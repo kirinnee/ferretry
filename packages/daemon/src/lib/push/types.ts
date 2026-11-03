@@ -1,4 +1,10 @@
-import type { BrowserPushSubscription, PushErrorCode, PushNotificationPayload, PushUrgency } from '@ferretry/protocol';
+import type {
+  BrowserPushSubscription,
+  PushErrorCode,
+  PushNotificationPayload,
+  PushPayload,
+  PushUrgency,
+} from '@ferretry/protocol';
 
 /**
  * WEB PUSH, AND WHY A SUBSCRIPTION IS NOT A SECOND KIND OF DEVICE.
@@ -96,8 +102,9 @@ export interface WebPushTransport {
  * and which ones a reader is shown is a decision their own browser makes locally, never one this
  * daemon filters on their behalf.
  */
-export interface PushDispatch {
-  readonly payload: PushNotificationPayload;
+export interface PushDispatch<Payload extends PushPayload = PushNotificationPayload> {
+  /** A notification to show; only the push fan-out and a clear's sender take a clear (`PushClearPayloadSchema`). */
+  readonly payload: Payload;
   /** How urgently every device should be reached (`pushUrgencyFor`); absent is `normal`. */
   readonly urgency?: PushUrgency;
   /**
@@ -105,6 +112,12 @@ export interface PushDispatch {
    * own limit (an approve-on-phone card's seconds left). Never lengthens one.
    */
   readonly ttlSeconds?: number;
+  /**
+   * A paired device NOT to reach: the one whose owner just opened the item a clear is about. Its page took its own
+   * alerts down, so a clear there could only swap them for a "Handled on another device" line on the very phone the
+   * owner is holding.
+   */
+  readonly exceptDevice?: string;
 }
 
 export interface PushClock {

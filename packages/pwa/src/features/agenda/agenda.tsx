@@ -158,6 +158,11 @@ export interface UseAgendaInput {
   readonly entries?: readonly TranscriptEntry[];
   /** An answer went and the view closed: the conversation returns to the newest message. */
   readonly onAnswered?: () => void;
+  /**
+   * An item's card came up here, however it was opened (a row, a `!A3`, a notification tap, paging): its alerts come
+   * down on this device and the owner's others (docs/notifications.md § When an alert is cleared).
+   */
+  readonly onItemOpened?: (daemon: DaemonConnection, sessionId: string, agendaId: string) => unknown;
   readonly now?: number;
 }
 
@@ -213,6 +218,7 @@ export const useAgenda = ({
   live,
   entries = NO_ENTRIES,
   onAnswered,
+  onItemOpened,
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
@@ -470,6 +476,10 @@ export const useAgenda = ({
   );
 
   const cardItem = shownItem;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the item whose card came up, on this board, is the one trigger
+  useEffect(() => {
+    if (cardItem !== undefined) onItemOpened?.(connection, scope.sessionId, cardItem.id);
+  }, [cardItem?.id, scopeKey]);
   // Only an open item pages; a parked, notice or resolved one is shown on its own.
   const paged = cardItem !== undefined && !isResolved(cardItem) ? openItems.indexOf(cardItem) : -1;
   const previous = paged > 0 ? openItems[paged - 1] : undefined;

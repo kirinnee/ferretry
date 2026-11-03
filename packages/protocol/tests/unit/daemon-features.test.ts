@@ -170,6 +170,8 @@ describe('daemon features', () => {
     should(list).containEql('agenda.offer-close.1');
     // The app offers download links only where this name is listed: moving, editing and the lease are all built.
     should(list).containEql('catalogs.links.1');
+    // The app says an item was opened only where this name is listed (an older daemon answers 404 on /v1/push/seen).
+    should(list).containEql('push.clear.1');
   });
 
   it('should keep the older idea limit below the raised one the feature unlocks', () => {

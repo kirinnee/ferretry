@@ -743,6 +743,7 @@ import {
   ActivityLedger,
   type AgendaActor,
   AgendaAgentClearer,
+  AgendaAlertClearer,
   AgendaBoardUndelivered,
   AgendaBuzz,
   AgendaChangeFanout,
@@ -10704,6 +10705,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const notificationLedger = new FileNotificationDeliveryLedger(paths, stateFiles, {
         warn: message => void process.stderr.write(`notifications: ${message}\n`),
       });
+      // Built below, once the boards it reads exist; a push that lands before then has no stale line to look for.
+      const alertClearerBox: { clearer?: AgendaAlertClearer } = {};
+      // One lane per ferret shared by its pushes and its clears, so a clear decided from one board is sent before a
+      // newer push about it is (`agendaAlertLane`).
+      const alertLanes = new KeyedSerialExecutor();
       const notificationHealth = new NotificationHealthMonitor(clock, line => void process.stderr.write(`${line}\n`));
       const notifications = new NotificationService({
         ledger: notificationLedger,
@@ -10722,8 +10728,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         push,
         serial: new KeyedSerialExecutor(),
+        lanes: alertLanes,
         clock,
         diagnostics: notificationHealth,
+        // A push that landed after its item was handled or opened is taken down as soon as it is recorded.
+        landed: sessionId => void alertClearerBox.clearer?.recheck(sessionId),
         // An input card asking for a one-time code is pushed at high priority (pushUrgencyFor).
         subjectOf: (sessionId, item) =>
           item.input === undefined
@@ -10758,6 +10767,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // A handled item's alerts come down on every device (docs/notifications.md § When an alert is cleared): answered,
+      // resolved, resting, snoozed or on the ferret's turn, on either board, or opened in the app on another device.
+      const alertClearer = new AgendaAlertClearer({
+        ledger: notificationLedger,
+        boards: {
+          read: async sessionId =>
+            await (sessionId === MACHINE_AGENDA_ID ? machineBoards : agendaBoards).read(sessionId),
+        },
+        push,
+        serial: alertLanes,
+        clock,
+      });
+      alertClearerBox.clearer = alertClearer;
+      // A board that changed while this daemon was down still takes its handled items' alerts down, in the background.
+      void agendaFilesMigrated.then(async () => await alertClearer.sweep()).catch(() => undefined);
       // Every session directory that may hold an agenda, whatever the session index still says about it.
       const agendaSessionIds = async (): Promise<readonly string[]> =>
         (await stateFiles.listDirectory(paths.sessions))
@@ -11019,6 +11043,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
+          // An item that no longer needs the owner takes its alerts down on every device.
+          alertClearer,
           // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
           new AgendaItemDraftDiscard({
             discard: async (sessionId, item) => await sharedDraftsHolder.service?.discard(sessionId, item),
@@ -11067,7 +11093,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         { has: async id => id === MACHINE_AGENDA_ID },
         notifications,
-        { changed: async sessionId => await workSearch.changed(sessionId) },
+        new AgendaChangeFanout([{ changed: async sessionId => await workSearch.changed(sessionId) }, alertClearer]),
       );
       const machineAgenda = new MachineAgenda(
         machineAgendaService,
@@ -13038,6 +13064,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         pairing,
         push,
+        pushAlerts: alertClearer,
         stepUp,
         security,
         carriers,

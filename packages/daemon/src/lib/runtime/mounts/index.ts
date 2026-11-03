@@ -94,7 +94,7 @@ import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
 import { pinRoutes } from './pins.ts';
-import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
+import { type PushAlertSubsystem, type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
@@ -207,6 +207,8 @@ export interface MountedSubsystems {
    *  `src/lib/push` for the two independent reasons that holds. The browser still has no service
    *  worker to receive one. */
   readonly push: PushSubscriptionSubsystem;
+  /** Takes an agenda item's alerts down on the owner's other devices when they open it (`POST /v1/push/seen`). */
+  readonly pushAlerts: PushAlertSubsystem;
   /** Passkeys and the step-up they prove — `docs/design/zero-trust.md` B2. */
   readonly stepUp: StepUpService;
   /** The machine's security settings — `docs/design/zero-trust.md` B6. */
@@ -570,7 +572,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // enrol, and its enrolment dies with its grant. Every path is under `/v1/push`, which no other
         // subsystem uses, and its one pattern is registered after its two fixed literals — so it can
         // neither shadow nor be shadowed by anything here.
-        ...pushRoutes(subsystems.push, subsystems.grants),
+        ...pushRoutes(subsystems.push, subsystems.grants, subsystems.pushAlerts),
         // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
         // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
         // there are no patterns among them, so it can neither shadow nor be shadowed.

@@ -167,6 +167,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  pushAlerts: { seen: async () => ({ found: true, tags: [] }) },
   stepUp: stepUpSubsystem(),
   // The published set's one view, which the pairing service reads too. Non-empty on purpose — an empty
   // one would let `PairingResponseSchema`'s default stand in for a carried-through set.
@@ -962,6 +963,7 @@ describe('the mounted daemon surface', () => {
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       1 + // one ferret's tidy plan: its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy")
       2 + // the machine agenda: its read and the owner's dismiss, snooze or resolve (docs/agenda.md, "The machine agenda")
+      1 + // an agenda item the owner opened, so its alerts come down on their other devices (`POST /v1/push/seen`)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -1068,6 +1070,8 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/pair/devices/:deviceId',
       // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
       'PATCH /v1/pair/devices/:deviceId/grants',
+      // An agenda item the owner opened: its alerts come down on their other devices (names no device, returns none).
+      'POST /v1/push/seen',
       // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
       // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
       // list is a projection with no field for one.

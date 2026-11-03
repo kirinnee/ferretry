@@ -94,6 +94,7 @@ interface HostProps {
   readonly live?: ReactElement;
   readonly entries?: readonly TranscriptEntry[];
   readonly onAnswered?: () => void;
+  readonly onItemOpened?: (daemon: unknown, sessionId: string, agendaId: string) => unknown;
   readonly projectId?: string;
 }
 
@@ -118,6 +119,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     ...(rest.live === undefined ? {} : { live: rest.live }),
     ...(rest.entries === undefined ? {} : { entries: rest.entries }),
     ...(rest.onAnswered === undefined ? {} : { onAnswered: rest.onAnswered }),
+    ...(rest.onItemOpened === undefined ? {} : { onItemOpened: rest.onItemOpened }),
     ...(rest.projectId === undefined ? {} : { projectId: rest.projectId }),
   });
   current = agenda;
@@ -356,6 +358,23 @@ describe('the full card', () => {
     expect(view.root.findByType(AgendaItemView).props.onNext).toBeUndefined();
     run(() => view.root.findByType(AgendaItemView).props.onPrevious());
     expect(cardId(view)).toBe('A2');
+  });
+
+  test('says each item whose card comes up in the conversation was opened, so its alerts come down', () => {
+    const opened: string[] = [];
+    const view = mount({
+      snapshot: board([item('A1'), item('A2')]),
+      focus: { target: 'A2' as AgendaId, seq: 1 },
+      onItemOpened: (daemon, sessionId, agendaId) => {
+        expect(daemon).toBe(connection);
+        opened.push(`${sessionId}:${agendaId}`);
+      },
+    });
+    expect(opened).toEqual([`${scope.sessionId}:A2`]);
+    run(() => view.root.findByType(AgendaItemView).props.onPrevious());
+    expect(cardId(view)).toBe('A1');
+    run(() => view.root.findByType(AgendaItemView).props.onClose());
+    expect(opened).toEqual([`${scope.sessionId}:A2`, `${scope.sessionId}:A1`]);
   });
 
   test('draws swipe arrows on a touch screen and none on a wide screen with a mouse', () => {

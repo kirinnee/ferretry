@@ -255,6 +255,12 @@ export const DAEMON_FEATURES = {
    * version a link serves cannot be retired (`version_linked`).
    */
   catalogLinks: 'catalogs.links.1',
+  /**
+   * Handled agenda alerts come down on every device (docs/notifications.md § When an alert is cleared): the daemon sends
+   * `kind: 'clear'` pushes, and `POST /v1/push/seen` takes an item the owner opened down on their other devices. A
+   * daemon without this name answers 404 there, so the app says an item was opened only where the machine reports it.
+   */
+  pushClear: 'push.clear.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

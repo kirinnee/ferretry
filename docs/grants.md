@@ -865,6 +865,12 @@ command says so at the moment somebody might be tempted to do that instead.
   another device filed, is device management and is decided by `pairing.use`, asked of the same grant
   layer every governed route is decided by. A caller on the host sees all of them.
 
+  **Saying an agenda item was opened is `fleet.use`** (`POST /v1/push/seen`, [notifications.md](notifications.md#when-an-alert-is-cleared)).
+  It takes that item's alerts down on the owner's other devices and answers only the tags it named, never an
+  endpoint or an item's words. It reveals nothing, but it changes what the owner's other phones show, so it is
+  governed rather than open; every default device holds `fleet.use`. The device it skips is the caller's own, read
+  from the credential.
+
   **The honest cost, stated rather than discovered:** switching `pairing` off for remote callers no longer
   stops a paired device enrolling itself for notifications. That is the intended shape — notifications are
   not a credential — and revoking the device still takes its enrolments with it. Enrolling still needs a
