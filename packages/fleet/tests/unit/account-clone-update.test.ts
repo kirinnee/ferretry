@@ -1584,6 +1584,27 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
     should(left.model.components.hooks.a?.directory).equal(shared);
   });
 
+  it('should leave out by default a new profile that needs a refused write, rather than choose it into a refusal', () => {
+    // Arrange: the new profile layers the new hook c, which cannot be written while b owns the tree.
+    const bundle = sourceBundle({
+      keys: { 'hooks/c': KEY_A, 'profile/p': KEY_API },
+      components: { hooks: { c: { harness: 'claude', directory: 'components/hooks/c' } } },
+      profiles: { p: { layers: ['hooks/c'] } },
+      files: [{ path: 'components/hooks/c/run.sh', content: 'new' }],
+    });
+    const target = parseAccountModel({ version: 2, components: { hooks: { b: hooksAt('.', KEY_B) } } });
+    const analysis = analyseCloneUpdate(bareInput(bundle, target, here));
+
+    // Act
+    const plan = planCloneUpdate(analysis, { decisions: {} });
+
+    // Assert
+    should(analysis.defaults.get('hooks/c')).equal('skip');
+    should(analysis.defaults.get('profile/p')).equal('skip');
+    should(plan.files).eql([]);
+    should(plan.model.profiles.p).be.undefined();
+  });
+
   it('should refuse adding a new document while an item here owns the whole tree, and not tick it by default', () => {
     // Arrange: c is new; b here names the whole asset tree.
     const bundle = sourceBundle({
