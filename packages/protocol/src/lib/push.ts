@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 /**
@@ -186,6 +187,42 @@ export const PushNotificationPayloadSchema = z.union([
 ]);
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>;
 
+/** The most tags one clear may name: an item's own tag, its approval's, the ferret's stop tag, and room to spare. */
+export const PUSH_CLEAR_MAX_TAGS = 8;
+
+/** One un-namespaced daemon tag a clear names (`attention-<sessionId>:<itemId>`, `pa-<id>`): printable, bounded. */
+const PushTagSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[^\p{Cc}\p{Cf}\s]+$/u);
+
+/**
+ * A CLEAR: the item these alerts were about was handled — answered, resolved, resting, snoozed, on the ferret's turn,
+ * or opened in the app on another device — so every device takes its alerts down (docs/notifications.md § When an
+ * alert is cleared).
+ *
+ * IT CARRIES NO CONTENT, and that is the parser's job, not a convention: no title, no body, no url, no count, no item
+ * words — only which of this machine's own tags to take down. The worker keeps each tag inside the machine's
+ * namespace, so a clear can never touch another machine's notifications. It is not a {@link PushNotificationPayload}:
+ * a clear is never shown as itself, so the type that every notification is composed from cannot hold one.
+ *
+ * A service worker older than this kind reads it as a payload it did not compose and shows its plain fallback line;
+ * the hosted app ships before a daemon release does, so that window is one app open long (docs/notifications.md).
+ */
+export const PushClearPayloadSchema = z.strictObject({
+  version: z.literal(1),
+  kind: z.literal('clear'),
+  eventKey: z.string().min(1).max(400),
+  sessionId: z.string().min(1).max(200),
+  tags: z.array(PushTagSchema).min(1).max(PUSH_CLEAR_MAX_TAGS),
+});
+export type PushClearPayload = z.infer<typeof PushClearPayloadSchema>;
+
+/** Everything a daemon's push may carry: a notification to show, or a clear of ones already shown. */
+export const PushPayloadSchema = z.union([PushNotificationPayloadSchema, PushClearPayloadSchema]);
+export type PushPayload = z.infer<typeof PushPayloadSchema>;
+
 export const PushDeliveryResultSchema = z.object({
   delivered: NonNegativeIntegerSchema,
   failed: NonNegativeIntegerSchema,
@@ -194,3 +231,37 @@ export type PushDeliveryResult = z.infer<typeof PushDeliveryResultSchema>;
 
 export const PushErrorCodeSchema = z.enum(['invalid', 'corrupt_store', 'not_found']);
 export type PushErrorCode = z.infer<typeof PushErrorCodeSchema>;
+
+/**
+ * `POST /v1/push/seen`: the owner opened an agenda item in the app, so its alerts come down on every OTHER device
+ * (docs/notifications.md § When an alert is cleared). Names the item and nothing more; which device asked is the
+ * credential's, never the body's.
+ */
+export const PushSeenRequestSchema = z.strictObject({
+  sessionId: z.string().min(1).max(200),
+  agendaId: AgendaIdSchema,
+});
+export type PushSeenRequest = z.infer<typeof PushSeenRequestSchema>;
+
+/**
+ * Whether a clear went out, and the tags it named (`PushClearPayloadSchema`'s), empty when nothing of that item's was
+ * still up. The clear skipped the caller's own device, so its page takes these tags down there itself.
+ */
+export const PushSeenResponseSchema = z.strictObject({
+  cleared: z.boolean(),
+  tags: z.array(PushTagSchema).max(64),
+});
+export type PushSeenResponse = z.infer<typeof PushSeenResponseSchema>;
+
+/**
+ * THE TAG ONE AGENDA ITEM'S PUSH GOES OUT UNDER: its own, so a clear can take down exactly that item's line on every
+ * device (docs/notifications.md § When an alert is cleared). A ferret with two pushed items therefore shows two lines.
+ * The daemon composes it and the app's page names it when the owner opens the item, so it is spelled once, here.
+ */
+export const agendaItemPushTag = (sessionId: string, itemId: string): string => `attention-${sessionId}:${itemId}`;
+
+/**
+ * The tag a STOP's push goes out under: it is about the ferret, not one item. Every agenda push used it before items
+ * had their own, so a push the ledger records without a tag was shown under it.
+ */
+export const agendaSessionPushTag = (sessionId: string): string => `attention-${sessionId}`;

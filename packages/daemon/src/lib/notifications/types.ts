@@ -80,6 +80,8 @@ const AgendaNotificationRequestedRecordObjectSchema = z
     woke: z.string().min(1).optional(),
     /** An approve-on-phone card's push: 0 at the raise, then one per new number read. At most one per number. */
     phoneApproval: NonNegativeIntegerSchema.optional(),
+    /** The tag it went out under, which a clear takes down. Absent on a push recorded before tags were. */
+    tag: z.string().min(1).max(200).optional(),
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })
@@ -93,9 +95,29 @@ export const AgendaNotificationRequestedRecordSchema = z.preprocess(
   AgendaNotificationRequestedRecordObjectSchema,
 );
 
+/**
+ * A CLEAR the daemon sent: the pushes it answers for (`covers`, their ledger keys) and the tags it named. Recorded
+ * like any push — requested, then its outcome — so a push is cleared once, across restarts too. It carries no words
+ * from the item, because the clear itself carries none (docs/notifications.md § When an alert is cleared).
+ */
+export const AgendaClearRequestedRecordSchema = z.strictObject({
+  v: z.literal(1),
+  phase: z.literal('requested'),
+  key: z.string().startsWith('clear:').min(8),
+  at: InstantSchema,
+  origin: z.literal('agenda-clear'),
+  sessionId: z.string().min(1),
+  /** The item the owner opened, when that is what cleared it. */
+  opened: AgendaIdSchema.optional(),
+  covers: z.array(z.string().min(1)).min(1),
+  tags: z.array(z.string().min(1)).min(1),
+  enrolled: NonNegativeIntegerSchema,
+});
+
 export const NotificationRequestedRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,
   AgendaNotificationRequestedRecordSchema,
+  AgendaClearRequestedRecordSchema,
 ]);
 
 export const NotificationOutcomeRecordSchema = z.strictObject({
@@ -111,11 +133,13 @@ export const NotificationOutcomeRecordSchema = z.strictObject({
 export const NotificationRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,
   AgendaNotificationRequestedRecordSchema,
+  AgendaClearRequestedRecordSchema,
   NotificationOutcomeRecordSchema,
 ]);
 
 export type DirectNotificationRequestedRecord = z.infer<typeof DirectNotificationRequestedRecordSchema>;
 export type AgendaNotificationRequestedRecord = z.infer<typeof AgendaNotificationRequestedRecordSchema>;
+export type AgendaClearRequestedRecord = z.infer<typeof AgendaClearRequestedRecordSchema>;
 export type NotificationRequestedRecord = z.infer<typeof NotificationRequestedRecordSchema>;
 export type NotificationOutcomeRecord = z.infer<typeof NotificationOutcomeRecordSchema>;
 export type NotificationRecord = z.infer<typeof NotificationRecordSchema>;
@@ -129,6 +153,8 @@ export interface NotificationLedgerEntry {
 export interface NotificationDeliveryLedger {
   /** Everything durably known about one logical notification. */
   find(key: string): Promise<NotificationLedgerEntry | undefined>;
+  /** Everything durably known, in the order it was first requested: what a clear reads to find what is still up. */
+  entries(): Promise<readonly NotificationLedgerEntry[]>;
   /** Appends one phase line durably. A rejection means the ledger cannot testify. */
   append(record: NotificationRecord): Promise<void>;
 }

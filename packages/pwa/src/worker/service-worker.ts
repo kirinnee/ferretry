@@ -18,7 +18,8 @@
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
  *   - push / notificationclick: show a daemon's Web Push notification and open what it names, after
  *     applying this device's own notification filter (`lib/notification-filter.ts`) — see the `push`
- *     listener's own comment for what is shown when the filter says hide it.
+ *     listener's own comment for what is shown when the filter says hide it — or, for a `clear` push,
+ *     take that item's notifications down (`lib/push-clear.ts`).
  *
  * ONE FILE, TWO KINDS OF REGISTRATION. The app registers this worker at `/`, and once per machine at
  * `/push/<daemonId>/` for that machine's own push subscription (`lib/push-scope.ts`). Every copy runs
@@ -35,11 +36,12 @@
  * trusted, because any page on this origin can write IndexedDB and Cache Storage.
  */
 
-import { isLoopbackHost, PushNotificationPayloadSchema } from '@ferretry/protocol';
+import { isLoopbackHost, PushPayloadSchema } from '@ferretry/protocol';
 import { shouldShowNotification } from '../lib/notification-filter.ts';
 import { readMirroredNotificationFilter } from '../lib/notification-filter-mirror.ts';
 import { notificationWindow, openInWindow } from '../lib/notification-open.ts';
 import { notificationBrand, showGroupedNotification } from '../lib/notify.ts';
+import { applyClear, type ClearRegistration } from '../lib/push-clear.ts';
 import {
   filteredPushNotification,
   machineNotification,
@@ -86,7 +88,7 @@ interface WindowClientLike {
 }
 interface WorkerScope {
   readonly location: { readonly origin: string; readonly hostname: string; readonly href: string };
-  readonly registration: Parameters<typeof showGroupedNotification>[0] & { readonly scope: string };
+  readonly registration: Parameters<typeof showGroupedNotification>[0] & ClearRegistration & { readonly scope: string };
   readonly clients: {
     claim(): Promise<void>;
     matchAll(options: { type: 'window'; includeUncontrolled?: boolean }): Promise<readonly WindowClientLike[]>;
@@ -179,7 +181,7 @@ worker.addEventListener('push', event => {
   } catch {
     payload = null;
   }
-  const parsed = PushNotificationPayloadSchema.safeParse(payload);
+  const parsed = PushPayloadSchema.safeParse(payload);
   event.waitUntil(
     (async () => {
       if (!parsed.success) {
@@ -190,6 +192,11 @@ worker.addEventListener('push', event => {
           ...notificationBrand(),
           body: 'Something is waiting in your Inbox.',
         });
+        return;
+      }
+      // A handled item: its notifications come down here, never through the filter — a clear carries nothing to hide.
+      if (parsed.data.kind === 'clear') {
+        await applyClear(worker.registration, parsed.data, machine, origin);
         return;
       }
       // Every daemon sends every event now (no server-side filter left to consult — see

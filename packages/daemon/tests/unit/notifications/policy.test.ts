@@ -294,7 +294,8 @@ describe('a push an older app still reads (agenda.wire.1)', () => {
 
   it.each(sent)('should keep the tag and the link of %s on the older spelling', (_name, payload) => {
     // Assert
-    should(payload.tag).equal('attention-session-1');
+    should(payload.tag).startWith('attention-session-1');
+    should(payload.tag).not.containEql('agenda');
     should(payload.url).startWith('/session/session-1?attention=');
     should(payload.url).not.containEql('agenda');
   });

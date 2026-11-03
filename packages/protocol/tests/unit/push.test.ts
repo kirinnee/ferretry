@@ -34,6 +34,13 @@ const payloadBase = {
 };
 const sessionPayload = { ...payloadBase, sessionId: 'session-1', kind: 'attention' };
 const devicePairedPayload = { ...payloadBase, kind: 'device-paired' };
+const clearPayload = {
+  version: 1,
+  kind: 'clear',
+  eventKey: 'clear:session-1:A3:1',
+  sessionId: 'session-1',
+  tags: ['attention-session-1:A3', 'attention-session-1'],
+};
 
 const pushCases: SchemaCase[] = [
   { name: 'notification kind', schema: push.PushNotificationKindSchema, value: 'attention' },
@@ -43,6 +50,14 @@ const pushCases: SchemaCase[] = [
   { name: 'device list', schema: push.PushDeviceListResponseSchema, value: { devices: [deviceView] } },
   { name: 'vapid key', schema: push.VapidPublicKeyResponseSchema, value: { publicKey: P256DH } },
   { name: 'notification payload', schema: push.PushNotificationPayloadSchema, value: sessionPayload },
+  { name: 'clear payload', schema: push.PushClearPayloadSchema, value: clearPayload },
+  { name: 'push payload', schema: push.PushPayloadSchema, value: clearPayload },
+  { name: 'seen request', schema: push.PushSeenRequestSchema, value: { sessionId: 'session-1', agendaId: 'A3' } },
+  {
+    name: 'seen response',
+    schema: push.PushSeenResponseSchema,
+    value: { cleared: true, tags: ['attention-session-1:A3'] },
+  },
   { name: 'delivery result', schema: push.PushDeliveryResultSchema, value: { delivered: 2, failed: 0 } },
   { name: 'push error', schema: push.PushErrorCodeSchema, value: 'invalid' },
   { name: 'push urgency', schema: push.PushUrgencySchema, value: 'high' },
@@ -462,5 +477,85 @@ describe('high priority (the owner: "for 2FA notification, please make it high p
       urgency: 'high',
     });
     should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, urgency: 'low' }).success).be.false();
+  });
+});
+
+describe('a clear (the owner: "when on 1 device is alr replied or resolved. then it should dismiss on other phones")', () => {
+  it('should carry only version, kind, eventKey, sessionId and tags', () => {
+    // Act
+    const parsed = push.PushPayloadSchema.parse(clearPayload);
+
+    // Assert
+    should(Object.keys(parsed).sort()).deepEqual(['eventKey', 'kind', 'sessionId', 'tags', 'version']);
+    should(push.PushClearPayloadSchema.parse(clearPayload)).deepEqual(clearPayload);
+  });
+
+  it('should refuse a clear that carries any content or an extra field', () => {
+    // Arrange
+    const smuggled = [
+      { title: 'Deploy?' },
+      { body: 'Approve the destructive step.' },
+      { url: '/session/session-1' },
+      { count: 1 },
+      { subject: 'anything' },
+    ];
+
+    // Act / Assert
+    for (const extra of smuggled) {
+      should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, ...extra }).success).be.false();
+      should(push.PushPayloadSchema.safeParse({ ...clearPayload, ...extra }).success).be.false();
+    }
+  });
+
+  it('should refuse no tags, too many tags, and an empty or spaced tag', () => {
+    // Arrange
+    const tags = (count: number): string[] => Array.from({ length: count }, (_, index) => `attention-s:A${index}`);
+
+    // Act / Assert
+    should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: [] }).success).be.false();
+    should(
+      push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: tags(push.PUSH_CLEAR_MAX_TAGS) }).success,
+    ).be.true();
+    should(
+      push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: tags(push.PUSH_CLEAR_MAX_TAGS + 1) }).success,
+    ).be.false();
+    should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: [''] }).success).be.false();
+    should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: ['two words'] }).success).be.false();
+    should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: ['x'.repeat(201)] }).success).be.false();
+    should(push.PushClearPayloadSchema.safeParse({ ...clearPayload, sessionId: '' }).success).be.false();
+  });
+
+  it('should never be a notification, and no notification may call itself a clear', () => {
+    // Act / Assert
+    should(push.PushNotificationPayloadSchema.safeParse(clearPayload).success).be.false();
+    should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, kind: 'clear' }).success).be.false();
+    should(push.PushNotificationPayloadSchema.safeParse({ ...payloadBase, kind: 'clear' }).success).be.false();
+    should(push.PushNotificationKindSchema.safeParse('clear').success).be.false();
+    should(push.PushPayloadSchema.parse(sessionPayload)).deepEqual(sessionPayload);
+  });
+});
+
+describe('the seen request', () => {
+  it('should name a session and an agenda id, and nothing else', () => {
+    // Act / Assert
+    should(push.PushSeenRequestSchema.safeParse({ sessionId: 'session-1', agendaId: 'A3' }).success).be.true();
+    should(push.PushSeenRequestSchema.safeParse({ sessionId: 'session-1', agendaId: 'A0' }).success).be.false();
+    should(push.PushSeenRequestSchema.safeParse({ sessionId: '', agendaId: 'A3' }).success).be.false();
+    should(
+      push.PushSeenRequestSchema.safeParse({ sessionId: 'session-1', agendaId: 'A3', deviceId: DEVICE_ID }).success,
+    ).be.false();
+    should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [] }).success).be.true();
+    should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [], title: 'Deploy?' }).success).be.false();
+  });
+});
+
+describe('agenda push tags', () => {
+  it('should give an item its own tag and a stop the ferret’s', () => {
+    // Act / Assert
+    should(push.agendaItemPushTag('session-1', 'A3')).equal('attention-session-1:A3');
+    should(push.agendaSessionPushTag('session-1')).equal('attention-session-1');
+    should(
+      push.PushClearPayloadSchema.safeParse({ ...clearPayload, tags: [push.agendaItemPushTag('s', 'A1')] }).success,
+    ).be.true();
   });
 });

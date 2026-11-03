@@ -1096,6 +1096,11 @@ export interface AgendaInboxPageProps {
   readonly clearPort?: ClearPort;
   /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
   readonly toTestHost?: ToTestHost;
+  /**
+   * An item was opened here (it is the deck's top card): its alerts come down on this device and the owner's others
+   * (docs/notifications.md § When an alert is cleared). Called once each time a different item opens. Absent: nothing.
+   */
+  readonly onItemOpened?: (card: InboxCard) => void;
 }
 
 /** How long a tapped notification's item may take to appear among the open ones before its chat opens instead. */
@@ -1445,6 +1450,7 @@ export function AgendaInboxPage({
   renderComposer,
   clearPort,
   toTestHost,
+  onItemOpened,
 }: AgendaInboxPageProps) {
   const headingId = useId();
   useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
@@ -1660,6 +1666,12 @@ export function AgendaInboxPage({
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
+  // Opening an item is the owner seeing it: its alerts come down here and on their other devices.
+  const openedCard = cardOpen ? deckSelected : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different item on top is the only trigger; the card object and the host callback are re-made every render
+  useEffect(() => {
+    if (openedCard !== undefined) onItemOpened?.(openedCard);
+  }, [openedCard?.key]);
 
   // The desktop run's keys. ←, ↑, → and ↓ answer or skip an agenda card inside the deck; a task card is answered here.
   // j and k move between cards, Esc closes. Never while the reader is in a field, a menu or a dialog.

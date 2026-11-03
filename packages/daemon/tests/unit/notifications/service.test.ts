@@ -45,6 +45,12 @@ class MemoryLedger implements NotificationDeliveryLedger {
     };
   }
 
+  async entries(): Promise<readonly NotificationLedgerEntry[]> {
+    const keys = this.records.filter(record => record.phase === 'requested').map(record => record.key);
+    const found = await Promise.all(keys.map(async key => await this.find(key)));
+    return found.filter(entry => entry !== undefined);
+  }
+
   async append(record: NotificationRecord): Promise<void> {
     this.callLog.push(`append:${record.phase}`);
     this.appends.push(record);
@@ -178,7 +184,13 @@ describe('NotificationService stop push', () => {
       title: 'Release agent is stopped · 2 need you',
       url: `/session/${SESSION}?attention=A1`,
     });
-    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:stopped:${AT}`, stoppedAt: AT });
+    // A stop is about the ferret: its line goes under the ferret's tag, recorded so a clear can name it.
+    should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}`);
+    should(requested(world)[0]).containDeep({
+      key: `agenda:${SESSION}:stopped:${AT}`,
+      stoppedAt: AT,
+      tag: `attention-${SESSION}`,
+    });
   });
 
   it('should push again for the next stop of the same ferret', async () => {
@@ -219,7 +231,13 @@ describe('NotificationService deadline push', () => {
     // Assert
     should(world.push.calls).equal(1);
     should(world.push.dispatches[0]?.payload.body).startWith('Needed in about 2 h');
-    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:A1:deadline`, deadline: true });
+    // An item's push goes under its own tag (one line per item), recorded so a clear can name it.
+    should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}:A1`);
+    should(requested(world)[0]).containDeep({
+      key: `agenda:${SESSION}:A1:deadline`,
+      deadline: true,
+      tag: `attention-${SESSION}:A1`,
+    });
   });
 
   it('should keep its own key apart from a stop of the same item', async () => {

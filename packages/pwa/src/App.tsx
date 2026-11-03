@@ -264,6 +264,9 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
+import { pushScopePath } from './lib/push-scope.ts';
+import { agendaItemOpenedHandler } from './lib/push-seen.ts';
+import { postAgendaItemSeen } from './lib/push-subscriptions.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
@@ -2269,6 +2272,22 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const daemonFetch = useDaemonFetch();
   const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
   const clearPort = useMemo(() => agendaClearPort(store.clients, daemonFetch), [store, daemonFetch]);
+  // An item opened here: its lines come down on this device, and on the owner's others through the machine.
+  const itemOpened = useMemo(
+    () =>
+      agendaItemOpenedHandler({
+        registration: async daemon => {
+          if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+          const scope = new URL(pushScopePath(daemon), window.location.origin).href;
+          const found = await navigator.serviceWorker.getRegistration(scope);
+          // Only this machine's own registration: the app-wide one holds none of its lines.
+          return found?.scope === scope ? found : null;
+        },
+        health: async daemon => await (await clientFor(daemon)).health(),
+        seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
+      }),
+    [clientFor, daemonFetch],
+  );
   const pairings = useBoardMachines();
   const boardActions = useBoardActions(
     store.board,
@@ -2312,6 +2331,10 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       }
       clearPort={clearPort}
       toTestHost={toTestHost}
+      onItemOpened={card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target !== undefined) void itemOpened(target, card.view.config.id, card.item.id);
+      }}
       banner={
         <NotificationsOffBanner
           rows={machineNotifications.rows}

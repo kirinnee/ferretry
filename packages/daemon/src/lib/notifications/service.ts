@@ -1,4 +1,10 @@
-import { type AgendaItem, type AgendaSnapshot, type PushSubject, pushUrgencyFor } from '@ferretry/protocol';
+import {
+  agendaItemPushTag,
+  type AgendaItem,
+  type AgendaSnapshot,
+  type PushSubject,
+  pushUrgencyFor,
+} from '@ferretry/protocol';
 import { type AgendaRaisedObserver, ownerTurnItems } from '../agenda/index.ts';
 import {
   agendaNotificationAttribution,
@@ -27,7 +33,7 @@ import {
 } from './types.ts';
 
 export interface NotificationServiceOptions {
-  readonly ledger: NotificationDeliveryLedger;
+  readonly ledger: Pick<NotificationDeliveryLedger, 'find' | 'append'>;
   readonly sessions: NotificationSessionDirectory;
   readonly push: NotificationPushDispatcher;
   readonly serial: NotificationSerialExecutor;
@@ -229,7 +235,7 @@ export class NotificationService implements AgendaRaisedObserver {
             : {
                 ...composed,
                 urgency: 'high',
-                tag: options.ownTag === true ? composed.tag : `${composed.tag}:${urgent.item.id}`,
+                tag: options.ownTag === true ? composed.tag : agendaItemPushTag(sessionId, urgent.item.id),
               };
         // The high slot is kept only when a device accepted the push; every other ending gives it back.
         let reached = false;
@@ -269,6 +275,7 @@ export class NotificationService implements AgendaRaisedObserver {
         ...(identity.woke === undefined ? {} : { woke: identity.woke }),
         ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
         ...(identity.phoneApproval === undefined ? {} : { phoneApproval: identity.phoneApproval }),
+        tag: payload.tag,
         sent: {
           kind: payload.kind,
           interactive: session.interactive,

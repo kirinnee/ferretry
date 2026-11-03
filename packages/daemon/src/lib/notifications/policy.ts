@@ -1,17 +1,24 @@
 import {
   AGENDA_PUSH_BODY_LENGTH,
   AGENDA_PUSH_TITLE_LENGTH,
+  agendaItemPushTag,
   type AgendaItem,
   type AgendaSnapshot,
   agendaBadgeCount,
   agendaNotificationPath,
+  agendaSessionPushTag,
   agendaTitle,
+  agendaTurn,
   clipAtWord,
   PHONE_APPROVAL_TITLE,
+  PUSH_CLEAR_MAX_TAGS,
+  type PushClearPayload,
+  PushClearPayloadSchema,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
 import { DEVICE_PAIRED_TITLE } from '../audit/policy.ts';
+import { ownerTurnItems } from '../agenda/index.ts';
 
 export type SessionNotificationPayload = Extract<PushNotificationPayload, { readonly sessionId: string }>;
 
@@ -85,7 +92,7 @@ export function pingNotificationPayload(
     kind: 'attention',
     title: agendaNotificationTitle(agendaTitle(item)),
     body: clipAtWord(oneLine(item.subject), AGENDA_PUSH_BODY_LENGTH),
-    tag: `attention-${sessionId}`,
+    tag: agendaItemPushTag(sessionId, item.id),
     url: agendaNotificationPath(sessionId, item.id),
     count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
@@ -107,7 +114,7 @@ export function gateNotificationPayload(
     kind: 'attention',
     title: agendaNotificationTitle(agendaTitle(item)),
     body: clipAtWord(oneLine(item.subject), AGENDA_PUSH_BODY_LENGTH),
-    tag: `attention-${sessionId}`,
+    tag: agendaItemPushTag(sessionId, item.id),
     url: agendaNotificationPath(sessionId, item.id),
     count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
@@ -130,7 +137,7 @@ export function deadlineNotificationPayload(
     kind: 'attention',
     title: agendaNotificationTitle(agendaTitle(item)),
     body: clipAtWord(`${timeLeftPhrase(item.neededBy, now)}: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
-    tag: `attention-${sessionId}`,
+    tag: agendaItemPushTag(sessionId, item.id),
     url: agendaNotificationPath(sessionId, item.id),
     count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
@@ -149,7 +156,7 @@ export function wokeNotificationPayload(
     kind: 'attention',
     title: agendaNotificationTitle(agendaTitle(item)),
     body: clipAtWord(`Back from snooze: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
-    tag: `attention-${sessionId}`,
+    tag: agendaItemPushTag(sessionId, item.id),
     url: agendaNotificationPath(sessionId, item.id),
     count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
@@ -183,6 +190,83 @@ export function phoneApprovalNotificationPayload(
 /** The tag every push of one approval shares (`pa-<id>`): the service worker renotifies under it. */
 export const phoneApprovalTag = (id: string): string => `pa-${id}`;
 
+/** One push the ledger says a device accepted, as far as clearing it goes. */
+export interface DeliveredAlert {
+  /** The push's ledger key: what a clear records as covered, so it is cleared once. */
+  readonly key: string;
+  readonly agendaId: string;
+  /** A stop's push: about the ferret and every item waiting then, not about its own `agendaId`. */
+  readonly stop: boolean;
+  /** The tag it went out under; absent on a push recorded before tags were, which went out under the session's. */
+  readonly tag?: string;
+}
+
+/** What one clear takes down (at most `PUSH_CLEAR_MAX_TAGS` tags), and which pushes it answers for. */
+export interface AlertClear {
+  readonly tags: readonly string[];
+  readonly covers: readonly string[];
+}
+
+/**
+ * Whether an open item still waits on the owner, so its alerts stay up: a notice until it is read (or snoozed), every
+ * other item while it is on the owner's turn — not answered, resolved, resting, snoozed or on the ferret's turn.
+ */
+export const alertStillWanted = (item: AgendaItem): boolean =>
+  item.notice === true ? item.parked === undefined : agendaTurn(item) === 'owner';
+
+/**
+ * WHICH ALERTS COME DOWN NOW (docs/notifications.md § When an alert is cleared), from the board as it stands and the
+ * pushes no clear has covered yet. Pure, and decided from the board rather than the change that woke it, so a new way
+ * for an item to stop needing the owner clears its alerts without a new rule here.
+ *
+ * - An item's own push comes down once the item no longer waits on the owner — or, with `opened`, once the owner has
+ *   opened that item somewhere.
+ * - A stop's push ("N need you") comes down only when no item it could count is left on the owner's turn, because
+ *   until then its words are still true. So does any push recorded without a tag: it went out under the same tag.
+ *
+ * Nothing is cleared for an item that never buzzed, which is what keeps a phone that must show something for every
+ * push (an iPhone) from collecting a "Handled" line for every item a ferret ever closed.
+ */
+export function alertsToClear(
+  sessionId: string,
+  uncovered: readonly DeliveredAlert[],
+  snapshot: AgendaSnapshot,
+  opened?: string,
+): readonly AlertClear[] {
+  const others = snapshot.items.filter(item => item.id !== opened);
+  const waiting = new Set(others.filter(alertStillWanted).map(item => item.id));
+  const stopDone = ownerTurnItems(others).every(item => item.gate !== undefined);
+  const sessionTag = agendaSessionPushTag(sessionId);
+  const handled = uncovered.filter(alert => {
+    const tag = alert.tag ?? sessionTag;
+    if (alert.stop || tag === sessionTag) return stopDone && (alert.stop || !waiting.has(alert.agendaId));
+    return opened === undefined ? !waiting.has(alert.agendaId) : alert.agendaId === opened;
+  });
+  const tags = [...new Set(handled.map(alert => alert.tag ?? sessionTag))];
+  // One clear names at most `PUSH_CLEAR_MAX_TAGS`: a burst that handled more is sent as several.
+  const clears: AlertClear[] = [];
+  for (let start = 0; start < tags.length; start += PUSH_CLEAR_MAX_TAGS) {
+    const chunk = tags.slice(start, start + PUSH_CLEAR_MAX_TAGS);
+    clears.push({
+      tags: chunk,
+      covers: handled.filter(alert => chunk.includes(alert.tag ?? sessionTag)).map(alert => alert.key),
+    });
+  }
+  return clears;
+}
+
+/** A clear's ledger key: named by the newest push it covers, so the same handling is never cleared twice. */
+export const clearNotificationKey = (sessionId: string, covers: readonly string[]): string =>
+  `clear:${sessionId}:${[...covers].sort().at(-1) ?? ''}`;
+
+/**
+ * THE CLEAR ITSELF: the session and the tags to take down, and nothing else — no title, no body, no url, no item
+ * words. Parsed here so a field added by mistake is refused before it can leave the daemon.
+ */
+export function clearPushPayload(sessionId: string, eventKey: string, tags: readonly string[]): PushClearPayload {
+  return PushClearPayloadSchema.parse({ version: 1, kind: 'clear', eventKey, sessionId, tags: [...tags] });
+}
+
 /** The item a stop's push shows and opens: the one blocking now, else the oldest waiting. */
 export function stopShows(waiting: readonly [AgendaItem, ...AgendaItem[]]): AgendaItem {
   return waiting.find(item => item.blockingNow === true) ?? waiting[0];
@@ -212,7 +296,7 @@ export function stoppedNotificationPayload(
     kind: 'attention',
     title: `${name} is stopped · ${count === 1 ? '1 needs you' : `${count} need you`}`,
     body: clipAtWord(oneLine(agendaTitle(first)), AGENDA_PUSH_BODY_LENGTH),
-    tag: `attention-${sessionId}`,
+    tag: agendaSessionPushTag(sessionId),
     url: agendaNotificationPath(sessionId, first.id),
     count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;

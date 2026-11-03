@@ -743,6 +743,7 @@ import {
   ActivityLedger,
   type AgendaActor,
   AgendaAgentClearer,
+  AgendaAlertClearer,
   AgendaBoardUndelivered,
   AgendaBuzz,
   AgendaChangeFanout,
@@ -10758,6 +10759,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // A handled item's alerts come down on every device (docs/notifications.md § When an alert is cleared): answered,
+      // resolved, resting, snoozed or on the ferret's turn, on either board, or opened in the app on another device.
+      const alertClearer = new AgendaAlertClearer({
+        ledger: notificationLedger,
+        boards: {
+          read: async sessionId =>
+            await (sessionId === MACHINE_AGENDA_ID ? machineBoards : agendaBoards).read(sessionId),
+        },
+        push,
+        serial: new KeyedSerialExecutor(),
+        clock,
+      });
       // Every session directory that may hold an agenda, whatever the session index still says about it.
       const agendaSessionIds = async (): Promise<readonly string[]> =>
         (await stateFiles.listDirectory(paths.sessions))
@@ -11019,6 +11032,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
+          // An item that no longer needs the owner takes its alerts down on every device.
+          alertClearer,
           // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
           new AgendaItemDraftDiscard({
             discard: async (sessionId, item) => await sharedDraftsHolder.service?.discard(sessionId, item),
@@ -11067,7 +11082,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         { has: async id => id === MACHINE_AGENDA_ID },
         notifications,
-        { changed: async sessionId => await workSearch.changed(sessionId) },
+        new AgendaChangeFanout([{ changed: async sessionId => await workSearch.changed(sessionId) }, alertClearer]),
       );
       const machineAgenda = new MachineAgenda(
         machineAgendaService,
@@ -13038,6 +13053,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         pairing,
         push,
+        pushAlerts: alertClearer,
         stepUp,
         security,
         carriers,
