@@ -33,6 +33,7 @@ export const sendAgendaAction = async (
       action.gate,
       action.attachments,
       action.askVersion,
+      action.cardAsk,
     );
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note, action.askVersion);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);

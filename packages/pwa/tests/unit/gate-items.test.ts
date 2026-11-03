@@ -72,6 +72,20 @@ describe('a gate item answers as a plain multiple choice', () => {
     expect(gateAnswerAction('Not good', 'blank')).not.toHaveProperty('attachments');
   });
 
+  test('an answer from an attached gate names the ask it was drawn for', () => {
+    const asked = gate([['Done', 'close']]);
+    expect(gateAnswerAction('Done', '', asked)).toMatchObject({ gate: true, cardAsk: 'gate:F1:tested:1' });
+    expect(gateAnswerAction('Done', '', true)).not.toHaveProperty('cardAsk');
+    expect(toGateAction(gateAnswerAction('Done', ''), asked)).toMatchObject({
+      gate: true,
+      cardAsk: 'gate:F1:tested:1',
+    });
+    expect(toGateAction({ kind: 'dismiss', label: 'Not needed' }, asked)).toEqual({
+      kind: 'dismiss',
+      label: 'Not needed',
+    });
+  });
+
   test('gateAnswerAction builds the same action from the label and the words', () => {
     expect(gateAnswerAction('Not good', '  blank  ')).toEqual({
       kind: 'respond',

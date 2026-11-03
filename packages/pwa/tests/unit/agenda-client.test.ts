@@ -310,6 +310,40 @@ describe('DaemonAgendaClient', () => {
     ]);
   });
 
+  it('names the card ask an answer is to only for a machine that takes it, and only for a gate answer', async () => {
+    const actions: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Done' };
+    const reference = 'gate:F1:tested:2';
+
+    // A machine whose health has not answered, or that predates card asks, would refuse the field as malformed
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, true, undefined, undefined, reference);
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, true, undefined, undefined, reference);
+    // A machine that reports `agenda.card-asks.1` takes it, on a gate answer only
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaCardAsks]),
+    });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, true, undefined, undefined, reference);
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, undefined, reference);
+
+    should(actions).deepEqual([
+      { action: 'resolve', id: 'A1', response: choice, gate: true },
+      { action: 'resolve', id: 'A1', response: choice, gate: true },
+      { action: 'resolve', id: 'A1', response: choice, gate: true, cardAsk: reference },
+      { action: 'resolve', id: 'A1', response: choice },
+    ]);
+  });
+
   it('sends the files of a Not good with its answer, and none when there are none', async () => {
     const actions: unknown[] = [];
     const client = new DaemonAgendaClient(undefined, async (_input, init) => {

@@ -18,6 +18,7 @@ import {
   type BoardReopenAttachments,
   gateAnswers,
   gateAskOptions,
+  gateReference,
   TEST_KIND_LABEL,
 } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
@@ -71,8 +72,10 @@ export const attachedGateLead = (gate: AgendaGate): string => {
 };
 
 /** An answer from the attached gate's row: marked so the daemon answers the gate, never the thread. */
-export const toGateAction = (action: InboxAction): InboxAction =>
-  action.kind === 'respond' ? { ...action, gate: true } : action;
+export const toGateAction = (action: InboxAction, gate?: AgendaGate): InboxAction =>
+  action.kind === 'respond'
+    ? { ...action, gate: true, ...(gate === undefined ? {} : { cardAsk: gateReference(gate) }) }
+    : action;
 
 /** Whether this answer to the item takes words: "Not good" needs them, "Not yet" may carry them, the rest take none. */
 export const gateWordsFor = (item: AgendaItem, action: InboxAction): GateWords => {
@@ -101,7 +104,7 @@ export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] 
 export const gateAnswerAction = (
   label: string,
   words: string,
-  attached = false,
+  attached: boolean | AgendaGate = false,
   attachments?: BoardReopenAttachments,
 ): InboxAction => {
   const note = words.trim();
@@ -110,7 +113,8 @@ export const gateAnswerAction = (
     label,
     response: { kind: 'multiple-choice', choice: label },
     ...(note === '' ? {} : { note }),
-    ...(attached ? { gate: true as const } : {}),
+    ...(attached === false ? {} : { gate: true as const }),
+    ...(typeof attached === 'object' ? { cardAsk: gateReference(attached) } : {}),
     ...(attachments === undefined ? {} : { attachments }),
   };
 };

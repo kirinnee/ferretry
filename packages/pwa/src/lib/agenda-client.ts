@@ -368,6 +368,7 @@ export class DaemonAgendaClient {
     gate?: true,
     attachments?: BoardReopenAttachments,
     askVersion?: number,
+    cardAsk?: string,
   ): Promise<void> {
     return this.#mutate(daemon, scope, {
       action: 'resolve',
@@ -375,6 +376,9 @@ export class DaemonAgendaClient {
       response,
       ...(note === undefined ? {} : { note }),
       ...(gate === undefined ? {} : { gate }),
+      ...(cardAsk !== undefined && gate !== undefined && this.wires.cardAsksOf(daemon.daemonId) === true
+        ? { cardAsk }
+        : {}),
       ...(attachments === undefined ? {} : { attachments }),
       ...this.#versioned(daemon, askVersion),
     });
