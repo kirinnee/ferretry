@@ -56,6 +56,14 @@ export class FileAgendaVersionStore implements AgendaVersionStore {
     await this.host.request(id, { id, kind: 'record', directory, sessionId, drafts }, 'commit agenda versions');
   }
 
+  async discard(sessionId: string, drafts: readonly AgendaVersionDraft[]): Promise<void> {
+    const directory = this.directory(sessionId);
+    for (const draft of drafts) this.directory(sessionId, draft.entry.item.id);
+    this.cached = undefined;
+    const id = this.host.nextId();
+    await this.host.request(id, { id, kind: 'discard', directory, sessionId, drafts }, 'discard agenda versions');
+  }
+
   async list(sessionId: string, item: AgendaId): Promise<readonly AgendaVersionSummary[]> {
     const directory = this.directory(sessionId, item);
     const id = this.host.nextId();

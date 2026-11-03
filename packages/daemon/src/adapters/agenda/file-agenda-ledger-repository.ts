@@ -28,10 +28,14 @@ const EntrySchema = z.unknown().transform((value, context) => {
 const digestOf = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 const PreparedSchema = z.strictObject({
+  /** The agenda file this commits, as it will be written: replay writes these bytes as they are. */
   ledger: z.string(),
   /** The digest of the agenda file this was prepared from (`null`: there was none) and of the file it commits. */
   base: z.string().nullable(),
-  results: z.array(z.string()).min(1),
+  result: z.string(),
+  /** Where the history file ended before this change, and the records it appends past that. */
+  archive: AgendaArchiveCursorSchema,
+  records: z.array(AgendaArchiveRecordSchema),
   effect: AgendaChangeEffectSchema.optional(),
   drafts: z.array(
     z.strictObject({
@@ -100,6 +104,8 @@ type IdentifiedAgendaFiles = AgendaFileStore &
 interface CachedLedger {
   readonly name: string;
   readonly identity: string;
+  /** The digest of the text it was parsed from. */
+  readonly digest: string;
   readonly ledger: AgendaLedger;
 }
 
@@ -170,6 +176,11 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   }
 
   private async load(sessionId: string): Promise<AgendaLedger | null> {
+    return (await this.loadDigested(sessionId))?.ledger ?? null;
+  }
+
+  /** The agenda as the reader would read it, with the digest of the text it came from. */
+  private async loadDigested(sessionId: string): Promise<{ ledger: AgendaLedger; digest: string } | null> {
     // THE READER'S RULE (`readAgendaFile`): the new name when it exists, else the old one.
     for (const name of [AGENDA_FILES.ledger.current, AGENDA_FILES.ledger.legacy]) {
       const now = await this.files.identity(sessionId, name);
@@ -178,7 +189,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       if (cached !== undefined && cached.name === name && cached.identity === now) {
         this.cache.delete(sessionId);
         this.cache.set(sessionId, cached);
-        return cached.ledger;
+        return cached;
       }
       const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
@@ -190,8 +201,9 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
         if (this.cache.size < AGENDA_CACHE_LIMIT) break;
         this.cache.delete(oldest);
       }
-      this.cache.set(sessionId, { name, identity: read.identity, ledger });
-      return ledger;
+      const found = { name, identity: read.identity, digest: digestOf(read.text), ledger };
+      this.cache.set(sessionId, found);
+      return found;
     }
     this.cache.delete(sessionId);
     return null;
@@ -241,7 +253,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     }
   }
 
-  /** The latest recorded version of each item the document names; an item never versioned has none. */
+  /** The latest kept version of each item the document names (a voided one is gone from the store); an item never versioned has none. */
   private async recordedItems(
     sessionId: string,
     raw: Record<string, unknown> | null,
@@ -280,17 +292,23 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return await this.serial(sessionId, async () => {
       await this.ready;
       await this.recoverVersions(sessionId);
-      let current = await this.load(sessionId);
+      const loaded = await this.loadDigested(sessionId);
+      let current = loaded?.ledger ?? null;
+      let base = loaded?.digest ?? null;
       // Migrate old in-ledger history before applying even an unchanged command. Appending precedes the
       // atomic cursor write; a retry after a crash cuts the uncommitted append and writes it once again.
-      if ((current?.archivePending?.length ?? 0) > 0 && current !== null)
+      if ((current?.archivePending?.length ?? 0) > 0 && current !== null) {
         current = await this.write(sessionId, current);
+        base = await this.ledgerDigest(sessionId);
+      }
       const mutation = apply(current);
       if (mutation.ok && mutation.changed) {
         if (this.versions === NO_AGENDA_VERSIONS)
           return { ...mutation, ledger: await this.write(sessionId, mutation.ledger) };
         const drafts = [...versionDrafts(current, mutation, by)];
-        const prepared = await this.coldVersions(sessionId, mutation.ledger, current, drafts);
+        const { committed, records } = this.plan(await this.coldVersions(sessionId, mutation.ledger, current, drafts));
+        const document = agendaLedgerDocument(committed);
+        const archive = mutation.ledger.archive ?? { bytes: 0, count: 0 };
         const mutationId = this.uniqueId();
         const identified = drafts.map((draft, index) => ({ ...draft, mutationId: `${mutationId}:${index}` }));
         const effect: AgendaChangeEffect | undefined =
@@ -313,62 +331,75 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
           sessionId,
           AGENDA_VERSION_PENDING,
           JSON.stringify({
-            ledger: agendaLedgerDocument(prepared),
-            base: await this.ledgerDigest(sessionId),
-            results: await this.resultDigests(sessionId, prepared),
+            ledger: document,
+            base,
+            result: digestOf(document),
+            archive,
+            records,
             drafts: identified,
             effect,
           }),
         );
-        const ledger = await this.commitVersions(sessionId, prepared, identified, effect);
-        return { ...mutation, ledger };
+        await this.commitVersions(sessionId, { document, archive, records }, identified, effect);
+        return { ...mutation, ledger: committed };
       }
       return mutation;
     });
   }
 
-  /** The agenda file's digest after this change commits: as first written, and as a replay rewrites it (parsed back, key order and all). */
-  private async resultDigests(sessionId: string, prepared: AgendaLedger): Promise<readonly string[]> {
-    const written = agendaLedgerDocument(this.plan(prepared).committed);
-    const replayed = agendaLedgerDocument(
-      this.plan(await this.parse(sessionId, AGENDA_VERSION_PENDING, agendaLedgerDocument(prepared))).committed,
-    );
-    return [...new Set([digestOf(written), digestOf(replayed)])];
-  }
-
-  private async recoverVersions(sessionId: string): Promise<AgendaLedger | undefined> {
+  private async recoverVersions(sessionId: string): Promise<void> {
     const text = await this.files.read(sessionId, AGENDA_VERSION_PENDING);
-    if (text === undefined) return undefined;
+    if (text === undefined) return;
     if (this.versions === NO_AGENDA_VERSIONS)
       throw new Error('agenda version archive is required to recover this transaction');
     const prepared = PreparedSchema.parse(JSON.parse(text));
     const now = await this.ledgerDigest(sessionId);
-    if (now !== prepared.base && !prepared.results.includes(now ?? '')) {
+    if (now !== prepared.base && now !== prepared.result) {
       // The agenda file is neither what this was prepared from nor what it commits: another daemon wrote it since
       // (a rollback to one that ignores this file). Replaying would overwrite that daemon's words, and its history
       // appends would be cut back to a cursor behind its own. The intent is kept aside, never replayed.
-      await this.files.writeAtomic(sessionId, `${AGENDA_VERSION_PENDING}.stale`, text);
+      const kept = await this.setAside(sessionId, text);
+      // What it recorded was never committed, and the board now belongs to someone else's items: none of it may
+      // become a base for them (a different item can hold the same id, or the same item other words).
+      await this.versions.discard?.(sessionId, prepared.drafts);
       await this.files.remove(sessionId, AGENDA_VERSION_PENDING);
       this.runtime.warn(
-        `agenda ${sessionId}: an unfinished change was set aside as ${AGENDA_VERSION_PENDING}.stale because the agenda file was written by another daemon since`,
+        `agenda ${sessionId}: an unfinished change was set aside as ${kept} because the agenda file was written by another daemon since, and the versions it had recorded were voided`,
       );
-      return undefined;
+      return;
     }
-    const ledger = await this.parse(sessionId, AGENDA_VERSION_PENDING, prepared.ledger);
-    return this.commitVersions(sessionId, ledger, prepared.drafts, prepared.effect);
+    await this.parse(sessionId, AGENDA_VERSION_PENDING, prepared.ledger);
+    await this.commitVersions(
+      sessionId,
+      { document: prepared.ledger, archive: prepared.archive, records: prepared.records },
+      prepared.drafts,
+      prepared.effect,
+    );
+  }
+
+  /** Keeps a set-aside intent where it can be read: `.stale`, and beside an earlier one under a name of its own. */
+  private async setAside(sessionId: string, text: string): Promise<string> {
+    const first = `${AGENDA_VERSION_PENDING}.stale`;
+    const held = await this.files.read(sessionId, first);
+    const name = held === undefined || held === text ? first : `${first}-${digestOf(text).slice(0, 16)}`;
+    await this.files.writeAtomic(sessionId, name, text);
+    return name;
   }
 
   private async commitVersions(
     sessionId: string,
-    ledger: AgendaLedger,
+    commit: {
+      readonly document: string;
+      readonly archive: AgendaArchiveCursor;
+      readonly records: readonly AgendaArchiveRecord[];
+    },
     drafts: readonly AgendaVersionDraft[],
     effect?: AgendaChangeEffect,
-  ): Promise<AgendaLedger> {
+  ): Promise<void> {
     await this.versions.record(sessionId, drafts);
-    const committed = await this.write(sessionId, ledger);
+    await this.commit(sessionId, commit.document, commit.archive, commit.records);
     if (effect !== undefined) await this.changeOutbox?.append(sessionId, effect);
     await this.files.remove(sessionId, AGENDA_VERSION_PENDING);
-    return committed;
   }
 
   /** Cold threads leave the hot maps only after their complete snapshots have been acknowledged by SQLite. */
@@ -466,19 +497,23 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   }
 
   private async write(sessionId: string, ledger: AgendaLedger): Promise<AgendaLedger> {
+    const { committed, records } = this.plan(ledger);
+    await this.commit(sessionId, agendaLedgerDocument(committed), ledger.archive ?? { bytes: 0, count: 0 }, records);
+    return committed;
+  }
+
+  /** The history records first, from where the file said it ended, then the agenda file as given. */
+  private async commit(
+    sessionId: string,
+    document: string,
+    archive: AgendaArchiveCursor,
+    records: readonly AgendaArchiveRecord[],
+  ): Promise<void> {
     try {
-      const { committed, records } = this.plan(ledger);
-      await appendLogRecords(
-        this.files,
-        sessionId,
-        AGENDA_ARCHIVE_FILE,
-        ledger.archive ?? { bytes: 0, count: 0 },
-        records,
-      );
-      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, agendaLedgerDocument(committed));
+      await appendLogRecords(this.files, sessionId, AGENDA_ARCHIVE_FILE, archive, records);
+      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, document);
       // The ledger now says where history ends (or that a version-2 board has none), so no append is pending.
       await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
-      return committed;
     } finally {
       // After the disk, whether or not it landed: the next read asks the file. A read racing this write may
       // keep the old copy, but against the old file's identity, which the next read no longer finds.

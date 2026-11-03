@@ -209,6 +209,33 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     }
   }
 
+  async discard(sessionId: string, drafts: readonly AgendaVersionDraft[]): Promise<void> {
+    this.cached = undefined;
+    // Latest first: an intent's drafts for one item are its tail, so each peels the one before it.
+    for (const draft of [...drafts].reverse()) {
+      if (draft.mutationId === undefined) continue;
+      const db = await this.openExisting(sessionId, draft.entry.item.id);
+      if (db === undefined) continue;
+      try {
+        db.transaction(() => {
+          if (db.query('DELETE FROM mutations WHERE id = ?').run(draft.mutationId ?? '').changes === 0) return;
+          const tail = db
+            .query<
+              { version: number; summary: string },
+              []
+            >('SELECT version, summary FROM versions ORDER BY version DESC LIMIT 1')
+            .get();
+          const summary = tail === null ? undefined : AgendaVersionSummarySchema.parse(JSON.parse(tail.summary));
+          if (tail === null || summary?.at !== draft.at || summary.change !== draft.change) return;
+          db.query('DELETE FROM version_words WHERE version = ?').run(tail.version);
+          db.query('DELETE FROM versions WHERE version = ?').run(tail.version);
+        })();
+      } finally {
+        db.close();
+      }
+    }
+  }
+
   async list(sessionId: string, id: AgendaId): Promise<readonly AgendaVersionSummary[]> {
     const db = await this.openExisting(sessionId, id);
     if (db === undefined) return [];

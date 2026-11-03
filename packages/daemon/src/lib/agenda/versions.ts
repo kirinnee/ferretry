@@ -40,6 +40,12 @@ export interface AgendaVersionStore {
     id: AgendaId,
     version: number,
   ): Promise<readonly AgendaConversationEntry[] | undefined>;
+  /**
+   * Voids what a change that never committed recorded: for each draft whose mutation the store holds, the version it
+   * made when it is still the item's latest (a draft's own version is always the tail), and the mutation itself.
+   * A draft the store never saw, or one that is no longer the tail, changes nothing.
+   */
+  discard?(sessionId: string, drafts: readonly AgendaVersionDraft[]): Promise<void>;
 }
 
 /** No versions are kept: a daemon wired without the sidecar. */

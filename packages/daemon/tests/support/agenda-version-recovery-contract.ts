@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
 import { describe, it, spyOn } from 'bun:test';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -1029,6 +1030,104 @@ export function agendaVersionRecoveryContract() {
         ok(await w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Later' } }));
         should(await w.files.read(SESSION, AGENDA_ARCHIVE_FILE)).startWith(sidecar ?? '');
         should(JSON.stringify(await w.repo.readArchive(SESSION))).containEql('OWNER_WORDS_FROM_2A');
+      } finally {
+        await w.close();
+      }
+    });
+
+    /** 2a adding an item of its own: the id its counter hands out, which a change that never committed may already have used. */
+    const olderDaemonAdds = async (w: Awaited<ReturnType<typeof world>>, subject: string) => {
+      const document = JSON.parse((await w.files.read(SESSION, 'agenda.json')) ?? '{}');
+      const added = JSON.parse(JSON.stringify(document.entries[0]));
+      added.item.id = 'A2';
+      added.item.subject = subject;
+      for (const key of ['conversation', 'conversationCount', 'conversationLastAt', 'relatedTasks'])
+        delete added.item[key];
+      for (const key of ['mergedFrom', 'mergedInto', 'splitFrom', 'splitInto']) delete added.item[key];
+      document.entries.push(added);
+      document.nextId = 3;
+      document.version = 2;
+      delete document.conversations;
+      delete document.carriedEntries;
+      await w.files.writeAtomic(SESSION, 'agenda.json', JSON.stringify(document));
+    };
+
+    it('voids the versions of a set-aside intent, so an item that took its id never resumes from them', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        w.fail('error', true);
+        await should(
+          w.save({ action: 'split', actor: ACTOR, id: 'A1', request: { ...REQUEST, subject: 'Stale child' } }),
+        ).be.rejected();
+        should(await w.backing.list(SESSION, 'A2')).have.length(1);
+        await olderDaemonAdds(w, 'Real second item');
+        w.restart();
+
+        const read = await w.repo.read(SESSION);
+
+        const [first, second] = read?.entries.map(entry => entry.item) ?? [];
+        should(second?.subject).equal('Real second item');
+        should(second?.splitFrom).be.undefined();
+        should(first?.splitInto).be.undefined();
+        should(read?.conversations?.A2 ?? []).be.empty();
+        should(await w.backing.list(SESSION, 'A2')).have.length(0);
+        should((await w.backing.list(SESSION, 'A1')).map(version => version.change)).deepEqual(['created']);
+        should(w.warnings.filter(message => message.includes('voided'))).have.length(1);
+        ok(await w.save({ action: 'edit', actor: ACTOR, id: 'A2', patch: { subject: 'Edited' } }));
+        should((await w.backing.list(SESSION, 'A2')).map(version => version.version)).deepEqual([1, 2]);
+      } finally {
+        await w.close();
+      }
+    });
+
+    it('does not bring back an owner reply a set-aside intent recorded and the owner then retyped on 2a', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        w.fail('error', true);
+        await should(w.save({ action: 'reply', actor: HUMAN, id: 'A1', note: 'STALE owner reply' })).be.rejected();
+        await olderDaemonWrites(w, 'From the older daemon', 'retyped on 2a');
+        w.restart();
+
+        const read = await w.repo.read(SESSION);
+
+        should((read?.conversations?.A1 ?? []).map(word => word.text)).deepEqual(['retyped on 2a']);
+        should((await w.backing.list(SESSION, 'A1')).map(version => version.change)).deepEqual(['created']);
+      } finally {
+        await w.close();
+      }
+    });
+
+    it('keeps every set-aside intent: a second one is written beside the first, and the same one is never copied twice', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        const aside = async (subject: string, history: string) => {
+          w.fail('error');
+          await should(w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject } })).be.rejected();
+          const pending = (await w.files.read(SESSION, AGENDA_VERSION_PENDING)) ?? '';
+          await olderDaemonWrites(w, `${subject} on 2a`, history);
+          w.restart();
+          await w.repo.read(SESSION);
+          return pending;
+        };
+        const firstIntent = await aside('First', 'one');
+        const secondIntent = await aside('Second', 'two');
+        const named = (text: string) =>
+          `${AGENDA_VERSION_PENDING}.stale-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
+
+        should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).equal(firstIntent);
+        should(await w.files.read(SESSION, named(secondIntent))).equal(secondIntent);
+
+        await w.files.writeAtomic(SESSION, AGENDA_VERSION_PENDING, secondIntent);
+        await w.repo.read(SESSION);
+        should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).equal(firstIntent);
+        should(await w.files.read(SESSION, named(secondIntent))).equal(secondIntent);
+        await w.files.writeAtomic(SESSION, AGENDA_VERSION_PENDING, firstIntent);
+        await w.repo.read(SESSION);
+        should(await w.files.read(SESSION, named(firstIntent))).be.undefined();
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
       } finally {
         await w.close();
       }

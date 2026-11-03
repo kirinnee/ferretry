@@ -45,6 +45,7 @@ export function agendaVersionsWorkerContract() {
         },
         get: async () => undefined,
         conversation: async () => undefined,
+        discard: async () => undefined,
       };
       serveAgendaVersions(scope, directory => {
         calls.push(directory);

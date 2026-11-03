@@ -4,6 +4,7 @@ import { SqliteAgendaVersionStore } from './sqlite-agenda-versions.ts';
 
 type Operation =
   | { readonly kind: 'record'; readonly drafts: readonly AgendaVersionDraft[] }
+  | { readonly kind: 'discard'; readonly drafts: readonly AgendaVersionDraft[] }
   | { readonly kind: 'list'; readonly item: AgendaId }
   | { readonly kind: 'get' | 'conversation'; readonly item: AgendaId; readonly version: number };
 
@@ -44,6 +45,7 @@ export function serveAgendaVersions(
         const store = held.store;
         let value: AgendaVersionsValue;
         if (request.kind === 'record') await store.record(request.sessionId, request.drafts);
+        else if (request.kind === 'discard') await store.discard(request.sessionId, request.drafts);
         else
           value =
             request.kind === 'list'

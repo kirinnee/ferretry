@@ -176,6 +176,92 @@ export function agendaVersionStoreContract() {
       should([asked, recorded]).deepEqual([false, true]);
     });
 
+    describe('voiding what a change that never committed recorded', () => {
+      const identified = (each: AgendaVersionDraft, mutationId: string): AgendaVersionDraft => ({
+        ...each,
+        mutationId,
+      });
+      const replied = entryOf(
+        ok(applyAgendaCommand(raised.ledger, { action: 'reply', actor: HUMAN, id: 'A1', note: 'eu', at: T(1) })).ledger,
+      );
+      const first = identified(draft(entryOf(raised.ledger), 'created', T(0)), 'm1:0');
+      const second = identified(draft(replied, 'replied', T(1)), 'm2:0');
+
+      it('should take the version a mutation made off the end, and let the same change be recorded again', async () => {
+        // Arrange
+        await store.record(SESSION, [first]);
+        await store.record(SESSION, [second]);
+        await store.get(SESSION, 'A1', 2);
+
+        // Act
+        await store.discard(SESSION, [second]);
+        const after = await store.list(SESSION, 'A1');
+        const gone = await store.get(SESSION, 'A1', 2);
+        await store.record(SESSION, [second]);
+
+        // Assert
+        should(after.map(row => [row.version, row.change])).deepEqual([[1, 'created']]);
+        should(gone).be.undefined();
+        should((await store.list(SESSION, 'A1')).map(row => [row.version, row.change])).deepEqual([
+          [1, 'created'],
+          [2, 'replied'],
+        ]);
+      });
+
+      it('should peel an intent that made several versions of one item, latest first, and keep the carried one before', async () => {
+        // Arrange: the intent's change was the item's first, so it made the carried version and its own.
+        const before = entryOf(raised.ledger);
+        const carrying = identified(draft(replied, 'replied', T(1), before), 'm3:0');
+        const next = identified(draft(replied, 'edited', T(2)), 'm3:1');
+        await store.record(SESSION, [carrying, next]);
+
+        // Act
+        await store.discard(SESSION, [carrying, next]);
+
+        // Assert
+        should((await store.list(SESSION, 'A1')).map(row => [row.version, row.change])).deepEqual([[1, 'carried']]);
+      });
+
+      it('should leave an item with no store, a draft with no mutation and a mutation it never held as they are', async () => {
+        // Arrange
+        await store.record(SESSION, [first, second]);
+        const other = entryOf(raised.ledger);
+        const elsewhere = identified(
+          draft({ ...other, item: { ...other.item, id: 'A7' } } as AgendaEntry, 'created', T(0)),
+          'm9:0',
+        );
+
+        // Act
+        await store.discard(SESSION, [elsewhere, draft(replied, 'replied', T(1)), identified(second, 'm-never')]);
+
+        // Assert
+        should((await store.list(SESSION, 'A7')).length).equal(0);
+        should((await store.list(SESSION, 'A1')).map(row => row.version)).deepEqual([1, 2]);
+      });
+
+      it('should void only a version that is still the latest, and refuse a name that is not an id', async () => {
+        // Arrange
+        await store.record(SESSION, [first]);
+        await store.record(SESSION, [second]);
+
+        // Act: the first mutation is no longer the tail; one whose time and change differ is not its version either.
+        await store.discard(SESSION, [first]);
+        await store.discard(SESSION, [{ ...second, at: T(7) }]);
+        const refused = await store
+          .discard(SESSION, [
+            { ...second, entry: { ...second.entry, item: { ...second.entry.item, id: '../x' } } } as AgendaVersionDraft,
+          ])
+          .then(
+            () => 'discarded',
+            error => String(error),
+          );
+
+        // Assert
+        should((await store.list(SESSION, 'A1')).map(row => row.version)).deepEqual([1, 2]);
+        should(refused).containEql('not a valid agenda id');
+      });
+    });
+
     it('should make a version of each entry a committed change touched', () => {
       // Arrange
       const replied = ok(
@@ -226,13 +312,39 @@ export function agendaVersionStoreContract() {
       should([other, item]).deepEqual([undefined, undefined]);
     });
 
-    it('should refuse to mark over a seen document it cannot read, and leave it and every device untouched', async () => {
+    it('should set aside a seen document that is not marks, say so, and start from none', async () => {
       // Arrange
-      const seen = new FileAgendaSeenStore(() => root);
+      const warnings: string[] = [];
+      const seen = new FileAgendaSeenStore(
+        () => root,
+        () => 'id1',
+        message => warnings.push(message),
+      );
       await seen.mark(SESSION, 'A1', 'laptop', 4);
       const file = join(root, 'agenda-seen.json');
       await writeFile(file, '{"laptop":{"A1":4},');
       const damaged = await readFile(file, 'utf8');
+      const marksSeenWhileDamaged = await seen.seen(SESSION, 'A1', 'laptop');
+
+      // Act
+      const marked = await seen.mark(SESSION, 'A1', 'phone', 2);
+      await writeFile(file, '{"phone":{"A1":"two"}}');
+      const again = await seen.mark(SESSION, 'A1', 'phone', 3);
+
+      // Assert
+      should(marksSeenWhileDamaged).be.undefined();
+      should([marked, again]).deepEqual([2, 3]);
+      should(await readFile(`${file}.corrupt-id1`, 'utf8')).equal('{"phone":{"A1":"two"}}');
+      should(JSON.parse(await readFile(file, 'utf8'))).deepEqual({ phone: { A1: 3 } });
+      should(warnings).have.length(2);
+      should(warnings[0]).containEql('set aside as');
+      should(damaged).equal('{"laptop":{"A1":4},');
+    });
+
+    it('should refuse to mark over a seen document it cannot read at all, and leave it untouched', async () => {
+      // Arrange: a directory where the file should be is an unreadable file, not a damaged one.
+      const seen = new FileAgendaSeenStore(() => root);
+      await mkdir(join(root, 'agenda-seen.json'));
 
       // Act
       const marked = await seen.mark(SESSION, 'A1', 'phone', 2).then(
@@ -242,8 +354,7 @@ export function agendaVersionStoreContract() {
 
       // Assert
       should(marked).equal('refused');
-      should(await readFile(file, 'utf8')).equal(damaged);
-      should(await seen.seen(SESSION, 'A1', 'phone')).be.undefined();
+      should((await stat(join(root, 'agenda-seen.json'))).isDirectory()).be.true();
     });
 
     it('should fail a mark whose temporary file cannot be written, leave the marks as they were and clear the temporary', async () => {
