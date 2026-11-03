@@ -144,7 +144,7 @@ describe('the owner decides', () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'why');
-    const entry = await w.service.decide('VERCEL', proposed.id, 'approve');
+    const entry = await w.service.decide('VERCEL', proposed.id, { decision: 'approve' });
     should(entry.recipe).equal('new steps');
     should(w.closed).deepEqual([{ sessionId: 's1', id: 'A1', note: 'Approved: the recipe was updated.' }]);
   });
@@ -153,7 +153,7 @@ describe('the owner decides', () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'why');
-    const entry = await w.service.decide('VERCEL', proposed.id, 'decline');
+    const entry = await w.service.decide('VERCEL', proposed.id, { decision: 'decline' });
     should(entry).not.have.property('recipe');
     should(w.closed[0]?.note).equal('Declined.');
   });
@@ -175,6 +175,7 @@ describe('a proposal’s card', () => {
     subject: 'Recipe change',
     context: '+ x',
     howToResolve: 'Approve it',
+    recipeProposal: { signIn: 'si_0000000000000001', id: 'rp_0000000000000001' },
   };
 
   it('should raise a task the daemon owns, and resolve it by its id', async () => {
@@ -193,7 +194,11 @@ describe('a proposal’s card', () => {
     should(await adapter.raise('s1', card)).deepEqual({ ok: true, id: 'A3' });
     should(raised[0]).containDeep([
       's1',
-      { kind: 'task', sourceRef: 'rp_0000000000000001' },
+      {
+        kind: 'task',
+        sourceRef: 'rp_0000000000000001',
+        recipeProposal: { signIn: 'si_0000000000000001', id: 'rp_0000000000000001' },
+      },
       { kind: 'daemon', cause: 'login-recipe' },
     ]);
     await adapter.close('s1', 'A3', 'Declined.');
@@ -294,8 +299,8 @@ describe('a recipe is masked when it is served', () => {
       sessionId: 's1',
       proposedAt: NOW,
     });
-    await should(w.service.decide('VERCEL', 'rp_00000000000000aa', 'approve')).be.rejectedWith(RecipeValueError);
-    should((await w.service.decide('VERCEL', 'rp_00000000000000aa', 'decline')).recipe).be.undefined();
+    await should(w.service.decide('VERCEL', 'rp_00000000000000aa', { decision: 'approve' })).be.rejectedWith(RecipeValueError);
+    should((await w.service.decide('VERCEL', 'rp_00000000000000aa', { decision: 'decline' })).recipe).be.undefined();
   });
 });
 
@@ -306,7 +311,7 @@ describe('a proposal card and an answer are masked too', () => {
     const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'why');
     should(w.cards[0]?.context).not.containEql(SECRET);
     should(w.cards[0]?.context).containEql('[redacted:login:X:password]');
-    const declined = await w.service.decide('VERCEL', proposed.id, 'decline');
+    const declined = await w.service.decide('VERCEL', proposed.id, { decision: 'decline' });
     should(JSON.stringify(declined)).not.containEql(SECRET);
   });
 });
@@ -400,9 +405,9 @@ describe('a proposal is keyed by the SIGN-IN it is for', () => {
   it("should bump the sign-in's version when the owner approves", async () => {
     const w = await twoPlaces();
     const proposed = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase', 'why');
-    const approved = await w.service.decideSignIn(w.ssh, proposed.id, 'approve');
+    const approved = await w.service.decideSignIn(w.ssh, proposed.id, { decision: 'approve' });
     should(approved).containDeep({ recipe: 'Type the passphrase', recipeVersion: 1 });
     const next = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase, then yes', 'why');
-    should((await w.service.decideSignIn(w.ssh, next.id, 'approve')).recipeVersion).equal(2);
+    should((await w.service.decideSignIn(w.ssh, next.id, { decision: 'approve' })).recipeVersion).equal(2);
   });
 });

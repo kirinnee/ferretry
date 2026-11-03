@@ -811,7 +811,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 | Route                                                 | Does                                                              | Grant                               |
 | ----------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------- |
 | `GET /v1/sign-in-rules[?signIn=]`                     | every rule (or one sign-in's), machine stages waiting, the health | `secrets.use`                       |
-| `GET /v1/sign-in-rules/eligibility?signIn=`           | whether a rule can be made, and why not                           | `secrets.use`                       |
+| `GET /v1/sign-in-rules/eligibility?signIn=`           | whether a rule can be made, and why not; `&progress=1` adds how far the owner is toward a `no_history` sign-in ("1 of 2 sign-ins done") | `secrets.use`                       |
 | `POST /v1/sign-in-rules/stages`                       | stage a rule                                                      | `secrets.configure` + `browser.use` |
 | `GET` / `DELETE /v1/sign-in-rules/stages/:stage`      | where a stage stands; drop it                                     | `secrets.use`                       |
 | `POST /v1/sign-in-rules/stages/:stage/confirm-in-app` | show a machine stage in the app                                   | `secrets.configure` + `browser.use` |

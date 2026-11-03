@@ -235,10 +235,10 @@ describe('a recipe proposal on one sign-in', () => {
     should((await w.directory.proposeSignIn(id, proposal('rp_0000000000000001', 'new', 'old'))).applied).be.false();
     await w.directory.proposalCardSignIn(id, 'rp_0000000000000001', 'A1');
     should((await w.directory.list()).signIns[0]?.proposals?.[0]?.agendaItemId).equal('A1');
-    const approved = await w.directory.decideSignIn(id, 'rp_0000000000000001', 'approve');
+    const approved = await w.directory.decideSignIn(id, 'rp_0000000000000001', { decision: 'approve' });
     should(approved.signIn.recipe).equal('new');
     should(approved.signIn.recipeVersion).equal(2);
-    should((await failure(w.directory.decideSignIn(id, 'rp_0000000000000001', 'decline'))).refusal).equal(
+    should((await failure(w.directory.decideSignIn(id, 'rp_0000000000000001', { decision: 'decline' }))).refusal).equal(
       'unknown_proposal',
     );
     should(
@@ -257,7 +257,7 @@ describe('a recipe proposal on one sign-in', () => {
       clock: CLOCK,
     });
     should(
-      (await failure(recipes.decideSignIn('si_0000000000000001', 'rp_0000000000000001', 'approve'))).refusal,
+      (await failure(recipes.decideSignIn('si_0000000000000001', 'rp_0000000000000001', { decision: 'approve' }))).refusal,
     ).equal('unknown_sign_in');
   });
 });

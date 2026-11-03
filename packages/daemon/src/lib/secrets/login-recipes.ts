@@ -3,6 +3,8 @@ import {
   type AccountSummary,
   type LoginEntryId,
   type LoginEntrySummary,
+  type AgendaRecipeProposalRef,
+  type LoginRecipeDecision,
   type LoginRecipeProposal,
   type LoginRecipeProposed,
   type SignInId,
@@ -56,6 +58,8 @@ export interface RecipeAgendaPort {
       readonly subject: string;
       readonly context: string;
       readonly howToResolve: string;
+      /** The sign-in and the proposal, so the app approves it on the card (`AgendaRecipeProposalRef`). */
+      readonly recipeProposal: AgendaRecipeProposalRef;
     },
   ): Promise<{ ok: true; id: string } | { ok: false; message: string }>;
   close(sessionId: string, id: string, note: string): Promise<void>;
@@ -155,7 +159,8 @@ export class LoginRecipeService {
       subject: `Recipe change ${placeWords(signIn.place)}`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
       context: await this.masked(cardContext(signIn.recipe, recipe, why)),
-      howToResolve: `Approve or decline it in Settings › Accounts, on the account's ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
+      howToResolve: `Approve, edit or decline it on this card, in Settings › Accounts, on the account's ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
+      recipeProposal: { signIn: signIn.id, id: proposal.id },
     });
     if (!card.ok) return { ...answer, state: 'pending' };
     await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card.id).catch(() => undefined);
@@ -216,15 +221,15 @@ export class LoginRecipeService {
    * The OWNER answers a proposal; its card closes either way. An approval is checked for values again: one the owner
    * kept after the proposal was made must not become the recipe.
    */
-  async decide(id: LoginEntryId, proposalId: string, decision: 'approve' | 'decline'): Promise<LoginEntrySummary> {
-    if (decision === 'approve') {
+  async decide(id: LoginEntryId, proposalId: string, answer: LoginRecipeDecision): Promise<LoginEntrySummary> {
+    if (answer.decision === 'approve') {
       const waiting = (await this.ports.logins.list())
         .find(each => each.id === id)
         ?.proposals?.find(proposal => proposal.id === proposalId);
-      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
+      await this.assertApproved(answer, waiting);
     }
-    const { entry, proposal } = await this.ports.logins.decide(id, proposalId, decision);
-    await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
+    const { entry, proposal } = await this.ports.logins.decide(id, proposalId, answer);
+    await this.closeCard(proposal, closingNote(answer));
     const [served] = await this.scrubbed([entry]);
     return served ?? entry;
   }
@@ -233,17 +238,26 @@ export class LoginRecipeService {
    * The OWNER answers a proposal on one sign-in; its card closes either way. An approval is checked for values again,
    * as {@link decide} does.
    */
-  async decideSignIn(id: SignInId, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
+  async decideSignIn(id: SignInId, proposalId: string, answer: LoginRecipeDecision): Promise<SignInSummary> {
     const accounts = this.ports.accounts;
-    if (decision === 'approve') {
+    if (answer.decision === 'approve') {
       const waiting = (await accounts.list()).signIns
         .find(each => each.id === id)
         ?.proposals?.find(proposal => proposal.id === proposalId);
-      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
+      await this.assertApproved(answer, waiting);
     }
-    const { signIn, proposal } = await accounts.decideSignIn(id, proposalId, decision);
-    await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
+    const { signIn, proposal } = await accounts.decideSignIn(id, proposalId, answer);
+    await this.closeCard(proposal, closingNote(answer));
     return await this.scrubbedEntry(signIn);
+  }
+
+  /**
+   * What an approval would make the recipe holds no value: the owner's own version when the approval carries one
+   * ("Approve my version"), checked whether or not the proposal is still there, else the ferret's text.
+   */
+  private async assertApproved(answer: LoginRecipeDecision, waiting: LoginRecipeProposal | undefined): Promise<void> {
+    const recipe = answer.decision === 'approve' && answer.recipe !== undefined ? answer.recipe : waiting?.recipe;
+    if (recipe !== undefined) await this.assertNoValue(recipe);
   }
 
   private async closeCard(proposal: LoginRecipeProposal, note: string): Promise<void> {
@@ -269,6 +283,14 @@ export class LoginRecipeService {
       .catch(() => undefined);
   }
 }
+
+/** How a card closes once the owner answered its proposal. */
+const closingNote = (answer: LoginRecipeDecision): string =>
+  answer.decision === 'decline'
+    ? 'Declined.'
+    : answer.recipe === undefined
+      ? 'Approved: the recipe was updated.'
+      : 'Approved with your edits: the recipe was updated.';
 
 /** A place as the Accounts screen names a site row: its first login domain, or its `tool@host`. */
 function placeName(place: Place): string {
@@ -298,21 +320,15 @@ export function cardContext(base: string | undefined, next: string, why: string)
 const RECIPE_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'login-recipe' };
 
 /**
- * A proposal's card on the owner's agenda: a `task` ("look at this"), whose answers change nothing. The owner
- * approves or declines on the login's Recipe in Settings, or with `fy account site recipe`, and the card closes.
+ * A proposal's card on the owner's agenda: a `task` whose generic answers change nothing (the agenda refuses them). It
+ * carries the proposal's ref, so the app approves, edits or declines it on the card itself through the owner's recipe
+ * route; an older app shows the changed lines and points to Settings or `fy account site recipe`. The card closes once
+ * the owner answered, wherever.
  */
 export class RecipeAgendaAdapter implements RecipeAgendaPort {
   constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}
 
-  async raise(
-    sessionId: string,
-    card: {
-      readonly sourceRef: string;
-      readonly subject: string;
-      readonly context: string;
-      readonly howToResolve: string;
-    },
-  ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  async raise(sessionId: string, card: Parameters<RecipeAgendaPort['raise']>[1]): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     const outcome = await this.agenda.raise(
       sessionId,
       {
@@ -323,6 +339,7 @@ export class RecipeAgendaAdapter implements RecipeAgendaPort {
         why: card.subject,
         context: card.context,
         howToResolve: card.howToResolve,
+        recipeProposal: card.recipeProposal,
       },
       RECIPE_CARD_ACTOR,
     );

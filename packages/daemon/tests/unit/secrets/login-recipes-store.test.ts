@@ -179,7 +179,7 @@ describe('a ferret proposes a recipe', () => {
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: 'old' }));
     await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
     await proposalCard(w, 'VERCEL', 'rp_0000000000000001', 'A7');
-    const { entry, proposal: answered } = await w.directory.decide('VERCEL', 'rp_0000000000000001', 'approve');
+    const { entry, proposal: answered } = await w.directory.decide('VERCEL', 'rp_0000000000000001', { decision: 'approve' });
     should(entry.recipe).equal('new');
     should(entry).not.have.property('proposals');
     should(answered.agendaItemId).equal('A7');
@@ -191,14 +191,14 @@ describe('a ferret proposes a recipe', () => {
     await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
     await w.directory.put('VERCEL', change({ recipe: 'edited by the owner' }));
     const stale = await w.directory
-      .decide('VERCEL', 'rp_0000000000000001', 'approve')
+      .decide('VERCEL', 'rp_0000000000000001', { decision: 'approve' })
       .catch((caught: unknown) => caught);
     should((stale as LoginEntryError).refusal).equal('stale_proposal');
-    const { entry } = await w.directory.decide('VERCEL', 'rp_0000000000000001', 'decline');
+    const { entry } = await w.directory.decide('VERCEL', 'rp_0000000000000001', { decision: 'decline' });
     should(entry.recipe).equal('edited by the owner');
     should(entry).not.have.property('proposals');
     const gone = await w.directory
-      .decide('VERCEL', 'rp_0000000000000001', 'decline')
+      .decide('VERCEL', 'rp_0000000000000001', { decision: 'decline' })
       .catch((caught: unknown) => caught);
     should((gone as LoginEntryError).refusal).equal('unknown_proposal');
   });
@@ -223,9 +223,9 @@ describe('who wrote the recipe', () => {
     await w.directory.put('VERCEL', change({ autoApplyRecipe: false }));
     await propose(w, 'VERCEL', proposal('rp_0000000000000002', 'more', 'ferret steps'));
     await propose(w, 'VERCEL', proposal('rp_0000000000000003', 'other', 'ferret steps'));
-    const declined = await w.directory.decide('VERCEL', 'rp_0000000000000002', 'decline');
+    const declined = await w.directory.decide('VERCEL', 'rp_0000000000000002', { decision: 'decline' });
     should(declined.entry.recipeBy).equal('ferret');
-    const approved = await w.directory.decide('VERCEL', 'rp_0000000000000003', 'approve');
+    const approved = await w.directory.decide('VERCEL', 'rp_0000000000000003', { decision: 'approve' });
     should(approved.entry).not.have.property('recipeBy');
     should(approved.entry.recipe).equal('other');
   });
