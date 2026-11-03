@@ -291,6 +291,18 @@ describe('a very long text', () => {
     expect(joined(runs, 'removed')).toBe(after);
   });
 
+  test('keeps the text whole when two far lines swap places in 3000 lines', () => {
+    const before = lines(3000, {});
+    const after = lines(3000, {
+      10: 'Step 2500 of the report finished cleanly',
+      2500: 'Step 10 of the report finished cleanly',
+    });
+    const runs = diffText(before, after);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+    expect(runs.some(run => run.kind !== 'added' && run.kind !== 'removed' && run.text.length > 50_000)).toBe(true);
+  });
+
   test('keeps two far edits in a 3000 sentence paragraph word-level', () => {
     const before = sentences(3000, {});
     const after = sentences(3000, { 5: 'wobbles', 2990: 'wobbles' });
