@@ -8,6 +8,7 @@ import {
   type LaneSet,
   BoardTaskActionRequestSchema,
   gateReference,
+  MAX_AGENDA_BODY_LENGTH,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -1037,6 +1038,22 @@ describe('open gate items from before card asks', () => {
 });
 
 describe('the new agenda for a card', () => {
+  it('never carries a cut-off How to test: too long for a body, the ask points at the card', () => {
+    // Arrange
+    const task = external({ laneId: 'tested', howToTest: `1. ${'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1000)}` });
+    const gate = gateOf({ task, laneSet: lanes(), audience: 'external' }, stageGateLanes);
+    if (gate === undefined) throw new Error('expected a gate');
+
+    // Act
+    const steps = cardAgendaRaise(gate, task, NOW).cardAsks?.[0]?.howToTest;
+
+    // Assert
+    should(steps).match(
+      /^How to test is 201,003 characters, too long to show here \(the most is 200,000\)\. Open the card \(/u,
+    );
+    should(steps).not.match(/x{10}/u);
+  });
+
   it('is written from the card: its title, the lane’s ask line, its How to test and the ask itself', () => {
     // Arrange
     const task = external({
