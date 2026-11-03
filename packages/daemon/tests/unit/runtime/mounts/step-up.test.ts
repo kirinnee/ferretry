@@ -416,6 +416,25 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'approve-task-plan')).be.false();
   });
 
+  it('should mint an approve-recipe challenge only for the one proposal it names (#F640)', async () => {
+    // Arrange — a device with a passkey
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]) });
+    const dispatcher = await world.surface;
+    const ask = async (body: unknown) =>
+      await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/step-up/options', body: json(body), ...asDevice }),
+      );
+
+    // Act
+    const options = await ask({ origin: ORIGIN, act: 'approve-recipe', subject: 'rp_0000000000000001' });
+    const unbound = await ask({ origin: ORIGIN, act: 'approve-recipe' });
+    const borrowed = await ask({ origin: ORIGIN, act: 'approve-recipe', subject: STAGE });
+
+    // Assert — a challenge for the proposal named; none without one, or for another kind of stage
+    should(options.status).equal(200);
+    should([unbound.status, borrowed.status]).deepEqual([400, 400]);
+  });
+
   it('should mint no approve-sign-in-rule challenge while this daemon stages no standing rules', async () => {
     // Arrange — a device with a passkey, and a 2FA stage and a plan stage that must not stand in for a rule's
     const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } });

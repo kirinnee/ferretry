@@ -258,17 +258,10 @@ export function stepUpRoutes(
         }
         // Approving a sign-in recipe binds its challenge, and so its proof, to the ONE proposal it names (`rp_…`): the
         // schema already refused a request without a well-formed one, and only a decision on that proposal can spend it.
-        if (body.act === STEP_UP_ACTS.approveRecipe) {
-          if (body.subject === undefined)
-            return errorResponse(
-              400,
-              'approving a recipe names the one proposal the passkey is for',
-              'invalid_subject',
-            );
+        if (body.act === STEP_UP_ACTS.approveRecipe && body.subject !== undefined)
           return answer(await service.stepUpOptions(caller(context), body.origin, body.act, body.subject), value =>
             StepUpOptionsSchema.parse(value),
           );
-        }
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );
