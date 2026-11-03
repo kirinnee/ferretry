@@ -1370,4 +1370,21 @@ describe('agenda link meanings toward an older daemon (agenda.link-meaning.1)', 
     should(gateway.applied[0]?.request).containDeep({ links: [{ label: 'Plan', target: '&F12' }] });
     should(out.diagnostics.filter(line => line.includes('link meanings'))).be.empty();
   });
+
+  it('should say, on add and on edit, when a labelled link keeps an = in its target', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, after);
+    gateway.offered = [DAEMON_FEATURES.agendaLinkMeaning];
+    const keeps = ['Run=https://ci.example.invalid/run?id=7=Failing'];
+
+    // Act
+    await controller.add(['pick', 'a', 'cluster'], { ...BRIEF, title: 'Pick a cluster', link: keeps });
+    await controller.edit('A2', { link: keeps });
+
+    // Assert
+    should(out.diagnostics.filter(line => line.includes('as the whole target of "Run"'))).have.length(2);
+    should(gateway.applied[0]?.request).containDeep({
+      links: [{ label: 'Run', target: 'https://ci.example.invalid/run?id=7=Failing' }],
+    });
+  });
 });

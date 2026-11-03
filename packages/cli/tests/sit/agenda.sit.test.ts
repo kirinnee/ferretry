@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   AGENDA_SCHEMA_VERSION,
-  DAEMON_FEATURES,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaItem,
@@ -87,7 +86,9 @@ class FakeAgendaDaemon {
     const path = new URL(request.url).pathname;
     const session = `/v1/sessions/${encodeURIComponent(SESSION)}`;
     if (path === '/v1/health' && request.method === 'GET') {
-      return Response.json(health({ features: [DAEMON_FEATURES.agendaConversation, DAEMON_FEATURES.agendaLinkMeaning] }));
+      return Response.json(
+        health({ features: [DAEMON_FEATURES.agendaConversation, DAEMON_FEATURES.agendaLinkMeaning] }),
+      );
     }
     // A daemon of this build answers the agenda spelling and the older attention one alike
     // (docs/agenda.md § Compatibility), and refuses anything else the way the real one does.

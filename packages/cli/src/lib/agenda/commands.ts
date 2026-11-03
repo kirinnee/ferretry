@@ -45,8 +45,8 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
   --link         a PR, file or reference worth opening, "label=target=meaning" (repeat): the label is a word
                  or two (no / ? & \\), the meaning says in plain words what it is; "label=target" and a bare
-                 target also work, but warn. A target with an = of its own and a one-word meaning, or a
-                 meaning with an = in it: use --json-file
+                 target also work, but warn. A target with an = of its own (?id=7, docs/a=b.md) and a
+                 one-word meaning cannot be told apart: use --json-file (the CLI says when it kept an =)
   --step         when the human must DO something: one Markdown step each, in order (repeat) — the
                  complete instructions (commands in code blocks, where to click, what to paste where;
                  never a secret value), so the item alone is enough

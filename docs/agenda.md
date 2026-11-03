@@ -1036,10 +1036,15 @@ and an address explains nothing. `fy agenda add|edit --link "label=target=meanin
 with meanings) and a bare target (the only form before) are read too, and the `--json-file` form takes
 `{"label", "target", "meaning"}`. The label is read only when it looks like one: a word or two without `/`, `?`, `&`
 or `\`, so a bare target with an `=` of its own (`https://host/page?a=b`) stays a target. A target may hold an `=`
-too (a query, `docs/a=b.md`): an address never holds a space and a meaning is a sentence, so the meaning starts
-after the last `=` whose tail holds whitespace (`Run=https://ci/run?id=7=The failing run`). A one-word meaning
-after such a target cannot be told from the target's own `=`, and a meaning with an `=` in it is cut at it, so give
-either through `--json-file`. The daemon lint warns, never refuses, for a link with no meaning ("say what it is, in
+too (a query, `docs/a=b.md`), and an address never holds a space while a meaning is a sentence: the meaning starts
+after the last `=` whose tail holds whitespace (`Run=https://ci/run?id=7=The failing run`), and an `=` inside a
+meaning (`Fix=#1440=Sets retries = 3 for the job`) is skipped while the target before the first `=` holds no space.
+With no sentence, the first `=` opens the meaning (`Docs=docs/a.md=Notes`, `PR=<pull request URL>=Fix`) unless it
+belongs to the target: a `?` comes before it (`Run=https://ci/run?id=7`) or an address comes after it
+(`Docs=docs/a=b.md`); one trailing `=` is an empty meaning. A one-word meaning after a query target
+(`Run=https://ci/run?id=7=Failing`) is the case no rule can settle: it is read whole as the target. So whenever a
+labelled link keeps an `=` in its target, the CLI says so on standard error ("read … as the whole target of …; if
+"Failing" is its meaning, give the link through --json-file"), and `--json-file` gives it unambiguously. The daemon lint warns, never refuses, for a link with no meaning ("say what it is, in
 plain words"). The item view shows the meaning in its terms-and-references table once it lands, and falls back to
 the label for an item raised before meanings existed. The daemon reports `agenda.link-meaning.1` on
 `GET /v1/health`; the CLI sends a meaning only to a daemon that lists it, and when the daemon lacks it (or its

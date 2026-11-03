@@ -1,8 +1,8 @@
 import {
   type AgendaActionRequest,
-  type AgendaLink,
   type AgendaClearAgentsResult,
   type AgendaId,
+  type AgendaLink,
   type AgendaSnapshot,
   agendaBriefRequiredProblems,
   DAEMON_FEATURES,
@@ -20,6 +20,7 @@ import {
   composeAddRequest,
   composeEditRequest,
   type EditFlags,
+  linkFlagNotices,
   parseBriefFile,
 } from './brief.ts';
 import {
@@ -256,6 +257,7 @@ export class AgendaController {
       file,
     );
     requireBrief(composed);
+    for (const notice of linkFlagNotices(options.link)) this.out.diagnostic(notice);
     if (composed.stage !== undefined || composed.whereWeAre !== undefined || composed.detail !== undefined) {
       await this.#requireChannel('--stage, --where and --detail');
     }
@@ -467,6 +469,7 @@ export class AgendaController {
       { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
       current,
     );
+    for (const notice of linkFlagNotices(options.link)) this.out.diagnostic(notice);
     const snapshot = await this.gateway.apply(sessionId, {
       ...(await this.#withLinkMeanings(request)),
       ...(options.now === true ? { now: true as const } : {}),
