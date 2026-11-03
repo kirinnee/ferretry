@@ -2,8 +2,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
-import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
-import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../src/lib/agent-tools/policy.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
   SessionEffectAdmission,
@@ -32,12 +31,13 @@ import {
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from '../../../../src/lib/session/lifecycle/index.ts';
-import { SessionCredentialRevokedError } from '../../../../src/lib/session/lifecycle/types.ts';
 import {
   dropFerretIdentity,
   FERRET_IDENTITY_VARIABLES,
   sessionPaneEnvironment,
 } from '../../../../src/lib/session/lifecycle/policy.ts';
+import { SessionCredentialRevokedError } from '../../../../src/lib/session/lifecycle/types.ts';
+import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 const LAUNCHED: SessionLaunchInstructions = {
@@ -1556,7 +1556,7 @@ describe('SessionLifecycleService credential per launch', () => {
       },
       capability => credential(capability).hash,
       (left, right) => left === right,
-      new Map(),
+      new CredentialDigestLocations(),
       () => '',
     );
     return {
@@ -1656,7 +1656,7 @@ describe('SessionLifecycleService credential per launch', () => {
         },
         capability => credential(capability).hash,
         (left, right) => left === right,
-        new Map(),
+        new CredentialDigestLocations(),
         () => '',
       );
       const current = built.repository.current();

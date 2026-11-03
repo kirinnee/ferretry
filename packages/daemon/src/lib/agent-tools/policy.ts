@@ -126,6 +126,43 @@ export interface CredentialedSessions {
 }
 
 /**
+ * Where each stored credential digest was last seen, and the stamp that scan was made under.
+ *
+ * It is the lookup state of {@link CredentialAgentIdentities}, injected so that service holds none of
+ * its own (docs/standards/stateless-oop-di). The map and the stamp live together because neither means
+ * anything without the other: locations are only trusted while the stamp they were built under still
+ * holds. Only digests are retained, at most one per fleet member; a null location marks a digest shared
+ * by several sessions.
+ */
+export class CredentialDigestLocations {
+  private readonly byDigest = new Map<string, string | null>();
+  private scannedAt: string | undefined;
+
+  /** The session last seen holding the digest, when the scan made under `stamp` is still current. */
+  locate(digest: string, stamp: string): string | null | undefined {
+    return this.scannedAt === stamp ? this.byDigest.get(digest) : undefined;
+  }
+
+  forget(digest: string): void {
+    this.byDigest.delete(digest);
+  }
+
+  /** Replaces rather than accumulates, so the map is bounded by the fleet and never by requests. */
+  replace(sessions: readonly CredentialedSession[], stamp: string): void {
+    this.byDigest.clear();
+    for (const candidate of sessions) {
+      const stored = candidate.sessionCapabilityHash;
+      this.byDigest.set(stored, this.byDigest.has(stored) ? null : candidate.id);
+    }
+    this.scannedAt = stamp;
+  }
+
+  entries(): readonly (readonly [string, string | null])[] {
+    return [...this.byDigest];
+  }
+}
+
+/**
  * Finds the live session a presented credential was minted for.
  *
  * Only digests are retained. A digest locates a candidate; its freshly read hash still has to match
@@ -138,25 +175,34 @@ export interface CredentialedSessions {
  * location is therefore only trusted while it is provably the ONLY session that holds the digest:
  * the scan that built the map recorded a digest shared by several sessions as ambiguous, which always
  * scans, and `stamp` says whether any session configuration — the only place a stored hash is
- * written — was written since that scan. A moved stamp discards every remembered location, so a
- * rotation or a new session that makes a digest shared is seen before it can be answered from a hint.
- * Between stamps, the one session is re-read, so its own rotation, stop or removal refuses at once.
+ * written — was written since that scan. The stamp is read BEFORE the scan and compared at use, and
+ * the daemon's storage moves it only AFTER a configuration write has also been published to the
+ * session index, so a scan that overlapped a half-published write (new document, member not yet
+ * listed) is stamped with a value that has already moved and is never trusted. A moved stamp discards
+ * every remembered location, so a rotation or a new session that makes a digest shared is seen before
+ * it can be answered from a hint. Between stamps, the one session is re-read, so its own rotation,
+ * stop or removal refuses at once.
  *
- * The one thing the stamp cannot see is a configuration edited by hand, outside this daemon. That
- * can only change the answer when it plants a digest another session already holds, which a
- * credential's random 256-bit digest never does by itself; the next scan reads it.
+ * The guarantee is therefore: identical to a full scan for every change made through the daemon's
+ * configuration writes and session-index publication. Acceptance never rests on the map: it always
+ * needs a fresh single-session read that is ACTIVE and passes the constant-time compare, never a
+ * cached yes. The map holds digests only and is bounded by the fleet.
+ *
+ * What the stamp cannot see is an out-of-band edit, copy or restore of a session's config.json that
+ * gives an EARLIER session a digest another session already holds. Until the next configuration
+ * write or scan, a warmed hit can keep answering with the session it remembered. That is safe: it
+ * needs ownership of the machine's state home; the presented credential must still match a freshly
+ * read, active session, so no wrong credential is admitted and a hint is no prefix oracle; and
+ * today's full scan picks among duplicate holders by an arbitrary order of its own. It heals at the
+ * next configuration write or scan.
  */
 export class CredentialAgentIdentities implements AgentIdentityResolver {
-  /** The stamp the map was built under; absent until the first scan, so nothing is trusted before one. */
-  private scannedAt: string | undefined;
-
   constructor(
     private readonly sessions: CredentialedSessions,
     private readonly hash: (capability: string) => string,
     private readonly matches: (left: string, right: string) => boolean,
-    /** Injected lookup state: a null id marks a digest shared by multiple sessions. */
-    private readonly byDigest: Map<string, string | null>,
-    /** Moves whenever any session configuration is written: the signal that a stored hash may have changed. */
+    private readonly locations: CredentialDigestLocations,
+    /** Moves whenever any session configuration is written and published: the signal that a stored hash may have changed. */
     private readonly stamp: () => string,
   ) {}
 
@@ -164,7 +210,7 @@ export class CredentialAgentIdentities implements AgentIdentityResolver {
     const digest = this.hash(capability);
     // Read BEFORE any document, so a write landing during a scan can only make the map look older.
     const stamp = this.stamp();
-    const id = this.scannedAt === stamp ? this.byDigest.get(digest) : undefined;
+    const id = this.locations.locate(digest, stamp);
     let session: CredentialedSession | undefined;
     if (id !== undefined && id !== null) {
       const candidate = await this.sessions.session(id);
@@ -173,20 +219,14 @@ export class CredentialAgentIdentities implements AgentIdentityResolver {
       } else {
         // Rotation, termination and removal invalidate the hint immediately; none can authenticate
         // from a remembered identity. A scan may still find another session holding this digest.
-        this.byDigest.delete(digest);
+        this.locations.forget(digest);
       }
     }
     if (session === undefined) {
       const sessions = await this.sessions.snapshot();
-      // Replace rather than accumulate: at most one digest per fleet member is retained, and a
-      // stream of bogus credentials adds no entries. Ambiguous digests always keep snapshot order
-      // (the first ACTIVE match), including when a previously inactive holder is revived.
-      this.byDigest.clear();
-      for (const candidate of sessions) {
-        const stored = candidate.sessionCapabilityHash;
-        this.byDigest.set(stored, this.byDigest.has(stored) ? null : candidate.id);
-      }
-      this.scannedAt = stamp;
+      // Ambiguous digests always keep snapshot order (the first ACTIVE match), including when a
+      // previously inactive holder is revived.
+      this.locations.replace(sessions, stamp);
       session = sessions.find(candidate => candidate.active && this.matches(candidate.sessionCapabilityHash, digest));
     }
     if (session === undefined) return undefined;

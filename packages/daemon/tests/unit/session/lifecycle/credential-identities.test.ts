@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
-import { CredentialAgentIdentities, type CredentialedSession } from '../../../../src/lib/agent-tools/policy.ts';
+import {
+  CredentialAgentIdentities,
+  CredentialDigestLocations,
+  type CredentialedSession,
+} from '../../../../src/lib/agent-tools/policy.ts';
 import { secretsMatch } from '../../../../src/lib/api/authentication.ts';
 
 const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
@@ -15,7 +19,7 @@ function harness(...records: CredentialedSession[]) {
   const scans: string[][] = [];
   const reads: string[] = [];
   const compared: (readonly [string, string])[] = [];
-  const byDigest = new Map<string, string | null>();
+  const locations = new CredentialDigestLocations();
   let configWrites = 0;
   const subject = new CredentialAgentIdentities(
     {
@@ -33,14 +37,14 @@ function harness(...records: CredentialedSession[]) {
       compared.push([left, right]);
       return secretsMatch(left, right);
     },
-    byDigest,
+    locations,
     () => String(configWrites),
   );
   /** A configuration write, as the daemon's storage counts it. */
   const wrote = () => {
     configWrites += 1;
   };
-  return { subject, records, scans, reads, compared, byDigest, wrote };
+  return { subject, records, scans, reads, compared, locations, wrote };
 }
 
 describe('CredentialAgentIdentities digest lookup', () => {
@@ -86,7 +90,7 @@ describe('CredentialAgentIdentities digest lookup', () => {
 
   it('should scan on every unknown credential without retaining the bogus digests', async () => {
     // Arrange
-    const { subject, byDigest, scans, reads } = harness(credentialed('first', 'alpha'));
+    const { subject, locations, scans, reads } = harness(credentialed('first', 'alpha'));
     await subject.resolve('alpha');
 
     // Act
@@ -96,12 +100,12 @@ describe('CredentialAgentIdentities digest lookup', () => {
     should(actual.every(identity => identity === undefined)).be.true();
     should(scans).have.length(13);
     should(reads).be.empty();
-    should([...byDigest]).deepEqual([[digest('alpha'), 'first']]);
+    should(locations.entries()).deepEqual([[digest('alpha'), 'first']]);
   });
 
   it('should find a new session on a miss and discard digests absent from the new snapshot', async () => {
     // Arrange
-    const { subject, records, scans, reads, byDigest } = harness(credentialed('first', 'alpha'));
+    const { subject, records, scans, reads, locations } = harness(credentialed('first', 'alpha'));
     await subject.resolve('alpha');
     records.splice(0, 1, credentialed('new', 'beta'));
 
@@ -114,17 +118,17 @@ describe('CredentialAgentIdentities digest lookup', () => {
     should(cached).deepEqual(actual);
     should(scans).have.length(2);
     should(reads).deepEqual(['new']);
-    should([...byDigest]).deepEqual([[digest('beta'), 'new']]);
+    should(locations.entries()).deepEqual([[digest('beta'), 'new']]);
   });
 
   it('should scan ambiguous digests in snapshot order, even when an earlier inactive holder revives', async () => {
     // Arrange
-    const { subject, records, scans, reads, byDigest } = harness(
+    const { subject, records, scans, reads, locations } = harness(
       credentialed('earlier', 'shared', false),
       credentialed('later', 'shared'),
     );
     should(await subject.resolve('shared')).deepEqual({ sessionId: 'later' });
-    should(byDigest.get(digest('shared'))).be.null();
+    should(locations.entries()).deepEqual([[digest('shared'), null]]);
     records[0] = credentialed('earlier', 'shared');
 
     // Act
@@ -149,7 +153,7 @@ describe('CredentialAgentIdentities digest lookup', () => {
       { snapshot: async () => records.slice(), session: async id => records.find(record => record.id === id) },
       digest,
       secretsMatch,
-      new Map(),
+      new CredentialDigestLocations(),
       () => '',
     );
     reads.length = 0;
@@ -181,6 +185,46 @@ describe('CredentialAgentIdentities digest lookup', () => {
     should(scans).have.length(2);
   });
 
+  it('should answer exactly as a fresh scan when a new earlier holder is published while a scan was reading the old fleet', async () => {
+    // Arrange — the scan reads the stamp, then the OLD roster; the write that adds an earlier holder
+    // of the same digest completes (document, index, then stamp) while that scan is still reading.
+    const records: CredentialedSession[] = [credentialed('later', 'h2')];
+    let configWrites = 0;
+    let publishDuringScan: (() => void) | undefined;
+    const source = {
+      snapshot: async () => {
+        const stale = records.slice();
+        publishDuringScan?.();
+        publishDuringScan = undefined;
+        return stale;
+      },
+      session: async (id: string) => records.find(record => record.id === id),
+    };
+    const subject = new CredentialAgentIdentities(source, digest, secretsMatch, new CredentialDigestLocations(), () =>
+      String(configWrites),
+    );
+    const fresh = new CredentialAgentIdentities(
+      source,
+      digest,
+      secretsMatch,
+      new CredentialDigestLocations(),
+      () => '',
+    );
+    publishDuringScan = () => {
+      records.unshift(credentialed('earlier', 'h2'));
+      configWrites += 1;
+    };
+
+    // Act
+    const duringScan = await subject.resolve('h2');
+    const afterwards = await subject.resolve('h2');
+
+    // Assert — the scan that overlapped the write is not trusted; later requests agree with a fresh scan.
+    should(duringScan).deepEqual({ sessionId: 'later' });
+    should(await fresh.resolve('h2')).deepEqual({ sessionId: 'earlier' });
+    should(afterwards).deepEqual({ sessionId: 'earlier' });
+  });
+
   it('should refuse a digest-map hit when the injected matcher refuses its freshly read hash', async () => {
     // Arrange — map equality must never replace the constant-time acceptance check.
     const record = credentialed('first', 'alpha');
@@ -192,7 +236,7 @@ describe('CredentialAgentIdentities digest lookup', () => {
         compared.push([left, right]);
         return false;
       },
-      new Map(),
+      new CredentialDigestLocations(),
       () => '',
     );
     await subject.resolve('alpha');

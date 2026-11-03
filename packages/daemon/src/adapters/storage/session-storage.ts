@@ -953,14 +953,20 @@ export class DaemonStorage {
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
       await this.writeDocument(createSessionPaths(this.paths, id).config, document);
-      this.configChanges += 1;
-      await this.syncSessionUnlocked(id);
+      try {
+        await this.syncSessionUnlocked(id);
+      } finally {
+        this.configChanges += 1;
+      }
     });
   }
 
   /**
-   * How many session configs this storage has written — counted once each write has landed, so a reader
-   * that sees the count move and reads again sees the new document.
+   * How many session configs this storage has written — counted once each write has landed AND the session
+   * index has published it (success or failure), so a reader that sees the count move and reads again sees
+   * the new document and the session's membership. The count moving AFTER the index publication is what
+   * lets a reader that read the stamp before a scan trust that scan: a write that was half-published while
+   * the scan ran moves the stamp when it finishes, so the scan's result is discarded, never kept.
    *
    * A stamp for a reader that derives something from EVERY session's config (the fleet reading's session
    * roster): while it holds, nothing this daemon wrote changed a config. It cannot see an edit made outside
@@ -1139,8 +1145,11 @@ export class DaemonStorage {
       await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await compute());
       await this.writeDocument(paths[kind], serializeJsonDocument(next));
-      if (kind === 'config') this.configChanges += 1;
-      await this.syncSessionUnlocked(id);
+      try {
+        await this.syncSessionUnlocked(id);
+      } finally {
+        if (kind === 'config') this.configChanges += 1;
+      }
       if (kind === 'state') this.publishState(id, next);
       return next;
     });

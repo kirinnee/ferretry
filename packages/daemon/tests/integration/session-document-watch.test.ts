@@ -177,6 +177,34 @@ describe('a watched session document', () => {
     should(storage.configWrites()).equal(3);
   });
 
+  it('should move the config count only once a new session is listed, so a scan that raced the write is never trusted', async () => {
+    // Arrange
+    const { storage } = await seeded(scriptedChanges().changes);
+    const added = parseSessionId('watched-2');
+    const before = storage.configWrites();
+    const observed: Array<{ readonly moved: boolean; readonly listed: boolean }> = [];
+
+    // Act — sample the count and the roster between every step of the write.
+    let settled = false;
+    const writing = storage.writeConfig(added, { id: 'watched-2', status: 'running', turn: 1 }).finally(() => {
+      settled = true;
+    });
+    while (!settled) {
+      observed.push({
+        moved: storage.configWrites() > before,
+        listed: storage.listSessions().some(session => session.id === added),
+      });
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    await writing;
+
+    // Assert — whenever the count had moved, the member was already published to the roster.
+    should(observed.some(sample => !sample.moved && !sample.listed)).be.true();
+    should(observed.filter(sample => sample.moved && !sample.listed)).deepEqual([]);
+    should(storage.configWrites()).equal(before + 1);
+    should(storage.listSessions().some(session => session.id === added)).be.true();
+  });
+
   it('should open no watch for reads that must be proved', async () => {
     // Arrange
     const watch = scriptedChanges();

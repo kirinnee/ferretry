@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
 import { NodeSessionCredentialIssuer } from '../../../../src/adapters/session/lifecycle/node-session-credential-issuer.ts';
-import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../src/lib/agent-tools/policy.ts';
 import {
   authenticate,
   isSessionCredential,
@@ -132,7 +132,7 @@ describe('the prefixed session credential, across a rotation', () => {
       { snapshot: async () => [await session()], session },
       sha256,
       secretsMatch,
-      new Map(),
+      new CredentialDigestLocations(),
       () => '',
     );
     const directory = { resolve: async (capability: string) => await identities.resolve(capability) };

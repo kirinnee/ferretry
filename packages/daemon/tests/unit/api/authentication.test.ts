@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
-import { CredentialAgentIdentities, type CredentialedSession } from '../../../src/lib/agent-tools/policy.ts';
+import {
+  CredentialAgentIdentities,
+  CredentialDigestLocations,
+  type CredentialedSession,
+} from '../../../src/lib/agent-tools/policy.ts';
 import {
   authenticate,
   bearerToken,
@@ -179,7 +183,7 @@ function directoryOver(sessions: readonly CredentialedSession[]) {
       compared.push([left, right]);
       return secretsMatch(left, right);
     },
-    new Map(),
+    new CredentialDigestLocations(),
     () => '',
   );
   const directory: SessionCredentialDirectory = {

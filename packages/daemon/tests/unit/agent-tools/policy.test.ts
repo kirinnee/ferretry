@@ -3,6 +3,7 @@ import should from 'should';
 import {
   auditHost,
   CredentialAgentIdentities,
+  CredentialDigestLocations,
   type CredentialedSession,
   clipOutput,
   controlRefusal,
@@ -56,7 +57,7 @@ describe('CredentialAgentIdentities', () => {
     { snapshot: async () => sessions, session: async id => sessions.find(session => session.id === id) },
     capability => `hash:${capability}`,
     secretsMatch,
-    new Map(),
+    new CredentialDigestLocations(),
     () => '',
   );
 
