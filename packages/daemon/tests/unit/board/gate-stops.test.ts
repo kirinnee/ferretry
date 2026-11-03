@@ -43,7 +43,7 @@ const verifyWithoutOwnerGate = (): LaneSet => {
   };
 };
 
-const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon'>, BoardCaller>> = {
+const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'>, BoardCaller>> = {
   'owner-human': { kind: 'owner' },
   owner: { kind: 'ferret', sessionId: 'child' },
   ancestor: { kind: 'ferret', sessionId: 'lead' },
@@ -129,7 +129,10 @@ describe('a ferret’s move never jumps a gate', () => {
 
   for (const jump of JUMPS) {
     for (const audience of ['external', 'internal'] as const) {
-      for (const [standing, caller] of Object.entries(CALLERS) as [Exclude<BoardStanding, 'daemon'>, BoardCaller][]) {
+      for (const [standing, caller] of Object.entries(CALLERS) as [
+        Exclude<BoardStanding, 'daemon' | 'assignee-lead'>,
+        BoardCaller,
+      ][]) {
         const expected = standing !== 'reader' && mayPassGate(standing, audience);
         it(`${expected ? 'lets' : 'refuses'} ${standing} on an ${audience} card ${jump.name}`, async () => {
           // Arrange

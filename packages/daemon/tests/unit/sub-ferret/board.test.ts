@@ -5,8 +5,14 @@ import {
   BoardTaskCreateRequestSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { type BoardCaller, BoardError, BoardService } from '../../../src/lib/board/index.ts';
-import { card, FakeParents, MemoryBoardStore, world } from '../board/support.ts';
+import {
+  type BoardCaller,
+  BoardError,
+  BoardService,
+  returnLead,
+  type SessionRoster,
+} from '../../../src/lib/board/index.ts';
+import { card, FakeParents, liveSession, MemoryBoardStore, rosterOf, world } from '../board/support.ts';
 import { DIRECTORY, REFUSED } from './support.ts';
 
 const ferret = (sessionId: string): BoardCaller => ({ kind: 'ferret', sessionId });
@@ -260,6 +266,34 @@ describe('planning inside a subtree', () => {
     should(grandchild?.message).match(REFUSED_SUBTREE);
     should(stranger?.code).equal('forbidden');
     should(stranger?.message).not.match(/sub-ferret/);
+  });
+
+  it('should let a middle lead drop or hand on a card the daemon returned to it', async () => {
+    // Arrange — owned by `child`, worked by `grandchild`, who ended: the card comes back to `child`
+    const { service, ports } = treeWith([
+      { id: 'F2', owner: 'child', assignee: 'grandchild', laneId: 'review' },
+      { id: 'F3', owner: 'child', assignee: 'grandchild', laneId: 'review' },
+    ]);
+    const ended: SessionRoster = rosterOf([
+      liveSession('lead'),
+      liveSession('child', { lead: 'lead' }),
+      liveSession('grandchild', { lead: 'child', status: 'completed' }),
+    ]);
+    const returnAll = async (id: string) =>
+      await service.returnToLead(id, { lead: 'child', from: 'grandchild' }, async (current, category) =>
+        returnLead(current, category, ended),
+      );
+
+    // Act
+    const returned = [await returnAll('F2'), await returnAll('F3')];
+    const handed = await refusal(service.act('F2', assignTo('sibling'), child));
+    const dropped = await refusal(service.act('F3', drop, child));
+
+    // Assert
+    should(returned).eql([true, true]);
+    should([handed, dropped]).eql([undefined, undefined]);
+    should(ports.store.cards.get('F2')?.assignee).equal('sibling');
+    should(ports.store.cards.get('F3')?.dropped).not.be.null();
   });
 
   it('should still refuse a middle lead the board moves that are not drop or assign', async () => {

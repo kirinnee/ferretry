@@ -735,8 +735,7 @@ The sub-card closes win, and the return takes what they leave:
 | any card in a backlog, shipped, verify or closed lane, or dropped    | nothing: not work in flight                                  |
 | no ancestor of the ferret is alive                                   | nothing: the card is **orphaned** and the Warden says so     |
 
-A lead's own bookkeeping sub-card (assigned to its owner) is never closed or returned by this. The check runs again inside the card's write, so a card that moved,
-was reassigned, dropped or closed since the sweep read it is left alone. The orphan alert ([Activity](#activity-and-staleness),
+A lead's own bookkeeping sub-card (assigned to its owner) is never closed or returned by this, and neither is a sub-card whose helper has no PR (it closes instead). The check runs again inside the card's write, against a fresh roster and the stored card: if the ended ferret came back, the chosen lead ended or a nearer one is alive, the card moved, was reassigned, dropped or closed, or its PR closed so that the helper-finished close now applies, the return is declined and the next sweep plans or closes it afresh. The orphan alert ([Activity](#activity-and-staleness),
 [who a board alert is for](#who-a-board-alert-is-for)) therefore fires only when nobody above the ended ferret is alive to take the card back.
 
 ## Authority
@@ -744,20 +743,20 @@ was reassigned, dropped or closed since the sweep read it is left alone. The orp
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to
 grant. This replaced the old `task-boards` access list. The code is `packages/daemon/src/lib/board/authority.ts`.
 
-| Standing      | Who                                                                        | May                                                                               |
-| ------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `owner-human` | the owner: loopback, or a device the `fleet` grant let in                  | everything, including owner gates and dependency overrides                        |
-|               | (on the admin token it is recorded as `admin-token`)                       |                                                                                   |
-| `owner`       | the card's owner ferret                                                    | the assignee's writes, plus re-plan                                               |
-|               |                                                                            | and, on an INTERNAL card, passing its gates                                       |
-| `ancestor`    | a ferret above the owner OR the assignee in the `parent` chain of sessions | the same as the owner                                                             |
-| `assignee`    | the ferret doing it                                                        | move, note, link, block, edit files, clarify, reopen, report an external trigger  |
-| `daemon`      | the daemon's own automation                                                | trigger moves, link cache, refile, relocate a removed lane's cards (never closed) |
-| `reader`      | any other ferret                                                           | read; depend, but only from its own card                                          |
+| Standing        | Who                                                               | May                                                                               |
+| --------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `owner-human`   | the owner: loopback, or a device the `fleet` grant let in         | everything, including owner gates and dependency overrides                        |
+|                 | (on the admin token it is recorded as `admin-token`)              |                                                                                   |
+| `owner`         | the card's owner ferret                                           | the assignee's writes, plus re-plan                                               |
+|                 |                                                                   | and, on an INTERNAL card, passing its gates                                       |
+| `ancestor`      | a ferret above the card's OWNER in the `parent` chain of sessions | the same as the owner                                                             |
+| `assignee-lead` | a ferret above the card's ASSIGNEE, but not above its owner       | drop and reassign the card, nothing else: never a gate, a close or a re-plan      |
+| `assignee`      | the ferret doing it                                               | move, note, link, block, edit files, clarify, reopen, report an external trigger  |
+| `daemon`        | the daemon's own automation                                       | trigger moves, link cache, refile, relocate a removed lane's cards (never closed) |
+| `reader`        | any other ferret                                                  | read; depend, but only from its own card                                          |
 
-**A lead plans its whole subtree.** A card is in a ferret's subtree when its owner OR its assignee started, directly or through a chain of leads,
-the ferret asking. So a lead may drop or assign a card owned by its grandchild, and one assigned to a descendant but owned by another party (a card its subtree was
-handed). A card outside the subtree is a `reader`'s: a sideways sibling, a cousin or a stranger can plan nothing there. This holds for a sub-ferret that leads a
+**A lead plans its whole subtree.** A card is in a ferret's subtree when the ferret asking owns it, or started, directly or through a chain of leads, the card's owner or its assignee (a returned card, owned and held by a middle lead, is still in that lead's subtree). So a lead may drop or assign a card owned by its grandchild, and one assigned to a descendant but owned by another party (a card its subtree was
+handed), as an `assignee-lead`. That reach stops at drop and reassign: the owner ferret's gates and its re-plan belong to the owner's own lineage (`ancestor`), so a lead that only reaches a card through its assignee cannot pass or close an internal card owned by somebody else. A card outside the subtree is a `reader`'s: a sideways sibling, a cousin or a stranger can plan nothing there. This holds for a sub-ferret that leads a
 subtree of its own too: the sub-ferret limit refuses its `drop` and `assign` only outside its subtree.
 
 Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate

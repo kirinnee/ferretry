@@ -33,7 +33,7 @@ describe('explainBoardRefusal', () => {
 
   it('should list who may do it instead, in words, when the refusal carries standings', () => {
     // Arrange
-    const standings = ['owner-human', 'owner', 'ancestor', 'assignee', 'daemon', 'reader'];
+    const standings = ['owner-human', 'owner', 'ancestor', 'assignee-lead', 'assignee', 'daemon', 'reader'];
 
     // Act
     const text = explainBoardRefusal(refused('forbidden', { allowed: standings }), context);
@@ -46,6 +46,7 @@ describe('explainBoardRefusal', () => {
         '  - the owner (a person, from the app or the CLI outside a ferret)',
         "  - the card's owner ferret",
         "  - a ferret above the card's owner (its lead)",
+        "  - a ferret above the card's assignee (for drop and reassign only)",
         '  - the ferret it is assigned to',
         '  - the daemon itself',
         '  - anyone who can read the board',

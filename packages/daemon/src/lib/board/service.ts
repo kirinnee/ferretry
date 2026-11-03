@@ -33,6 +33,7 @@ import {
   categoryOf,
   formatTaskRef,
   type Lane,
+  type LaneCategory,
   type LaneSet,
   type LaneTrigger,
   type TaskKind,
@@ -93,7 +94,7 @@ import type {
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
-import { returnCard, WORKING_CATEGORIES } from './return-to-lead.ts';
+import { returnCard } from './return-to-lead.ts';
 import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
 
 export interface BoardServiceDependencies {
@@ -324,21 +325,28 @@ export class BoardService {
   }
 
   /**
-   * Hands a card whose ferret ended to `lead`, the nearest live lead above that ferret (the board sweep found it):
-   * assigned as the daemon, with `returned to <lead>: <ferret> finished` in its history. Judged again inside the
-   * card's write, so a card that moved on, was reassigned, dropped or closed since the sweep read it is left alone.
-   * `true` when it moved.
+   * Hands a card whose ferret (`from`) ended to `lead`, the nearest live lead above that ferret (the board sweep found
+   * it): assigned as the daemon, with `returned to <lead>: <ferret> finished` in its history. The decision is made
+   * again INSIDE the card's write, against the card as it is now: `recheck` answers the lead the card should go to
+   * from a roster read at this moment, or `null` when it should stay (the ferret is back, the card became a PR-free
+   * helper to close, the lane changed). A card that moved, was reassigned, dropped or closed, or whose nearest live
+   * lead is no longer `lead`, is left alone; the next sweep plans it afresh. `true` when it moved.
    */
-  async returnToLead(id: BoardTaskId, lead: string, from: string): Promise<boolean> {
+  async returnToLead(
+    id: BoardTaskId,
+    plan: { readonly lead: string; readonly from: string },
+    recheck: (card: BoardTask, category: LaneCategory | undefined) => Promise<string | null>,
+  ): Promise<boolean> {
     const caller: BoardCaller = { kind: 'daemon' };
     const returned = await this.ports.store.write(id, async current => {
-      if (current === undefined || current.dropped !== null || effectiveAssignee(current) !== from) {
+      if (current === undefined || current.dropped !== null || effectiveAssignee(current) !== plan.from) {
         return { task: null, result: null };
       }
       const context = await this.context(current, caller);
       const category = categoryOf(context.laneSet, current.laneId);
-      if (!category.ok || !WORKING_CATEGORIES.includes(category.value)) return { task: null, result: null };
-      const task = requireValidCard(returnCard(current, lead, from, context));
+      const lead = await recheck(current, category.ok ? category.value : undefined);
+      if (lead !== plan.lead) return { task: null, result: null };
+      const task = requireValidCard(returnCard(current, plan.lead, plan.from, context));
       return { task, result: task };
     });
     if (returned === null) return false;
@@ -979,9 +987,14 @@ export class BoardService {
     return standingOf(caller, card, owners, assignees);
   }
 
-  /** Whether the card's owner or its assignee is a descendant of the caller: the card is in the caller's subtree. */
+  /**
+   * Whether the card is in the caller's subtree: the caller owns it, or its owner or its assignee is a descendant of
+   * the caller. A lead that owns a card is the root of its own subtree, so a card returned to it (assignee = owner)
+   * can still be dropped or handed to a replacement.
+   */
   private async inSubtree(caller: BoardCaller, card: BoardTask): Promise<boolean> {
     if (caller.kind !== 'ferret') return false;
+    if (caller.sessionId === card.owner) return true;
     const [owners, assignees] = await this.lineages(caller, card);
     return owners.includes(caller.sessionId) || assignees.includes(caller.sessionId);
   }

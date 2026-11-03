@@ -11,6 +11,7 @@ import {
   nearestLiveLead,
   planSweep,
   returnCard,
+  returnLead,
   type SessionRoster,
   type SweepBoard,
   SUB_CARD_HELPER_REASON,
@@ -247,7 +248,7 @@ describe('the sweep returning an ended ferret’s card', () => {
       board: {
         sweepBoard: async () => swept,
         closeEndedHelper: async id => await service.closeEndedHelper(id),
-        returnToLead: async (id, lead, from) => await service.returnToLead(id, lead, from),
+        returnToLead: async (id, plan, recheck) => await service.returnToLead(id, plan, recheck),
       },
       sessions: new FakeSessions(rosterWithEnded('completed')),
       memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },
@@ -317,7 +318,10 @@ describe('returning one card through the service', () => {
     const before = ported.store.cards.get('F2');
 
     // Act
-    const moved = await service.returnToLead('F2', 'child', 'grandchild');
+    const roster = rosterWithEnded('completed');
+    const moved = await service.returnToLead('F2', { lead: 'child', from: 'grandchild' }, async (current, category) =>
+      returnLead(current, category, roster),
+    );
 
     // Assert
     should(moved).be.false();
@@ -343,6 +347,153 @@ describe('returning one card through the service', () => {
       to: 'child',
       returnedFrom: 'grandchild',
     });
+  });
+});
+
+/** A tick whose roster changes after the plan is made: the card's write must judge the roster as it is then. */
+const tickWithRosterChange = async (options: {
+  readonly stored: readonly BoardTask[];
+  readonly planned: readonly BoardTaskView[];
+  readonly before: SessionRoster;
+  readonly after: SessionRoster;
+}) => {
+  const ported = world({ store: new MemoryBoardStore(options.stored) });
+  const service = new BoardService(ported);
+  const sessions = new FakeSessions(options.before);
+  const sweep = new BoardSweep({
+    board: {
+      sweepBoard: async () => board(...options.planned),
+      // Planning is over once the helper closes run: the roster moves on before the returns execute.
+      closeEndedHelper: async () => {
+        sessions.current = options.after;
+        return false;
+      },
+      returnToLead: async (id, plan, recheck) => await service.returnToLead(id, plan, recheck),
+    },
+    sessions,
+    memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },
+    nudges: { send: async () => undefined },
+    clock: { now: () => NOW },
+    diagnostics: { warn: () => undefined },
+  });
+  const report = await sweep.tick();
+  return { report, ported };
+};
+
+const prFree = { prs: [], branch: null, commits: [], docs: [] };
+/** A second ended helper, with no PR, so the tick runs a helper close (and the roster changes) before the returns. */
+const trigger = () => idle(helperWithPr({ id: 'F9', assignee: 'grandchild', links: prFree }));
+
+describe('a return judged again when it is written', () => {
+  const planned = () => [trigger(), idle(helperWithPr({ assignee: 'grandchild' }))];
+
+  it('should not hand the card to a lead that ended after the plan', async () => {
+    // Arrange
+    const stored = [helperWithPr({ assignee: 'grandchild' }), helperWithPr({ id: 'F9', assignee: 'grandchild' })];
+    const after = rosterOf([
+      session('lead'),
+      session('child', 'lead', { status: 'stopped' }),
+      session('grandchild', 'child', { status: 'completed' }),
+    ]);
+
+    // Act
+    const { report, ported } = await tickWithRosterChange({
+      stored,
+      planned: planned(),
+      before: rosterWithEnded('completed'),
+      after,
+    });
+
+    // Assert
+    should(report.returned).be.empty();
+    should(ported.store.cards.get('F2')?.assignee).equal('grandchild');
+  });
+
+  it('should not take a card from a worker that came back after the plan', async () => {
+    // Arrange
+    const stored = [helperWithPr({ assignee: 'grandchild' }), helperWithPr({ id: 'F9', assignee: 'grandchild' })];
+    const resumed = rosterOf([session('lead'), session('child', 'lead'), session('grandchild', 'child')]);
+
+    // Act
+    const { report, ported } = await tickWithRosterChange({
+      stored,
+      planned: planned(),
+      before: rosterWithEnded('completed'),
+      after: resumed,
+    });
+
+    // Assert
+    should(report.returned).be.empty();
+    should(ported.store.cards.get('F2')?.assignee).equal('grandchild');
+  });
+
+  it('should still return the card when nothing changed since the plan', async () => {
+    // Arrange
+    const stored = [helperWithPr({ assignee: 'grandchild' }), helperWithPr({ id: 'F9', assignee: 'grandchild' })];
+
+    // Act
+    const { report, ported } = await tickWithRosterChange({
+      stored,
+      planned: planned(),
+      before: rosterWithEnded('completed'),
+      after: rosterWithEnded('completed'),
+    });
+
+    // Assert
+    should(report.returned).eql(['F2']);
+    should(ported.store.cards.get('F2')?.assignee).equal('child');
+  });
+
+  it('should leave a helper whose PR closed after the plan for the helper close, not return it to its owner', async () => {
+    // Arrange — planned with its PR open (so it is a return), stored with the PR closed unmerged
+    const closedPr = { ...openPr, state: 'closed' as const };
+    const stored = [
+      helperWithPr({ assignee: 'grandchild', owner: 'child', links: { ...links, prs: [closedPr] } }),
+      helperWithPr({ id: 'F9', assignee: 'grandchild', links: prFree }),
+    ];
+    const roster = rosterWithEnded('completed');
+
+    // Act
+    const { report, ported } = await tickWithRosterChange({
+      stored,
+      planned: [trigger(), idle(helperWithPr({ assignee: 'grandchild', owner: 'child' }))],
+      before: roster,
+      after: roster,
+    });
+
+    // Assert
+    const after = ported.store.cards.get('F2') as BoardTask;
+    should(report.returned).be.empty();
+    should(after.assignee).equal('grandchild');
+    should(planSweep(EMPTY_SWEEP_MEMORY, board(idle(after)), roster, NOW).closes).eql(['F2']);
+  });
+});
+
+describe('a lead’s own bookkeeping sub-card whose ferret ended', () => {
+  it.each([
+    ['assigned to nobody', { owner: 'grandchild', assignee: null }],
+    ['assigned to its owner', { owner: 'grandchild', assignee: 'grandchild' }],
+  ] as const)('should not be returned, %s', (_name, overrides) => {
+    // Arrange
+    const view = idle(helperWithPr(overrides));
+
+    // Act
+    const plan = planSweep(EMPTY_SWEEP_MEMORY, board(view), rosterWithEnded('completed'), NOW);
+
+    // Assert
+    should(plan.returns).be.empty();
+    should(plan.closes).be.empty();
+  });
+
+  it('should be returned while a top-level card of the same shape is', () => {
+    // Arrange
+    const topLevel = idle(helperWithPr({ owner: 'grandchild', assignee: null, parent: null }));
+
+    // Act
+    const plan = planSweep(EMPTY_SWEEP_MEMORY, board(topLevel), rosterWithEnded('completed'), NOW);
+
+    // Assert
+    should(plan.returns).eql([{ id: 'F2', lead: 'child', from: 'grandchild' }]);
   });
 });
 

@@ -205,7 +205,7 @@ describe('a reported trigger', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).equal(
-      'only the owner, its owner ferret, the leads of its owner ferret or its assignee, its assignee may report an event on &F1 (owner ferret lead)',
+      "only the owner, its owner ferret, the owner ferret's leads, its assignee may report an event on &F1 (owner ferret lead)",
     );
     should(ports.store.writes).eql([]);
   });

@@ -37,11 +37,13 @@
  * {@link planSweep} is pure; {@link BoardSweep} does the IO through its ports.
  */
 import {
+  type BoardTask,
   type BoardTaskId,
   type BoardTaskView,
   formatTaskRef,
   InstantSchema,
   isBlockerDone,
+  type LaneCategory,
   laneOf,
   type TaskRef,
 } from '@ferretry/protocol';
@@ -50,7 +52,7 @@ import { cardStaleAfterMs, presenceOf, type SessionLivenessSource, type SessionR
 import { effectiveAssignee } from './authority.ts';
 import { cardCategory, type LaneSets } from './graph.ts';
 import { noticeRecipient } from './notice-route.ts';
-import { endedForGrace, returnTarget } from './return-to-lead.ts';
+import { endedForGrace, returnLead, returnTarget } from './return-to-lead.ts';
 import { isHandedHelper, isPrFreeHelper } from './sub-card-close.ts';
 import type { BoardClock, BoardDiagnostics } from './ports.ts';
 
@@ -269,8 +271,15 @@ export interface BoardSweepPorts {
     sweepBoard(): Promise<SweepBoard>;
     /** Closes a helper whose ferret ended; `true` when it closed. */
     closeEndedHelper(id: BoardTaskId): Promise<boolean>;
-    /** Hands a card whose ferret ended to its live lead; `true` when it moved. */
-    returnToLead(id: BoardTaskId, lead: string, from: string): Promise<boolean>;
+    /**
+     * Hands a card whose ferret ended to its live lead; `true` when it moved. `recheck` is asked inside the card's
+     * write and answers the lead the card should go to now, or `null` to leave it.
+     */
+    returnToLead(
+      id: BoardTaskId,
+      plan: { readonly lead: string; readonly from: string },
+      recheck: (card: BoardTask, category: LaneCategory | undefined) => Promise<string | null>,
+    ): Promise<boolean>;
   };
   readonly sessions: SessionLivenessSource;
   readonly memory: SweepMemoryStore;
@@ -341,12 +350,16 @@ export class BoardSweep {
     }
     const returned: BoardTaskId[] = [];
     for (const { id, lead, from } of plan.returns) {
-      await this.ports.board.returnToLead(id, lead, from).then(
-        done => {
-          if (done) returned.push(id);
-        },
-        (error: unknown) => this.ports.diagnostics.warn(`could not return &${id} to ${lead}: ${messageOf(error)}`),
-      );
+      await this.ports.board
+        .returnToLead(id, { lead, from }, async (card, category) =>
+          returnLead(card, category, await this.ports.sessions.roster()),
+        )
+        .then(
+          done => {
+            if (done) returned.push(id);
+          },
+          (error: unknown) => this.ports.diagnostics.warn(`could not return &${id} to ${lead}: ${messageOf(error)}`),
+        );
     }
     const marks = Object.fromEntries(nudged.map(id => [id, now]));
     await this.ports.memory.write({ ...plan.memory, seen, nudged: { ...plan.memory.nudged, ...marks } });

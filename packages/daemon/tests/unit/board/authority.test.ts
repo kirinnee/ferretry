@@ -8,6 +8,7 @@ import {
   MAX_LINEAGE_DEPTH,
   mayDo,
   mayHandDown,
+  mayPassGate,
   OPERATION_STANDINGS,
   refusalMessage,
   standingOf,
@@ -20,14 +21,31 @@ const owned = { owner: 'lead', assignee: 'child' };
 describe("a lead's standing over its subtree", () => {
   const lead: BoardCaller = { kind: 'ferret', sessionId: 'lead' };
 
-  it('should be ancestor of a card whose assignee is its descendant, whoever owns it', () => {
+  it('should be an assignee-lead of a card whose assignee is its descendant, whoever owns it', () => {
     // Act
     const standing = standingOf(lead, { owner: 'stranger', assignee: 'grandchild' }, ['other'], ['child', 'lead']);
 
     // Assert
-    should(standing).equal('ancestor');
+    should(standing).equal('assignee-lead');
     should(mayDo('drop', standing)).be.true();
     should(mayDo('assign', standing)).be.true();
+  });
+
+  it('should hold nothing but drop and assign as an assignee-lead, and never pass a gate', () => {
+    // Act / Assert
+    for (const operation of Object.keys(OPERATION_STANDINGS) as BoardOperation[]) {
+      should(mayDo(operation, 'assignee-lead')).equal(operation === 'drop' || operation === 'assign');
+    }
+    should(mayPassGate('assignee-lead', 'internal')).be.false();
+    should(mayPassGate('assignee-lead', 'external')).be.false();
+  });
+
+  it('should stay an ancestor of a card whose owner descends from it, whoever its assignee is', () => {
+    // Act
+    const standing = standingOf(lead, { owner: 'child', assignee: 'cousin' }, ['lead'], ['sibling']);
+
+    // Assert
+    should(standing).equal('ancestor');
   });
 
   it('should be a reader of a card neither its owner nor its assignee descends from it', () => {
@@ -124,7 +142,7 @@ describe('a refusal message', () => {
 
     // Assert
     should(message).equal(
-      'only the owner, its owner ferret, the leads of its owner ferret or its assignee may drop &F3 (owner ferret lead)',
+      "only the owner, its owner ferret, the owner ferret's leads, the assignee's leads may drop &F3 (owner ferret lead)",
     );
   });
 
