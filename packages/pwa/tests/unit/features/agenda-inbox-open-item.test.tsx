@@ -457,3 +457,76 @@ describe('the open Inbox item’s History', () => {
     await mounted.unmount();
   });
 });
+
+describe('opening an item takes its alerts down (docs/notifications.md § When an alert is cleared)', () => {
+  it('tells the host once for the item on top, and not for the list', async () => {
+    // Arrange
+    const openedOnList: string[] = [];
+    const openedOnDeck: string[] = [];
+
+    // Act
+    const list = await mount(
+      page(fakeInbox(), [shipIt, rebase], { onItemOpened: card => openedOnList.push(card.key) }),
+    );
+    await list.unmount();
+    const deck = await mount(
+      page(fakeInbox(), [shipIt, rebase], {
+        initialOpen: shipIt.key,
+        onItemOpened: card => openedOnDeck.push(card.key),
+      }),
+    );
+    await interact(() => undefined);
+    const first = [...openedOnDeck];
+    await interact(() =>
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+    );
+    await interact(() =>
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-inbox-tool="skip"]'), 'Skip').click(),
+    );
+
+    // Assert
+    expect(openedOnList).toEqual([]);
+    expect(first).toEqual([shipIt.key]);
+    expect(openedOnDeck).toEqual([shipIt.key, rebase.key]);
+    await deck.unmount();
+  });
+
+  it('does not tell of a card the deck moved on to by itself while nobody used the page, until someone does (review round 9)', async () => {
+    // Arrange — the deck is open on Ship it on a screen nobody has touched for a while.
+    const fake = fakeInbox();
+    const opened: string[] = [];
+    const props = { initialOpen: shipIt.key, onItemOpened: (card: InboxCard) => opened.push(card.key) };
+    const deck = await mount(page(fake, [shipIt, rebase], props));
+    fake.clock.advance(61_000);
+
+    // Act — Ship it is answered on another device, so the deck deals Rebase; later someone presses a key here.
+    await deck.render(page(fake, [rebase], props));
+    const unattended = [...opened];
+    await key(document.body, 'Shift');
+
+    // Assert
+    expect(unattended).toEqual([shipIt.key]);
+    expect(opened).toEqual([shipIt.key, rebase.key]);
+    expect(topView(deck).getAttribute('data-agenda-view')).toBe('A3');
+    await deck.unmount();
+  });
+
+  it('does not tell of a card on a hidden page, whatever is pressed', async () => {
+    // Arrange
+    const opened: string[] = [];
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+
+    // Act
+    const deck = await mount(
+      page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, onItemOpened: card => opened.push(card.key) }),
+    );
+    await key(document.body, 'Shift');
+    if (visibility === undefined) delete (document as { visibilityState?: unknown }).visibilityState;
+    else Object.defineProperty(document, 'visibilityState', visibility);
+
+    // Assert
+    expect(opened).toEqual([]);
+    await deck.unmount();
+  });
+});

@@ -10,8 +10,13 @@ import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import type { AlertSeenOutcome } from '../../../../src/lib/notifications/index.ts';
 import { PushError } from '../../../../src/lib/push/index.ts';
-import { type PushSubscriptionSubsystem, pushRoutes } from '../../../../src/lib/runtime/mounts/push.ts';
+import {
+  type PushAlertSubsystem,
+  type PushSubscriptionSubsystem,
+  pushRoutes,
+} from '../../../../src/lib/runtime/mounts/push.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { grantSubsystem } from './support.ts';
 
@@ -483,5 +488,136 @@ describe('push routes refusing a cross-device act with nothing to explain', () =
       error: 'only a device that may manage devices can change another device’s notifications',
       code: 'grant_undetermined',
     });
+  });
+});
+
+describe('POST /v1/push/seen (the owner opened an item; its alerts come down on their other devices)', () => {
+  class FakeAlerts implements PushAlertSubsystem {
+    readonly calls: Array<readonly [string, string, string | undefined]> = [];
+    constructor(private readonly outcome: AlertSeenOutcome = { found: true, tags: ['attention-session-1:A3'] }) {}
+
+    async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
+      this.calls.push([sessionId, agendaId, exceptDevice]);
+      return this.outcome;
+    }
+  }
+
+  const seenBody = JSON.stringify({ sessionId: 'session-1', agendaId: 'A3' });
+
+  async function seenMount(alerts: PushAlertSubsystem) {
+    const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
+    await grants.refresh();
+    return new ApiDispatcher(
+      new ApiRouter(pushRoutes(new FakePush(), grants, alerts)),
+      credentials,
+      grants,
+      undefined,
+      {
+        held: device => device.deviceId === browser.deviceId,
+      },
+    );
+  }
+
+  it('should skip the device that opened it, read from its credential and never the body', async () => {
+    // Arrange
+    deviceGrants = LIMITED_DEVICE_GRANTS;
+    const alerts = new FakeAlerts();
+    const surface = await seenMount(alerts);
+
+    // Act
+    const response = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/seen', device: browser, body: seenBody }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({ cleared: true, tags: ['attention-session-1:A3'] });
+    should(alerts.calls).deepEqual([['session-1', 'A3', deviceId]]);
+  });
+
+  it('should skip no device for the owner at the machine, and say when nothing was still up', async () => {
+    // Arrange
+    const alerts = new FakeAlerts({ found: true, tags: [] });
+    const surface = await seenMount(alerts);
+
+    // Act
+    const response = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/seen', headers: admin, loopback: true, body: seenBody }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({ cleared: false, tags: [] });
+    should(alerts.calls).deepEqual([['session-1', 'A3', undefined]]);
+  });
+
+  it('should answer 404 for an item that is not on that board', async () => {
+    // Arrange
+    deviceGrants = LIMITED_DEVICE_GRANTS;
+    const surface = await seenMount(new FakeAlerts({ found: false }));
+
+    // Act
+    const response = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/seen', device: browser, body: seenBody }),
+    );
+
+    // Assert
+    should(response.status).equal(404);
+    should(jsonBody(response).code).equal('push_not_found');
+  });
+
+  it('should refuse a body that names more than the item, before the clearer is reached', async () => {
+    // Arrange
+    deviceGrants = LIMITED_DEVICE_GRANTS;
+    const alerts = new FakeAlerts();
+    const surface = await seenMount(alerts);
+    const bodies = [
+      JSON.stringify({ sessionId: 'session-1', agendaId: 'A3', exceptDevice: otherDeviceId }),
+      JSON.stringify({ sessionId: 'session-1', agendaId: 'not-an-id' }),
+    ];
+
+    // Act
+    const statuses = [];
+    for (const raw of bodies)
+      statuses.push(
+        (await surface.dispatch(request({ method: 'POST', path: '/v1/push/seen', device: browser, body: raw }))).status,
+      );
+
+    // Assert
+    should(statuses).deepEqual([400, 400]);
+    should(alerts.calls).deepEqual([]);
+  });
+
+  it('should be fleet.use: a device the operator narrowed off the fleet is refused', async () => {
+    // Arrange
+    deviceGrants = { ...LIMITED_DEVICE_GRANTS, fleet: { use: false, configure: false } };
+    const alerts = new FakeAlerts();
+    const surface = await seenMount(alerts);
+
+    // Act
+    const response = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/seen', device: browser, body: seenBody }),
+    );
+    deviceGrants = LIMITED_DEVICE_GRANTS;
+
+    // Assert
+    should(response.status).equal(403);
+    should(alerts.calls).deepEqual([]);
+  });
+
+  it('should refuse a warden and an unauthenticated caller', async () => {
+    // Arrange
+    const alerts = new FakeAlerts();
+    const surface = await seenMount(alerts);
+
+    // Act
+    const asWarden = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/push/seen', headers: warden, body: seenBody }),
+    );
+    const anonymous = await surface.dispatch(request({ method: 'POST', path: '/v1/push/seen', body: seenBody }));
+
+    // Assert
+    should([asWarden.status, anonymous.status]).deepEqual([403, 401]);
+    should(alerts.calls).deepEqual([]);
   });
 });

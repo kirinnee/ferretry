@@ -289,6 +289,8 @@ export interface SessionChatPageProps {
    * SAME item — tapping its notification a second time, after the panel was folded, opens it again.
    */
   readonly agendaTargetKey?: string;
+  /** An agenda item's card came up in this conversation: its alerts come down (`useAgenda`'s `onItemOpened`). */
+  readonly onAgendaItemOpened?: (daemon: DaemonConnection, sessionId: string, agendaId: string) => unknown;
   /**
    * This session's live-feed state and the reader's manual reconnect.
    *
@@ -493,6 +495,7 @@ export function SessionChatPage({
   initialInfo,
   board,
   boardTasks,
+  onAgendaItemOpened,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
@@ -1221,6 +1224,7 @@ export function SessionChatPage({
     connection,
     ferret: sessionDisplayName(session),
     focus: agendaFocus,
+    ...(onAgendaItemOpened === undefined ? {} : { onItemOpened: onAgendaItemOpened }),
     repliesSlot:
       agendaReplies === undefined ||
       (agendaReplies.secondsLeft === null &&

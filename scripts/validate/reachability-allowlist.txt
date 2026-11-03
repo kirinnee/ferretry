@@ -294,6 +294,7 @@ packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab b
 packages/pwa/src/lib/board-ports.ts # the Board's send-and-start ports (U12), reached from App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-board-asks.ts # the card detail's ask reader (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/push-seen.ts # an Inbox item opened here takes its alerts down (POST /v1/push/seen), used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-side-view.ts # the in-ferret Tasks tab's Kanban/List choice, reached from chat-tasks.tsx ← session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-to-test-cards.ts # the Inbox's cards-to-test read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/queue-view/queue-action.ts # the Find/Cmd-K Message queue destination, used by App.tsx ← main.tsx; the gate ignores .tsx roots

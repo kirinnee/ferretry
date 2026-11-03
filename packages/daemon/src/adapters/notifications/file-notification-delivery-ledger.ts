@@ -52,6 +52,10 @@ export class FileNotificationDeliveryLedger implements NotificationDeliveryLedge
     return (await this.read()).entries.get(key);
   }
 
+  async entries(): Promise<readonly NotificationLedgerEntry[]> {
+    return [...(await this.read()).entries.values()];
+  }
+
   /** How the ledger reads now: the lines it skips and the newest outcome. Total. */
   async inspect(): Promise<NotificationLedgerHealth> {
     try {
