@@ -952,8 +952,10 @@ export class DaemonStorage {
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
-      await this.writeDocument(createSessionPaths(this.paths, id).config, document);
+      // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
+      // the directory fsync), so a failed write can still have replaced the stored config.
       try {
+        await this.writeDocument(createSessionPaths(this.paths, id).config, document);
         await this.syncSessionUnlocked(id);
       } finally {
         this.configChanges += 1;
@@ -1144,8 +1146,10 @@ export class DaemonStorage {
       // paths get the same gate from their own ensureSessionDirectory call.
       await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await compute());
-      await this.writeDocument(paths[kind], serializeJsonDocument(next));
+      // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
+      // has still changed the stored config.
       try {
+        await this.writeDocument(paths[kind], serializeJsonDocument(next));
         await this.syncSessionUnlocked(id);
       } finally {
         if (kind === 'config') this.configChanges += 1;

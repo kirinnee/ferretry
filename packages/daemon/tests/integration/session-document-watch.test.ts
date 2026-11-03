@@ -9,6 +9,7 @@
  * hub — an edit from outside the daemon seen within the hub's settle.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +28,9 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../src/adapters/index.ts';
+import { StorageCredentialedSessions } from '../../src/adapters/agent-tools/storage-credentialed-sessions.ts';
+import { secretsMatch } from '../../src/lib/api/authentication.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../src/lib/agent-tools/policy.ts';
 import { FileEventHub } from '../../src/lib/file-events/hub.ts';
 import { createSessionPaths, type FileSystemPort, type FoundationPaths, parseSessionId } from '../../src/lib/index.ts';
 import { waitFor, waitForValue } from './support/wait-for.ts';
@@ -44,6 +48,8 @@ class CountingStateFileSystem extends StateFileSystem {
   identities: string[] = [];
   /** While set, an atomic write waits for it before it renames — so a test can read alongside it. */
   writing: { readonly entered: () => void; readonly gate: Promise<void> } | undefined;
+  /** While set, an atomic write renames and THEN throws — the chmod or directory fsync failing after the swap. */
+  failAfterRename = false;
 
   override async identity(path: string): Promise<string | undefined> {
     this.identities.push(path);
@@ -57,6 +63,7 @@ class CountingStateFileSystem extends StateFileSystem {
       await writing.gate;
     }
     await super.writeTextAtomic(path, text);
+    if (this.failAfterRename) throw new Error('fsync failed after the rename');
   }
 }
 
@@ -175,6 +182,94 @@ describe('a watched session document', () => {
     // Assert — the seed's one config write, then one per config write; a state write is not a config.
     should(seededWrites).equal(1);
     should(storage.configWrites()).equal(3);
+  });
+
+  it('should count a config write that renamed and then threw, so a remembered credential location is discarded', async () => {
+    // Arrange — 'later' holds h2 and is warmed as its holder; 'earlier' holds another credential.
+    const { storage, fileSystem } = await seeded(scriptedChanges().changes);
+    const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+    const earlier = parseSessionId('earlier');
+    const later = parseSessionId('later');
+    const config = (id: string, capability: string) => ({
+      id,
+      incarnation: `${id}-1`,
+      runtimeGeneration: 1,
+      name: id,
+      agent: 'claude-auto',
+      harness: 'claude',
+      modelHint: 'opus',
+      mode: 'interactive',
+      remoteControl: false,
+      harnessFlags: [],
+      cwd: '/work/ferretry',
+      createdAt: '2026-07-31T09:00:00.000Z',
+      updatedAt: '2026-07-31T09:00:00.000Z',
+      turn: 1,
+      intervalSeconds: 30,
+      timeoutSeconds: 0,
+      nudgeAfterSeconds: 0,
+      killAfterSeconds: 0,
+      directSendMaxChars: 4_096,
+      resumeMenuChoice: 'full',
+      maxSnapshots: 10,
+      retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
+      command: ['/usr/bin/claude-auto'],
+      tmuxSession: `fy-${id}`,
+      sessionCapabilityHash: digest(capability),
+    });
+    for (const [id, capability] of [
+      [earlier, 'h1'],
+      [later, 'h2'],
+    ] as const) {
+      await storage.writeConfig(id, config(id, capability));
+      await storage.writeState(id, { id, status: 'running', turn: 1 });
+    }
+    const source = new StorageCredentialedSessions({
+      sessionIds: () => storage.listSessions().map(session => session.id),
+      readConfig: async id => await storage.readConfig(parseSessionId(id)),
+      readState: async id => await storage.readState(parseSessionId(id)),
+    });
+    const resolver = (stamp: () => string) =>
+      new CredentialAgentIdentities(source, digest, secretsMatch, new CredentialDigestLocations(), stamp);
+    const warmed = resolver(() => String(storage.configWrites()));
+    should((await warmed.resolve('h2'))?.sessionId).equal('later');
+    const before = storage.configWrites();
+
+    // Act — 'earlier' is rewritten to h2, but the write throws after its rename already replaced the document.
+    fileSystem.failAfterRename = true;
+    const failure = await storage.writeConfig(earlier, config('earlier', 'h2')).then(
+      () => undefined,
+      (error: Error) => error,
+    );
+    fileSystem.failAfterRename = false;
+    should(failure?.message).equal('fsync failed after the rename');
+
+    // Assert — the failed write moved the stamp, so the warmed resolver agrees with a fresh scan.
+    should(storage.configWrites()).be.above(before);
+    const fresh = await resolver(() => '').resolve('h2');
+    should(fresh?.sessionId).equal('earlier');
+    should(await warmed.resolve('h2')).deepEqual(fresh);
+  });
+
+  it('should count an updateConfig whose write renamed and then threw', async () => {
+    // Arrange
+    const { storage, fileSystem } = await seeded(scriptedChanges().changes);
+    const before = storage.configWrites();
+
+    // Act
+    fileSystem.failAfterRename = true;
+    const failure = await storage
+      .updateConfig(ID, current => ({ ...(current as Record<string, unknown>), turn: 9 }))
+      .then(
+        () => undefined,
+        (error: Error) => error,
+      );
+    fileSystem.failAfterRename = false;
+
+    // Assert — the document changed under the failed call, and the stamp says so.
+    should(failure?.message).equal('fsync failed after the rename');
+    should(storage.configWrites()).equal(before + 1);
+    should((await storage.readConfig(ID)) as Record<string, unknown>).have.property('turn', 9);
   });
 
   it('should move the config count only once a new session is listed, so a scan that raced the write is never trusted', async () => {
