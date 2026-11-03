@@ -6,8 +6,8 @@
  * It bundles `agenda-diff-page.tsx` (fixtures in `agenda-diff.ts`, a stubbed daemon), opens each item the way a link
  * does (`?agenda=A…`), and FAILS (after writing every picture) when: a page scrolls sideways; the card is drawn in a
  * fallback font; the diff does not default to "since you last looked"; an addition is not underlined or a removal is
- * not struck through (colour alone is never the signal); an unchanged section is not folded; the merge confirm does not
- * say what closes and what is kept; a merged or split item has no reference link for its lineage; a "from chat" entry
+ * not struck through (colour alone is never the signal); an unchanged section is not folded; the merge confirm is not the one short heading,
+ * line, checkbox and Cancel/Merge pair, or repeats a title; a merged or split item has no reference link for its lineage; a "from chat" entry
  * lacks its tag; a link's meaning is missing from the terms table; or a machine without `agenda.conversation.1` still
  * shows a diff or merge control.
  */
@@ -297,17 +297,22 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       (await page.locator('[data-agenda-merge-candidate="A143"]').count()) === 0,
       `${label('merge')}: a closed item is offered`,
     );
+    const lead = (await page.locator('[data-agenda-merge-picker] .fy-merge__lead').textContent()) ?? '';
+    check(
+      !lead.includes('Where do snoozed items go?'),
+      `${label('merge')}: the picker repeats the open item's title ("${lead}")`,
+    );
     await scrollToSelector(page, '[data-agenda-lineage]');
     await shot(page, 'merge-picker', form, theme);
     await press(page, '[data-agenda-merge-candidate="A142"]');
     await page.locator('[data-agenda-merge-confirm]').waitFor({ state: 'visible' });
     const words = (await page.locator('[data-agenda-merge-confirm]').textContent()) ?? '';
     check(
-      /closes as merged into/.test(words) &&
-        /Both conversations and all cards are kept/.test(words) &&
-        words.includes('"Does push repeat for a woken item?"') &&
-        words.includes('"Where do snoozed items go?" (this one)'),
-      `${label('merge')}: the confirm does not say what closes and what is kept ("${words}")`,
+      words.startsWith('Merge !A142 into this item?') &&
+        words.includes('!A142 closes; this item keeps its ask. Both conversations and all cards are kept.') &&
+        !words.includes('Does push repeat for a woken item?') &&
+        !words.includes('Where do snoozed items go?'),
+      `${label('merge')}: the confirm is not the short one ("${words}")`,
     );
     await scrollToSelector(page, '[data-agenda-lineage]');
     await shot(page, 'merge-confirm', form, theme);

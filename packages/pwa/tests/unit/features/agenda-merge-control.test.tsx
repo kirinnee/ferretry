@@ -89,20 +89,23 @@ describe('Merge with…', () => {
     const sent: Sent[] = [];
     const root = await draw(item(), mergeView(sent));
     await click(root, '[data-agenda-merge-open]');
-    expect(root.querySelector('[data-agenda-merge-picker]')?.textContent).toContain(
-      'Merge !A5 "Queue choice" (this one) with which open agenda?',
-    );
+    const picker = must(root.querySelector('[data-agenda-merge-picker]'), 'picker');
+    expect(picker.textContent).toContain('Merge this item with which open agenda?');
+    expect(picker.textContent).not.toContain('Queue choice');
     expect(must(root.querySelector('[data-agenda-merge-candidate="A2"]'), 'candidate').textContent).toBe(
       '!A2 Pick the queue',
     );
 
     await click(root, '[data-agenda-merge-candidate="A2"]');
     const confirm = must(root.querySelector('[data-agenda-merge-confirm]'), 'confirm step');
-    expect(confirm.textContent).toContain('Merge !A2 "Pick the queue" into !A5 "Queue choice" (this one)?');
-    expect(confirm.textContent).toContain('!A2 "Pick the queue" closes as merged into !A5 "Queue choice" (this one)');
-    expect(confirm.textContent).toContain('Keep !A2 "Pick the queue" instead of this one');
-    expect(confirm.textContent).toContain('Merge into !A5 "Queue choice" (this one)');
-    expect(confirm.textContent).toContain('Both conversations and all cards are kept');
+    expect(confirm.textContent).toBe(
+      'Merge !A2 into this item?' +
+        '!A2 closes; this item keeps its ask. Both conversations and all cards are kept.' +
+        'Keep !A2 instead' +
+        'CancelMerge',
+    );
+    expect(confirm.textContent).not.toContain('Pick the queue');
+    expect(confirm.textContent).not.toContain('Queue choice');
     expect(sent).toEqual([]);
 
     await click(root, '[data-agenda-merge-go]');
@@ -116,8 +119,8 @@ describe('Merge with…', () => {
     await click(root, '[data-agenda-merge-open]');
     await click(root, '[data-agenda-merge-candidate="A2"]');
     const actions = must(root.querySelector('.fy-merge__actions'), 'actions');
-    const labels = [...actions.querySelectorAll('button')].map(button => button.textContent?.trim().split(' ')[0]);
-    expect(labels).toEqual(['Cancel', 'Back', 'Merge']);
+    const labels = [...actions.querySelectorAll('button')].map(button => button.textContent?.trim());
+    expect(labels).toEqual(['Cancel', 'Merge']);
     expect(actions.lastElementChild?.hasAttribute('data-agenda-merge-go')).toBe(true);
   });
 
@@ -128,8 +131,8 @@ describe('Merge with…', () => {
     await click(root, '[data-agenda-merge-candidate="A2"]');
     await click(root, 'input[type="checkbox"]');
     const words = root.querySelector('[data-agenda-merge-confirm]')?.textContent;
-    expect(words).toContain('Merge !A5 "Queue choice" (this one) into !A2 "Pick the queue"?');
-    expect(words).toContain('Merge into !A2 "Pick the queue"');
+    expect(words).toContain('Merge this item into !A2?');
+    expect(words).toContain('This item closes; !A2 keeps its ask. Both conversations and all cards are kept.');
     await click(root, '[data-agenda-merge-go]');
     expect(sent).toEqual([{ survivor: 'A2', absorbed: 'A5' }]);
   });
@@ -142,15 +145,11 @@ describe('Merge with…', () => {
     expect(root.querySelector('[data-agenda-merge-picker]')).toBeNull();
   });
 
-  test('goes back from the confirm step to the list, and Cancel closes it', async () => {
+  test('closes the panel from the confirm step with Cancel, the only other choice', async () => {
     const root = await draw(item(), mergeView([]));
     await click(root, '[data-agenda-merge-open]');
     await click(root, '[data-agenda-merge-candidate="A2"]');
-    const quiet = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('.fy-merge__actions .fy-merge__quiet')];
-    await interact(() => must(quiet()[1], 'back').click());
-    expect(root.querySelector('[data-agenda-merge-picker]')).not.toBeNull();
-    await click(root, '[data-agenda-merge-candidate="A2"]');
-    await interact(() => must(quiet()[0], 'cancel').click());
+    await click(root, '.fy-merge__actions .fy-merge__quiet');
     expect(root.querySelector('[data-agenda-merge-picker]')).toBeNull();
     expect(root.querySelector('[data-agenda-merge-confirm]')).toBeNull();
   });

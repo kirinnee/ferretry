@@ -3,7 +3,7 @@
  * says what joined or left this item ("Merged into !A2", "Split from !A3", "Split into !A7, !A8") through the ONE reference
  * renderer, so each `!A…` reads and opens as it does in a message. Beside it, an open plain conversation offers "Merge
  * with…": a picker of the other open agendas, then a confirm step that says what will happen before anything is sent.
- * There is no split button: a split is made by the ferret, and the item only shows where it came from.
+ * Each title shows once, in the picker; the confirm names the other agenda by its reference alone. There is no split button: a split is made by the ferret, and the item only shows where it came from.
  */
 
 import type { AgendaItem } from '@ferretry/protocol';
@@ -16,7 +16,7 @@ import {
   lineageLines,
   mergeChoice,
   mergeWords,
-  pickerLead,
+  PICKER_LEAD,
 } from '../../lib/agenda-merge.ts';
 import type { AgendaMergeView } from './use-item-lifecycle.ts';
 
@@ -49,7 +49,7 @@ function MergePanel({
     return (
       <div className="fy-merge__panel" data-agenda-merge-picker="">
         <p className="fy-merge__lead m-0" id={groupId}>
-          {pickerLead(item)}
+          {PICKER_LEAD}
         </p>
         {merge.candidates.length === 0 ? (
           <p className="fy-merge__note m-0" data-agenda-merge-none="">
@@ -93,9 +93,8 @@ function MergePanel({
   };
   return (
     <div className="fy-merge__panel" data-agenda-merge-confirm="">
-      <p className="fy-merge__lead m-0">{words.question}</p>
+      <div className="fy-merge__lead">{renderProse(words.question)}</div>
       <div className="fy-merge__note">{renderProse(words.outcome)}</div>
-      <p className="fy-merge__note m-0">{words.kept}</p>
       <label className="fy-merge__flip" htmlFor={keepId}>
         <input
           checked={state.keepPicked}
@@ -114,9 +113,6 @@ function MergePanel({
       <div className="fy-merge__actions">
         <button className="fy-merge__quiet" disabled={sending} onClick={onDone} type="button">
           Cancel
-        </button>
-        <button className="fy-merge__quiet" disabled={sending} onClick={() => setState({ step: 'pick' })} type="button">
-          Back
         </button>
         <button className="fy-merge__go" data-agenda-merge-go="" disabled={sending} onClick={send} type="button">
           {words.button}

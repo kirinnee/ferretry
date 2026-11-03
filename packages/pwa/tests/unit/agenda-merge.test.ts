@@ -10,7 +10,7 @@ import {
   mergeChoice,
   mergeOffered,
   mergeWords,
-  pickerLead,
+  PICKER_LEAD,
 } from '../../src/lib/agenda-merge.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
@@ -63,58 +63,31 @@ describe('what a merge can join', () => {
     expect(mergeCandidates(item('A5'), board).map(other => other.id)).toEqual(['A2', 'A10']);
   });
 
-  test('keeps the viewed item unless the other is picked, and says what happens in words', () => {
+  test('keeps the viewed item unless the other is picked', () => {
     const viewed = item('A5', { subject: 'Does push repeat?' });
     const other = item('A2', { subject: 'Where do snoozed items go?' });
     expect(mergeChoice(viewed, other, false)).toEqual({ survivor: viewed, absorbed: other });
     expect(mergeChoice(viewed, other, true)).toEqual({ survivor: other, absorbed: viewed });
-
-    const words = mergeWords(mergeChoice(viewed, other, false), 'A5');
-    expect(words.question).toBe('Merge !A2 "Where do snoozed items go?" into !A5 "Does push repeat?" (this one)?');
-    expect(words.outcome).toContain(
-      '!A2 "Where do snoozed items go?" closes as merged into !A5 "Does push repeat?" (this one)',
-    );
-    expect(words.kept).toContain('Both conversations and all cards are kept');
-    expect(words.button).toBe('Merge into !A5 "Does push repeat?" (this one)');
   });
 
-  test('marks the open agenda "this one" when it is the one that closes, and names the survivor by title', () => {
+  test('says what happens by reference alone, with the open agenda as "this item" and no title', () => {
     const viewed = item('A5', { subject: 'Does push repeat?' });
     const other = item('A2', { subject: 'Where do snoozed items go?' });
-    const words = mergeWords(mergeChoice(viewed, other, true), 'A5');
-    expect(words.question).toBe('Merge !A5 "Does push repeat?" (this one) into !A2 "Where do snoozed items go?"?');
-    expect(words.outcome).toContain(
-      '!A5 "Does push repeat?" (this one) closes as merged into !A2 "Where do snoozed items go?"',
-    );
-    expect(words.button).toBe('Merge into !A2 "Where do snoozed items go?"');
-  });
-
-  test('cuts a long title at a word with an ellipsis, so the words stay readable', () => {
-    const long = item('A9', {
-      subject: 'Should a reply to a snoozed agenda wake it up again straight away or wait for the owner',
+    expect(mergeWords(mergeChoice(viewed, other, false), 'A5')).toEqual({
+      question: 'Merge !A2 into this item?',
+      outcome: '!A2 closes; this item keeps its ask. Both conversations and all cards are kept.',
+      button: 'Merge',
     });
-    const words = mergeWords(mergeChoice(item('A5'), long, false), 'A5');
-    expect(words.question).toContain('!A9 "Should a reply to a snoozed agenda…"');
-  });
-
-  test('cuts a long own title at a word, or at the limit when it has no word to cut at', () => {
-    const spoken = item('A9', {
-      title: 'Should a reply to a snoozed agenda wake it up again straight away or wait for the owner',
+    expect(mergeWords(mergeChoice(viewed, other, true), 'A5')).toEqual({
+      question: 'Merge this item into !A2?',
+      outcome: 'This item closes; !A2 keeps its ask. Both conversations and all cards are kept.',
+      button: 'Merge',
     });
-    expect(mergeWords(mergeChoice(item('A5'), spoken, false), 'A5').question).toContain(
-      '!A9 "Should a reply to a snoozed agenda wake it up again…"',
-    );
-    const unbroken = item('A8', { title: 'x'.repeat(80) });
-    expect(mergeWords(mergeChoice(item('A5'), unbroken, false), 'A5').question).toContain(`!A8 "${'x'.repeat(60)}…"`);
   });
 
-  test('names the open agenda by title in the picker lead, and the other by title in the flip label', () => {
-    expect(pickerLead(item('A5', { subject: 'Does push repeat?' }))).toBe(
-      'Merge !A5 "Does push repeat?" (this one) with which open agenda?',
-    );
-    expect(flipLabel(item('A2', { subject: 'Where do snoozed items go?' }))).toBe(
-      'Keep !A2 "Where do snoozed items go?" instead of this one',
-    );
+  test('asks the picker question without naming the open agenda, and the flip label without a title', () => {
+    expect(PICKER_LEAD).toBe('Merge this item with which open agenda?');
+    expect(flipLabel(item('A2', { subject: 'Where do snoozed items go?' }))).toBe('Keep !A2 instead');
   });
 
   test('names a candidate by its reference and its title', () => {
@@ -146,6 +119,16 @@ describe('where an item came from', () => {
     ]);
     expect(lineageLines({ mergedInto: 'A2' }, titles)).toEqual([
       { key: 'merged-into', text: 'Merged into !A2 (Where do snoozed items go?)' },
+    ]);
+  });
+
+  test('cuts a long title at a word with an ellipsis, or at the limit when it has no word to cut at', () => {
+    const spoken = 'Should a reply to a snoozed agenda wake it up again straight away or wait for the owner';
+    expect(lineageLines({ mergedInto: 'A2' }, { A2: spoken })).toEqual([
+      { key: 'merged-into', text: 'Merged into !A2 (Should a reply to a snoozed agenda wake it up again…)' },
+    ]);
+    expect(lineageLines({ mergedInto: 'A2' }, { A2: 'x'.repeat(80) })).toEqual([
+      { key: 'merged-into', text: `Merged into !A2 (${'x'.repeat(60)}…)` },
     ]);
   });
 

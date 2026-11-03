@@ -716,15 +716,14 @@ only items in the same agenda home (one lineage) can be merged. Refused: an item
 a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
 address.
 
-In the app, an open plain conversation shows **Merge with…** beside its lineage lines. The picker is headed with the open
-agenda by id and title and marked "this one" ("Merge !A5 "Queue choice" (this one) with which open agenda?"), and lists
-the other open plain conversations on the same board by id and title. A confirm step says what will happen before
-anything is sent, naming BOTH agendas by id and title and marking the open one "this one", because an id alone does not
-say which agenda it is: "Merge !A2 "Pick the queue" into !A5 "Queue choice" (this one)?", then "!A2 "Pick the queue"
-closes as merged into !A5 "Queue choice" (this one). Both conversations and all cards are kept, and nothing is cut."
-The viewed item survives by default, and "Keep !A2 "Pick the queue" instead of this one" flips it (the button then
-reads "Merge into !A2 "Pick the queue""). The choices sit in the fixed order: Cancel and Back on the left, the
-confirming merge on the right. A long title is cut at a word with "…". There is no grant to gate on: the daemon decides by who acts, so the app offers the button
+In the app, an open plain conversation shows **Merge with…** beside its lineage lines. The picker asks "Merge this item with
+which open agenda?" and lists the other open plain conversations on the same board by id and title, each title once.
+A confirm step says what will happen before anything is sent, and repeats no title (the picker just showed it): the
+heading "Merge !A2 into this item?" (the `!A2` is a reference, opened as in a message), one line, "!A2 closes; this item
+keeps its ask. Both conversations and all cards are kept.", and the checkbox "Keep !A2 instead". The viewed item
+survives by default, and the checkbox flips it ("Merge this item into !A2?", "This item closes; !A2 keeps its ask. …").
+The choices sit in the fixed order: Cancel on the left, **Merge** on the right; Cancel leaves the panel, and the
+picker is reopened with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
 only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
 **Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so

@@ -48,7 +48,7 @@ export const mergeCandidates = (item: AgendaItem, board: readonly AgendaItem[]):
     .filter(other => other.id !== item.id && !closed(other) && isPlainThread(other))
     .sort((a, b) => numberOf(a.id) - numberOf(b.id));
 
-/** Which agenda survives and which closes, each whole, so the words about them can name them by title. */
+/** Which agenda survives and which closes. */
 export interface MergeChoice {
   readonly survivor: AgendaItem;
   readonly absorbed: AgendaItem;
@@ -68,41 +68,32 @@ const clipped = (title: string): string => {
   return `${(word > QUOTED_TITLE / 2 ? cut.slice(0, word) : cut).trimEnd()}…`;
 };
 
-/** The marker the viewed agenda carries wherever the merge words name it. */
-const THIS_ONE = 'this one';
+/** What the picker asks. The open agenda is not named: its title is the head of the view the picker sits under. */
+export const PICKER_LEAD = 'Merge this item with which open agenda?';
 
-/** An agenda as the merge words name it: its reference and its title, and "this one" when it is the one open. */
-const agendaName = (item: AgendaItem, viewed: AgendaId): string =>
-  `!${item.id} "${clipped(agendaTitle(item))}"${item.id === viewed ? ` (${THIS_ONE})` : ''}`;
+/** The checkbox that makes the other agenda the survivor. Short: the picker already showed its title. */
+export const flipLabel = (picked: AgendaItem): string => `Keep !${picked.id} instead`;
 
-/** What the picker asks, naming the open agenda so its id is never alone. */
-export const pickerLead = (item: AgendaItem): string =>
-  `Merge !${item.id} "${clipped(agendaTitle(item))}" (${THIS_ONE}) with which open agenda?`;
-
-/** The checkbox that makes the other agenda the survivor. */
-export const flipLabel = (picked: AgendaItem): string =>
-  `Keep !${picked.id} "${clipped(agendaTitle(picked))}" instead of ${THIS_ONE}`;
-
-/** The words of the confirm step: what is asked, what happens, and what is kept. */
+/** The words of the confirm step: what is asked and what happens, then the button. No title is repeated. */
 export interface MergeWords {
   readonly question: string;
   readonly outcome: string;
-  readonly kept: string;
   readonly button: string;
 }
 
 /**
- * What the confirm step says, so "Merge" is never pressed without knowing what it does. Each agenda is named by its id
- * AND its title, and the one open is marked "this one", because an id alone says nothing about which agenda it is.
+ * What the confirm step says, so "Merge" is never pressed without knowing what it does. The other agenda is named by its
+ * id alone (the picker just showed its title) and the one open is "this item".
  */
 export const mergeWords = (choice: MergeChoice, viewed: AgendaId): MergeWords => {
-  const absorbed = agendaName(choice.absorbed, viewed);
-  const survivor = agendaName(choice.survivor, viewed);
+  const name = (item: AgendaItem): string => (item.id === viewed ? 'this item' : `!${item.id}`);
+  const absorbed = name(choice.absorbed);
+  const survivor = name(choice.survivor);
+  const closes = `${absorbed} closes; ${survivor} keeps its ask. Both conversations and all cards are kept.`;
   return {
     question: `Merge ${absorbed} into ${survivor}?`,
-    outcome: `${absorbed} closes as merged into ${survivor}. ${survivor} keeps its ask and its place.`,
-    kept: 'Both conversations and all cards are kept, and nothing is cut.',
-    button: `Merge into ${survivor}`,
+    outcome: closes.charAt(0).toUpperCase() + closes.slice(1),
+    button: 'Merge',
   };
 };
 
