@@ -114,6 +114,13 @@ export interface InputCardProps {
   /** The daemon says the facts moved: the host reads the request again. */
   readonly onRefresh?: () => void;
   /**
+   * Whether the card holds the view it is drawn in (#B147): `true` while a Send, a paste or a Cancel from here is on its
+   * way, and while a follow-up offer ("Always use…", "Don’t ask again…") is on screen after it; `false` once it has
+   * nothing more to show, with the words it settled in when it settled here. The view closes then, or as soon as the
+   * daemon closes the item while nothing holds it. Called only when it changes.
+   */
+  readonly onHold?: (holding: boolean, settled?: string) => void;
+  /**
    * Drawn inside an agenda item (the v5 item view or the compact card), which already has the title, the type
    * badge and the frame: the card then draws no panel and no heading of its own, only the target and the clock.
    */
@@ -160,6 +167,7 @@ export function InputCard({
   now: fixedNow,
   onDone,
   onRefresh,
+  onHold,
   embedded = false,
   accounts,
   addKey,
@@ -172,6 +180,22 @@ export function InputCard({
   const [problem, setProblem] = useState<string | null>(null);
   const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
   const [tappedSignIn, setTappedSignIn] = useState<SignInSummary['id'] | undefined>(undefined);
+  // A Send or a paste from this card on its way, and whether the rule offer after a hand tap has anything to offer
+  // (`undefined` while that is read).
+  const [sending, setSending] = useState(false);
+  const [ruleOffered, setRuleOffered] = useState<boolean | undefined>(undefined);
+  const offersRule = ruleOffer !== undefined && tappedSignIn !== undefined;
+  const following = always !== undefined || (offersRule && ruleOffered !== false);
+  const holding = sending || cancelling || (settled !== null && following);
+  const told = useRef<string | null>(null);
+  const hold = useRef(onHold);
+  hold.current = onHold;
+  useEffect(() => {
+    const said = `${holding}\u0000${settled ?? ''}`;
+    if (told.current === said || (told.current === null && !holding && settled === null)) return;
+    told.current = said;
+    hold.current?.(holding, holding || settled === null ? undefined : settled);
+  }, [holding, settled]);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
   // Why the task plan (or a standing rule) did not fill this card: the owner's view only, one fixed sentence by source,
@@ -374,6 +398,7 @@ export function InputCard({
           cancel={cancelButton}
           client={client}
           onRefresh={onRefresh}
+          onSending={setSending}
           onSettled={text => {
             setSettled(text);
             onDone();
@@ -390,6 +415,7 @@ export function InputCard({
             fields={fields}
             extra={setup}
             onRefresh={onRefresh}
+            onSending={setSending}
             onSettled={(text, handTapped) => {
               setSettled(text);
               setAlways(handTapped === undefined ? undefined : alwaysUseFor(request.saved, handTapped));
@@ -406,7 +432,12 @@ export function InputCard({
           </p>
           {always === undefined ? null : <AlwaysUseLine always={always} client={client} />}
           {ruleOffer === undefined || tappedSignIn === undefined ? null : (
-            <SignInRuleOffer askPasskey={ruleOffer.askPasskey} client={client} signIn={tappedSignIn} />
+            <SignInRuleOffer
+              askPasskey={ruleOffer.askPasskey}
+              client={client}
+              onOffered={setRuleOffered}
+              signIn={tappedSignIn}
+            />
           )}
         </>
       )}
@@ -434,13 +465,24 @@ interface PasteSectionProps {
   readonly cancel: ReactNode;
   readonly onSettled: (text: string) => void;
   readonly onRefresh: (() => void) | undefined;
+  /** A paste from here is on its way (`true`) or came back (`false`). */
+  readonly onSending: (sending: boolean) => void;
 }
 
 /**
  * A PASTE (docs/secure-copy.md): the ferret asks to paste a secure copy it holds. There is no field: the owner
  * allows it or cancels, and the daemon types the copy the request names. Its full card is a later phase.
  */
-function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled, onRefresh }: PasteSectionProps) {
+function SealedPasteSection({
+  request,
+  client,
+  blocked,
+  busy,
+  cancel,
+  onSettled,
+  onRefresh,
+  onSending,
+}: PasteSectionProps) {
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // A paste the daemon never answered keeps its id, so pressing Allow again cannot paste twice.
@@ -456,6 +498,7 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
     if (!built.ok) return void setFailure(built.problem);
     setFailure(null);
     setSending(true);
+    onSending(true);
     try {
       await deliverInput(client, request, built.body);
       pending.current = null;
@@ -467,6 +510,7 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
       if (words.kind === 'changed') onRefresh?.();
     } finally {
       setSending(false);
+      onSending(false);
     }
   };
 
@@ -523,6 +567,8 @@ interface FormProps {
   readonly cancel: ReactNode;
   /** `handTapped`: the account the owner picked by hand (not the daemon's one-tap), which a default may be made of. */
   readonly onSettled: (text: string, handTapped?: InputSavedOffer) => void;
+  /** A Send from here is on its way (`true`) or came back (`false`). */
+  readonly onSending: (sending: boolean) => void;
   readonly onRefresh: (() => void) | undefined;
   /** The "Set up automatic codes" panel, under the offers. */
   readonly extra: ReactNode;
@@ -784,7 +830,18 @@ function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonl
   );
 }
 
-function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh, extra }: FormProps) {
+function InputForm({
+  request,
+  fields,
+  client,
+  blocked,
+  busy,
+  cancel,
+  onSettled,
+  onSending,
+  onRefresh,
+  extra,
+}: FormProps) {
   const nodes = useRef<Nodes>(new Map());
   const { primary, others: rest, elsewhere } = splitOffers(request.saved);
   const pickOne = pickOneOffers(request.saved);
@@ -862,6 +919,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     }
     setFailure(null);
     setSending(true);
+    onSending(true);
     // The body now holds the padded values; the fields do not keep them a moment longer.
     clear();
     try {
@@ -877,6 +935,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       if (words.kind === 'changed') onRefresh?.();
     } finally {
       setSending(false);
+      onSending(false);
     }
   };
 
