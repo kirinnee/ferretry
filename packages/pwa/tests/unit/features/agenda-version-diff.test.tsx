@@ -105,6 +105,14 @@ describe('the comparison', () => {
     expect(root.querySelector('.fy-diff__legend')?.textContent).toContain('Underlined');
   });
 
+  test('keeps a struck word apart from the word that replaces it', async () => {
+    const root = await draw(viewOf(listOf(3, 1)));
+    const where = must(root.querySelector('[data-agenda-diff-section="whereWeAre"]'), 'where we are');
+    const pairs = [...where.querySelectorAll('del')].filter(del => del.nextElementSibling?.tagName === 'INS');
+    expect(pairs.length).toBeGreaterThan(0);
+    for (const del of pairs) expect(del.nextSibling?.nodeType).toBe(Node.TEXT_NODE);
+  });
+
   test('folds the sections that did not change under one line', async () => {
     const root = await draw(viewOf(listOf(3, 2)));
     const folded = must(root.querySelector('[data-agenda-diff-unchanged]'), 'unchanged fold');

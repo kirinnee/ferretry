@@ -34,6 +34,7 @@ const CLIENT = {
   snooze: noop,
   unsnooze: noop,
   progress: noop,
+  merge: noop,
 };
 
 /** A wide screen with a mouse: the card has no swipe arrows and the agenda also shows as a section beside the chat. */

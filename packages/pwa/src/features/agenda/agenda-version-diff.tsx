@@ -98,11 +98,14 @@ function SectionChange({ section }: { readonly section: SectionDiff }) {
         </span>
       </h5>
       <p className="fy-diff__text m-0">
-        {section.runs.map((run, index) => {
+        {section.runs.flatMap((run, index) => {
           const at = `${String(index)}:${run.kind}`;
-          if (run.kind === 'added') return <ins key={at}>{run.text}</ins>;
-          if (run.kind === 'removed') return <del key={at}>{run.text}</del>;
-          return <span key={at}>{run.text}</span>;
+          if (run.kind === 'added') return [<ins key={at}>{run.text}</ins>];
+          if (run.kind === 'same') return [<span key={at}>{run.text}</span>];
+          // A struck word and the word that replaces it are kept apart, so neither reads as one glued word.
+          const next = section.runs[index + 1];
+          const glued = next?.kind === 'added' && !/\s$/u.test(run.text) && !/^\s/u.test(next.text);
+          return glued ? [<del key={at}>{run.text}</del>, ' '] : [<del key={at}>{run.text}</del>];
         })}
       </p>
     </section>

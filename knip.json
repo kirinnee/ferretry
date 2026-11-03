@@ -100,6 +100,8 @@
         "harness/agenda-shapes-screenshot.ts",
         "harness/orphan-notice-screenshot.ts",
         "harness/agenda-ask-screenshot.ts",
+        "harness/agenda-diff-screenshot.ts",
+        "harness/agenda-diff-page.tsx",
         "harness/doneclose-screenshot.ts",
         "harness/doneclose-page.tsx",
         "harness/inbox-v2-screenshot.ts",
