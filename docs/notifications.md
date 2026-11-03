@@ -98,7 +98,7 @@ the next idle period is a new stop.
   a stop is something the daemon sees happen.
 - A RESTING item: the owner replied to or answered it, asked for more or to discuss it, or the ferret took it on
   (`fy agenda rest`). The ferret has the ball; the Warden's silence nudge goes to the ferret, never to the phone.
-- A parked item: one the owner replied to, or snoozed and not yet woken.
+- A snoozed item that has not yet woken. (An item the owner replied to is RESTING, above, not parked.)
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
 sent, under a key naming its reason — `attention:<session>:stopped:<stoppedAt>`,

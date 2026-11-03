@@ -1202,7 +1202,7 @@ its STAGE instead ([The item view](#the-item-view)), which is what it needs from
 | `form`            | Fill in  | fills in the card's fields                      |
 | `input`           | Type in  | types in what the card asks for                 |
 
-A **gate item** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
+A **card ask** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
 go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message kinds are another thing and keep their own words.
 
 ## The item view
@@ -1573,7 +1573,7 @@ Plan to approve, Tracker, Test; a resolved row shows the last stage it had) and 
 tab, so the two cannot disagree. The tab is hidden while the agenda has nothing on it and agenda mode is off.
 
 The task panel has no Cards view: the Tasks tab is **Kanban** or **List** (List by default). A card's ask is an item on an
-agenda, so it appears here and in the Inbox, and a card swipes as a gate item does (**→ Done**, **← Not good**,
+agenda, so it appears here and in the Inbox, and a card ask swipes like any item (**→ Done**, **← Not good**,
 **↓ Skip**) wherever its ask is drawn.
 
 ## Delivery
@@ -1638,6 +1638,35 @@ max wait is **refused** by the config check, not clamped. All four are read at s
 - **Why this replaced the old outbox.** The old one recorded a batch as delivered the moment it was handed
   over, and swallowed a refusal. A ferret whose composer held text (a person mid-message, or a stranded
   draft) refused the send, and the owner's Discuss or answer was lost while the agenda said it had gone.
+
+## Definition of done
+
+The agenda-first redesign is done when these sixteen things are true. Each is proved by a test named
+`DoD <n>: …` in [`agenda-dod.sit.test.ts`](../packages/cli/tests/sit/agenda-dod.sit.test.ts) (a temp `FY_HOME`, no
+network; the CLI runs against the daemon's real agenda routes and ledger files). The items the app shows are proved by
+the page's own tests, which that file checks still exist and still name the behaviour.
+
+| #   | The claim                                                                                           | Proved by                                                                                                   |
+| --- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 1   | `fy agenda add` with an open candidate refuses without `--new` and shows the join command           | `DoD 1` (SIT, through the real routes)                                                                      |
+| 2   | A card that already asks points the second ask to the agenda carrying it                            | `DoD 2`                                                                                                     |
+| 3   | Needs you is one unique queue, blockers first; a resting item never pushes                          | `DoD 3`; the tab: `packages/pwa/tests/unit/agenda-tab.test.ts`                                              |
+| 4   | A reply rests the item; the ferret's answer returns it to its old spot; 30 quiet minutes, one nudge | `DoD 4`                                                                                                     |
+| 5   | Snooze holds until its time; a blocker wakes it                                                     | `DoD 5`                                                                                                     |
+| 6   | A card ask rides its agenda, never a standalone item                                                | `DoD 6`                                                                                                     |
+| 7   | "Where we are now" holds a report                                                                   | `DoD 7`                                                                                                     |
+| 8   | A 200k report round-trips whole; every reply is in the conversation, in order                       | `DoD 8`; the page: `agenda-conversation.test.ts` (PR 8)                                                     |
+| 9   | Versions list, and any two can be fetched to compare                                                | `DoD 9`; the diff: `features/agenda-version-diff.test.tsx` (PR 8)                                           |
+| 10  | A merge keeps both conversations and all cards                                                      | `DoD 10`; the button: `features/agenda-merge-control.test.tsx` (PR 8)                                       |
+| 11  | A sub-ferret's card or agenda create is refused                                                     | `DoD 11`                                                                                                    |
+| 12  | A live `card` / `board` block updates when the card moves                                           | `packages/pwa/tests/unit/fy-render-card-embed.test.tsx` (`DoD 12`, by pointer)                              |
+| 13  | The board shows public cards by default                                                             | `DoD 13`; `features/board-page.test.tsx`, `board-private-preference.test.ts`, `card-visibility.sit.test.ts` |
+| 14  | One agenda goes explainer → question → plan → tracker → test → done, the history keeping each stage | `DoD 14`, the journey                                                                                       |
+| 15  | A split links both ways and moves the card asks                                                     | `DoD 15`                                                                                                    |
+| 16  | `fy agenda log` copies the owner's chat words verbatim, tagged                                      | `DoD 16` (SIT, through the real routes)                                                                     |
+
+The teaching that makes a ferret follow these rules is held to the spec by
+`packages/cli/tests/unit/agenda/teaching-spec.test.ts`.
 
 ## Compatibility
 

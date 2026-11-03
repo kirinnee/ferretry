@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import { AGENDA_INSTRUCTION, BOARD_INSTRUCTION } from '@ferretry/fleet';
+import { AgendaStageSchema } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
 import { agendaCandidates, renderCandidates } from '../../../src/lib/agenda/candidates';
@@ -106,5 +107,61 @@ describe('the teaching matches the agenda-first spec', () => {
     should(said(listing)).containEql('same place, same context, same pace');
     should(said(listing)).containEql('dependent things always share one');
     should(umbrellaRefusal(['x'], 'fy')).containEql('--broad "<why this must be one card>"');
+  });
+});
+
+/** The verbs the spec's "Teaching ferrets" section names: each is taught in the prompt AND is a real command with help. */
+const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string }> = [
+  { verb: 'answer', taught: 'answer <id> "…"' },
+  { verb: 'rest', taught: 'rest <id> --why' },
+  { verb: 'log', taught: 'log <id> --reply|--rest' },
+  { verb: 'split', taught: '`split`' },
+  { verb: 'merge', taught: '`merge`' },
+  { verb: 'edit', taught: '(`edit`)' },
+];
+
+describe('the teaching names every agenda verb the spec lists', () => {
+  const program = new Command().name('fy').exitOverride();
+  registerAgendaCommands(
+    program,
+    new AgendaController(new RecordingAgendaGateway(snapshot([])), new CapturingOutput(), SESSION),
+  );
+  const agenda = program.commands.find(command => command.name() === 'agenda');
+
+  for (const { verb, taught } of SPEC_VERBS) {
+    it(`should teach "${verb}" in the agenda prompt and register fy agenda ${verb} with a description`, () => {
+      // Act
+      const command = agenda?.commands.find(each => each.name() === verb);
+
+      // Assert
+      should(said(AGENDA_INSTRUCTION('fy'))).containEql(said(taught));
+      should(command).not.be.undefined();
+      should(command?.description().length).be.above(0);
+    });
+  }
+
+  it('should teach the stage chain in the order the protocol lists it, and the flags that move it', () => {
+    // Arrange
+    const stages = AgendaStageSchema.options.filter(stage => stage !== 'done');
+    const prompt = AGENDA_INSTRUCTION('fy');
+
+    // Assert
+    should(prompt).containEql(stages.join('→'));
+    should(prompt).containEql('`--stage`');
+    should(prompt).containEql('`--where`');
+  });
+
+  it('should say a resting item is quiet, a Needs-you item buzzes, and rest --why means working', () => {
+    // Act
+    const prompt = said(AGENDA_INSTRUCTION('fy'));
+
+    // Assert
+    should(prompt).containEql('needs you buzzes; resting is quiet');
+    should(prompt).containEql('rest <id> --why …`=working');
+  });
+
+  it('should answer an owner question ON its item, and open one info item only when no item exists', () => {
+    // Assert
+    should(said(AGENDA_INSTRUCTION('fy'))).containEql('no item: one `-k info`');
   });
 });
