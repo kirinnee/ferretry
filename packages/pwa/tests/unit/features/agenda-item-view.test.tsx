@@ -567,6 +567,47 @@ describe('an input request', () => {
     expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
   });
 
+  test('keeps the prompt and the ask when the form it was given is not drawn: a settled item', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: why the deploy password is wanted',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" />, settled: <p data-settled="">Delivered.</p> });
+    expect(root().querySelector('[data-fake-input]')).toBeNull();
+    expect(one('[data-agenda-section="context"]').textContent).toContain('why the deploy password is wanted');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+  });
+
+  test('keeps each version’s prompt and the ask when an older version is selected, form given', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: the new prompt',
+      revisions: [
+        {
+          at: '2026-08-01T11:57:00.000Z',
+          by: 'daemon',
+          changed: ['context'],
+          previous: { context: 'The agent says: the first prompt' },
+        },
+      ],
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
+    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    await interact(() => {
+      picker.value = '1';
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(root().querySelector('[data-fake-input]')).toBeNull();
+    expect(one('[data-agenda-section="context"]').textContent).toContain('the first prompt');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-latest]').click());
+    expect(one('[data-fake-input]')).toBeDefined();
+    expect(root().querySelector('[data-agenda-need]')).toBeNull();
+  });
+
   test('without its form (an app that cannot draw it) keeps the context and the ask as they were', async () => {
     const input = agendaItem('A8', {
       kind: 'input',

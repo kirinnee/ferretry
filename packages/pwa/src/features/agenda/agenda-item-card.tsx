@@ -311,14 +311,16 @@ export function AgendaItemCard({
   const mark = (text: string): string => markTerms(text, terms, seen);
   const premise = read.premise?.trim() ? mark(read.premise) : null;
   // A notice with cards lists them as rows with buttons, so its context (the same lines, for an older app) says nothing more.
-  // An input card shows the agent's prompt under the daemon's facts, so its context keeps only the daemon's own lines.
-  const contextText = item.kind === 'input' && inputForm !== undefined ? inputContextLines(read.context) : read.context;
+  const answerable = latest && settled === undefined;
+  const isInput = inputForm !== undefined && item.kind === 'input';
+  // Only a card that is DRAWN says the agent's prompt itself, under the daemon's facts, so only then does the context keep
+  // just the daemon's own lines: a settled record and an older version draw no card, and keep the prompt as written.
+  const inputDrawn = isInput && answerable;
+  const contextText = inputDrawn ? inputContextLines(read.context) : read.context;
   const context = cardsForm === undefined && contextText?.trim() ? mark(contextText) : null;
 
-  const answerable = latest && settled === undefined;
   const formFields = item.fields ?? [];
   const formPicks = useFormPicks(formKey ?? item.id, formFields);
-  const isInput = inputForm !== undefined && item.kind === 'input';
   // A gate item is a card to try or approve: its steps are the card's How to test, and Not needed is a button under it.
   const gated = item.gate !== undefined;
   const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated && !dismissAside;
@@ -458,7 +460,7 @@ export function AgendaItemCard({
           </div>
         )}
         {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
-        {isInput ? null : (
+        {inputDrawn ? null : (
           <AgendaNeed
             shape={shape}
             {...(gated && body !== null ? { heading: 'How to test' } : {})}

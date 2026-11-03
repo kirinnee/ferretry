@@ -53,9 +53,11 @@ with it, saying how it ended. The view stays only while a Send from it is on its
 offer ("Always use…", "Don't ask again…") is on screen and not yet carried out; finishing the last one
 lets it close. Only a view the owner saw open closes by itself, and only during that opening: leaving
 the view, or opening the closed record again from the history, starts afresh, and a hold never outlives
-the opening that made it. The card says the agent's prompt once, under
+the opening that made it; a card that goes while it holds (the owner picks an older version, which draws
+no card) lets the hold go with it. The card says the agent's prompt once, under
 the daemon's facts: the context's last line (after `INPUT_PROMPT_MARKER`, "The agent says: ") is
-for a restarted daemon and an app that cannot draw the form.
+for a restarted daemon and an app that cannot draw the form. Only a card that is drawn (the latest version of an
+item still open) takes the prompt out of the context; a closed record and an older version keep it as written.
 
 The generic agenda answer **refuses** `kind: 'input'` (400 `use_input_form`), so a value can never be
 typed into the agent's pane as `[answer to !A7] hunter2`. The agent adds `kind: 'input'` items only
