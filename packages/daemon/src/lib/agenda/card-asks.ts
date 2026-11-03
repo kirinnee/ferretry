@@ -17,12 +17,14 @@
  *
  * `gateAttached` mirrors the first open ask's gate on every write, for an app that predates card asks. Pure and total.
  */
+import { createHash } from 'node:crypto';
 import {
   type AgendaCardAsk,
   type AgendaCardAskAnswer,
   type AgendaCardAskWoke,
   type AgendaItem,
   cardAskReference,
+  canonicalJson,
   cardAskStage,
   formatTaskRef,
   isOpenCardAsk,
@@ -129,21 +131,30 @@ const backTo = (item: AgendaItem, turn: AgendaCardAskWoke): AgendaItem => ({
   ...turn,
 });
 
-/** Whether anything but the daemon's own lines was written on the item after `at`: the owner or a ferret has spoken since. */
-const talkedSince = (item: AgendaItem, at: string): boolean =>
-  (item.history ?? []).some(entry => entry.kind !== 'updated' && entry.at > at) ||
-  (item.ownerAnswer !== undefined && item.ownerAnswer.at > at);
+/**
+ * The digest of everything on the thread but what the card-ask writer owns (the asks, their mirror and the seal
+ * itself): its words, turn, park, stage and edits. `undefined` when it has no canonical spelling.
+ */
+const fingerprint = (item: AgendaItem): string | undefined => {
+  const { cardAsks: _asks, cardAsksSeal: _seal, gateAttached: _shown, gateAttachedChangedAt: _stamp, ...rest } = item;
+  const spelled = canonicalJson(rest);
+  return spelled.ok ? createHash('sha256').update(spelled.text, 'utf8').digest('hex').slice(0, 32) : undefined;
+};
+
+/** The item with the seal of the thread as it now stands. */
+export const sealCardAsks = (item: AgendaItem): AgendaItem => {
+  const digest = fingerprint(item);
+  const { cardAsksSeal: _seal, ...rest } = item;
+  return digest === undefined ? rest : { ...rest, cardAsksSeal: digest };
+};
+
+/** Whether the thread is exactly as the card-ask writer left it: nobody else has written anything on it since. */
+const untouched = (item: AgendaItem): boolean =>
+  item.cardAsksSeal !== undefined && item.cardAsksSeal === fingerprint(item);
 
 /** Whether an owner's answer to a card ask was recorded on the item after `at`. */
 const answeredSince = (item: AgendaItem, at: string): boolean =>
   (item.history ?? []).some(entry => entry.kind === 'gate-answered' && entry.at > at);
-
-/**
- * Whether nothing has happened to the item's turn since an ask woke it at `at`: still the owner's, still from that ask,
- * and nobody has replied, asked, or answered since — a thread that went back to the owner after talk is theirs to see.
- */
-const stillWoken = (item: AgendaItem, at: string): boolean =>
-  item.parked === undefined && item.waitingOn === undefined && item.waitingSince === at && !talkedSince(item, at);
 
 /** The item resting on the owner's answer, waiting on its ferret, as every other answer rests one. */
 const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
@@ -164,25 +175,36 @@ const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
 const isCardAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
   item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined;
 
-/** Whether the owner or a ferret has said anything on an agenda: the daemon's own lines are not talk. */
-const hasTalk = (item: AgendaItem): boolean =>
-  (item.history ?? []).some(entry => entry.kind !== 'updated' && entry.kind !== 'gate-answered') ||
-  item.ownerAnswer !== undefined;
-
-const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
-
 /**
- * One operation on one open item's card asks. `stage` moves the item to the stage an ask puts it in, as the state
- * machine records a stage change; `history` adds one activity line.
+ * Whether the owner or a ferret has said anything on a card's own agenda. A sealed one is read by its seal; one from
+ * before the seal by its activity lines, where the daemon's own (`updated`, `gate-answered`) are not talk.
  */
-export const applyCardAsk = (
+const talkedOn = (item: AgendaItem): boolean =>
+  item.cardAsksSeal === undefined
+    ? (item.history ?? []).some(entry => entry.kind !== 'updated' && entry.kind !== 'gate-answered') ||
+      item.ownerAnswer !== undefined
+    : !untouched(item);
+
+const spelled = (value: unknown): string => {
+  const canonical = canonicalJson(value);
+  return canonical.ok ? canonical.text : JSON.stringify(value);
+};
+
+/** Whether two values are the same content, however their keys were spread. */
+const sameJson = (left: unknown, right: unknown): boolean => spelled(left) === spelled(right);
+
+/** What the state machine lends the pure half: the stage move an ask makes, the activity line, and the form an item is stored in. */
+export interface CardAskEffects {
+  readonly stage: (item: AgendaItem, stage: 'test' | 'plan') => AgendaItem;
+  readonly history: (item: AgendaItem, kind: 'updated' | 'gate-answered', note: string) => AgendaItem;
+  readonly tidy: (item: AgendaItem) => AgendaItem;
+}
+
+const operate = (
   item: AgendaItem,
   operation: CardAskOperation,
   at: string,
-  effects: {
-    readonly stage: (item: AgendaItem, stage: 'test' | 'plan') => AgendaItem;
-    readonly history: (item: AgendaItem, kind: 'updated' | 'gate-answered', note: string) => AgendaItem;
-  },
+  effects: CardAskEffects,
 ): CardAskOutcome => {
   const asks = item.cardAsks ?? [];
   if (operation.kind === 'attach') {
@@ -235,26 +257,28 @@ export const applyCardAsk = (
       asks.filter(ask => ask !== target),
       at,
     );
+    // Only a thread nobody has written on since the daemon left it, still waiting on this ask, is moved.
+    const asLeft = untouched(item) && item.waitingSince === target.at;
     const waiting = openCardAsks(left).filter(ask => ask.notYet === undefined);
     if (waiting.length > 0) {
       // The newest ask goes: the thread has waited on the owner since the one before, not since the one that went.
       const newest = Math.max(...waiting.map(ask => Date.parse(ask.at)));
-      const settled = stillWoken(left, target.at) ? { ...left, waitingSince: new Date(newest).toISOString() } : left;
+      const settled = asLeft ? { ...left, waitingSince: new Date(newest).toISOString() } : left;
       return { kind: 'changed', item: settled, change: 'refreshed' };
     }
     const note = `${formatTaskRef({ id: target.gate.cardId })} moved on, so nothing is left to answer`;
     const told = effects.history(left, 'updated', note);
     if (target.woke !== undefined && !isCardAgenda(left)) {
-      // A ferret's thread goes back to the turn the ask woke it out of; one that has moved on since stays as it is,
-      // and one the owner answered an ask of since rests, as any answer rests it.
-      const settled = stillWoken(left, target.at)
-        ? backTo(told, target.woke)
+      // A ferret's thread goes back to the turn the ask woke it out of, or rests when the owner's answer to another ask
+      // is the last thing on it; one anybody has written on since stays as it is, in Needs you.
+      const settled = !asLeft
+        ? told
         : answeredSince(left, target.at)
           ? restedOnAnswer(told, at)
-          : told;
+          : backTo(told, target.woke);
       return { kind: 'changed', item: settled, change: 'refreshed' };
     }
-    if ((left.cardAsks ?? []).length > 0 || (isCardAgenda(left) && hasTalk(left))) {
+    if ((left.cardAsks ?? []).length > 0 || (isCardAgenda(left) && talkedOn(item))) {
       return { kind: 'changed', item: restedOnAnswer(told, at), change: 'refreshed' };
     }
     return isCardAgenda(left)
@@ -303,4 +327,25 @@ export const restRefusal = (item: AgendaItem): string | undefined => {
   if (waiting.length === 0) return undefined;
   const cards = [...new Set(waiting.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ');
   return `${item.id} carries the ask of ${cards}, which waits on the owner: it stays in Needs you until they answer`;
+};
+
+/**
+ * One operation on one open item's card asks. `stage` moves the item to the stage an ask puts it in, as the state
+ * machine records a stage change; `history` adds one activity line; `tidy` is the form the item is stored in.
+ *
+ * The thread is sealed with every change the writer makes to it, as long as it was untouched before (or an ask
+ * begins a turn of its own, with no unanswered ask on it): a thread somebody else wrote on keeps the seal it had,
+ * which no longer matches it, so it never again reads as the way the daemon left it.
+ */
+export const applyCardAsk = (
+  item: AgendaItem,
+  operation: CardAskOperation,
+  at: string,
+  effects: CardAskEffects,
+): CardAskOutcome => {
+  const outcome = operate(item, operation, at, effects);
+  if (outcome.kind !== 'changed') return outcome;
+  const begins =
+    operation.kind === 'attach' && !isCardAgenda(item) && openCardAsks(item).every(ask => ask.notYet !== undefined);
+  return untouched(item) || begins ? { ...outcome, item: sealCardAsks(effects.tidy(outcome.item)) } : outcome;
 };

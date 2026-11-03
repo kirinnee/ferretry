@@ -1257,6 +1257,12 @@ const AgendaItemBaseShape = {
   /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
   cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
   /**
+   * A digest of the thread as the daemon last left it, apart from its card asks: when the thread no longer matches it,
+   * the owner or a ferret has touched it since, and a withdrawn ask leaves it where it is. Only the daemon writes it;
+   * absent on a thread from before it, which a withdrawn ask never moves.
+   */
+  cardAsksSeal: z.string().max(64).optional(),
+  /**
    * How a RESTING item rests (`agenda-state.ts`): waiting on its ferret, or the ferret working on it, and the nudge
    * clock. It rides beside the `parked: replied` (or `waitingOn: 'ferret'`) every app reads, which stays the field
    * that says the item rests; absent on an item parked before Resting existed, which reads as waiting on the ferret.

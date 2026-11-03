@@ -4985,3 +4985,239 @@ describe('agenda ledger link meanings', () => {
     should(kept.snapshot.items[0]?.links).eql(MEANT);
   });
 });
+
+describe('a card ask withdrawn from a thread somebody wrote on since (docs/agenda.md § Card asks)', () => {
+  const START = Date.parse('2026-07-30T10:00:00Z');
+  const minute = (offset: number): string => new Date(START + offset * 60_000).toISOString();
+  const gateFor = (cardId: string) => ({
+    cardId,
+    laneId: 'tested',
+    laneName: 'Try it',
+    entry: 1,
+    projectId: 'p1',
+    options: [
+      { id: 'o0', label: 'Done', outcome: 'close' as const },
+      { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' as const },
+    ],
+  });
+  const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
+  const attach = (ledger: AgendaLedger, cardId: string, at: string) =>
+    succeeded(
+      applyAgendaCommand(ledger, {
+        action: 'card-ask',
+        actor: SYSTEM,
+        id: 'A1',
+        operation: { kind: 'attach', ask: { gate: gateFor(cardId) } },
+        at,
+      }),
+    );
+  const withdraw = (ledger: AgendaLedger, cardId: string, at: string) =>
+    succeeded(
+      applyAgendaCommand(ledger, {
+        action: 'card-ask',
+        actor: SYSTEM,
+        id: 'A1',
+        operation: { kind: 'withdraw', reference: gateReference(gateFor(cardId)) },
+        at,
+      }),
+    );
+  const answerDone = (ledger: AgendaLedger, cardId: string, at: string) =>
+    succeeded(
+      applyAgendaCommand(ledger, {
+        action: 'card-ask',
+        actor: SYSTEM,
+        id: 'A1',
+        operation: {
+          kind: 'answered',
+          reference: gateReference(gateFor(cardId)),
+          answer: { at, response: { kind: 'multiple-choice', choice: 'Done' }, receipt: 'a'.repeat(64) },
+        },
+        at,
+      }),
+    );
+  const stateOf = (result: Extract<AgendaMutation, { ok: true }>) => agendaState(result.item!);
+
+  it('keeps the ferret’s edit in Needs you when it answered the thread while an ask held it awake', () => {
+    // Arrange — the owner asked for more info at 11 (the thread waits on its ferret); F2's ask wakes it at 12
+    const ledger = raised(AGENT, {}, minute(0)).ledger;
+    const asked = succeeded(
+      applyAgendaCommand(ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: minute(11) }),
+    );
+    const woken = attach(asked.ledger, 'F2', minute(12));
+    should(stateOf(woken).state).equal('needs-you');
+
+    // Act — the ferret answers with an edit at 12:30, then the owner drags F2 on the Board at 13
+    const answered = succeeded(
+      applyAgendaCommand(woken.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Here is what you asked' },
+        at: minute(12.5),
+      }),
+    );
+    const after = withdraw(answered.ledger, 'F2', minute(13));
+
+    // Assert — the answer is still in front of the owner, not hidden behind a "waiting on ferret"
+    should(stateOf(after).state).equal('needs-you');
+    should(after.item?.waitingOn).be.undefined();
+    should(after.item?.subject).equal('Here is what you asked');
+  });
+
+  it('still puts the thread back where it was when only the daemon wrote on it', () => {
+    // Arrange
+    const ledger = raised(AGENT, {}, minute(0)).ledger;
+    const asked = succeeded(
+      applyAgendaCommand(ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: minute(11) }),
+    );
+    const woken = attach(asked.ledger, 'F2', minute(12));
+
+    // Act
+    const after = withdraw(woken.ledger, 'F2', minute(13));
+
+    // Assert
+    should(stateOf(after).state).equal('resting');
+    should(after.item?.waitingOn).equal('ferret');
+  });
+
+  it('rests on the owner’s answer to another ask when it is the last thing said', () => {
+    // Arrange — the thread rests working; F2 and F3 ask; the owner answers F2 (F3 keeps it awake)
+    const rested = succeeded(
+      applyAgendaCommand(raised(AGENT, {}, minute(0)).ledger, {
+        action: 'rest',
+        actor: AGENT,
+        id: 'A1',
+        why: 'checking',
+        at: minute(10),
+      }),
+    );
+    const both = attach(attach(rested.ledger, 'F2', minute(12)).ledger, 'F3', minute(13));
+    const answered = answerDone(both.ledger, 'F2', minute(14));
+    should(stateOf(answered).state).equal('needs-you');
+
+    // Act
+    const after = withdraw(answered.ledger, 'F3', minute(16));
+
+    // Assert
+    should(stateOf(after).state).equal('resting');
+    should(after.item?.resting?.sub).equal('waiting-on-ferret');
+  });
+
+  it('keeps a fresh question of the ferret’s in Needs you after the owner’s answer to another ask', () => {
+    // Arrange — as above, then the ferret asks anew with an edit that replaces the ask at 15
+    const rested = succeeded(
+      applyAgendaCommand(raised(AGENT, {}, minute(0)).ledger, {
+        action: 'rest',
+        actor: AGENT,
+        id: 'A1',
+        why: 'checking',
+        at: minute(10),
+      }),
+    );
+    const both = attach(attach(rested.ledger, 'F2', minute(12)).ledger, 'F3', minute(13));
+    const answered = answerDone(both.ledger, 'F2', minute(14));
+    const asksAnew = succeeded(
+      applyAgendaCommand(answered.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { ask: { kind: 'open-question' } },
+        at: minute(15),
+      }),
+    );
+    should(asksAnew.item?.waitingSince).equal(minute(15));
+
+    // Act — F3 is dragged at 16
+    const after = withdraw(asksAnew.ledger, 'F3', minute(16));
+
+    // Assert — the new question is not hidden
+    should(stateOf(after).state).equal('needs-you');
+    should(after.item?.waitingSince).equal(minute(15));
+  });
+
+  it('keeps the thread in Needs you when the owner asked for more and the ferret answered after their answer to another ask', () => {
+    // Arrange
+    const rested = succeeded(
+      applyAgendaCommand(raised(AGENT, {}, minute(0)).ledger, {
+        action: 'rest',
+        actor: AGENT,
+        id: 'A1',
+        why: 'checking',
+        at: minute(10),
+      }),
+    );
+    const both = attach(attach(rested.ledger, 'F2', minute(12)).ledger, 'F3', minute(13));
+    const answered = answerDone(both.ledger, 'F2', minute(14));
+    const replied = succeeded(
+      applyAgendaCommand(answered.ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: minute(14.5) }),
+    );
+    const ferretAnswer = succeeded(
+      applyAgendaCommand(replied.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Here is the answer' },
+        at: minute(15),
+      }),
+    );
+    should(stateOf(ferretAnswer).state).equal('needs-you');
+
+    // Act
+    const after = withdraw(ferretAnswer.ledger, 'F3', minute(16));
+
+    // Assert
+    should(stateOf(after).state).equal('needs-you');
+    should(after.item?.subject).equal('Here is the answer');
+  });
+
+  it('still puts a resting thread back after the ledger is read back from its file', () => {
+    // Arrange — the thread rests working; F2's ask wakes it; the file is written and read
+    const rested = succeeded(
+      applyAgendaCommand(raised(AGENT, {}, minute(0)).ledger, {
+        action: 'rest',
+        actor: AGENT,
+        id: 'A1',
+        why: 'checking',
+        at: minute(10),
+      }),
+    );
+    const woken = attach(rested.ledger, 'F2', minute(12));
+    const stored = AgendaItemSchema.parse(JSON.parse(JSON.stringify(woken.item)));
+    const reread = {
+      ...woken.ledger,
+      entries: woken.ledger.entries.map(entry => (entry.lifecycle === 'active' ? { ...entry, item: stored } : entry)),
+    };
+
+    // Act
+    const after = withdraw(reread, 'F2', minute(13));
+
+    // Assert — back to working, as it was
+    should(woken.item?.cardAsksSeal).be.a.String();
+    should(after.item?.resting?.sub).equal('working');
+  });
+
+  it('leaves a thread from before the seal where it is', () => {
+    // Arrange — the same wake, with the seal taken off as an older daemon wrote it
+    const rested = succeeded(
+      applyAgendaCommand(raised(AGENT, {}, minute(0)).ledger, {
+        action: 'rest',
+        actor: AGENT,
+        id: 'A1',
+        why: 'checking',
+        at: minute(10),
+      }),
+    );
+    const woken = attach(rested.ledger, 'F2', minute(12));
+    const { cardAsksSeal: _seal, ...unsealed } = woken.item!;
+    const old = {
+      ...woken.ledger,
+      entries: woken.ledger.entries.map(entry => (entry.lifecycle === 'active' ? { ...entry, item: unsealed } : entry)),
+    };
+
+    // Act
+    const after = withdraw(old, 'F2', minute(13));
+
+    // Assert
+    should(stateOf(after).state).equal('needs-you');
+  });
+});

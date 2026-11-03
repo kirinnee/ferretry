@@ -12,6 +12,7 @@ import {
   type CardAskOperation,
   type CardAskOutcome,
   LEGACY_REPLAY_MS,
+  sealCardAsks,
   withCardAsks,
 } from '../../../src/lib/agenda/card-asks.ts';
 
@@ -47,6 +48,7 @@ const world = () => {
       ...item,
       history: [...(item.history ?? []), { at: now, kind, note }],
     }),
+    tidy: (item: AgendaItem) => item,
   };
   return {
     effects,
@@ -242,6 +244,57 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
     // Assert
     should(agendaState(after).state).equal('resting');
     should(after.cardAsks).have.length(1);
+  });
+});
+
+describe('a card’s own agenda, when its only ask is withdrawn', () => {
+  const talk = { at: at(2), kind: 'replied' as const, note: 'hm' };
+
+  it('closes when nobody wrote on it, sealed or from before the seal', () => {
+    // Arrange
+    const { apply } = world();
+    const sealed = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
+    const old = changed(apply(cardAgenda(), attach('F1'), 1));
+
+    // Act
+    const closedSealed = apply(sealed, withdraw('F1'), 3);
+    const closedOld = apply(old, withdraw('F1'), 3);
+
+    // Assert
+    should(sealed.cardAsksSeal).be.a.String();
+    should(old.cardAsksSeal).be.undefined();
+    should(closedSealed.kind).equal('closed');
+    should(closedOld.kind).equal('closed');
+  });
+
+  it('rests on its ferret when somebody wrote on it, sealed or from before the seal', () => {
+    // Arrange
+    const { apply } = world();
+    const sealed = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
+    const old = changed(apply(cardAgenda(), attach('F1'), 1));
+    const sealedTalk = { ...sealed, history: [...(sealed.history ?? []), talk] };
+    const oldTalk = { ...old, history: [...(old.history ?? []), talk] };
+
+    // Act
+    const restedSealed = changed(apply(sealedTalk, withdraw('F1'), 3));
+    const restedOld = changed(apply(oldTalk, withdraw('F1'), 3));
+
+    // Assert
+    should(agendaState(restedSealed).state).equal('resting');
+    should(agendaState(restedOld).state).equal('resting');
+  });
+
+  it('rests when the owner answered, as an answer is what the agenda holds', () => {
+    // Arrange
+    const { apply } = world();
+    const both = changed(apply(changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1)), attach('F2'), 2));
+    const answered = changed(apply(both, { kind: 'answered', reference: reference('F1'), answer }, 3));
+
+    // Act
+    const after = changed(apply(answered, withdraw('F2'), 4));
+
+    // Assert
+    should(agendaState(after).state).equal('resting');
   });
 });
 

@@ -99,7 +99,14 @@ import {
   speakerOf,
   wordsOf,
 } from './item-words.ts';
-import { applyCardAsk, type CardAskOperation, closeRefusal, restRefusal, withCardAsks } from './card-asks.ts';
+import {
+  applyCardAsk,
+  type CardAskOperation,
+  closeRefusal,
+  restRefusal,
+  sealCardAsks,
+  withCardAsks,
+} from './card-asks.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -1636,7 +1643,9 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     actor,
   );
   // A card agenda opens with its card asks, the first open one mirrored for an app that predates them.
-  const item = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
+  // One that carries its talk over from another ferret's is not sealed: it reads its activity lines, as one from before the seal does.
+  const asked = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
+  const item = request.cardAsks === undefined || request.carried !== undefined ? asked : sealCardAsks(asked);
   const next: AgendaLedger = {
     ...ledger,
     nextId: ledger.nextId + 1,
@@ -3432,6 +3441,7 @@ function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation 
   const outcome = applyCardAsk(target.item, command.operation, command.at, {
     stage: (item, stage) => ({ ...item, ...staged(item, stage, command.at) }),
     history: (item, kind, note) => ({ ...item, history: withHistory(item.history, { at: command.at, kind, note }) }),
+    tidy: tidied,
   });
   if (outcome.kind === 'unchanged') return unchanged(ledger);
   if (outcome.kind === 'refused') return failure(outcome.code, outcome.message);

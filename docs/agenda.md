@@ -210,13 +210,20 @@ each answer does to the card).
 - **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly. When no open ask
   still waits on the owner (the last one went, or only ones they said Not yet to are left), the agenda stops being a
   blocker: it rests waiting on its ferret, or, if it is the daemon-opened card agenda (`card-agenda:`) and holds no
-  conversation, it closes. A ferret's thread that carried the ask goes back to the turn the ask woke it out of (the
-  owner's, with the question it had, or the park, rest or wait it was in), unless something has happened to it since:
-  the owner snoozed it, replied on it, or asked for more; the ferret asked again or answered them. It then stays as it
-  is, so an answer the owner has not read yet is not hidden. If the owner answered a card ask on it since, it rests, as
-  any answer rests it. The ask remembers that turn (`woke`); a thread from before that was recorded rests if it holds
-  an answered ask, else stays as it is. The stage the ask moved the agenda to is not undone: the stage is a log of what
-  changed.
+  conversation, it closes. **One rule decides whether the daemon may move a thread when it withdraws an ask: only a
+  thread exactly as the daemon left it.** Every write the card-ask writer makes (put an ask on, restate it, answer it,
+  Not yet, withdraw another) seals the thread: a digest of everything on it but the card asks and their mirror
+  (`cardAsksSeal`). Anything else that is written on the thread afterwards — the owner's reply, answer or Needs info or
+  snooze, the ferret's edit (its revision), hand-back, rest or new question, and the daemon's own other lines —
+  makes the digest differ, and the daemon does not renew a seal the thread no longer matches while an ask still waits
+  on it (a new ask on a thread with none waiting takes a fresh turn and a fresh seal). A thread that matches goes back to the turn the ask woke it out of (the owner's, with
+  the question it had, or the park, rest or wait it was in); it rests instead, as any answer rests it, when the
+  owner's answer to another card ask is the last thing on it. A thread that does not match stays as it is, in Needs
+  you: a leftover question the owner can read costs nothing, a ferret's answer hidden behind a "waiting on ferret"
+  costs the answer. The ask remembers the turn it woke the thread out of (`woke`); a thread from before the seal
+  (none is stored) is never moved, and the daemon-opened card agenda from before it keeps the older rule (a
+  conversation line, or an owner's answer on it, is talk). The stage the ask moved the agenda to is not undone: the
+  stage is a log of what changed.
 - **It buzzes once**, when the ask is put on. An agenda is left out of a stop's push only while its sole open items are
   card asks; a question the ferret asks on the same agenda is counted ([notifications.md](notifications.md)).
 - **Not needed.** The owner's Not needed on the card's own agenda (`card-agenda:`, or a converted gate item) means they
