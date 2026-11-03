@@ -14,6 +14,21 @@ const PendingAppendSchema = z.strictObject({
   text: z.string().min(1),
 });
 
+/** Complete an append whose write-ahead journal survived a crash; a no-op when none did. */
+export async function recoverLogAppend(files: AppendOnlyFiles, sessionId: string, name: string): Promise<void> {
+  const journal = `${name}.pending`;
+  const interrupted = await files.read(sessionId, journal);
+  if (interrupted === undefined) return;
+  const pending = PendingAppendSchema.parse(JSON.parse(interrupted));
+  const tail = await files.readAfter(sessionId, name, pending.bytes);
+  const intended = new TextEncoder().encode(pending.text);
+  if (!tail.subarray(0, intended.length).every((byte, index) => byte === intended[index])) {
+    throw new Error(`inconsistent append tail: ${name}`);
+  }
+  await files.appendSynced(sessionId, name, intended.subarray(tail.length));
+  await files.remove(sessionId, journal);
+}
+
 /**
  * Append JSONL records once, then return the new bounded cursor. A small write-ahead file completes a torn
  * append on restart. A cursor lagging a completed append reuses its matching records, including duplicates
@@ -27,17 +42,7 @@ export async function appendLogRecords(
   records: readonly unknown[],
 ): Promise<{ readonly bytes: number; readonly count: number }> {
   const journal = `${name}.pending`;
-  const finish = async (pending: z.infer<typeof PendingAppendSchema>) => {
-    const tail = await files.readAfter(sessionId, name, pending.bytes);
-    const intended = new TextEncoder().encode(pending.text);
-    if (!tail.subarray(0, intended.length).every((byte, index) => byte === intended[index])) {
-      throw new Error(`inconsistent append tail: ${name}`);
-    }
-    await files.appendSynced(sessionId, name, intended.subarray(tail.length));
-    await files.remove(sessionId, journal);
-  };
-  const interrupted = await files.read(sessionId, journal);
-  if (interrupted !== undefined) await finish(PendingAppendSchema.parse(JSON.parse(interrupted)));
+  await recoverLogAppend(files, sessionId, name);
   const tailBytes = await files.readAfter(sessionId, name, cursor.bytes);
   const tail = new TextDecoder('utf-8', { fatal: true }).decode(tailBytes);
   if (tail !== '' && !tail.endsWith('\n')) throw new Error(`incomplete append tail: ${name}`);
@@ -58,7 +63,7 @@ export async function appendLogRecords(
   if (text !== '') {
     const pending = { bytes, text };
     await files.writeAtomic(sessionId, journal, JSON.stringify(pending));
-    await finish(pending);
+    await recoverLogAppend(files, sessionId, name);
   }
   return { bytes: bytes + new TextEncoder().encode(text).length, count: cursor.count + replay.length + added.length };
 }

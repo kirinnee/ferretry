@@ -313,14 +313,16 @@ the detail and an answer to the owner's question 200,000; the context and every 
 The wire history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to
 their own store. Before an owner record leaves that history, it is durably appended to the session's
 `agenda-history.jsonl`, keyed by item id. The sidecar has no eviction policy and stays off the wire. Pruning a
-closed item removes its hot view, retaining all its owner words in this file. History is read only when explicitly
-requested; an ordinary transaction never rereads or rewrites the committed sidecar.
+closed item removes its hot view, retaining all its owner words in this file: its conversation, and the closing note
+and any structured answer, as the item's complete last snapshot (a `version` record). History is read only when
+explicitly requested; an ordinary transaction never rereads or rewrites the committed sidecar.
 
 **Storage layout.** Each line is an `owner-history` record (`id`, `entry`) or a `version` record (`id`, `item`).
 `agenda.json` holds only an `archive` cursor with a UTF-8 byte offset and record count, so the hot file does not
 grow with the conversation. Transaction-local `archivePending` records are appended and synced before the hot
 ledger is atomically written without them. A temporary `agenda-history.jsonl.pending` journal records the byte
-offset and next append; recovery completes a torn append, including a split UTF-8 character. If the ledger's
+offset and next append; recovery completes a torn append, including a split UTF-8 character, on the next write or the next history read (which
+queues behind writers), so a crash never leaves the history unreadable. If the ledger's
 cursor lags a completed append, matching records in that suffix are reused once. The generic append mechanism
 can also hold later versions. Existing in-ledger `ownerHistory` records move here on the next transaction,
 including an unchanged one, with the same replay protection.

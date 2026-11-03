@@ -323,6 +323,76 @@ describe('the private agenda archive', () => {
     should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).startWith(archived);
   });
 
+  it('should keep the closing note and structured answer of an item whose closed history is pruned', async () => {
+    const { files, repository } = subject();
+    await save(repository, { action: 'raise', actor: agent, at: NOW, request: { ...request, ask: { kind: 'task' } } });
+    await save(repository, { action: 'reply', actor: human, at: NOW, id: 'A1', note: 'OWNER_REPLY_KEPT' });
+    await save(repository, { action: 'resolve', actor: human, at: NOW, id: 'A1', note: 'OWNER_DONE_KEPT' });
+    await save(repository, {
+      action: 'raise',
+      actor: { kind: 'daemon', cause: 'system' },
+      at: NOW,
+      request: {
+        ...request,
+        ask: { kind: 'multiple-choice', options: [{ label: 'CHOICE_KEPT' }, { label: 'other' }] },
+      },
+    });
+    await save(repository, {
+      action: 'answer',
+      actor: human,
+      at: NOW,
+      id: 'A2',
+      response: { kind: 'multiple-choice', choice: 'CHOICE_KEPT' },
+      note: 'OWNER_ANSWER_NOTE_KEPT',
+    });
+    for (let n = 0; n < 100; n++) {
+      const raised = await save(repository, { action: 'raise', actor: agent, at: NOW, request });
+      await save(repository, { action: 'resolve', actor: human, at: NOW, id: raised.item?.id ?? 'missing' });
+    }
+    const ledger = await repository.read(SESSION);
+    if (ledger === null) throw new Error('no board');
+    should(ledger.entries.some(entry => entry.item.id === 'A1' || entry.item.id === 'A2')).be.false();
+    const kept = JSON.stringify(await repository.readArchive(SESSION));
+    for (const words of [
+      'OWNER_REPLY_KEPT',
+      'OWNER_DONE_KEPT',
+      'OWNER_ANSWER_NOTE_KEPT',
+      '"response":{"kind":"multiple-choice","choice":"CHOICE_KEPT"}',
+    ]) {
+      should(kept).containEql(words);
+    }
+    should(files.files.get(`${SESSION}/${current}`)?.text).not.containEql('OWNER_DONE_KEPT');
+  });
+
+  it('should finish a torn history append when history is read, with no archive-producing action in between', async () => {
+    const { files, repository } = subject();
+    const first = { id: 'A1', entry: { at: NOW, kind: 'replied', note: 'first committed owner record' } };
+    const second = { kind: 'owner-history', id: 'A1', entry: { at: NOW, kind: 'replied', note: 'second 雪 record' } };
+    files.put(SESSION, current, JSON.stringify({ ...emptyAgendaLedger(SESSION, NOW), ownerHistory: [first] }));
+    const unchanged = (current: AgendaLedger | null) => {
+      if (current === null) throw new Error('no board');
+      return {
+        ok: true as const,
+        changed: false,
+        change: 'unchanged' as const,
+        ledger: current,
+        snapshot: agendaSnapshot(current),
+      };
+    };
+    ok(await repository.transact(SESSION, unchanged));
+    const committed = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
+    const text = `${JSON.stringify(second)}\n`;
+    files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + text.slice(0, 15));
+    files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed), text }));
+    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+    ok(await restarted.transact(SESSION, unchanged));
+    should(files.files.has(`${SESSION}/${AGENDA_ARCHIVE_FILE}.pending`)).be.true();
+    const records = await restarted.readArchive(SESSION);
+    should(records).deepEqual([{ kind: 'owner-history', ...first }, second]);
+    should(files.files.has(`${SESSION}/${AGENDA_ARCHIVE_FILE}.pending`)).be.false();
+    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(committed + text);
+  });
+
   it('should migrate in-ledger owner history once and replay an append whose cursor commit failed', async () => {
     const { files, repository } = subject();
     const record = { id: 'A1', entry: { at: NOW, kind: 'replied', note: 'Owner 雪 words' } };

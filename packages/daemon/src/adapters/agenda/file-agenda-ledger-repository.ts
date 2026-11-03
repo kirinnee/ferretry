@@ -10,7 +10,7 @@ import {
   isAgendaSessionId,
   parseAgendaLedger,
 } from '../../lib/agenda/index.ts';
-import { type AppendOnlyFiles, appendLogRecords } from '../../lib/append-only-log.ts';
+import { type AppendOnlyFiles, appendLogRecords, recoverLogAppend } from '../../lib/append-only-log.ts';
 import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
 import { FileAgendaFileStore } from './file-agenda-file-store.ts';
 
@@ -127,17 +127,23 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     });
   }
 
-  /** Explicit, lazy history read. Snapshots and transactions never read committed archive records. */
+  /**
+   * Explicit, lazy history read. Snapshots and transactions never read committed archive records. It queues
+   * behind writers and completes a torn append first, so a crash never leaves history unreadable.
+   */
   async readArchive(sessionId: string): Promise<readonly AgendaArchiveRecord[]> {
     this.assertSessionId(sessionId);
     await this.ready;
-    const text = await this.files.read(sessionId, AGENDA_ARCHIVE_FILE);
-    if (text === undefined) return [];
-    if (!text.endsWith('\n')) throw new Error('incomplete agenda history');
-    return text
-      .slice(0, -1)
-      .split('\n')
-      .map(line => AgendaArchiveRecordSchema.parse(JSON.parse(line)));
+    return await this.serial(sessionId, async () => {
+      await recoverLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
+      const text = await this.files.read(sessionId, AGENDA_ARCHIVE_FILE);
+      if (text === undefined) return [];
+      if (!text.endsWith('\n')) throw new Error('incomplete agenda history');
+      return text
+        .slice(0, -1)
+        .split('\n')
+        .map(line => AgendaArchiveRecordSchema.parse(JSON.parse(line)));
+    });
   }
 
   private async write(sessionId: string, ledger: AgendaLedger): Promise<AgendaLedger> {
