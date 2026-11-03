@@ -39,24 +39,30 @@ export const SUB_FERRET_MAY_ON_LANES = 'read the board and its lanes';
  * who can do the rest. It speaks to the caller, never of "sub-ferrets" at large: a sub-ferret that leads a subtree of
  * its own is told what its subtree allows.
  */
-const subFerretRefusalMessage = (doing: string, may: string, leadAddress: string): string =>
-  `You are a sub-ferret, so you can't ${doing}. You may ${may}. For anything else ask your lead: fy send ${leadAddress} "…"`;
+const subFerretRefusalMessage = (doing: string, may: string, leadAddress: string, claim?: string): string =>
+  `You are a sub-ferret, so you can't ${doing}. You may ${may}. ${
+    claim === undefined
+      ? `For anything else ask your lead: fy send ${leadAddress} "…"`
+      : `Your lead holds this card: claim it first: ${claim}`
+  }`;
 
 /**
  * The refusal for `sessionId` doing `doing`, or `null` when it is a lead (or nobody the daemon knows has
  * started it). A directory that cannot answer refuses nothing: the limit narrows a ferret that is known to
- * be a sub-ferret, it never locks out one it cannot place.
+ * be a sub-ferret, it never locks out one it cannot place. `claim` is the command that takes a card its lead holds
+ * (`fy task claim &F12`): given, the refusal sends the caller there instead of to its lead.
  */
 export const subFerretRefusal = async (
   directory: SubFerretDirectory,
   sessionId: string,
   doing: string,
   may: string = SUB_FERRET_MAY_ON_BOARD,
+  claim?: string,
 ): Promise<string | null> => {
   const lead = await directory.leadOf(sessionId).catch(() => undefined);
   if (lead === undefined) return null;
   const address = await directory.addressOf(lead).catch(() => lead);
-  return subFerretRefusalMessage(doing, may, address);
+  return subFerretRefusalMessage(doing, may, address, claim);
 };
 
 /** Whether `sessionId` was started by another session. */

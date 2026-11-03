@@ -304,6 +304,7 @@ export type BoardVerb =
   | 'clarify'
   | 'link'
   | 'assign'
+  | 'claim'
   | 'note'
   | 'order'
   | 'reparent'
@@ -326,6 +327,7 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   clarify: 'clarified',
   link: 'linked',
   assign: 'assigned',
+  claim: 'claimed',
   note: 'noted',
   order: 'ranked',
   reparent: 're-parented',

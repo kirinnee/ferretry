@@ -164,6 +164,36 @@ export const mayHandDown = (
   assignee !== caller.sessionId &&
   assigneeAncestors.includes(caller.sessionId);
 
+/**
+ * The lead a ferret may CLAIM the card from: the reverse of {@link mayHandDown}. The card's current holder (its assignee,
+ * else its owner) when that is one of the caller's own ancestors. `undefined` otherwise, and for the ferret that already
+ * holds it: never sideways (a sibling's or cousin's card, even under a shared lead who owns it), never beyond the caller's
+ * own lineage, and never a card the owner holds (the owner is not a ferret). `callerAncestors` is the caller's lineage
+ * from the daemon's session registry, nearest first.
+ */
+export const claimableFrom = (
+  caller: BoardCaller,
+  card: Pick<BoardTask, 'owner' | 'assignee'>,
+  callerAncestors: readonly string[],
+): string | undefined => {
+  if (caller.kind !== 'ferret') return undefined;
+  const holder = effectiveAssignee(card);
+  return caller.sessionId !== holder && callerAncestors.includes(holder) ? holder : undefined;
+};
+
+/** The sentence a refused claim answers with: who may claim, and what to do instead. */
+export const claimRefusalMessage = (
+  card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>,
+  caller: BoardCaller,
+): string => {
+  const ref = formatTaskRef(card);
+  if (caller.kind !== 'ferret') return `claim is a ferret's: ${ref} is taken with \`fy task assign ${ref} <ferret>\``;
+  if (caller.sessionId === effectiveAssignee(card)) return `${ref} is already yours`;
+  if (caller.sessionId === card.owner)
+    return `you own ${ref}: take it with \`fy task assign ${ref} ${caller.sessionId}\``;
+  return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(card)}); a card held by a ferret outside your lineage is theirs: ask your lead`;
+};
+
 const STANDING_WORDS: Readonly<Record<BoardStanding, string>> = {
   'owner-human': 'the owner',
   owner: 'its owner ferret',

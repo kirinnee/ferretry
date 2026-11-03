@@ -1131,11 +1131,9 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('Never raise agenda items or notify the owner;');
     should(text).containEql(
-      'Label every send: `--kind blocker` (stuck until answered), `--kind action` (default; to do), `--kind fyi` (rarely; no action).',
+      "Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end).",
     );
-    should(text).containEql(
-      "Blockers go at once, actions are combined for a minute, FYIs wait for the receiver's turn to end.",
-    );
+    should(text).containEql('batched a minute');
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
     should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
@@ -1143,7 +1141,9 @@ describe('SUB_FERRET_INSTRUCTION', () => {
       'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make; routine progress: `zz task note` on your card.',
     );
     should(text).containEql('Your final report says how the owner tests it.');
-    should(text).containEql('it moves itself (start, PR, merge, `zz signal done`). No card? Make none.');
+    should(text).containEql(
+      "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz task claim <id>`, don't ask. No card? Make none.",
+    );
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });

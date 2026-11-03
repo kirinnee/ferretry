@@ -2165,7 +2165,7 @@ describe('a card that changes hands keeps ONE gate item (&B138)', () => {
     await world.gates.backfill();
 
     // Act — `fy new --card F1` hands it to the lead's sub-ferret, which writes the card again
-    await world.board.handOver('F1', 'child', 'grandchild');
+    await world.board.handOver('F1', 'child', 'grandchild', { owner: 'child', assignee: 'child' });
     await world.gates.written('F1');
     await world.gates.backfill();
 

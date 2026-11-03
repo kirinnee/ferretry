@@ -2720,7 +2720,7 @@ function createSessionControlSubsystem(
    * The board card a start with a prompt gets (board-design.md §3.1), written after the record and before
    * the launch. Total: a board failure is said on stderr and never fails the start.
    */
-  cards: Pick<SessionCards, 'open'>,
+  cards: Pick<SessionCards, 'open' | 'startOn' | 'takeOver'>,
   /** The daemon's own directories: a start a session made is refused a folder inside them (`refuseStateHomeStart`). */
   stateHomes: StateHomeReach,
 ): SessionControlSubsystem {
@@ -2804,6 +2804,23 @@ function createSessionControlSubsystem(
         },
         await spawnAncestry(storage, sessions),
       );
+      // `fy start --card`: the existing card the new session takes over, judged BEFORE anything is claimed or written so a
+      // refusal leaves no session behind: the card must exist, be open work and be the caller's to hand down, and the
+      // session must be an ordinary ferret. A `fy new`'s delegation (already decided) takes precedence.
+      let startDelegation = delegation;
+      const explicitCard = delegation === undefined ? request.card : undefined;
+      if (explicitCard !== undefined) {
+        if (request.prompt === undefined)
+          throw new SessionControlError('invalid', '--card needs a prompt: the card is the work that prompt describes');
+        const handed = await cards.startOn(
+          request.parent,
+          explicitCard,
+          ordinaryFerret(stamped.label, stamped.provenance.wardenLineage),
+        );
+        if (handed.delegation === undefined)
+          throw new SessionControlError('card_refused', handed.refusal ?? `card ${explicitCard} cannot be handed over`);
+        startDelegation = handed.delegation;
+      }
       // PACK MODE'S LIMITS, before anything is claimed or written: a parent already running as many
       // sub-ferrets as it may, or one too deep to start its own, is refused here whichever command
       // asked (docs/pack-mode.md). A warden's own spawns are the Warden's to bound, not this.
@@ -3021,13 +3038,20 @@ function createSessionControlSubsystem(
         // THE CARD, after the record and before the launch (board-design.md §3.1): the agent's first turn
         // already has its focus card, and a start refused before here leaves none. A miner, a guide builder
         // or a warden is not work on a board. `open` never rejects: a board failure never fails a start.
-        if (request.prompt !== undefined && ordinaryFerret(stamped.label, stamped.provenance.wardenLineage))
+        // An EXPLICIT `--card` is the opposite: the handover must succeed, or the session is stopped and the start
+        // refused, so nothing launches on a card it was not given.
+        if (explicitCard !== undefined && startDelegation !== undefined) {
+          const taken = await cards.takeOver(startDelegation, id, async reason => {
+            await lifecycle.stop(id, reason);
+          });
+          if (taken.refusal !== undefined) throw new SessionControlError('card_refused', taken.refusal);
+        } else if (request.prompt !== undefined && ordinaryFerret(stamped.label, stamped.provenance.wardenLineage))
           await cards.open({
             sessionId: id,
             name: request.name,
             brief: request.prompt,
             parent: request.parent,
-            delegation,
+            delegation: startDelegation,
           });
         await lifecycle.start(
           id,
@@ -3038,6 +3062,11 @@ function createSessionControlSubsystem(
               },
         );
       } catch (error) {
+        // A refused card is the caller's to read, not a launch failure: the record was stopped with the reason.
+        if (error instanceof SessionControlError) {
+          if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+          throw error;
+        }
         // The record survives a failed launch with the reason in it, so the failure is answered with
         // the session that holds the evidence rather than an error the caller cannot follow up.
         const failed = storage.findSession(id) === undefined ? undefined : await view(id).catch(() => undefined);

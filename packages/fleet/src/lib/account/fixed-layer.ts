@@ -495,8 +495,8 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 /** What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. */
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
-    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make; routine progress: \`${fy} task note\` on your card. Label every send: \`--kind blocker\` (stuck until answered), \`--kind action\` (default; to do), \`--kind fyi\` (rarely; no action). Blockers go at once, actions are combined for a minute, FYIs wait for the receiver's turn to end. Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). No card? Make none. Your final report says how the owner tests it.`,
+    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make; routine progress: \`${fy} task note\` on your card. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
+    `With a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none. Your final report says how the owner tests it.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

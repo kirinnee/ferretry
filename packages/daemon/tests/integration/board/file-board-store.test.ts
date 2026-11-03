@@ -7,9 +7,9 @@ import should from 'should';
 import { FileBoardStore } from '../../../src/adapters/board/file-board-store.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/index.ts';
-import { BoardUnavailableError } from '../../../src/lib/board/index.ts';
+import { BoardService, BoardUnavailableError, SessionCards } from '../../../src/lib/board/index.ts';
 import { createFoundationPaths, type FileSystemPort, resolveStateHome } from '../../../src/lib/index.ts';
-import { card } from '../../unit/board/support.ts';
+import { card, FakeFocus, FakeLanes, PROJECT, world } from '../../unit/board/support.ts';
 
 /**
  * The board's source of truth over a real state home: one file per card, a machine-wide counter, and a
@@ -497,5 +497,77 @@ describe('the file board store, racing a hand edit', () => {
     should(BoardTaskSchema.parse(JSON.parse(await readFile(join(tasks, 'F1.json'), 'utf8'))).title).equal(
       'Board store',
     );
+  });
+});
+
+describe('the file board store when a committed write cannot be read back', () => {
+  /** The real filesystem whose NEXT identified read fails once, as an EIO or EMFILE would. */
+  const failingOnce = () => {
+    const state = { armed: false };
+    const wrap = (files: FileSystemPort): FileSystemPort =>
+      overriding(files, {
+        readTextIdentified: async (path: string) => {
+          if (state.armed) {
+            state.armed = false;
+            throw new Error('EMFILE: too many open files');
+          }
+          return await files.readTextIdentified?.(path);
+        },
+      });
+    return { state, wrap };
+  };
+
+  it('should keep the write it committed, say so, and notice a later outside edit', async () => {
+    // Arrange
+    const { state, wrap } = failingOnce();
+    const { tasks, store, warnings } = await fixture(wrap);
+    await store.read();
+    state.armed = true;
+
+    // Act
+    const result = await store.write('F1', async () => ({ task: card({ title: 'Committed' }), result: 'done' }));
+    await writeFile(join(tasks, 'F1.json'), json(card({ title: 'Edited by hand' })));
+    const changed = await store.noticeOutsideEdits();
+
+    // Assert
+    should(result).equal('done');
+    should(warnings.join('\n')).containEql('board card F1 was saved, but its file could not be read back');
+    should(changed).eql(['F1']);
+    should((await store.read()).cards[0]?.title).equal('Edited by hand');
+  });
+
+  it('should not stop a session whose card assignment was committed before the read-back failed', async () => {
+    // Arrange
+    const { state, wrap } = failingOnce();
+    const { store, warnings } = await fixture(wrap);
+    await store.write('F9', async () => ({ task: card({ id: 'F9', owner: 'lead' }), result: undefined }));
+    const focus = new FakeFocus();
+    const service = new BoardService({ ...world(), store, focus });
+    const cards = new SessionCards({
+      board: service,
+      lanes: new FakeLanes(),
+      starts: { projectForStart: async () => PROJECT },
+      switches: { isOn: async () => true },
+      proposer: { propose: async () => null },
+      projects: { nameOf: async () => 'Ferretry' },
+      focus,
+      diagnostics: { warn: message => warnings.push(message) },
+      bin: 'fy',
+    });
+    const stopped: string[] = [];
+    const { delegation } = await cards.startOn('lead', 'F9');
+    state.armed = true;
+
+    // Act
+    const taken = await cards.takeOver(delegation as NonNullable<typeof delegation>, 'child', async reason => {
+      stopped.push(reason);
+    });
+
+    // Assert
+    should(taken.refusal).be.undefined();
+    should(taken.opened?.card).match({ id: 'F9', assignee: 'child' });
+    should(stopped).be.empty();
+    should(warnings.join('\n')).containEql('board card F9 was saved, but its file could not be read back');
+    should((await store.read()).cards.find(entry => entry.id === 'F9')?.assignee).equal('child');
   });
 });

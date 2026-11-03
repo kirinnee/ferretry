@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   buildAssignAction,
+  buildClaimAction,
   buildBlockAction,
   buildBoardCreateRequest,
   buildBoardQuery,
@@ -353,6 +354,7 @@ describe('the action builders', () => {
     // Act + Assert
     should(buildAssignAction('sess-1')).eql({ action: 'assign', assignee: 'sess-1' });
     should(buildAssignAction(null)).eql({ action: 'assign', assignee: null });
+    should(buildClaimAction()).eql({ action: 'claim' });
   });
 
   it('should join the note words and refuse an empty note', () => {

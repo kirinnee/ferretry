@@ -60,6 +60,9 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
     case 'linked':
       return `linked ${event.field}: ${event.value}`;
     case 'assigned':
+      if (event.claimedFrom !== undefined && event.to !== null) {
+        return `claimed by ${names(event.to)} from ${names(event.claimedFrom)}`;
+      }
       if (event.returnedFrom !== undefined && event.to !== null) {
         return `returned to ${names(event.to)}: ${names(event.returnedFrom)} finished`;
       }
