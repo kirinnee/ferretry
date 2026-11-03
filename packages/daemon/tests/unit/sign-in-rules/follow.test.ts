@@ -190,7 +190,7 @@ describe('the rest of the account store, followed (secrev-1274b L4)', () => {
     const w = await world();
     await w.directory.proposeSignIn(w.signIn, PROPOSAL('rp_0000000000000001'));
     should(await w.status()).equal('active');
-    await w.directory.decideSignIn(w.signIn, 'rp_0000000000000001', 'approve');
+    await w.directory.decideSignIn(w.signIn, 'rp_0000000000000001', { decision: 'approve' });
     should(await w.status()).equal('recipe-changed');
   });
 

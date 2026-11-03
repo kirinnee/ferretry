@@ -50,7 +50,10 @@ target again before Send is allowed.
 
 The daemon closes the card the moment its request ends, and an app showing it open closes its view
 with it, saying how it ended. The view stays only while a Send from it is on its way or a follow-up
-offer ("Always use…", "Don't ask again…") is on screen. The card says the agent's prompt once, under
+offer ("Always use…", "Don't ask again…") is on screen and not yet carried out; finishing the last one
+lets it close. Only a view the owner saw open closes by itself, and only during that opening: leaving
+the view, or opening the closed record again from the history, starts afresh, and a hold never outlives
+the opening that made it. The card says the agent's prompt once, under
 the daemon's facts: the context's last line (after `INPUT_PROMPT_MARKER`, "The agent says: ") is
 for a restarted daemon and an app that cannot draw the form.
 
@@ -804,11 +807,17 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   and one that signs in nowhere too. A rule suggestion (`preapprove`) resolves the sign-in with the same decision,
   codes and words, so the two halves of one call never answer differently. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
   a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change on github.com" (the place only: agenda text is every ferret's to
-  read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
-  approves or declines in Settings › Accounts › the account › the place › Recipe, or with
-  `fy account site recipe approve|decline <sign-in> <proposal>`, through the owner-only
+  read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". The card carries the daemon's `recipeProposal` ref
+  (`{ signIn, id }`, which no agenda add can set), so the app draws the steps, what Ferretry saw and the ferret's
+  words on the card, with **Approve, Edit ("Approve my version") and Decline right there** (owner decision !A320).
+  The generic agenda answer refuses the card (`use_input_form`): it approves nothing. Every door is the owner-only
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
-  proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record).
+  proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record):
+  the card, Settings › Accounts › the account › the place › Recipe, and `fy account site recipe approve|decline
+<sign-in> <proposal>`. **Approving from a paired device wants a passkey** proved for that act (`approve-recipe`,
+  claimed once at admission, [grants.md](grants.md)); the machine itself is ungoverned, and a decline never asks. An
+  approval may carry the owner's own `recipe`: it becomes the recipe instead of the ferret's text, in the same act,
+  checked for values like any recipe, and it is the owner's (no `recipeBy`).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
   was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE sign-in lets a
   proposal apply at once; that is audited (`login-recipe-auto`, with the sign-in) and marked as the ferret's.

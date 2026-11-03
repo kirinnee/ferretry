@@ -249,8 +249,8 @@ export interface BoardOptIn {
 
 /** What the owner said to a session, for deciding whether a card's ask is theirs. */
 export interface OwnerWords {
-  /** The owner's messages to a session, first turn included; empty when it cannot tell. Never throws. */
-  said(sessionId: string): Promise<readonly string[]>;
+  /** Best effort by default. Strict reads reject incomplete/unreadable records instead of guessing nobody spoke. */
+  said(sessionId: string, options?: { readonly strict?: boolean }): Promise<readonly string[]>;
 }
 
 /** The agenda threads a card may be made to carry out (`fy task create --thread`): linked to the card, nothing more. */

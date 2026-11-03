@@ -48,7 +48,7 @@ export interface ChatTasksProps {
   readonly now: number;
   /** Where a link inside the drawer that is not a card of this ferret goes. */
   readonly onNavigate?: (to: string) => void;
-  /** "Ferret cards" on or off (`chat.agents` is its current value). */
+  /** "Show private" on or off (`chat.agents` is its current value). */
   readonly onAgents: (agents: boolean) => void;
   /** The tab fills the chat, at page density; the button then collapses it. */
   readonly expanded?: boolean;

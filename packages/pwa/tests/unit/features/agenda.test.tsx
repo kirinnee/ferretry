@@ -1338,6 +1338,20 @@ describe('an input card that ends while it is open (#B147)', () => {
     expect(textOf(said[0])).toContain('closed');
   });
 
+  test('says only that it is closed when the daemon closed it without a note', () => {
+    const view = openInput();
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', null)])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(false);
+    expect(textOf(sentLine(view)[0])).toContain('!A7 is closed.');
+  });
+
   test('closes its view once the card sent from here has nothing more to show, in the card’s own words', () => {
     const view = openInput();
     run(() => inputHost(view).props.onHold(true));
@@ -1426,6 +1440,57 @@ describe('an input card that ends while it is open (#B147)', () => {
       ),
     );
     expect(live().covered).toBe(true);
+  });
+
+  const resolveA7 = (view: ReturnType<typeof render>, seq: number, note = 'Input request delivered.') =>
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', note)])}
+          focus={{ target: 'A7' as AgendaId, seq }}
+        />,
+      ),
+    );
+
+  test('a closed input card the view already closed on opens again from the history and stays to be read', () => {
+    const view = openInput();
+    resolveA7(view, 1);
+    expect(live().covered).toBe(false);
+    // The owner picks !A7 from the history, or a chat reference to it.
+    resolveA7(view, 2);
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+  });
+
+  test('an input card left before it ended stays to be read when it is opened from the history later', () => {
+    const view = openInput();
+    run(() => view.root.findByType(AgendaItemView).props.onClose());
+    expect(live().covered).toBe(false);
+    resolveA7(view, 2);
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+  });
+
+  test('a hold left by a view that went away is not carried into the next opening of the request', () => {
+    const view = openInput();
+    const gone = inputHost(view).props.onHold;
+    run(() => gone(true));
+    run(() => view.root.findByType(AgendaItemView).props.onClose());
+    // The same request, opened again while it is still waiting.
+    run(() =>
+      view.update(
+        <Host snapshot={board([inputItem('A7'), item('A2')])} focus={{ target: 'A7' as AgendaId, seq: 2 }} />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    // The card that went away finishes late: it cannot hold, release or close the new opening.
+    run(() => gone(true));
+    run(() => gone(false, 'Sent to %terminal:dev.'));
+    expect(live().covered).toBe(true);
+    // The request ends: nothing holds the new opening, so it closes by itself.
+    resolveA7(view, 2);
+    expect(live().covered).toBe(false);
+    expect(sentLine(view)[0]?.props['data-tone']).toBe('info');
   });
 
   test('any other item the ferret closes while it is open stays on screen as before', () => {

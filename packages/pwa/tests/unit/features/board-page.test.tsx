@@ -1,3 +1,4 @@
+import { boardPrivate } from '../../../src/lib/board-private-preference.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { boardErr, boardOk } from '@ferretry/protocol';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
@@ -28,6 +29,7 @@ let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  boardPrivate.set(false);
 });
 
 const OPEN = [
@@ -345,6 +347,50 @@ describe('BoardPage — human and agent tasks', () => {
     expect(toggle(root)?.checked).toBe(false);
     await click(root, '[data-filter="agents"]');
     expect(searches).toEqual(['agents=1']);
+  });
+
+  it('remembers the toggle on this device, so a plain Board link opens with private cards shown', async () => {
+    const first = await open({ open: SPLIT });
+    await click(first.root, '[data-filter="agents"]');
+    expect(boardPrivate.snapshot()).toBe(true);
+    await view?.unmount();
+    const later = await open({ open: SPLIT });
+    expect(titles(later.root)).toEqual(['Ask from the owner', 'Made by a ferret']);
+    expect(toggle(later.root)?.checked).toBe(true);
+  });
+
+  it('lets a link that names the choice win over the device, and changes nothing on the device', async () => {
+    boardPrivate.set(true);
+    const hidden = await open({ open: SPLIT, props: { search: 'agents=0' } });
+    expect(titles(hidden.root)).toEqual(['Ask from the owner']);
+    expect(boardPrivate.snapshot()).toBe(true);
+    await view?.unmount();
+    boardPrivate.set(false);
+    const shown = await open({ open: SPLIT, props: { search: 'agents=1' } });
+    expect(titles(shown.root)).toEqual(['Ask from the owner', 'Made by a ferret']);
+    expect(boardPrivate.snapshot()).toBe(false);
+  });
+
+  it('turns the device choice off again, and says so in the link when the link had it on', async () => {
+    boardPrivate.set(true);
+    const { root, searches } = await open({ open: SPLIT });
+    await click(root, '[data-filter="agents"]');
+    expect(boardPrivate.snapshot()).toBe(false);
+    expect(searches).toEqual(['']);
+  });
+
+  it('hides a card the daemon calls private, even one a person asked for, and shows one it calls public', async () => {
+    const told = [
+      originCard('F1', 'human', null, { title: 'Public ask', laneId: 'implement', visibility: 'public' }),
+      originCard('F2', 'human', null, { title: 'Hidden by the owner', laneId: 'implement', visibility: 'private' }),
+      originCard('F3', 'agent', null, { title: 'Published ferret card', laneId: 'implement', visibility: 'public' }),
+    ];
+    const { root } = await open({ open: told });
+    expect(titles(root)).toEqual(['Public ask', 'Published ferret card']);
+    expect(toggle(root)?.checked).toBe(false);
+    await view?.unmount();
+    const all = await open({ open: told, props: { search: 'agents=1' } });
+    expect(titles(all.root)).toEqual(['Public ask', 'Hidden by the owner', 'Published ferret card']);
   });
 
   it('keeps the toggle when Clear resets the other filters', async () => {

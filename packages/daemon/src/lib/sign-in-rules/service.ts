@@ -46,7 +46,7 @@ import type { AuditSink } from '../audit/types.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
 import type { PasskeysChange } from '../step-up/passkeys-changed.ts';
 import { type RuleListing, ruleDrift, samePins, snapshotPins } from './drift.ts';
-import { ineligibleBecause, ruleSurfaceOf, tappedCount } from './eligibility.ts';
+import { ineligibleBecause, ruleSurfaceOf, tapProgress, tappedCount } from './eligibility.ts';
 import { checkRuleProof, ruleChallenge, type SignInRuleProofPort } from './proof.ts';
 import { auditText } from './words.ts';
 
@@ -387,8 +387,12 @@ export class SignInRuleService {
     return { health: this.#health === 'damaged' ? 'damaged' : 'ok', rules, stages };
   }
 
-  /** Whether the owner could make a rule for this sign-in now, and why not; its rule, when it has one. */
-  async eligibility(caller: PasteRuleCaller, signIn: SignInId): Promise<SignInRuleEligibility> {
+  /**
+   * Whether the owner could make a rule for this sign-in now, and why not; its rule, when it has one. `progress`: a
+   * `no-history` answer also says how far the owner is (`history`), for an app that asked (an older one's strict read
+   * would refuse the field).
+   */
+  async eligibility(caller: PasteRuleCaller, signIn: SignInId, progress = false): Promise<SignInRuleEligibility> {
     const owner = requireOwner(caller);
     this.#ready();
     const listing = await this.#listing();
@@ -401,7 +405,13 @@ export class SignInRuleService {
       ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
     return because === undefined
       ? { signIn, eligible: true, history: tappedCount(found), ...(rule === undefined ? {} : { rule }) }
-      : { signIn, eligible: false, because, ...(rule === undefined ? {} : { rule }) };
+      : {
+          signIn,
+          eligible: false,
+          because,
+          ...(rule === undefined ? {} : { rule }),
+          ...(progress && because === 'no-history' ? { history: tapProgress(found) } : {}),
+        };
   }
 
   // ── Stage, approve, drop ──────────────────────────────────────────────────────────────────────────

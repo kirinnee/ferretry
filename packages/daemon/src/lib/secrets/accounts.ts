@@ -38,6 +38,7 @@ import {
   type LoginFieldRole,
   type LoginMethod,
   type LoginObservation,
+  type LoginRecipeDecision,
   type LoginRecipeProposal,
   type LoginMethodRecord,
   LOGIN_RECIPE_PROPOSALS_MAX,
@@ -1034,10 +1035,10 @@ export class AccountDirectory {
   async decideSignIn(
     id: SignInId,
     proposalId: string,
-    decision: 'approve' | 'decline',
+    answer: LoginRecipeDecision,
   ): Promise<{ readonly signIn: SignInSummary; readonly proposal: LoginRecipeProposal }> {
     return await this.transact(draft => {
-      const { proposal } = decideOn(draft, id, this.signInIn(draft, id), proposalId, decision);
+      const { proposal } = decideOn(draft, id, this.signInIn(draft, id), proposalId, answer);
       return { signIn: signInSummary(id, draft.signIns[id] as SignInRecord, draft.accounts, draft.signIns), proposal };
     });
   }
@@ -1361,8 +1362,9 @@ export function decideOn(
   id: SignInId,
   signIn: SignInRecord,
   proposalId: string,
-  decision: 'approve' | 'decline',
+  answer: LoginRecipeDecision,
 ): { readonly proposal: LoginRecipeProposal } {
+  const { decision } = answer;
   const proposal = signIn.proposals?.find(waiting => waiting.id === proposalId);
   if (proposal === undefined)
     throw new LoginEntryError(
@@ -1377,11 +1379,12 @@ export function decideOn(
   const proposals = (signIn.proposals ?? []).filter(waiting => waiting.id !== proposalId);
   const { proposals: _old, ...rest } = signIn;
   const bare: SignInRecord = { ...rest, ...(proposals.length === 0 ? {} : { proposals }) };
-  // An approved recipe is the owner's: whoever wrote it before, a person has now read it.
+  // An approved recipe is the owner's: whoever wrote it before, a person has now read it. "Approve my version" puts
+  // the owner's own text in the ferret's place, against the same base (the stale check above holds for both).
   draft.signIns[id] =
-    decision === 'approve'
+    answer.decision === 'approve'
       ? (() => {
-          const { recipeBy: _by, ...owned } = withRecipe(bare, proposal.recipe, draft.at);
+          const { recipeBy: _by, ...owned } = withRecipe(bare, answer.recipe ?? proposal.recipe, draft.at);
           return { ...owned, updatedAt: draft.at };
         })()
       : bare;

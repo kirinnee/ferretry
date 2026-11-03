@@ -21,6 +21,7 @@ import {
 import { type BoardIndex, blockedBy, cardCategory, type LaneSets, shippedIn } from './graph.ts';
 import { askSessionOf, cardAskedBy, cardOrigin, humanParentOf, type OriginFacts } from './origin.ts';
 import type { ActivityDeriver, AgendaLinkSource, CardActivity, CardAsks, SessionParents } from './ports.ts';
+import { cardVisibility } from './visibility.ts';
 
 export interface DerivationInputs {
   readonly index: BoardIndex;
@@ -126,6 +127,7 @@ export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTask
     shippedIn: shippedIn(card),
     origin: cardOrigin(card, origins),
     askedBy: card.askedBy ?? cardAskedBy(card),
+    visibility: cardVisibility(card),
     humanParent: humanParentOf(card, inputs.index, ancestor => cardOrigin(ancestor, origins)),
   };
 };

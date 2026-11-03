@@ -6,6 +6,7 @@ import {
   humanParentKey,
   humanScope,
   isAgentTask,
+  isPrivateCard,
   splitAvailable,
   taskAsker,
 } from '../../src/lib/board-human.ts';
@@ -48,6 +49,28 @@ describe('who asked for a card', () => {
     expect(splitAvailable([card('F1'), originCard('F2', 'agent')])).toBe(true);
     expect(splitAvailable([{ origin: 'agent' }])).toBe(true);
     expect(splitAvailable([])).toBe(false);
+  });
+});
+
+describe('private cards', () => {
+  const sub = { parent: { id: 'F1' } };
+
+  it('believes the daemon’s visibility over who asked', () => {
+    expect(isPrivateCard(card('F2', { askedBy: 'person', visibility: 'private' }))).toBe(true);
+    expect(isPrivateCard(card('F3', { askedBy: 'agent', visibility: 'public' }))).toBe(false);
+    expect(isPrivateCard(card('F4', { ...sub, askedBy: 'person', visibility: 'public' }))).toBe(false);
+  });
+
+  it('falls back to the older rule for a card whose daemon sends no visibility', () => {
+    expect(isPrivateCard(card('F2', { askedBy: 'agent' }))).toBe(true);
+    expect(isPrivateCard(card('F3', { ...sub, askedBy: 'agent' }))).toBe(true);
+    expect(isPrivateCard(card('F4', { ...sub, askedBy: 'person' }))).toBe(false);
+    expect(isPrivateCard(card('F5', { askedBy: 'person' }))).toBe(false);
+  });
+
+  it('offers the split when a card says its visibility, even if nothing says who asked', () => {
+    expect(splitAvailable([{ visibility: 'private' }])).toBe(true);
+    expect(splitAvailable([{ visibility: 'sideways' }])).toBe(false);
   });
 });
 

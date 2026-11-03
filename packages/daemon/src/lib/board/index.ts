@@ -10,6 +10,7 @@ export * from './lane-facts.ts';
 export * from './lineage.ts';
 export * from './notice-route.ts';
 export * from './origin.ts';
+export * from './visibility.ts';
 export * from './ports.ts';
 export * from './pr-cache.ts';
 export * from './query.ts';

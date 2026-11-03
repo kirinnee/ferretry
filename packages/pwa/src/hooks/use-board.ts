@@ -17,6 +17,7 @@ import type { BoardTaskId } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
+import { boardPrivate } from '../lib/board-private-preference.ts';
 import {
   type BoardFilters,
   type BoardMachineData,
@@ -193,7 +194,18 @@ export const useBoardFilters = (
   search: string,
   navigate: (search: string) => void,
 ): readonly [BoardFilters, (next: BoardFilters) => void] => {
-  const filters = useMemo(() => parseBoardFilters(search), [search]);
-  const set = useCallback((next: BoardFilters) => navigate(boardFiltersToSearch(next).toString()), [navigate]);
+  const showPrivate = useSyncExternalStore(boardPrivate.subscribe, boardPrivate.snapshot, () => false);
+  const defaults = useMemo(() => ({ agents: showPrivate }), [showPrivate]);
+  const filters = useMemo(() => parseBoardFilters(search, defaults), [search, defaults]);
+  const set = useCallback(
+    (next: BoardFilters) => {
+      // Only the toggle itself changes the device's choice: a link that said `agents=1` does not. The toggle
+      // writes the choice into the link too (`agents=1`; off is the plain link, as the device now defaults to off).
+      const toggled = next.agents !== filters.agents;
+      if (toggled) boardPrivate.set(next.agents);
+      navigate(boardFiltersToSearch(next, toggled ? undefined : { agents: showPrivate }).toString());
+    },
+    [filters.agents, navigate, showPrivate],
+  );
   return [filters, set];
 };

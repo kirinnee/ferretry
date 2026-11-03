@@ -26,6 +26,8 @@ export interface SignInRuleOfferProps {
   readonly askPasskey: RulesBinding['askPasskey'];
   /** Whether there is an offer to show, once the daemon answered (`false` too when it could not). */
   readonly onOffered?: (offered: boolean) => void;
+  /** The owner approved the rule: the offer is carried out. */
+  readonly onSaved?: () => void;
 }
 
 interface Found {
@@ -33,7 +35,7 @@ interface Found {
   readonly account: AccountSummary;
 }
 
-export function SignInRuleOffer({ client, signIn, askPasskey, onOffered }: SignInRuleOfferProps) {
+export function SignInRuleOffer({ client, signIn, askPasskey, onOffered, onSaved }: SignInRuleOfferProps) {
   const [found, setFound] = useState<Found | undefined>(undefined);
   const [reading, setReading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -80,6 +82,7 @@ export function SignInRuleOffer({ client, signIn, askPasskey, onOffered }: SignI
         onSettled={() => {
           setFound(undefined);
           setSaved(true);
+          onSaved?.();
         }}
         origin="owner"
         place={found.signIn.place}

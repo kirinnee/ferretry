@@ -359,3 +359,125 @@ describe('fy board', () => {
     should(() => JSON.parse(output.lines.join('\n'))).not.throw();
   });
 });
+
+describe('fy task create --private / --public', () => {
+  it.each([
+    ['--private', 'private'],
+    ['--public', 'public'],
+  ] as const)('should send %s as the card visibility', async (flag, visibility) => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run(...creating, flag);
+
+    // Assert
+    should(gateway.created?.request).have.property('visibility', visibility);
+  });
+
+  it('should leave visibility to the daemon when neither flag is given', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run(...creating);
+
+    // Assert
+    should(gateway.created?.request).not.have.property('visibility');
+  });
+
+  it('should refuse both flags before any request', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    const attempt = run(...creating, '--private', '--public');
+
+    // Assert
+    await should(attempt).rejected();
+    should(gateway.created).be.undefined();
+  });
+});
+
+describe('fy task edit --visibility', () => {
+  it('should send visibility alone as one edit', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('task', 'edit', 'F412', '--visibility', 'private');
+
+    // Assert
+    should(gateway.acted?.request).eql({ action: 'edit', visibility: 'private' });
+  });
+
+  it('should send visibility beside card text as the same single edit', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('task', 'edit', 'F412', '--title', 'Changed', '--visibility', 'public');
+
+    // Assert
+    should(gateway.acted?.request).eql({ action: 'edit', title: 'Changed', visibility: 'public' });
+  });
+
+  it('should refuse a visibility that is neither public nor private before any request', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    const attempt = run('task', 'edit', 'F412', '--title', 'Changed', '--visibility', 'secret');
+
+    // Assert
+    await should(attempt).rejected();
+    should(gateway.acted).be.undefined();
+  });
+});
+
+describe('fy board --private / --all', () => {
+  it('should query the public cards only by default', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('board');
+
+    // Assert
+    should(gateway.queried).have.property('visibility', 'public');
+  });
+
+  it('should query the private cards with --private', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('board', '--private');
+
+    // Assert
+    should(gateway.queried).have.property('visibility', 'private');
+  });
+
+  it('should leave visibility out with --all so every card comes back', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('board', '--all');
+
+    // Assert
+    should(gateway.queried).not.have.property('visibility');
+  });
+
+  it('should refuse --private with --all', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    const attempt = run('board', '--private', '--all');
+
+    // Assert
+    await should(attempt).rejected();
+    should(gateway.queried).be.undefined();
+  });
+});

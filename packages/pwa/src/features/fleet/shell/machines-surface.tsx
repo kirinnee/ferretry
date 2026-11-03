@@ -130,6 +130,8 @@ export interface MachinesSurfaceProps {
   readonly daemonPanels?: DaemonPanelsRenderer;
   /** Forget a pairing in this browser — offered here for one a newer pairing replaced. */
   readonly onRemove?: (daemonId: DaemonId) => void;
+  /** Where these settings live ("This machine … shared by every device"), drawn under the machine's name. */
+  readonly scope?: ReactNode;
 }
 
 export function MachinesSurface({
@@ -146,6 +148,7 @@ export function MachinesSurface({
   tabs = {},
   daemonPanels,
   onRemove,
+  scope,
 }: MachinesSurfaceProps) {
   const record = connections.find(candidate => candidate.daemonId === daemonId);
 
@@ -153,9 +156,12 @@ export function MachinesSurface({
 
   if (record === undefined)
     return (
-      <p className="m-0 text-ui leading-base text-warn" role="alert">
-        This machine is not paired with this browser, so its setup cannot be shown.
-      </p>
+      <>
+        {scope}
+        <p className="m-0 text-ui leading-base text-warn" role="alert">
+          This machine is not paired with this browser, so its setup cannot be shown.
+        </p>
+      </>
     );
 
   const name = distinctDaemonName(record, connections);
@@ -175,6 +181,7 @@ export function MachinesSurface({
           <AccountStatus word={reachWord(reach)} label={reachLabel(reach)} />
           <span className="min-w-0 truncate">{shownReachSummary(reach)}</span>
         </span>
+        {scope}
       </header>
 
       {/* An old pairing a newer one replaced: nothing answers it, so the one useful thing is to remove it. */}
