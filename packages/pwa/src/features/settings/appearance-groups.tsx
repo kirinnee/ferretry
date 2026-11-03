@@ -45,12 +45,12 @@ const WIDTH_HINT: Readonly<Record<ChatWidth, string>> = {
 
 const OPEN_LINK_LABEL: Readonly<Record<OpenLinksIn, string>> = {
   browser: 'Your browser',
-  panel: 'Side panel',
-  computer: 'Default browser',
+  panel: 'Ferretry side panel',
+  computer: "Your computer's default browser",
 };
 
 const COMPUTER_LINKS_NOTE =
-  'Default browser opens links in whichever browser this computer picks, so a link router can choose the profile.';
+  "Your computer's default browser opens links in whichever browser this computer picks, so a link router can choose the profile.";
 
 /** The sentence each choice carries, one per line, so the (i) says what every option does and not only the chosen one. */
 function OptionNotes({ notes }: { readonly notes: readonly (readonly [label: string, text: string])[] }) {

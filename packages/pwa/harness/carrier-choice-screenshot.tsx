@@ -37,6 +37,7 @@ import { createRoot } from 'react-dom/client';
 import { chooseConnection } from '@ferretry/relay';
 import { DaemonSettingsFrame } from '../../src/features/settings/daemon-settings-frame.tsx';
 import { ConnectionPreferenceSettings } from '../../src/features/settings/connection-preference-settings.tsx';
+import { SettingGroup } from '../../src/features/settings/setting-row.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 
 const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.local:7431', deviceId: 'harness' });
@@ -90,8 +91,7 @@ function Scene({ scene }) {
 function Device() {
   const [preferences, setPreferences] = useState({ studio: 'relay', laptop: 'auto' });
   return (
-    <section className="kt-panel p-panel">
-      <h3 className="m-0 mb-3 text-row font-semibold text-fg">Connection</h3>
+    <SettingGroup label="Connection">
       <ConnectionPreferenceSettings
         machines={[
           { daemonId: 'studio', label: 'studio', preference: preferences.studio, availability: { webrtc: false } },
@@ -104,7 +104,7 @@ function Device() {
         ]}
         onChange={(daemonId, preference) => setPreferences(current => ({ ...current, [daemonId]: preference }))}
       />
-    </section>
+    </SettingGroup>
   );
 }
 
@@ -182,7 +182,7 @@ try {
         });
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=studio-${scheme}`);
-        await page.locator('[data-scene="device"] [data-connection-preferences]').waitFor({ state: 'visible' });
+        await page.locator('[data-scene="device"] [data-setting-row]').waitFor({ state: 'visible' });
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (overflow > 0) fail(`${scheme} ${viewport.name} scrolls sideways by ${overflow}px`);
         for (const name of SCENES) {

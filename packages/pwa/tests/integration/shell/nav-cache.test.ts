@@ -110,7 +110,7 @@ describe('navigation without reloads, and the session cache, in the real shell (
         await stall(tab);
 
         // Act: clear the cache, then a held reload of the list.
-        await tab.click('[data-clear-cached-data] button:has-text("Clear cached data")');
+        await tab.click('[data-clear-cached-data] button:has-text("Clear")');
         await tab.click('[data-clear-cached-data="confirming"] button:has-text("Clear")');
         await tab.waitForSelector('[data-clear-cached-data="cleared"]');
         await nextBoot(tab, { hold: true });

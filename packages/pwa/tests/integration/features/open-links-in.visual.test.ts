@@ -125,7 +125,7 @@ describe('Settings › Appearance › Open links in', () => {
       const tab = await openSettings(context, 'light');
       const row = tab.locator('[data-setting-id="open-links-in"]');
       expect(await row.innerText()).toContain('Open links in');
-      expect(await row.innerText()).toContain('Cmd/Ctrl-click always opens a new tab.');
+      expect(await row.innerText()).toContain('Cmd/Ctrl-click always opens a new tab');
       const radios = row.locator('input[type="radio"]');
       expect(await radios.count()).toBe(2);
       expect(await radios.nth(0).isChecked()).toBe(true);

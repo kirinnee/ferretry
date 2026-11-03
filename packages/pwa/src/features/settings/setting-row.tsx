@@ -60,9 +60,20 @@ export interface SettingRowProps {
   readonly wide?: boolean;
   /** Content under the row that is always shown, for example a list the control reveals. */
   readonly children?: ReactNode;
+  /** `data-*` attributes on the row itself, for a row whose state a test or a stylesheet reads. */
+  readonly dataAttributes?: Readonly<Record<`data-${string}`, string>>;
 }
 
-export function SettingRow({ settingId, name, hint, explanation, control, wide = false, children }: SettingRowProps) {
+export function SettingRow({
+  settingId,
+  name,
+  hint,
+  explanation,
+  control,
+  wide = false,
+  children,
+  dataAttributes,
+}: SettingRowProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const labelId = `${id}-label`;
@@ -89,6 +100,7 @@ export function SettingRow({ settingId, name, hint, explanation, control, wide =
         ? {}
         : { id: `settings-${settingId}`, 'data-setting-id': settingId, tabIndex: -1 as const })}
       data-setting-row={name}
+      {...dataAttributes}
       className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex min-h-[var(--row-min-h)] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
@@ -227,7 +239,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
             key={option.id}
             title={option.title}
             className={cn(
-              'flex h-control-sm min-w-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-tab px-control-x text-meta font-medium transition-colors max-md:min-h-[44px] max-md:flex-1',
+              'flex h-control-sm min-w-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-tab px-control-x text-meta font-medium transition-colors max-md:h-auto max-md:min-h-[44px] max-md:flex-1 max-md:whitespace-normal max-md:py-1 max-md:text-center max-md:leading-tight',
               'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
               checked
                 ? 'border border-accent bg-accent-soft text-accent'

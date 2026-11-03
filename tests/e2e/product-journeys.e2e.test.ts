@@ -663,8 +663,8 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
       waitUntil: 'load',
       timeout: 30_000,
     });
-    await expectScreen(page, 'input[name="text-scale"][value="large"]');
-    await page.click('label:has(input[name="text-scale"][value="large"])');
+    await expectScreen(page, '[data-setting-id="text-size"] input[value="large"]');
+    await page.click('[data-setting-id="text-size"] label:has(input[value="large"])');
     await waitUntil(page, `document.documentElement.getAttribute('data-text-scale') === 'large'`, 10_000);
     return { value: undefined, evidence: 'text size Large applied (<html data-text-scale="large">)' };
   });
