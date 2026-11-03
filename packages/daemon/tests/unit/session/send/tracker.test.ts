@@ -142,6 +142,8 @@ class World {
   /** When set, each look waits here until the test releases it. */
   readonly holds: Array<() => void> = [];
   holdLooks = false;
+  /** The ledger cannot be read at all, so a look and the debt behind it both fail. */
+  listFails = false;
   readonly tracker: SendTracker;
 
   constructor(...initial: SendRecord[]) {
@@ -156,6 +158,7 @@ class World {
         ledger: {
           list: async id => {
             this.looked.push(id);
+            if (this.listFails) throw new Error('ledger unreadable');
             if (this.holdLooks) await new Promise<void>(resolve => this.holds.push(resolve));
             return [...this.records.values()];
           },
@@ -836,6 +839,24 @@ describe('a failure notice a crash interrupted', () => {
     should(world.only.noticesOwed).be.undefined();
     should(world.scheduled).be.empty();
     should(await world.tracker.watching(ID)).be.false();
+  });
+
+  it('keeps a debt it cannot read owed, and looks again once the ledger is readable', async () => {
+    const world = new World({ ...quiet(), fate: 'unaccounted', fateAt: at(15_000), noticesOwed: owedAll });
+    world.nowMs = T0 + 15_000;
+    world.listFails = true;
+
+    await world.tracker.check(ID).catch(() => undefined);
+
+    should(world.notices).be.empty();
+    should(world.scheduled.length).be.above(0);
+    should(world.scheduled.every(entry => entry.delayMs === 60_000)).be.true();
+
+    world.listFails = false;
+    await world.fireScheduled();
+
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
   });
 
   it('schedules nothing for a debt that is paid on the first look', async () => {
