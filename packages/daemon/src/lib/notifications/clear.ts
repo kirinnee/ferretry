@@ -57,7 +57,8 @@ export type AlertSeenOutcome = { readonly found: false } | { readonly found: tru
 export class AgendaAlertClearer implements AgendaChangeObserver {
   /**
    * Opens made while one of the item's pushes was still on its way, by that push's key: honoured when it lands
-   * (`recheck`), because at the open there was nothing on any screen yet to take down. In memory: a restart between the
+   * (`recheck`), because at the open there was nothing on any screen yet to take down — on ANY device, the opener's
+   * included: its page closed only what was showing when it asked. In memory: a restart between the
    * open and the push landing leaves that one line up.
    */
   private readonly pendingOpens = new Map<string, PendingOpen>();
@@ -81,7 +82,8 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
         const landed = entries.find(entry => normalizedNotificationKey(entry.requested.key) === key);
         if (landed !== undefined && landed.outcome === undefined) continue;
         this.pendingOpens.delete(key);
-        await this.send(sessionId, snapshot, { opened: open.agendaId, exceptDevice: open.exceptDevice, only: key });
+        // EVERY device, the opener's too: its page closed what was showing when it asked, and this line came after.
+        await this.send(sessionId, snapshot, { opened: open.agendaId, only: key });
       }
     }).catch(() => undefined);
   }
@@ -103,7 +105,7 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
     return await this.run(sessionId, async snapshot => {
       if (![...snapshot.items, ...snapshot.resolved].some(item => item.id === agendaId)) return { found: false };
       for (const key of inFlightAlerts(sessionId, agendaId, await this.options.ledger.entries()))
-        this.remember(key, { sessionId, agendaId, ...(exceptDevice === undefined ? {} : { exceptDevice }) });
+        this.remember(key, { sessionId, agendaId });
       return {
         found: true,
         tags: await this.send(sessionId, snapshot, {
@@ -172,7 +174,6 @@ const MAX_PENDING_OPENS = 256;
 interface PendingOpen {
   readonly sessionId: string;
   readonly agendaId: string;
-  readonly exceptDevice?: string | undefined;
 }
 
 interface SendOptions {

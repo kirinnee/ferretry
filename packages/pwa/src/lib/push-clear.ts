@@ -119,8 +119,11 @@ export const applyClear = async (
   payload: PushClearPayload,
   machine: PushMachine | null,
   origin: string,
+  order?: { readonly recent: RecentlyCleared; readonly place: number },
 ): Promise<ClearPlan> => {
   const tags = [...new Set(payload.tags.map(tag => shownTag(tag, machine)))];
+  // Remembered before anything is awaited: a push for one of these tags still on its way through this worker reads it.
+  order?.recent.remember(tags, order.place);
   const found = await Promise.all(tags.map(async tag => [tag, await registration.getNotifications({ tag })] as const));
   const showing = found.filter(([, notifications]) => notifications.length > 0).map(([tag]) => tag);
   const plan = planClear(showing, await deliveredByApple(registration), machine, origin);
@@ -131,6 +134,69 @@ export const applyClear = async (
     for (const notification of notifications) notification.close();
   }
   return plan;
+};
+
+/** How long a clear is remembered in this worker: far longer than one push handler takes to read its filter and show. */
+export const CLEARED_TAG_MEMORY_MS = 60_000;
+
+/**
+ * THE ORDER PUSHES REACHED THIS WORKER, AND WHAT EACH CLEAR TOOK DOWN.
+ *
+ * A push and the clear that follows it can be handled at once in one worker, and a push handler awaits the filter
+ * mirror before it shows anything: a clear handled in that gap finds nothing to close, and the push would then put the
+ * stale line up after it. So every push takes its place in arrival order ({@link arrived}), a clear remembers its
+ * tags with its own place, and a push is settled as the clear would have settled it ({@link settleIfCleared}) only when
+ * a clear of its tag arrived AFTER it. A push that arrives after the clear — the item woke again, a new number — is a
+ * newer line and shows as usual.
+ *
+ * In memory: a worker that stopped in between had no such race. A clear the push service delivers BEFORE the push it
+ * clears is not caught: nothing on the wire tells a stale push from a newer one, and the clear carries no more.
+ */
+export class RecentlyCleared {
+  #place = 0;
+  readonly #cleared = new Map<string, { readonly place: number; readonly at: number }>();
+
+  constructor(private readonly now: () => number) {}
+
+  /** A push event's place in this worker's arrival order. */
+  arrived(): number {
+    this.#place += 1;
+    return this.#place;
+  }
+
+  /** A clear at \`place\` took these shown tags down. */
+  remember(tags: readonly string[], place: number): void {
+    const at = this.now();
+    for (const [tag, entry] of this.#cleared) if (at - entry.at > CLEARED_TAG_MEMORY_MS) this.#cleared.delete(tag);
+    for (const tag of tags) this.#cleared.set(tag, { place, at });
+  }
+
+  /** Whether a clear of \`tag\` arrived after the push at \`place\`, within memory. */
+  clearedAfter(tag: string, place: number): boolean {
+    const entry = this.#cleared.get(tag);
+    return entry !== undefined && entry.place > place && this.now() - entry.at <= CLEARED_TAG_MEMORY_MS;
+  }
+}
+
+/**
+ * A push at \`place\`, about to show or just shown under \`tag\`, that a later clear took down meanwhile: settled as that
+ * clear would have — whatever is under the tag closed, or on Apple's service replaced by the quiet line (a push must
+ * show something there). Answers whether it was.
+ */
+export const settleIfCleared = async (
+  registration: ClearRegistration,
+  tag: string,
+  recent: RecentlyCleared,
+  place: number,
+  machine: PushMachine | null,
+  origin: string,
+): Promise<boolean> => {
+  if (!recent.clearedAfter(tag, place)) return false;
+  const showing = await registration.getNotifications({ tag });
+  const plan = planClear([tag], await deliveredByApple(registration), machine, origin);
+  if (plan.show !== undefined) await registration.showNotification(plan.show.title, plan.show.options);
+  if (plan.close.includes(tag)) for (const notification of showing) notification.close();
+  return true;
 };
 
 /**

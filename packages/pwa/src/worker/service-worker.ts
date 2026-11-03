@@ -41,7 +41,7 @@ import { shouldShowNotification } from '../lib/notification-filter.ts';
 import { readMirroredNotificationFilter } from '../lib/notification-filter-mirror.ts';
 import { notificationWindow, openInWindow } from '../lib/notification-open.ts';
 import { notificationBrand, showGroupedNotification } from '../lib/notify.ts';
-import { applyClear, type ClearRegistration } from '../lib/push-clear.ts';
+import { applyClear, type ClearRegistration, RecentlyCleared, settleIfCleared } from '../lib/push-clear.ts';
 import {
   filteredPushNotification,
   machineNotification,
@@ -106,6 +106,9 @@ const worker = globalThis as unknown as WorkerScope;
 const origin = worker.location.origin;
 /** The machine this copy serves, or `null` for the app-wide registration. Fixed for the worker's life. */
 const machine = pushMachineOf(worker.registration.scope, worker.location.href);
+
+/** The tags this worker cleared a moment ago, so a push still on its way through it cannot put a stale line back. */
+const recentlyCleared = new RecentlyCleared(() => Date.now());
 
 const network = new FetchReleaseNetwork((input, init) => globalThis.fetch(input, init), origin);
 const keeper = new ReleaseKeeper({
@@ -175,6 +178,8 @@ worker.addEventListener('message', event => {
 });
 
 worker.addEventListener('push', event => {
+  // Its place in arrival order, taken before anything is awaited (`RecentlyCleared`).
+  const place = recentlyCleared.arrived();
   let payload: unknown = null;
   try {
     payload = event.data?.json() ?? null;
@@ -196,7 +201,7 @@ worker.addEventListener('push', event => {
       }
       // A handled item: its notifications come down here, never through the filter — a clear carries nothing to hide.
       if (parsed.data.kind === 'clear') {
-        await applyClear(worker.registration, parsed.data, machine, origin);
+        await applyClear(worker.registration, parsed.data, machine, origin, { recent: recentlyCleared, place });
         return;
       }
       // Every daemon sends every event now (no server-side filter left to consult — see
@@ -216,12 +221,15 @@ worker.addEventListener('push', event => {
         await worker.registration.showNotification(quiet.title, quiet.options);
         return;
       }
-      await showGroupedNotification(
-        worker.registration,
+      const shown =
         machine === null
           ? unverifiedNotification(parsed.data, origin)
-          : machineNotification(parsed.data, machine, origin),
-      );
+          : machineNotification(parsed.data, machine, origin);
+      // A clear for this line that arrived after this push, while it read its filter, settles it as the clear would have...
+      if (await settleIfCleared(worker.registration, shown.tag, recentlyCleared, place, machine, origin)) return;
+      await showGroupedNotification(worker.registration, shown);
+      // ...and so does one that arrived while it was being shown, when the clear found nothing yet to take down.
+      await settleIfCleared(worker.registration, shown.tag, recentlyCleared, place, machine, origin);
     })().catch(() => undefined),
   );
 });

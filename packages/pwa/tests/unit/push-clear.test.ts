@@ -9,6 +9,7 @@ import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON } from '../../src/lib/notify.ts';
 import {
   applyClear,
+  CLEARED_TAG_MEMORY_MS,
   type ClearRegistration,
   closeShownTags,
   HANDLED_BODY,
@@ -17,6 +18,8 @@ import {
   handledNotification,
   isApplePushService,
   planClear,
+  RecentlyCleared,
+  settleIfCleared,
   shownTag,
 } from '../../src/lib/push-clear.ts';
 import { agendaItemOpenedHandler, machinePushRegistration } from '../../src/lib/push-seen.ts';
@@ -440,5 +443,123 @@ describe('machinePushRegistration (which registration holds a machine’s lines 
         ORIGIN,
       )(daemonId('home')),
     ).toBeNull();
+  });
+});
+
+describe('a push and its clear handled at once in one worker (review round 2)', () => {
+  const tag = shownTag('attention-session-1:A3', WORK);
+
+  /** A registration whose lines change as the worker shows and closes them. */
+  class LiveRegistration implements ClearRegistration {
+    readonly lines = new Map<string, number>();
+    readonly shown: { title: string; tag?: string | undefined }[] = [];
+    readonly pushManager: ClearRegistration['pushManager'];
+
+    constructor(endpoint: string) {
+      this.pushManager = { getSubscription: async () => ({ endpoint }) };
+    }
+
+    async getNotifications(options: { tag: string }): Promise<readonly { close(): void }[]> {
+      return Array.from({ length: this.lines.get(options.tag) ?? 0 }, () => ({
+        close: () => void this.lines.delete(options.tag),
+      }));
+    }
+
+    async showNotification(title: string, options?: NotificationOptions): Promise<void> {
+      this.shown.push({ title, tag: options?.tag });
+      if (options?.tag !== undefined) this.lines.set(options.tag, 1);
+    }
+  }
+
+  const clock = { now: 0 };
+  const order = () => new RecentlyCleared(() => clock.now);
+
+  it('should not let a push that read its filter while its clear ran put the stale line up (Android)', async () => {
+    // Arrange — the push arrives first and is still reading its filter when the clear arrives and runs.
+    const registration = new LiveRegistration(FCM);
+    const recent = order();
+    const push = recent.arrived();
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
+      recent,
+      place: recent.arrived(),
+    });
+
+    // Act — the push resumes.
+    const settled = await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN);
+
+    // Assert
+    expect(settled).toBe(true);
+    expect(registration.shown).toEqual([]);
+    expect(registration.lines.size).toBe(0);
+  });
+
+  it('should show the quiet line in its place on an iPhone, never the item', async () => {
+    // Arrange
+    const registration = new LiveRegistration(APPLE);
+    const recent = order();
+    const push = recent.arrived();
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
+      recent,
+      place: recent.arrived(),
+    });
+    registration.shown.splice(0);
+
+    // Act
+    await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN);
+
+    // Assert
+    expect(registration.shown).toEqual([{ title: 'Work laptop · Handled on another device', tag }]);
+  });
+
+  it('should take the line down after it showed, when the clear ran while it was being shown', async () => {
+    // Arrange — the push checked (nothing cleared yet), then the clear ran, then the line went up.
+    const registration = new LiveRegistration(FCM);
+    const recent = order();
+    const push = recent.arrived();
+    expect(await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN)).toBe(false);
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
+      recent,
+      place: recent.arrived(),
+    });
+    await registration.showNotification('Work laptop · Deploy?', { tag });
+
+    // Act
+    const settled = await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN);
+
+    // Assert
+    expect(settled).toBe(true);
+    expect(registration.lines.has(tag)).toBe(false);
+  });
+
+  it('should let a push that arrived after the clear show: it is a newer line (the item woke again)', async () => {
+    // Arrange
+    const registration = new LiveRegistration(FCM);
+    const recent = order();
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
+      recent,
+      place: recent.arrived(),
+    });
+
+    // Act / Assert
+    expect(await settleIfCleared(registration, tag, recent, recent.arrived(), WORK, ORIGIN)).toBe(false);
+    expect(recent.clearedAfter(shownTag('attention-session-1:A4', WORK), 0)).toBe(false);
+  });
+
+  it(`should forget a clear after ${CLEARED_TAG_MEMORY_MS / 1000} s`, () => {
+    // Arrange
+    clock.now = 0;
+    const recent = order();
+    const push = recent.arrived();
+    recent.remember([tag], recent.arrived());
+
+    // Act
+    clock.now = CLEARED_TAG_MEMORY_MS + 1;
+    const forgotten = recent.clearedAfter(tag, push);
+    recent.remember([shownTag('attention-session-1:A4', WORK)], recent.arrived());
+
+    // Assert
+    expect(forgotten).toBe(false);
+    expect(recent.clearedAfter(tag, push)).toBe(false);
+    clock.now = 0;
   });
 });

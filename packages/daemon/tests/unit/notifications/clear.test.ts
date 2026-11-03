@@ -706,7 +706,7 @@ describe('a push still on its way when its item is handled or opened (review rou
     ]);
   });
 
-  it('should honour an open made while it was on its way, skipping the device that opened it', async () => {
+  it('should honour an open made while it was on its way, on every device: the opener closed only what was showing', async () => {
     // Arrange — the item still waits on the owner; only the open says its line should come down.
     const test = world(onItsWay('A1'));
     test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
@@ -720,7 +720,7 @@ describe('a push still on its way when its item is handled or opened (review rou
     // Assert
     should(opened).deepEqual({ found: true, tags: [] });
     should(test.sent).have.length(1);
-    should(test.sent[0]?.exceptDevice).equal('device-1');
+    should(test.sent[0]).not.have.property('exceptDevice');
     should(test.sent[0]?.payload).containDeep({ tags: ['attention-session-1:A1'] });
   });
 

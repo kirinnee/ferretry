@@ -235,9 +235,17 @@ left to cover sends nothing.
 
 **A push still on its way.** A push the owner handles or opens before it has reached a device had no line to take
 down yet. The daemon looks again as soon as that push's outcome is recorded: a handled item's line comes down then,
-and an open made while it was on its way is honoured then too, still skipping the device that opened it (that memory
-is not kept across a restart). At start the daemon looks once at every ferret with a line still up, for a board that
-changed while it was down. A clear is never in `fy doctor`'s push count: one that reached no device (the only one was the device
+and an open made while it was on its way is honoured then too (that memory is not kept across a restart). That late
+clear reaches EVERY device, the one that opened the item included: its page closed only what was showing when it
+asked, so an iPhone there may show the quiet note for that one line. At start the daemon looks once at every ferret
+with a line still up, for a board that changed while it was down.
+
+**A push and its clear at once.** A service worker can handle a push and the clear after it at the same time, and a
+push reads this device's filter before it shows anything. So the worker numbers pushes in the order they arrive and
+remembers each clear's tags for a minute (`RecentlyCleared`): a push whose line a LATER-arriving clear took down is
+settled as that clear would have, before or just after it shows. A push that arrives after the clear (the item woke
+again) shows as usual. A clear the push service delivers before the push it clears is not caught: nothing on the wire
+tells that push from a newer one. A clear is never in `fy doctor`'s push count: one that reached no device (the only one was the device
 that opened the item) is not a failed push. A clear the push service refused leaves that line up.
 
 **Older apps.** A service worker older than this release cannot read a clear and shows its plain "Something is
