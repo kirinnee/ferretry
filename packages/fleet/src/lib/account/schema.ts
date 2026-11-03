@@ -28,6 +28,7 @@ import {
   BrowserPortsSettingSchema,
   BrowserProxySettingSchema,
   CONFIG_COMPONENT_KINDS,
+  CompactAtSchema,
   isLoopbackHost,
   SECRET_REFERENCE_SOURCE,
 } from '@ferretry/protocol';
@@ -743,6 +744,11 @@ export const LayerReferenceTextSchema = z.string().check(ctx => {
  */
 export const LayeredProfileSchema = z.strictObject({
   layers: z.array(LayerReferenceTextSchema).default([]),
+  /**
+   * Where a profile's ferret's harness compacts its own conversation, in tokens, or `auto` for the harness's
+   * own trigger (docs/compact-at.md). A ferret's own `compactAt` overrides it. Left out is `auto`.
+   */
+  compactAt: CompactAtSchema.optional(),
   /** The source's origin key for this profile, set by Clone: how a repeat copy finds it again. */
   clonedFromKey: NonEmptyString.optional(),
 });
@@ -765,6 +771,11 @@ export const RuntimeSchema = z.strictObject({
   agent: z.boolean().default(false),
   /** Switched off without deleting it (`./disabled.ts`). */
   disabled: DisabledSchema.optional(),
+  /**
+   * Where a runtime's ferret's harness compacts its own conversation, in tokens, or `auto` for the harness's
+   * own trigger (docs/compact-at.md). A ferret's own `compactAt` overrides it. Left out is `auto`.
+   */
+  compactAt: CompactAtSchema.optional(),
   /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
   clonedFromKey: NonEmptyString.optional(),
 });

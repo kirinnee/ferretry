@@ -212,6 +212,26 @@ describe('registerSessionCommands · start', () => {
     should(unset.api.calls[0]?.args[0]).not.have.property('fast');
   });
 
+  it('should carry --compact-at as tokens or auto, refuse a bad one, and send nothing when unset', async () => {
+    // Arrange
+    const sized = harness();
+    const word = harness();
+    const unset = harness();
+    const bad = harness();
+
+    // Act
+    await sized.run(['start', 'go', '--agent', 'claude-alpha', '--compact-at', '250k']);
+    await word.run(['start', 'go', '--agent', 'claude-alpha', '--compact-at', 'auto']);
+    await unset.run(['start', 'go', '--agent', 'claude-alpha']);
+    await bad.run(['start', 'go', '--agent', 'claude-alpha', '--compact-at', '10k']);
+
+    // Assert
+    should(sized.api.calls[0]?.args[0]).containDeep({ compactAt: 250_000 });
+    should(word.api.calls[0]?.args[0]).containDeep({ compactAt: 'auto' });
+    should(unset.api.calls[0]?.args[0]).not.have.property('compactAt');
+    should(bad.api.calls).be.empty();
+  });
+
   it('should pass an explicit parent', async () => {
     // Arrange
     const subject = harness({}, { cwd: '/work/repo' });

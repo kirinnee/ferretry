@@ -203,3 +203,26 @@ describe('buildStartRequest', () => {
     should((error as SessionCommandError).exitCode).equal(2);
   });
 });
+
+describe('buildStartRequest --compact-at', () => {
+  it('should put a typed trigger on the wire as tokens or auto, and nothing otherwise', () => {
+    // Arrange / Act
+    const sized = buildStartRequest({ ...auto, compactAt: '250k' }, HERE);
+    const word = buildStartRequest({ ...auto, compactAt: 'auto' }, HERE);
+    const unset = buildStartRequest(auto, HERE);
+
+    // Assert
+    should(StartSessionRequestSchema.safeParse(sized.request).success).be.true();
+    should(sized.request).containDeep({ compactAt: 250_000 });
+    should(word.request).containDeep({ compactAt: 'auto' });
+    should(unset.request).not.have.property('compactAt');
+  });
+
+  it('should refuse a trigger below the floor naming the flag', () => {
+    // Arrange / Act / Assert
+    should(() => buildStartRequest({ ...auto, compactAt: '20k' }, HERE)).throw(
+      '--compact-at: 20k is too small: the lowest is 100k.',
+    );
+    should(() => buildStartRequest({ ...auto, compactAt: 'soon' }, HERE)).throw(/--compact-at: /);
+  });
+});

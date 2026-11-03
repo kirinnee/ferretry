@@ -113,6 +113,22 @@ describe('PackController.newChild', () => {
     should(out.exitCode).be.undefined();
   });
 
+  it('should send a typed --compact-at and refuse one below the floor before asking the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = build();
+
+    // Act
+    await controller.newChild(['do it'], { runtime: 'r', compactAt: '250k' });
+    const refusal = await controller
+      .newChild(['do it'], { runtime: 'r', compactAt: '20k' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(gateway.newCalls).have.length(1);
+    should(gateway.newCalls[0]).containDeep({ compactAt: 250_000 });
+    should((refusal as Error).message).equal('--compact-at: 20k is too small: the lowest is 100k.');
+  });
+
   it('should send the working folder when a person starts it, and every option given', async () => {
     // Arrange
     const { controller, gateway } = build();

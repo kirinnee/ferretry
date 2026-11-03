@@ -31,7 +31,7 @@
  *
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
-import { secretReferencesIn } from '@ferretry/protocol';
+import { type CompactAt, secretReferencesIn } from '@ferretry/protocol';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
 import {
   buildFleetManifest,
@@ -191,6 +191,8 @@ interface PlannedRuntime {
   /** The format of the Codex model catalog file its wrapper points Codex at, when it has one. */
   readonly codexCatalog?: number;
   readonly defaultModel: string | null;
+  /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
+  readonly compactAt?: CompactAt;
   readonly secretEnv: Readonly<Record<string, string>>;
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
@@ -444,6 +446,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         ? []
         : ['--settings', joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), FIXED_SETTINGS_FILE)];
     const { models, modelCatalog, defaultModel } = publishedModels(derived);
+    const compactAt = runtime.compactAt ?? model.profiles[runtime.profile]?.compactAt;
     const blocked = reasons.length === 0 ? undefined : reasons.join('; ');
     operations.push({
       kind: 'file',
@@ -484,6 +487,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       ...(modelCatalog === undefined ? {} : { modelCatalog }),
       ...(codexCatalog === undefined ? {} : { codexCatalog: CODEX_CATALOG_FORMAT }),
       defaultModel,
+      ...(compactAt === undefined ? {} : { compactAt }),
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
@@ -522,6 +526,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         models: runtime.models,
         ...(runtime.modelCatalog === undefined ? {} : { modelCatalog: runtime.modelCatalog }),
         ...(runtime.codexCatalog === undefined ? {} : { codexCatalog: runtime.codexCatalog }),
+        ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
@@ -537,6 +542,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       wrapper: runtime.wrapper,
       models: runtime.models,
       defaultModel: runtime.defaultModel,
+      ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
     })),
   });
 

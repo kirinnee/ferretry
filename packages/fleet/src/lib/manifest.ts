@@ -14,7 +14,7 @@
  */
 import { basename } from 'node:path';
 import { z } from 'zod';
-import { malformedSecretReference, secretReferencesIn } from '@ferretry/protocol';
+import { CompactAtSchema, malformedSecretReference, secretReferencesIn } from '@ferretry/protocol';
 
 const NonEmptyString = z.string().min(1);
 
@@ -129,6 +129,8 @@ const accountShape = {
    * has a file in an older format — nothing else in the manifest would differ.
    */
   codexCatalog: z.number().int().positive().optional(),
+  /** Where ferrets launched on this account compact their conversation, unless one sets its own. Absent is `auto`. */
+  compactAt: CompactAtSchema.optional(),
   available: z.boolean(),
   /** Required when `available` is false, `null` otherwise. */
   unavailableReason: NonEmptyString.nullable(),
@@ -247,6 +249,8 @@ export const FleetManifestRuntimeSchema = z
     models: z.array(FleetManifestModelSchema).readonly(),
     /** The model the runtime uses when nobody names one, or `null` when its profile has no model set. */
     defaultModel: NonEmptyString.nullable(),
+    /** The runtime's compaction default, its own else its profile's. Absent is `auto`. */
+    compactAt: CompactAtSchema.optional(),
   })
   .check(ctx => {
     const runtime = ctx.value;

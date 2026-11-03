@@ -113,6 +113,7 @@ import { taskPlanRoutes } from './task-plans.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
+import { type SessionCompactAtSubsystem, sessionCompactAtRoutes } from './session-compact-at.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
@@ -344,6 +345,8 @@ export interface MountedSubsystems {
   readonly sessionPin: SessionPinSubsystem;
   /** Whether a ferret keeps an agenda, from its next launch (docs/agenda.md). */
   readonly sessionAgendaMode: SessionAgendaModeSubsystem;
+  /** Where a ferret compacts its conversation, from its next launch (docs/compact-at.md). */
+  readonly sessionCompactAt: SessionCompactAtSubsystem;
   /** Whether a ferret is told it may explain with hypermedia, from its next launch (docs/hypermedia.md). */
   readonly sessionHypermedia: SessionHypermediaSubsystem;
   /** Pack mode: its settings view, recommendations, sub-ferret starts, results and the per-ferret switch (docs/pack-mode.md). */
@@ -713,6 +716,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...sessionHypermediaRoutes(subsystems.sessionHypermedia),
         // `agenda-mode` is a final literal no other one-segment session route uses.
         ...sessionAgendaModeRoutes(subsystems.sessionAgendaMode),
+        // `compact-at` is a final literal no other one-segment session route uses.
+        ...sessionCompactAtRoutes(subsystems.sessionCompactAt),
         // `/v1/pack…` is a prefix no other route uses; the two session paths end in literals (`result`,
         // `pack`) no other one-segment session route uses, so none can shadow or be shadowed.
         ...packRoutes(subsystems.pack, subsystems.stateHomes),

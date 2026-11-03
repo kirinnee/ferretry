@@ -8,6 +8,7 @@ import {
   NonNegativeIntegerSchema,
   PositiveIntegerSchema,
 } from './common.ts';
+import { CompactAtSchema } from './compact-at.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema, SessionStatusSchema } from './session-base.ts';
 import { HarnessDialogSchema } from './session-dialog.ts';
@@ -639,6 +640,13 @@ export const SessionConfigSchema = z.object({
    * (`machine.yaml` agendaMode), and the one-time migration records it ON for a ferret that already had open items. Read at launch, so a change takes effect at the next launch.
    */
   agenda: z.boolean().optional(),
+  /**
+   * Where this ferret's harness compacts its own conversation, in tokens, or `auto` for the harness's own trigger
+   * (docs/compact-at.md). ABSENT MEANS THE LOGIN'S DEFAULT (the runtime's `compactAt`, else `auto`), so a session
+   * that recorded nothing follows it. Read at launch AND on every relaunch, so a change reaches a running ferret at
+   * its next restart.
+   */
+  compactAt: CompactAtSchema.optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
 
@@ -1107,6 +1115,8 @@ const StartSessionBaseSchema = z.strictObject({
   effort: z.string().min(1).optional(),
   /** Launch in the harness's fast mode. Refused when the chosen model has none; omitted leaves it off. */
   fast: z.boolean().optional(),
+  /** Compact the conversation at this many tokens, or `auto`. Refused outside the floor and the model's window. */
+  compactAt: CompactAtSchema.optional(),
   intervalSeconds: PositiveIntegerSchema.optional(),
   timeoutSeconds: NonNegativeIntegerSchema.optional(),
   nudgeAfterSeconds: NonNegativeIntegerSchema.optional(),
