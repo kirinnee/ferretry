@@ -249,12 +249,13 @@ describe('a withheld alert about a private card', () => {
 
   it('should note nothing when the interactive lead gets an alert about a public card or one with no public ancestor', async () => {
     // Arrange
-    const orphan = card({ id: 'F20', owner: 'lizzette', parent: null });
-    const world = alertWorld({ lizzette: 'interactive' }, { cards: [parent, orphan] });
+    const hiddenRoot = card({ id: 'F20', owner: 'lizzette', visibility: 'private', parent: null });
+    const orphan = card({ id: 'F21', owner: 'lizzette', parent: { id: 'F20' } });
+    const world = alertWorld({ lizzette: 'interactive' }, { cards: [parent, hiddenRoot, orphan] });
 
     // Act
     await world.alerts.send('lizzette', '&F10 PR #1 CI is red.', 'F10' as BoardTaskId);
-    await world.alerts.send('lizzette', '&F20 PR #2 CI is red.', 'F20' as BoardTaskId);
+    await world.alerts.send('lizzette', '&F21 PR #2 CI is red.', 'F21' as BoardTaskId);
     await world.alerts.send('lizzette', '&F10 has had no activity for 3h.');
 
     // Assert
