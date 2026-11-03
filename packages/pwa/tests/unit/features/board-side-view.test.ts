@@ -2,8 +2,8 @@ import { describe, test } from 'bun:test';
 import should from 'should';
 import {
   BOARD_SIDE_VIEW_KEY,
-  BoardSideViewStore,
   type BoardSideViewStorage,
+  BoardSideViewStore,
   DEFAULT_BOARD_SIDE_VIEW,
   parseBoardSideView,
 } from '../../../src/lib/board-side-view.ts';
@@ -56,8 +56,8 @@ describe('BoardSideViewStore', () => {
     };
     const store = new BoardSideViewStore(denied);
     should(store.snapshot()).equal('list');
-    store.set('list');
-    should(store.snapshot()).equal('list');
+    store.set('kanban');
+    should(store.snapshot()).equal('kanban');
   });
 
   test('a fresh device, with nothing stored, starts on the List and remembers a pick', () => {

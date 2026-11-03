@@ -2718,6 +2718,23 @@ describe('SessionChatPage', () => {
     );
     const agendaPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) =>
       chatPage({ session: agendaSession(), attention: agendaModel(), ...props });
+
+    test('Overview opens the Agenda tab with the same Needs-you count', async () => {
+      const page = renderSessionChatPage(
+        agendaPage({ context: contextDependencies(), initialInfo: 'overview' }),
+        fakeDaemon().factory,
+      );
+      try {
+        await flush();
+        const info = page.root.findByType(SessionInfo);
+        expect(info.props.about.agenda.counts['needs-you']).toBe(1);
+        run(() => info.props.about.agenda.onOpen());
+        expect(page.root.findByType(SessionInfo).props.placement.tab).toBe('agenda');
+        expect(page.root.findAllByProps({ 'data-agenda-tab': 'needs-you' })).toHaveLength(1);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
     const update = (page: ReturnType<typeof renderSessionChatPage>, element: ReactElement) =>
       run(() => page.update(withSessionSearch(element as ReactElement<ComponentProps<typeof SessionChatPage>>)));
 

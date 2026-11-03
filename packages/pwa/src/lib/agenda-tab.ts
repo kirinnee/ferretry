@@ -111,22 +111,18 @@ export const agendaTabModel = ({ items, resolved, ferret, now }: AgendaTabInput)
   });
 
   const needsYou = needsYouQueue(open).map(item => row('needs-you', item, 'Needs you', item.waitingSince));
-  const rested = restingQueue(open).flatMap(item => {
+  const rested = restingQueue(open).map(item => {
     const view = agendaState(item);
     if (view.state === 'resting')
-      return [
-        row(
-          'resting',
-          item,
-          view.sub === 'working' ? 'Resting · working' : `Resting · waiting on ${agendaAuthor(item, ferret)}`,
-          view.since,
-        ),
-      ];
-    if (view.state === 'snoozed') {
-      const until = parkedUntilWords(item, now);
-      return [row('snoozed', item, until === null ? 'Snoozed' : `Snoozed until ${until}`, item.parked?.at)];
-    }
-    return [];
+      return row(
+        'resting',
+        item,
+        view.sub === 'working' ? 'Resting · working' : `Resting · waiting on ${agendaAuthor(item, ferret)}`,
+        view.since,
+      );
+    // `restingQueue` contains only resting and snoozed items.
+    const until = parkedUntilWords(item, now);
+    return row('snoozed', item, until === null ? 'Snoozed' : `Snoozed until ${until}`, item.parked?.at);
   });
   const resolvedRows = [...resolved]
     .sort((left, right) => Date.parse(right.resolvedAt) - Date.parse(left.resolvedAt))
