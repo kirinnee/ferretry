@@ -6,6 +6,7 @@ import {
   AgendaQuestionSchema,
   agendaBriefOf,
   MAX_AGENDA_BODY_LENGTH,
+  MAX_AGENDA_TERM_MEANING_LENGTH,
   MAX_AGENDA_FOLDED_DETAIL_LENGTH,
   MAX_AGENDA_WHERE_LENGTH,
   MAX_AGENDA_QUESTIONS,
@@ -17,6 +18,7 @@ import {
   MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH,
   MAX_AGENDA_POINTS_LENGTH,
 } from '../../src/lib/agenda.ts';
+import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
 
@@ -389,5 +391,37 @@ describe('agenda option details', () => {
     // Act / Assert
     should(AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: many }).success).be.false();
     should(AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: [] }).success).be.false();
+  });
+});
+
+describe('agenda link meaning', () => {
+  it('should take a link with a plain meaning, without one, and refuse a blank or over-long one', () => {
+    // Arrange
+    const withLinks = (links: unknown) => AgendaItemSchema.safeParse({ ...minimal, links });
+
+    // Act / Assert
+    should(
+      withLinks([{ label: 'Plan', target: '&F12', meaning: 'The plan to keep the login alive' }]).success,
+    ).be.true();
+    should(withLinks([{ label: 'Plan', target: '&F12' }]).success).be.true();
+    should(withLinks([{ target: '&F12', meaning: '   ' }]).success).be.false();
+    should(withLinks([{ target: '&F12', meaning: 'x'.repeat(MAX_AGENDA_TERM_MEANING_LENGTH) }]).success).be.true();
+    should(withLinks([{ target: '&F12', meaning: 'x'.repeat(MAX_AGENDA_TERM_MEANING_LENGTH + 1) }]).success).be.false();
+  });
+
+  it('should keep the meaning on an add request and in the brief of an item', () => {
+    // Arrange
+    const links = [{ label: 'Plan', target: '&F12', meaning: 'The plan to keep the login alive' }];
+
+    // Act
+    const item = AgendaItemSchema.parse({ ...minimal, links });
+
+    // Assert
+    should(agendaBriefOf(item).links).eql(links);
+  });
+
+  it('should be reported by a daemon as agenda.link-meaning.1', () => {
+    should(DAEMON_FEATURES.agendaLinkMeaning).equal('agenda.link-meaning.1');
+    should(daemonFeatureList()).containEql('agenda.link-meaning.1');
   });
 });

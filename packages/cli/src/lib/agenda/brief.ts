@@ -5,13 +5,13 @@ import {
   type AgendaAsk,
   type AgendaAskOption,
   type AgendaCardAnswer,
-  type AgendaKind,
-  type AgendaStage,
-  AgendaStageSchema,
   type AgendaItem,
+  type AgendaKind,
   type AgendaLink,
   type AgendaOptionDetail,
   type AgendaQuestion,
+  type AgendaStage,
+  AgendaStageSchema,
   type AgendaTerm,
   agendaEditShapeProblems,
   agendaShapeProblems,
@@ -89,7 +89,10 @@ export interface BriefFlags extends AskFlags {
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
 /** Text, or a list of short points that is drawn as bullets. */
 const Prose = z.union([z.string(), z.array(z.string())]);
-const LinkInput = z.union([z.string(), z.object({ label: z.string().optional(), target: z.string() })]);
+const LinkInput = z.union([
+  z.string(),
+  z.object({ label: z.string().optional(), target: z.string(), meaning: z.string().optional() }),
+]);
 
 /**
  * The JSON body `--json-file` reads: the same fields as the flags, in the protocol's own shapes where it
@@ -512,9 +515,68 @@ function option(value: string | { label: string; description?: string | undefine
   return { label: value.label.trim(), ...(value.description === undefined ? {} : { description: value.description }) };
 }
 
-function link(value: string | { label?: string | undefined; target: string }): AgendaLink {
-  if (typeof value === 'string') return { target: value.trim() };
-  return { target: value.target.trim(), ...(value.label === undefined ? {} : { label: value.label }) };
+function link(
+  value: string | { label?: string | undefined; target: string; meaning?: string | undefined },
+): AgendaLink {
+  if (typeof value === 'string') return linkFrom(value);
+  const meaning = text(value.meaning);
+  return {
+    target: value.target.trim(),
+    ...(value.label === undefined ? {} : { label: value.label }),
+    ...(meaning === undefined ? {} : { meaning }),
+  };
+}
+
+/**
+ * `--link`: a bare target, `label=target`, or `label=target=meaning` (the meaning is the plain words the item view's
+ * terms-and-references table shows). The label is read only when it looks like one: a word or two, never a URL or a path,
+ * so a bare target that carries an `=` of its own (`https://host/page?a=b`) stays a target. The meaning starts at the
+ * last `=` whose tail is a sentence (an address never holds a space), skipping an `=` inside the meaning when the
+ * target before the first `=` holds none. With no sentence, the first `=` opens the meaning unless it plausibly belongs
+ * to the target: a `?` before it (a query) or an address after it (`docs/a=b.md`). One trailing `=` is an empty meaning.
+ */
+function linkFrom(raw: string): AgendaLink {
+  const value = raw.trim();
+  const first = value.indexOf('=');
+  const label = first < 0 ? '' : value.slice(0, first).trim();
+  if (first < 0 || label === '' || /[/?&\\]/u.test(label)) return { target: value };
+  const rest = value.slice(first + 1).replace(/=\s*$/u, '');
+  const cut = meaningStart(rest);
+  const head = rest.slice(0, cut).trim();
+  // A doubled `==` before a meaning is an empty target-side `=`; a query target may end in one legitimately.
+  const target = cut < rest.length && head.endsWith('=') && !head.includes('?') ? head.slice(0, -1).trim() : head;
+  if (target === '') throw new Error(`--link needs label=target or label=target=meaning, got "${raw}"`);
+  const meaning = text(rest.slice(cut + 1));
+  return { label, target, ...(meaning === undefined ? {} : { meaning }) };
+}
+
+/**
+ * What the person is told when a labelled `--link` keeps an `=` in its target and no meaning was read: the part after
+ * the last `=` may have been a one-word meaning that cannot be told from the address's own `=`, and `--json-file` says it unambiguously.
+ */
+export function linkFlagNotices(flags: readonly string[] | undefined): string[] {
+  return (flags ?? []).flatMap(raw => {
+    const { label, target, meaning } = linkFrom(raw);
+    if (label === undefined || meaning !== undefined || !target.includes('=')) return [];
+    const tail = target.slice(target.lastIndexOf('=') + 1);
+    if (tail === '') return [];
+    return [
+      `read "${target}" as the whole target of "${label}"; if "${tail}" is its meaning, give the link through --json-file`,
+    ];
+  });
+}
+
+/** Where the `=` that opens a link's meaning sits in `target[=meaning]`, or its length when there is none. */
+function meaningStart(rest: string): number {
+  const first = rest.indexOf('=');
+  if (first < 0) return rest.length;
+  const skipSpaced = !/\s/u.test(rest.slice(0, first));
+  for (let at = rest.lastIndexOf('='); at >= 0; at = rest.lastIndexOf('=', at - 1)) {
+    if (/\s/u.test(rest.slice(at + 1).trim()) && !(skipSpaced && /\s/u.test(rest.slice(0, at).trim()))) return at;
+    if (at === 0) break;
+  }
+  const belongs = rest.slice(0, first).includes('?') || /[/?.:&\\]/u.test(rest.slice(first + 1));
+  return belongs ? rest.length : first;
 }
 
 /**

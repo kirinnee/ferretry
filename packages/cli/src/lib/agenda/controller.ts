@@ -2,6 +2,7 @@ import {
   type AgendaActionRequest,
   type AgendaClearAgentsResult,
   type AgendaId,
+  type AgendaLink,
   type AgendaSnapshot,
   agendaBriefRequiredProblems,
   DAEMON_FEATURES,
@@ -19,6 +20,7 @@ import {
   composeAddRequest,
   composeEditRequest,
   type EditFlags,
+  linkFlagNotices,
   parseBriefFile,
 } from './brief.ts';
 import {
@@ -255,6 +257,7 @@ export class AgendaController {
       file,
     );
     requireBrief(composed);
+    for (const notice of linkFlagNotices(options.link)) this.out.diagnostic(notice);
     if (composed.stage !== undefined || composed.whereWeAre !== undefined || composed.detail !== undefined) {
       await this.#requireChannel('--stage, --where and --detail');
     }
@@ -271,7 +274,8 @@ export class AgendaController {
     const asked = options.offerClose === true ? { ...composed, offerClose: true as const } : composed;
     if (composed.confirms === undefined && !(await this.#searchCheckOpen(before, asked, flag.card, options))) return;
     const carded = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
-    const request = options.offerClose === true ? await this.#withOfferClose(carded) : carded;
+    const offered = options.offerClose === true ? await this.#withOfferClose(carded) : carded;
+    const request = await this.#withLinkMeanings(offered);
     const after = await this.gateway.apply(sessionId, request);
 
     const raised = onlyNewId(before, after);
@@ -465,8 +469,9 @@ export class AgendaController {
       { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
       current,
     );
+    for (const notice of linkFlagNotices(options.link)) this.out.diagnostic(notice);
     const snapshot = await this.gateway.apply(sessionId, {
-      ...request,
+      ...(await this.#withLinkMeanings(request)),
       ...(options.now === true ? { now: true as const } : {}),
     });
     this.#report(snapshot, options, () => renderAgendaMutation('edited', agendaReference(id), snapshot, id));
@@ -797,6 +802,22 @@ export class AgendaController {
       'this daemon is older than the Done button on agenda items, so the item is raised without it; update the daemon to offer it',
     );
     return request;
+  }
+
+  /**
+   * The request with each link's `meaning` kept only for a daemon that reports `agenda.link-meaning.1`: an older one
+   * refuses the whole request over the field, so its links go as `label=target` and the person is told.
+   */
+  async #withLinkMeanings<R extends { readonly links?: readonly AgendaLink[] | undefined }>(request: R): Promise<R> {
+    if (request.links === undefined || !request.links.some(entry => entry.meaning !== undefined)) return request;
+    if ((await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaLinkMeaning)) return request;
+    this.out.diagnostic(
+      'could not confirm the daemon takes link meanings, so each link is sent as label=target without its meaning; update the daemon if it is older',
+    );
+    return {
+      ...request,
+      links: request.links.map(({ meaning: _meaning, ...rest }) => rest),
+    };
   }
 
   /** Which session this invocation acts on. */

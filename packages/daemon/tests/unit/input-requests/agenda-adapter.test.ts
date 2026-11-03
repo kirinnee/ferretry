@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type AgendaId, AgendaItemSchema } from '@ferretry/protocol';
 import should from 'should';
+import { closestAgendaLink } from '../../../src/lib/agenda/closest.ts';
 import {
   type AgendaLedger,
   type AgendaLedgerRepository,
@@ -109,7 +110,7 @@ describe('InputAgendaAdapter', () => {
     // Assert — a failed search never stops the card: it is raised, linking nothing.
     const items = listed.ok ? listed.value.items : [];
     should(seen).eql([{ sessionId: SESSION, prompt: 'sudo password for deploy' }]);
-    should(items.find(item => item.id === id)?.links).eql([{ label: 'Part of: Deploy the relay', target: '!A3' }]);
+    should(items.find(item => item.id === id)?.links).eql([closestAgendaLink({ id: 'A3', title: 'Deploy the relay' })]);
     should(items.find(item => item.id === other)?.links).be.undefined();
   });
 

@@ -473,10 +473,15 @@ export const AgendaOptionDetailSchema = z.strictObject({
 });
 export type AgendaOptionDetail = z.infer<typeof AgendaOptionDetailSchema>;
 
-/** A PR, a file or a reference the reader may want to open. The target is a URL, a path or a reference. */
+/**
+ * A PR, a file or a reference the reader may want to open. The target is a URL, a path or a reference; the
+ * `meaning` says in plain words what it is, so the item view's terms-and-references table explains it
+ * (`agenda.link-meaning.1`).
+ */
 export const AgendaLinkSchema = z.strictObject({
   label: singleLine(MAX_AGENDA_LINK_LABEL_LENGTH).optional(),
   target: singleLine(MAX_AGENDA_LINK_TARGET_LENGTH),
+  meaning: prose(MAX_AGENDA_TERM_MEANING_LENGTH).optional(),
 });
 export type AgendaLink = z.infer<typeof AgendaLinkSchema>;
 

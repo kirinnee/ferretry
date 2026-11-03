@@ -52,5 +52,6 @@ export function closestAgendaLink(closest: ClosestAgenda): AgendaLink {
     label:
       label.length <= MAX_AGENDA_LINK_LABEL_LENGTH ? label : `${label.slice(0, MAX_AGENDA_LINK_LABEL_LENGTH - 1)}…`,
     target: `!${closest.id}`,
+    meaning: 'The open agenda this belongs with: the same topic, so the answer lands in one place.',
   };
 }
