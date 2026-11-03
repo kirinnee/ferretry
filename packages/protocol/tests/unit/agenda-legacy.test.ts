@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AgendaSnapshotSchema as OldAgendaSnapshotSchema } from '../fixtures/agenda-before-channel.ts';
 import {
   AgendaItemSchema,
   AgendaSnapshotSchema,
@@ -41,6 +42,34 @@ const SNAPSHOT = {
 } as const;
 
 describe('the legacy agenda projection', () => {
+  it('should satisfy the pre-channel main schema for every nested widened field', () => {
+    const item = AgendaItemSchema.parse({
+      ...minimal,
+      questionAnswer: 'q'.repeat(9_000),
+      revisions: [
+        {
+          at: AT,
+          by: 'agent',
+          changed: ['questionAnswer', 'whereWeAre'],
+          previous: { questionAnswer: 'p'.repeat(9_000), whereWeAre: 'old' },
+        },
+      ],
+      undelivered: {
+        at: AT,
+        reason: 'offline',
+        reply: {
+          action: 'resolve',
+          note: 'n'.repeat(3_000),
+          response: { kind: 'open-question', answer: 'a'.repeat(3_000) },
+        },
+      },
+    });
+    const board = { ...SNAPSHOT, items: [item], resolved: [] };
+    should(OldAgendaSnapshotSchema.safeParse(board).success).be.false();
+    should(OldAgendaSnapshotSchema.safeParse(legacyAgendaSnapshot(board)).success).be.true();
+    should(item.undelivered?.reply.note).have.length(3_000);
+    should(item.questionAnswer).have.length(9_000);
+  });
   it('should clip what the channel widened to the bound the older app held, marking the cut', () => {
     // Arrange
     const item = AgendaItemSchema.parse({

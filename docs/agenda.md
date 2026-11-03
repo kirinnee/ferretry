@@ -219,16 +219,26 @@ There is no size limit a reader meets: **an item may weigh up to a transport bou
 JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound under it — the body, where we are,
 the detail and an answer to the owner's question 200,000; the context and every reply or answer of the owner's
 64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history.
-The history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to their
-own store.
+The wire history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to
+their own store. Before an owner record leaves that history, the same atomic ledger write archives it in
+`ownerHistory`, keyed by item id. This archive is durable and omitted from snapshots; its records retain their
+individual schema bounds, and its length grows with the conversation. It has no eviction policy. This keeps owner
+words available for the later conversation migration without making the wire item grow with every reply.
 
 **An item can always be closed, rested, edited shorter and answered.** What the item says (its fields; `MAX_AGENDA_CONTENT_LENGTH`,
-560,000) is bounded well under the transport bound, and so is each owner response (`MAX_AGENDA_RESPONSE_LENGTH`,
-70,000): what an edit, an answer or a closing adds — a retained version, a history entry, the answer, the resolution —
-therefore always has room. A request that raises or edits an item past the content bound is refused, naming it. When
-what the machine records would still push the item over the transport bound, the machine **sheds the oldest
-retained versions first, then the oldest history entries** (never the record of a card gate the owner answered)
-until it fits, so a very long item never becomes one nobody can write to.
+560,000) is bounded well under the transport bound. A response alone is at most 70,000 characters of JSON, and the
+**complete response plus note** is at most 136,000 (`MAX_AGENDA_REPLY_ENVELOPE_LENGTH`), including JSON escaping.
+Three retained envelopes (latest answer, Retry, closing response/note) take at most 408,000, leaving 32,000 for
+control metadata. Non-evictable gate receipts use at most 16,000 of that reserve. Requests and stored reply
+envelopes share this check; a 64,000-character printable answer plus a printable note fits, while a note whose
+escaping exceeds the envelope is refused before writing. The complete merged closed item also checks the
+1,000,000-character bound, including all resolution fields.
+
+A request that raises or edits an item past the content bound is refused, naming it. When versions or history
+would push an item past the transport bound, the machine removes oldest retained versions first, then oldest
+history entries (never a gate receipt), **archiving owner records in the same write before removing them**. The
+20-entry wire history limit uses that same archive path. Rebuildable activity and version metadata can be shed;
+owner responses and notes remain durable.
 
 An owner's earlier answers are kept: each `replied` history entry carries the `response` (the choice or typed
 answer) next to its note, because `ownerAnswer` keeps only the latest.
@@ -1051,13 +1061,17 @@ unreadable. Its limits were smaller (a point-form segment 1,024, the context and
 history entry is a key it refuses. A daemon therefore serves the items in two shapes, chosen by the **request header
 `x-fy-agenda-channel: 1`** (the same version as `agenda.channel.1` on `GET /v1/health`):
 
-- **With the header** — the whole shape, exactly as stored. The CLI sends it on every request; an app that reads the channel sends it to a
-  machine that lists `agenda.channel.1` (the header is already allowed by the daemon's CORS preflight).
+- **With the header** — the whole shape, exactly as stored. The CLI and current PWA send it on agenda requests,
+  including snapshot reads, actions, Send now and every roll-up page. Older daemons ignore the header (it is already
+  allowed by the daemon's CORS preflight).
 - **Without it** — the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
   every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
   `stages`, `whereWeAre`, `detail`) and the `response` of a history entry left out, and a revision that only changed a
   field the older app does not know dropped. The projection is a view: it is never written back, so nothing is lost on
-  the machine. It covers the board, the roll-up of every conversation and the machine agenda.
+  the machine. It covers the board, Send now, the roll-up of every conversation and the machine agenda, including
+  `questionAnswer`, revision `previous` values and nested undelivered responses and notes. If an older app retries
+  the exact clipped reply it received, the ledger transition restores the stored full reply before applying it;
+  a legacy view never replaces the owner's words with a shortened answer.
 
 ### Both spellings, one window
 

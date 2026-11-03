@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AgendaSnapshotSchema as OldAgendaSnapshotSchema } from '../../../../../protocol/tests/fixtures/agenda-before-channel.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import {
@@ -9,6 +10,7 @@ import {
   AgendaService,
 } from '../../../../src/lib/agenda/index.ts';
 import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
+import type { AgendaGatePort } from '../../../../src/lib/runtime/mounts/agenda-gates.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,
@@ -53,8 +55,9 @@ function fixture(
   repository?: AgendaLedgerRepository,
   notifications: DirectNotificationSubsystem = new FakeNotifications(),
   credentials: ApiCredentials = CREDENTIALS,
+  gates?: AgendaGatePort,
 ) {
-  const routes = agendaRoutes(agendaService(repository), notifications, NO_HELD_REPLIES);
+  const routes = agendaRoutes(agendaService(repository), notifications, NO_HELD_REPLIES, undefined, gates);
   const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), credentials, NO_GOVERNED_ROUTES_GUARD);
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
@@ -94,6 +97,56 @@ describe('agendaActor', () => {
 });
 
 describe('attention routes', () => {
+  it('should replay the full stored owner answer when an old app retries its clipped view', async () => {
+    const repository = new FakeLedgerRepository();
+    const service = agendaService(repository);
+    const notes: (string | null | undefined)[] = [];
+    const gates: AgendaGatePort = {
+      isGate: async () => false,
+      answer: async answer => {
+        notes.push(answer.note);
+        return { handled: false };
+      },
+    };
+    const dispatch = fixture(repository, new FakeNotifications(), CREDENTIALS, gates);
+    await dispatch(post({ ...raise, ask: { kind: 'open-question' } }, agentIn('s1')));
+    const response = { kind: 'open-question', answer: 'a'.repeat(9_000) };
+    const note = 'n'.repeat(3_000);
+    await dispatch(post({ action: 'resolve', id: 'A1', response, note }));
+    const failed = await service.undelivered('s1', 'A1', 'offline', 1);
+    should(failed.ok).be.true();
+    const read = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
+    const oldBoard = OldAgendaSnapshotSchema.parse(jsonBody(read));
+    const clipped = oldBoard.items[0]?.undelivered?.reply;
+    if (clipped === undefined) throw new Error('no Retry');
+    const retried = await dispatch(post({ ...clipped, id: 'A1' }));
+    should(retried.status).equal(200);
+    should(notes.at(-1)).equal(note);
+    const stored = await service.list('s1');
+    if (!stored.ok) throw new Error(stored.error.message);
+    should(stored.value.items[0]?.ownerAnswer).containDeep({ response, note });
+  });
+  it('should serve Send now in the old schema unless the caller opts into the channel', async () => {
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as { id: string }[])[0]?.id;
+    await dispatch(
+      post({ action: 'edit', id, whereWeAre: 'new location', questionAnswer: 'q'.repeat(9_000) }, agentIn('s1')),
+    );
+    const path = '/v1/sessions/s1/agenda/replies';
+    const legacy = await dispatch({ method: 'POST', path, headers: human, body: '{}' });
+    const channel = await dispatch({
+      method: 'POST',
+      path,
+      headers: { ...human, 'x-fy-agenda-channel': '1' },
+      body: '{}',
+    });
+    should(legacy.status).equal(200);
+    should(channel.status).equal(200);
+    should(OldAgendaSnapshotSchema.safeParse(jsonBody(legacy)).success).be.true();
+    should(OldAgendaSnapshotSchema.safeParse(jsonBody(channel)).success).be.false();
+    should((jsonBody(channel).items as { questionAnswer: string }[])[0]?.questionAnswer).have.length(9_000);
+  });
   it('should answer an empty board rather than a 404 for a session with no ledger yet', async () => {
     // A session that has never blocked has an empty board, which is not the same as a missing one.
     // Arrange

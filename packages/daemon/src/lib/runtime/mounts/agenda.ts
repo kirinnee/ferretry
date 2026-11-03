@@ -11,6 +11,7 @@ import {
   legacyAgendaSnapshot,
   MAX_AGENDA_SUBJECT_LENGTH,
   readsAgendaChannel,
+  restoredLegacyAgendaReply,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
@@ -159,7 +160,7 @@ async function sendReplies(
   const before = await agenda.list(sessionId);
   if (!before.ok) return refusal(before.error);
   await replies.sendNow(sessionId);
-  return jsonResponse(await withReplies(replies, sessionId, before.value));
+  return jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, before.value)));
 }
 
 /**
@@ -179,8 +180,22 @@ async function apply(
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  const request = await parseBody(context.request, AgendaActionRequestSchema);
+  let request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
+  // Restore a legacy Retry before gate/config side effects as well as in the atomic ledger transition.
+  if (
+    actor.kind === 'human' &&
+    !readsAgendaChannel(context.request.headers) &&
+    request.action === 'resolve' &&
+    request.response !== undefined &&
+    (gates !== undefined || config !== undefined)
+  ) {
+    const board = await agenda.list(sessionId);
+    if (!board.ok) return refusal(board.error);
+    const id = request.id;
+    const item = board.value.items.find(item => item.id === id);
+    if (item !== undefined) request = restoredLegacyAgendaReply(item, request);
+  }
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     request.action === 'resolve' && request.response !== undefined && gates !== undefined

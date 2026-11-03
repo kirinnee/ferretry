@@ -28,7 +28,8 @@ describe('fetchAgendaRollup', () => {
   it('reads every page, following `next` as `after`', async () => {
     const calls: string[] = [];
     const pages = [page(['a', 'b'], 'b'), page(['c'])];
-    const boards = await fetchAgendaRollup(daemon, async input => {
+    const boards = await fetchAgendaRollup(daemon, async (input, init) => {
+      expect(new Headers(init?.headers).get('x-fy-agenda-channel')).toBe('1');
       calls.push(String(input));
       return reply(pages.shift());
     });

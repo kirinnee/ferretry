@@ -32,11 +32,25 @@ export const MAX_AGENDA_ITEM_LENGTH = 1_000_000;
  * What an item's OWN content (everything but its control metadata and versions) may weigh, as JSON. It is held well
  * under the transport bound so the room that is left always covers what closing, resting or answering adds
  * (`agendaContentLength`), and so every accepted item stays closable and shortenable: its revisions and history are
- * the only things shed to fit (`fitAgendaItem`).
+ * the only things compacted to fit (`fitAgendaItem`); the daemon archives owner history before removing it.
  */
 export const MAX_AGENDA_CONTENT_LENGTH = 560_000;
 /** The most one owner response weighs, as JSON: it is kept on the item (`ownerAnswer`), in its history and on its close. */
 export const MAX_AGENDA_RESPONSE_LENGTH = 70_000;
+/** Complete response plus note, as JSON, before its copies in history, ownerAnswer and Retry. */
+export const MAX_AGENDA_REPLY_ENVELOPE_LENGTH = 136_000;
+/** Gate receipts cannot be shed: reserve half the 32k control budget for them. */
+export const MAX_AGENDA_GATE_HISTORY_LENGTH = 16_000;
+
+export function agendaReplyEnvelopeLength(reply: {
+  readonly response?: AgendaResponse;
+  readonly note?: string | null;
+}): number {
+  return JSON.stringify({
+    ...(reply.response === undefined ? {} : { response: reply.response }),
+    ...(reply.note == null ? {} : { note: reply.note }),
+  }).length;
+}
 /** The longest context an item carries: the facts around the situation, as Markdown. */
 export const MAX_AGENDA_CONTEXT_LENGTH = 64_000;
 /** The longest the owner's own words are — an answer, a reply, a note — so every reply shows whole. */
@@ -643,7 +657,7 @@ export const recommendedAgendaOption = (item: AgendaBrief & { readonly ask?: Age
 };
 
 /**
- * The most entries an item's history keeps, oldest dropped. Kept, with the revisions' bound, until the item's
+ * The most entries an item's wire history keeps; owner records are archived before compaction. Kept until the item's
  * conversation and versions move to their own store (the next step of docs/agenda.md § States).
  */
 export const MAX_AGENDA_HISTORY = 20;
@@ -790,25 +804,29 @@ export type AgendaBy = z.infer<typeof AgendaBySchema>;
  * `{ ...reply, id }` to the board is the same action again. Each variant is the matching action request
  * without its id.
  */
-export const AgendaUndeliveredReplySchema = z.discriminatedUnion('action', [
-  z.strictObject({
-    action: z.literal('resolve'),
-    note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
-    response: AgendaResponseSchema.optional(),
-  }),
-  z.strictObject({
-    action: z.literal('dismiss'),
-    note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
-  }),
-  z.strictObject({
-    action: z.literal('needs-info'),
-    note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
-  }),
-  z.strictObject({
-    action: z.literal('discuss'),
-    note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
-  }),
-]);
+export const AgendaUndeliveredReplySchema = z
+  .discriminatedUnion('action', [
+    z.strictObject({
+      action: z.literal('resolve'),
+      note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+      response: AgendaResponseSchema.optional(),
+    }),
+    z.strictObject({
+      action: z.literal('dismiss'),
+      note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+    }),
+    z.strictObject({
+      action: z.literal('needs-info'),
+      note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
+    }),
+    z.strictObject({
+      action: z.literal('discuss'),
+      note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
+    }),
+  ])
+  .refine(reply => agendaReplyEnvelopeLength(reply) <= MAX_AGENDA_REPLY_ENVELOPE_LENGTH, {
+    message: `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`,
+  });
 export type AgendaUndeliveredReply = z.infer<typeof AgendaUndeliveredReplySchema>;
 
 /**
@@ -1008,12 +1026,16 @@ export type AgendaGate = z.infer<typeof AgendaGateSchema>;
  * closes it, so the answer is kept on the item until the ferret replies or marks it done. `request` is the item's
  * request counter (`infoRequests`) when it was given: it names this answer's one delivery to the ferret.
  */
-export const AgendaOwnerAnswerSchema = z.object({
-  at: InstantSchema,
-  response: AgendaResponseSchema,
-  note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
-  request: PositiveIntegerSchema,
-});
+export const AgendaOwnerAnswerSchema = z
+  .object({
+    at: InstantSchema,
+    response: AgendaResponseSchema,
+    note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+    request: PositiveIntegerSchema,
+  })
+  .refine(reply => agendaReplyEnvelopeLength(reply) <= MAX_AGENDA_REPLY_ENVELOPE_LENGTH, {
+    message: `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`,
+  });
 export type AgendaOwnerAnswer = z.infer<typeof AgendaOwnerAnswerSchema>;
 
 const AgendaItemBaseShape = {
@@ -1141,6 +1163,15 @@ export const AgendaItemSchema = z
       context.addIssue({
         code: 'custom',
         message: `an agenda item's own content is at most ${MAX_AGENDA_CONTENT_LENGTH} characters as JSON: move the long part to a file and link it`,
+      });
+    }
+    if (
+      JSON.stringify(value.history?.filter(entry => entry.kind === 'gate-answered') ?? []).length >
+      MAX_AGENDA_GATE_HISTORY_LENGTH
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: `agenda gate receipts are at most ${MAX_AGENDA_GATE_HISTORY_LENGTH} characters as JSON`,
       });
     }
     if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
@@ -1272,8 +1303,8 @@ export function agendaContentLength(item: object): number {
 /**
  * An item that fits the transport bound: when it weighs more than `MAX_AGENDA_ITEM_LENGTH`, its oldest revisions go
  * first, then its oldest history (a card gate's `gate-answered` entry never goes: it keeps that gate asked for good).
- * Content is bounded far below the transport bound, so what is left always fits; an item that already fits is returned
- * as it is.
+ * The daemon must archive owner records removed here in the same ledger write. The history count is bounded too;
+ * an item already within both bounds is returned as it is.
  */
 export function fitAgendaItem<
   T extends {
@@ -1283,6 +1314,12 @@ export function fitAgendaItem<
 >(item: T): T {
   const weighs = (candidate: T) => JSON.stringify(candidate).length;
   let fitted = item;
+  while ((fitted.history?.length ?? 0) > MAX_AGENDA_HISTORY) {
+    const history = fitted.history ?? [];
+    const oldest = history.findIndex(entry => entry.kind !== 'gate-answered');
+    if (oldest < 0) break;
+    fitted = { ...fitted, history: history.filter((_, index) => index !== oldest) } as T;
+  }
   while (weighs(fitted) > MAX_AGENDA_ITEM_LENGTH && (fitted.revisions?.length ?? 0) > 0) {
     const { revisions, ...rest } = fitted;
     const kept = (revisions ?? []).slice(1);
@@ -1302,6 +1339,21 @@ export function fitAgendaItem<
 export const ResolvedAgendaItemSchema = z
   .intersection(AgendaItemSchema, AgendaResolutionSchema)
   .superRefine((value, context) => {
+    if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
+      context.addIssue({
+        code: 'custom',
+        message: `an agenda item is at most ${MAX_AGENDA_ITEM_LENGTH} characters as JSON`,
+      });
+    }
+    if (
+      agendaReplyEnvelopeLength({ response: value.response, note: value.resolutionNote }) >
+      MAX_AGENDA_REPLY_ENVELOPE_LENGTH
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`,
+      });
+    }
     if (value.disposition !== 'done' && value.response !== undefined) {
       context.addIssue({ code: 'custom', message: 'only a done item may carry a response', path: ['response'] });
     }
@@ -1576,6 +1628,16 @@ export const AgendaActionRequestSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    if (
+      ['resolve', 'dismiss', 'needs-info', 'discuss'].includes(value.action) &&
+      agendaReplyEnvelopeLength(value as { response?: AgendaResponse; note?: string }) >
+        MAX_AGENDA_REPLY_ENVELOPE_LENGTH
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`,
+      });
+    }
     if (value.action === 'resolve' && value.attachments !== undefined && value.response === undefined) {
       context.addIssue({
         code: 'custom',

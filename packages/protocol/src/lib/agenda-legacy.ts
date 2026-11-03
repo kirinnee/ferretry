@@ -1,4 +1,11 @@
-import type { AgendaItem, AgendaOpenSession, AgendaResponse, AgendaSnapshot, ResolvedAgendaItem } from './agenda.ts';
+import type {
+  AgendaItem,
+  AgendaOpenSession,
+  AgendaResponse,
+  AgendaSnapshot,
+  AgendaUndeliveredReply,
+  ResolvedAgendaItem,
+} from './agenda.ts';
 
 /**
  * THE LEGACY PROJECTION (docs/agenda.md § An older app keeps reading the board).
@@ -44,6 +51,7 @@ function clippedFields<T extends object>(fields: T): T {
   }
   if (typeof out.context === 'string') out.context = clip(out.context, LEGACY_AGENDA_LIMITS.text);
   if (typeof out.body === 'string') out.body = clip(out.body, LEGACY_AGENDA_LIMITS.body);
+  if (typeof out.questionAnswer === 'string') out.questionAnswer = clip(out.questionAnswer, LEGACY_AGENDA_LIMITS.body);
   if (Array.isArray(out.steps)) {
     out.steps = out.steps.map(step => (typeof step === 'string' ? clip(step, LEGACY_AGENDA_LIMITS.step) : step));
   }
@@ -88,6 +96,17 @@ function clippedResponse(response: AgendaResponse): AgendaResponse {
 function projected<T extends AgendaItem>(item: T): T {
   const bag: Record<string, unknown> = { ...clippedFields(item) };
   for (const key of CHANNEL_ONLY_KEYS) delete bag[key];
+  if (item.undelivered !== undefined) {
+    const reply = item.undelivered.reply;
+    bag.undelivered = {
+      ...item.undelivered,
+      reply: {
+        ...reply,
+        ...(reply.note === undefined ? {} : { note: clip(reply.note, LEGACY_AGENDA_LIMITS.text) }),
+        ...('response' in reply && reply.response !== undefined ? { response: clippedResponse(reply.response) } : {}),
+      },
+    };
+  }
   const revisions = (item.revisions ?? []).flatMap(revision => {
     const changed = revision.changed.filter(field => !CHANNEL_ONLY_FIELDS.has(field));
     if (changed.length === 0) return [];
@@ -108,6 +127,22 @@ function projected<T extends AgendaItem>(item: T): T {
 
 /** One open item as an app before the channel reads it. */
 export const legacyAgendaItem = (item: AgendaItem): AgendaItem => projected(item);
+
+/** An exact legacy Retry replays the stored words, also before any gate/confirmation side effect. */
+export function restoredLegacyAgendaReply<T extends AgendaUndeliveredReply>(item: AgendaItem, reply: T): T {
+  const stored = item.undelivered?.reply;
+  const expected = legacyAgendaItem(item).undelivered?.reply;
+  if (
+    stored === undefined ||
+    expected === undefined ||
+    expected.action !== reply.action ||
+    expected.note !== reply.note
+  )
+    return reply;
+  const response = 'response' in reply ? reply.response : undefined;
+  const projectedResponse = 'response' in expected ? expected.response : undefined;
+  return JSON.stringify(response) === JSON.stringify(projectedResponse) ? ({ ...reply, ...stored } as T) : reply;
+}
 
 /** One closed item as an app before the channel reads it. */
 export function legacyResolvedAgendaItem(item: ResolvedAgendaItem): ResolvedAgendaItem {

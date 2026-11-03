@@ -16,7 +16,9 @@ import {
   type AgendaErrorCode,
   type AgendaGate,
   type AgendaHistoryEntry,
+  AgendaHistoryEntrySchema,
   type AgendaId,
+  AgendaIdSchema,
   type AgendaInputRef,
   type AgendaItem,
   AgendaItemSchema,
@@ -31,6 +33,9 @@ import {
   agendaStage,
   agendaStageOfKind,
   MAX_AGENDA_REPLY_LENGTH,
+  MAX_AGENDA_REPLY_ENVELOPE_LENGTH,
+  agendaReplyEnvelopeLength,
+  restoredLegacyAgendaReply,
   MAX_AGENDA_STAGES,
   type AgendaSource,
   type AgendaUndelivered,
@@ -51,7 +56,6 @@ import {
   gateReference,
   parseGateFollowupReference,
   parseGateReference,
-  MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_REVISIONS,
@@ -59,7 +63,7 @@ import {
   ResolvedAgendaItemSchema,
   type TaskRef,
 } from '@ferretry/protocol';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -106,8 +110,12 @@ export type AgendaEntry =
   | { readonly lifecycle: 'active'; readonly origin: AgendaActor; readonly item: AgendaItem }
   | { readonly lifecycle: 'addressed'; readonly origin: AgendaActor; readonly item: ResolvedAgendaItem };
 
+const ArchivedOwnerHistorySchema = z.array(z.strictObject({ id: AgendaIdSchema, entry: AgendaHistoryEntrySchema }));
+
 /** Internal durable state. Active state and count are both derived from the entry lifecycle. */
 export interface AgendaLedger {
+  /** Owner records removed from the bounded wire history; durable, never included in snapshots. */
+  readonly ownerHistory?: readonly { readonly id: AgendaId; readonly entry: AgendaHistoryEntry }[];
   readonly sessionId: string;
   readonly nextId: number;
   readonly entries: readonly AgendaEntry[];
@@ -573,6 +581,9 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     return null;
   }
   const entries: AgendaEntry[] = [];
+  const archive = ArchivedOwnerHistorySchema.safeParse(raw.ownerHistory ?? []);
+  if (!archive.success) return null;
+  const ownerHistory = archive.data;
   const unreadable: unknown[] = [];
   const ids = new Set<string>();
   let maxId = 0;
@@ -615,6 +626,7 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     nextId: raw.nextId as number,
     entries,
     updatedAt: raw.updatedAt,
+    ...(ownerHistory.length === 0 ? {} : { ownerHistory }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
   });
   return toChannel(parked, raw.version === undefined || raw.version === 1);
@@ -809,11 +821,45 @@ function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
  * held to the schema the reader holds it to, and a change that fails is refused instead of written.
  */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
+  command = restoredRetry(ledger, command);
+  if (
+    ['answer', 'resolve', 'dismiss', 'needs-info', 'discuss', 'reply'].includes(command.action) &&
+    agendaReplyEnvelopeLength(command as { response?: AgendaResponse; note?: string | null }) >
+      MAX_AGENDA_REPLY_ENVELOPE_LENGTH
+  ) {
+    return failure('invalid', `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`);
+  }
   const transitioned = transition(ledger, command);
   if (!transitioned.ok || !transitioned.changed) return transitioned;
   const mutation = fitted(ledger, transitioned);
   const problem = unreadableWrite(ledger, mutation.ledger);
   return problem === undefined ? mutation : failure('invalid', problem);
+}
+
+/** Old apps post the clipped Retry view. Match it exactly and replay the stored words inside the ledger transition. */
+function restoredRetry(ledger: AgendaLedger, command: AgendaCommand): AgendaCommand {
+  if (command.actor.kind !== 'human' || !('id' in command)) return command;
+  const item = ledger.entries.find(entry => entry.lifecycle === 'active' && entry.item.id === command.id)?.item;
+  const stored = item?.undelivered?.reply;
+  if (item === undefined || stored === undefined) return command;
+  if (command.action === 'answer') {
+    const reply = restoredLegacyAgendaReply(item, {
+      action: 'resolve',
+      response: command.response,
+      note: command.note ?? undefined,
+    });
+    return { ...command, response: reply.response, note: reply.note };
+  }
+  if (
+    command.action === 'resolve' ||
+    command.action === 'dismiss' ||
+    command.action === 'needs-info' ||
+    command.action === 'discuss'
+  ) {
+    const reply = restoredLegacyAgendaReply(item, { action: command.action, note: command.note ?? undefined });
+    return { ...command, note: reply.note };
+  }
+  return command;
 }
 
 /**
@@ -826,15 +872,33 @@ function fitted(
 ): Extract<AgendaMutation, { ok: true }> {
   const kept = new Set(before.entries);
   const swaps = new Map<object, object>();
+  const archived = [...(mutation.ledger.ownerHistory ?? [])];
   const entries = mutation.ledger.entries.map(entry => {
     if (kept.has(entry)) return entry;
     const item = fitAgendaItem(entry.item);
+    // Include the old history too: some transitions fit an intermediate item before returning it.
+    const previous = before.entries.find(old => old.item.id === entry.item.id)?.item.history ?? [];
+    const candidates = [...(entry.item.history ?? [])];
+    const present = candidates.map(record => JSON.stringify(record));
+    for (const record of previous) {
+      const index = present.indexOf(JSON.stringify(record));
+      if (index < 0) candidates.push(record);
+      else present.splice(index, 1);
+    }
+    const retained = (item.history ?? []).map(record => JSON.stringify(record));
+    for (const record of candidates) {
+      const index = retained.indexOf(JSON.stringify(record));
+      if (index >= 0) retained.splice(index, 1);
+      else if (['replied', 'needs-info', 'discuss'].includes(record.kind)) {
+        archived.push({ id: item.id, entry: record });
+      }
+    }
     if (item === entry.item) return entry;
     swaps.set(entry.item, item);
     return { ...entry, item } as typeof entry;
   });
-  if (swaps.size === 0) return mutation;
-  const ledger = { ...mutation.ledger, entries };
+  if (swaps.size === 0 && archived.length === (mutation.ledger.ownerHistory?.length ?? 0)) return mutation;
+  const ledger = { ...mutation.ledger, entries, ...(archived.length === 0 ? {} : { ownerHistory: archived }) };
   const item = mutation.item === undefined ? undefined : (swaps.get(mutation.item) as AgendaItem | undefined);
   const addressed =
     mutation.addressed === undefined ? undefined : (swaps.get(mutation.addressed) as ResolvedAgendaItem | undefined);
@@ -1841,12 +1905,12 @@ function tidied(item: AgendaItem): AgendaItem {
   return rest;
 }
 
-/** The history with one more entry, the oldest dropped past the bound. */
+/** History before fitting: the fitter archives owner records before applying the wire bounds. */
 function withHistory(
   history: readonly AgendaHistoryEntry[] | undefined,
   entry: AgendaHistoryEntry,
 ): AgendaHistoryEntry[] {
-  return [...(history ?? []), entry].slice(-MAX_AGENDA_HISTORY);
+  return [...(history ?? []), entry];
 }
 
 /**

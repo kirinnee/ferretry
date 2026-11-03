@@ -7,6 +7,7 @@ import {
   ResolvedAgendaItemSchema,
   agendaContentLength,
   fitAgendaItem,
+  legacyAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -15,6 +16,7 @@ import {
   type AgendaMutation,
   type RaiseAgendaRequest,
   agendaSnapshot,
+  agendaLedgerDocument,
   applyAgendaCommand,
   applyAgendaCommandToSession,
   parseAgendaLedger,
@@ -75,7 +77,168 @@ const open = (ledger: AgendaLedger) => {
   return found;
 };
 
+function heavyQuestionBoard(): AgendaLedger {
+  const ledger = heavyBoard();
+  return {
+    ...ledger,
+    entries: ledger.entries.map(
+      entry =>
+        ({
+          ...entry,
+          item: { ...entry.item, detail: 'd'.repeat(118_000), ask: { kind: 'open-question' as const } },
+        }) as typeof entry,
+    ),
+  };
+}
+
 describe('a long agenda item', () => {
+  it('should archive every owner answer before compaction, including past twenty history entries', () => {
+    let ledger = heavyQuestionBoard();
+    for (let round = 1; round <= 23; round++) {
+      const response = { kind: 'open-question' as const, answer: `OWNER_RESPONSE_${round}:${'a'.repeat(63_970)}` };
+      const note = `OWNER_NOTE_${round}:${'n'.repeat(63_970)}`;
+      ledger = ok(
+        applyAgendaCommand(ledger, { action: 'answer', actor: HUMAN, id: 'A1', response, note, at: AT }),
+      ).ledger;
+      ledger = ok(
+        applyAgendaCommand(ledger, {
+          action: 'edit',
+          actor: AGENT,
+          id: 'A1',
+          patch: { questionAnswer: `Round ${round}` },
+          at: AT,
+        }),
+      ).ledger;
+    }
+    const reread = parseAgendaLedger(JSON.parse(agendaLedgerDocument(ledger)), SESSION_ID);
+    should(reread).not.be.null();
+    const saved = JSON.stringify(reread);
+    for (let round = 1; round <= 23; round++) {
+      should(saved).containEql(`OWNER_RESPONSE_${round}:`);
+      should(saved).containEql(`OWNER_NOTE_${round}:`);
+    }
+    should(ledger.ownerHistory?.length ?? 0).be.above(0);
+    should(agendaSnapshot(ledger)).not.have.property('ownerHistory');
+  });
+
+  it('should reserve the complete JSON envelope and keep large answers retryable and closable', () => {
+    const ledger = heavyQuestionBoard();
+    const response = { kind: 'open-question' as const, answer: 'a'.repeat(64_000) };
+    const oversized = { action: 'resolve', id: 'A1', response, note: '\u0000'.repeat(64_000) };
+    should(AgendaActionRequestSchema.safeParse(oversized).success).be.false();
+    should(
+      applyAgendaCommand(ledger, { ...oversized, action: 'answer', actor: HUMAN, at: AT } as Parameters<
+        typeof applyAgendaCommand
+      >[1]).ok,
+    ).be.false();
+    const answered = ok(
+      applyAgendaCommand(ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response,
+        note: 'n'.repeat(64_000),
+        at: AT,
+      }),
+    );
+    const failed = ok(
+      applyAgendaCommand(answered.ledger, {
+        action: 'undelivered',
+        actor: { kind: 'daemon', cause: 'system' },
+        id: 'A1',
+        request: 1,
+        reason: 'offline',
+        at: AT,
+      }),
+    );
+    const projected = legacyAgendaItem(open(failed.ledger)).undelivered?.reply;
+    if (projected?.action !== 'resolve' || projected.response === undefined) throw new Error('no Retry');
+    const retried = ok(
+      applyAgendaCommand(failed.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: projected.response,
+        note: projected.note,
+        at: AT,
+      }),
+    );
+    should(open(retried.ledger).ownerAnswer?.response).deepEqual(response);
+    should(open(retried.ledger).ownerAnswer?.note).equal('n'.repeat(64_000));
+    const closed = ok(
+      applyAgendaCommand(failed.ledger, {
+        action: 'resolve',
+        actor: HUMAN,
+        id: 'A1',
+        note: 'c'.repeat(64_000),
+        at: AT,
+      }),
+    );
+    for (const item of [answered.item, failed.item, retried.item, closed.addressed]) {
+      should(JSON.stringify(item).length).be.belowOrEqual(MAX_AGENDA_ITEM_LENGTH);
+    }
+    should(ResolvedAgendaItemSchema.safeParse(closed.addressed).success).be.true();
+    const escaped = ok(
+      applyAgendaCommand(ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response,
+        note: '\u0000'.repeat(11_000),
+        at: AT,
+      }),
+    );
+    const retryEscaped = ok(
+      applyAgendaCommand(escaped.ledger, {
+        action: 'undelivered',
+        actor: { kind: 'daemon', cause: 'system' },
+        id: 'A1',
+        request: 1,
+        reason: 'offline',
+        at: AT,
+      }),
+    );
+    const closeEscaped = ok(
+      applyAgendaCommand(retryEscaped.ledger, {
+        action: 'resolve',
+        actor: HUMAN,
+        id: 'A1',
+        note: 'c'.repeat(64_000),
+        at: AT,
+      }),
+    );
+    should(JSON.stringify(closeEscaped.addressed).length).be.belowOrEqual(MAX_AGENDA_ITEM_LENGTH);
+  });
+
+  it('should refuse a closed item whose resolution pushes the full JSON over the transport bound', () => {
+    const answered = ok(
+      applyAgendaCommand(heavyQuestionBoard(), {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'open-question', answer: 'a'.repeat(64_000) },
+        note: 'n'.repeat(64_000),
+        at: AT,
+      }),
+    );
+    const item = open(answered.ledger);
+    // Fill retained versions to the wire bound without changing the content bound.
+    const previous = { body: '' };
+    const nearLimit = { ...item, revisions: [{ at: AT, by: 'agent', changed: ['body'], previous }] };
+    previous.body = 'v'.repeat(MAX_AGENDA_ITEM_LENGTH - JSON.stringify(nearLimit).length - 1);
+    should(AgendaItemSchema.safeParse(nearLimit).success).be.true();
+    const raw = {
+      ...nearLimit,
+      resolvedAt: AT,
+      disposition: 'done',
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      resolutionNote: 'c'.repeat(64_000),
+    };
+    should(JSON.stringify(raw).length).be.above(MAX_AGENDA_ITEM_LENGTH);
+    should(ResolvedAgendaItemSchema.safeParse(raw).success).be.false();
+  });
   it('should keep its content under the bound and every edit of it inside the transport bound', () => {
     // Act
     const ledger = heavyBoard();
