@@ -233,7 +233,7 @@ export interface SentMessage {
 }
 
 /** The `send` options that take a value, so the value is not read as the message. */
-const VALUE_FLAGS = new Set(['-f', '--file', '--message-file', '--until']);
+const VALUE_FLAGS = new Set(['-f', '--file', '--message-file', '--until', '--kind']);
 
 /** How Codex's exec tool says a command failed. */
 const CODEX_EXIT = /Process exited with code (\d+)/u;
