@@ -440,18 +440,24 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
   `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (the owner runs \`${fy} secret set NAME\`; then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
 
 /**
- * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps a list of what only the owner can
- * do or decide, and the daemon pushes the phone once when it stops with items waiting. Off unless the
- * daemon writes {@link AGENDA_ENV} `1`. docs/agenda.md quotes this text verbatim.
+ * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps the owner's agendas, each ONE channel of
+ * their attention, and the daemon pushes the phone once when it stops with items waiting. Off unless the
+ * daemon writes {@link AGENDA_ENV} `1`. docs/notifications.md quotes this text verbatim.
  */
 export const AGENDA_ENV = 'FY_AGENDA';
 
-/** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
+/**
+ * The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. It teaches the model first
+ * (what an agenda is, the three-part test, search-check-open, the states, the type, splitting, chat discussion),
+ * then the one command that opens one. It names only verbs that exist: `answer`, `rest`, `log`, `split` and
+ * `merge` join it in the PRs that ship them (docs/pack-mode.md keeps the room for them).
+ */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY what the owner alone can give: info, a decision or action. No tracking items (test/verify): gates/\`${fy} notify\` cover it; after Not good, open one only for input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`); not \`-k info\`. Search first (\`${fy} search\`). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤80 (rest: \`--body\`). Many bugs/asks: ONE \`-k info\`, line each + where tracked. Read cold (no "as above", ticket/PR ids, paths, acronyms: \`--term "X=meaning"\`): short Markdown points, no headings, answer first; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
-    `\`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `"[answer to !A3 …]"=answer; "[re !A3 …]"=chat, parks it: do the work, \`done <id>\` (question: \`--reason "<why>"\`); \`edit <id> --back\` + refreshed card only for NEW asks. KEEP CURRENT: \`edit\` if changed, \`done\` if settled.`,
+    `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest (unsure: closest). Split parts that stop fitting.`,
+    `Open: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\`. Title ≤40, ask ≤80 (rest: \`--body\`). Read cold: no ids/paths/jargon (\`--term "X=meaning"\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
+    `Needs you buzzes; Resting is quiet. Owner reply rests it; your answer (\`edit <id> --question-answer "<text>"\` or \`--back\`) brings it back. Keep current (\`edit\`); only you mark it Done (\`done <id>\`) when nothing more is expected. Type: explainer→question→plan→tracker→test. Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.`,
+    'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');
 
 /**
@@ -470,10 +476,12 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * (`board/opt-in.ts`), and the rule says it overrides other instructions, because a person's own CLAUDE.md that
  * says to record every task was outvoting it. The board moves what a signal moves (a
  * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
- * up on a board that is on (`board/turn-check.ts` in the daemon). docs/board.md quotes this text verbatim.
+ * up on a board that is on (`board/turn-check.ts` in the daemon). A card shows progress only: every ask of the owner
+ * rides the card's agenda, never the card, and one card is one outcome, never an umbrella (`fy task create` lists the
+ * related cards and refuses a broad one without `--broad`). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or the owner said Yes to \`${fy} agenda add -k yesno\` "Track this on the board?" (\`--approval !A<n>\`). \`${fy} search\` first; link a match. Make: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\`. A card (&F412; agenda !A48): before To test \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move; owner closes. Gate? The daemon asks; raise nothing.`;
+  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Cards (&F412) show progress only; every human ask goes in the card's agenda. No umbrella cards; check related cards first and prefer adding to one. Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon

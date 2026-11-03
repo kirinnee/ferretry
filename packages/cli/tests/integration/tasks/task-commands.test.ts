@@ -15,6 +15,7 @@ import { registerBoardCommands } from '../../../src/adapters/board/board-command
 import { registerTaskCommands } from '../../../src/adapters/tasks/task-commands';
 import { BoardController } from '../../../src/lib/board/board-controllers';
 import type { IBoardGateway, SessionDirectoryEntry } from '../../../src/lib/board/ports';
+import { TASK_CREATE_RULE } from '../../../src/lib/board/umbrella';
 import type { ITextFileReader } from '../../../src/lib/tasks/ports';
 import { boardResponse, FERRETRY_ID, listing, taskResponse } from '../board/fixtures';
 
@@ -258,6 +259,35 @@ describe('fy task move --help', () => {
     should(help).containEql('`fy board lanes show` lists this project\'s lanes with "use when"');
     should(help).containEql('  active  ');
     should(help).containEql('Blocked is not a lane');
+  });
+});
+
+describe('fy task create --help', () => {
+  it('should teach one card per outcome after the options: progress only, related cards first, no umbrella', async () => {
+    // Arrange
+    const board = new BoardController({
+      gateway: new FakeBoardGateway(),
+      output: new CapturedOutput(),
+      files: new StubFiles(),
+      binary: 'fy',
+      environmentSessionId: 'session-7',
+    });
+    const written: string[] = [];
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: text => written.push(text), writeErr: () => {} });
+    registerTaskCommands(program, { board });
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'task', 'create', '--help']).catch(() => undefined);
+
+    // Assert
+    const flat = (text: string): string => text.replace(/\s+/g, ' ');
+    const help = flat(written.join(''));
+    const rule = flat(TASK_CREATE_RULE);
+    should(help).containEql('--broad <why>');
+    should(help).containEql('prefer adding to a related card');
+    should(help).containEql(rule);
+    should(help.indexOf(rule)).be.above(help.indexOf('--broad <why>'));
   });
 });
 

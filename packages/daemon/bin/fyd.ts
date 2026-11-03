@@ -59,19 +59,19 @@ import {
   type AnalyticsPricingRate,
   type AskToStopJobsResult,
   type AutoResumeSummary,
+  type BoardTaskStartResponse,
   CatalogMemberKeyIdSchema,
-  checkCompactAt,
-  type CompactAt,
   CONFIG_ACCEPTED_FILE,
+  type CompactAt,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
+  checkCompactAt,
   commandLabel,
   configFilePath,
-  type BoardTaskStartResponse,
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
+  type DuplicateAsk,
   daemonFeatureList,
-  terminalRulesOffered,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -82,6 +82,8 @@ import {
   ioPressureView,
   type LearningConfig,
   localOnlyNotice,
+  MACHINE_AGENDA_ID,
+  MAX_WORK_RELATED_TEXT_LENGTH,
   type MigrationConversation,
   mcpOAuthSecretNames,
   PACK_CLEAN_UP_LABEL,
@@ -110,9 +112,8 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
+  terminalRulesOffered,
   type WardenGuardConfig,
-  type DuplicateAsk,
-  MACHINE_AGENDA_ID,
 } from '@ferretry/protocol';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
@@ -129,13 +130,10 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
-import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
-import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
-import { OrphanList } from '../src/lib/warden/orphan-list.ts';
-import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
+import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
+import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
 import {
   LedgerAgendaReceipts,
@@ -151,7 +149,9 @@ import {
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
+import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
+import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
 import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
@@ -169,10 +169,11 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
-import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.ts';
+import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
+import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -261,6 +262,7 @@ import {
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
+  ConfiguredLinkStoreLocator,
   DaemonBinder,
   DaemonHealthProbe,
   DaemonSecretsLoader,
@@ -275,17 +277,14 @@ import {
   FileCatalogBlobStore,
   FileCatalogDocumentStore,
   FileCatalogMembersStore,
-  FileLinkDocumentStore,
-  FileLinkKeyVault,
-  HttpLinkStoreClient,
-  ConfiguredLinkStoreLocator,
-  type LinkStoreSetting,
   FileCatalogSharesStore,
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
   FileLaneSetStore,
   FileLegacyWireUseStore,
+  FileLinkDocumentStore,
+  FileLinkKeyVault,
   FileLoginIndexStore,
   FileLoopbackMarkerReader,
   FileModelCatalogCache,
@@ -312,12 +311,14 @@ import {
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
+  HttpLinkStoreClient,
   HttpUsageSource,
   hostCgroupFacts,
   InlineIndexFile,
   JournalGrantAudit,
   JscStackSampler,
   KeyedSerialExecutor,
+  type LinkStoreSetting,
   LOGIN_SECRETS_DOCUMENT,
   LoadSafeWorker,
   ManifestAccountInventory,
@@ -483,6 +484,7 @@ import {
   WorkerObserverHost,
   WorkerSupervisor,
 } from '../src/adapters/session/observer/index.ts';
+import { mostRecentLiveSession } from '../src/adapters/session/owner-session.ts';
 import {
   HarnessProcessProvenance,
   processTreeFor,
@@ -523,7 +525,6 @@ import {
   TimerSendScheduler,
   TmuxSendTerminal,
 } from '../src/adapters/session/send/index.ts';
-import { mostRecentLiveSession } from '../src/adapters/session/owner-session.ts';
 import { sessionAddressCandidates } from '../src/adapters/session/session-address-candidates.ts';
 import {
   FileSignalArtifacts,
@@ -544,7 +545,6 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
-import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
 import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -557,8 +557,8 @@ import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader
 import {
   ManagedTerminalService,
   RedactingTerminalStreamService,
-  StorageTerminalOwnerDirectory,
   runProgram,
+  StorageTerminalOwnerDirectory,
   systemLoginShell,
   TerminalRuntimeError,
   TerminalServiceError,
@@ -616,44 +616,45 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
-import { type AgendaMutation, isAgendaSessionId } from '../src/lib/agenda/index.ts';
+import { type AgendaMutation, closestAgenda, isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
-import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
-  ThreadGateObserver,
+  alertFallback,
   BOARD_SWEEP_INTERVAL_MS,
   BoardGateCheck,
   BoardService,
   BoardSweep,
-  alertFallback,
-  noticeRecipient,
+  type BoardThreads,
   BoardTurnCheck,
+  CardStartRefused,
   type CardWriteObserver,
   DoneDeliveryLadder,
   DuplicateSweep,
   GateItems,
   LivenessActivityDeriver,
+  noticeRecipient,
   type OwnerWords,
-  type BoardThreads,
+  ownerDelegation,
   ReopenDeliveryLadder,
   rungsOf,
-  stageGateLanes,
   SessionCards,
   type SessionLivenessSource,
-  CardStartRefused,
-  ownerDelegation,
+  stageGateLanes,
   startOnCard,
+  ThreadGateObserver,
   walkLadder,
 } from '../src/lib/board/index.ts';
-import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
-import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
+import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
+import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
+import { OrphanList } from '../src/lib/warden/orphan-list.ts';
+import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
 /** How many owner-start keys the daemon remembers (see `cardStartResults`). */
@@ -691,8 +692,8 @@ import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts'
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
-import { TidyService } from '../src/lib/tidy/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
+import { TidyService } from '../src/lib/tidy/index.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -707,8 +708,8 @@ interface AutoResumeBoot {
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
 import { FileCatalogInstallPrefsStore } from '../src/adapters/catalog-installs/prefs-file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
-import { FileLocalSkillInstallStore } from '../src/adapters/local-skill-installs/file-store.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
+import { FileLocalSkillInstallStore } from '../src/adapters/local-skill-installs/file-store.ts';
 import {
   countedFileOperations,
   instrumentChildProcesses,
@@ -716,7 +717,6 @@ import {
 } from '../src/adapters/runtime/performance-instruments.ts';
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
-import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -739,21 +739,18 @@ import {
   ActivityLedger,
   type AgendaActor,
   AgendaAgentClearer,
-  AgendaRollup,
   AgendaBoardUndelivered,
   AgendaBuzz,
   AgendaChangeFanout,
   AgendaConversation,
   AgendaDraftSessions,
+  AgendaHomes,
+  AgendaItemDraftDiscard,
   AgendaReplyBatcher,
   AgendaReplyDelivery,
   AgendaResurfacer,
-  AgendaHomes,
-  AgendaItemDraftDiscard,
+  AgendaRollup,
   AgendaService,
-  migrateToAgendaHomes,
-  foldNoticesIntoMachineAgenda,
-  MachineAgenda,
   AgendaTurnNudge,
   AgendaWaker,
   type AgentCopyPagesPort,
@@ -764,6 +761,8 @@ import {
   type AgentJobControl,
   AgentJobStopper,
   type AgentPhoneApprovalPort,
+  AgentPinService,
+  AgentPinSubsystem,
   type AgentPlanPort,
   AgentSendFailureNotifier,
   AgentToolService,
@@ -793,6 +792,7 @@ import {
   type AuditSink,
   AutoResumeService,
   adoptAgendaDefault,
+  adoptedLaunchArgv,
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
   agendaBlockNotice,
@@ -871,9 +871,7 @@ import {
   createSessionDirectory,
   createSessionPaths,
   createWardenPaths,
-  adoptedLaunchArgv,
   currentLaunchCompactAt,
-  launchedCompactAt,
   currentLaunchEffort,
   currentLaunchModel,
   type DaemonConfig,
@@ -931,7 +929,6 @@ import {
   FleetReading,
   FleetRefreshService,
   FleetSecretReferences,
-  PublishedFleetInventory,
   FleetWardenAgents,
   ForeignHistoryImporter,
   type FoundationPaths,
@@ -940,6 +937,7 @@ import {
   firewallRefusal,
   firstWriteReleasedAnswerAgenda,
   fleetManifestRefusal,
+  foldNoticesIntoMachineAgenda,
   foreignAdvertisementNotice,
   HANDOVER_RESCAN_INTERVAL_MS,
   HARNESS_PICKER_COMMAND,
@@ -975,6 +973,7 @@ import {
   InputAgentNotifierAdapter,
   InputAuditAdapter,
   InputCardClosedObserver,
+  type InputClosestAgenda,
   InputLoginAdapter,
   InputLoginProbe,
   type InputPasteRules,
@@ -1018,11 +1017,13 @@ import {
   LoopbackFirewallWatch,
   type LoopWatchdogPort,
   lateSeedCards,
+  launchedCompactAt,
   launchGuardActive,
   launchReasoningEffort,
   limitedCredentials,
   locateHarnessCommand,
   lookBeforeReading,
+  MachineAgenda,
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
@@ -1036,7 +1037,6 @@ import {
   MemberGateway,
   MemberJoinGate,
   MemberJoinProver,
-  renameNotice,
   MemberPasskeyService,
   MigrationPreflight,
   type MigrationReportStore,
@@ -1048,6 +1048,7 @@ import {
   mcpInventoryFolders,
   messageWithAttachments,
   migrateAgendaFiles,
+  migrateToAgendaHomes,
   migrateToAgendaMode,
   modelCatalogPricingRates,
   modelCatalogsView,
@@ -1104,6 +1105,7 @@ import {
   ProviderQuotaService,
   PublishedCarrierSet,
   type PublishedCarrierView,
+  PublishedFleetInventory,
   PublishedModelCatalogService,
   PushNewDeviceAlert,
   PushService,
@@ -1172,6 +1174,7 @@ import {
   relayCarriersNeedDiscovery,
   releasedAnswerAgendaOwnedBy,
   releasingAttachmentsOnStop,
+  renameNotice,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
@@ -1208,9 +1211,7 @@ import {
   SendUnconfirmed,
   type SerialExecutor,
   SessionAgendaModeService,
-  SessionCompactAtService,
   type SessionAgendaModeSubsystem,
-  type SessionCompactAtSubsystem,
   SessionAgendaProjection,
   type SessionAncestor,
   SessionAnswerError,
@@ -1218,6 +1219,8 @@ import {
   SessionAttachmentStore,
   SessionAttachService,
   SessionBoardResolver,
+  SessionCompactAtService,
+  type SessionCompactAtSubsystem,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -1384,12 +1387,12 @@ import {
   type WardenBoardPort,
   WardenCallsignTakenError,
   type WardenExchangeReader,
-  type WardenStuckInputPort,
   type WardenFleetSession,
   type WardenJournal,
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
+  type WardenStuckInputPort,
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
@@ -1406,8 +1409,6 @@ import {
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
-  AgentPinService,
-  AgentPinSubsystem,
   withContext,
   withLivenessLedger,
   withOutdated,
@@ -1415,6 +1416,7 @@ import {
   withRevive,
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
+import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
 import {
   admitChild,
   CleanUpService,
@@ -6633,6 +6635,8 @@ function createInputRequestService(input: {
   readonly terminals: TerminalRuntimePort;
   readonly tmux: TmuxCommandPort;
   readonly agenda: AgendaService;
+  /** The open agenda an input card belongs with, so it links its topic instead of reading as a fresh one. */
+  readonly closestAgenda?: InputClosestAgenda;
   readonly agentReplies: AgendaReplyBatcher;
   readonly audit: AuditLog;
   readonly values: EphemeralValues;
@@ -6704,7 +6708,7 @@ function createInputRequestService(input: {
       // replaces a value and lists names, never returns one.
       new SecretStoreTarget(input.secretStore),
     ),
-    agenda: new InputAgendaAdapter(input.agenda),
+    agenda: new InputAgendaAdapter(input.agenda, input.closestAgenda),
     notifier: new InputAgentNotifierAdapter(
       async (sessionId, key, message) => await input.agentReplies.add(sessionId, key, message),
     ),
@@ -11302,6 +11306,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         terminals,
         tmux,
         agenda,
+        // An agenda is one channel of the owner's attention: a card that strongly matches an open one links to it.
+        closestAgenda: async (sessionId, card) => {
+          const listed = await agenda.list(sessionId);
+          const title = card.prompt.trim().slice(0, MAX_WORK_RELATED_TEXT_LENGTH);
+          if (!listed.ok || title === '') return undefined;
+          const related = await workSearch.related({
+            kind: 'agenda',
+            title,
+            ask: card.ask.trim().slice(0, MAX_WORK_RELATED_TEXT_LENGTH),
+          });
+          return closestAgenda(related, sessionId, listed.value.items);
+        },
         agentReplies: agendaReplies,
         audit: auditLog,
         values: justTyped,

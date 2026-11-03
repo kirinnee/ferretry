@@ -21,6 +21,11 @@ member's session never reaches this route table at all. Both answers are `no-sto
 The related check is a `POST` only because a title and an ask do not fit in a URL. It reads and changes
 nothing.
 
+`fy agenda add` uses the check to rank the caller's own open agendas, which it lists before it opens a new one
+([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)); `fy task create` lists the weaker related
+cards it finds ([board.md § One card, one outcome](board.md#one-card-one-outcome)). The daemon itself asks it when
+it raises an input card, to link the card to the open agenda it strongly matches.
+
 Daemons that have these routes report `work.search.1` in `GET /v1/health` features. Against an older daemon,
 the app keeps searching only what it has already loaded, and the CLI files without the check.
 

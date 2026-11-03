@@ -97,6 +97,20 @@ one --question with options is a choice, and plain questions — one or several 
 Segments (--premise, --context, --decided, --still-open, --question-answer, --body): short points, answer first, no
 paragraphs. One paragraph over ${AGENDA_SEGMENT_PARAGRAPH_LENGTH} characters draws a warning: split this into short points (- …) or bold the answer first.`;
 
+/**
+ * The open rule, as `fy agenda add --help` says it first (docs/agenda.md § One channel per topic): the same model the
+ * Agenda mode prompt teaches (`AGENDA_INSTRUCTION`), in the words the add's own listing uses.
+ */
+export const AGENDA_OPEN_RULE = `ONE AGENDA IS ONE CHANNEL of the owner's attention: everything in it is heard in the same place,
+against the same background, decided at the same pace.
+  Search, check, then open: add first lists your open agendas, closest first, and asks "Should this join !A3?"
+  with the exact edit that adds the ask there instead. Two things share one agenda when all three hold: same
+  place, same context, same pace. Dependent things always share one (a card that depends on, or blocks, a card
+  an open agenda carries is listed first). Open a new one only when none passes: --new "<why none fits>". If
+  unsure, add to the closest. Split off a part that stops passing the test.
+  The owner's reply rests an item (quiet); your answer on it brings it back to Needs you. Only you mark it Done,
+  when nothing more is expected.`;
+
 const DISMISS_POLICY = `Agents may dismiss only agenda items they raised themselves.
 A human may dismiss any agenda item. Every dismissal remains in the resolution audit.`;
 
@@ -161,7 +175,7 @@ function mountVerbs(
   scoped(
     agenda
       .command('add')
-      .description('raise something a human must decide or do')
+      .description('open an agenda for what the owner must decide or do — only when no open one fits')
       .argument('[ask...]', 'the ask: one line naming what the human must decide or do')
       .option('-t, --title <text>', 'REQUIRED: what this is about, plain words, aim for 40 characters, no IDs')
       .option('--ask <line>', 'the ask, when it is not given as words')
@@ -182,7 +196,10 @@ function mountVerbs(
         '--related <id>',
         'work this belongs to: a card (F12) links it there; an agenda item (A3) is edited, not duplicated',
       )
-      .option('--new', 'raise it even if an agenda item on the same thing exists')
+      .option(
+        '--new [why]',
+        'open a new agenda although open ones are listed: say why none fits (a bare --new is deprecated)',
+      )
       .option(
         '-o, --option <label>',
         'a choice label, or "Label: why" to add its one-line detail; repeat for each option',
@@ -244,7 +261,7 @@ function mountVerbs(
         "a config file with a change held for the owner (fy config status): the owner's Allow applies it; the card's answers are Allow, Deny, Discard change",
       )
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
-      .addHelpText('after', `\n${askKinds(root.parent?.name() ?? 'fy')}`),
+      .addHelpText('after', `\n${AGENDA_OPEN_RULE}\n\n${askKinds(root.parent?.name() ?? 'fy')}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.add(words, merged<AgendaAddOptions>(command));
   });
