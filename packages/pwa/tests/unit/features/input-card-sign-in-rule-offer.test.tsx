@@ -24,12 +24,15 @@ const two = () => [
   offer({ id: 'HOME', label: 'Home', username: 'kirin@home', signIn: SITE_SIGN_IN }),
 ];
 
-const delivered = (call: Call) => ({
-  id: 'ab'.repeat(16),
-  deliveryId: (call.body as { deliveryId?: string }).deliveryId,
-  state: 'delivered',
-  submitted: true,
-});
+const delivered = (call: Call) =>
+  call.path === '/v1/accounts/defaults'
+    ? { defaults: {} }
+    : {
+        id: 'ab'.repeat(16),
+        deliveryId: (call.body as { deliveryId?: string }).deliveryId,
+        state: 'delivered',
+        submitted: true,
+      };
 
 type Hold = readonly [boolean, string | undefined];
 
@@ -40,7 +43,8 @@ const card = async (
 ) => {
   const fake = fakeClient(delivered);
   const rules = ruleClient(options.world);
-  const route = (path: string): RuleClient => (path.startsWith('/v1/sign-in-rules') ? rules.client : fake.client);
+  const route = (path: string): RuleClient =>
+    path.startsWith('/v1/sign-in-rules') || path === '/v1/accounts' ? rules.client : fake.client;
   const client = {
     request: async (path: string, schema: never, init?: RequestInit) => await route(path).request(path, schema, init),
   } as never;
@@ -219,5 +223,89 @@ describe('the card’s hold on the view it is drawn in (#B147)', () => {
       [true, undefined],
       [false, undefined],
     ]);
+  });
+});
+
+describe('finishing a follow-up lets go of the view (#B147)', () => {
+  const PROJECT = { id: 'p_ferretry', name: 'ferretry' };
+  const pick = () => withSaved(saved({ match: 'app.clickup.com', project: PROJECT, offers: two() }));
+  const flush = async () => {
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+  };
+  const finishRule = async (view: Mounted) => {
+    await click(view.container.querySelector('[data-rule-offer-button]'));
+    await flush();
+    await click(view.container.querySelector('[data-rule-approve]'));
+    await flush();
+  };
+
+  it('lets go once "Always use for <project>" is saved', async () => {
+    const holds: Hold[] = [];
+    const view = await card(pick(), false, { holds });
+    await click(view.container.querySelector('[data-input-offer="HOME"]'));
+    await settle();
+    expect(holds.at(-1)).toEqual([true, undefined]);
+
+    await click(view.container.querySelector('[data-input-always-button]'));
+    await flush();
+
+    expect(view.container.querySelector('[data-input-always-saved]')).not.toBeNull();
+    expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
+  });
+
+  it('keeps holding while a write for the default fails, and while the button is still there', async () => {
+    const holds: Hold[] = [];
+    const fake = fakeClient(call => {
+      if (call.path === '/v1/accounts/defaults') throw new Error('the owner has to confirm this on the machine');
+      return delivered(call);
+    });
+    const value = pick();
+    const view = await mount(
+      <InputCard
+        agentName="Hadi"
+        client={fake.client}
+        fields={fieldsOf(value)}
+        now={NOW}
+        onDone={() => undefined}
+        onHold={(holding, settled) => holds.push([holding, settled])}
+        request={value}
+      />,
+    );
+    mounted.push(view);
+    await click(view.container.querySelector('[data-input-offer="HOME"]'));
+    await settle();
+    await click(view.container.querySelector('[data-input-always-button]'));
+    await flush();
+
+    expect(view.container.querySelector('[data-input-always-failure]')).not.toBeNull();
+    expect(holds.at(-1)).toEqual([true, undefined]);
+  });
+
+  it('lets go once the standing rule is approved', async () => {
+    const holds: Hold[] = [];
+    const view = await card(withSaved(saved({ offers: two() })), true, { holds });
+    await click(view.container.querySelector('[data-input-offer="HOME"]'));
+    await settle();
+    expect(holds.at(-1)).toEqual([true, undefined]);
+
+    await finishRule(view);
+
+    expect(view.container.querySelector('[data-rule-offer-saved]')).not.toBeNull();
+    expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
+  });
+
+  it('keeps holding until EVERY offered follow-up is done', async () => {
+    const holds: Hold[] = [];
+    const view = await card(pick(), true, { holds });
+    await click(view.container.querySelector('[data-input-offer="HOME"]'));
+    await settle();
+
+    await click(view.container.querySelector('[data-input-always-button]'));
+    await flush();
+    expect(view.container.querySelector('[data-input-always-saved]')).not.toBeNull();
+    expect(holds.at(-1)).toEqual([true, undefined]);
+
+    await finishRule(view);
+    expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
   });
 });

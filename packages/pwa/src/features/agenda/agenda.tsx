@@ -120,6 +120,7 @@ const endedWords = (item: ResolvedAgendaItem): string =>
     ? `${agendaReference(item.id)} is closed.`
     : `${agendaReference(item.id)} is closed. ${item.resolutionNote}`;
 const NO_RECORDS: readonly ResolvedAgendaItem[] = [];
+const NO_HOLDS: ReadonlySet<AgendaId> = new Set();
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
 
@@ -230,13 +231,17 @@ export const useAgenda = ({
     readonly key: string;
     readonly drawer: boolean;
     readonly card: AgendaId | null;
-  }>({ key: scopeKey, drawer: false, card: null });
-  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null };
+    readonly opening: number;
+  }>({ key: scopeKey, drawer: false, card: null, opening: 0 });
+  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null, opening: 0 };
+  // Every change of the card shown is a NEW opening of the view: what an earlier opening saw or held is not this one's.
+  const openings = useRef(0);
   const update = useCallback(
     (change: (current: typeof here) => Partial<typeof here>): void =>
       setShown(current => {
-        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null };
-        return { ...base, ...change(base) };
+        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null, opening: 0 };
+        const next = { ...base, ...change(base) };
+        return next.card === base.card ? next : { ...next, opening: ++openings.current };
       }),
     [scopeKey],
   );
@@ -312,11 +317,19 @@ export const useAgenda = ({
   };
 
   // An input card holds its view while a Send from it is on its way or a follow-up offer is on screen (`onHold`).
-  const [holding, setHolding] = useState<ReadonlySet<AgendaId>>(new Set());
-  // The ids this view showed while they were still open: only those close by themselves when they end, never a closed
-  // record the owner opened from the history to read.
-  const seenOpen = useRef(new Set<AgendaId>());
-  if (shownItem !== undefined && !closed) seenOpen.current.add(shownItem.id);
+  // Holds belong to the opening that made them: a card that went with its opening leaves nothing behind in the next.
+  const [held, setHeld] = useState<{ readonly opening: number; readonly ids: ReadonlySet<AgendaId> }>({
+    opening: here.opening,
+    ids: new Set(),
+  });
+  const holding = held.opening === here.opening ? held.ids : NO_HOLDS;
+  const latestOpening = useRef(here.opening);
+  latestOpening.current = here.opening;
+  // Whether the item was still open during THIS opening of the view: only then does it close by itself when it ends,
+  // never a closed record the owner opened from the history to read, nor one opened again after it ended.
+  const seenOpen = useRef<number | null>(null);
+  if (shownItem === undefined || seenOpen.current !== here.opening) seenOpen.current = null;
+  if (shownItem !== undefined && !closed) seenOpen.current = here.opening;
   const closeEnded = (id: AgendaId, text: string, tone: 'ok' | 'info'): void => {
     update(current => (current.card === id ? { card: null } : {}));
     setSentForm({ id, text, tone });
@@ -325,22 +338,26 @@ export const useAgenda = ({
   };
   const holdFor =
     (id: AgendaId) =>
-    (held: boolean, settled?: string): void => {
-      setHolding(current => {
-        if (current.has(id) === held) return current;
-        const next = new Set(current);
-        if (held) next.add(id);
+    (isHeld: boolean, settled?: string): void => {
+      const opening = here.opening;
+      // A card from an earlier opening speaks for nothing now.
+      if (opening !== latestOpening.current) return;
+      setHeld(current => {
+        const ids = current.opening === opening ? current.ids : NO_HOLDS;
+        if (ids.has(id) === isHeld) return current.opening === opening ? current : { opening, ids };
+        const next = new Set(ids);
+        if (isHeld) next.add(id);
         else next.delete(id);
-        return next;
+        return { opening, ids: next };
       });
       // Sent from here with nothing more to show: the card's own words, at once, before any board says so.
-      if (!held && settled !== undefined) closeEnded(id, settled, 'ok');
+      if (!isHeld && settled !== undefined) closeEnded(id, settled, 'ok');
     };
   const ended =
     shownItem !== undefined &&
     isResolved(shownItem) &&
     endsItself(shownItem) &&
-    seenOpen.current.has(shownItem.id) &&
+    seenOpen.current === here.opening &&
     !holding.has(shownItem.id)
       ? shownItem
       : undefined;
@@ -467,9 +484,9 @@ export const useAgenda = ({
     cardModel(cardItem).shape !== 'info' &&
     cardModel(cardItem).shape !== 'input';
   // An input card that holds the view keeps its form on screen, closed or not: what it says after a Send is in there.
-  const held = cardItem !== undefined && holding.has(cardItem.id);
+  const cardHeld = cardItem !== undefined && holding.has(cardItem.id);
   const standing =
-    cardItem === undefined || held || (!closed && cardItem.parked === undefined) ? undefined : (
+    cardItem === undefined || cardHeld || (!closed && cardItem.parked === undefined) ? undefined : (
       <AgendaSettled
         busy={busyIds.has(cardItem.id)}
         error={typeof cardError === 'string' ? cardError : null}

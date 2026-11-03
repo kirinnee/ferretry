@@ -185,7 +185,10 @@ export function InputCard({
   const [sending, setSending] = useState(false);
   const [ruleOffered, setRuleOffered] = useState<boolean | undefined>(undefined);
   const offersRule = ruleOffer !== undefined && tappedSignIn !== undefined;
-  const following = always !== undefined || (offersRule && ruleOffered !== false);
+  // Each follow-up tells the card when it has been carried out; one that is done no longer holds the view.
+  const [alwaysSaved, setAlwaysSaved] = useState(false);
+  const [ruleSaved, setRuleSaved] = useState(false);
+  const following = (always !== undefined && !alwaysSaved) || (offersRule && ruleOffered !== false && !ruleSaved);
   const holding = sending || cancelling || (settled !== null && following);
   const told = useRef<string | null>(null);
   const hold = useRef(onHold);
@@ -433,12 +436,15 @@ export function InputCard({
           <p className="m-0 text-ui text-ok" data-input-settled="" role="status">
             {settled}
           </p>
-          {always === undefined ? null : <AlwaysUseLine always={always} client={client} />}
+          {always === undefined ? null : (
+            <AlwaysUseLine always={always} client={client} onSaved={() => setAlwaysSaved(true)} />
+          )}
           {ruleOffer === undefined || tappedSignIn === undefined ? null : (
             <SignInRuleOffer
               askPasskey={ruleOffer.askPasskey}
               client={client}
               onOffered={setRuleOffered}
+              onSaved={() => setRuleSaved(true)}
               signIn={tappedSignIn}
             />
           )}
@@ -788,7 +794,15 @@ const sensitivityWords = (field: InputCardField): string =>
  * default (`PUT /v1/accounts/defaults`); the owner's own act, in effect at once (a paired device confirms with its passkey). A failure is said
  * in words and never changes what was already sent.
  */
-function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonly client: InputClient }) {
+function AlwaysUseLine({
+  always,
+  client,
+  onSaved,
+}: {
+  readonly always: AlwaysUse;
+  readonly client: InputClient;
+  readonly onSaved: () => void;
+}) {
   const [state, setState] = useState<'idle' | 'writing' | 'saved'>('idle');
   const [failure, setFailure] = useState<string | null>(null);
   const write = async (): Promise<void> => {
@@ -797,6 +811,7 @@ function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonl
     try {
       await putAccountDefault(client, always.body);
       setState('saved');
+      onSaved();
     } catch (cause) {
       setState('idle');
       setFailure(cause instanceof Error ? cause.message : String(cause));
