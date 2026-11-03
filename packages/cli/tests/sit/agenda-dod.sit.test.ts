@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   type AgendaGate,
   type AgendaItem,
+  agendaNotificationPath,
   agendaState,
   BoardTaskCreateRequestSchema,
+  type BoardTaskView,
   DAEMON_FEATURES,
   gateReference,
   needsYouQueue,
@@ -18,6 +20,7 @@ import {
   FileAgendaSeenStore,
   FileAgendaVersionStore,
 } from '../../../daemon/src/adapters/agenda/file-agenda-versions.ts';
+import { KeyedSerialExecutor } from '../../../daemon/src/adapters/system/keyed-serial-executor.ts';
 import { inlineAgendaVersionsWorker } from '../../../daemon/tests/support/agenda-versions-worker.ts';
 import { AgendaRestNudger } from '../../../daemon/src/lib/agenda/rest-nudge.ts';
 import {
@@ -31,10 +34,19 @@ import { NO_GOVERNED_ROUTES_GUARD } from '../../../daemon/src/lib/api/capability
 import { ApiDispatcher, ApiRouter } from '../../../daemon/src/lib/api/index.ts';
 import { BoardError, BoardService, cardVisibility } from '../../../daemon/src/lib/board/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../daemon/src/lib/grants/index.ts';
+import { NotificationService } from '../../../daemon/src/lib/notifications/service.ts';
+import type {
+  NotificationDeliveryLedger,
+  NotificationLedgerEntry,
+  NotificationRecord,
+} from '../../../daemon/src/lib/notifications/types.ts';
+import type { PushDispatch } from '../../../daemon/src/lib/push/types.ts';
 import { agendaRoutes } from '../../../daemon/src/lib/runtime/index.ts';
 import { card, MemoryBoardStore, world as boardWorld } from '../../../daemon/tests/unit/board/support.ts';
 import { DIRECTORY, REFUSED } from '../../../daemon/tests/unit/sub-ferret/support.ts';
 import { request as apiRequest } from '../../../daemon/tests/unit/api/support.ts';
+import pkg from '../../package.json' with { type: 'json' };
+import { card as taskCard, taskResponse } from '../unit/board/fixtures';
 import { health } from '../unit/daemon/fixtures';
 import { BinaryCliDriver, type CliDriver, InProcessCliDriver } from './driver';
 
@@ -43,16 +55,18 @@ import { BinaryCliDriver, type CliDriver, InProcessCliDriver } from './driver';
  * so the checklist reads straight from the test output.
  *
  * WHAT THIS PROVES: the agenda-first redesign end to end on a TEMP `FY_HOME`, with no network. The daemon half is the
- * real `AgendaService` over the real file ledger, version archive and seen store; the CLI half drives the real `fy`
- * through HTTP into the daemon's real agenda routes, so a flag, a route and a ledger file all answer for one claim.
- * The pages in the app are proved by the PR that built each one; the `UI` tests name the file and the behaviour it
- * proves, so a deleted or renamed test breaks this checklist.
+ * real `AgendaService` over the real file ledger, version archive and seen store. Items 1, 2, 7, 8 (the report), 10, 14,
+ * 15 and 16 are driven through the real `fy` over HTTP into the daemon's real agenda routes, so a flag, a route and a
+ * ledger file all answer for one claim. Items 3, 4, 5, 6, 8 (the replies), 9, 11 and 13 are service-level checks: the
+ * owner's side (a reply, a snooze, the clock, the push) has no `fy` command, so the test calls the service the app's
+ * routes call. The pages in the app are proved by the PR that built each one; the `UI` tests name the file and the
+ * behaviour it proves, so a deleted or renamed test breaks this checklist.
  *
- * WHAT THIS DOES NOT PROVE: pushes reaching a phone, a live tmux pane, or the real browser. Those are the integration
+ * WHAT THIS DOES NOT PROVE: a push reaching a phone, a live tmux pane, or the real browser. Those are the integration
  * and visual tiers, which CI runs.
  */
 
-const binaryName = 'fy';
+const binaryName = Object.keys(pkg.bin)[0] ?? pkg.name;
 const os = process.platform === 'darwin' ? 'darwin' : 'linux';
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64-baseline';
 const binaryPath = process.env.CLI_BIN ?? `dist/bin/${binaryName}-${os}-${arch}`;
@@ -102,6 +116,28 @@ interface Chat {
   messages: Array<{ messageId: string; at: string; text: string }>;
 }
 
+/** The push ledger in memory: the notification service decides from it, the test reads what it recorded. */
+class MemoryPushLedger implements NotificationDeliveryLedger {
+  readonly records: NotificationRecord[] = [];
+
+  async find(key: string): Promise<NotificationLedgerEntry | undefined> {
+    const requested = this.records.find(record => record.key === key && record.phase === 'requested');
+    if (requested === undefined || requested.phase !== 'requested') return undefined;
+    const outcome = this.records.find(record => record.key === key && record.phase === 'outcome');
+    return { requested, ...(outcome === undefined || outcome.phase !== 'outcome' ? {} : { outcome }) };
+  }
+
+  async entries(): Promise<readonly NotificationLedgerEntry[]> {
+    const keys = this.records.filter(record => record.phase === 'requested').map(record => record.key);
+    const found = await Promise.all(keys.map(async key => await this.find(key)));
+    return found.filter(entry => entry !== undefined);
+  }
+
+  async append(record: NotificationRecord): Promise<void> {
+    this.records.push(record);
+  }
+}
+
 /** A daemon's agenda on a temp `FY_HOME`: real files, a clock the test moves, and ports the test can see. */
 function build() {
   const home = mkdtempSync(join(tmpdir(), 'fy-dod-'));
@@ -110,8 +146,8 @@ function build() {
   const repository = new FileAgendaLedgerRepository(sessionDirectory, undefined, undefined, undefined, versions);
   const seen = new FileAgendaSeenStore(sessionDirectory);
   const clock = { at: minute(0) };
-  const pushed: string[] = [];
   const asking = new Map<string, { sessionId: string; id: string }>();
+  const cards = new Map<string, BoardTaskView>();
   const chat: Chat = { messages: [] };
   const ownerChat: OwnerChat = {
     find: async (_session, messageId) => {
@@ -125,8 +161,8 @@ function build() {
   const service = new AgendaService(
     repository,
     { now: () => clock.at },
-    { has: async id => id === SESSION || id === 'child' },
-    { raised: async (_session, item) => void pushed.push(item.id) },
+    { has: async id => id === SESSION || id === 'child' || id === 'lead' },
+    { raised: async () => undefined },
     { changed: async () => undefined },
     undefined,
     DIRECTORY,
@@ -143,8 +179,8 @@ function build() {
     repository,
     service,
     clock,
-    pushed,
     asking,
+    cards,
     chat,
     at: (offset: number) => {
       clock.at = minute(offset);
@@ -161,6 +197,33 @@ function build() {
       if (found === undefined) throw new Error(`no item ${id}`);
       return found as AgendaItem;
     },
+    /** The real notification service, with a recording sender: what the daemon does when the ferret stops. */
+    buzz: () => {
+      const dispatches: PushDispatch[] = [];
+      const ledger = new MemoryPushLedger();
+      const notifications = new NotificationService({
+        ledger,
+        sessions: { describe: async () => ({ name: 'Ada', title: 'Ship the release', interactive: true }) },
+        push: {
+          list: async () => [{}],
+          notify: async dispatch => {
+            dispatches.push(dispatch);
+            return { delivered: 1, failed: 0 };
+          },
+        },
+        serial: new KeyedSerialExecutor(),
+        clock: { now: () => clock.at },
+      });
+      return {
+        dispatches,
+        recorded: () => ledger.records.length,
+        stopped: async (stoppedAt: string) => {
+          const listed = await service.list(SESSION);
+          if (!listed.ok) throw new Error(listed.error.message);
+          await notifications.stopped(SESSION, stoppedAt, listed.value);
+        },
+      };
+    },
     dispose: () => rmSync(home, { recursive: true, force: true }),
   };
 }
@@ -176,7 +239,7 @@ afterAll(() => {
   for (const each of worlds) each.dispose();
 });
 
-/** The real agenda routes behind a Bun server, for `fy` to call. */
+/** The real agenda routes behind a Bun server, for `fy` to call; the board's card route answers from `made.cards`. */
 function serveRoutes(made: World) {
   const credentials = {
     admin: 'admin-secret',
@@ -207,9 +270,17 @@ function serveRoutes(made: World) {
               DAEMON_FEATURES.agendaConversation,
               DAEMON_FEATURES.agendaLinkMeaning,
               DAEMON_FEATURES.agendaChannel,
+              DAEMON_FEATURES.agendaTask,
             ],
           }),
         );
+      const boardCard = url.pathname.match(/^\/v1\/board\/tasks\/([^/]+)$/u)?.[1];
+      if (boardCard !== undefined) {
+        const found = made.cards.get(decodeURIComponent(boardCard));
+        return found === undefined
+          ? Response.json({ error: { code: 'not_found', message: 'no such card' } }, { status: 404 })
+          : Response.json(taskResponse(found));
+      }
       const body = incoming.method === 'GET' ? '' : await incoming.text();
       const response = await dispatcher.dispatch(
         apiRequest({
@@ -231,8 +302,10 @@ beforeAll(() => {
   driver = useInProcess ? new InProcessCliDriver() : new BinaryCliDriver(binaryPath);
 });
 
-const fy = (url: string, args: string[]) =>
+/** One `fy agenda …` call on the world's temp home, as the ferret session. */
+const fy = (made: World, url: string, args: string[]) =>
   driver.run(['agenda', ...args, '--session', SESSION], {
+    FY_HOME: made.home,
     FY_URL: url,
     FY_TOKEN: 'admin-secret',
     FY_SESSION_ID: SESSION,
@@ -240,27 +313,50 @@ const fy = (url: string, args: string[]) =>
 
 const BRIEF = ['--premise', 'A release is ready.', '--context', 'The deploy needs a region.'];
 
-/** A UI proof lives in another PR's test: it must exist and say the behaviour it proves. */
+/** A proof lives in another test file: it must exist and say the behaviour it proves. */
 const proves = (path: string, ...phrases: string[]): void => {
   const file = join(REPO, path);
   should(existsSync(file)).equal(true, `${path} must exist: it proves this item`);
   const text = readFileSync(file, 'utf8');
   for (const phrase of phrases) should(text).containEql(phrase);
 };
-const landed = (path: string): boolean => existsSync(join(REPO, path));
 
 describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`, () => {
-  it('DoD 1: a ferret only opens an agenda when no open one passes the test; otherwise it is told to join the closest', async () => {
+  it('DoD 1: a ferret only opens an agenda when no open one passes the test; otherwise it adds to the closest', async () => {
     // Arrange
     const made = fresh();
     const daemon = serveRoutes(made);
     try {
-      const first = await fy(daemon.url, ['add', 'Which region do we deploy to?', '--title', 'Region', ...BRIEF]);
+      const first = await fy(made, daemon.url, ['add', 'Which region do we deploy to?', '--title', 'Region', ...BRIEF]);
       should(first.code).equal(0, first.err);
 
       // Act — a second ask on the same topic, with no word on why it is new
-      const refused = await fy(daemon.url, ['add', 'Which region for the canary?', '--title', 'Canary', ...BRIEF]);
-      const joined = await fy(daemon.url, [
+      const refused = await fy(made, daemon.url, [
+        'add',
+        'Which region for the canary?',
+        '--title',
+        'Canary',
+        ...BRIEF,
+      ]);
+
+      // Assert — nothing opened; the listing names the candidate and the join command
+      should(refused.code).not.equal(0);
+      should(refused.err).containEql('Search, check, then open');
+      should(refused.err).containEql('Should this join !A1?');
+      should(refused.err).containEql('fy agenda edit A1');
+      should(refused.err).containEql('--new');
+      should((await made.items()).map(item => item.id)).eql(['A1']);
+
+      // Act — the ferret adds to the closest, as the listing says
+      const joined = await fy(made, daemon.url, ['edit', 'A1', '--where', 'The canary region is decided here too.']);
+
+      // Assert — still ONE agenda, now carrying the canary
+      should(joined.code).equal(0, joined.err);
+      should((await made.items()).map(item => item.id)).eql(['A1']);
+      should((await made.item('A1')).whereWeAre).containEql('The canary region is decided here too.');
+
+      // Act — only a reason that none passes opens a second one
+      const opened = await fy(made, daemon.url, [
         'add',
         'Which region for the canary?',
         '--title',
@@ -271,19 +367,65 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
       ]);
 
       // Assert
-      should(refused.code).not.equal(0);
-      should(refused.err).containEql('Search, check, then open');
-      should(refused.err).containEql('Should this join !A1?');
-      should(refused.err).containEql('fy agenda edit A1');
-      should(refused.err).containEql('--new');
-      should(joined.code).equal(0, joined.err);
+      should(opened.code).equal(0, opened.err);
       should((await made.items()).map(item => item.id)).eql(['A1', 'A2']);
     } finally {
       daemon.stop();
     }
   });
 
-  it('DoD 2: things that depend on each other are in one agenda: a card already asking points to the agenda that carries it', async () => {
+  it('DoD 2: things that depend on each other are always in one agenda: the listing puts the agenda carrying a dependency first', async () => {
+    // Arrange — A1 carries F1; F2 depends on F1; F3 blocks F1
+    const made = fresh();
+    made.cards.set('F1', taskCard({ id: 'F1' }));
+    made.cards.set('F2', taskCard({ id: 'F2', dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] }));
+    made.cards.set('F3', taskCard({ id: 'F3', blocks: [{ id: 'F1' }] }));
+    const daemon = serveRoutes(made);
+    try {
+      const first = await fy(made, daemon.url, [
+        'add',
+        'Can you try the badge?',
+        '--title',
+        'Badge',
+        '--task',
+        'F1',
+        ...BRIEF,
+      ]);
+      should(first.code).equal(0, first.err);
+
+      // Act
+      const dependent = await fy(made, daemon.url, [
+        'add',
+        'Is the badge colour right?',
+        '--title',
+        'Colour',
+        '--task',
+        'F2',
+        ...BRIEF,
+      ]);
+      const blocking = await fy(made, daemon.url, [
+        'add',
+        'Is the badge ready to ship?',
+        '--title',
+        'Ship',
+        '--task',
+        'F3',
+        ...BRIEF,
+      ]);
+
+      // Assert — neither opened; each says WHY !A1 is the one to join
+      should(dependent.code).not.equal(0);
+      should(dependent.err).containEql('carries &F1, which &F2 depends on');
+      should(dependent.err).containEql('Should this join !A1?');
+      should(blocking.code).not.equal(0);
+      should(blocking.err).containEql('carries &F1, which depends on &F3');
+      should((await made.items()).map(item => item.id)).eql(['A1']);
+    } finally {
+      daemon.stop();
+    }
+  });
+
+  it('DoD 2: a card that already asks is never asked about twice: the second ask is refused and points at the agenda carrying it', async () => {
     // Arrange
     const made = fresh();
     ok(await made.service.raise(SESSION, ask('Can you try the badge?'), AGENT));
@@ -293,15 +435,31 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     // Act — a second ask naming the same card
     const second = await made.service.raise(SESSION, ask('Is the badge colour right?', { task: { id: 'F1' } }), AGENT);
 
-    // Assert — refused as a second ask, pointing at !A1, which carries the card
+    // Assert
     should(second.ok).be.false();
     should(!second.ok && second.error.message).containEql('!A1');
     should(!second.ok && second.error.message).containEql('already asks the owner');
     should((await made.items()).map(item => item.id)).eql(['A1']);
   });
 
-  it('DoD 3: Needs you is one queue, blockers first, each agenda once; a resting item never pushes', async () => {
-    // Arrange — A1 and A2 ask; A3 blocks; A2 gets the owner's reply and rests
+  it('DoD 3: Needs you notifies once and puts blockers first; a Resting or snoozed item never buzzes', async () => {
+    // Arrange — a quiet board: A1 the owner replied to, A2 snoozed
+    const quiet = fresh();
+    ok(await quiet.service.raise(SESSION, ask('Which region?'), AGENT));
+    ok(await quiet.service.raise(SESSION, ask('Which cluster?'), AGENT));
+    quiet.at(1);
+    ok(await quiet.service.reply(SESSION, 'A1', OWNER, 'what is a region?'));
+    ok(await quiet.service.snooze(SESSION, 'A2', minute(60), OWNER));
+    const silent = quiet.buzz();
+
+    // Act — the ferret stops
+    await silent.stopped(minute(5));
+
+    // Assert — nothing sent, nothing recorded
+    should(silent.dispatches).have.length(0);
+    should(silent.recorded()).equal(0);
+
+    // Arrange — A1 asks first, A2 next, A3 blocks; the owner replies to A2, so it rests; A1 is older and not blocking
     const made = fresh();
     ok(await made.service.raise(SESSION, ask('Which region?'), AGENT));
     made.at(1);
@@ -309,23 +467,25 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     made.at(2);
     ok(await made.service.raise(SESSION, ask('Which quota?', { blockingNow: true }), AGENT));
     made.at(3);
-    const pushedBefore = made.pushed.length;
     ok(await made.service.reply(SESSION, 'A2', OWNER, 'what is a cluster?'));
-    ok(await made.service.rest(SESSION, 'A1', 'checking the region list', AGENT));
+    const items = await made.items();
+    const buzzing = made.buzz();
 
     // Act
-    const items = await made.items();
     const queue = needsYouQueue([...items, ...items]).map(item => item.id);
-    const resting = restingQueue(items).map(item => item.id);
+    await buzzing.stopped(minute(5));
+    await buzzing.stopped(minute(5));
 
-    // Assert
-    should(queue).eql(['A3']);
-    should(resting.sort()).eql(['A1', 'A2']);
-    should(made.pushed.length).equal(pushedBefore);
-    should(made.pushed).eql(['A1', 'A2', 'A3']);
+    // Assert — one queue, each agenda once, the blocker first
+    should(queue).eql(['A3', 'A1']);
+    should(restingQueue(items).map(item => item.id)).eql(['A2']);
+    // Assert — ONE push for the stop, opening straight at the blocker's ask
+    should(buzzing.dispatches).have.length(1);
+    should(buzzing.dispatches[0]?.payload.url).equal(agendaNotificationPath(SESSION, 'A3'));
+    should(buzzing.dispatches[0]?.payload.title).containEql('2 need you');
   });
 
-  it('DoD 4: a reply rests the item; the ferret’s answer brings it back to its old spot; 30 minutes of silence get one nudge', async () => {
+  it('DoD 4: a reply or an answer rests the item; the ferret’s answer brings it back to its old spot; 30 minutes of silence get one nudge', async () => {
     // Arrange — A1 is older than A2, and the owner replies to A1
     const made = fresh();
     ok(await made.service.raise(SESSION, ask('Which region?'), AGENT));
@@ -341,7 +501,7 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
       () => [SESSION],
       { schedule: () => undefined, cancel: () => undefined },
       () => made.clock.at,
-      'fy',
+      binaryName,
     );
 
     // Assert — resting, out of Needs you
@@ -366,6 +526,20 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     // Assert — back in Needs you, ahead of the newer A2: its old spot
     should(agendaState(await made.item('A1')).state).equal('needs-you');
     should(needsYouQueue(await made.items()).map(item => item.id)).eql(['A1', 'A2']);
+  });
+
+  it('DoD 4: an ANSWER from the owner leaves Needs you too', async () => {
+    // Arrange
+    const made = fresh();
+    ok(await made.service.raise(SESSION, ask('Which region?', { ask: { kind: 'open-question' } }), AGENT));
+    ok(await made.service.raise(SESSION, ask('Which cluster?'), AGENT));
+    made.at(1);
+
+    // Act — the owner answers A1's ask in the app
+    ok(await made.service.answer(SESSION, 'A1', { kind: 'open-question', answer: 'eu-west' }, OWNER));
+
+    // Assert — A1 is no longer waiting on the owner
+    should(needsYouQueue(await made.items()).map(item => item.id)).eql(['A2']);
   });
 
   it('DoD 5: snooze keeps an item resting until the time picked, unless a blocker wakes it', async () => {
@@ -418,33 +592,78 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     should(carried.gateAttached?.cardId).equal('F1');
   });
 
+  it('DoD 6 (board): a card reaching its gate puts the ask on the open agenda that carries it, and opens none', () => {
+    proves(
+      'packages/daemon/tests/unit/board/card-asks.test.ts',
+      'opens ONE agenda named after the card, carrying its How to test and Done / Not good (DoD 6)',
+      'puts the ask on the open agenda that already carries the card, and opens none',
+    );
+  });
+
   it('DoD 7: an explainer or report you ask for appears in the agenda’s “where we are now”', async () => {
     // Arrange
     const made = fresh();
-    ok(await made.service.raise(SESSION, ask('Walk me through the cache?', { stage: 'explainer' }), AGENT));
+    const daemon = serveRoutes(made);
+    try {
+      const added = await fy(made, daemon.url, [
+        'add',
+        'Walk me through the cache?',
+        '--title',
+        'Cache',
+        '--stage',
+        'explainer',
+        ...BRIEF,
+      ]);
+      should(added.code).equal(0, added.err);
 
-    // Act
-    ok(await made.service.edit(SESSION, 'A1', { whereWeAre: 'The cache has three layers: L1, L2, disk.' }, AGENT));
+      // Act
+      const edited = await fy(made, daemon.url, ['edit', 'A1', '--where', 'The cache has three layers: L1, L2, disk.']);
 
-    // Assert
-    should((await made.item('A1')).whereWeAre).equal('The cache has three layers: L1, L2, disk.');
+      // Assert
+      should(edited.code).equal(0, edited.err);
+      should((await made.item('A1')).whereWeAre).equal('The cache has three layers: L1, L2, disk.');
+    } finally {
+      daemon.stop();
+    }
   });
 
-  it('DoD 8: a 200k report round-trips whole, and every reply is in the conversation, in order', async () => {
+  it('DoD 8: a 200k report round-trips whole through `fy agenda edit --body-file`', async () => {
     // Arrange
     const made = fresh();
+    const daemon = serveRoutes(made);
     const report = `${'r'.repeat(199_990)}END-REPORT`;
+    const file = join(made.home, 'report.md');
+    writeFileSync(file, report);
+    try {
+      const added = await fy(made, daemon.url, ['add', 'Read the report?', '--title', 'Report', ...BRIEF]);
+      should(added.code).equal(0, added.err);
+
+      // Act
+      const edited = await fy(made, daemon.url, ['edit', 'A1', '--body-file', file]);
+
+      // Assert — read back whole: the same length, the same last words, nothing cut
+      should(edited.code).equal(0, edited.err);
+      const kept = (await made.item('A1')).body ?? '';
+      should(kept.length).equal(report.length);
+      should(kept.endsWith('END-REPORT')).be.true();
+      should(kept === report).be.true();
+    } finally {
+      daemon.stop();
+    }
+  });
+
+  it('DoD 8: every reply shows in the conversation, in order, the ferret’s answers between them', async () => {
+    // Arrange
+    const made = fresh();
     ok(await made.service.raise(SESSION, ask('Read the report?'), AGENT));
 
     // Act
-    ok(await made.service.edit(SESSION, 'A1', { whereWeAre: report }, AGENT));
     for (const [index, words] of ['first reply', 'second reply', 'third reply'].entries()) {
       made.at(index + 1);
       ok(await made.service.reply(SESSION, 'A1', OWNER, words));
       made.at(index + 1.5);
       ok(await made.service.edit(SESSION, 'A1', { questionAnswer: `ferret answer ${index + 1}` }, AGENT));
     }
-    const kept = await made.item('A1');
     const words: string[] = [];
     let cursor: { index: number; offset: number } | undefined = { index: 0, offset: 0 };
     while (cursor !== undefined) {
@@ -454,11 +673,15 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
       cursor = page.value.next;
     }
 
-    // Assert
-    should(kept.whereWeAre).equal(report);
-    should(words.filter(text => text.includes('reply'))).eql(['first reply', 'second reply', 'third reply']);
-    should(words.indexOf('first reply')).be.below(words.indexOf('second reply'));
-    should(words.indexOf('second reply')).be.below(words.indexOf('third reply'));
+    // Assert — the owner’s words and the ferret’s, interleaved exactly as they happened
+    should(words.filter(text => /reply|ferret answer/u.test(text))).eql([
+      'first reply',
+      'ferret answer 1',
+      'second reply',
+      'ferret answer 2',
+      'third reply',
+      'ferret answer 3',
+    ]);
   });
 
   it('DoD 9: the versions list, and any two can be fetched to compare', async () => {
@@ -491,52 +714,68 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     made.at(1);
     ok(await made.service.reply(SESSION, 'A1', OWNER, 'about the region'));
     ok(await made.service.reply(SESSION, 'A2', OWNER, 'about the cluster'));
+    const daemon = serveRoutes(made);
+    try {
+      // Act — the ferret merges A2 into A1
+      made.at(2);
+      const merged = await fy(made, daemon.url, ['merge', 'A1', 'A2']);
+      should(merged.code).equal(0, merged.err);
+      const kept = await made.item('A1');
+      const absorbed = await made.item('A2');
+      const page = await made.service.conversationOf(SESSION, 'A1', 0, 0);
+      const total = page.ok ? page.value.total : -1;
+      const texts: string[] = [];
+      for (let index = 0; index < total; index += 1) {
+        const entry = await made.service.conversationOf(SESSION, 'A1', index, 0);
+        if (entry.ok && entry.value.entry !== undefined) texts.push(entry.value.entry.text);
+      }
 
-    // Act
-    made.at(2);
-    ok(await made.service.merge(SESSION, 'A1', 'A2', AGENT));
-    const kept = await made.item('A1');
-    const absorbed = await made.item('A2');
-    const page = await made.service.conversationOf(SESSION, 'A1', 0, 0);
-    const total = page.ok ? page.value.total : -1;
-    const texts: string[] = [];
-    for (let index = 0; index < total; index += 1) {
-      const entry = await made.service.conversationOf(SESSION, 'A1', index, 0);
-      if (entry.ok && entry.value.entry !== undefined) texts.push(entry.value.entry.text);
+      // Assert
+      should(kept.cardAsks?.map(each => each.gate.cardId).sort()).eql(['F1', 'F2']);
+      should(absorbed.mergedInto).equal('A1');
+      should(texts.join('\n')).containEql('about the region');
+      should(texts.join('\n')).containEql('about the cluster');
+    } finally {
+      daemon.stop();
     }
-
-    // Assert
-    should(kept.cardAsks?.map(each => each.gate.cardId).sort()).eql(['F1', 'F2']);
-    should(absorbed.mergedInto).equal('A1');
-    should(texts.join('\n')).containEql('about the region');
-    should(texts.join('\n')).containEql('about the cluster');
   });
 
-  it('DoD 11: a sub-ferret can not create a card or an agenda without permission', async () => {
+  it('DoD 11: a sub-ferret can not create a card or an agenda without permission; its lead can', async () => {
     // Arrange
     const made = fresh();
     const child: AgendaActor = { kind: 'agent', sessionId: 'child', name: 'Bo' };
+    const lead: AgendaActor = { kind: 'agent', sessionId: 'lead', name: 'Lee' };
     const board = new BoardService(
-      boardWorld({ store: new MemoryBoardStore([card({ owner: 'lead', assignee: 'child' })]), subFerrets: DIRECTORY }),
+      boardWorld({
+        store: new MemoryBoardStore([card({ owner: 'lead', assignee: 'child' })]),
+        subFerrets: DIRECTORY,
+      }),
     );
+    const create = BoardTaskCreateRequestSchema.parse({
+      kind: 'feature',
+      title: 'More',
+      ask: { text: 'x', source: 'owner' },
+    });
 
     // Act
     const agenda = await made.service.raise('child', ask('Can I open this?'), child);
-    const cardRefused = await board
-      .create(
-        BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'More', ask: { text: 'x', source: 'owner' } }),
-        { kind: 'ferret', sessionId: 'child' },
-      )
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+    const cardRefused = await board.create(create, { kind: 'ferret', sessionId: 'child' }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const leadAgenda = await made.service.raise('lead', ask('May I open this?'), lead);
+    const leadCard = await board.create(create, { kind: 'ferret', sessionId: 'lead' }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
-    // Assert
+    // Assert — refused for the sub-ferret, allowed for the lead
     should(agenda).containDeep({ ok: false, error: { code: 'forbidden' } });
     should(!agenda.ok && agenda.error.message).match(REFUSED);
     should(cardRefused).be.instanceOf(BoardError);
     should((cardRefused as BoardError).message).match(REFUSED);
+    should(leadAgenda.ok).be.true();
+    should(leadCard).be.undefined();
   });
 
   it('DoD 12 (UI): a ferret can show a live card or mini board inline, and it updates when the card moves', () => {
@@ -571,25 +810,43 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
   it('DoD 14: one agenda goes explainer → question → plan → tracker → test → done, and the history keeps every stage', async () => {
     // Arrange
     const made = fresh();
+    const daemon = serveRoutes(made);
     const stages = ['explainer', 'question', 'plan', 'tracker', 'test'] as const;
-    ok(await made.service.raise(SESSION, ask('Walk me through the cache?', { stage: 'explainer' }), AGENT));
+    try {
+      const added = await fy(made, daemon.url, [
+        'add',
+        'Walk me through the cache?',
+        '--title',
+        'Cache',
+        '--stage',
+        'explainer',
+        ...BRIEF,
+      ]);
+      should(added.code).equal(0, added.err);
 
-    // Act / Assert — each step, in turn
-    for (const [index, stage] of stages.entries()) {
-      made.at(index + 1);
-      if (index > 0) ok(await made.service.edit(SESSION, 'A1', { stage }, AGENT));
-      const item = await made.item('A1');
-      should(item.stage).equal(stage);
-      should(agendaState(item).state).equal('needs-you');
-      should(item.stages?.map(entry => entry.stage)).eql(stages.slice(0, index + 1));
+      // Act / Assert — each step, in turn, through the CLI
+      for (const [index, stage] of stages.entries()) {
+        made.at(index + 1);
+        if (index > 0) {
+          const moved = await fy(made, daemon.url, ['edit', 'A1', '--stage', stage]);
+          should(moved.code).equal(0, moved.err);
+        }
+        const item = await made.item('A1');
+        should(item.stage).equal(stage);
+        should(agendaState(item).state).equal('needs-you');
+        should(item.stages?.map(entry => entry.stage)).eql(stages.slice(0, index + 1));
+      }
+      made.at(10);
+      const done = await fy(made, daemon.url, ['done', 'A1', '--note', 'shipped']);
+      should(done.code).equal(0, done.err);
+      const finished = await made.item('A1');
+
+      // Assert
+      should(finished.stage).equal('done');
+      should(finished.stages?.map(entry => entry.stage)).eql([...stages, 'done']);
+    } finally {
+      daemon.stop();
     }
-    made.at(10);
-    ok(await made.service.resolve(SESSION, 'A1', AGENT, 'shipped'));
-    const done = await made.item('A1');
-
-    // Assert
-    should(done.stage).equal('done');
-    should(done.stages?.map(entry => entry.stage)).eql([...stages, 'done']);
   });
 
   it('DoD 15: a split links both ways and moves the card asks of the cards it moves', async () => {
@@ -598,66 +855,166 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     ok(await made.service.raise(SESSION, ask('Which region?'), AGENT));
     ok(await made.service.cardAsk(SESSION, 'A1', { kind: 'attach', ask: { gate: gate('F1') } }));
     ok(await made.service.cardAsk(SESSION, 'A1', { kind: 'attach', ask: { gate: gate('F2') } }));
+    const daemon = serveRoutes(made);
+    try {
+      // Act — the ferret splits F2 off, through the CLI
+      made.at(1);
+      const split = await fy(made, daemon.url, [
+        'split',
+        'A1',
+        'Is F2 right on its own?',
+        '--title',
+        'F2 on its own',
+        ...BRIEF,
+        '--move-cards',
+        'F2',
+      ]);
+      should(split.code).equal(0, split.err);
+      const parent = await made.item('A1');
+      const child = await made.item('A2');
 
-    // Act
-    made.at(1);
-    ok(await made.service.split(SESSION, 'A1', ask('Is F2 right on its own?'), AGENT, [{ id: 'F2' }]));
-    const parent = await made.item('A1');
-    const child = await made.item('A2');
-
-    // Assert
-    should(child.splitFrom).equal('A1');
-    should(parent.splitInto).containEql('A2');
-    should(parent.cardAsks?.map(each => gateReference(each.gate))).eql([gateReference(gate('F1'))]);
-    should(child.cardAsks?.map(each => gateReference(each.gate))).eql([gateReference(gate('F2'))]);
+      // Assert
+      should(child.splitFrom).equal('A1');
+      should(parent.splitInto).containEql('A2');
+      should(parent.cardAsks?.map(each => gateReference(each.gate))).eql([gateReference(gate('F1'))]);
+      should(child.cardAsks?.map(each => gateReference(each.gate))).eql([gateReference(gate('F2'))]);
+    } finally {
+      daemon.stop();
+    }
   });
 
-  it('DoD 16: `fy agenda log` copies the owner’s chat words verbatim, tagged from chat, and the item rests until the ferret answers', async () => {
-    // Arrange
+  it('DoD 16: `fy agenda log` copies the owner’s chat words verbatim, tagged from chat; the ferret’s answer brings the item back to its old spot', async () => {
+    // Arrange — A1 is the older agenda, A2 a newer one
     const made = fresh();
     const daemon = serveRoutes(made);
     try {
-      const added = await fy(daemon.url, ['add', 'Which region do we deploy to?', '--title', 'Region', ...BRIEF]);
+      const added = await fy(made, daemon.url, ['add', 'Which region do we deploy to?', '--title', 'Region', ...BRIEF]);
       should(added.code).equal(0, added.err);
-      made.chat.messages.push({ messageId: 'm1', at: minute(1), text: '  use eu-west,\nnot us-east  ' });
-      made.at(2);
+      made.at(1);
+      ok(await made.service.raise(SESSION, ask('Which cluster?'), AGENT));
+      made.chat.messages.push({ messageId: 'm1', at: minute(2), text: '  use eu-west,\nnot us-east  ' });
+      made.at(3);
 
       // Act
-      const logged = await fy(daemon.url, ['log', 'A1', '--reply', 'Understood: eu-west.']);
+      const logged = await fy(made, daemon.url, ['log', 'A1', '--reply', 'Understood: eu-west.']);
 
-      // Assert
+      // Assert — the words verbatim, tagged, with the ferret's reply
       should(logged.code).equal(0, logged.err);
       const item = await made.item('A1');
       const conversation = item.conversation ?? [];
       should(conversation.find(entry => entry.by === 'owner')).containEql({
         text: '  use eu-west,\nnot us-east  ',
-        fromChat: { messageId: 'm1', at: minute(1) },
+        fromChat: { messageId: 'm1', at: minute(2) },
       });
       should(conversation.some(entry => entry.by === 'ferret' && entry.text === 'Understood: eu-west.')).be.true();
+
+      // Assert — it came back AHEAD of the newer A2: its old spot
       should(agendaState(item).state).equal('needs-you');
+      should(needsYouQueue(await made.items()).map(each => each.id)).eql(['A1', 'A2']);
+
+      // Assert — the same chat message is never logged twice
+      const again = await fy(made, daemon.url, ['log', 'A1', '--message', 'm1', '--reply', 'Understood again.']);
+      should(again.code).not.equal(0);
+      should((await made.item('A1')).conversation?.filter(entry => entry.by === 'owner')).have.length(1);
+    } finally {
+      daemon.stop();
+    }
+  });
+
+  it('DoD 16: `fy agenda log --rest` leaves the item resting as working', async () => {
+    // Arrange
+    const made = fresh();
+    const daemon = serveRoutes(made);
+    try {
+      const added = await fy(made, daemon.url, ['add', 'Which region do we deploy to?', '--title', 'Region', ...BRIEF]);
+      should(added.code).equal(0, added.err);
+      made.chat.messages.push({ messageId: 'm1', at: minute(1), text: 'look into eu-west' });
+      made.at(2);
+
+      // Act
+      const logged = await fy(made, daemon.url, ['log', 'A1', '--rest', 'Checking the EU list.']);
+
+      // Assert
+      should(logged.code).equal(0, logged.err);
+      should(agendaState(await made.item('A1'))).containEql({ state: 'resting', sub: 'working' });
+      const listed = await made.service.versionsOf(SESSION, 'A1');
+      const last = listed.ok ? listed.value.versions.at(-1)?.version : undefined;
+      const stored = last === undefined ? undefined : await made.service.versionOf(SESSION, 'A1', last);
+      should(stored?.ok && agendaState(stored.value.item as AgendaItem).state).equal('resting');
     } finally {
       daemon.stop();
     }
   });
 });
 
+/**
+ * The pages that prove what the app shows. Each points at a test file and the behaviour it names. A pointer is only
+ * conditional on the PR that adds the page: while that PR is open the source module it adds does not exist, so the
+ * pointer waits; once the module exists, a missing or renamed test file, or a lost phrase, FAILS the checklist.
+ */
+const landed = (module: string): boolean => existsSync(join(REPO, module));
+const ITEM_PAGE = 'packages/pwa/src/lib/agenda-item-sections.ts';
+const DIFF_PAGE = 'packages/pwa/src/features/agenda/agenda-version-diff.tsx';
+const pointer = (module: string) => (landed(module) ? it : it.skip);
+
 describe('Definition of done: the pages that prove the items the app shows (UI)', () => {
-  it('DoD 3 (UI): Needs you opens straight at its ask and a Resting item never buzzes', () => {
+  it('DoD 3 (UI): Needs you opens straight at its ask', () => {
     proves('packages/pwa/tests/unit/agenda-tab.test.ts', 'agendaTabModel');
   });
 
-  const pending = (path: string) => (landed(path) ? it : it.skip);
+  const itemPage = pointer(ITEM_PAGE);
+  const diffPage = pointer(DIFF_PAGE);
+  const parts = 'packages/pwa/tests/unit/features/agenda-item-parts.test.tsx';
 
-  pending('packages/pwa/tests/unit/features/agenda-version-diff.test.tsx')(
-    'DoD 9 (UI): diff mode shows what changed between any two versions',
-    () => proves('packages/pwa/tests/unit/features/agenda-version-diff.test.tsx'),
+  itemPage('DoD 3 (UI): a push or a link opens the item AT ITS ASK', () => {
+    proves('packages/pwa/tests/unit/features/agenda-inbox-notification-open.test.tsx', 'opens it AT ITS ASK');
+    proves(parts, 'a push or a link that names the item scrolls to "What I need from you" and focuses it');
+  });
+  itemPage('DoD 6 (UI): the ask and every card ask sit inside the item, never docked', () => {
+    proves(parts, 'holds the ask and EVERY card ask, each with its own buttons, inside the item — never docked');
+  });
+  itemPage('DoD 7 (UI): the report the owner asked for shows whole in “where we are now”', () => {
+    proves(parts, 'holds the report the owner asked for, whole — no cut-off, however long');
+  });
+  itemPage('DoD 8 (UI): a reply is drawn whole, however long, and every reply in order', () => {
+    proves(
+      'packages/pwa/tests/unit/features/agenda-item-history.test.tsx',
+      'draws a reply WHOLE, however long, and every reply in order',
+    );
+  });
+  itemPage('DoD 9 (UI): the detailed context and the activity log are folded', () => {
+    proves(
+      'packages/pwa/tests/unit/agenda-item-sections.test.ts',
+      'are in the spec’s order, with the detailed context and the activity log folded',
+    );
+    proves(parts, 'the detailed context and the activity log start closed, and open on a tap');
+  });
+  itemPage('DoD 14 (UI): the head shows the stage the agenda is at now', () => {
+    proves(parts, 'the head says where the item stands and the stage it is at now');
+  });
+  diffPage('DoD 9 (UI): diff mode shows what changed between any two versions', () => {
+    proves(
+      'packages/pwa/tests/unit/features/agenda-version-diff.test.tsx',
+      'lets the owner pick any two versions, in whichever order',
+      'defaults to what changed since this device last looked',
+    );
+  });
+  diffPage(
+    'DoD 10 (UI): the merge button lists the open agendas, then says what will happen before sending anything',
+    () => {
+      proves(
+        'packages/pwa/tests/unit/features/agenda-merge-control.test.tsx',
+        'lists the open agendas, then says what will happen before sending anything',
+      );
+    },
   );
-  pending('packages/pwa/tests/unit/features/agenda-merge-control.test.tsx')(
-    'DoD 10 (UI): the merge button merges two agendas',
-    () => proves('packages/pwa/tests/unit/features/agenda-merge-control.test.tsx'),
-  );
-  pending('packages/pwa/tests/unit/agenda-conversation.test.ts')(
-    'DoD 8 (UI): every reply shows in the conversation, in order',
-    () => proves('packages/pwa/tests/unit/agenda-conversation.test.ts'),
-  );
+  diffPage('DoD 15 (UI): a split says where it came from and where it went', () => {
+    proves(
+      'packages/pwa/tests/unit/features/agenda-merge-control.test.tsx',
+      'says where a split came from and where it went',
+    );
+  });
+  diffPage('DoD 8 (UI): the conversation is one event per stored entry, in stored order', () => {
+    proves('packages/pwa/tests/unit/agenda-conversation.test.ts', 'is one event per stored entry, in stored order');
+  });
 });

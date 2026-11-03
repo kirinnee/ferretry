@@ -113,7 +113,7 @@ The Hypermedia line then learned `card` and `board` (live board cards) on main, 
 7,813 (7,827 counting the separators), 37 characters under the 7,850 cap (23 counting the separators). The card-asks PR then
 reworded the Board section ("Before it's ready to try:", "lane by work", "add to one") and kept "show progress only": board 638 → 631, the
 measured total 7,806 (7,820 counting the separators), 44 characters under the 7,850 cap (30 counting the separators).
-PR 10 (teach round 2) re-read the Agenda and Board text against the spec, found every rule and verb (`answer`, `rest`, `log`, `split`, `merge`, the stages) already taught, and changed no words: the total stays 7,806 (7,820 counting the separators), 44 characters under the 7,850 cap. `teaching-spec.test.ts` now holds each verb and the stage chain to the spec.
+PR 10 (teach round 2) re-read the Agenda and Board text against the spec and found every rule and verb (`answer`, `rest`, `log`, `split`, `merge`, the stages) already taught except the `done` verb and "say so" when unsure. Review round 1 added both, paid for by "logs their words verbatim; link" in place of "puts their words on it verbatim; link it": agenda 1,266 → 1,267, the measured total 7,806 → 7,807 (7,821 counting the separators), 43 characters under the 7,850 cap. `teaching-spec.test.ts` now holds each verb and the stage chain to the spec.
 The whole-prompt cap is unchanged.
 
 ## The routing prompt

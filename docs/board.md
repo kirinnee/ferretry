@@ -115,16 +115,16 @@ applies the plan with the same card drop and agenda "done" the ferret could type
 change keeps its history and its authority check, and it names each failure without stopping. A failure makes
 the command exit non-zero.
 
-| It **drops** a card when …                                         | It **never** drops …                                      |
-| ------------------------------------------------------------------ | --------------------------------------------------------- |
-| the caller owns or is assigned it, and it is not closed or dropped | a card the owner asked for (`askedBy: person`)            |
-| its project's board is **off** ([switch](#the-board-is-opt-in))    | a card on a board that is on                              |
-| `askedBy` is `agent`: it is the ferret's own work                  | a card assigned to another live session (a sub-ferret)    |
-|                                                                    | a card waiting at a gate on the owner (an open gate item) |
+| It **drops** a card when …                                         | It **never** drops …                                     |
+| ------------------------------------------------------------------ | -------------------------------------------------------- |
+| the caller owns or is assigned it, and it is not closed or dropped | a card the owner asked for (`askedBy: person`)           |
+| its project's board is **off** ([switch](#the-board-is-opt-in))    | a card on a board that is on                             |
+| `askedBy` is `agent`: it is the ferret's own work                  | a card assigned to another live session (a sub-ferret)   |
+|                                                                    | a card waiting at a gate on the owner (an open card ask) |
 
 | It **closes** an item when … (any open state: active, snoozed, replied, in discussion)       | It **never** closes …                                                                                                                       |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| it is on the caller's own agenda and the caller raised it                                    | a gate item or gate follow-up, or anything the daemon raised                                                                                |
+| it is on the caller's own agenda and the caller raised it                                    | a card ask or gate follow-up, or anything the daemon raised                                                                                 |
 | it is kind `info`, or linked (`--task`) to a card this run drops, or an ask with no question | an item on the owner's turn mid-reply (a reply held or being sent)                                                                          |
 |                                                                                              | an item with a question, fields, options or a confirm: listed as "kept: needs the owner" with the `fy agenda done <id>` to close it by hand |
 

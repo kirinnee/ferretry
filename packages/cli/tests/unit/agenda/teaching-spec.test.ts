@@ -36,7 +36,7 @@ const SPEC_RULES: ReadonlyArray<{
   { rule: 'search, check, then open', prompt: 'agenda', cli: 'agenda add', phrase: 'search, check, then open' },
   { rule: 'dependent things share one', prompt: 'agenda', cli: 'agenda add', phrase: 'dependent things always share' },
   { rule: "the owner's reply rests an item", prompt: 'agenda', cli: 'agenda add', phrase: 'rests' },
-  { rule: 'only the ferret marks it Done', prompt: 'agenda', cli: 'agenda add', phrase: 'only you mark it done' },
+  { rule: 'only the ferret marks it Done', prompt: 'agenda', cli: 'agenda add', phrase: 'only you mark it' },
   { rule: 'no umbrella cards', prompt: 'board', cli: 'task create', phrase: 'no umbrella' },
   { rule: 'check related cards first', prompt: 'board', cli: 'task create', phrase: 'check related cards first' },
   { rule: 'a card shows progress only', prompt: 'board', cli: 'task create', phrase: 'progress only' },
@@ -118,6 +118,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
   { verb: 'edit', taught: '(`edit`)' },
+  { verb: 'done', taught: 'mark it `done`' },
 ];
 
 describe('the teaching names every agenda verb the spec lists', () => {

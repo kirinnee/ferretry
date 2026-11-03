@@ -55,8 +55,8 @@ An input card always counts as inside the window (row 2), so it pushes once the 
 **approve-on-phone card** ([input requests](input-requests.md#approve-on-your-phone)) is the one card that pushes
 outside these rows: once when it is raised, and once more for each new number the daemon reads off the page (at most
 four in all). It has no `neededBy`, so row 2 never pushes it a second time. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
-or replied item is parked ([agenda.md](agenda.md#parked-items)): it never counts toward a stop or a deadline while
-it sleeps.
+item is parked, and a replied item rests (stored as `parked: replied`; [agenda.md](agenda.md#parked-items)): neither
+counts toward a stop or a deadline while it sleeps.
 
 ### Quiet cards: filled in advance, never buzzed
 
@@ -429,7 +429,7 @@ with the binary's name for `fy`:
 ```text
 Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest. `split` misfits, `merge` items that share.
 Open: `fy agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`. Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`). Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`); todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
-Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "…"` returns it. `rest <id> --why …`=working; `--stage`, `--where`=now. Keep current (`edit`); only you mark it Done when nothing's left. Type: explainer→question→plan→tracker→test. Chat: `log <id> --reply|--rest` puts their words on it verbatim; link it; unsure: closest.
+Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "…"` returns it. `rest <id> --why …`=working; `--stage`, `--where`=now. Keep current (`edit`); only you mark it `done` when nothing's left. Type: explainer→question→plan→tracker→test. Chat: `log <id> --reply|--rest` logs their words verbatim; link; unsure: closest, say so.
 Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.
 ```
 
