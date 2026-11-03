@@ -812,7 +812,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql("Keep current (`edit`); only you mark it Done when nothing's left.");
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
-    should(text).containEql('Chat: their words verbatim + reply; link it; unsure: closest.');
+    should(text).containEql('Chat: their words verbatim on it + reply; link it; unsure: closest.');
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
@@ -841,7 +841,7 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,252: the body rule (one-screen summary, full report via `--link`) added 43 to the 1,276 of the agenda-first model, and tightening the section's own wording (the repeated "unsure: closest", `done <id>`, "<the ask>", the form's "text in the reply" that the help already says) paid for it and for main's send-label rule; the total keeps at least 100 of headroom.
+    // Assert — measured 1,230: the body rule (one-screen summary, full report via `--link`) added 43 to the 1,276 of the agenda-first model, and tightening the section's own wording (the repeated "unsure: closest", `done <id>`, "<the ask>", the form's "text in the reply" that the help already says) paid for it and for main's send-label rule; the total keeps at least 100 of headroom.
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
   });
 

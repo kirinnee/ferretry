@@ -20,6 +20,14 @@ class MemoryLog implements AppendOnlyFiles {
   async remove(_session: string, name: string) {
     this.documents.delete(name);
   }
+  async truncate(_session: string, name: string, bytes: number) {
+    this.documents.set(
+      name,
+      Buffer.from(this.documents.get(name) ?? '')
+        .subarray(0, bytes)
+        .toString('utf8'),
+    );
+  }
   async appendSynced(_session: string, name: string, bytes: Uint8Array) {
     if (this.failAppend) {
       this.failAppend = false;
@@ -49,24 +57,43 @@ describe('an append-only log', () => {
     should(files.documents.has(`${NAME}.pending`)).be.false();
   });
 
-  it('should replay a lagging cursor idempotently while retaining repeated records and unrelated uncommitted words', async () => {
+  it('should replay a lagging cursor idempotently while retaining repeated records', async () => {
     const files = new MemoryLog();
     const records = [{ text: 'same' }, { text: 'same' }];
     const first = await append(files, EMPTY, records);
     should(await append(files, EMPTY, records)).deepEqual(first);
-    const next = await append(files, EMPTY, [{ text: 'another command' }]);
-    should(next.count).equal(3);
-    should(files.documents.get(NAME)?.split('\n').filter(Boolean)).have.length(3);
+    should(files.documents.get(NAME)?.split('\n').filter(Boolean)).have.length(2);
   });
 
-  it('should finish a torn append from its durable journal before a different command appends', async () => {
+  it('should cut the uncommitted records of a different command instead of adopting them', async () => {
+    const files = new MemoryLog();
+    const committed = await append(files, EMPTY, [{ text: 'committed 雪' }]);
+    await append(files, committed, [{ text: 'rolled back' }]);
+    const next = await append(files, committed, [{ text: 'another command' }]);
+    should(next.count).equal(2);
+    should(files.documents.get(NAME)).equal('{"text":"committed 雪"}\n{"text":"another command"}\n');
+    should(next.bytes).equal(Buffer.byteLength(files.documents.get(NAME) ?? ''));
+  });
+
+  it('should keep only the leading records of a retry and cut the rest of the tail', async () => {
+    const files = new MemoryLog();
+    const records = [{ text: 'one' }, { text: 'two' }];
+    await append(files, EMPTY, [...records, { text: 'extra' }]);
+    const retried = await append(files, EMPTY, records);
+    should(files.documents.get(NAME)).equal('{"text":"one"}\n{"text":"two"}\n');
+    should(retried).deepEqual({ bytes: Buffer.byteLength(files.documents.get(NAME) ?? ''), count: 2 });
+    await append(files, EMPTY, [{ text: 'two' }, { text: 'one' }]);
+    should(files.documents.get(NAME)).equal('{"text":"two"}\n{"text":"one"}\n');
+  });
+
+  it('should finish a torn append from its durable journal, then drop it when a different command appends', async () => {
     const files = new MemoryLog();
     files.failAppend = true;
     await should(append(files, EMPTY, [{ text: '雪 owner words' }])).be.rejectedWith('interrupted append');
     const after = await append(files, EMPTY, [{ text: 'other words' }]);
-    should(after.count).equal(2);
-    should(files.documents.get(NAME)).equal('{"text":"雪 owner words"}\n{"text":"other words"}\n');
-    should(await append(files, EMPTY, [{ text: '雪 owner words' }, { text: 'other words' }])).deepEqual(after);
+    should(after.count).equal(1);
+    should(files.documents.get(NAME)).equal('{"text":"other words"}\n');
+    should(files.documents.has(`${NAME}.pending`)).be.false();
   });
 
   it('should recover a fully appended journal without writing its records twice', async () => {

@@ -55,6 +55,16 @@ class MemoryFiles {
     );
   }
 
+  async truncate(sessionId: string, name: string, bytes: number): Promise<void> {
+    this.put(
+      sessionId,
+      name,
+      Buffer.from(this.files.get(`${sessionId}/${name}`)?.text ?? '')
+        .subarray(0, bytes)
+        .toString('utf8'),
+    );
+  }
+
   async writeAtomic(sessionId: string, name: string, text: string): Promise<void> {
     if (this.failLedgerWrite && name === current) {
       this.failLedgerWrite = false;
@@ -388,9 +398,89 @@ describe('the private agenda archive', () => {
     ok(await restarted.transact(SESSION, unchanged));
     should(files.files.has(`${SESSION}/${AGENDA_ARCHIVE_FILE}.pending`)).be.true();
     const records = await restarted.readArchive(SESSION);
-    should(records).deepEqual([{ kind: 'owner-history', ...first }, second]);
+    should(records).deepEqual([{ kind: 'owner-history', ...first }]);
     should(files.files.has(`${SESSION}/${AGENDA_ARCHIVE_FILE}.pending`)).be.false();
     should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(committed + text);
+  });
+
+  describe('a transaction whose ledger write failed after its history append', () => {
+    const SATURATED_CLOSED = 100;
+    const resolveA1 = (note: string) =>
+      ({ action: 'resolve', actor: human, at: NOW, id: 'A1', note }) as Parameters<typeof applyAgendaCommand>[1];
+    const dismissA1 = (note: string) =>
+      ({ action: 'dismiss', actor: human, at: NOW, id: 'A1', note }) as Parameters<typeof applyAgendaCommand>[1];
+
+    /** A board whose closed items fill the hot file, so closing A1 prunes it into the sidecar at once. */
+    const saturated = async () => {
+      const harness = subject();
+      await save(harness.repository, { action: 'raise', actor: agent, at: NOW, request });
+      const ledger = await harness.repository.read(SESSION);
+      if (ledger === null) throw new Error('no board');
+      const filler = Array.from({ length: SATURATED_CLOSED }, (_, n) => ({
+        lifecycle: 'addressed',
+        origin: human,
+        item: { id: `A${n + 2}`, invalidFutureItem: true },
+      }));
+      harness.files.put(
+        SESSION,
+        current,
+        JSON.stringify({ ...ledger, nextId: SATURATED_CLOSED + 2, entries: [...ledger.entries, ...filler] }),
+      );
+      return harness;
+    };
+    const command = (command: Parameters<typeof applyAgendaCommand>[1]) => (ledger: AgendaLedger | null) =>
+      applyAgendaCommandToSession(ledger, SESSION, command);
+    const words = async (repository: FileAgendaLedgerRepository) =>
+      JSON.stringify(await repository.readArchive(SESSION));
+
+    it('should not serve its record as history, and should drop it when a different command commits', async () => {
+      const { files, repository } = await saturated();
+      files.failLedgerWrite = true;
+      await should(repository.transact(SESSION, command(dismissA1('PHANTOM_DISMISS')))).be.rejectedWith(
+        'ledger commit failed',
+      );
+      should((await repository.read(SESSION))?.entries.some(entry => entry.lifecycle === 'active')).be.true();
+      should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).containEql('PHANTOM_DISMISS');
+      should(await words(repository)).not.containEql('PHANTOM_DISMISS');
+
+      ok(await repository.transact(SESSION, command(resolveA1('REAL_RESOLVE'))));
+
+      const history = await words(repository);
+      should(history).containEql('REAL_RESOLVE');
+      should(history).not.containEql('PHANTOM_DISMISS');
+      should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).not.containEql('PHANTOM_DISMISS');
+    });
+
+    it('should reuse its record once when the same command is retried', async () => {
+      const { files, repository } = await saturated();
+      files.failLedgerWrite = true;
+      await should(repository.transact(SESSION, command(resolveA1('SAME_COMMAND')))).be.rejected();
+      const appended = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text;
+
+      ok(await repository.transact(SESSION, command(resolveA1('SAME_COMMAND'))));
+
+      should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(appended);
+      should((await words(repository)).split('SAME_COMMAND').length - 1).equal(1);
+    });
+
+    it('should fail closed when the sidecar is shorter than the ledger cursor says', async () => {
+      const { files, repository } = await saturated();
+      ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
+      files.put(SESSION, AGENDA_ARCHIVE_FILE, '');
+      await should(repository.readArchive(SESSION)).be.rejectedWith(
+        'agenda history is shorter than its committed cursor',
+      );
+      files.files.delete(`${SESSION}/${AGENDA_ARCHIVE_FILE}`);
+      await should(repository.readArchive(SESSION)).be.rejectedWith(
+        'agenda history is shorter than its committed cursor',
+      );
+    });
+
+    it('should serve no history for a session with no ledger, whatever the sidecar holds', async () => {
+      const { files, repository } = subject();
+      files.put(SESSION, AGENDA_ARCHIVE_FILE, '{"stray":true}\n');
+      should(await repository.readArchive(SESSION)).deepEqual([]);
+    });
   });
 
   it('should migrate in-ledger owner history once and replay an append whose cursor commit failed', async () => {

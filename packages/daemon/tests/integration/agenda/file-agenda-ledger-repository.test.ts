@@ -67,6 +67,16 @@ describe('the agenda file store, read with its identity', () => {
     await mkdir(store.file('session-1', 'directory'));
     await should(store.readAfter('session-1', 'directory', 0)).be.rejected();
   });
+  it('should cut a file back to its committed bytes, keeping them untouched', async () => {
+    const { home } = await createRepository();
+    const store = new FileAgendaFileStore(id => join(home, 'sessions', id));
+    const committed = Buffer.from('{"words":"雪"}\n');
+    await store.appendSynced('session-1', 'history.jsonl', committed);
+    await store.appendSynced('session-1', 'history.jsonl', Buffer.from('{"words":"rolled back"}\n'));
+    await store.truncate('session-1', 'history.jsonl', committed.length);
+    should(await store.read('session-1', 'history.jsonl')).equal(committed.toString());
+    await should(store.truncate('session-1', 'absent.jsonl', 0)).be.rejectedWith({ code: 'ENOENT' });
+  });
   it('should read a file with the identity of the very file read, and say a missing one has neither', async () => {
     // Arrange
     const home = await mkdtemp(join(tmpdir(), 'ferretry-agenda-'));

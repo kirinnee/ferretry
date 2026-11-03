@@ -113,6 +113,16 @@ export class FileAgendaFileStore implements AgendaFileStore {
     await this.syncDirectory(directory);
   }
 
+  async truncate(sessionId: string, name: string, bytes: number): Promise<void> {
+    const handle = await open(this.file(sessionId, name), 'r+');
+    try {
+      await handle.truncate(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+
   private async syncDirectory(directory: string): Promise<void> {
     const handle = await open(directory, 'r');
     try {

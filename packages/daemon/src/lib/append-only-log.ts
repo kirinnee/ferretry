@@ -5,6 +5,8 @@ export interface AppendOnlyFiles {
   read(sessionId: string, name: string): Promise<string | undefined>;
   readAfter(sessionId: string, name: string, bytes: number): Promise<Uint8Array>;
   appendSynced(sessionId: string, name: string, bytes: Uint8Array): Promise<void>;
+  /** Cut the file to its first `bytes` bytes, synced. Only ever drops an uncommitted tail. */
+  truncate(sessionId: string, name: string, bytes: number): Promise<void>;
   writeAtomic(sessionId: string, name: string, text: string): Promise<void>;
   remove(sessionId: string, name: string): Promise<void>;
 }
@@ -31,8 +33,10 @@ export async function recoverLogAppend(files: AppendOnlyFiles, sessionId: string
 
 /**
  * Append JSONL records once, then return the new bounded cursor. A small write-ahead file completes a torn
- * append on restart. A cursor lagging a completed append reuses its matching records, including duplicates
- * within a batch. Only the uncommitted tail is read; committed history is never read or rewritten here.
+ * append on restart. Bytes past the cursor were never committed: the leading records of that tail that equal
+ * this call's leading records are reused (a retry of the same command after a crash), and every other tail
+ * byte is cut, so a rolled-back command's records can never be adopted by a different one. Only the
+ * uncommitted tail is read; committed history is never read or rewritten here.
  */
 export async function appendLogRecords(
   files: AppendOnlyFiles,
@@ -49,21 +53,24 @@ export async function appendLogRecords(
   const replay = tail === '' ? [] : tail.slice(0, -1).split('\n');
   // Validate recovery data before advancing the cursor. The record schema belongs to the caller.
   for (const line of replay) JSON.parse(line);
-  const unmatched = [...replay];
-  const added = records
-    .map(record => JSON.stringify(record))
-    .filter(line => {
-      const matched = unmatched.indexOf(line);
-      if (matched < 0) return true;
-      unmatched.splice(matched, 1);
-      return false;
-    });
-  const bytes = cursor.bytes + tailBytes.length;
+  const lines = records.map(record => JSON.stringify(record));
+  let reused = 0;
+  while (reused < replay.length && reused < lines.length && replay[reused] === lines[reused]) reused += 1;
+  const bytes =
+    cursor.bytes +
+    new TextEncoder().encode(
+      replay
+        .slice(0, reused)
+        .map(line => `${line}\n`)
+        .join(''),
+    ).length;
+  if (bytes < cursor.bytes + tailBytes.length) await files.truncate(sessionId, name, bytes);
+  const added = lines.slice(reused);
   const text = added.length === 0 ? '' : `${added.join('\n')}\n`;
   if (text !== '') {
     const pending = { bytes, text };
     await files.writeAtomic(sessionId, journal, JSON.stringify(pending));
     await recoverLogAppend(files, sessionId, name);
   }
-  return { bytes: bytes + new TextEncoder().encode(text).length, count: cursor.count + replay.length + added.length };
+  return { bytes: bytes + new TextEncoder().encode(text).length, count: cursor.count + lines.length };
 }

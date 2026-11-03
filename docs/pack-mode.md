@@ -71,7 +71,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,230      | 308      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,236      | 309      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -104,6 +104,8 @@ separators), leaving 16 characters under the 7,850 cap (2 counting the separator
 the Agenda section's own wording (the repeated "unsure: closest", `done <id>` → `done`, `"<the ask>"` → `"<ask>"`, the form's
 "text in the reply", which the help already says, "on it" in the chat line, "say so" and "your"): agenda 1,319 → 1,230, the measured
 total 7,745 (7,759 counting the separators), leaving 105 characters under the 7,850 cap (91 counting the separators).
+Final review then restored "on it" in the chat line (the owner's words go ON the agenda item): agenda 1,230 → 1,236, the measured total
+7,751 (7,765 counting the separators), 99 characters under the 7,850 cap (85 counting the separators).
 The whole-prompt cap is unchanged.
 
 ## The routing prompt

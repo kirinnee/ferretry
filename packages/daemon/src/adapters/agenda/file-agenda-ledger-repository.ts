@@ -129,15 +129,20 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
 
   /**
    * Explicit, lazy history read. Snapshots and transactions never read committed archive records. It queues
-   * behind writers and completes a torn append first, so a crash never leaves history unreadable.
+   * behind writers and completes a torn append first, so a crash never leaves history unreadable. It serves
+   * only the bytes the ledger's cursor has committed: a record appended by a transaction whose ledger write
+   * then failed is not history.
    */
   async readArchive(sessionId: string): Promise<readonly AgendaArchiveRecord[]> {
     this.assertSessionId(sessionId);
     await this.ready;
     return await this.serial(sessionId, async () => {
       await recoverLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
-      const text = await this.files.read(sessionId, AGENDA_ARCHIVE_FILE);
-      if (text === undefined) return [];
+      const committed = (await this.read(sessionId))?.archive?.bytes ?? 0;
+      if (committed === 0) return [];
+      const bytes = Buffer.from((await this.files.read(sessionId, AGENDA_ARCHIVE_FILE)) ?? '');
+      if (bytes.length < committed) throw new Error('agenda history is shorter than its committed cursor');
+      const text = bytes.subarray(0, committed).toString('utf8');
       if (!text.endsWith('\n')) throw new Error('incomplete agenda history');
       return text
         .slice(0, -1)
