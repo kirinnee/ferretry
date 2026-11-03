@@ -366,7 +366,7 @@ type Draft = {
   machine: Record<string, unknown>;
   credentials: Record<string, Record<string, unknown>>;
   components: Record<ComponentKind, Record<string, Record<string, unknown>>>;
-  profiles: Record<string, { layers: string[] }>;
+  profiles: Record<string, { layers: string[] } & Record<string, unknown>>;
   runtimes: Record<string, Record<string, unknown>>;
 } & Record<string, unknown>;
 
@@ -927,6 +927,9 @@ function putRuntime(
     agent: change.agent,
     ...(change.harness === undefined ? {} : { harness: change.harness }),
     ...(model.runtimes[change.name]?.disabled === undefined ? {} : { disabled: model.runtimes[change.name]?.disabled }),
+    ...(model.runtimes[change.name]?.compactAt === undefined
+      ? {}
+      : { compactAt: model.runtimes[change.name]?.compactAt }),
     ...cloneLinkOf(model.runtimes[change.name]),
   };
   // The first agent runtime on a machine becomes its default for new agents (and the Warden's login).
@@ -954,7 +957,12 @@ function putProfile(
   if (!change.create && !exists) refuse(`no profile ${change.name} exists on this machine`);
   const layers = layersRefusal(model, change.name, change.layers);
   if (layers !== undefined) refuse(layers);
-  draft.profiles[change.name] = { layers: [...change.layers], ...cloneLinkOf(model.profiles[change.name]) };
+  const before = model.profiles[change.name];
+  draft.profiles[change.name] = {
+    layers: [...change.layers],
+    ...(before?.compactAt === undefined ? {} : { compactAt: before.compactAt }),
+    ...cloneLinkOf(before),
+  };
   if (exists) {
     const consequence = editConsequence(profileUsage(model, change.name));
     if (consequence !== undefined) consequences.push(consequence);
