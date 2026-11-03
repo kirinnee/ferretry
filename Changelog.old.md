@@ -1,3 +1,11 @@
+## [4.256.1](https://github.com/kirinnee/ferretry/compare/v4.256.0...v4.256.1) (2026-11-03)
+
+### Fixes
+
+* **daemon:** keep the board watch's git answers while the checkout is unchanged ([#1422](https://github.com/kirinnee/ferretry/issues/1422)) ([ea49938](https://github.com/kirinnee/ferretry/commit/ea4993887d5b4b1998a3368606e0a18a12de389b))
+* **daemon:** size the session document cache to the fleet instead of 4,096 ([#1416](https://github.com/kirinnee/ferretry/issues/1416)) ([7d22107](https://github.com/kirinnee/ferretry/commit/7d22107c76af5661800e50e471c6962403d7f5b9))
+* **daemon:** stop re-parsing and re-serialising an unchanged session list ([#1424](https://github.com/kirinnee/ferretry/issues/1424)) ([d0c3754](https://github.com/kirinnee/ferretry/commit/d0c3754a6528485a056684fdb821dcd55bf9751f))
+
 ## [4.256.0](https://github.com/kirinnee/ferretry/compare/v4.255.1...v4.256.0) (2026-11-03)
 
 ### Features

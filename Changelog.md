@@ -1,3 +1,9 @@
+## [4.257.0](https://github.com/kirinnee/ferretry/compare/v4.256.1...v4.257.0) (2026-11-03)
+
+### Features
+
+* **queue:** message labels, action batching and the ferret FYI digest ([#1400](https://github.com/kirinnee/ferretry/issues/1400)) ([7a8082a](https://github.com/kirinnee/ferretry/commit/7a8082afee04122b45a83d8b34933ea0f5a9646d))
+
 ## [4.256.1](https://github.com/kirinnee/ferretry/compare/v4.256.0...v4.256.1) (2026-11-03)
 
 ### Fixes
