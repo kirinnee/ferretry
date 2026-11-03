@@ -1342,7 +1342,14 @@ describe('an input card that ends while it is open (#B147)', () => {
     });
     expect(live().covered).toBe(true);
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
-    run(() => view.update(<Host snapshot={board([], {}, [closedRecord('A7', 'Input request delivered.')])} focus={{ target: 'A7' as AgendaId, seq: 1 }} />));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [closedRecord('A7', 'Input request delivered.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
     expect(live().covered).toBe(true);
   });
 
