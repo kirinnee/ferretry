@@ -1,6 +1,6 @@
 {
   "name": "@ferretry/daemon",
-  "version": "4.263.0",
+  "version": "4.264.0",
   "private": true,
   "description": "Per-host agent daemon runtime",
   "type": "module",

@@ -1,3 +1,9 @@
+## [4.264.0](https://github.com/kirinnee/ferretry/compare/v4.263.0...v4.264.0) (2026-11-03)
+
+### Features
+
+* **agenda:** conversation on the item, log, versions, merge and split ([#1428](https://github.com/kirinnee/ferretry/issues/1428)) ([b5f40d5](https://github.com/kirinnee/ferretry/commit/b5f40d55d75dccedf1b30dfc409699728aeb3d5a))
+
 ## [4.263.0](https://github.com/kirinnee/ferretry/compare/v4.262.0...v4.263.0) (2026-11-03)
 
 ### Features
