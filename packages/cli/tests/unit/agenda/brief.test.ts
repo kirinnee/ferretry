@@ -6,6 +6,7 @@ import {
   type BriefFlags,
   composeAddRequest,
   composeEditRequest,
+  type EditFlags,
   parseBriefFile,
 } from '../../../src/lib/agenda/brief';
 
@@ -14,6 +15,36 @@ const add = (words: readonly string[], flags: BriefFlags = {}, file: BriefFile =
   composeAddRequest(words, { title: 'Plan approval', ...flags }, file);
 
 describe('agenda brief composition', () => {
+  it('should take a body of exactly 8,000 characters and refuse 8,001 before sending, naming the count and the remedy', () => {
+    // Arrange / Act
+    const fits = add(['pick'], { body: 'x'.repeat(8_000) });
+    const refuse = () => add(['pick'], { body: 'x'.repeat(8_001) });
+
+    // Assert
+    should(fits.body).have.length(8_000);
+    should(refuse).throw(
+      /body: the body is 8,001 characters; the most is 8,000\. Do not trim it: put the full report in a file or artifact, add it with --link/u,
+    );
+  });
+
+  it('should hold an edit’s body and question answer to the same 8,000 characters', () => {
+    // Arrange
+    const edit = (flags: EditFlags) => composeEditRequest('A1', flags, undefined);
+
+    // Act / Assert
+    should(edit({ body: 'x'.repeat(8_000), questionAnswer: 'y'.repeat(8_000) })).have.property('body');
+    should(() => edit({ body: 'x'.repeat(8_001) })).throw(/the body is 8,001 characters/u);
+    should(() => edit({ questionAnswer: 'y'.repeat(8_001) })).throw(
+      /the question answer is 8,001 characters; the most is 8,000.*add it with --link/u,
+    );
+  });
+
+  it('should refuse a step over 2,000 characters with the same remedy', () => {
+    // Arrange / Act / Assert
+    should(add(['pick'], { step: ['x'.repeat(2_000)] })).have.property('steps');
+    should(() => add(['pick'], { step: ['x'.repeat(2_001)] })).throw(/a step is 2,001 characters; the most is 2,000/u);
+  });
+
   it('should compose a plain add as a titled reply with no answers', () => {
     // Arrange / Act
     const request = add(['pick', 'a', 'cluster'], {});

@@ -455,7 +455,7 @@ export const AGENDA_ENV = 'FY_AGENDA';
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
     `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest (unsure: closest). Split parts that stop fitting.`,
-    `Open: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\`. Title ≤40, ask ≤80 (rest: \`--body\`). Read cold: no ids/paths/jargon (\`--term "X=meaning"\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
+    `Open: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\`. Title ≤40, ask ≤80 (rest: \`--body\`, one-screen summary; full report: \`--link\`). Read cold: no ids/paths/jargon (\`--term "X=meaning"\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
     `Needs you buzzes; Resting is quiet. Owner reply rests it; your answer (\`edit <id> --question-answer "<text>"\` or \`--back\`) brings it back. Keep current (\`edit\`); only you mark it Done (\`done <id>\`) when nothing more is expected. Type: explainer→question→plan→tracker→test. Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.`,
     'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');

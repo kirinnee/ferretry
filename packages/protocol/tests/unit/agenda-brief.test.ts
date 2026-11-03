@@ -38,6 +38,26 @@ const plan = {
 };
 
 describe('attention brief', () => {
+  it('should refuse an over-long body, question answer or step with a message that names the count and the remedy', () => {
+    // Arrange / Act
+    const body = AgendaItemSchema.safeParse({ ...minimal, body: 'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1) });
+    const answer = AgendaItemSchema.safeParse({ ...minimal, questionAnswer: 'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1) });
+    const step = AgendaItemSchema.safeParse({ ...minimal, steps: ['x'.repeat(MAX_AGENDA_STEP_LENGTH + 1)] });
+    const fits = AgendaItemSchema.safeParse({
+      ...minimal,
+      body: 'x'.repeat(MAX_AGENDA_BODY_LENGTH),
+      questionAnswer: 'x'.repeat(MAX_AGENDA_BODY_LENGTH),
+    });
+
+    // Assert
+    should(fits.success).be.true();
+    should(body.error?.issues[0]?.message).equal(
+      'the body is 8,001 characters; the most is 8,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice.',
+    );
+    should(answer.error?.issues[0]?.message).match(/^the question answer is 8,001 characters; the most is 8,000\./u);
+    should(step.error?.issues[0]?.message).match(/^a step is 2,001 characters; the most is 2,000\./u);
+  });
+
   it('should read an item raised before the brief existed, with nothing structured on it', () => {
     // Arrange / Act
     const item = AgendaItemSchema.parse(minimal);
