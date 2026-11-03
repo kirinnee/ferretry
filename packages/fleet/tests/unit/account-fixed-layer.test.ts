@@ -713,7 +713,7 @@ describe('Pack mode teaching', () => {
       '`zz new --auto',
       '--name "<short task title>"',
       '`zz wait <id>`',
-      '`zz send <id> --kind blocker|action|fyi` (default action; fyi rarely)',
+      'Label sends: `--kind blocker|action|fyi` (fyi rarely)',
       '`zz stop children',
     ])
       should(teaching).containEql(step);
