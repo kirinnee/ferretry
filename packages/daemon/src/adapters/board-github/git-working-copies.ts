@@ -1,5 +1,6 @@
-import { lstat, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { constants, type Stats } from 'node:fs';
+import { access, lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
 import { githubRepositoryOf, parseGitRemote, type WorkingCopies } from '../../lib/board-github/index.ts';
 
 /**
@@ -78,39 +79,115 @@ function steersGit(environment: Environment): boolean {
   return Object.keys(environment).some(name => name.startsWith('GIT_') && !HARMLESS_GIT_VARIABLES.has(name));
 }
 
+/** What a candidate git directory turned out to be, as far as this adapter can tell. */
+type Candidate =
+  | Repository
+  /** Git certainly takes it for no repository — something it is missing — and walks on past it. */
+  | 'absent'
+  /** Git may take it for one, or it cannot be read exactly: never vouched for, and never walked past. */
+  | 'unclear';
+
+/** The prefix of a `.git` file; the path follows it verbatim. */
+const GITFILE_PREFIX = 'gitdir: ';
+/** What git strips from the end of a `.git` file or a `commondir` (it loops over both); nothing else is ever stripped. */
+const LINE_ENDINGS = /[\r\n]+$/u;
 /**
- * The repository a candidate git directory is, only when it is COMPLETE the way git's own `is_git_directory`
- * wants: a `HEAD` in the git dir, and `objects/` and `refs/` in its common dir. Anything less is something git
- * does not take for a repository (it walks on past it), so it is not one here either.
+ * A `HEAD` git takes for one (`validate_headref`): a symref into `refs/`, or a full object id. NARROWER than git
+ * on purpose — git also takes `ref:` without the space and an id with anything after it, and a `HEAD` this does
+ * not know is one it does not vouch for.
+ */
+const VALID_HEAD = /^(?:ref: refs\/[^\0\r\n]+|[0-9a-f]{40}|[0-9a-f]{64})\n?$/iu;
+
+const isMissing = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+
+/** What looking at a path found: its `Stats`, `missing` when it is not there, `unreadable` for any other failure. */
+async function look(path: string, followLinks: boolean): Promise<Stats | 'missing' | 'unreadable'> {
+  try {
+    return await (followLinks ? stat(path) : lstat(path));
+  } catch (error) {
+    return isMissing(error) ? 'missing' : 'unreadable';
+  }
+}
+
+/** The text of `bytes`, or `undefined` when UTF-8 cannot carry them back unchanged (a path through them would name another). */
+function exactText(bytes: Buffer): string | undefined {
+  const text = bytes.toString('utf8');
+  return Buffer.from(text, 'utf8').equals(bytes) ? text : undefined;
+}
+
+/**
+ * The physical place a pointer (the text of a `.git` file or a `commondir`) leads to, or `undefined` when the
+ * filesystem cannot say. The pointer is NOT normalised: `..` after a symlink leads somewhere other than the
+ * directory above the link's name, so the text goes to `realpath` as it is and the filesystem does the
+ * traversing, as it does for git. A relative pointer is relative to `base`.
+ */
+async function traverse(pointer: string, base: string): Promise<string | undefined> {
+  return await realpath(isAbsolute(pointer) ? pointer : `${base}/${pointer}`).catch(() => undefined);
+}
+
+/** Where a git dir keeps the files of the repository it belongs to: itself, or where its `commondir` leads. */
+async function commonDirectory(gitDirectory: string): Promise<string | undefined> {
+  const file = join(gitDirectory, 'commondir');
+  if ((await look(file, false)) === 'missing') return gitDirectory;
+  const bytes = await readFile(file).catch(() => undefined);
+  const pointer = bytes === undefined || bytes.length === 0 ? undefined : exactText(bytes)?.replace(LINE_ENDINGS, '');
+  return pointer === undefined ? undefined : await traverse(pointer, gitDirectory);
+}
+
+/** Whether a directory is one git's `access(X_OK)` lets through (and this reads), `absent` when it is not there. */
+async function directoryState(path: string): Promise<'usable' | 'absent' | 'unclear'> {
+  const found = await look(path, true);
+  if (found === 'missing') return 'absent';
+  if (found === 'unreadable' || !found.isDirectory()) return 'unclear';
+  return await access(path, constants.R_OK | constants.X_OK).then(
+    () => 'usable',
+    () => 'unclear',
+  );
+}
+
+/**
+ * The repository a candidate git directory is, only when it is COMPLETE and VALID the way git's own
+ * `is_git_directory` wants: in the git dir a `HEAD` that reads as a symref into `refs/` or an object id, and in
+ * its common dir accessible `objects/` and `refs/`. A candidate git certainly rejects for lacking a part is
+ * `absent`; one that has every part but that this cannot vouch for (a `HEAD` of another shape, an inaccessible
+ * directory, a pointer that does not resolve exactly) is `unclear` — git may reject it and walk on, or not,
+ * and either way answering from the repository above it could be wrong.
  *
  * Both directories are resolved through `realpath` BEFORE the common dir is followed: git reaches a linked
  * worktree's directory through any symlink first and only then applies `commondir`'s `..`, so normalising the
  * `..` textually would name a different directory.
  */
-async function asRepository(candidate: string): Promise<Repository | undefined> {
+async function asRepository(candidate: string): Promise<Candidate> {
   const gitDirectory = await realpath(candidate).catch(() => undefined);
-  if (gitDirectory === undefined) return undefined;
-  const named = await readFile(join(gitDirectory, 'commondir'), 'utf8').catch(() => undefined);
-  const common =
-    named === undefined ? gitDirectory : await realpath(resolve(gitDirectory, named.trim())).catch(() => undefined);
-  if (common === undefined) return undefined;
-  const isFile = async (path: string) => (await stat(path).catch(() => undefined))?.isFile() === true;
-  const isDirectory = async (path: string) => (await stat(path).catch(() => undefined))?.isDirectory() === true;
-  const complete = await Promise.all([
-    isFile(join(gitDirectory, 'HEAD')),
-    isDirectory(join(common, 'objects')),
-    isDirectory(join(common, 'refs')),
-  ]);
-  return complete.every(Boolean) ? { gitDirectory, common } : undefined;
+  if (gitDirectory === undefined) return 'unclear';
+  const head = join(gitDirectory, 'HEAD');
+  const headFound = await look(head, false);
+  if (headFound === 'missing') return 'absent';
+  if (headFound === 'unreadable' || !headFound.isFile()) return 'unclear';
+  const common = await commonDirectory(gitDirectory);
+  if (common === undefined) return 'unclear';
+  const parts = await Promise.all([directoryState(join(common, 'objects')), directoryState(join(common, 'refs'))]);
+  if (parts.includes('absent')) return 'absent';
+  const headRead = await readFile(head, 'utf8').catch(() => '');
+  return parts.every(part => part === 'usable') && VALID_HEAD.test(headRead) ? { gitDirectory, common } : 'unclear';
 }
 
-/** What a `.git` entry in `folder` points at: itself when a directory, the `gitdir:` of a file, else nothing. */
+/**
+ * What a `.git` entry in `folder` points at: itself when a directory, the `gitdir:` of a file, else nothing. The
+ * path is the file's text as git reads it — after the prefix, minus the trailing line ending, spaces and all —
+ * and is left unresolved for {@link asRepository} to hand to the filesystem.
+ */
 async function pointedAt(folder: string, dotGit: string): Promise<string | undefined> {
   const information = await stat(dotGit).catch(() => undefined);
   if (information?.isDirectory() === true) return dotGit;
   if (information?.isFile() !== true) return undefined;
-  const pointer = /^gitdir: (.+)$/mu.exec(await readFile(dotGit, 'utf8').catch(() => ''));
-  return pointer?.[1] === undefined ? undefined : resolve(folder, pointer[1].trim());
+  const bytes = await readFile(dotGit).catch(() => undefined);
+  const text = bytes === undefined ? undefined : exactText(bytes);
+  if (text?.startsWith(GITFILE_PREFIX) !== true) return undefined;
+  const pointer = text.slice(GITFILE_PREFIX.length).replace(LINE_ENDINGS, '');
+  if (pointer === '') return undefined;
+  return isAbsolute(pointer) ? pointer : `${folder}/${pointer}`;
 }
 
 /**
@@ -119,10 +196,12 @@ async function pointedAt(folder: string, dotGit: string): Promise<string | undef
  * The folder is the PHYSICAL one (`realpath`): git changes into it and walks up from where it finds itself, so
  * a link to a folder of another repository is that repository's, not that of the folder holding the link.
  *
- * An ALLOWLIST: the nearest `.git` ends the walk, and it must be a complete git dir (or a `gitdir:` file / link
- * leading to one) — an incomplete one, a dangling link or a socket is a boundary this cannot read, and walking
- * past it would answer from an enclosing repository git may not use. A folder that is itself a complete git dir
- * (a bare repository, or somewhere inside `.git`) is likewise left to git: it uses that, not what encloses it.
+ * An ALLOWLIST: the nearest `.git` ends the walk, and it must be a complete, valid git dir (or a `gitdir:` file /
+ * link leading to one) — an incomplete or invalid one, a dangling link or a socket is a boundary this cannot
+ * read, and walking past it would answer from an enclosing repository git may not use. A folder that is itself
+ * a git dir, or that this cannot tell from one (a bare repository, or somewhere inside `.git`), is likewise
+ * left to git: it uses that, not what encloses it. Only a folder git certainly takes for no repository is
+ * walked out of.
  */
 async function repositoryAt(physicalFolder: string): Promise<Repository | undefined> {
   let folder = physicalFolder;
@@ -130,9 +209,10 @@ async function repositoryAt(physicalFolder: string): Promise<Repository | undefi
     const dotGit = join(folder, '.git');
     if (await exists(dotGit)) {
       const target = await pointedAt(folder, dotGit);
-      return target === undefined ? undefined : await asRepository(target);
+      const repository = target === undefined ? undefined : await asRepository(target);
+      return typeof repository === 'object' ? repository : undefined;
     }
-    if ((await asRepository(folder)) !== undefined) return undefined;
+    if ((await asRepository(folder)) !== 'absent') return undefined;
     const parent = dirname(folder);
     if (parent === folder) return undefined;
     folder = parent;

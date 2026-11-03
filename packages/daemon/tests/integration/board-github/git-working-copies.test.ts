@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GitWorkingCopies } from '../../../src/adapters/board-github/git-working-copies.ts';
@@ -514,6 +514,270 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
               ['owner/legacy-one', 'owner/legacy-two', 'owner/legacy-two'],
             ]);
           });
+        });
+      });
+
+      describe('a repository git validates and locates in ways a type check cannot see', () => {
+        const COMMIT = ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '--quiet', '-m', 'r'];
+        /** A repository at `path`, on `branch`, with a commit and an `origin` named after `name`. */
+        const initAt = async (path: string, branch: string, name: string): Promise<string> => {
+          await mkdir(path, { recursive: true });
+          await git(path, 'init', '--quiet', '-b', branch);
+          await git(path, ...COMMIT);
+          await git(path, 'remote', 'add', 'origin', `git@github.com:owner/${name}.git`);
+          return path;
+        };
+        /**
+         * The real repository at `<root>/base/repo`, a decoy at `<root>/repo`, and `<root>/bridge`, a symlink to
+         * `<root>/base/deeper`: `<root>/bridge/../repo` is the real one (the link is followed, THEN `..`), and the
+         * same text normalised without the filesystem is the decoy.
+         */
+        const bridged = async (root: string): Promise<string> => {
+          const real = await initAt(join(root, 'base', 'repo'), 'main', 'one');
+          await mkdir(join(root, 'base', 'deeper'));
+          await symlink(join(root, 'base', 'deeper'), join(root, 'bridge'));
+          await initAt(join(root, 'repo'), 'decoy', 'decoy');
+          return real;
+        };
+        /** What a primed adapter says after `change`, and what a fresh one says. */
+        const primedThenChanged = async (
+          ask: (copies: GitWorkingCopies) => Promise<string | null>,
+          change: () => Promise<void>,
+        ): Promise<readonly [string | null, string | null, string | null]> => {
+          const copies = new GitWorkingCopies();
+          const primed = await ask(copies);
+          await change();
+          return [primed, await ask(copies), await ask(new GitWorkingCopies())];
+        };
+        const branch = async (copies: GitWorkingCopies, path: string) => await copies.branchOf(path);
+
+        it('should use the enclosing repository when a nested .git has a HEAD git does not accept', async () => {
+          await withTempRoot(async root => {
+            // Arrange — git ignores `inner/.git` for a HEAD that is no ref and no object id, and uses `outer`.
+            const outer = await repository(root);
+            await git(outer, 'checkout', '--quiet', '-b', 'feat/one');
+            const inner = join(outer, 'inner');
+            await mkdir(inner);
+            await git(inner, 'init', '--quiet', '-b', 'main');
+            await writeFile(join(inner, '.git', 'HEAD'), 'not a ref\n');
+
+            // Act
+            const outcome = await primedThenChanged(
+              async copies => await branch(copies, inner),
+              async () => await git(outer, 'checkout', '--quiet', '-b', 'feat/two'),
+            );
+
+            // Assert
+            should(outcome).deepEqual(['feat/one', 'feat/two', 'feat/two']);
+          });
+        });
+
+        it('should use the enclosing repository when a nested .git has an objects directory git cannot enter', async () => {
+          await withTempRoot(async root => {
+            // Arrange — an ordinary user cannot enter a mode-000 `objects/`, so git ignores `inner/.git` for it.
+            const outer = await repository(root);
+            await git(outer, 'checkout', '--quiet', '-b', 'feat/one');
+            const inner = join(outer, 'inner');
+            await mkdir(inner);
+            await git(inner, 'init', '--quiet', '-b', 'main');
+            const objects = join(inner, '.git', 'objects');
+            await chmod(objects, 0o000);
+
+            try {
+              // Act
+              const [primed, kept, fresh] = await primedThenChanged(
+                async copies => await branch(copies, inner),
+                async () => await git(outer, 'checkout', '--quiet', '-b', 'feat/two'),
+              );
+
+              // Assert — root enters it anyway, and then git and the adapter both take `inner` for the repository.
+              should(kept).equal(fresh);
+              if (process.getuid?.() !== 0) should([primed, kept]).deepEqual(['feat/one', 'feat/two']);
+            } finally {
+              await chmod(objects, 0o755);
+            }
+          });
+        });
+
+        it("should follow a worktree's commondir through a symlink before its .. and not past the link's name", async () => {
+          await withTempRoot(async root => {
+            // Arrange
+            const real = await bridged(root);
+            const tree = join(root, 'tree');
+            await git(real, 'worktree', 'add', '--quiet', '-b', 'feat/tree', tree);
+            await writeFile(join(real, '.git', 'worktrees', 'tree', 'commondir'), `${root}/bridge/../repo/.git\n`);
+
+            // Act
+            const outcome = await primedThenChanged(
+              async copies => await copies.repositoryOf(tree),
+              async () => await git(real, 'remote', 'set-url', 'origin', 'git@github.com:owner/two.git'),
+            );
+
+            // Assert
+            should(outcome).deepEqual(['owner/one', 'owner/two', 'owner/two']);
+          });
+        });
+
+        it("should follow a .git file's gitdir through a symlink before its .. and not past the link's name", async () => {
+          await withTempRoot(async root => {
+            // Arrange
+            const real = await bridged(root);
+            const tree = join(root, 'tree');
+            await mkdir(tree);
+            await writeFile(join(tree, '.git'), `gitdir: ${root}/bridge/../repo/.git\n`);
+
+            // Act
+            const outcome = await primedThenChanged(
+              async copies => await branch(copies, tree),
+              async () => await git(real, 'symbolic-ref', 'HEAD', 'refs/heads/feat/two'),
+            );
+
+            // Assert
+            should(outcome).deepEqual(['main', 'feat/two', 'feat/two']);
+          });
+        });
+
+        for (const [spelling, store] of [
+          ['a trailing space, which belongs to the path', (root: string) => `${root}/store `],
+          ['a newline inside the path', (root: string) => `${root}/store\nsecond`],
+        ] as const)
+          it(`should take a separate git dir whose path has ${spelling} exactly as git does`, async () => {
+            await withTempRoot(async root => {
+              // Arrange — the decoy `<root>/store` is what trimming, or reading the first line, would name.
+              const tree = join(root, 'tree');
+              await git(root, 'init', '--quiet', '--separate-git-dir', store(root), '-b', 'actual/one', tree);
+              await git(root, 'init', '--quiet', '--bare', '-b', 'decoy', join(root, 'store'));
+
+              // Act
+              const outcome = await primedThenChanged(
+                async copies => await branch(copies, tree),
+                async () => await git(tree, 'symbolic-ref', 'HEAD', 'refs/heads/actual/two'),
+              );
+
+              // Assert
+              should(outcome).deepEqual(['actual/one', 'actual/two', 'actual/two']);
+            });
+          });
+
+        it('should keep the answer for a .git file that ends in a CRLF, which git strips', async () => {
+          await withTempRoot(async root => {
+            // Arrange
+            const real = await initAt(join(root, 'real'), 'main', 'one');
+            const tree = join(root, 'tree');
+            await mkdir(tree);
+            await writeFile(join(tree, '.git'), `gitdir: ${real}/.git\r\n`);
+            const { binary, asked } = await countingGit(root);
+            const copies = new GitWorkingCopies(binary);
+
+            // Act
+            const first = await copies.branchOf(tree);
+            await copies.branchOf(tree);
+            const unchanged = (await asked()).length;
+            await git(real, 'symbolic-ref', 'HEAD', 'refs/heads/feat/two');
+            const changed = await copies.branchOf(tree);
+
+            // Assert
+            should([first, unchanged, changed]).deepEqual(['main', 1, 'feat/two']);
+          });
+        });
+
+        describe('a shape this cannot vouch for exactly', () => {
+          /** Each builds a folder git can (or cannot) answer for; the adapter must ask git every time. */
+          const cases: readonly (readonly [string, (root: string) => Promise<string | undefined>])[] = [
+            [
+              'a legacy symlink for HEAD',
+              async root => {
+                const repo = await repository(root);
+                await rm(join(repo, '.git', 'HEAD'));
+                await symlink('refs/heads/main', join(repo, '.git', 'HEAD'));
+                return repo;
+              },
+            ],
+            [
+              'a .git file whose path is not valid UTF-8',
+              async root => {
+                const store = await initAt(join(root, 'store'), 'main', 'one');
+                const bytes = Buffer.concat([Buffer.from(`${store}-`), Buffer.from([0xff])]);
+                try {
+                  await rename(store, bytes);
+                } catch {
+                  return undefined; // a filesystem that refuses a name that is not UTF-8 cannot hold the case
+                }
+                const tree = join(root, 'tree');
+                await mkdir(tree);
+                await writeFile(
+                  join(tree, '.git'),
+                  Buffer.concat([Buffer.from('gitdir: '), bytes, Buffer.from('/.git\n')]),
+                );
+                return tree;
+              },
+            ],
+            [
+              'a commondir with nothing in it',
+              async root => {
+                const real = await initAt(join(root, 'real'), 'main', 'one');
+                const tree = join(root, 'tree');
+                await git(real, 'worktree', 'add', '--quiet', '-b', 'feat/tree', tree);
+                await writeFile(join(real, '.git', 'worktrees', 'tree', 'commondir'), '');
+                return tree;
+              },
+            ],
+            [
+              'a commondir that leads nowhere',
+              async root => {
+                const real = await initAt(join(root, 'real'), 'main', 'one');
+                const tree = join(root, 'tree');
+                await git(real, 'worktree', 'add', '--quiet', '-b', 'feat/tree', tree);
+                await writeFile(join(real, '.git', 'worktrees', 'tree', 'commondir'), `${root}/missing\n`);
+                return tree;
+              },
+            ],
+            [
+              'a .git file with no path after gitdir:',
+              async root => {
+                const tree = join(root, 'tree');
+                await mkdir(tree);
+                await writeFile(join(tree, '.git'), 'gitdir: \n');
+                return tree;
+              },
+            ],
+            [
+              'a .git file that does not start with gitdir:',
+              async root => {
+                const tree = join(root, 'tree');
+                await mkdir(tree);
+                await writeFile(join(tree, '.git'), `${root}/missing\n`);
+                return tree;
+              },
+            ],
+            [
+              'an objects that is not a directory',
+              async root => {
+                const repo = await repository(root);
+                await rm(join(repo, '.git', 'objects'), { recursive: true });
+                await writeFile(join(repo, '.git', 'objects'), '');
+                return repo;
+              },
+            ],
+          ];
+
+          for (const [name, build] of cases)
+            it(`should ask git every time for ${name}`, async () => {
+              await withTempRoot(async root => {
+                // Arrange
+                const folder = await build(root);
+                if (folder === undefined) return;
+                const { binary, asked } = await countingGit(root);
+                const copies = new GitWorkingCopies(binary);
+
+                // Act
+                const answers = [await copies.branchOf(folder), await copies.branchOf(folder)];
+
+                // Assert
+                should((await asked()).length).equal(2);
+                should(answers[1]).equal(answers[0]);
+              });
+            });
         });
       });
 
