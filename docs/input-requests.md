@@ -50,7 +50,10 @@ target again before Send is allowed.
 
 The daemon closes the card the moment its request ends, and an app showing it open closes its view
 with it, saying how it ended. The view stays only while a Send from it is on its way or a follow-up
-offer ("Always use…", "Don't ask again…") is on screen. The card says the agent's prompt once, under
+offer ("Always use…", "Don't ask again…") is on screen and not yet carried out; finishing the last one
+lets it close. Only a view the owner saw open closes by itself, and only during that opening: leaving
+the view, or opening the closed record again from the history, starts afresh, and a hold never outlives
+the opening that made it. The card says the agent's prompt once, under
 the daemon's facts: the context's last line (after `INPUT_PROMPT_MARKER`, "The agent says: ") is
 for a restarted daemon and an app that cannot draw the form.
 
