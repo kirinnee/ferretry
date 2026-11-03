@@ -62,6 +62,14 @@ describe('one stored entry as an event', () => {
 });
 
 describe('the item’s history from its stored thread', () => {
+  test('puts a gap row where the unread earlier entries go, and none for an empty gap', () => {
+    const stored = [entry({ text: 'one' }), entry({ text: 'two' })];
+    const gapped = storedHistory(agendaItem('A5'), stored, { at: 1, count: 3, state: 'loading' });
+    expect(gapped.map(event => event.kind).slice(-3)).toEqual(['owner', 'gap', 'owner']);
+    const empty = storedHistory(agendaItem('A5'), stored, { at: 1, count: 0, state: 'loading' });
+    expect(empty.some(event => event.kind === 'gap')).toBe(false);
+  });
+
   test('is one event per stored entry, in stored order', () => {
     const events = storedHistory(agendaItem('A5'), [
       entry({ text: 'one' }),

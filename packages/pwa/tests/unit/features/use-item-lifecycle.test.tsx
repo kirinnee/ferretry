@@ -242,6 +242,22 @@ describe('what an open item knows about its own life', () => {
     ]);
   });
 
+  test('reads nothing more when a longer tail already holds what was still missing', async () => {
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
+
+    calls = [];
+    await interact(() =>
+      update?.({
+        ...inputOf(base({ conversationCount: 4, conversation: [entry('two'), entry('three'), entry('four')] })),
+      }),
+    );
+    await interact(() => Promise.resolve());
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three', 'four']);
+    expect(latest?.conversationGap).toBeUndefined();
+    expect(calls.filter(call => call.path.startsWith('/conversation'))).toEqual([]);
+  });
+
   test('says so, and draws only what it has, when a thread is longer than one read takes', async () => {
     endless = true;
     await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));

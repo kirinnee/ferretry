@@ -187,15 +187,6 @@ export const diffWords = (before: string, after: string): readonly WordRun[] => 
   return merged([...front, ...tidy(merged(walk)), ...back]);
 };
 
-/** Two texts that are alike enough get a word diff; two that are not are one block out and one block in. */
-const diffPair = (before: string, after: string): readonly WordRun[] =>
-  similarity(before, after) >= REWRITE_SIMILARITY
-    ? diffWords(before, after)
-    : merged([
-        { kind: 'removed', text: before },
-        { kind: 'added', text: after },
-      ]);
-
 /** The pieces of a text that end where a sentence or a line does, spaces kept, so they join back into the text. */
 const LINES = /(?<=\n)/u;
 const SENTENCES = /(?<=[.!?]\s+)(?=\S)/u;
@@ -266,7 +257,7 @@ const align = (
 };
 
 const bySentence = (a: string, b: string): readonly WordRun[] =>
-  align(piecesOf(a, SENTENCES), piecesOf(b, SENTENCES), diffPair);
+  align(piecesOf(a, SENTENCES), piecesOf(b, SENTENCES), diffWords);
 
 /** The fewest words a sentence has for keeping it word for word to make two lines a pair. */
 const KEPT_SENTENCE_WORDS = 3;

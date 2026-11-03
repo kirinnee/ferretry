@@ -97,6 +97,17 @@ describe('what a merge can join', () => {
     expect(words.question).toContain('!A9 "Should a reply to a snoozed agenda…"');
   });
 
+  test('cuts a long own title at a word, or at the limit when it has no word to cut at', () => {
+    const spoken = item('A9', {
+      title: 'Should a reply to a snoozed agenda wake it up again straight away or wait for the owner',
+    });
+    expect(mergeWords(mergeChoice(item('A5'), spoken, false), 'A5').question).toContain(
+      '!A9 "Should a reply to a snoozed agenda wake it up again…"',
+    );
+    const unbroken = item('A8', { title: 'x'.repeat(80) });
+    expect(mergeWords(mergeChoice(item('A5'), unbroken, false), 'A5').question).toContain(`!A8 "${'x'.repeat(60)}…"`);
+  });
+
   test('names the open agenda by title in the picker lead, and the other by title in the flip label', () => {
     expect(pickerLead(item('A5', { subject: 'Does push repeat?' }))).toBe(
       'Merge !A5 "Does push repeat?" (this one) with which open agenda?',
