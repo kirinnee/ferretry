@@ -286,8 +286,18 @@ export const OwnedCatalogLinkSchema = z.strictObject({
   installCap: InstallCapSchema.optional(),
   opens: z.number().int().min(0),
   opensCheckedAt: InstantSchema.optional(),
-  storeState: z.enum(['ok', 'unreachable']).optional(),
+  storeState: z.enum(['ok', 'unreachable', 'lapsed']).optional(),
   endedAt: InstantSchema.optional(),
+  /** How many times this link's document has been uploaded (a move, a refresh, a change of end, a revival). */
+  sequence: z.number().int().min(1).optional(),
+  /** The version the link served before its latest move; absent until it has moved. */
+  movedFrom: z.number().int().min(1).optional(),
+  /** When a link the store had lapsed was put back; absent until that happens. */
+  revivedAt: InstantSchema.optional(),
+  /** Why an ended link ended: the owner, its end, its cap, the item gone, or the machine's identity changing. */
+  endReason: z.enum(['owner', 'expired', 'used', 'item-gone', 'identity-changed']).optional(),
+  /** An `identity-changed` link the store may still serve: the latest time it can. After this it serves nothing. */
+  stopsBy: InstantSchema.optional(),
 });
 export type OwnedCatalogLink = z.infer<typeof OwnedCatalogLinkSchema>;
 
@@ -295,11 +305,18 @@ export const OwnedCatalogLinkListSchema = z.strictObject({
   publisher: DaemonIdSchema,
   links: z.array(OwnedCatalogLinkSchema).readonly(),
   max: z.literal(CATALOG_LINKS_MAX_LIVE),
+  /** One sentence for the whole list when something needs saying: a link the store let lapse, or one a changed identity ended. */
+  sentence: z.string().min(1).optional(),
 });
 export type OwnedCatalogLinkList = z.infer<typeof OwnedCatalogLinkListSchema>;
 
 /** `POST /v1/catalog-links` answer: the one place a fresh URL is shown. A one-time URL is never shown again. */
-export const CreatedCatalogLinkSchema = z.strictObject({ link: OwnedCatalogLinkSchema, url: z.string().min(1) });
+export const CreatedCatalogLinkSchema = z.strictObject({
+  link: OwnedCatalogLinkSchema,
+  url: z.string().min(1),
+  /** The link made a new item in the owner's list (a link from a source, not from an item already there). */
+  created: z.boolean().optional(),
+});
 export type CreatedCatalogLink = z.infer<typeof CreatedCatalogLinkSchema>;
 
 /** `POST /v1/catalog-links/:linkId/copy` answer: a public link's URL again. */

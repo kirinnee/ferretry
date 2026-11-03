@@ -3,6 +3,7 @@
  * holds a socket or opens a key (docs/standards/three-layer-architecture).
  */
 import type { CatalogItemSource, CatalogLinkKind } from '@ferretry/protocol';
+import type { AuditEntry } from '../audit/types.ts';
 import type { LinkStatus, LinkStoreRefusalCode } from '@ferretry/relay';
 import type { LinkSubject } from '../shared-catalogs/index.ts';
 import type { LinksDocument } from './document.ts';
@@ -59,6 +60,11 @@ export interface LinkStoreClient {
   status(origin: string, bundleIds: readonly string[]): Promise<StoreAnswer<LinkStatus>>;
   /** Whether the store at `origin` is taking new links, from its public advertisement. */
   available(origin: string): Promise<boolean>;
+}
+
+/** Where the links side tells the owner what it did on its own (a link put back after the store let it lapse). */
+export interface LinkAuditSink {
+  record(entry: AuditEntry): Promise<void>;
 }
 
 /** The kept items a link can carry. `SharedCatalogService` is one. */

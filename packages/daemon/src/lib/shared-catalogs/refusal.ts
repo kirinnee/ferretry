@@ -24,6 +24,7 @@ export const CATALOG_REFUSALS = [
   'version_unknown',
   'version_current',
   'version_retired',
+  'version_linked',
   'version_before_join',
   'signing_unavailable',
   'store_damaged',

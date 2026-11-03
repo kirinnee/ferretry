@@ -157,6 +157,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/catalog-links operator any',
   'POST /v1/catalog-links operator person',
   'GET /v1/catalog-links/:linkId operator any',
+  'PUT /v1/catalog-links/:linkId/version operator person',
+  'PATCH /v1/catalog-links/:linkId operator person',
   'POST /v1/catalog-links/:linkId/copy operator person',
   'DELETE /v1/catalog-links/:linkId operator person',
   'GET /v1/sessions operator any',
