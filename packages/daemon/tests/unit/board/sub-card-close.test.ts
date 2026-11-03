@@ -283,7 +283,11 @@ describe('closing a helper whose ferret ended', () => {
     const warnings: string[] = [];
     const swept = board(idle(sub('implement'), { lastTouchedAt: old }));
     const sweep = new BoardSweep({
-      board: { sweepBoard: async () => swept, closeEndedHelper: async id => await service.closeEndedHelper(id) },
+      board: {
+        sweepBoard: async () => swept,
+        closeEndedHelper: async id => await service.closeEndedHelper(id),
+        returnToLead: async () => false,
+      },
       sessions: new FakeSessions(gone),
       memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },
       nudges: { send: async () => undefined },
@@ -310,6 +314,7 @@ describe('closing a helper whose ferret ended', () => {
         closeEndedHelper: async () => {
           throw new Error('store is read-only');
         },
+        returnToLead: async () => false,
       },
       sessions: new FakeSessions(gone),
       memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },

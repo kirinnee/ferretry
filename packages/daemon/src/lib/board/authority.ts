@@ -9,7 +9,7 @@
  * |---------------|--------------------------------------------------------|--------------------------------------|
  * | `owner-human` | the owner: loopback, or a device the `fleet` grant let in | everything, incl. gates and overrides |
  * | `owner`       | the card's owner ferret                                | the assignee's writes, plus re-plan   |
- * | `ancestor`    | a ferret above the card's owner                        | the same as the owner                |
+ * | `ancestor`    | a ferret above the card's owner or assignee          | the same as the owner                |
  * | `assignee`    | the ferret doing it (`assignee`, else the owner)       | move, note, link, report, files, …   |
  * | `daemon`      | the daemon's own automation                            | trigger moves, link cache, refile    |
  * | `reader`      | any other ferret                                       | read; depend from ITS OWN card only   |
@@ -102,19 +102,23 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
 export const effectiveAssignee = (card: Pick<BoardTask, 'owner' | 'assignee'>): string => card.assignee ?? card.owner;
 
 /**
- * A caller's standing on one card. `ownerAncestors` is the card owner's lineage, nearest first; only a
- * ferret that is neither the owner nor the assignee needs it, so a caller may pass `[]` otherwise.
+ * A caller's standing on one card. `ownerAncestors` is the card owner's lineage and `assigneeAncestors` the assignee's,
+ * nearest first; only a ferret that is neither the owner nor the assignee needs them, so a caller may pass `[]`
+ * otherwise. A lead above EITHER one is an `ancestor`: the card is in its subtree whoever made it, so a lead that
+ * handed a card down to a grandchild still holds it, and a card its subtree was handed is its own to plan.
  */
 export const standingOf = (
   caller: BoardCaller,
   card: Pick<BoardTask, 'owner' | 'assignee'>,
   ownerAncestors: readonly string[],
+  assigneeAncestors: readonly string[] = [],
 ): BoardStanding => {
   if (caller.kind === 'owner') return 'owner-human';
   if (caller.kind === 'daemon') return 'daemon';
   if (caller.sessionId === card.owner) return 'owner';
   if (ownerAncestors.includes(caller.sessionId)) return 'ancestor';
   if (caller.sessionId === effectiveAssignee(card)) return 'assignee';
+  if (assigneeAncestors.includes(caller.sessionId)) return 'ancestor';
   return 'reader';
 };
 
@@ -159,7 +163,7 @@ export const mayHandDown = (
 const STANDING_WORDS: Readonly<Record<BoardStanding, string>> = {
   'owner-human': 'the owner',
   owner: 'its owner ferret',
-  ancestor: "the owner ferret's leads",
+  ancestor: 'the leads of its owner ferret or its assignee',
   assignee: 'its assignee',
   daemon: 'the daemon',
   reader: 'any ferret',

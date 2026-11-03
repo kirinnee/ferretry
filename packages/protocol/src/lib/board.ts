@@ -362,6 +362,8 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     to: SessionIdSchema.nullable(),
     /** Present when the card's assignee handed it down to one of its own descendants; the actor is that assignee. */
     handedDown: z.literal(true).optional(),
+    /** Present when the daemon returned the card to a live lead because this ferret, its assignee, ended: the one that finished. */
+    returnedFrom: SessionIdSchema.optional(),
   }),
   z.object({
     ...EventBase,

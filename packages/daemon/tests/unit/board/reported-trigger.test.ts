@@ -205,7 +205,7 @@ describe('a reported trigger', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).equal(
-      "only the owner, its owner ferret, the owner ferret's leads, its assignee may report an event on &F1 (owner ferret lead)",
+      'only the owner, its owner ferret, the leads of its owner ferret or its assignee, its assignee may report an event on &F1 (owner ferret lead)',
     );
     should(ports.store.writes).eql([]);
   });
@@ -490,7 +490,7 @@ describe('a sub-ferret reporting a trigger', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).equal(
-      'Sub-ferrets don\'t report events on a card they are not doing; tell your lead: fy send lizzette "…"',
+      `You are a sub-ferret, so you can't report events on a card they are not doing. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
     );
     should(ports.store.writes).eql([]);
   });

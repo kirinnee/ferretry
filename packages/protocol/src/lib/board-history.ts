@@ -60,6 +60,9 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
     case 'linked':
       return `linked ${event.field}: ${event.value}`;
     case 'assigned':
+      if (event.returnedFrom !== undefined && event.to !== null) {
+        return `returned to ${names(event.to)}: ${names(event.returnedFrom)} finished`;
+      }
       return `assigned ${event.from === null ? 'nobody' : names(event.from)} → ${event.to === null ? 'nobody' : names(event.to)}${
         event.handedDown === true && event.actor.sessionId !== undefined
           ? ` (handed down by ${names(event.actor.sessionId)})`

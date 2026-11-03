@@ -17,6 +17,29 @@ import { FakeParents } from './support.ts';
 
 const owned = { owner: 'lead', assignee: 'child' };
 
+describe("a lead's standing over its subtree", () => {
+  const lead: BoardCaller = { kind: 'ferret', sessionId: 'lead' };
+
+  it('should be ancestor of a card whose assignee is its descendant, whoever owns it', () => {
+    // Act
+    const standing = standingOf(lead, { owner: 'stranger', assignee: 'grandchild' }, ['other'], ['child', 'lead']);
+
+    // Assert
+    should(standing).equal('ancestor');
+    should(mayDo('drop', standing)).be.true();
+    should(mayDo('assign', standing)).be.true();
+  });
+
+  it('should be a reader of a card neither its owner nor its assignee descends from it', () => {
+    // Act
+    const standing = standingOf(lead, { owner: 'stranger', assignee: 'cousin' }, ['other'], ['sibling', 'other']);
+
+    // Assert
+    should(standing).equal('reader');
+    should(mayDo('drop', standing)).be.false();
+  });
+});
+
 describe('a caller standing on a card', () => {
   it.each<{ caller: BoardCaller; ancestors: readonly string[]; expected: BoardStanding }>([
     { caller: { kind: 'owner' }, ancestors: [], expected: 'owner-human' },
@@ -101,7 +124,7 @@ describe('a refusal message', () => {
 
     // Assert
     should(message).equal(
-      "only the owner, its owner ferret, the owner ferret's leads may drop &F3 (owner ferret lead)",
+      'only the owner, its owner ferret, the leads of its owner ferret or its assignee may drop &F3 (owner ferret lead)',
     );
   });
 

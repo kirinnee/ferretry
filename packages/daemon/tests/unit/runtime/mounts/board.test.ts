@@ -377,7 +377,9 @@ describe('the board mount', () => {
 
     // Assert
     should([sibling.status, upward.status, stranger.status]).eql([403, 403, 403]);
-    should(String(jsonBody(sibling).error)).startWith("Sub-ferrets don't reassign cards");
+    should(String(jsonBody(sibling).error)).startWith(
+      "You are a sub-ferret, so you can't reassign a card outside your own subtree",
+    );
     should(handedDown.status).equal(200);
     should(jsonBody(handedDown)).match({ task: { assignee: 'grandchild', owner: 'lead' } });
   });

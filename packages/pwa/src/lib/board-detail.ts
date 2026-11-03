@@ -190,6 +190,13 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
     case 'linked':
       return { text: `linked a ${event.field}`, detail: event.value, minor: true };
     case 'assigned':
+      if (event.returnedFrom !== undefined && event.to !== null) {
+        return {
+          text: `returned to ${context.names(event.to)}: ${context.names(event.returnedFrom)} finished`,
+          detail: null,
+          minor: false,
+        };
+      }
       return {
         text:
           event.to === null

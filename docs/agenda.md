@@ -484,8 +484,8 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
 
 **Sub-ferrets raise nothing.** A session another ferret started (`config.parent`) is refused `add`, `edit`,
-`surface`, `done` and `dismiss` (and `fy notify`, the same owner-facing channel) with `forbidden`: `Sub-ferrets don't
-raise agenda items or notify the owner; tell your lead: fy send <lead-callsign> "…"`. They report to the lead with
+`surface`, `done` and `dismiss` (and `fy notify`, the same owner-facing channel) with `forbidden`: `You are a sub-ferret, so you can't
+raise agenda items or notify the owner. You may read the agenda and report to your lead. For anything else ask your lead: fy send <lead-callsign> "…"`. They report to the lead with
 `fy send`; the lead decides what the owner must see. `AgendaService.apply` is the one choke point; reads stay open.
 Their prompt carries no Agenda mode section even when the switch is on
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)).

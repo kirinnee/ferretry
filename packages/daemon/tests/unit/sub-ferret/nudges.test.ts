@@ -85,7 +85,9 @@ describe('the sub-ferret directory over the session registry', () => {
     const refusal = await subFerretRefusal(registry, 'child', 'drop cards');
 
     // Assert
-    should(refusal).equal('Sub-ferrets don\'t drop cards; tell your lead: fy send lizzette "…"');
+    should(refusal).equal(
+      `You are a sub-ferret, so you can't drop cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
+    );
   });
 
   it('should treat an empty parent, a lead and an unknown session as leads', async () => {
@@ -112,7 +114,9 @@ describe('the sub-ferret directory over the session registry', () => {
     const open = await subFerretRefusal(broken, 'child', 'move cards');
 
     // Assert
-    should(named).equal('Sub-ferrets don\'t move cards; tell your lead: fy send lead "…"');
+    should(named).equal(
+      `You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lead "…"`,
+    );
     should(open).be.null();
   });
 });
