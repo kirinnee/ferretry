@@ -83,6 +83,14 @@ const draw = async (
 
 const root = (): HTMLElement => must(view?.container, 'the view');
 const one = <T extends Element>(selector: string): T => must(root().querySelector<T>(selector), selector);
+/** The form's Yes / No button that says `word`: picked by its words, since No sits first, as on every Yes / No row. */
+const yesNoButton = (word: 'Yes' | 'No'): HTMLButtonElement =>
+  must(
+    [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-form-yesno] button')].find(button =>
+      (button.textContent ?? '').startsWith(word),
+    ),
+    word,
+  );
 const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = one('[data-agenda-view]')) =>
   interact(() => pressKey(target, key, init));
 
@@ -1151,9 +1159,9 @@ describe('a form card', () => {
     const [page] = [...root().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')] as [HTMLInputElement];
     await interact(() => page.click());
     expect(page.checked).toBe(true);
-    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
-    await interact(() => yes.click());
-    expect(yes.getAttribute('aria-pressed')).toBe('true');
+    const no = yesNoButton('No');
+    await interact(() => no.click());
+    expect(no.getAttribute('aria-pressed')).toBe('true');
   });
 
   test('the picked row is filled, apart from the Recommended tag, and a required field with no pick says so', async () => {
@@ -1167,9 +1175,9 @@ describe('a form card', () => {
     const us = must(rows[1]?.querySelector('input'), 'US');
     await interact(() => us.click());
     expect(rows.map(row => row.hasAttribute('data-on'))).toEqual([false, true, false, false]);
-    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
-    await interact(() => yes.click());
-    expect(yes.querySelector('.fy-form__seg-check')).not.toBeNull();
+    const no = yesNoButton('No');
+    await interact(() => no.click());
+    expect(no.querySelector('.fy-form__seg-check')).not.toBeNull();
     expect(root().querySelectorAll('[data-agenda-form-needed]')).toHaveLength(1);
   });
 
@@ -1180,8 +1188,8 @@ describe('a form card', () => {
     expect(root().querySelectorAll('[data-agenda-need-lead]')).toHaveLength(1);
     const checks = [...root().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     await interact(() => checks[0]?.click());
-    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
-    await interact(() => yes.click());
+    const no = yesNoButton('No');
+    await interact(() => no.click());
     expect(one('[data-agenda-form-progress]').textContent).toBe('All 3 answered');
     expect(one('[data-agenda-form-foot]').hasAttribute('data-done')).toBe(true);
   });
