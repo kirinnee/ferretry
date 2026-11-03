@@ -243,10 +243,18 @@ export function cloneBundleProblem(bundle: FleetCloneBundle): string | null {
   if (orphan !== undefined) {
     return `${from} carries ${orphan.path}, which none of its components uses, so none of it can be copied.`;
   }
-  // A file is carried or it is not: one marked both would let the omission stand in for the bytes a review compares.
-  const masked = bundle.notCopied.find(entry => seen.has(plainAssetPath(entry.path)));
-  if (masked !== undefined) {
-    return `${from} carries ${masked.path} and also says it could not carry it, so none of it can be copied.`;
+  // A file is carried or it is not: one marked both would let the omission stand in for the bytes a review
+  // compares. A folder marked not copied says the same of everything beneath it, so a carried file there is too.
+  for (const entry of bundle.notCopied) {
+    if (isOutsideReference(entry.path)) continue;
+    const omitted = plainAssetPath(entry.path);
+    if (seen.has(omitted)) {
+      return `${from} carries ${entry.path} and also says it could not carry it, so none of it can be copied.`;
+    }
+    const beneath = [...seen].find(path => omitted === '' || path.startsWith(`${omitted}/`));
+    if (beneath !== undefined) {
+      return `${from} carries ${beneath} and also says it could not carry ${entry.path}, the folder it is in, so none of it can be copied.`;
+    }
   }
   return null;
 }

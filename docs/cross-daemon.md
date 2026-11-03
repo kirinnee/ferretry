@@ -93,7 +93,7 @@ summary is [security.md](security.md).
   environment login descriptors included) and this machine's raw declarations, owned documents and record,
   not just the semantic digests. A bundle that marks a carried file as not copied is refused. A taken item
   is moved off any path another item here shares, so writing it can never change an item hidden as the same,
-  and the files the review lists as removed go in the same batch (account-model.md L14–L15). Governed devices need `fleet.configure`; no login or secret is written (account-model.md L13).
+  and the files the review lists as removed go in the same batch (account-model.md L14–L16). Governed devices need `fleet.configure`; no login or secret is written (account-model.md L13).
 - **Bounded.** A settings or hooks document too deep or too large to walk key by key (64 levels, 2,000
   values) is said to be so and shown whole; the walk never recurses.
 - **3d. Copying B into A shows B's setup to A — said out loud.** The Clone source step now says the

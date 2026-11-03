@@ -26,21 +26,29 @@ export interface AssetRoots {
   readonly assetsDirectory: string;
 }
 
-const ALIAS_PREFIX = /^(?:\/|~\/|\$HOME\/)/u;
+/**
+ * The asset tree itself, as {@link assetReference} spells it. An item that names it owns every path in the
+ * tree, so nothing written anywhere in it can leave that item as it was.
+ */
+export const ASSET_ROOT = '.';
+
+/** A leading `~` or `$` that is not the person's home: a root nothing here can resolve. */
+const UNKNOWN_ROOT = /^(?:~(?!\/|$)|\$(?!HOME(?:\/|$)))/u;
 
 /**
- * One canonical asset-relative spelling of a configured path, or `undefined` when it is not inside the
- * asset tree. `components/x`, `/state/fleet/assets/components/x` and `~/…/components/x` (when the home
- * is the assets directory's ancestor) are one folder, and ownership is decided on that one spelling.
+ * One canonical asset-relative spelling of a configured path, {@link ASSET_ROOT} for the asset tree itself,
+ * or `undefined` when it is not inside the asset tree. `components/x`, `../assets/components/x` (from the
+ * assets directory), `/state/fleet/assets/components/x` and `~/…/components/x` (when the home is the assets
+ * directory's ancestor) are one folder, read exactly as {@link expandAssetPath} reads them, and ownership,
+ * the review and the write all go by that one spelling.
  */
 export function assetReference(path: string, roots: AssetRoots): string | undefined {
-  const plain = (value: string): string => canonicalAssetReference(value).replace(/\/+$/u, '');
-  if (isAssetRelative(path)) return plain(path);
-  if (!ALIAS_PREFIX.test(path)) return undefined;
+  if (UNKNOWN_ROOT.test(path)) return undefined;
   const absolute = expandAssetPath(path, roots.userHome, roots.assetsDirectory);
   const inside = relative(normalize(roots.assetsDirectory), absolute);
-  if (inside === '' || inside === '..' || inside.startsWith('../') || isAbsolute(inside)) return undefined;
-  return plain(inside);
+  if (inside === '') return ASSET_ROOT;
+  if (inside === '..' || inside.startsWith('../') || isAbsolute(inside)) return undefined;
+  return canonicalAssetReference(inside).replace(/\/+$/u, '');
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text. */
@@ -77,10 +85,22 @@ export function bundleModel(bundle: FleetCloneBundle, sourceName: string): Accou
   }
 }
 
-/** Whether two asset paths are the same or one sits inside the other, by whole path segments. */
+/** Whether two asset paths are the same or one sits inside the other, by whole path segments. The tree holds all. */
 export function pathsOverlap(a: string, b: string): boolean {
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  return a === b || a === ASSET_ROOT || b === ASSET_ROOT || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
+
+/**
+ * The sentence for a write that has nowhere to go: an item here owns the whole asset tree, so every path in
+ * it is that item's and no destination leaves it as it was.
+ */
+export const wholeTreeRefusal = (path: string, owners: readonly string[]): string =>
+  `${owners.join(', ')} here ${owners.length === 1 ? 'uses' : 'use'} the whole setup folder, so writing ${path} would change ${owners.length === 1 ? 'it' : 'them'} too. Point ${owners.length === 1 ? 'it' : 'them'} at a folder of ${owners.length === 1 ? 'its' : 'their'} own first, or leave this out.`;
+
+/** No destination is free while an owned path is the whole tree: refuse rather than search for one forever. */
+const refuseWholeTree = (path: string, used: ReadonlySet<string>): void => {
+  if (used.has(ASSET_ROOT)) throw new CloneRefusal(wholeTreeRefusal(path, ['An item']));
+};
 
 /**
  * Whether a destination is free: it is not a path another item here owns, does not sit inside a folder one
@@ -106,6 +126,7 @@ function outsideOwner(path: string, used: ReadonlySet<string>): string | undefin
  */
 export function movedFile(file: string, from: string, to: string, used: ReadonlySet<string>): string {
   if (!isAssetRelative(file)) return file;
+  refuseWholeTree(file, used);
   const dot = file.lastIndexOf('.');
   const slash = file.lastIndexOf('/');
   const stem = dot > slash ? file.slice(0, dot) : file;
@@ -120,6 +141,7 @@ export function movedFile(file: string, from: string, to: string, used: Readonly
 
 /** The folder a renamed component's scripts move to, never one that overlaps a path the target already uses. */
 export function movedFolder(folder: string, from: string, to: string, used: ReadonlySet<string>): string {
+  refuseWholeTree(folder, used);
   if (isFree(used, folder)) return folder;
   const outside = outsideOwner(folder, used);
   if (outside !== undefined) return outside;

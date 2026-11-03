@@ -17,8 +17,9 @@
  *   the size budget) has no contents to stand for it, so its literal path stays in the digest instead:
  *   re-pointing a hook at another script is a change;
  * - a skills component's items, each with its files the same way;
- * - a profile's layers as IDENTITIES, in order (order is what the harness reads);
- * - a runtime as `{ login identity, profile identity, agent, harness }`.
+ * - a profile's layers as IDENTITIES, in order (order is what the harness reads), with its `compactAt`;
+ * - a runtime as `{ login identity, profile identity, agent, harness, compactAt }`. Whether it is switched
+ *   off (`disabled`) is the machine's own say, so it is not a difference between two machines.
  *
  * What a name is not: an item's own name is not inside its digest, so renaming it is not a change.
  */
@@ -152,6 +153,7 @@ const normalised = (
         profile: identityOf(`profile/${String(value.profile)}`),
         agent: value.agent === true,
         harness: value.harness,
+        compactAt: value.compactAt,
       };
     case 'login': {
       // A login's id is only how this machine files it; what it signs in with is everything else.

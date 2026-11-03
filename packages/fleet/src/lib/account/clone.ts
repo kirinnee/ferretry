@@ -174,6 +174,22 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
     const plain = plainAsset(file.path);
     if (!files.has(plain)) files.set(plain, { path: plain, content: file.content });
   }
+  // ONE ANSWER PER FILE: a target refuses a bundle that says a file is both carried and not
+  // (`cloneBundleProblem`). A document read on its own and then left out of its folder for room is carried,
+  // since its bytes are here. One inside a folder that could not be read at all (a link) is left out with
+  // it, and listed: carried, it would contradict the folder's omission, which protects the rest of it there.
+  const omittedFolders = input.notCopied.map(entry => plainAsset(entry.path)).filter(isAssetRelative);
+  const leftOut: { path: string; reason: string }[] = [];
+  for (const path of [...files.keys()]) {
+    const folder = omittedFolders.find(omitted => path.startsWith(`${omitted}/`));
+    if (folder === undefined) continue;
+    files.delete(path);
+    leftOut.push({ path, reason: `it is inside ${folder}, which could not be copied` });
+  }
+  const notCopied = [
+    ...input.notCopied.filter(entry => !files.has(plainAsset(entry.path))).map(entry => ({ ...entry })),
+    ...leftOut,
+  ];
   return FleetCloneBundleSchema.parse({
     format: FLEET_CLONE_BUNDLE_FORMAT,
     version: 1,
@@ -184,7 +200,7 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
     profiles: model.profiles,
     runtimes: model.runtimes,
     files: [...files.values()],
-    notCopied: input.notCopied.map(entry => ({ path: entry.path, reason: entry.reason })),
+    notCopied: notCopied.map(entry => ({ path: entry.path, reason: entry.reason })),
   });
 }
 

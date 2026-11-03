@@ -377,6 +377,16 @@ describe('cloneBundleProblem: a file is carried or it is not', () => {
 
   it('should accept a file not copied beside the carried ones', () => {
     should(cloneBundleProblem(carried('components/hooks/a/huge.bin'))).be.null();
+    should(cloneBundleProblem(carried('components/hooks/a/run'))).be.null();
+    should(cloneBundleProblem(carried('/elsewhere/components/hooks/a'))).be.null();
+  });
+
+  it('should refuse a carried file beneath a folder also listed as not copied, however that is spelled', () => {
+    for (const folder of ['components/hooks/a', './components/hooks/a/', 'components', '.']) {
+      should(cloneBundleProblem(carried(folder))).equal(
+        `The setup from studio-mac carries components/hooks/a/run.sh and also says it could not carry ${folder}, the folder it is in, so none of it can be copied.`,
+      );
+    }
   });
 });
 

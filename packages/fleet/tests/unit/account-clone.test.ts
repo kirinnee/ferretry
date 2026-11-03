@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type FleetCloneBundle, FleetCloneBundleSchema, secretReference } from '@ferretry/protocol';
+import { cloneBundleProblem, type FleetCloneBundle, FleetCloneBundleSchema, secretReference } from '@ferretry/protocol';
 import should from 'should';
 import {
   buildCloneBundle,
@@ -203,6 +203,55 @@ describe('buildCloneBundle', () => {
       { id: 'signed', harness: 'claude' },
     ]);
     should(JSON.stringify(bundle)).not.containEql('"ferretry"');
+  });
+
+  it('should never say a file is both carried and not, keeping the omission that protects a folder', () => {
+    // Arrange: an instruction document read on its own sits in a hook subfolder that could not be read (a
+    // link), and another document was read whole but then left out of its folder for room.
+    const model = parseAccountModel({
+      version: 2,
+      credentials: { you: { harness: 'claude', store: 'ferretry' } },
+      components: {
+        instructions: {
+          inside: { file: 'components/hooks/a/sub/run.md' },
+          main: { file: 'components/hooks/b/main.md' },
+        },
+        hooks: {
+          a: { harness: 'claude', directory: 'components/hooks/a' },
+          b: { harness: 'claude', directory: 'components/hooks/b' },
+        },
+      },
+      profiles: { default: { layers: [] } },
+      runtimes: { you: { credential: 'you', profile: 'default' } },
+    });
+
+    // Act
+    const bundle = buildCloneBundle({
+      model,
+      machine: 'studio-mac',
+      exportedAt: EXPORTED_AT,
+      emails: {},
+      files: [
+        { path: 'components/hooks/a/sub/run.md', content: 'inside a link' },
+        { path: 'components/hooks/a/run.sh', content: 'run' },
+        { path: 'components/hooks/b/main.md', content: '# Main' },
+      ],
+      notCopied: [
+        { path: 'components/hooks/a/sub', reason: 'it is a link or a special file' },
+        { path: 'components/hooks/b/main.md', reason: 'the setup is too large to copy in one go' },
+      ],
+    });
+
+    // Assert: the bundle is one a target accepts, and the document left out is said, never dropped quietly.
+    should(cloneBundleProblem(bundle)).be.null();
+    should(bundle.files.map(file => file.path)).eql(['components/hooks/a/run.sh', 'components/hooks/b/main.md']);
+    should(bundle.notCopied).eql([
+      { path: 'components/hooks/a/sub', reason: 'it is a link or a special file' },
+      {
+        path: 'components/hooks/a/sub/run.md',
+        reason: 'it is inside components/hooks/a/sub, which could not be copied',
+      },
+    ]);
   });
 
   it('should round-trip through parseCloneBundle', () => {
