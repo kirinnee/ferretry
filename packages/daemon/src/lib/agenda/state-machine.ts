@@ -4,14 +4,10 @@ import {
   type AgendaAsk,
   type AgendaBrief,
   type AgendaCardAnswer,
+  type AgendaCardRow,
   type AgendaClearableField,
   type AgendaConfirms,
   type AgendaCopyPlanRef,
-  type AgendaTaskPlanRef,
-  type AgendaSignInRuleSuggestionRef,
-  type AgendaCardRow,
-  type AgendaPhoneApprovalRef,
-  type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaGate,
@@ -22,48 +18,60 @@ import {
   type AgendaInputRef,
   type AgendaItem,
   AgendaItemSchema,
-  fitAgendaItem,
   type AgendaKind,
+  type AgendaPhoneApprovalRef,
   type AgendaResponse,
+  type AgendaResting,
   type AgendaRevisableField,
   type AgendaRevision,
-  type AgendaResting,
+  type AgendaSignInRuleSuggestionRef,
   type AgendaSnapshot,
-  type AgendaStage,
-  agendaStage,
-  agendaStageOfKind,
-  MAX_AGENDA_REPLY_LENGTH,
-  MAX_AGENDA_REPLY_ENVELOPE_LENGTH,
-  agendaReplyEnvelopeLength,
-  restoredLegacyAgendaReply,
-  MAX_AGENDA_STAGES,
   type AgendaSource,
+  type AgendaStage,
+  type AgendaTaskPlanRef,
+  type AgendaTwoFactorSeedRef,
   type AgendaUndelivered,
   agendaBriefOf,
-  agendaCardKind,
-  agendaFormProblems,
   agendaBriefRequiredProblems,
+  agendaCardKind,
   agendaEditShapeProblems,
+  agendaFormProblems,
   agendaNoticeProblems,
   agendaOfferCloseProblems,
   agendaOptionDetailProblems,
+  agendaReplyEnvelopeLength,
   agendaShape,
   agendaShapeProblems,
+  agendaStage,
+  agendaStageOfKind,
   agendaState,
   agendaWakeAt,
+  fitAgendaItem,
   formAnswerProblems,
   formatTaskRef,
   gateReference,
-  parseGateFollowupReference,
-  parseGateReference,
   MAX_AGENDA_PER_SESSION,
+  MAX_AGENDA_REPLY_ENVELOPE_LENGTH,
+  MAX_AGENDA_REPLY_LENGTH,
   MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_REVISIONS,
+  MAX_AGENDA_STAGES,
+  parseGateFollowupReference,
+  parseGateReference,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
+  restoredLegacyAgendaReply,
+  StoredAgendaItemSchema,
+  StoredResolvedAgendaItemSchema,
   type TaskRef,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import {
+  type AgendaArchiveCursor,
+  AgendaArchiveCursorSchema,
+  type AgendaArchiveRecord,
+  AgendaArchiveRecordSchema,
+} from './archive.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -114,8 +122,10 @@ const ArchivedOwnerHistorySchema = z.array(z.strictObject({ id: AgendaIdSchema, 
 
 /** Internal durable state. Active state and count are both derived from the entry lifecycle. */
 export interface AgendaLedger {
-  /** Owner records removed from the bounded wire history; durable, never included in snapshots. */
-  readonly ownerHistory?: readonly { readonly id: AgendaId; readonly entry: AgendaHistoryEntry }[];
+  /** Bounded position in the private append-only sidecar. */
+  readonly archive?: AgendaArchiveCursor;
+  /** Transaction-local records. The repository appends these before committing and clears them from the hot file. */
+  readonly archivePending?: readonly AgendaArchiveRecord[];
   readonly sessionId: string;
   readonly nextId: number;
   readonly entries: readonly AgendaEntry[];
@@ -583,7 +593,14 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   const entries: AgendaEntry[] = [];
   const archive = ArchivedOwnerHistorySchema.safeParse(raw.ownerHistory ?? []);
   if (!archive.success) return null;
-  const ownerHistory = archive.data;
+  const pending = z.array(AgendaArchiveRecordSchema).safeParse(raw.archivePending ?? []);
+  const cursor = AgendaArchiveCursorSchema.optional().safeParse(raw.archive);
+  if (!pending.success || !cursor.success) return null;
+  const archivePending: AgendaArchiveRecord[] = [
+    ...pending.data,
+    ...archive.data.map(record => ({ kind: 'owner-history' as const, ...record })),
+  ];
+  const legacy = raw.version === undefined || raw.version === 1;
   const unreadable: unknown[] = [];
   const ids = new Set<string>();
   let maxId = 0;
@@ -595,7 +612,7 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   // "Couldn't read" for all of them. It still counts as what it was (`setAsideOf`): its id is never reused and
   // it holds its place under the caps, so the board stays one that reads whole should the entry read again.
   for (const rawEntry of raw.entries) {
-    const entry = parseAgendaEntry(rawEntry);
+    const entry = parseAgendaEntry(rawEntry, legacy, archivePending);
     if (entry === null) {
       unreadable.push(rawEntry);
       continue;
@@ -626,10 +643,11 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     nextId: raw.nextId as number,
     entries,
     updatedAt: raw.updatedAt,
-    ...(ownerHistory.length === 0 ? {} : { ownerHistory }),
+    ...(cursor.data === undefined ? {} : { archive: cursor.data }),
+    ...(archivePending.length === 0 ? {} : { archivePending }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
   });
-  return toChannel(parked, raw.version === undefined || raw.version === 1);
+  return toChannel(parked, legacy);
 }
 
 /**
@@ -872,7 +890,17 @@ function fitted(
 ): Extract<AgendaMutation, { ok: true }> {
   const kept = new Set(before.entries);
   const swaps = new Map<object, object>();
-  const archived = [...(mutation.ledger.ownerHistory ?? [])];
+  const archived = [...(mutation.ledger.archivePending ?? [])];
+  const remaining = new Set(mutation.ledger.entries.map(entry => entry.item.id));
+  // Closed-history pruning removes the hot view, never the owner's conversation.
+  for (const entry of before.entries) {
+    if (remaining.has(entry.item.id)) continue;
+    for (const record of entry.item.history ?? []) {
+      if (['replied', 'needs-info', 'discuss'].includes(record.kind)) {
+        archived.push({ kind: 'owner-history', id: entry.item.id, entry: record });
+      }
+    }
+  }
   const entries = mutation.ledger.entries.map(entry => {
     if (kept.has(entry)) return entry;
     const item = fitAgendaItem(entry.item);
@@ -890,15 +918,15 @@ function fitted(
       const index = retained.indexOf(JSON.stringify(record));
       if (index >= 0) retained.splice(index, 1);
       else if (['replied', 'needs-info', 'discuss'].includes(record.kind)) {
-        archived.push({ id: item.id, entry: record });
+        archived.push({ kind: 'owner-history', id: item.id, entry: record });
       }
     }
     if (item === entry.item) return entry;
     swaps.set(entry.item, item);
     return { ...entry, item } as typeof entry;
   });
-  if (swaps.size === 0 && archived.length === (mutation.ledger.ownerHistory?.length ?? 0)) return mutation;
-  const ledger = { ...mutation.ledger, entries, ...(archived.length === 0 ? {} : { ownerHistory: archived }) };
+  if (swaps.size === 0 && archived.length === (mutation.ledger.archivePending?.length ?? 0)) return mutation;
+  const ledger = { ...mutation.ledger, entries, ...(archived.length === 0 ? {} : { archivePending: archived }) };
   const item = mutation.item === undefined ? undefined : (swaps.get(mutation.item) as AgendaItem | undefined);
   const addressed =
     mutation.addressed === undefined ? undefined : (swaps.get(mutation.addressed) as ResolvedAgendaItem | undefined);
@@ -1422,20 +1450,39 @@ function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): Age
     : addressed(ledger, target, command.actor, command.note ?? null, command.at, 'done', 'resolved');
 }
 
-function parseAgendaEntry(value: unknown): AgendaEntry | null {
+function parseAgendaEntry(value: unknown, legacy: boolean, pending: AgendaArchiveRecord[]): AgendaEntry | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const origin = parseAgendaActor(raw.origin);
   if (origin === null) return null;
   if (raw.lifecycle === 'active') {
-    const item = parseEntryItem(AgendaItemSchema, raw.item, origin);
+    const decoded = parseEntryItem(legacy ? StoredAgendaItemSchema : AgendaItemSchema, raw.item, origin);
+    const item = decoded === null ? null : migrateStoredItem(decoded, legacy, pending);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'active', origin, item } : null;
   }
   if (raw.lifecycle === 'addressed') {
-    const item = parseEntryItem(ResolvedAgendaItemSchema, raw.item, origin);
+    const decoded = parseEntryItem(
+      legacy ? StoredResolvedAgendaItemSchema : ResolvedAgendaItemSchema,
+      raw.item,
+      origin,
+    );
+    const item = decoded === null ? null : migrateStoredItem(decoded, legacy, pending);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'addressed', origin, item } : null;
   }
   return null;
+}
+
+/** Old writers had no aggregate wire limit. Decode their versions first and preserve them before fitting the view. */
+function migrateStoredItem<Item extends AgendaItem | ResolvedAgendaItem>(
+  item: Item,
+  legacy: boolean,
+  pending: AgendaArchiveRecord[],
+): Item {
+  if (!legacy) return item;
+  const migrated = channelItem(item, true);
+  const fitted = fitAgendaItem(migrated);
+  if (fitted !== migrated) pending.push({ kind: 'version', id: item.id, item });
+  return fitted;
 }
 
 /**

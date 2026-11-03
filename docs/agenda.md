@@ -220,16 +220,32 @@ JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound u
 the detail and an answer to the owner's question 200,000; the context and every reply or answer of the owner's
 64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history.
 The wire history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to
-their own store. Before an owner record leaves that history, the same atomic ledger write archives it in
-`ownerHistory`, keyed by item id. This archive is durable and omitted from snapshots; its records retain their
-individual schema bounds, and its length grows with the conversation. It has no eviction policy. This keeps owner
-words available for the later conversation migration without making the wire item grow with every reply.
+their own store. Before an owner record leaves that history, it is durably appended to the session's
+`agenda-history.jsonl`, keyed by item id. The sidecar has no eviction policy and stays off the wire. Pruning a
+closed item removes its hot view, retaining all its owner words in this file. History is read only when explicitly
+requested; an ordinary transaction never rereads or rewrites the committed sidecar.
+
+**Storage layout.** Each line is an `owner-history` record (`id`, `entry`) or a `version` record (`id`, `item`).
+`agenda.json` holds only an `archive` cursor with a UTF-8 byte offset and record count, so the hot file does not
+grow with the conversation. Transaction-local `archivePending` records are appended and synced before the hot
+ledger is atomically written without them. A temporary `agenda-history.jsonl.pending` journal records the byte
+offset and next append; recovery completes a torn append, including a split UTF-8 character. If the ledger's
+cursor lags a completed append, matching records in that suffix are reused once. The generic append mechanism
+can also hold later versions. Existing in-ledger `ownerHistory` records move here on the next transaction,
+including an unchanged one, with the same replay protection.
+
+**Older ledgers are decoded before today's wire budgets are applied.** An old-valid item whose escaped versions
+exceed the transport bound keeps its complete original snapshot as a sidecar `version`; its served view sheds
+the oldest versions to fit. Its current words stay readable and actionable. Read-time normalization is
+idempotent, and the sidecar is committed before the migrated view replaces the old file.
 
 **An item can always be closed, rested, edited shorter and answered.** What the item says (its fields; `MAX_AGENDA_CONTENT_LENGTH`,
 560,000) is bounded well under the transport bound. A response alone is at most 70,000 characters of JSON, and the
 **complete response plus note** is at most 136,000 (`MAX_AGENDA_REPLY_ENVELOPE_LENGTH`), including JSON escaping.
 Three retained envelopes (latest answer, Retry, closing response/note) take at most 408,000, leaving 32,000 for
-control metadata. Non-evictable gate receipts use at most 16,000 of that reserve. Requests and stored reply
+control metadata. Non-evictable gate receipts use at most 16,000 of that reserve. The reserve includes all
+transition-only fields: request counters, waiting state and timestamps, stage and step progress never consume
+the item's own content budget. Requests and stored reply
 envelopes share this check; a 64,000-character printable answer plus a printable note fits, while a note whose
 escaping exceeds the envelope is refused before writing. The complete merged closed item also checks the
 1,000,000-character bound, including all resolution fields.

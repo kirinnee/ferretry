@@ -4,8 +4,16 @@ import {
   AGENDA_CACHE_LIMIT,
   FileAgendaLedgerRepository,
 } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { AGENDA_ARCHIVE_FILE } from '../../../src/lib/agenda/archive.ts';
 import { AGENDA_FILES, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
+import {
+  type AgendaLedger,
+  type AgendaMutation,
+  agendaSnapshot,
+  type applyAgendaCommand,
+  applyAgendaCommandToSession,
+} from '../../../src/lib/agenda/state-machine.ts';
 
 /**
  * The agenda repository's parsed copy: kept per session against the identity of the file it was read from,
@@ -20,6 +28,9 @@ const { current, legacy } = AGENDA_FILES.ledger;
 class MemoryFiles {
   readonly files = new Map<string, { text: string; identity: string }>();
   parses = 0;
+  readonly fullReads: string[] = [];
+  readonly tailReads: number[] = [];
+  failLedgerWrite = false;
   private stamp = 0;
 
   file(sessionId: string, name: string): string {
@@ -27,10 +38,28 @@ class MemoryFiles {
   }
 
   async read(sessionId: string, name: string): Promise<string | undefined> {
+    this.fullReads.push(name);
     return this.files.get(`${sessionId}/${name}`)?.text;
   }
 
+  async readAfter(sessionId: string, name: string, bytes: number): Promise<Uint8Array> {
+    this.tailReads.push(bytes);
+    return Buffer.from(this.files.get(`${sessionId}/${name}`)?.text ?? '').subarray(bytes);
+  }
+
+  async appendSynced(sessionId: string, name: string, bytes: Uint8Array): Promise<void> {
+    this.put(
+      sessionId,
+      name,
+      (this.files.get(`${sessionId}/${name}`)?.text ?? '') + Buffer.from(bytes).toString('utf8'),
+    );
+  }
+
   async writeAtomic(sessionId: string, name: string, text: string): Promise<void> {
+    if (this.failLedgerWrite && name === current) {
+      this.failLedgerWrite = false;
+      throw new Error('ledger commit failed');
+    }
     this.put(sessionId, name, text);
   }
 
@@ -208,5 +237,118 @@ describe('the agenda repository cache limit', () => {
     // Assert
     should(keptParses).equal(parsed + 1);
     should(files.parses).equal(keptParses + 1);
+  });
+});
+
+describe('the private agenda archive', () => {
+  const agent = { kind: 'agent' as const, sessionId: SESSION, name: 'Ada' };
+  const human = { kind: 'human' as const };
+  const ok = (mutation: AgendaMutation) => {
+    if (!mutation.ok) throw new Error(mutation.error.message);
+    return mutation;
+  };
+  const save = async (repository: FileAgendaLedgerRepository, command: Parameters<typeof applyAgendaCommand>[1]) =>
+    ok(await repository.transact(SESSION, current => applyAgendaCommandToSession(current, SESSION, command)));
+
+  it('should retain sixty owner rounds without growing or rereading the hot archive, even after the item is pruned', async () => {
+    const { files, repository } = subject();
+    await save(repository, {
+      action: 'raise',
+      actor: agent,
+      at: NOW,
+      request: {
+        ...request,
+        ask: { kind: 'open-question' },
+        body: 'b'.repeat(200_000),
+        whereWeAre: 'w'.repeat(200_000),
+        detail: 'd'.repeat(118_000),
+        context: 'c'.repeat(40_000),
+      },
+    });
+    for (let n = 1; n <= 60; n++) {
+      await save(repository, {
+        action: 'answer',
+        actor: human,
+        at: NOW,
+        id: 'A1',
+        response: { kind: 'open-question', answer: `ANSWER_${n}:${'a'.repeat(63_970)}` },
+        note: `NOTE_${n}:${'n'.repeat(63_970)}`,
+      });
+      await save(repository, {
+        action: 'edit',
+        actor: agent,
+        at: NOW,
+        id: 'A1',
+        patch: { questionAnswer: `Round ${n}` },
+      });
+    }
+    const hot = files.files.get(`${SESSION}/${current}`)?.text ?? '';
+    const archived = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
+    should(hot.length).be.below(1_100_000);
+    should(archived.length).be.above(7_000_000);
+    should(hot).not.containEql('archivePending');
+    should(hot).not.containEql('ownerHistory');
+    should(files.fullReads).not.containEql(AGENDA_ARCHIVE_FILE);
+    should(files.tailReads.filter(offset => offset === 0)).have.length(2);
+    const ledger = await repository.read(SESSION);
+    if (ledger === null) throw new Error('no board');
+    const words = JSON.stringify(await repository.readArchive(SESSION)) + JSON.stringify(agendaSnapshot(ledger));
+    for (let n = 1; n <= 60; n++) {
+      should(words).containEql(`ANSWER_${n}:`);
+      should(words).containEql(`NOTE_${n}:`);
+    }
+    const closed = await save(repository, { action: 'resolve', actor: agent, at: NOW, id: 'A1' });
+    const entry = closed.ledger.entries[0];
+    if (entry?.lifecycle !== 'addressed') throw new Error('not closed');
+    const {
+      body: _body,
+      whereWeAre: _where,
+      detail: _detail,
+      history: _history,
+      revisions: _revisions,
+      ownerAnswer: _answer,
+      ...small
+    } = entry.item;
+    const full: AgendaLedger = {
+      ...closed.ledger,
+      nextId: 101,
+      entries: [...Array.from({ length: 99 }, (_, n) => ({ ...entry, item: { ...small, id: `A${n + 2}` } })), entry],
+    };
+    files.put(SESSION, current, JSON.stringify(full));
+    await save(repository, { action: 'raise', actor: agent, at: NOW, request });
+    const pruned = await save(repository, { action: 'resolve', actor: human, at: NOW, id: 'A101' });
+    should(pruned.ledger.entries.some(entry => entry.item.id === 'A1')).be.false();
+    const remainingWords = JSON.stringify(await repository.readArchive(SESSION));
+    for (let n = 1; n <= 60; n++) should(remainingWords).containEql(`ANSWER_${n}:`);
+    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).startWith(archived);
+  });
+
+  it('should migrate in-ledger owner history once and replay an append whose cursor commit failed', async () => {
+    const { files, repository } = subject();
+    const record = { id: 'A1', entry: { at: NOW, kind: 'replied', note: 'Owner 雪 words' } };
+    files.put(SESSION, current, JSON.stringify({ ...emptyAgendaLedger(SESSION, NOW), ownerHistory: [record] }));
+    should(await repository.readArchive(SESSION)).deepEqual([]);
+    files.failLedgerWrite = true;
+    const unchanged = (current: AgendaLedger | null) => {
+      if (current === null) throw new Error('no board');
+      return {
+        ok: true as const,
+        changed: false,
+        change: 'unchanged' as const,
+        ledger: current,
+        snapshot: agendaSnapshot(current),
+      };
+    };
+    await should(repository.transact(SESSION, unchanged)).be.rejectedWith('ledger commit failed');
+    const appended = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text;
+    const restarted = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+    const migrated = ok(await restarted.transact(SESSION, unchanged));
+    should(migrated.ledger.archivePending).be.undefined();
+    should(migrated.ledger.archive?.count).equal(1);
+    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(appended);
+    should(await restarted.readArchive(SESSION)).deepEqual([{ kind: 'owner-history', ...record }]);
+    should(files.files.get(`${SESSION}/${current}`)?.text).not.containEql('ownerHistory');
+    await restarted.transact(SESSION, unchanged);
+    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).equal(appended);
   });
 });

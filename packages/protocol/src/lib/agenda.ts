@@ -5,16 +5,16 @@ import {
   SignInRuleSuggestionIdSchema,
   TwoFactorStageIdSchema,
 } from './account-ids.ts';
-import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
 import {
   AgendaRestingSchema,
-  type AgendaStateSource,
-  agendaState,
   AgendaStageEntrySchema,
   AgendaStageSchema,
+  type AgendaStateSource,
+  agendaState,
   MAX_AGENDA_REST_WHY_LENGTH,
   MAX_AGENDA_STAGES,
 } from './agenda-state.ts';
+import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 export const AGENDA_SCHEMA_VERSION = 1 as const;
@@ -1137,7 +1137,8 @@ const AgendaItemBaseShape = {
   ownerAnswer: AgendaOwnerAnswerSchema.optional(),
 };
 
-export const AgendaItemSchema = z
+/** Stored entries are decoded before the transport budget is applied by migration. */
+export const StoredAgendaItemSchema = z
   .discriminatedUnion('raisedBy', [
     z.object({
       ...AgendaItemBaseShape,
@@ -1159,27 +1160,6 @@ export const AgendaItemSchema = z
     }),
   ])
   .superRefine((value, context) => {
-    if (agendaContentLength(value) > MAX_AGENDA_CONTENT_LENGTH) {
-      context.addIssue({
-        code: 'custom',
-        message: `an agenda item's own content is at most ${MAX_AGENDA_CONTENT_LENGTH} characters as JSON: move the long part to a file and link it`,
-      });
-    }
-    if (
-      JSON.stringify(value.history?.filter(entry => entry.kind === 'gate-answered') ?? []).length >
-      MAX_AGENDA_GATE_HISTORY_LENGTH
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: `agenda gate receipts are at most ${MAX_AGENDA_GATE_HISTORY_LENGTH} characters as JSON`,
-      });
-    }
-    if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
-      context.addIssue({
-        code: 'custom',
-        message: `an agenda item is at most ${MAX_AGENDA_ITEM_LENGTH} characters as JSON: move the long part to a file and link it`,
-      });
-    }
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
     }
@@ -1233,6 +1213,34 @@ export const AgendaItemSchema = z
       }
     }
   });
+export const AgendaItemSchema = StoredAgendaItemSchema.superRefine(agendaItemSizeProblems);
+
+function agendaItemSizeProblems(
+  value: { readonly history?: readonly { readonly kind: string }[] },
+  context: z.RefinementCtx,
+): void {
+  if (agendaContentLength(value) > MAX_AGENDA_CONTENT_LENGTH) {
+    context.addIssue({
+      code: 'custom',
+      message: `an agenda item's own content is at most ${MAX_AGENDA_CONTENT_LENGTH} characters as JSON: move the long part to a file and link it`,
+    });
+  }
+  if (
+    JSON.stringify(value.history?.filter(entry => entry.kind === 'gate-answered') ?? []).length >
+    MAX_AGENDA_GATE_HISTORY_LENGTH
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: `agenda gate receipts are at most ${MAX_AGENDA_GATE_HISTORY_LENGTH} characters as JSON`,
+    });
+  }
+  if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
+    context.addIssue({
+      code: 'custom',
+      message: `an agenda item is at most ${MAX_AGENDA_ITEM_LENGTH} characters as JSON: move the long part to a file and link it`,
+    });
+  }
+}
 export type AgendaItem = z.infer<typeof AgendaItemSchema>;
 
 const ResolvedAgendaBaseShape = {
@@ -1284,6 +1292,14 @@ const AGENDA_CONTROL_KEYS: ReadonlySet<string> = new Set([
   'parked',
   'stages',
   'urgentAt',
+  'infoRequests',
+  'sourceSeq',
+  'waitingSince',
+  'waitingOn',
+  'askedAt',
+  'waitingFor',
+  'stepsDone',
+  'stage',
   'resolvedAt',
   'resolutionNote',
   'response',
@@ -1336,15 +1352,9 @@ export function fitAgendaItem<
   return fitted;
 }
 
-export const ResolvedAgendaItemSchema = z
-  .intersection(AgendaItemSchema, AgendaResolutionSchema)
+export const StoredResolvedAgendaItemSchema = z
+  .intersection(StoredAgendaItemSchema, AgendaResolutionSchema)
   .superRefine((value, context) => {
-    if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
-      context.addIssue({
-        code: 'custom',
-        message: `an agenda item is at most ${MAX_AGENDA_ITEM_LENGTH} characters as JSON`,
-      });
-    }
     if (
       agendaReplyEnvelopeLength({ response: value.response, note: value.resolutionNote }) >
       MAX_AGENDA_REPLY_ENVELOPE_LENGTH
@@ -1373,6 +1383,7 @@ export const ResolvedAgendaItemSchema = z
       }
     }
   });
+export const ResolvedAgendaItemSchema = StoredResolvedAgendaItemSchema.superRefine(agendaItemSizeProblems);
 export type ResolvedAgendaItem = z.infer<typeof ResolvedAgendaItemSchema>;
 
 /**

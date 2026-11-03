@@ -288,6 +288,7 @@ const agendaCases: SchemaCase[] = [
   { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
+  { name: 'stored attention item', schema: agenda.StoredAgendaItemSchema, value: agendaItem },
   { name: 'agenda query', schema: agenda.AgendaOpenQuerySchema, value: { after: 'session-1', limit: 50 } },
   {
     name: 'agenda roll-up session',
@@ -342,6 +343,7 @@ const agendaCases: SchemaCase[] = [
     value: { rule: `sr_${'b'.repeat(24)}` },
   },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
+  { name: 'stored resolved attention', schema: agenda.StoredResolvedAgendaItemSchema, value: resolvedAgenda },
   {
     name: 'card a notice is about',
     schema: agenda.AgendaCardRowSchema,

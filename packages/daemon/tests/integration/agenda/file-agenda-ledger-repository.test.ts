@@ -9,7 +9,8 @@ import {
   FileAgendaLedgerRepository,
   InvalidAgendaLedgerError,
 } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { type AgendaMutation, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
+import { AGENDA_ARCHIVE_FILE } from '../../../src/lib/agenda/archive.ts';
+import { type AgendaMutation, agendaSnapshot, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
 
 const homes: string[] = [];
@@ -45,6 +46,27 @@ const request = {
 };
 
 describe('the agenda file store, read with its identity', () => {
+  it('should append durable UTF-8 bytes and read only a requested suffix, refusing missing committed bytes', async () => {
+    const { home } = await createRepository();
+    const store = new FileAgendaFileStore(id => join(home, 'sessions', id));
+    should(await store.readAfter('session-1', 'history.jsonl', 0)).deepEqual(new Uint8Array());
+    await should(store.readAfter('session-1', 'history.jsonl', 1)).be.rejectedWith({ code: 'ENOENT' });
+    const first = Buffer.from('{"words":"雪 🦦"}\n');
+    const second = Buffer.from('{"words":"another"}\n');
+    await store.appendSynced('session-1', 'history.jsonl', first);
+    await store.appendSynced('session-1', 'history.jsonl', second);
+    should(Buffer.from(await store.readAfter('session-1', 'history.jsonl', first.length)).toString()).equal(
+      second.toString(),
+    );
+    should(Buffer.from(await store.readAfter('session-1', 'history.jsonl', first.length + second.length)).length).equal(
+      0,
+    );
+    await should(store.readAfter('session-1', 'history.jsonl', first.length + second.length + 1)).be.rejectedWith(
+      /cursor exceeds/u,
+    );
+    await mkdir(store.file('session-1', 'directory'));
+    await should(store.readAfter('session-1', 'directory', 0)).be.rejected();
+  });
   it('should read a file with the identity of the very file read, and say a missing one has neither', async () => {
     // Arrange
     const home = await mkdtemp(join(tmpdir(), 'ferretry-agenda-'));
@@ -79,6 +101,39 @@ describe('the agenda file store, read with its identity', () => {
 });
 
 describe('FileAgendaLedgerRepository', () => {
+  it('should durably migrate owner history to a private append-only sidecar and recover a torn UTF-8 append', async () => {
+    const { repository } = await createRepository();
+    const file = repository.file('session-1');
+    const directory = dirname(file);
+    await mkdir(directory, { recursive: true });
+    const record = {
+      kind: 'owner-history',
+      id: 'A1',
+      entry: { at: '2026-11-03T08:00:00Z', kind: 'replied', note: '雪 owner words' },
+    };
+    const text = `${JSON.stringify(record)}\n`;
+    const firstByteOfSnow = Buffer.from(text).indexOf(Buffer.from('雪'));
+    await writeFile(join(directory, AGENDA_ARCHIVE_FILE), Buffer.from(text).subarray(0, firstByteOfSnow + 1));
+    await writeFile(join(directory, `${AGENDA_ARCHIVE_FILE}.pending`), JSON.stringify({ bytes: 0, text }));
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...emptyAgendaLedger('session-1', '2026-11-03T08:00:00Z'),
+        ownerHistory: [{ id: record.id, entry: record.entry }],
+      }),
+    );
+    await repository.transact('session-1', current => {
+      if (current === null) throw new Error('no ledger');
+      return { ok: true, changed: false, change: 'unchanged', ledger: current, snapshot: agendaSnapshot(current) };
+    });
+    should(await readFile(join(directory, AGENDA_ARCHIVE_FILE), 'utf8')).equal(text);
+    should(await repository.readArchive('session-1')).deepEqual([record]);
+    should((await repository.read('session-1'))?.archive).deepEqual({ bytes: Buffer.byteLength(text), count: 1 });
+    should(await readFile(file, 'utf8')).not.containEql('ownerHistory');
+    should(await repository.readArchive('no-history')).deepEqual([]);
+    await writeFile(join(directory, AGENDA_ARCHIVE_FILE), 'partial');
+    await should(repository.readArchive('session-1')).be.rejectedWith('incomplete agenda history');
+  });
   it('should keep serving correct agendas past its cache limit, dropping only the copy read longest ago', async () => {
     // Arrange
     const { repository } = await createRepository();

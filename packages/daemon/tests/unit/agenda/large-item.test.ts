@@ -2,25 +2,26 @@ import { describe, it } from 'bun:test';
 import {
   AgendaActionRequestSchema,
   AgendaItemSchema,
+  agendaContentLength,
+  fitAgendaItem,
+  legacyAgendaItem,
   MAX_AGENDA_CONTENT_LENGTH,
   MAX_AGENDA_GATE_HISTORY_LENGTH,
   MAX_AGENDA_ITEM_LENGTH,
   ResolvedAgendaItemSchema,
-  agendaContentLength,
-  fitAgendaItem,
-  legacyAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
+import { AgendaSnapshotSchema as OldSnapshotSchema } from '../../../../protocol/tests/fixtures/agenda-before-channel.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
   type AgendaMutation,
-  type RaiseAgendaRequest,
-  agendaSnapshot,
   agendaLedgerDocument,
+  agendaSnapshot,
   applyAgendaCommand,
   applyAgendaCommandToSession,
   parseAgendaLedger,
+  type RaiseAgendaRequest,
 } from '../../../src/lib/agenda/state-machine.ts';
 
 /**
@@ -93,6 +94,104 @@ function heavyQuestionBoard(): AgendaLedger {
 }
 
 describe('a long agenda item', () => {
+  it('should migrate an old-schema-valid megabyte of escaped versions before enforcing wire limits', () => {
+    const payload = (n: number) => ({
+      body: `${n % 10}${'\\'.repeat(7_999)}`,
+      steps: Array.from({ length: 20 }, (_, i) => `${(i + n) % 10}${'\\'.repeat(1_999)}`),
+    });
+    const seed = ok(
+      applyAgendaCommandToSession(null, SESSION_ID, {
+        action: 'raise',
+        actor: AGENT,
+        at: AT,
+        request: { ...longRequest('a'), body: 'small', whereWeAre: undefined, detail: undefined, context: 'Context' },
+      }),
+    );
+    const item = {
+      ...seed.item,
+      ...payload(10),
+      revisions: Array.from({ length: 10 }, (_, n) => ({
+        at: AT,
+        by: 'agent',
+        changed: ['body', 'steps'],
+        previous: payload(n),
+      })),
+    };
+    const snapshot = { ...seed.snapshot, items: [item] };
+    should(OldSnapshotSchema.safeParse(snapshot).success).be.true();
+    should(JSON.stringify(item).length).be.above(MAX_AGENDA_ITEM_LENGTH);
+    const raw = { ...seed.ledger, version: undefined, entries: [{ ...seed.ledger.entries[0], item }] };
+    const migrated = parseAgendaLedger(raw, SESSION_ID);
+    if (migrated === null) throw new Error('legacy board did not read');
+    should(migrated.unreadable).be.undefined();
+    should(agendaSnapshot(migrated).count).equal(1);
+    should(AgendaItemSchema.safeParse(open(migrated)).success).be.true();
+    should(open(migrated).body).equal(item.body);
+    should(open(migrated).steps).deepEqual(item.steps);
+    should(migrated.archivePending).deepEqual([{ kind: 'version', id: 'A1', item }]);
+    should(parseAgendaLedger(JSON.parse(agendaLedgerDocument(migrated)), SESSION_ID)).deepEqual(migrated);
+    for (const command of [
+      { action: 'rest' as const, why: 'Reading' },
+      { action: 'resolve' as const, note: 'Finished' },
+      { action: 'edit' as const, patch: { body: 'short' } },
+    ])
+      should(ok(applyAgendaCommand(migrated, { ...command, actor: AGENT, id: 'A1', at: AT })).changed).be.true();
+  });
+
+  it('should reserve every owner transition at exactly the accepted content limit', () => {
+    const raisedAt = '2026-11-03T08:00:00Z';
+    const request = {
+      ...longRequest('a'),
+      ask: { kind: 'open-question' as const },
+      detail: 'd'.repeat(110_000),
+      questionAnswer: 'Ready0',
+      steps: ['First', 'Second'],
+    };
+    const seed = ok(
+      applyAgendaCommandToSession(null, SESSION_ID, { action: 'raise', actor: AGENT, request, at: raisedAt }),
+    );
+    request.detail += 'd'.repeat(MAX_AGENDA_CONTENT_LENGTH - agendaContentLength(open(seed.ledger)));
+    should(AgendaActionRequestSchema.safeParse({ action: 'add', ...request }).success).be.true();
+    const base = ok(
+      applyAgendaCommandToSession(null, SESSION_ID, { action: 'raise', actor: AGENT, request, at: raisedAt }),
+    );
+    should(agendaContentLength(open(base.ledger))).equal(MAX_AGENDA_CONTENT_LENGTH);
+    // Answer, Needs info, Discuss, Rest, Done, shrink, progress, snooze and wake all fit without editing content.
+    const commands = [
+      { action: 'answer', actor: HUMAN, response: { kind: 'open-question', answer: 'Yes' } },
+      { action: 'needs-info', actor: HUMAN, note: 'More please' },
+      { action: 'discuss', actor: HUMAN, note: 'Discuss please' },
+      { action: 'reply', actor: HUMAN, note: 'My reply' },
+      { action: 'rest', actor: AGENT, why: 'Working' },
+      { action: 'resolve', actor: HUMAN, note: 'Finished' },
+      { action: 'dismiss', actor: HUMAN },
+      { action: 'edit', actor: AGENT, patch: { body: 'short' } },
+      { action: 'progress', actor: HUMAN, step: 0, done: true },
+      { action: 'snooze', actor: HUMAN, until: '2026-11-03T09:00:00.000Z' },
+    ] as const;
+    for (const command of commands) {
+      const changed = ok(applyAgendaCommand(base.ledger, { ...command, id: 'A1', at: AT }));
+      const item = changed.item ?? changed.addressed;
+      should(JSON.stringify(item).length).be.belowOrEqual(MAX_AGENDA_ITEM_LENGTH);
+      should(
+        (changed.addressed === undefined ? AgendaItemSchema : ResolvedAgendaItemSchema).safeParse(item).success,
+      ).be.true();
+    }
+    const rested = ok(
+      applyAgendaCommand(base.ledger, { action: 'rest', actor: AGENT, id: 'A1', why: 'Working', at: AT }),
+    );
+    const resurfaced = ok(
+      applyAgendaCommand(rested.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { questionAnswer: 'Ready1' },
+        at: AT,
+      }),
+    );
+    should(agendaContentLength(open(resurfaced.ledger))).equal(MAX_AGENDA_CONTENT_LENGTH);
+    should(open(resurfaced.ledger).waitingSince).equal(AT);
+  });
   it('should reserve gate receipts and reject an oversized stored closing envelope', () => {
     const item = open(heavyQuestionBoard());
     const receipt = { at: AT, kind: 'gate-answered', note: 'r'.repeat(MAX_AGENDA_GATE_HISTORY_LENGTH) };
@@ -170,8 +269,8 @@ describe('a long agenda item', () => {
       should(saved).containEql(`OWNER_RESPONSE_${round}:`);
       should(saved).containEql(`OWNER_NOTE_${round}:`);
     }
-    should(ledger.ownerHistory?.length ?? 0).be.above(0);
-    should(agendaSnapshot(ledger)).not.have.property('ownerHistory');
+    should(ledger.archivePending?.length ?? 0).be.above(0);
+    should(agendaSnapshot(ledger)).not.have.property('archivePending');
   });
 
   it('should reserve the complete JSON envelope and keep large answers retryable and closable', () => {
