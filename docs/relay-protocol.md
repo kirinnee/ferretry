@@ -1564,7 +1564,7 @@ outstanding:
    so rather than defaulting to "direct".
 5. **Removal of the interim carrier chooser and self-hosting setup route** — DONE. First run asks
    no carrier question: the `connect` step, the `own-relay` answer and the four self-hosting steps
-   are gone, and the daemon step carries a read-only note (`onboarding-connection-note.tsx`) saying
+   are gone, and the "Open Ferretry" step carries, in an "About connections" disclosure, a read-only note (`onboarding-connection-note.tsx`) saying
    direct is tried first and the hosted relay is the automatic fallback, with the live advertisement
    state and what the relay would see. Self-hosting is left to the expert runbook: the Connection
    panel links it, beside a sentence saying a relay of your own is configured on the daemon and the
