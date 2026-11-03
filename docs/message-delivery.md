@@ -178,6 +178,12 @@ interrupt, which go at once.
   under the existing per-member key `send-failed:<recipient>:<sendId>`, so a notice sent but not yet crossed
   off is attempted again and lands once. A notice that throws stays owed. A send later proven `delivered`
   drops its debt, and a final row owing nothing stays quiet.
+- **A debt that could not be paid schedules its own retry** — a look that leaves any notice unsent (the notifier
+  threw, or the crossing-off would not write) schedules another look for that session after 60 s, then 2×, 4× …
+  the wait before it, at most 6 in a row; the earlier of that and the sends' own next look wins, since one look
+  is kept per session. Past the cap nothing is scheduled but the debt stays on the row, and `watching` counts it
+  **whatever the age of its send** (the proof-age ceilings end a wait for proof, not for a notice), so the next
+  reader's look or the next boot pays it. A paid debt resets the backoff and schedules nothing.
 - **Settings** — `delivery` in `config/daemon.json`: `coalesce` (default `true`; `false` is the kill switch —
   every ferret message is a blocker and goes alone, as before), `actionWindowMs` (60 000),
   `fyiMaxHoldMs` (600 000), `batchMax` (20). Read at start.

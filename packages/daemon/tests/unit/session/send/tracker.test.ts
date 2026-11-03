@@ -5,6 +5,7 @@ import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } f
 import {
   defaultSendTrackerSettings,
   lookBeforeReading,
+  OWED_NOTICE_RETRY_LIMIT,
   SEND_READ_LOOK_BUDGET_MS,
   type SendEvidenceReading,
   type SendHeldAt,
@@ -270,6 +271,15 @@ class World {
 
   get events(): string[] {
     return this.journal.map(entry => entry.event);
+  }
+
+  /** Runs the look the tracker last asked the scheduler for — what the daemon's timer would do — and lets it finish. */
+  async fireScheduled(): Promise<void> {
+    const next = this.scheduled.pop();
+    if (next === undefined) throw new Error('nothing was scheduled');
+    this.scheduled.length = 0;
+    next.run();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
 
   async checkAt(ms: number): Promise<void> {
@@ -635,6 +645,8 @@ describe('a failure notice a crash interrupted', () => {
         { queueId: 'q-3', from: SENDER },
       ],
     });
+  // A revive-carried send has no composer to look in, so the only look it asks for is the debt's own.
+  const quiet = () => ({ ...combined(), path: 'revive' as const });
   const keys = (...sendIds: string[]) => sendIds.map(sendId => `send-failed:${ID}:${sendId}`);
   const reboot = async (world: World) => {
     world.notices.length = 0;
@@ -733,6 +745,107 @@ describe('a failure notice a crash interrupted', () => {
     should(world.only.fate).equal('delivered');
     should(world.only.noticesOwed).be.undefined();
     should(world.notices).be.empty();
+  });
+
+  it('keeps a look scheduled while a notice is unsent, and pays each member once when the scheduled look runs', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+
+    await world.checkAt(15_000);
+
+    should(world.only.noticesOwed).eql(owedAll);
+    should(world.scheduled.map(entry => [entry.id, entry.delayMs])).eql([[ID, 60_000]]);
+
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.fireScheduled();
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['send-1', 'q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('retries a partly paid debt without telling anyone twice, and stops once it is cleared', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+    world.crashOnCrossOff = 2;
+    await world.checkAt(15_000).catch(() => undefined);
+    world.crashOnCrossOff = undefined;
+    world.notices.length = 0;
+    world.scheduled.length = 0;
+    world.noticeFails = true;
+
+    await world.tracker.check(ID).catch(() => undefined);
+    world.scheduled.splice(0, world.scheduled.length - 1);
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.fireScheduled();
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('backs off between retries, gives up scheduling after a bounded number, and a later look still pays', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+    await world.checkAt(15_000);
+    const delays = [world.scheduled.at(-1)?.delayMs];
+
+    for (let retry = 0; retry < OWED_NOTICE_RETRY_LIMIT; retry += 1) {
+      await world.fireScheduled().catch(() => undefined);
+      delays.push(world.scheduled.at(-1)?.delayMs);
+    }
+
+    should(delays).eql([60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, undefined]);
+    should(world.scheduled).be.empty();
+    should(world.only.noticesOwed).eql(owedAll);
+    should(await world.tracker.watching(ID)).be.true();
+
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.tracker.check(ID);
+
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('pays an old debt found at boot from the scheduled look once the notifier recovers, however old the send', async () => {
+    const world = new World({ ...quiet(), fate: 'unaccounted', fateAt: at(15_000), noticesOwed: owedAll });
+    world.nowMs = T0 + 4 * 24 * 60 * 60_000;
+    world.noticeFails = true;
+
+    should(await world.tracker.watching(ID)).be.true();
+    await world.tracker.check(ID);
+
+    should(world.notices).have.length(3);
+    should(world.only.noticesOwed).eql(owedAll);
+    should(world.scheduled.map(entry => entry.delayMs)).eql([60_000]);
+
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.fireScheduled();
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['send-1', 'q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+    should(await world.tracker.watching(ID)).be.false();
+  });
+
+  it('schedules nothing for a debt that is paid on the first look', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+
+    await world.checkAt(15_000);
+
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
   });
 });
 

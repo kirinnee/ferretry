@@ -124,7 +124,15 @@ const UNREADABLE: SendEvidenceReading = { readable: false, inputs: [] };
 /** One look at where the pane holds a send: a place, nowhere, or a pane that could not be read. */
 type PaneHold = SendHeldAt | 'nowhere' | 'unreadable';
 
+/** How many times in a row a look that could not pay a debt schedules another, each after twice the wait before it. */
+export const OWED_NOTICE_RETRY_LIMIT = 6;
+
 export class SendTracker implements SendTracking, SendTrackingLoop {
+  /** Sessions whose failure notices a look in this process could not send, so its own settling is retried too. */
+  private readonly unpaid = new Set<SessionId>();
+  /** Consecutive looks that left a debt unpaid, per session; the backoff and its cap. Cleared when the debt is. */
+  private readonly debtLooks = new Map<SessionId, number>();
+
   constructor(
     private readonly ports: SendTrackerPorts,
     private readonly settings: SendTrackerSettings,
@@ -182,7 +190,9 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   /** Whether a look at this session could change anything, so a reader knows one is worth taking. */
   async watching(id: SessionId): Promise<boolean> {
     const now = Date.parse(this.ports.clock.now());
-    return (await this.ports.ledger.list(id)).some(record => this.watches(record, now));
+    // A debt is watched however old its send is: the proof-age ceilings below end a wait for PROOF, and a
+    // notice that was never sent is not waiting for any.
+    return (await this.ports.ledger.list(id)).some(record => owesNotices(record) || this.watches(record, now));
   }
 
   /**
@@ -208,32 +218,72 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   /**
    * One look, then the news a crash left owed. The debt is paid AFTER the proofs so a send this look finds
    * delivered after all is not reported lost, and in a `finally` so a look that threw does not leave it
-   * unpaid. A ledger that will not take a crossing-off is retried by the next look, and a notice already sent
-   * dedupes under its own key.
+   * unpaid. A notice already sent dedupes under its own key.
+   *
+   * A DEBT STILL OWED SCHEDULES ITS OWN NEXT LOOK. A notifier that was down for a look used to leave the
+   * debt on the ledger with nothing coming back to it: no look was scheduled for a final send, and a
+   * reader's look is only taken for a send `watching` calls open. So a look that leaves any notice unsent
+   * schedules another after twice the wait of the last, up to `OWED_NOTICE_RETRY_LIMIT` in a row; past the
+   * limit the debt stays durable and `watching`, and the next reader's look or boot pays it. The wait is
+   * the earlier of the debt's and the sends' own next look, since one scheduled look is kept per session.
    */
   private async checkLocked(id: SessionId): Promise<void> {
+    this.unpaid.delete(id);
     let seen: readonly SendRecord[] | undefined;
+    let lookDelay: number | undefined;
     try {
       seen = await this.ports.ledger.list(id);
-      await this.look(id, seen);
+      lookDelay = await this.look(id, seen);
     } finally {
-      await this.payOwedNotices(id, seen);
+      const owed = await this.payOwedNotices(id, seen);
+      const debtDelay = this.debtDelay(id, owed);
+      const delay = lookDelay === undefined ? debtDelay : Math.min(lookDelay, debtDelay ?? lookDelay);
+      if (delay !== undefined)
+        this.ports.scheduler.schedule(id, delay, () => void this.check(id).catch(() => undefined));
     }
   }
 
-  /** Reads the ledger again only when the look's own reading showed a debt, or never got that far. */
-  private async payOwedNotices(id: SessionId, seen: readonly SendRecord[] | undefined): Promise<void> {
-    if (seen?.some(owesNotices) === false) return;
-    for (const record of await this.ports.ledger.list(id).catch(() => []))
-      if (owesNotices(record)) await this.tell(id, record, record.noticesOwed ?? []).catch(() => undefined);
+  /** How long until the next look for an unpaid debt, `undefined` when none is owed or the retries are spent. */
+  private debtDelay(id: SessionId, owed: boolean): number | undefined {
+    if (!owed) {
+      this.debtLooks.delete(id);
+      return undefined;
+    }
+    const looks = this.debtLooks.get(id) ?? 0;
+    if (looks >= OWED_NOTICE_RETRY_LIMIT) return undefined;
+    this.debtLooks.set(id, looks + 1);
+    return this.settings.busyExtensionMs * 2 ** looks;
   }
 
-  private async look(id: SessionId, records: readonly SendRecord[]): Promise<void> {
+  /**
+   * Pays what the ledger shows owed, and answers whether any notice is STILL owed afterwards. The ledger is read
+   * again only when the look's own reading showed a debt, or never got that far; a debt this look wrote itself
+   * was already attempted by the settle that wrote it, and is only counted here.
+   */
+  private async payOwedNotices(id: SessionId, seen: readonly SendRecord[] | undefined): Promise<boolean> {
+    if (seen?.some(owesNotices) === false) return this.unpaid.has(id);
+    let records: readonly SendRecord[];
+    try {
+      records = await this.ports.ledger.list(id);
+    } catch {
+      return true;
+    }
+    let owed = false;
+    for (const record of records) {
+      if (!owesNotices(record)) continue;
+      const after = await this.tell(id, record, record.noticesOwed ?? []).catch(() => record);
+      owed ||= owesNotices(after);
+    }
+    return owed;
+  }
+
+  /** One look at a session's sends. Answers how long until the next one it wants, or `undefined` for none. */
+  private async look(id: SessionId, records: readonly SendRecord[]): Promise<number | undefined> {
     const now = Date.parse(this.ports.clock.now());
     // A person's send nothing has been typed for goes FIRST: it is the owner's message, and every other
     // send in this look would otherwise be typed ahead of it into the same queue.
     const watched = records.filter(record => this.watches(record, now)).sort(untypedFirst);
-    if (watched.length === 0) return;
+    if (watched.length === 0) return undefined;
     const oldest = Math.min(...watched.map(record => Date.parse(record.acceptedAt)));
     const since = new Date(oldest - this.settings.matchSlackMs).toISOString();
     const reading = await this.ports.evidence.read(id, since).catch(() => UNREADABLE);
@@ -283,8 +333,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
             : Math.min(due, composerLook);
       next = next === undefined ? at : Math.min(next, at);
     }
-    if (next !== undefined)
-      this.ports.scheduler.schedule(id, Math.max(0, next - now), () => void this.check(id).catch(() => undefined));
+    return next === undefined ? undefined : Math.max(0, next - now);
   }
 
   private async deliver(id: SessionId, record: SendRecord, verdict: SendVerdict): Promise<void> {
@@ -663,6 +712,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
           noticesOwed: remaining.length > 0 ? remaining : undefined,
         })) ?? current;
     }
+    // Said here so the look that settled the send knows, without a second read, that it left a debt behind.
+    if (remaining.length > 0) this.unpaid.add(id);
     return current;
   }
 }
