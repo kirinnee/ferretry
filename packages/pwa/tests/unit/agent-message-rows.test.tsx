@@ -44,6 +44,17 @@ const proved = (navigated: string[]) => ({
 });
 
 describe('a message from another ferret', () => {
+  test("shows the sender's label as a small chip beside the kind, and none when it sent none", () => {
+    const labelled = render(<TranscriptRow entry={{ ...PEER, peer: { ...PEER.peer!, label: 'blocker' } }} />);
+    const chip = labelled.root.findByProps({ className: 'fy-peer-label' });
+    expect(chip.props['data-peer-label']).toBe('blocker');
+    expect(chip.children).toEqual(['blocker']);
+    expect(labelled.root.findAllByProps({ className: 'fy-peer-label' })).toHaveLength(1);
+
+    const plain = render(<TranscriptRow entry={PEER} />);
+    expect(plain.root.findAllByProps({ className: 'fy-peer-label' })).toHaveLength(0);
+  });
+
   test('reads as FROM that ferret: a proved :reference, a Markdown body, and no delivery boilerplate', () => {
     const navigated: string[] = [];
     const view = render(

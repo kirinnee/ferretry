@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { QueuedMessage, SendDisposition } from '@ferretry/protocol';
 import should from 'should';
 import { SendPathDeliveryView, SendPathQueueTransport } from '../../../../src/adapters/session/queue/index.ts';
+import type { QueueDelivery } from '../../../../src/lib/session/queue/deliverer.ts';
 import type { SessionSendService } from '../../../../src/lib/session/send/service.ts';
 import {
   SendDraftRefused,
@@ -37,6 +38,8 @@ const message = (overrides: Partial<QueuedMessage> = {}): QueuedMessage => ({
   ...overrides,
 });
 
+const one = (member: QueuedMessage): QueueDelivery => ({ sendId: member.id, members: [member] });
+
 type SendRequest = Parameters<SessionSendService['send']>[0];
 
 function transport(answer: SendDisposition | Error, records: readonly SendRecord[] = [], untyped = false) {
@@ -61,7 +64,7 @@ describe('SendPathQueueTransport', () => {
   it('should hand a person’s message over under its own id, as a person’s', async () => {
     const { subject, requests } = transport('delivered');
 
-    should(await subject.handOver(ID, message())).deepEqual({ kind: 'landed' });
+    should(await subject.handOver(ID, one(message()))).deepEqual({ kind: 'landed' });
     should(requests).deepEqual([{ id: ID, sendId: 'q-1', message: 'ship it' }]);
   });
 
@@ -69,8 +72,8 @@ describe('SendPathQueueTransport', () => {
     const peer = transport('queued');
     const daemon = transport('revived');
 
-    await peer.subject.handOver(ID, message({ sender: 'agent', from: 'session-2' }));
-    await daemon.subject.handOver(ID, message({ sender: 'daemon' }));
+    await peer.subject.handOver(ID, one(message({ sender: 'agent', from: 'session-2' })));
+    await daemon.subject.handOver(ID, one(message({ sender: 'daemon' })));
 
     should(peer.requests[0]).containEql({ senderReference: 'session-2' });
     should(daemon.requests[0]).containEql({ origin: 'daemon' });
@@ -80,8 +83,8 @@ describe('SendPathQueueTransport', () => {
   it('should hand an interrupt over as the send path’s own stop-then-type', async () => {
     const { subject, requests } = transport('delivered');
 
-    await subject.handOver(ID, message({ interrupt: true }));
-    await subject.handOver(ID, message({ id: 'q-2' }));
+    await subject.handOver(ID, one(message({ interrupt: true })));
+    await subject.handOver(ID, one(message({ id: 'q-2' })));
 
     should(requests[0]).containEql({ now: true });
     should(requests[1]).not.have.property('now');
@@ -90,22 +93,24 @@ describe('SendPathQueueTransport', () => {
   it('should leave a ferret’s message with no sender session unattributed', async () => {
     const { subject, requests } = transport('delivered');
 
-    await subject.handOver(ID, message({ sender: 'agent' }));
+    await subject.handOver(ID, one(message({ sender: 'agent' })));
 
     should(requests[0]).not.have.property('senderReference');
   });
 
   it('should call a hand-over the pane has not proven unproven', async () => {
     for (const answer of ['sent', 'queued-for-revive'] as const)
-      should(await transport(answer).subject.handOver(ID, message())).deepEqual({ kind: 'unproven' });
-    should(await transport(new SendUnconfirmed('typed, not shown', 'q-1')).subject.handOver(ID, message())).deepEqual({
+      should(await transport(answer).subject.handOver(ID, one(message()))).deepEqual({ kind: 'unproven' });
+    should(
+      await transport(new SendUnconfirmed('typed, not shown', 'q-1')).subject.handOver(ID, one(message())),
+    ).deepEqual({
       kind: 'unproven',
     });
   });
 
   it('should call a send the send path kept open, untyped, unproven — whatever its disposition says', async () => {
     // An idle pane's kept send still answers `delivered`: nothing was typed, and the ledger will say when.
-    should(await transport('delivered', [], true).subject.handOver(ID, message())).deepEqual({ kind: 'unproven' });
+    should(await transport('delivered', [], true).subject.handOver(ID, one(message()))).deepEqual({ kind: 'unproven' });
   });
 
   it('should turn each refusal that typed nothing into the reason the message waits', async () => {
@@ -116,16 +121,18 @@ describe('SendPathQueueTransport', () => {
       [new SendUnavailable('a question is open'), 'dialog'],
     ];
     for (const [error, reason] of cases)
-      should(await transport(error).subject.handOver(ID, message())).deepEqual({ kind: 'refused', reason });
+      should(await transport(error).subject.handOver(ID, one(message()))).deepEqual({ kind: 'refused', reason });
   });
 
   it('should fail a plain refusal, and pass on what it cannot read', async () => {
-    should(await transport(new SendRefused('a send requires a message')).subject.handOver(ID, message())).deepEqual({
+    should(
+      await transport(new SendRefused('a send requires a message')).subject.handOver(ID, one(message())),
+    ).deepEqual({
       kind: 'failed',
       failure: 'a send requires a message',
     });
     const thrown = await transport(new Error('tmux went away'))
-      .subject.handOver(ID, message())
+      .subject.handOver(ID, one(message()))
       .catch((error: unknown) => (error as Error).message);
     should(thrown).equal('tmux went away');
   });

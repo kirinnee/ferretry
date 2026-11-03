@@ -287,7 +287,12 @@ describe('SendMessageController', () => {
 
     // Assert
     should(api.methods()).deepEqual(['upload', 'send']);
-    should(api.calls[1]?.args[1]).deepEqual({ message: 'look at this', attachmentIds: ['att-1'], now: false });
+    should(api.calls[1]?.args[1]).deepEqual({
+      message: 'look at this',
+      attachmentIds: ['att-1'],
+      now: false,
+      label: 'action',
+    });
     should(io.err).containEql('delivered');
   });
 
@@ -396,7 +401,76 @@ describe('SendMessageController', () => {
     });
 
     // Assert
-    should(api.calls[0]?.args[1]).containDeep({ now: true });
+    should(api.calls[0]?.args[1]).containDeep({ now: true, label: 'blocker' });
+  });
+
+  it('should send the label the sender chose', async () => {
+    // Arrange
+    const api = new RecordingApi({ send: sendResult('queued') });
+    const { presenter } = capturedPresenter();
+
+    // Act
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK).execute('ses-1', {
+      message: 'build is green',
+      kind: 'fyi',
+    });
+
+    // Assert
+    should(api.calls[0]?.args[1]).containDeep({ label: 'fyi' });
+  });
+
+  it('should tell the sender a held message is held on purpose and not to resend', async () => {
+    // Arrange
+    const api = new RecordingApi({
+      send: { ...sendResult('queued'), fate: 'accepted', label: 'action', heldUntil: '2026-01-01T00:11:00.000Z' },
+    });
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK).execute('ses-1', {
+      message: 'please review',
+    });
+
+    // Assert
+    should(io.err.join('\n')).match(
+      /held until \d\d:\d\d:\d\d to combine with other messages \(action\); not typed yet; do not resend/u,
+    );
+  });
+
+  it('should send once more without the label when an older daemon refuses the field, and say so', async () => {
+    // Arrange
+    const refusal = new FyHttpError('invalid request', 400, 'invalid_request');
+    const api = new RecordingApi({ send: sendResult('delivered'), sendFailures: [refusal] });
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK).execute('ses-1', {
+      message: 'ping',
+      kind: 'fyi',
+    });
+
+    // Assert
+    should(api.methods()).deepEqual(['send', 'send']);
+    should(api.calls[0]?.args[1]).containDeep({ label: 'fyi' });
+    should(api.calls[1]?.args[1]).deepEqual({ message: 'ping', attachmentIds: [], now: false });
+    should(io.err).containEql('this daemon does not know --kind; sent as an ordinary message');
+  });
+
+  it('should not retry a refusal that is not the old daemon’s, nor any other failure', async () => {
+    for (const failure of [new FyHttpError('nope', 403, 'forbidden'), new FyHttpError('bad', 500, undefined)]) {
+      // Arrange
+      const api = new RecordingApi({ send: sendResult('delivered'), sendFailures: [failure] });
+      const { presenter } = capturedPresenter();
+
+      // Act
+      const error = await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK)
+        .execute('ses-1', { message: 'ping' })
+        .catch((caught: unknown) => caught);
+
+      // Assert
+      should(error).equal(failure);
+      should(api.methods()).deepEqual(['send']);
+    }
   });
 });
 

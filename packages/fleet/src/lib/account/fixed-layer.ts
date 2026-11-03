@@ -348,7 +348,7 @@ export const PACK_INSTRUCTION = (fy: string): string =>
     `1. \`${fy} recommend\` lists the models usable now, most quota first, with the command to start each.`,
     `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.`,
     `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
-    `4. \`${fy} wait <id>\` prints its result when it finishes; check it, then combine the results yourself.`,
+    `4. \`${fy} wait <id>\` prints its result when it finishes; check it, then combine the results yourself. Message a sub-ferret with \`${fy} send <id> --kind blocker|action|fyi\` (default action; fyi rarely).`,
     `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
   ].join('\n');
 
@@ -486,7 +486,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 /** What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. */
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
-    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; report to your lead: \`${fy} send <lead-callsign> "<message>"\`. Only a password, code or approval the daemon asks for reaches the owner from you.`,
+    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; report to your lead: \`${fy} send <lead-callsign> "<message>"\`. Label every send: \`--kind blocker\` only when you are stuck until answered, \`--kind action\` (default) when it needs doing, \`--kind fyi\` rarely, for news that needs nothing. Blockers go at once, actions are combined for a minute, FYIs wait for the receiver's turn to end. Only a password, code or approval the daemon asks for reaches the owner from you.`,
     `With a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`), progress \`${fy} task note\`; it moves itself (start, PR, merge, \`${fy} signal done\`). No card? Make none. Your final report says how the owner tests it.`,
   ].join('\n');
 

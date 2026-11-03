@@ -9,6 +9,8 @@ import {
   movesFrom,
   type OwnDraft,
   QueueDeliverer,
+  type QueueDelivery,
+  type QueueDeliverySettings,
   type QueueEvent,
   type SendFate,
   type SendPaneObservation,
@@ -20,9 +22,15 @@ import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.t
 const ID = parseSessionId('session-1');
 const T0 = Date.UTC(2026, 9, 30, 13, 5, 0);
 
-function message(id: string, sender: QueuedMessage['sender'], seconds = 0): QueuedMessage {
+function message(
+  id: string,
+  sender: QueuedMessage['sender'],
+  seconds = 0,
+  extra: Partial<QueuedMessage> = {},
+): QueuedMessage {
   const at = new Date(T0 + seconds * 1_000).toISOString();
   return {
+    ...extra,
     v: 1,
     id,
     sender,
@@ -47,6 +55,8 @@ const pane = (overrides: Partial<SendPaneObservation> = {}): SendPaneObservation
 class World {
   readonly log: QueueEvent[] = [];
   readonly handed: string[] = [];
+  /** Every delivery handed over, whole, with the queue as it stood the moment it was. */
+  readonly deliveries: Array<{ delivery: QueueDelivery; during: readonly QueuedMessage[] }> = [];
   readonly scheduled: number[] = [];
   readonly fates = new Map<string, SendFate>();
   target: SendTarget = { id: ID, status: 'running', mode: 'auto', turn: 4, harness: 'claude' };
@@ -65,42 +75,50 @@ class World {
   ownDraft: () => OwnDraft = () => ({ kind: 'foreign' });
   /** How many times the deliverer asked the send path to finish a draft of ours. */
   clears = 0;
+  /** The settings the deliverer reads on every look; a test narrows them with Object.assign. */
+  readonly settings: { -readonly [K in keyof QueueDeliverySettings]: QueueDeliverySettings[K] } = {
+    ...defaultQueueDeliverySettings,
+  };
   readonly deliverer: QueueDeliverer;
 
   constructor(...messages: QueuedMessage[]) {
     for (const entry of messages) this.log.push({ v: 1, kind: 'enqueued', at: entry.enqueuedAt, message: entry });
-    this.deliverer = new QueueDeliverer({
-      store: {
-        read: async () => [...this.log],
-        append: async (_id, event) => void this.log.push(event),
-      },
-      serial: { run: async (_key, work) => await work(), runExclusive: async work => await work() },
-      clock: { now: () => new Date(this.nowMs).toISOString() },
-      scheduler: { schedule: (_id, delayMs) => void this.scheduled.push(delayMs), cancelAll: () => undefined },
-      view: async (): Promise<DeliveryView> => {
-        if (this.pane === 'unreadable') throw new Error('capture failed');
-        return { target: this.target, pane: this.pane, launching: this.launching };
-      },
-      transport: {
-        handOver: async (_id: SessionId, entry: QueuedMessage) => {
-          this.handed.push(entry.id);
-          if (this.hold !== undefined) await this.hold;
-          const answer = this.answers.shift() ?? { kind: 'landed' };
-          if (answer instanceof Error) throw answer;
-          return answer;
+    this.deliverer = new QueueDeliverer(
+      {
+        store: {
+          read: async () => [...this.log],
+          append: async (_id, event) => void this.log.push(event),
         },
-        fate: async (_id: SessionId, messageId: string) => this.fates.get(messageId),
-        clearOwnDraft: async () => {
-          this.clears += 1;
-          return this.ownDraft();
+        serial: { run: async (_key, work) => await work(), runExclusive: async work => await work() },
+        clock: { now: () => new Date(this.nowMs).toISOString() },
+        scheduler: { schedule: (_id, delayMs) => void this.scheduled.push(delayMs), cancelAll: () => undefined },
+        view: async (): Promise<DeliveryView> => {
+          if (this.pane === 'unreadable') throw new Error('capture failed');
+          return { target: this.target, pane: this.pane, launching: this.launching };
+        },
+        transport: {
+          handOver: async (_id: SessionId, delivery: QueueDelivery) => {
+            this.handed.push(delivery.sendId);
+            this.deliveries.push({ delivery, during: this.queue });
+            if (this.hold !== undefined) await this.hold;
+            const answer = this.answers.shift() ?? { kind: 'landed' };
+            if (answer instanceof Error) throw answer;
+            return answer;
+          },
+          fate: async (_id: SessionId, messageId: string) => this.fates.get(messageId),
+          clearOwnDraft: async () => {
+            this.clears += 1;
+            return this.ownDraft();
+          },
+        },
+        sessions: () => [ID],
+        sleep: async milliseconds => {
+          this.slept.push(milliseconds);
+          if (this.sleepForever) await new Promise<void>(() => undefined);
         },
       },
-      sessions: () => [ID],
-      sleep: async milliseconds => {
-        this.slept.push(milliseconds);
-        if (this.sleepForever) await new Promise<void>(() => undefined);
-      },
-    });
+      this.settings,
+    );
   }
 
   get queue(): readonly QueuedMessage[] {
@@ -339,7 +357,7 @@ describe('handing over a queue', () => {
 
   it('should hand over no more than one look allows, and look again for the rest', async () => {
     const messages = Array.from({ length: defaultQueueDeliverySettings.perLook + 2 }, (_, index) =>
-      message(`m${index}`, 'agent', index),
+      message(`m${index}`, 'human', index),
     );
     const world = new World(...messages);
 
@@ -488,5 +506,252 @@ describe('settling a hand-over from the send ledger', () => {
     should(movesFrom(unconfirmed, 'delivered')).eql([{ state: 'read' }]);
     should(movesFrom(unconfirmed, 'queued')).eql([{ state: 'delivered' }]);
     should(movesFrom(unconfirmed, 'unaccounted')).eql([]);
+  });
+});
+
+describe('labels and combined delivery', () => {
+  const action = (id: string, seconds: number, extra: Partial<QueuedMessage> = {}): QueuedMessage =>
+    message(id, 'agent', seconds, {
+      label: 'action',
+      holdUntil: new Date(T0 + (seconds + 60) * 1_000).toISOString(),
+      ...extra,
+    });
+  const fyi = (id: string, seconds: number, extra: Partial<QueuedMessage> = {}): QueuedMessage =>
+    message(id, 'agent', seconds, {
+      label: 'fyi',
+      holdUntil: new Date(T0 + (seconds + 600) * 1_000).toISOString(),
+      ...extra,
+    });
+
+  it('should hold an action for its window, look again exactly when it ends, then deliver it alone', async () => {
+    const world = new World(action('a', 0));
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).be.empty();
+    should(world.state('a')).containEql({ state: 'queued' });
+    should(world.state('a')).not.have.property('waitReason');
+    should(world.scheduled.at(-1)).equal(60_000);
+
+    world.nowMs = T0 + 60_000;
+    await world.deliverer.look(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.deliveries[0]?.delivery.members.map(entry => entry.id)).eql(['a']);
+    should(world.state('a')?.state).equal('delivered');
+    should(world.state('a')).not.have.property('deliveredAs');
+  });
+
+  it('should combine every ferret message that arrives inside the window into ONE turn, oldest first', async () => {
+    const world = new World(action('a', 0), fyi('f', 20), action('b', 59));
+    world.nowMs = T0 + 60_000;
+
+    await world.deliverer.look(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.deliveries[0]?.delivery.members.map(entry => entry.id)).eql(['a', 'f', 'b']);
+    should(world.queue.map(entry => [entry.state, entry.deliveredAs])).eql([
+      ['delivered', 'a'],
+      ['delivered', 'a'],
+      ['delivered', 'a'],
+    ]);
+  });
+
+  it('should have every member typing under the delivery id BEFORE anything is handed over', async () => {
+    const world = new World(action('a', 0), action('b', 5));
+    world.nowMs = T0 + 60_000;
+
+    await world.deliverer.look(ID);
+
+    should(world.deliveries[0]?.during.map(entry => [entry.state, entry.deliveredAs])).eql([
+      ['typing', 'a'],
+      ['typing', 'a'],
+    ]);
+  });
+
+  it('should start a new window for what arrives after the first batch left', async () => {
+    const world = new World(action('a', 0));
+    world.nowMs = T0 + 60_000;
+    await world.deliverer.look(ID);
+    should(world.handed).eql(['a']);
+
+    const late = action('late', 61);
+    world.log.push({ v: 1, kind: 'enqueued', at: late.enqueuedAt, message: late });
+    world.nowMs = T0 + 61_000;
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.state('late')?.state).equal('queued');
+
+    world.nowMs = T0 + 121_000;
+    await world.deliverer.look(ID);
+    should(world.handed).eql(['a', 'late']);
+    should(world.deliveries[1]?.delivery.members.map(entry => entry.id)).eql(['late']);
+  });
+
+  it('should deliver a blocker at once, carrying the actions and FYIs already waiting', async () => {
+    const world = new World(action('a', 0), fyi('f', 1), message('b', 'agent', 2, { label: 'blocker' }));
+    world.nowMs = T0 + 2_000;
+
+    await world.deliverer.look(ID);
+
+    should(world.deliveries.map(entry => entry.delivery.members.map(member => member.id))).eql([['a', 'f', 'b']]);
+  });
+
+  it("should never hold the owner's message or the daemon's behind a held ferret message", async () => {
+    const world = new World(action('a', 0), message('warden', 'daemon', 1), message('owner', 'human', 2));
+
+    await world.deliverer.look(ID);
+
+    should(world.handed).eql(['owner', 'warden']);
+    should(world.state('a')?.state).equal('queued');
+  });
+
+  it('should let a due ferret message go before a daemon notice, as it always did', async () => {
+    const world = new World(message('warden', 'daemon', 0), action('a', 1));
+    world.nowMs = T0 + 61_000;
+
+    await world.deliverer.look(ID);
+
+    should(world.handed).eql(['a', 'warden']);
+  });
+
+  it('should hold an FYI past a turn that ended before it arrived, and deliver it at the next turn end', async () => {
+    const world = new World(fyi('f', 10));
+    world.target = { ...world.target, turnState: 'your-turn', turnStateAt: new Date(T0 + 5_000).toISOString() };
+    world.nowMs = T0 + 20_000;
+    await world.deliverer.look(ID);
+    should(world.handed).be.empty();
+
+    world.target = { ...world.target, turnState: 'working', turnStateAt: new Date(T0 + 30_000).toISOString() };
+    await world.deliverer.changed(ID);
+    should(world.handed).be.empty();
+
+    world.nowMs = T0 + 90_000;
+    world.target = { ...world.target, turnState: 'your-turn', turnStateAt: new Date(T0 + 90_000).toISOString() };
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['f']);
+  });
+
+  it('should deliver an FYI at its cap even when no turn ends', async () => {
+    const world = new World(fyi('f', 0));
+    await world.deliverer.enqueued(ID);
+    should(world.scheduled.at(-1)).equal(600_000);
+
+    world.nowMs = T0 + 600_000;
+    await world.deliverer.look(ID);
+
+    should(world.handed).eql(['f']);
+  });
+
+  it('should deliver a question labelled fyi as an action, and a reply the sender is waited on for at once', async () => {
+    const question = new World(fyi('q', 0, { replyExpected: true, holdUntil: new Date(T0 + 60_000).toISOString() }));
+    await question.deliverer.enqueued(ID);
+    should(question.handed).be.empty();
+    question.nowMs = T0 + 60_000;
+    await question.deliverer.look(ID);
+    should(question.handed).eql(['q']);
+
+    const reply = new World(action('r', 0, { from: 'peer-session' }));
+    reply.target = { ...reply.target, waiting: { peer: 'peer-session' } };
+    await reply.deliverer.enqueued(ID);
+    should(reply.handed).eql(['r']);
+  });
+
+  it('should keep an FYI-only delivery from reviving a stopped session, saying why', async () => {
+    const world = new World(fyi('f', 0));
+    world.target = { ...world.target, status: 'stopped' };
+    world.nowMs = T0 + 600_000;
+
+    await world.deliverer.look(ID);
+
+    should(world.handed).be.empty();
+    should(world.state('f')).containEql({ state: 'queued', waitReason: 'stopped' });
+  });
+
+  it('should split a long wait at the batch limit and deliver the rest under the normal rules', async () => {
+    const world = new World(...Array.from({ length: 5 }, (_, index) => action(`m${index}`, index)));
+    Object.assign(world.settings, { batchMax: 2 });
+    world.nowMs = T0 + 70_000;
+
+    await world.deliverer.look(ID);
+
+    should(world.deliveries.map(entry => entry.delivery.members.map(member => member.id))).eql([
+      ['m0', 'm1'],
+      ['m2', 'm3'],
+      ['m4'],
+    ]);
+  });
+
+  it('should treat every label as a blocker, one turn each, when coalescing is switched off', async () => {
+    const off = new World(action('a', 0), fyi('f', 1), action('b', 2));
+    Object.assign(off.settings, { coalesce: false });
+
+    await off.deliverer.look(ID);
+
+    should(off.deliveries.map(entry => entry.delivery.members.map(member => member.id))).eql([['a'], ['f'], ['b']]);
+  });
+
+  it('should apply a refusal to every member, leaving none half-batched', async () => {
+    const world = new World(action('a', 0), action('b', 1));
+    world.nowMs = T0 + 61_000;
+    world.answers.push({ kind: 'refused', reason: 'draft' });
+
+    await world.deliverer.look(ID);
+
+    should(world.queue.map(entry => [entry.state, entry.waitReason])).eql([
+      ['queued', 'draft'],
+      ['queued', 'draft'],
+    ]);
+    should(world.queue.every(entry => entry.deliveredAs === undefined)).equal(true);
+  });
+
+  it('should fail every member when the send path refused the turn for good', async () => {
+    const world = new World(action('a', 0), action('b', 1));
+    world.nowMs = T0 + 61_000;
+    world.answers.push({ kind: 'failed', failure: 'nope' });
+
+    await world.deliverer.look(ID);
+
+    should(world.queue.map(entry => entry.state)).eql(['failed', 'failed']);
+  });
+
+  it('should settle every member from the ONE ledger record under the lead id', async () => {
+    const world = new World(action('a', 0), action('b', 1));
+    world.nowMs = T0 + 61_000;
+    world.answers.push({ kind: 'unproven' });
+    await world.deliverer.look(ID);
+    should(world.queue.map(entry => entry.state)).eql(['typing', 'typing']);
+
+    world.fates.set('a', 'delivered');
+    await world.deliverer.look(ID);
+
+    should(world.queue.map(entry => entry.state)).eql(['read', 'read']);
+  });
+
+  it('should put every member back when a crash left them typing with no ledger record, and type nothing twice', async () => {
+    const world = new World(action('a', 0), action('b', 1));
+    world.log.push(
+      { v: 1, kind: 'moved', at: new Date(T0).toISOString(), id: 'a', state: 'typing', batch: 'a' },
+      { v: 1, kind: 'moved', at: new Date(T0).toISOString(), id: 'b', state: 'typing', batch: 'a' },
+    );
+
+    await world.deliverer.arm();
+
+    should(world.queue.map(entry => [entry.state, entry.deliveredAs])).eql([
+      ['queued', undefined],
+      ['queued', undefined],
+    ]);
+    should(world.handed).be.empty();
+  });
+
+  it('should deliver what a restart finds overdue', async () => {
+    const world = new World(action('a', 0), fyi('f', 1));
+    world.nowMs = T0 + 700_000;
+
+    await world.deliverer.arm();
+
+    should(world.deliveries.map(entry => entry.delivery.members.map(member => member.id))).eql([['a', 'f']]);
   });
 });

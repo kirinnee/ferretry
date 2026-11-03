@@ -290,6 +290,8 @@ const sessionCases: SchemaCase[] = [
     },
   },
   { name: 'send request', schema: session.SendRequestSchema, value: { message: 'Continue' } },
+  { name: 'labelled send request', schema: session.SendRequestSchema, value: { message: 'Continue', label: 'fyi' } },
+  { name: 'peer message label', schema: session.PeerMessageLabelSchema, value: 'blocker' },
   {
     name: 'structured question answer',
     schema: session.StructuredQuestionAnswerSchema,
@@ -455,6 +457,11 @@ const sessionCases: SchemaCase[] = [
   { name: 'agent name', schema: session.AgentNameSchema, value: 'Hadi' },
   { name: 'send disposition', schema: session.SendDispositionSchema, value: 'delivered' },
   { name: 'send result', schema: session.SendResultSchema, value: { ...sessionView, disposition: 'delivered' } },
+  {
+    name: 'held send result',
+    schema: session.SendResultSchema,
+    value: { ...sessionView, disposition: 'queued', label: 'fyi', heldUntil: LATER_INSTANT },
+  },
   { name: 'signal kind', schema: session.SignalKindSchema, value: 'done' },
   { name: 'signal options', schema: session.SignalOptionsSchema, value: { until: INSTANT } },
   { name: 'snapshot scope', schema: session.SnapshotScopeSchema, value: 'screen' },
@@ -829,6 +836,12 @@ describe('session schemas', () => {
         value: { kind: 'working', until: INSTANT },
       },
       { name: 'unknown send key', schema: session.SendRequestSchema, value: { message: 'x', from: 'spoof' } },
+      { name: 'unknown send label', schema: session.SendRequestSchema, value: { message: 'x', label: 'urgent' } },
+      {
+        name: 'unknown key beside a send label',
+        schema: session.SendRequestSchema,
+        value: { message: 'x', label: 'fyi', holdUntil: INSTANT },
+      },
       {
         // An identity with no harness session is the shape that would let a reader believe a
         // transcript had been attributed when nothing was.

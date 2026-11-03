@@ -31,6 +31,11 @@ export interface QueueView {
   readonly failure?: string;
   /** Who sent it, when the daemon says (`QueuedMessage.by`); absent on a daemon from before it. */
   readonly by?: QueueSender;
+  /**
+   * The id of the send this message travelled inside, when the daemon combined it with others into ONE
+   * turn: the oldest member's. Only set on a message that is NOT that send itself.
+   */
+  readonly deliveredAs?: string;
 }
 
 /** How long one queue read may take; it rides the same poll as the ledger. */
@@ -73,6 +78,9 @@ const viewOf = (message: QueuedMessage): QueueView => ({
   ...(message.waitReason === undefined ? {} : { waitReason: message.waitReason }),
   ...(message.failure === undefined ? {} : { failure: message.failure }),
   ...(senderOf(message) === undefined ? {} : { by: senderOf(message) }),
+  ...(message.deliveredAs === undefined || message.deliveredAs === message.id
+    ? {}
+    : { deliveredAs: message.deliveredAs }),
 });
 
 /** The ledger fate a queue state stands for, so placement and the actions treat a queue-only row like a ledger one. */
@@ -145,6 +153,12 @@ const joinedRow = (row: LedgerSendRecord, message: QueuedMessage): LedgerSendRec
  *     cancelled/failed. Otherwise the ledger's own fate stands.
  *   * A queue message with no ledger row yet — waiting for a draft, a question, its turn — becomes a row of
  *     its own, so it is a bubble in the right place the moment it is accepted.
+ *   * SEVERAL MESSAGES DELIVERED AS ONE TURN have ONE ledger row, under the oldest member's id, whose
+ *     message is the combined text. Only that member joins it; every other member (`deliveredAs`) keeps the
+ *     row it already has from the queue — its own words, its own ticks, its own sender — so no message is
+ *     swallowed by the combined text and none is drawn twice. The combined row is read as its first
+ *     message (`peerFrom`), which is the lead member's own text; where the rest sit in the conversation is
+ *     `placeLedgerRows`'s business.
  *
  * Pure and total: the same two lists always give the same rows, and an empty queue returns the ledger as is.
  */

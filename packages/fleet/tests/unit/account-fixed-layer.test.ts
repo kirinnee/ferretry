@@ -713,6 +713,7 @@ describe('Pack mode teaching', () => {
       '`zz new --auto',
       '--name "<short task title>"',
       '`zz wait <id>`',
+      '`zz send <id> --kind blocker|action|fyi` (default action; fyi rarely)',
       '`zz stop children',
     ])
       should(teaching).containEql(step);
@@ -1111,6 +1112,12 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text.split('\n')).have.length(2);
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('Never raise agenda items or notify the owner;');
+    should(text).containEql(
+      'Label every send: `--kind blocker` only when you are stuck until answered, `--kind action` (default) when it needs doing, `--kind fyi` rarely, for news that needs nothing.',
+    );
+    should(text).containEql(
+      "Blockers go at once, actions are combined for a minute, FYIs wait for the receiver's turn to end.",
+    );
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
     should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
@@ -1126,7 +1133,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(460);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {

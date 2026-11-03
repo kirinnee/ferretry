@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { turnFileInstruction } from '@ferretry/protocol';
+import { combinedDelivery, turnFileInstruction } from '@ferretry/protocol';
 import {
   ACTED_WATCH_MS,
   NUDGE_SETTLE_MS,
@@ -1230,5 +1230,38 @@ describe('transcriptEntriesFromLog: images', () => {
     );
     const result = entries[0]?.tools?.[0]?.result;
     expect(result).toEqual({ text: 'see [fy-image bad image/png]' });
+  });
+});
+
+describe('transcriptEntriesFromLog · several ferrets at once', () => {
+  const combined = combinedDelivery(
+    [
+      {
+        sender: { name: 'rhett', sessionId: 's-rhett', kind: 'message', label: 'action' },
+        body: 'first\n\nstill first',
+      },
+      { sender: { name: 'sada', sessionId: 's-sada', kind: 'question', label: 'blocker' }, body: 'second' },
+    ],
+    'fy',
+  );
+  const log = `[10:01:02] user/message: <pasted_content id="c">\n${combined}\n</pasted_content>`
+    .split('\n')
+    .map((line, index) => (index === 0 ? line : `    ${line}`))
+    .join('\n');
+
+  test('opens one record into one peer row per message, in order, never as You', () => {
+    const entries = transcriptEntriesFromLog(log, NOW);
+    expect(entries.map(entry => [entry.kind, entry.peer?.name, entry.peer?.label, entry.text])).toEqual([
+      ['user', 'rhett', 'action', 'first\n\nstill first'],
+      ['user', 'sada', 'blocker', 'second'],
+    ]);
+    expect(entries.every(entry => entry.label !== 'You')).toBe(true);
+    expect(entries.every(entry => entry.at === Date.UTC(2026, 9, 18, 10, 1, 2))).toBe(true);
+  });
+
+  test("gives the first row the record's own id and every other a distinct one", () => {
+    const [first, second] = transcriptEntriesFromLog(log, NOW);
+    expect(first?.id).toMatch(/^log:[0-9a-z]+:\d+$/u);
+    expect(second?.id).toBe(`${first?.id}~2`);
   });
 });

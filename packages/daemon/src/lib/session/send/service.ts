@@ -1,4 +1,10 @@
-import type { QueueAuthor, SendCancelEffect, SendDisposition } from '@ferretry/protocol';
+import {
+  combinedDelivery,
+  type PeerMessageLabel,
+  type QueueAuthor,
+  type SendCancelEffect,
+  type SendDisposition,
+} from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
@@ -9,6 +15,7 @@ import {
   paneMidTurn,
   peerMessageKind,
   peerPreamble,
+  peerSender,
   queuedPayloadInstruction,
   routeSend,
   sendPayload,
@@ -69,6 +76,18 @@ export interface SessionSendPorts {
   readonly tracking: SendTracking;
 }
 
+/** One ferret's message inside a combined delivery (`SendMessageRequest.parts`). */
+export interface SendPart {
+  /** The queued message's own id. */
+  readonly queueId: string;
+  /** The sending ferret's session. */
+  readonly senderReference: string;
+  /** The message as its sender wrote it, without a banner. */
+  readonly text: string;
+  readonly replyExpected: boolean;
+  readonly label?: PeerMessageLabel | undefined;
+}
+
 export interface SendMessageRequest {
   readonly id: SessionId;
   /**
@@ -85,6 +104,14 @@ export interface SendMessageRequest {
   readonly now?: boolean | undefined;
   /** The sender is parked awaiting the reply, so the receiver is told how to unblock them. */
   readonly replyExpected?: boolean | undefined;
+  /** The sender's label for the message, shown in its banner (`fy send --kind`). */
+  readonly label?: PeerMessageLabel | undefined;
+  /**
+   * Several ferret messages delivered as ONE turn, oldest first (two or more). `message` is then only
+   * their text joined, for the record; the agent reads one `combinedDelivery` built from these, and
+   * `senderReference` names the first part's sender, who attributes the one ledger record.
+   */
+  readonly parts?: readonly SendPart[] | undefined;
   /**
    * The session that made this call, when a teammate did rather than a person.
    *
@@ -253,6 +280,12 @@ function restorable(record: SendRecord): SendSettlement {
   };
 }
 
+/** A part of a combined delivery with its sender resolved, when it still can be. */
+interface Party {
+  readonly part: SendPart;
+  readonly sender: SendTarget | undefined;
+}
+
 export class SessionSendService {
   constructor(
     private readonly ports: SessionSendPorts,
@@ -271,13 +304,19 @@ export class SessionSendService {
           `${Math.round(this.settings.controlLaunchWaitMs / 1_000)}s; it is pending, not failed`,
       );
     const sender = await this.sender(request);
-    const payload = await this.payload(request, sender);
+    const parties = await this.parties(request);
+    const payload = await this.payload(request, sender, parties);
     const locked = await this.ports.serial.run(request.id, async () => await this.locked(request, payload, sender));
     const settled = locked.kind === 'revive' ? await this.revive(request, payload, sender) : locked;
     // Only a NEW transport is tracked: a duplicate request found a send already being watched.
     if (settled.applied) this.ports.tracking.track(request.id);
     const target = await this.require(request.id);
-    if (sender !== undefined && settled.applied) await this.attribute(target, sender, request, settled);
+    if (settled.applied) {
+      if (parties !== undefined) {
+        for (const party of parties)
+          if (party.sender !== undefined) await this.attribute(target, party.sender, party.part.text, settled);
+      } else if (sender !== undefined) await this.attribute(target, sender, request.message, settled);
+    }
     return { target, disposition: dispositionOf(settled.path, settled.held), record: settled.record };
   }
 
@@ -1302,7 +1341,7 @@ export class SessionSendService {
   private async attribute(
     target: SendTarget,
     sender: SendTarget,
-    request: SendMessageRequest,
+    text: string,
     settled: Extract<LockedOutcome, { kind: 'settled' }>,
   ): Promise<void> {
     const disposition = dispositionOf(settled.path, settled.held);
@@ -1312,7 +1351,7 @@ export class SessionSendService {
         to: target.id,
         from: sender.id,
         disposition,
-        message: request.message.trim(),
+        message: text.trim(),
         ...(sender.teammate === undefined ? {} : { fromName: sender.teammate }),
       })
       .catch(async (error: unknown) => {
@@ -1355,12 +1394,40 @@ export class SessionSendService {
    * The recipient is read only for a peer send, to tell a REPLY it is parked on from a new message; a
    * recipient that cannot be read yet degrades to the plainer kind rather than failing the send.
    */
-  private async payload(request: SendMessageRequest, sender: SendTarget | undefined): Promise<string> {
+  private async payload(
+    request: SendMessageRequest,
+    sender: SendTarget | undefined,
+    parties: readonly Party[] | undefined,
+  ): Promise<string> {
+    if (parties !== undefined) {
+      const recipient = await this.ports.repository.read(request.id).catch(() => undefined);
+      return combinedDelivery(
+        parties.map(({ part, sender: from }) => {
+          // A sender that can no longer be resolved is still named by the reference it sent under.
+          const who = from ?? { id: part.senderReference as SessionId };
+          const kind = peerMessageKind(recipient, who.id, part.replyExpected);
+          return { sender: peerSender(who, kind, part.label), body: sendPayload(part.text) };
+        }),
+        this.settings.clientName,
+      );
+    }
     const message = sendPayload(request.message);
     if (sender === undefined) return message;
     const recipient = await this.ports.repository.read(request.id).catch(() => undefined);
     const kind = peerMessageKind(recipient, sender.id, request.replyExpected === true);
-    return `${peerPreamble(sender, kind, this.settings.clientName)}${message}`;
+    return `${peerPreamble(sender, kind, this.settings.clientName, request.label)}${message}`;
+  }
+
+  /** The senders of a combined delivery, each resolved; `undefined` for a send of one message. */
+  private async parties(request: SendMessageRequest): Promise<readonly Party[] | undefined> {
+    const parts = request.parts;
+    if (parts === undefined || parts.length < 2) return undefined;
+    return await Promise.all(
+      parts.map(async part => ({
+        part,
+        sender: await this.ports.repository.resolveSender(part.senderReference).catch(() => undefined),
+      })),
+    );
   }
 
   /** The sender's canonical identity, never the reference the caller supplied. */

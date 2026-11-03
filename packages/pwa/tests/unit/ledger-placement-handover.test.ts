@@ -103,6 +103,44 @@ describe('a send that has landed in the transcript before the daemon confirmed i
     ]);
   });
 
+  test('a turn file that carried several messages is one row; the members riding in it get no bubble of their own', () => {
+    const queue = {
+      state: 'delivered',
+      stateAt: iso(2_000),
+      revision: 1,
+    } as const;
+    const rows = placeLedgerRows(
+      [user('t', 'Read the file …', undefined, { handoff: { kind: 'turn', name: 'turn-009', turn: 9, path: '/t' } })],
+      [
+        send({ sendId: 'send-lead', path: 'turn-file', turn: 9, message: 'combined', acceptedAt: iso(1), queue }),
+        send({
+          sendId: 'send-b',
+          message: 'second',
+          acceptedAt: iso(2),
+          queue: { ...queue, deliveredAs: 'send-lead' },
+        }),
+        send({ sendId: 'send-c', message: 'third', acceptedAt: iso(3), queue: { ...queue, deliveredAs: 'send-lead' } }),
+      ],
+      T0 + 5_000,
+    );
+    expect(shape(rows)).toEqual([{ id: sendRowId('send-lead'), kind: 'user', send: 'send-lead' }]);
+  });
+
+  test('a member of a combined turn whose lead is not on screen still gets its own bubble', () => {
+    const rows = placeLedgerRows(
+      [],
+      [
+        send({
+          sendId: 'send-b',
+          message: 'second',
+          queue: { state: 'delivered', stateAt: iso(2_000), revision: 1, deliveredAs: 'send-lead' },
+        }),
+      ],
+      T0 + 5_000,
+    );
+    expect(shape(rows)).toEqual([{ id: sendRowId('send-b'), kind: 'ledger', send: 'send-b' }]);
+  });
+
   test('settled sends are never worn: a failure stays its own note, at the time it was sent, beside any look-alike', () => {
     const rows = placeLedgerRows([user('b', 'ship it', 1_000)], [send({ fate: 'timed_out' })], T0 + 2_000);
     expect(shape(rows).map(row => row.kind)).toEqual(['ledger', 'user']);

@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  defaultQueueCoalesceSettings,
   type QueueEvent,
   QueueRefused,
   SessionQueueService,
@@ -149,5 +150,91 @@ describe('changing a message that still waits', () => {
     should((missing as QueueRefused).refusal).equal('not_found');
     should((gone as QueueRefused).refusal).equal('not_waiting');
     should((gone as QueueRefused).message).match(/is cancelled, so it can no longer be cancelled/u);
+  });
+});
+
+describe('how long a ferret message is held', () => {
+  const agent = { sender: 'agent' as const, text: 'note' };
+  const heldMs = (message: { enqueuedAt: string; holdUntil?: string | undefined }): number | undefined =>
+    message.holdUntil === undefined ? undefined : Date.parse(message.holdUntil) - Date.parse(message.enqueuedAt);
+
+  it('should default an unlabelled ferret message to an action held for the 60 s window', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, { ...agent, id: 'a' });
+
+    should(message.label).equal('action');
+    should(heldMs(message)).equal(60_000);
+  });
+
+  it('should hold an FYI for the 10 minute cap at most', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, { ...agent, id: 'f', label: 'fyi' });
+
+    should(message.label).equal('fyi');
+    should(heldMs(message)).equal(600_000);
+  });
+
+  it('should hold a question labelled fyi only for the action window', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, { ...agent, id: 'q', label: 'fyi', replyExpected: true });
+
+    should(heldMs(message)).equal(60_000);
+  });
+
+  it('should never hold a blocker or an interrupt', async () => {
+    const { service } = subject();
+
+    const blocker = await service.enqueue(ID, { ...agent, id: 'b', label: 'blocker' });
+    const now = await service.enqueue(ID, { ...agent, id: 'n', interrupt: true });
+
+    should(blocker.message).not.have.property('holdUntil');
+    should(now.message).not.have.property('holdUntil');
+  });
+
+  it("should never label or hold the owner's message or the daemon's", async () => {
+    const { service } = subject();
+
+    const owner = await service.enqueue(ID, { id: 'o', sender: 'human', text: 'hi', label: 'fyi' });
+    const warden = await service.enqueue(ID, { id: 'w', sender: 'daemon', text: 'alert', label: 'fyi' });
+
+    for (const { message } of [owner, warden]) {
+      should(message).not.have.property('label');
+      should(message).not.have.property('holdUntil');
+    }
+  });
+
+  it('should hold nothing, and call everything a blocker, with the kill switch off', async () => {
+    const store = new MemoryQueueStore();
+    const service = new SessionQueueService(
+      {
+        store,
+        clock: { now: () => new Date(Date.UTC(2026, 9, 30, 13, 0, 0)).toISOString() },
+        serial: { run: async (_key, work) => await work(), runExclusive: async work => await work() },
+      },
+      { ...defaultQueueCoalesceSettings, coalesce: false },
+    );
+
+    const { message } = await service.enqueue(ID, { ...agent, id: 'f', label: 'fyi' });
+
+    should(message).not.have.property('holdUntil');
+  });
+
+  it('should use the configured window and cap', async () => {
+    const service = new SessionQueueService(
+      {
+        store: new MemoryQueueStore(),
+        clock: { now: () => new Date(Date.UTC(2026, 9, 30, 13, 0, 0)).toISOString() },
+        serial: { run: async (_key, work) => await work(), runExclusive: async work => await work() },
+      },
+      { ...defaultQueueCoalesceSettings, actionWindowMs: 5_000, fyiMaxHoldMs: 9_000 },
+    );
+
+    const action = await service.enqueue(ID, { ...agent, id: 'a' });
+    const fyi = await service.enqueue(ID, { ...agent, id: 'f', label: 'fyi' });
+
+    should([heldMs(action.message), heldMs(fyi.message)]).eql([5_000, 9_000]);
   });
 });

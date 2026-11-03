@@ -623,6 +623,7 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
+import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
 import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import {
   AgendaCardLinks,
@@ -1125,6 +1126,7 @@ import {
   publisherLabel,
   QUEUE_ANSWER_WAIT_MS,
   QuarantineRegistry,
+  defaultQueueDeliverySettings,
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
@@ -1309,6 +1311,7 @@ import {
   searchTranscriptRecords,
   secretsMatch,
   selectBrowserWorker,
+  sendRecordFor,
   sendRecordView,
   sessionHealthSettingsAt,
   sessionNameClaim,
@@ -3682,15 +3685,19 @@ function createSessionSendSubsystem(
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
             ...(request.now === true ? { interrupt: true } : {}),
+            ...(person || request.label === undefined ? {} : { label: request.label }),
           })
           .catch((error: unknown) => sendRefusal(error));
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
+        const queued = (await queue.list(id)).find(message => message.id === enqueued.message.id);
         const answer = answerOf(
           (await ledger.list(id)).find(record => record.sendId === enqueued.message.id),
-          (await queue.list(id)).find(message => message.id === enqueued.message.id),
+          queued,
         );
+        // Still held to be combined with others: say so, so the sender does not read "queued" as stuck.
+        const held = queued?.state === 'queued' && queued.label !== undefined && queued.holdUntil !== undefined;
         if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
         if (person) await instructions.queueIfStale(id);
         return {
@@ -3700,6 +3707,7 @@ function createSessionSendSubsystem(
           fate: answer.fate,
           ...(answer.waitReason === undefined ? {} : { waitReason: answer.waitReason }),
           ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
+          ...(held ? { label: queued.label, heldUntil: queued.holdUntil } : {}),
         };
       }
       const outcome = await service
@@ -3746,9 +3754,9 @@ function createSessionSendSubsystem(
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
       await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
-      const record = (await ledger.list(id)).find(entry => entry.sendId === sendId);
-      if (record === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
-      return sendRecordView(record);
+      const found = sendRecordFor(await ledger.list(id), await queue.list(id), sendId);
+      if (found === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
+      return found;
     },
     retry: async (reference, sendId, force) => {
       const id = require(reference);
@@ -10168,18 +10176,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        */
       const queueSerial = new KeyedSerialExecutor();
       const queueStore = new FileSessionQueueStore(id => createSessionPaths(paths, id).directory);
-      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial });
+      const coalescing = {
+        coalesce: delivery.coalesce,
+        actionWindowMs: delivery.actionWindowMs,
+        fyiMaxHoldMs: delivery.fyiMaxHoldMs,
+        batchMax: delivery.batchMax,
+      };
+      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial }, coalescing);
       const deliveryView = new SendPathDeliveryView(sendRepository, sendTerminal, launchGate);
-      const queueDeliverer = new QueueDeliverer({
-        store: queueStore,
-        serial: queueSerial,
-        clock,
-        scheduler: new TimerSendScheduler(),
-        view: async id => await deliveryView.view(id),
-        transport: new SendPathQueueTransport(sends, sendLedger),
-        sessions: () => storage.listSessions().map(session => session.id),
-        sleep: async milliseconds => await Bun.sleep(milliseconds),
-      });
+      const queueDeliverer = new QueueDeliverer(
+        {
+          store: queueStore,
+          serial: queueSerial,
+          clock,
+          scheduler: new TimerSendScheduler(),
+          view: async id => await deliveryView.view(id),
+          transport: new SendPathQueueTransport(sends, sendLedger),
+          sessions: () => storage.listSessions().map(session => session.id),
+          sleep: async milliseconds => await Bun.sleep(milliseconds),
+        },
+        { ...defaultQueueDeliverySettings, ...coalescing },
+      );
       storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
       /**
        * What every producer inside this daemon sends through: with the queue on, its message is enqueued and
@@ -13522,7 +13539,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
           sends: producerSends('Warden'),
-          exchanges: { sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)) },
+          exchanges: {
+            sends: async sessionId => {
+              const id = parseSessionId(sessionId);
+              return withBatchMembers(await sendLedger.list(id), await sessionQueue.list(id));
+            },
+          },
           // B144: the send path's own verified Enter, and the health a stuck ferret is marked with.
           stuckInput: {
             sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),

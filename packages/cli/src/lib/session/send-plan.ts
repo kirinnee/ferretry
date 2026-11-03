@@ -1,4 +1,12 @@
-import type { QueueWaitReason, SendDisposition, SendRecord, SendResult } from '@ferretry/protocol';
+import {
+  PEER_MESSAGE_LABELS,
+  type PeerMessageLabel,
+  PeerMessageLabelSchema,
+  type QueueWaitReason,
+  type SendDisposition,
+  type SendRecord,
+  type SendResult,
+} from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment } from './ports.ts';
 
@@ -14,6 +22,8 @@ export interface SendFlags {
   /** Mark it as wanting an answer without parking the sender (`--ask` does both). */
   readonly expectReply?: boolean;
   readonly until?: string;
+  /** `--kind`, as typed: `blocker`, `action` or `fyi`. Parsed here, so an unknown word never reaches the wire. */
+  readonly kind?: string;
 }
 
 export interface SendPlan {
@@ -21,6 +31,8 @@ export interface SendPlan {
   readonly attachmentPaths: readonly string[];
   readonly now: boolean;
   readonly replyExpected: boolean;
+  /** How soon the receiver is to get it; the daemon only holds a ferret's message for a label it can combine. */
+  readonly label: PeerMessageLabel;
   /** Set when the caller asked to be parked: the session id to park and the deadline, if any. */
   readonly park?: { readonly callerSessionId: string; readonly until?: string };
 }
@@ -48,16 +60,36 @@ export function planSend(flags: SendFlags, environment: SessionEnvironment): Sen
       '--ask parks the calling session, so it only works from inside a session (FY_SESSION_ID is unset)',
     );
   if (flags.until !== undefined && flags.ask !== true) throw new SessionCommandError('--until applies to `send --ask`');
+  const label = planLabel(flags);
 
   return {
     message,
     attachmentPaths,
     now: flags.now === true,
     replyExpected: flags.ask === true || flags.expectReply === true,
+    label,
     ...(flags.ask === true && caller !== undefined && caller !== ''
       ? { park: { callerSessionId: caller, ...(flags.until === undefined ? {} : { until: flags.until }) } }
       : {}),
   };
+}
+
+/**
+ * The label a send carries. A question or an interrupt is a blocker by nature (it is delivered at once), so
+ * those flags set it; the one thing they cannot be is an FYI, which is held for the receiver's next turn end.
+ */
+function planLabel(flags: SendFlags): PeerMessageLabel {
+  const parsed = flags.kind === undefined ? undefined : PeerMessageLabelSchema.safeParse(flags.kind.trim());
+  if (parsed !== undefined && !parsed.success)
+    throw new SessionCommandError(`--kind must be one of ${PEER_MESSAGE_LABELS.join(' | ')} (got "${flags.kind}")`);
+  const asked = parsed?.data;
+  const urgent = flags.ask === true || flags.expectReply === true || flags.now === true;
+  if (asked === 'fyi' && urgent)
+    throw new SessionCommandError(
+      'a question is never an FYI: --kind fyi cannot be combined with --ask, --expect-reply or --now',
+    );
+  if (flags.ask === true || flags.now === true) return 'blocker';
+  return asked ?? 'action';
 }
 
 const DISPOSITION_NOTES: Readonly<Record<SendDisposition, string>> = {
@@ -89,8 +121,14 @@ const WAIT_REASON_NOTES: Readonly<Record<QueueWaitReason, string>> = {
  * `queued` disposition with a fate of `accepted` is exactly that — a message the agent's own queue holds
  * has the fate `queued` — and an older daemon that sends no wait reason says it the same way.
  */
-export function waitingInFerretryQueue(result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason'>): boolean {
-  return result.waitReason !== undefined || (result.disposition === 'queued' && result.fate === 'accepted');
+export function waitingInFerretryQueue(
+  result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason' | 'heldUntil'>,
+): boolean {
+  return (
+    result.waitReason !== undefined ||
+    result.heldUntil !== undefined ||
+    (result.disposition === 'queued' && result.fate === 'accepted')
+  );
 }
 
 /**
@@ -102,9 +140,10 @@ export function waitingInFerretryQueue(result: Pick<SendResult, 'disposition' | 
  * what it waits behind is an unconfirmed send of Ferretry's own — that a re-submit was attempted.
  */
 export function describeSendResult(
-  result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason' | 'waitBehind'>,
+  result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason' | 'waitBehind' | 'label' | 'heldUntil'>,
 ): string {
   if (!waitingInFerretryQueue(result)) return describeDisposition(result.disposition);
+  if (result.heldUntil !== undefined) return describeHold(result.label ?? 'action', result.heldUntil);
   if (result.waitBehind !== undefined)
     return (
       `NOT delivered yet: it is waiting in Ferretry's queue behind an unconfirmed earlier send (${result.waitBehind}) ` +
@@ -117,6 +156,22 @@ export function describeSendResult(
       'It is typed as soon as that clears; do not resend'
     );
   return "accepted into Ferretry's queue and not typed into the agent yet; do not resend";
+}
+
+/** A time of day for a human, in their own zone: the queue's hold is minutes long, never a date. */
+function clockTime(instant: string): string {
+  const at = new Date(instant);
+  return [at.getHours(), at.getMinutes(), at.getSeconds()].map(part => String(part).padStart(2, '0')).join(':');
+}
+
+/** A message the queue is holding on purpose, so the sender does not read the wait as a fault and resend. */
+function describeHold(label: PeerMessageLabel, heldUntil: string): string {
+  if (label === 'fyi')
+    return (
+      `held as an FYI (not typed yet): it is delivered when the agent's turn ends, or by ${clockTime(heldUntil)} at the latest, ` +
+      'together with its other pending messages; do not resend'
+    );
+  return `held until ${clockTime(heldUntil)} to combine with other messages (${label}); not typed yet; do not resend`;
 }
 
 /** The stderr note that follows a successful park, or the refusal when no agent received it. */
