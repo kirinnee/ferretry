@@ -6,7 +6,7 @@
  * replaced, tested again, or looked at later.
  */
 
-import { MIN_SECRET_VALUE_LENGTH, type SpeedupStatus, type SpeedupsView } from '@ferretry/protocol';
+import type { SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
 import { ExternalLink } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { putSecret } from '../../secrets/secrets-api.ts';
@@ -16,12 +16,13 @@ import { changeRefusalSentence } from '../shell/apply-change.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { PrimaryAction } from './footer-slot.tsx';
 import { SetupNote } from './setup-ui.tsx';
+import { listWords } from './setup-words.ts';
 
-/** The keys that were typed long enough to be a whole key, by provider. */
+/** The keys that were typed, by provider; a field left empty is not one. */
 const typedKeys = (drafts: Readonly<Record<string, string>>): readonly [string, string][] =>
   Object.entries(drafts)
     .map(([provider, value]): [string, string] => [provider, value.trim()])
-    .filter(([, value]) => value.length >= MIN_SECRET_VALUE_LENGTH);
+    .filter(([, value]) => value.length > 0);
 
 function KeyField({
   status,
@@ -84,7 +85,7 @@ export function OnboardingSpeedupsStep({
   /** At least one key is stored: the step is set. */
   readonly onSaved: () => void;
   /** Every typed key was stored and worked: the page moves on. */
-  readonly onFinished: () => void;
+  readonly onFinished: (stillHere: boolean) => void;
 }) {
   const { connection, createClient, machineName } = tab;
   const [view, setView] = useState<SpeedupsView | null>(null);
@@ -92,8 +93,16 @@ export function OnboardingSpeedupsStep({
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const [busy, setBusy] = useState<'saving' | 'testing' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [dictationOpen, setDictationOpen] = useState(false);
   const latest = useRef({ onSaved, onFinished });
   latest.current = { onSaved, onFinished };
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -114,6 +123,13 @@ export function OnboardingSpeedupsStep({
 
   const typed = typedKeys(drafts);
   const idle = busy === null;
+  // Save keys saves every key that was typed, so it waits until every one of them is a whole key: a short
+  // second key is never dropped quietly.
+  const unfinished = (view?.providers ?? []).filter(
+    status =>
+      typed.some(([provider]) => provider === status.provider) &&
+      keyDraftProblem(drafts[status.provider] ?? '') !== undefined,
+  );
 
   const save = useCallback(async (): Promise<void> => {
     setProblem(null);
@@ -137,7 +153,7 @@ export function OnboardingSpeedupsStep({
         if (!result.ok) failed.push(`${status?.label ?? provider}: ${result.message}`);
       }
       setView(await readSpeedups(client));
-      if (failed.length === 0) latest.current.onFinished();
+      if (failed.length === 0) latest.current.onFinished(here.current);
       else setProblem(`Saved, but the test didn’t pass. ${failed.join(' ')} Paste a corrected key, or skip.`);
     } catch (cause) {
       setProblem(changeRefusalSentence(cause));
@@ -181,7 +197,13 @@ export function OnboardingSpeedupsStep({
           )}
           {jev === undefined ? null : <div className="kt-panel p-panel">{field(jev)}</div>}
           {dictation.length === 0 ? null : (
-            <details className="kt-panel p-panel" data-speedups-dictation="">
+            <details
+              className="kt-panel p-panel"
+              data-speedups-dictation=""
+              // A short key typed in here must not stay out of sight behind a closed heading.
+              open={dictationOpen || unfinished.some(status => status.provider !== 'jev')}
+              onToggle={event => setDictationOpen(event.currentTarget.open)}
+            >
               <summary className="cursor-pointer text-cell font-semibold text-fg">
                 Dictation clean-up keys ({dictation.map(status => status.label).join(', ')})
               </summary>
@@ -190,6 +212,12 @@ export function OnboardingSpeedupsStep({
           )}
         </>
       )}
+      {unfinished.length === 0 ? null : (
+        <p role="status" className="m-0 text-cell text-err" data-speedups-unfinished="">
+          {listWords(unfinished.map(status => status.label))} {unfinished.length === 1 ? 'key looks' : 'keys look'} too
+          short to be whole. Finish {unfinished.length === 1 ? 'it' : 'them'}, or clear the field, to save.
+        </p>
+      )}
       {problem === null ? null : (
         <p role="alert" className="m-0 text-cell text-err" data-speedups-problem="">
           {problem}
@@ -197,7 +225,7 @@ export function OnboardingSpeedupsStep({
       )}
       <PrimaryAction
         label={busy === 'saving' ? 'Saving…' : busy === 'testing' ? 'Testing…' : 'Save keys'}
-        disabled={!idle || typed.length === 0 || view === null}
+        disabled={!idle || typed.length === 0 || unfinished.length > 0 || view === null}
         onClick={() => void save()}
         name="save-keys"
       />

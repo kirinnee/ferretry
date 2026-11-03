@@ -107,6 +107,23 @@ export const continueOnboarding = (progress: MachineSetupProgress): MachineSetup
         states: isTask(progress.at) ? { ...progress.states, [progress.at]: 'done' } : progress.states,
       };
 
+/** The step that follows another, whether or not anyone is on it. */
+export const onboardingStepAfter = after;
+
+/**
+ * A step's own action worked (an import the daemon did not refuse, keys that tested): it is set, and the
+ * page moves on only when the person is still on the visit that asked for it. Someone who tapped Skip or
+ * the rail while it ran keeps the page they chose; the step is still set.
+ */
+export const completeOnboardingStep = (
+  progress: MachineSetupProgress,
+  id: MachineSetupTaskId,
+  stillHere: boolean,
+): MachineSetupProgress =>
+  stillHere && progress.at === id
+    ? continueOnboarding(markOnboardingStep(progress, id))
+    : markOnboardingStep(progress, id);
+
 /** Keep what was answered on a CLI's step. */
 export const answerOnboardingHarness = (
   progress: MachineSetupProgress,

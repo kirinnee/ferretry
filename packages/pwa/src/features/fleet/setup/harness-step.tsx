@@ -34,7 +34,7 @@ import { readFleetSetupScan } from '../setup-api.ts';
 import { type AccountChanges, ChangeApplyPanel, changeReady, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { FirstRunSignIn } from './first-run-sign-in.tsx';
-import { PrimaryAction } from './footer-slot.tsx';
+import { PrimaryAction, useQuietFooter } from './footer-slot.tsx';
 import {
   changeList,
   changeSummary,
@@ -87,9 +87,10 @@ export interface OnboardingHarnessStepProps {
   readonly onReady: () => void;
   /**
    * The step's action is done and the page moves on: an import the daemon did not refuse (with what it
-   * brought in), or `Continue` on a CLI that is already imported (`null`).
+   * brought in), or `Continue` on a CLI that is already imported (`null`). `stillHere` is false when the
+   * person left this page while the import ran: the result is kept, and the page they chose stays open.
    */
-  readonly onFinished: (report: HarnessReport | null) => void;
+  readonly onFinished: (report: HarnessReport | null, stillHere: boolean) => void;
   /** How often a waiting sign-in is re-read. Supplied in tests. */
   readonly pollMs?: number;
 }
@@ -123,6 +124,14 @@ export function OnboardingHarnessStep({
 
   const latest = useRef({ access, onReady });
   latest.current = { access, onReady };
+  // One mount is one visit: leaving the page (Skip, Back, the rail) ends it, even if an import is still running.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
   const read = useCallback(async (): Promise<void> => {
     setIssue(null);
     const scanned = await latest.current.access.read(client => readFleetSetupScan(client));
@@ -195,15 +204,18 @@ export function OnboardingHarnessStep({
         setImported({ notes: importNotes(scan, [harness]), counts });
         onAnswers({});
         await read();
-        onFinished({
-          harness,
-          runtime: makes ? typed : null,
-          summary: importSummary(counts),
-          conversations: kept === null ? null : kept.sentence,
-          signIn: now
-            .filter(runtime => runtime.credential.status === 'needs_sign_in')
-            .map(runtime => ({ runtime: runtime.name, credential: runtime.credential.id })),
-        });
+        onFinished(
+          {
+            harness,
+            runtime: makes ? typed : null,
+            summary: importSummary(counts),
+            conversations: kept === null ? null : kept.sentence,
+            signIn: now
+              .filter(runtime => runtime.credential.status === 'needs_sign_in')
+              .map(runtime => ({ runtime: runtime.name, credential: runtime.credential.id })),
+          },
+          here.current,
+        );
       } finally {
         setSending(false);
       }
@@ -253,7 +265,7 @@ export function OnboardingHarnessStep({
         name="import"
       />
     ) : (
-      <PrimaryAction label="Continue" onClick={() => onFinished(null)} name="continue" />
+      <PrimaryAction label="Continue" onClick={() => onFinished(null, true)} name="continue" />
     );
     body = (
       <>
@@ -688,6 +700,7 @@ function ProviderRuntime({
   const [name, setName] = useState(() => suggestedRuntimeName(harness, credential, runtimes));
   const [made, setMade] = useState<string | null>(null);
   const problem = runtimeNameProblem(name, runtimes, machineName);
+  useQuietFooter(made === null && profile !== undefined);
 
   if (made !== null)
     return (

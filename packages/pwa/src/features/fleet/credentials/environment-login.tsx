@@ -21,6 +21,7 @@ import { listSecrets } from '../../secrets/secrets-api.ts';
 import { readFleetPresets } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import type { MachineData } from '../runtimes/machine-data.ts';
+import { useQuietFooter } from '../setup/footer-slot.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import type { AccountChanges } from '../shell/apply-change-panel.tsx';
 import type { HarnessKind } from './credentials-model.ts';
@@ -112,6 +113,8 @@ export function EnvironmentLogin({
 }: EnvironmentLoginProps) {
   const { loaded, stored, onStored } = useProviderCatalog(connection, createClient);
   const [screen, setScreen] = useState<Screen>({ kind: 'grid' });
+  // Past the grid every screen has a primary of its own (Save, Continue, Done): the setup footer's steps back.
+  useQuietFooter(screen.kind !== 'grid');
   // One read of Ollama when this flow opens and it offers the Ollama tile; then only on Check again.
   const local = useLocalModels({
     connection,

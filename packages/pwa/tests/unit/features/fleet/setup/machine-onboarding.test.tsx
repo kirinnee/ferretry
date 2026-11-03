@@ -20,6 +20,7 @@ import { config as learningConfig } from '../../../../support/learning.ts';
 import { wardenConfig } from '../../../../support/warden.ts';
 import { fileView } from '../../config-files/config-files-support.ts';
 import { CREDENTIALS, PROFILES } from '../account-support.ts';
+import { PROVIDERS } from '../credentials/environment-support.ts';
 import {
   APPLY_PATH,
   bundle,
@@ -841,5 +842,235 @@ describe('MachineOnboarding · Agent controls', () => {
     const screen = await render({ machine: null });
     await screen.rail('controls');
     expect(screen.text('[data-onboarding-reading="controls"]')).toBe('studio-mac’s controls show once it answers.');
+  });
+});
+
+// ── One action per page, however the person moves ────────────────────────────────────────────────
+
+const primaries = (screen: Screen) =>
+  screen.all('button[data-variant="primary"]').map(button => button.textContent?.trim() ?? '');
+
+const typeInto = async (element: Element | null, value: string, what: string): Promise<void> => {
+  const input = must(element as HTMLInputElement | null, what);
+  await interact(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+};
+
+describe('MachineOnboarding · an import that finishes after the person has moved on', () => {
+  /** A machine whose apply waits until `release()`, so the person can move while Import is pending. */
+  const held = () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let imported = false;
+    const target = daemon({
+      ...SET_UP_READS,
+      '/v1/fleet/machine': FRESH_MACHINE,
+      'GET /v1/fleet/runtimes': () => (imported ? CLAUDE_RUNTIME : NO_RUNTIMES),
+      '/v1/fleet/proposals': STAGED,
+      [APPLY_PATH]: () => {
+        imported = true;
+        return { outcome: 'executed', executor: 'setup', summary: 'Imported' };
+      },
+    });
+    const client: FleetClient = {
+      request: async (path, schema, init) => {
+        if (path === APPLY_PATH) await gate;
+        return await target.request(path, schema, init);
+      },
+    };
+    return { client, release: () => release() };
+  };
+  const stateOf = (screen: Screen, id: string) =>
+    screen.all(`[data-onboarding-rail="column"] [data-onboarding-go="${id}"]`)[0]?.getAttribute('data-state');
+
+  it('does not skip the page the person moved to: Skip to Codex, then Import lands, and Codex is still open', async () => {
+    const pending = held();
+    const screen = await render({ machine: FRESH_MACHINE, createClient: async () => pending.client });
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-primary="import"]');
+    await screen.click('[data-onboarding-skip]');
+    expect(screen.at()).toBe('codex');
+    pending.release();
+    await settle();
+    expect(screen.at()).toBe('codex');
+    expect(screen.q('[data-onboarding-step-body="codex"]')).not.toBeNull();
+    expect(stateOf(screen, 'codex')).not.toBe('skipped');
+  });
+
+  it('still counts the import it did as Claude Code set, and keeps its note for the page after', async () => {
+    const pending = held();
+    const screen = await render({ machine: FRESH_MACHINE, createClient: async () => pending.client });
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-primary="import"]');
+    await screen.click('[data-onboarding-skip]');
+    pending.release();
+    await settle();
+    expect(stateOf(screen, 'claude')).toBe('done');
+    // The note was meant for the page after Claude Code, and that is the page the person is on.
+    expect(screen.text('[data-setup-note="import-carry"]')).toContain('claude-default is ready');
+  });
+
+  it('does not move a person who went Back, or jumped by the rail, to a page they did not choose', async () => {
+    const pending = held();
+    const screen = await render({ machine: FRESH_MACHINE, createClient: async () => pending.client });
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-primary="import"]');
+    await screen.rail('warden');
+    pending.release();
+    await settle();
+    expect(screen.at()).toBe('warden');
+  });
+
+  it('does not move a person who left and came back to the same step: the new visit is not the one that asked', async () => {
+    const pending = held();
+    const screen = await render({ machine: FRESH_MACHINE, createClient: async () => pending.client });
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-primary="import"]');
+    await screen.rail('warden');
+    await screen.rail('claude');
+    pending.release();
+    await settle();
+    expect(screen.at()).toBe('claude');
+  });
+
+  it('still moves on by itself when the person stayed', async () => {
+    const pending = held();
+    const screen = await render({ machine: FRESH_MACHINE, createClient: async () => pending.client });
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-primary="import"]');
+    pending.release();
+    await settle();
+    expect(screen.at()).toBe('codex');
+  });
+});
+
+describe('MachineOnboarding · the page’s one primary', () => {
+  it('keeps Continue as the one primary on Agent controls until a switch is flipped', async () => {
+    const screen = await render();
+    await screen.rail('controls');
+    expect(primaries(screen)).toHaveLength(1);
+    expect(screen.q('[data-onboarding-foot] button[data-variant="primary"]')).not.toBeNull();
+  });
+
+  it('gives the primary to Save what agents may control when a switch is flipped, and quiets Continue', async () => {
+    const screen = await render();
+    await screen.rail('controls');
+    await screen.click('[data-agent-control] [role=switch]');
+    const saves = screen.all('button[data-variant="primary"]');
+    expect(saves).toHaveLength(1);
+    expect(saves[0]?.textContent).toContain('Save what agents may control');
+    // The reviewed change keeps its own button, and the footer can still move on without it.
+    expect(saves[0]?.closest('[data-onboarding-foot]')).toBeNull();
+    const next = must(screen.q('[data-onboarding-foot] [data-onboarding-next]'), 'Continue');
+    expect(next.getAttribute('data-variant')).not.toBe('primary');
+  });
+
+  it('gives Continue its primary back when the switch is put back', async () => {
+    const screen = await render();
+    await screen.rail('controls');
+    await screen.click('[data-agent-control] [role=switch]');
+    await screen.click('[data-agent-control] [role=switch]');
+    expect(primaries(screen)).toHaveLength(1);
+    expect(screen.q('[data-onboarding-foot] button[data-variant="primary"]')).not.toBeNull();
+  });
+});
+
+describe('MachineOnboarding · an open provider-key form', () => {
+  const secretsRoute = (call: Call) =>
+    call.body === undefined
+      ? { v: 1, health: 'ready', secrets: [], references: [] }
+      : {
+          name: (call.body as { name: string }).name,
+          createdAt: '2026-10-16T08:00:00.000Z',
+          updatedAt: '2026-10-16T08:00:00.000Z',
+        };
+  const providerScreen = () =>
+    render({
+      machine: FRESH_MACHINE,
+      routes: {
+        ...SET_UP_READS,
+        '/v1/fleet/machine': FRESH_MACHINE,
+        '/v1/fleet/presets': PROVIDERS,
+        '/v1/secrets': secretsRoute,
+      },
+    });
+  const footerImport = (screen: Screen) =>
+    must(screen.q('[data-onboarding-foot] [data-onboarding-primary="import"]'), 'the footer Import');
+
+  it('keeps Import the footer’s one primary while only the provider grid is open', async () => {
+    const screen = await providerScreen();
+    await screen.rail('claude');
+    await screen.click('[data-harness-provider-toggle]');
+    expect(screen.q('[data-provider-grid]')).not.toBeNull();
+    expect(footerImport(screen).getAttribute('data-variant')).toBe('primary');
+    expect(primaries(screen)).toEqual(['Import']);
+  });
+
+  it('quiets the footer’s Import while a provider’s form is open, and gives it back when the form closes', async () => {
+    const screen = await providerScreen();
+    await screen.rail('claude');
+    await screen.click('[data-harness-provider-toggle]');
+    await screen.click('[data-provider-tile="deepseek"]');
+    expect(screen.q('[data-env-login="form"]')).not.toBeNull();
+    // Only the form's own Add carries the reviewed change; Import steps back but stays pressable.
+    expect(primaries(screen)).toHaveLength(1);
+    expect(screen.q('[data-env-login="form"] [data-change-submit]')?.getAttribute('data-variant')).toBe('primary');
+    expect(footerImport(screen).getAttribute('data-variant')).not.toBe('primary');
+    expect((footerImport(screen) as HTMLButtonElement).disabled).toBe(false);
+    await screen.click('[data-harness-provider-toggle]');
+    expect(screen.q('[data-env-login="form"]')).toBeNull();
+    expect(footerImport(screen).getAttribute('data-variant')).toBe('primary');
+    expect(primaries(screen)).toEqual(['Import']);
+  });
+});
+
+describe('MachineOnboarding · Save keys that finish after the person has moved on', () => {
+  it('keeps the page the person moved to, and still counts Speed-ups as set', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const name = (call: Call) => (call.body as { name: string }).name;
+    const target = daemon({
+      ...SET_UP_READS,
+      '/v1/speedups': speedups(false),
+      '/v1/secrets': (call: Call) => ({
+        name: name(call),
+        createdAt: '2026-10-16T08:00:00.000Z',
+        updatedAt: '2026-10-16T08:00:00.000Z',
+      }),
+      '/v1/speedups/jev/test': {
+        provider: 'jev',
+        secretName: 'JEV_API_KEY',
+        ok: true,
+        code: 'ok',
+        message: 'The key works.',
+        at: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    const client: FleetClient = {
+      request: async (path, schema, init) => {
+        if (path === '/v1/speedups/jev/test') await gate;
+        return await target.request(path, schema, init);
+      },
+    };
+    const screen = await render({ createClient: async () => client });
+    await screen.rail('speedups');
+    await typeInto(screen.q('#speedup-key-jev'), 'sk-test-0123456789', 'the Jev field');
+    await screen.click('[data-onboarding-primary="save-keys"]');
+    await screen.click('[data-onboarding-skip]');
+    expect(screen.at()).toBe('voice');
+    release();
+    await settle();
+    expect(screen.at()).toBe('voice');
+    const state = screen
+      .all('[data-onboarding-rail="column"] [data-onboarding-go="speedups"]')[0]
+      ?.getAttribute('data-state');
+    expect(state).toBe('done');
   });
 });

@@ -246,3 +246,106 @@ describe('OnboardingSpeedupsStep', () => {
     expect(text('[data-setup-note="speedups-vault"]')).toContain('The secret store can’t be read');
   });
 });
+
+describe('OnboardingSpeedupsStep · every typed key must be a whole key', () => {
+  const unfinished = () => q('[data-speedups-unfinished]');
+
+  it('keeps Save keys off while a second typed key is short, and says which one', async () => {
+    await start({ [SPEEDUPS_PATH]: view() });
+    await typeInto('jev', KEY);
+    expect(save()?.disabled).toBe(false);
+    await typeInto('groq', 'short');
+    expect(save()?.disabled).toBe(true);
+    expect(text('[data-speedups-unfinished]')).toContain('Groq key looks too short');
+    // The short key is under a closed heading, so the heading opens to show it.
+    expect((q('[data-speedups-dictation]') as HTMLDetailsElement).open).toBe(true);
+    expect(text('[data-speedup-field="groq"]')).toContain('At least 8 characters');
+  });
+
+  it('sends nothing, and keeps both drafts, until the short key is finished', async () => {
+    const run = await start({
+      [SPEEDUPS_PATH]: view(),
+      [SECRETS_PATH]: (call: Call) => summary((call.body as { name: string }).name),
+      [testPath('jev')]: result('jev', true),
+      [testPath('groq')]: result('groq', true),
+    });
+    await typeInto('jev', KEY);
+    await typeInto('groq', 'short');
+    await clickOn(save(), 'Save keys');
+    expect(posted(run.calls, SECRETS_PATH)).toHaveLength(0);
+    expect(run.saved).toHaveLength(0);
+    expect(run.finished).toHaveLength(0);
+    expect((q('#speedup-key-jev') as HTMLInputElement).value).toBe(KEY);
+    expect((q('#speedup-key-groq') as HTMLInputElement).value).toBe('short');
+    await typeInto('groq', `${KEY}-groq`);
+    expect(unfinished()).toBeNull();
+    await clickOn(save(), 'Save keys');
+    expect(posted(run.calls, SECRETS_PATH).map(call => call.body)).toEqual([
+      { name: 'JEV_API_KEY', value: KEY },
+      { name: 'GROQ_API_KEY', value: `${KEY}-groq` },
+    ]);
+    expect(run.finished).toHaveLength(1);
+  });
+
+  it('saves the whole key alone once the short one is cleared', async () => {
+    const run = await start({
+      [SPEEDUPS_PATH]: view(),
+      [SECRETS_PATH]: (call: Call) => summary((call.body as { name: string }).name),
+      [testPath('jev')]: result('jev', true),
+    });
+    await typeInto('jev', KEY);
+    await typeInto('groq', 'short');
+    await typeInto('groq', '');
+    expect(unfinished()).toBeNull();
+    expect(save()?.disabled).toBe(false);
+    await clickOn(save(), 'Save keys');
+    expect(posted(run.calls, SECRETS_PATH).map(call => call.body)).toEqual([{ name: 'JEV_API_KEY', value: KEY }]);
+  });
+
+  it('keeps Save keys off for a lone short key, and for a short key beside a key already stored', async () => {
+    await start({ [SPEEDUPS_PATH]: view(['jev']) });
+    await typeInto('groq', 'short');
+    expect(save()?.disabled).toBe(true);
+    expect(text('[data-speedups-unfinished]')).toContain('Groq key looks too short');
+  });
+
+  it('says “keys look” when two are short', async () => {
+    await start({ [SPEEDUPS_PATH]: view() });
+    await typeInto('jev', 'short');
+    await typeInto('groq', 'tiny');
+    expect(text('[data-speedups-unfinished]')).toContain('Jev and Groq keys look too short');
+  });
+});
+
+describe('OnboardingSpeedupsStep · finishing after the page was left', () => {
+  it('tells the rail the page was still there when the keys worked', async () => {
+    const stillHere: boolean[] = [];
+    const calls: Call[] = [];
+    const client = scriptedClient(
+      {
+        '/v1/fleet/machine': machineView(),
+        [SPEEDUPS_PATH]: view(),
+        [SECRETS_PATH]: (call: Call) => summary((call.body as { name: string }).name),
+        [testPath('jev')]: result('jev', true),
+      },
+      calls,
+    );
+    const tab: MachineTabProps = {
+      connection: STUDIO,
+      machineName: 'studio-mac',
+      machine: machineView(),
+      online: true,
+      checking: false,
+      onRetry: () => undefined,
+      createClient: async () => client,
+    };
+    const step = (
+      <OnboardingSpeedupsStep tab={tab} onSaved={() => undefined} onFinished={here => stillHere.push(here)} />
+    );
+    mounted = await mount(step);
+    await settle();
+    await typeInto('jev', KEY);
+    await clickOn(save(), 'Save keys');
+    expect(stillHere).toEqual([true]);
+  });
+});

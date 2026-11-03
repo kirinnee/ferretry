@@ -26,12 +26,13 @@ import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
 import { wardenMachineDefaultLogin, wardenSummary } from '../../warden/warden-settings-model.ts';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { FooterSlotContext } from './footer-slot.tsx';
+import { FooterQuietContext, FooterSlotContext, useFooterQuietState } from './footer-slot.tsx';
 import { type HarnessReport, OnboardingHarnessStep } from './harness-step.tsx';
 import {
   answerOnboardingHarness,
   backOnboardingStep,
   chooseOnboardingStart,
+  completeOnboardingStep,
   continueOnboarding,
   goToOnboardingStep,
   type MachineSetupProgress,
@@ -45,6 +46,7 @@ import {
   onboardingNeedsRuntime,
   onboardingRailMarker,
   onboardingSetCount,
+  onboardingStepAfter,
   onboardingStepLabel,
   skipOnboardingStep,
 } from './onboarding-model.ts';
@@ -58,10 +60,10 @@ import {
   OnboardingWardenStep,
   type VoiceCleanupPort,
 } from './onboarding-steps.tsx';
-import type { MachineSetupProgressPort } from './setup-progress.ts';
-import { OnboardingSpeedupsStep } from './speedups-step.tsx';
-import { SetupNote } from './setup-ui.tsx';
 import { machineItemHash } from './settings-route.ts';
+import type { MachineSetupProgressPort } from './setup-progress.ts';
+import { SetupNote } from './setup-ui.tsx';
+import { OnboardingSpeedupsStep } from './speedups-step.tsx';
 
 export interface MachineOnboardingProps extends MachineTabProps {
   /** Every OTHER machine this browser has paired, for Start from › Clone. */
@@ -182,6 +184,7 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
     null,
   );
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const footerQuiet = useFooterQuietState();
   const at = progress.at;
   const titleRef = useRef<HTMLHeadingElement>(null);
 
@@ -248,12 +251,12 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             answers={progress.answers?.[step] ?? {}}
             onAnswers={answers => move(current => answerOnboardingHarness(current, step, answers))}
             onReady={() => move(current => markOnboardingStep(current, step))}
-            onFinished={report => {
+            onFinished={(report, stillHere) => {
               if (report !== null) {
                 setReports(current => ({ ...current, [step]: report }));
-                setCarried({ report, on: continueOnboarding(markOnboardingStep(progress, step)).at });
+                setCarried({ report, on: onboardingStepAfter(step) });
               }
-              move(current => continueOnboarding(markOnboardingStep(current, step)));
+              move(current => completeOnboardingStep(current, step, stillHere));
             }}
             {...(pollMs === undefined ? {} : { pollMs })}
           />
@@ -263,7 +266,7 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
           <OnboardingSpeedupsStep
             tab={tab}
             onSaved={() => move(current => markOnboardingStep(current, 'speedups'))}
-            onFinished={() => move(current => continueOnboarding(markOnboardingStep(current, 'speedups')))}
+            onFinished={stillHere => move(current => completeOnboardingStep(current, 'speedups', stillHere))}
           />
         );
       case 'voice':
@@ -391,7 +394,9 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
               <ImportCarryNote report={carried.report} machineName={machineName} />
             ) : null}
             <FooterSlotContext.Provider value={slot}>
-              <div className="min-w-0">{body(at)}</div>
+              <FooterQuietContext.Provider value={footerQuiet}>
+                <div className="min-w-0">{body(at)}</div>
+              </FooterQuietContext.Provider>
             </FooterSlotContext.Provider>
           </div>
         </div>
@@ -416,13 +421,18 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
               )}
               <span className="contents" ref={setSlot} data-onboarding-slot="" />
               {at === 'done' ? (
-                <Button type="button" variant="primary" data-onboarding-finish="" onClick={finish}>
+                <Button
+                  type="button"
+                  variant={footerQuiet.quiet ? 'outline' : 'primary'}
+                  data-onboarding-finish=""
+                  onClick={finish}
+                >
                   Finish setup
                 </Button>
               ) : ownsPrimary(at, progress.start) ? null : (
                 <Button
                   type="button"
-                  variant="primary"
+                  variant={footerQuiet.quiet ? 'outline' : 'primary'}
                   data-onboarding-next=""
                   onClick={() => move(continueOnboarding)}
                 >

@@ -13,6 +13,7 @@ import { useEffect, useId, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
+import { useQuietFooter } from '../setup/footer-slot.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupSection } from '../setup/setup-ui.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -51,6 +52,7 @@ export function DefaultRuntimeControl({
   const current = machine.defaultRuntime;
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
+  useQuietFooter(pending);
   const save = (): void => {
     if (picked === null) return;
     void changes.apply(machineSettings(machine, { defaultRuntime: picked })).then(result => {

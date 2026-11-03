@@ -35,6 +35,7 @@ import { readConfigFile, writeConfigFile } from '../../config-files/config-files
 import { Segmented } from '../conversations/conversation-picker.tsx';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
+import { useQuietFooter } from '../setup/footer-slot.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
 import { type SettingsFlow, useSettingsFlow } from '../setup/settings-route.ts';
 import type { SetupAccess } from '../setup/setup-access.ts';
@@ -241,6 +242,7 @@ export function AgentControlSection({
   const current = machine.agentControl;
   const [draft, setDraft] = useState<FleetAgentControl>(current);
   const pending = AGENT_CONTROL_KINDS.some(kind => draft[kind] !== current[kind]);
+  useQuietFooter(pending);
   const save = (): void => {
     void changes.apply(machineSettings(machine, { agentControl: draft })).then(result => {
       if (result.kind === 'refused') return;

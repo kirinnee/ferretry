@@ -129,6 +129,13 @@ try {
         await screen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
         await page.waitForTimeout(400);
         await shot('claude');
+        // A provider's key form is open: its own Add owns the page, and the footer's Import goes quiet.
+        await screen.locator('[data-harness-provider-toggle]').click();
+        await screen.locator('[data-provider-tile="deepseek"]').click();
+        await screen.locator('[data-env-login="form"]').waitFor({ state: 'visible' });
+        await shot('claude-provider-form');
+        await screen.locator('[data-harness-provider-toggle]').click();
+        await screen.locator('[data-env-login="form"]').waitFor({ state: 'detached' });
         await screen.locator('[data-setup-disclosure="found-details"] summary').click();
         await shot('claude-details');
         await screen.locator('[data-harness-conversations]').check();
@@ -162,6 +169,17 @@ try {
         for (const id of ['voice', 'warden', 'learning', 'controls'] as const) {
           await stepBody(id);
           await shot(id);
+          if (id === 'controls') {
+            // A switch flipped: Save what agents may control is the primary; Continue goes quiet.
+            const flip = screen.locator('[data-agent-control] [role="switch"]').first();
+            await flip.click();
+            await screen
+              .locator('[data-change-submit]:not([data-onboarding-primary])')
+              .first()
+              .waitFor({ state: 'visible' });
+            await shot('controls-changed');
+            await flip.click();
+          }
           await screen.locator('[data-onboarding-next]').click();
         }
         await stepBody('done');

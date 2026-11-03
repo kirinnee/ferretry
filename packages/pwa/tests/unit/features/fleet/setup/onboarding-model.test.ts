@@ -3,6 +3,7 @@ import {
   answerOnboardingHarness,
   backOnboardingStep,
   chooseOnboardingStart,
+  completeOnboardingStep,
   continueOnboarding,
   goToOnboardingStep,
   isMachineSetupStepId,
@@ -378,5 +379,25 @@ describe('onboardingNeedsRuntime', () => {
 
   it('is satisfied by a runtime on either CLI', () => {
     expect(onboardingNeedsRuntime({ runtimes: { claude: [], codex: ['codex-default'] } })).toBe(false);
+  });
+});
+
+describe('completing a step that asked to move on', () => {
+  it('marks it set and opens the next when the person is still on it', () => {
+    const next = completeOnboardingStep(progress({ at: 'claude' }), 'claude', true);
+    expect(next.at).toBe('codex');
+    expect(next.states).toEqual({ pair: 'done', claude: 'done' });
+  });
+
+  it('marks it set but stays where the person is when they are on another page', () => {
+    const next = completeOnboardingStep(progress({ at: 'codex' }), 'claude', true);
+    expect(next.at).toBe('codex');
+    expect(next.states).toEqual({ pair: 'done', claude: 'done' });
+  });
+
+  it('marks it set but never moves a person who left the visit that asked, even back on the same step', () => {
+    const next = completeOnboardingStep(progress({ at: 'claude' }), 'claude', false);
+    expect(next.at).toBe('claude');
+    expect(next.states).toEqual({ pair: 'done', claude: 'done' });
   });
 });
