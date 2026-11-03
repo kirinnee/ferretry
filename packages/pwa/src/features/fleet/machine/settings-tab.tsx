@@ -219,7 +219,7 @@ export function AgentPermissionsSection({
   );
 }
 
-const AGENT_CONTROL_KINDS: readonly AgentControlKind[] = [
+export const AGENT_CONTROL_KINDS: readonly AgentControlKind[] = [
   'terminals',
   'browsers',
   'files',

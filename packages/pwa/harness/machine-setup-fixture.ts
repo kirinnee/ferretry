@@ -40,6 +40,8 @@ interface MachineState {
   passiveDefault: boolean;
   /** The runtimes a machine that is not set up has made so far. */
   runtimes: AgentRuntime[];
+  /** This machine's `voice.yaml`, as Defaults reads and writes it; a fresh machine speaks with the browser. */
+  voice: string;
 }
 
 const DAY = 86_400_000;
@@ -60,7 +62,13 @@ const states = new Map<string, MachineState>();
 const stateOf = (machine: string): MachineState => {
   const known = states.get(machine);
   if (known !== undefined) return known;
-  const fresh: MachineState = { secrets: [], warden: DEFAULT_WARDEN_CONFIG, passiveDefault: true, runtimes: [] };
+  const fresh: MachineState = {
+    secrets: [],
+    warden: DEFAULT_WARDEN_CONFIG,
+    passiveDefault: true,
+    runtimes: [],
+    voice: 'defaultEngine: browser\n',
+  };
   states.set(machine, fresh);
   return fresh;
 };
@@ -193,7 +201,15 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
         references: [],
       };
     case '/v1/warden/config':
-      if (method === 'PATCH') state.warden = { ...state.warden, ...(body(init) as Partial<WardenConfig>) };
+      if (method === 'PATCH') {
+        // The daemon merges a patched layer into the stored ones; a partial `layers` must not replace them.
+        const patch = body(init) as Partial<WardenConfig>;
+        state.warden = {
+          ...state.warden,
+          ...patch,
+          ...(patch.layers === undefined ? {} : { layers: { ...state.warden.layers, ...patch.layers } }),
+        };
+      }
       return { config: state.warden, accounts: state.warden.accounts, warnings: [] };
     case '/v1/learning/config':
       if (method === 'PATCH') state.passiveDefault = body(init).passiveDefault === true;
@@ -203,6 +219,7 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
         const written = String(body(init).path);
         // Only the three settings files Copy writes; every other file is the Files panel's fixture.
         if (!(written in SOURCE_FILES)) return undefined;
+        if (written === 'voice.yaml' && !source) state.voice = String(body(init).text ?? state.voice);
         // The copied Warden turns on the Jev guard, which spends: the daemon holds it for the owner.
         return written === 'warden.yaml'
           ? {
@@ -219,7 +236,7 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
       }
       const file = url.searchParams.get('path') ?? '';
       if (!(file in SOURCE_FILES)) return undefined;
-      const text = source ? SOURCE_FILES[file] : undefined;
+      const text = source ? SOURCE_FILES[file] : file === 'voice.yaml' ? state.voice : undefined;
       return {
         path: file,
         absolutePath: `/home/harness/.ferretry/config/${file}`,

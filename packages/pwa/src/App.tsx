@@ -45,7 +45,6 @@ import type { TranscriptHistoryControl } from './components/transcript-history-r
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
-import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
@@ -101,6 +100,7 @@ import { queueContribution } from './features/queue-view/queue-action.ts';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
 import { ActionToast } from './features/session-actions/action-toast.tsx';
+import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
@@ -2459,8 +2459,6 @@ function ImportedHistoryRoute({ connection }: DaemonPageProps) {
 /** One machine's full-screen first run: no app chrome, only its own stepper. */
 function MachineSetupRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
-  // The Voice step's clean-up choice is THIS device's dictation setting, the same one Settings › Dictation edits.
-  const dictation = useSttSettings(store.stt);
   const { connections } = useConnectionSnapshot();
   const { navigate } = useRouter();
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
@@ -2482,7 +2480,6 @@ function MachineSetupRoute({ connection }: DaemonPageProps) {
       createClient={createClient}
       onNavigate={navigate}
       storage={browserSetupStorage()}
-      voiceCleanup={dictation}
     />
   );
 }

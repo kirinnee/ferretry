@@ -4,19 +4,47 @@
  * on each, and moves on when they worked. Jev is the one on show; Groq and Cerebras (dictation clean-up)
  * are folded under their own heading. Settings › Speed-ups (`speedups-surface.tsx`) is where a key is
  * replaced, tested again, or looked at later.
+ *
+ * Under the Jev key sits "Let the Warden use Jev", ticked: when a Jev key is saved and works, `Save keys`
+ * also switches Jev on through the Warden's own PATCH (`wardenStartingDraft`). With no Jev key saved the
+ * Warden is never touched, so Jev stays off.
  */
 
-import type { SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
+import { type SpeedupStatus, type SpeedupsView, WardenConfigViewSchema } from '@ferretry/protocol';
 import { ExternalLink } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { putSecret } from '../../secrets/secrets-api.ts';
 import { readSpeedups, testSpeedup } from '../../speedups/speedups-api.ts';
 import { keyDraftProblem } from '../../speedups/speedups-surface.tsx';
+import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
+import type { FleetClient } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { PrimaryAction } from './footer-slot.tsx';
+import { wardenStartingDraft } from './onboarding-model.ts';
 import { SetupNote } from './setup-ui.tsx';
 import { listWords } from './setup-words.ts';
+
+/**
+ * Switch the Warden's Jev layer on through its own PATCH, only while the machine is still on the free
+ * default (`wardenStartingDraft`): a layer the owner chose, or a Warden they turned off, is left alone.
+ * `null` when it worked or there was nothing to change; a sentence when it did not.
+ */
+const switchJevOn = async (client: FleetClient): Promise<string | null> => {
+  try {
+    const view = await client.request('/v1/warden/config', WardenConfigViewSchema);
+    const patch = wardenConfigPatchFrom(view.config, wardenStartingDraft(view.config, true));
+    if (Object.keys(patch).length === 0) return null;
+    await client.request('/v1/warden/config', WardenConfigViewSchema, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    return null;
+  } catch (cause) {
+    return `Your keys are saved, but Jev could not be switched on for the Warden. ${changeRefusalSentence(cause)} Skip, then turn it on in Settings › Warden.`;
+  }
+};
 
 /** The keys that were typed, by provider; a field left empty is not one. */
 const typedKeys = (drafts: Readonly<Record<string, string>>): readonly [string, string][] =>
@@ -100,6 +128,7 @@ export function OnboardingSpeedupsStep({
   const [busy, setBusy] = useState<'saving' | 'testing' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [dictationOpen, setDictationOpen] = useState(false);
+  const [warden, setWarden] = useState(true);
   const latest = useRef({ onSaved, onFinished });
   latest.current = { onSaved, onFinished };
   const here = useRef(true);
@@ -157,8 +186,11 @@ export function OnboardingSpeedupsStep({
         }));
         if (!result.ok) failed.push(`${status?.label ?? provider}: ${result.message}`);
       }
+      const jevWorked = typed.some(([provider]) => provider === 'jev') && !failed.some(line => line.startsWith('Jev'));
+      const wardenProblem = warden && jevWorked ? await switchJevOn(client) : null;
       setView(await readSpeedups(client));
-      if (failed.length === 0) {
+      if (wardenProblem !== null) setProblem(wardenProblem);
+      else if (failed.length === 0) {
         // Only a key that worked sets the step: a saved key that failed its test leaves it open.
         latest.current.onSaved();
         latest.current.onFinished(here.current);
@@ -168,7 +200,7 @@ export function OnboardingSpeedupsStep({
     } finally {
       setBusy(null);
     }
-  }, [connection, createClient, typed, view]);
+  }, [connection, createClient, typed, view, warden]);
 
   /**
    * Keys already stored and every one of them proven (its last test passed, on this very key), none being
@@ -215,7 +247,23 @@ export function OnboardingSpeedupsStep({
               <span>Fix it in Secrets before pasting a key, or you may write over one that is still there.</span>
             </SetupNote>
           )}
-          {jev === undefined ? null : <div className="kt-panel p-panel">{field(jev)}</div>}
+          {jev === undefined ? null : (
+            <div className="kt-panel flex min-w-0 flex-col gap-3 p-panel">
+              {field(jev)}
+              <label className="flex min-w-0 items-start gap-2 text-cell text-fg" data-speedups-warden-jev="">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={warden}
+                  disabled={!idle}
+                  onChange={event => setWarden(event.target.checked)}
+                />
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  Let the Warden use Jev (fractions of a cent per decision)
+                </span>
+              </label>
+            </div>
+          )}
           {dictation.length === 0 ? null : (
             <details
               className="kt-panel p-panel"

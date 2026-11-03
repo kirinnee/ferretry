@@ -31,6 +31,9 @@ export const withMachineVoiceEngine = (text: string, engine: VoiceEngine): strin
   return `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${line}\n`;
 };
 
+/** `voice.yaml` with no default engine: the line removed, the rest of the file kept. */
+export const withoutMachineVoiceEngine = (text: string): string => text.replace(/^defaultEngine:[^\n]*\n?/mu, '');
+
 /**
  * The machine default for one paired machine, read once per machine and again whenever its `voice.yaml`
  * moves (from setup on another device, `fy`, or a hand edit); `null` while unread, when the file names

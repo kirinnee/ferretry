@@ -2,498 +2,392 @@
  * The New machine setup steps' bodies (spec R4; build plan P9). Each one REUSES the surface that owns
  * its subject in Settings, so a step and its "Set up later" panel can never disagree:
  *
- * - **Pair** — this device is already paired (the screen is only reachable through a pairing); a
- *   phone can be paired too, with Settings › Devices's own surface.
- * - **Start from** — fresh, or Copy settings from another machine (`clone.tsx`), embedded in the step with no
- *   stepper of its own.
+ * - **Start from** — only when another machine can be copied: two cards that ARE the actions (tap one and
+ *   setup moves on). Copying embeds Copy settings from another machine (`clone.tsx`), with no stepper of its own.
  * - **Claude Code**, **Codex** — one screen each that detects, imports, signs in and names the runtime
  *   (`harness-step.tsx`).
  * - **Speed-ups** — one `Save keys` (`speedups-step.tsx`): paste → stored → tested → "set ✓".
- * - **Voice** — Settings › Dictation's engine choice (Parakeet, with its download size and optional install,
- *   or phone/browser voice), saved as the MACHINE's default in `voice.yaml`; clean-up is this device's.
- * - **Warden** — Settings › Warden's card, with Jev switched on only when a Jev key was added.
- * - **Learning** — the passive-learning default for new ferrets.
- * - **Agent controls** — the Machine tab's own controls and default runtime sections.
+ * - **Defaults** — the settings a machine already has, in one list: its voice, learning from corrections, and
+ *   what agents may use. `Use these` saves ONLY what changed, each through the save its Settings panel uses.
+ * - **Done** — what was made, and the one button that starts using it.
  */
 
-import {
-  LearningConfigSchema,
-  type SpeedupsView,
-  type VoiceEngine,
-  type WardenConfig,
-  type WardenConfigPatch,
-  type WardenConfigView,
-  WardenConfigViewSchema,
-} from '@ferretry/protocol';
-import { QrCode } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { useLayoutMode } from '../../../hooks/use-layout-mode.ts';
+import { type FleetAgentControl, LearningConfigSchema, type VoiceEngine } from '@ferretry/protocol';
+import { type ReactNode, useEffect, useState } from 'react';
+import { useParakeetInstall } from '../../../hooks/use-parakeet-install.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useParakeetVoice } from '../../../lib/store.tsx';
-import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../../lib/stt/browser-recognition.ts';
+import { PARAKEET_DOWNLOAD_SIZE } from '../../../lib/stt/parakeet-model.ts';
 import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
-import type { SttSettings, SttSettingsPatch } from '../../../lib/stt/stt-settings.ts';
-import { Button } from '../../../shell/primitives.tsx';
 import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
-import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
-import { PairPhoneSheet } from '../../settings/pair-phone.tsx';
-import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
-import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
-import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
-import { AgentControlSection } from '../machine/settings-tab.tsx';
-import { DefaultRuntimeSection } from '../runtimes/default-runtime.tsx';
+import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
+import { machineSettings } from '../machine/machine-settings.ts';
+import { AGENT_CONTROL_KINDS, AGENT_CONTROL_WORDS } from '../machine/settings-tab.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
+import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { CloneMachine } from './clone.tsx';
-import type { MachineSetupStart, OnboardingDoneRow } from './onboarding-model.ts';
-import { wardenStartingDraft } from './onboarding-model.ts';
+import { PrimaryAction } from './footer-slot.tsx';
+import type { DefaultVoice, MachineSetupStart, OnboardingDoneRow } from './onboarding-model.ts';
 import { useSetupAccess } from './setup-access.ts';
-import { RadioChoices, SetupNote, SetupSection } from './setup-ui.tsx';
-import { machineVoiceEngine, VOICE_FILE, withMachineVoiceEngine } from './voice-default.ts';
-
-/** One step's lead sentence, the same size on every step. */
-function Lead({ children }: { readonly children: ReactNode }) {
-  return <p className="m-0 text-cell leading-base text-fg">{children}</p>;
-}
-
-// ── Pair ─────────────────────────────────────────────────────────────────────────────────────────
-
-export function OnboardingPairStep({
-  connection,
-  machineName,
-  createPairingClient,
-}: Pick<MachineTabProps, 'connection' | 'machineName'> & { readonly createPairingClient?: PairingClientFactory }) {
-  const [open, setOpen] = useState(false);
-  const phone = useLayoutMode() === 'drawer';
-  return (
-    <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="pair">
-      <SetupNote tone="ok" name="paired" title={`This device is paired with ${machineName}`}>
-        <span>
-          Pairing is always first and always direct: it can never be relayed, so this device has already met{' '}
-          {machineName} on its own network.
-        </span>
-      </SetupNote>
-      <SetupSection title="Another device" name="pair-another">
-        <p className="m-0 text-cell leading-base text-muted">
-          Pair a phone now, or later from Settings › Devices. A pairing code is single-use and lasts two minutes.
-        </p>
-        <div>
-          <Button type="button" data-onboarding-pair-phone="" onClick={() => setOpen(true)}>
-            <QrCode size={16} aria-hidden="true" />
-            Pair a phone too
-          </Button>
-        </div>
-      </SetupSection>
-      <PairPhoneSheet
-        connection={connection}
-        machineName={machineName}
-        open={open}
-        presentation={phone ? 'sheet' : 'dialog'}
-        onClose={() => setOpen(false)}
-        {...(createPairingClient === undefined ? {} : { createClient: createPairingClient })}
-      />
-    </div>
-  );
-}
+import { machineVoiceEngine, VOICE_FILE, withMachineVoiceEngine, withoutMachineVoiceEngine } from './voice-default.ts';
 
 // ── Start from ───────────────────────────────────────────────────────────────────────────────────
+
+function StartCard({
+  name,
+  title,
+  detail,
+  onClick,
+}: {
+  readonly name: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="kt-panel flex min-h-control min-w-0 flex-col gap-0.5 p-panel text-left hover:border-accent"
+      data-start-card={name}
+      onClick={onClick}
+    >
+      <span className="text-row font-semibold text-fg">{title} ›</span>
+      <span className="text-cell text-muted">{detail}</span>
+    </button>
+  );
+}
 
 export function OnboardingStartStep({
   start,
   onStart,
   sources,
   tab,
+  onFresh,
   onCloned,
   onCopied,
 }: {
   readonly start: MachineSetupStart;
   readonly onStart: (start: MachineSetupStart) => void;
-  /** Every OTHER machine this browser has paired. */
+  /** Every OTHER machine this browser has paired: never empty on this step. */
   readonly sources: readonly DaemonConnectionRecord[];
   readonly tab: MachineTabProps;
+  /** "Start fresh": setup moves on. */
+  readonly onFresh: () => void;
   /** The copy finished: the step is set and setup continues. */
   readonly onCloned: () => void;
   /** The copy ran, from this machine. */
   readonly onCopied: (source: string) => void;
 }) {
+  const only = sources.length === 1 ? sources[0] : undefined;
+  const copyTitle = only === undefined ? 'Copy another machine' : `Copy ${daemonDisplayName(only)}`;
   return (
-    <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="start">
-      <RadioChoices
-        legend="Start from"
-        legendHidden
-        name="onboarding-start"
-        value={start}
-        onChoose={onStart}
-        options={[
-          { id: 'fresh', title: 'A fresh setup', detail: 'Walk through each step.' },
-          {
-            id: 'clone',
-            title: 'Clone settings from another machine',
-            detail:
-              'Copy the Warden, learning, voice, agent controls, profiles and runtimes. Secrets and login tokens are never copied.',
-          },
-        ]}
-      />
+    <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="start">
       {start === 'clone' ? (
         <CloneMachine
           {...tab}
           sources={sources}
+          {...(only === undefined ? {} : { initialSource: only.daemonId })}
           doneLabel="Continue setup"
           presentation="embedded"
           onDone={onCloned}
           onCopied={onCopied}
           onLeave={() => onStart('fresh')}
         />
-      ) : null}
+      ) : (
+        <>
+          <p className="m-0 text-cell leading-base text-muted">
+            You have other machines. Start fresh, or copy one of them.
+          </p>
+          <StartCard
+            name="fresh"
+            title="Start fresh"
+            detail="Bring in Claude Code and Codex, one tap each."
+            onClick={onFresh}
+          />
+          <StartCard
+            name="clone"
+            title={copyTitle}
+            detail="Its Warden, learning, controls and runtimes. Never secrets or logins."
+            onClick={() => onStart('clone')}
+          />
+        </>
+      )}
     </div>
   );
 }
 
-// ── Voice ────────────────────────────────────────────────────────────────────────────────────────
+// ── Defaults ─────────────────────────────────────────────────────────────────────────────────────
 
-/** This device's dictation settings, as much of them as the Voice step changes. */
-export interface VoiceCleanupPort {
-  readonly settings: SttSettings;
-  readonly update: (patch: SttSettingsPatch) => void;
+const VOICE_OPTIONS: readonly { readonly id: DefaultVoice; readonly label: string }[] = [
+  { id: 'browser', label: 'Browser voice' },
+  { id: 'parakeet', label: `Parakeet (${PARAKEET_DOWNLOAD_SIZE}, on device)` },
+  { id: 'off', label: 'Off' },
+];
+
+const VOICE_DETAIL: Readonly<Record<DefaultVoice, string>> = {
+  browser: 'Your browser’s speech recognition. It sends what you say to your browser vendor.',
+  parakeet: `Speech turns into text on this device and never leaves it. ${PARAKEET_DOWNLOAD_SIZE} downloads when you use these.`,
+  off: 'No default voice. Each device chooses its own in Settings › Dictation.',
+};
+
+const voiceOf = (engine: VoiceEngine | null): DefaultVoice => engine ?? 'off';
+
+/** What a row's read left it as: still reading, read, or could not be read (its row is left out of the save). */
+type Read<T> =
+  | { readonly kind: 'reading' }
+  | { readonly kind: 'read'; readonly value: T }
+  | { readonly kind: 'failed' };
+
+const READING: Read<never> = { kind: 'reading' };
+
+/** One row of the Defaults list: a title, a sentence, and the control. */
+function DefaultRow({
+  title,
+  detail,
+  name,
+  children,
+  inline = false,
+}: {
+  readonly title: string;
+  readonly detail?: string;
+  readonly name: string;
+  readonly children: ReactNode;
+  readonly inline?: boolean;
+}) {
+  return (
+    <div
+      className={inline ? 'flex min-w-0 items-center gap-3 p-panel' : 'flex min-w-0 flex-col gap-2 p-panel'}
+      data-default-row={name}
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-row font-semibold text-fg">{title}</span>
+        {detail === undefined ? null : <span className="text-cell text-muted">{detail}</span>}
+      </span>
+      {children}
+    </div>
+  );
 }
 
-export function OnboardingVoiceStep({
+const sameControl = (left: FleetAgentControl, right: FleetAgentControl): boolean =>
+  AGENT_CONTROL_KINDS.every(kind => left[kind] === right[kind]);
+
+/**
+ * The Defaults page: what this machine already does, in one list. Nothing is written until `Use these`,
+ * and then only what differs from what the machine has — voice through its `voice.yaml`, learning through
+ * its PATCH, and what agents may use through the same reviewed change as Settings, so turning terminals,
+ * browsers or files on from another device still asks for the passkey and a refusal still stops the page.
+ * Parakeet downloads only if it was picked.
+ */
+export function OnboardingDefaultsStep({
   tab,
-  cleanup,
   voice,
-  browserSupport,
+  onFinished,
 }: {
   readonly tab: MachineTabProps;
-  /** This device's clean-up choice; without it the step points at Settings › Dictation. */
-  readonly cleanup?: VoiceCleanupPort;
   /** Parakeet on this device; the app's own unless a test or the harness hands one in. */
   readonly voice?: ParakeetVoice | null;
-  /** Whether the phone/browser engine works on this page; production reads the page. */
-  readonly browserSupport?: BrowserRecognitionSupport;
+  /** Everything that changed was saved: the page moves on. */
+  readonly onFinished: () => void;
 }) {
-  const { connection, createClient, machineName } = tab;
+  const { connection, createClient, machine, machineName, checking, onRetry } = tab;
+  const access = useSetupAccess({ connection, createClient });
+  const { changes } = access;
   const contextVoice = useParakeetVoice();
   const parakeet = voice === undefined ? contextVoice : voice;
-  const detected = useMemo(() => browserRecognitionProvider().support, []);
-  const support = browserSupport ?? detected;
-  /** The machine default as `voice.yaml` names it: `undefined` while reading. */
-  const [engine, setEngine] = useState<VoiceEngine | null | undefined>(undefined);
+  const install = useParakeetInstall(parakeet);
+
+  // What the machine has (`base*`) and what the person has set on this page (the rest).
+  const [baseVoice, setBaseVoice] = useState<Read<DefaultVoice>>(READING);
+  const [basePassive, setBasePassive] = useState<Read<boolean>>(READING);
+  const [pickedVoice, setPickedVoice] = useState<DefaultVoice | null>(null);
+  const [pickedPassive, setPickedPassive] = useState<boolean | null>(null);
+  const [pickedControl, setPickedControl] = useState<FleetAgentControl | null>(null);
+  const [baseControl, setBaseControl] = useState<FleetAgentControl | null>(null);
+  const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    void createClient(connection)
-      .then(async client => machineVoiceEngine((await readConfigFile(client, VOICE_FILE)).text))
-      .then(
-        found => {
-          if (live) setEngine(found);
-        },
-        (cause: unknown) => {
-          if (live) {
-            setEngine(null);
-            setProblem(changeRefusalSentence(cause));
-          }
-        },
-      );
+    void createClient(connection).then(
+      async client => {
+        const [file, learning] = await Promise.all([
+          readConfigFile(client, VOICE_FILE).then(
+            (read): Read<DefaultVoice> => ({ kind: 'read', value: voiceOf(machineVoiceEngine(read.text)) }),
+            (): Read<DefaultVoice> => ({ kind: 'failed' }),
+          ),
+          client.request('/v1/learning/config', LearningConfigSchema).then(
+            (config): Read<boolean> => ({ kind: 'read', value: config.passiveDefault }),
+            (): Read<boolean> => ({ kind: 'failed' }),
+          ),
+        ]);
+        if (!live) return;
+        setBaseVoice(file);
+        setBasePassive(learning);
+      },
+      () => {
+        if (!live) return;
+        setBaseVoice({ kind: 'failed' });
+        setBasePassive({ kind: 'failed' });
+      },
+    );
     return () => {
       live = false;
     };
   }, [connection, createClient]);
 
-  /** Write the default into voice.yaml against what is there now, keeping the rest of the file. */
-  const choose = (next: VoiceEngine): void => {
+  const currentControl = baseControl ?? machine?.agentControl ?? null;
+  const control = pickedControl ?? currentControl;
+  const voiceNow = baseVoice.kind === 'read' ? (pickedVoice ?? baseVoice.value) : null;
+  const passiveNow = basePassive.kind === 'read' ? (pickedPassive ?? basePassive.value) : null;
+  const controlChanged = control !== null && currentControl !== null && !sameControl(control, currentControl);
+  const voiceChanged = baseVoice.kind === 'read' && voiceNow !== null && voiceNow !== baseVoice.value;
+  const passiveChanged = basePassive.kind === 'read' && passiveNow !== null && passiveNow !== basePassive.value;
+  const reading = baseVoice.kind === 'reading' || basePassive.kind === 'reading' || (machine === null && checking);
+
+  const save = async (): Promise<void> => {
     setProblem(null);
-    setEngine(next);
-    void (async () => {
-      try {
+    setSaving(true);
+    try {
+      // Agent controls first: it can be refused (or ask for a passkey), and a refusal must stop the page
+      // before anything else is written.
+      if (controlChanged && machine !== null && control !== null) {
+        const result = await changes.apply(machineSettings(machine, { agentControl: control }));
+        if (result.kind === 'refused') return;
+        setBaseControl(control);
+        setPickedControl(null);
+        onRetry();
+      }
+      if (passiveChanged && passiveNow !== null) {
+        const client = await createClient(connection);
+        const config = await client.request('/v1/learning/config', LearningConfigSchema, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ passiveDefault: passiveNow }),
+        });
+        setBasePassive({ kind: 'read', value: config.passiveDefault });
+        setPickedPassive(null);
+      }
+      if (voiceChanged && voiceNow !== null) {
         const client = await createClient(connection);
         const file = await readConfigFile(client, VOICE_FILE);
-        await writeConfigFile(client, VOICE_FILE, withMachineVoiceEngine(file.text, next), file.etag);
-      } catch (cause) {
-        setProblem(changeRefusalSentence(cause));
+        const next =
+          voiceNow === 'off' ? withoutMachineVoiceEngine(file.text) : withMachineVoiceEngine(file.text, voiceNow);
+        await writeConfigFile(client, VOICE_FILE, next, file.etag);
+        setBaseVoice({ kind: 'read', value: voiceNow });
+        setPickedVoice(null);
+        // The one download in setup, and only because it was picked. It carries on in this browser while setup moves on.
+        if (voiceNow === 'parakeet' && (install.phase === 'absent' || install.phase === 'partial'))
+          void parakeet?.install();
       }
-    })();
-  };
-
-  return (
-    <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="voice">
-      <SetupSection title="Speech to text" name="voice-engine">
-        <p className="m-0 text-cell leading-base text-muted">
-          The default for every device paired to {machineName}: a device uses it until you pick another engine on that
-          device in Settings › Dictation. Speech always turns into text on the device itself. The download is optional —
-          skip it and choose later.
-        </p>
-        {engine === undefined ? (
-          <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="voice">
-            Reading {machineName}’s voice settings…
-          </p>
-        ) : (
-          <VoiceEngineChoice value={engine} onChange={choose} voice={parakeet} browserSupport={support} quiet />
-        )}
-        {problem === null ? null : (
-          <p role="alert" className="m-0 text-ui text-err" data-onboarding-voice-problem="">
-            {problem}
-          </p>
-        )}
-      </SetupSection>
-      <SetupSection title="Clean-up of the transcript" name="voice-cleanup">
-        <p className="m-0 text-cell leading-base text-muted">
-          Optional: punctuation, filler words, formatting. Only the transcript text is sent, only when you dictate, and
-          never in the background. Groq and Cerebras need their key from Speed-ups.
-        </p>
-        {cleanup === undefined ? (
-          <p className="m-0 text-cell text-muted" data-onboarding-voice-cleanup="settings">
-            Choose it on each device in Settings › Behaviour › Dictation.
-          </p>
-        ) : (
-          <RadioChoices
-            legend="Clean-up"
-            legendHidden
-            name="voice-cleanup"
-            value={cleanup.settings.enhancementProvider}
-            onChoose={enhancementProvider => cleanup.update({ enhancementProvider })}
-            options={[
-              {
-                id: 'local',
-                title: 'On this device only',
-                detail: 'Word fixes from your dictionary. Nothing is sent.',
-              },
-              { id: 'groq', title: 'Groq', detail: 'A fast, cheap model cleans up the text. Fractions of a cent.' },
-              { id: 'cerebras', title: 'Cerebras', detail: 'The alternative fast post-processor.' },
-            ]}
-          />
-        )}
-      </SetupSection>
-    </div>
-  );
-}
-
-// ── Warden ───────────────────────────────────────────────────────────────────────────────────────
-
-interface WardenLoaded {
-  readonly view: WardenConfigView;
-  readonly draft: WardenConfig;
-  readonly speedups: SpeedupsView | null;
-}
-
-/**
- * Settings › Warden's card on this step. It opens on {@link wardenStartingDraft} — Jev switched on when a
- * Jev key is set and the machine is still on the free default — and nothing changes until Save.
- */
-export function OnboardingWardenStep({
-  tab,
-  onSaved,
-}: {
-  readonly tab: MachineTabProps;
-  readonly onSaved: () => void;
-}) {
-  const { connection, createClient } = tab;
-  const [loaded, setLoaded] = useState<WardenLoaded | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const client = await createClient(connection);
-        const [view, speedups] = await Promise.all([
-          client.request('/v1/warden/config', WardenConfigViewSchema),
-          readSpeedups(client).catch(() => null),
-        ]);
-        const jev = jevKeyStatus(speedups).state === 'set';
-        if (live) setLoaded({ view, draft: wardenStartingDraft(view.config, jev), speedups });
-      } catch (cause) {
-        if (live) setFailure(changeRefusalSentence(cause));
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [connection, createClient]);
-
-  const save = async (state: WardenLoaded, patch: WardenConfigPatch): Promise<void> => {
-    setSaving(true);
-    setError(null);
-    try {
-      const client = await createClient(connection);
-      const view = await client.request('/v1/warden/config', WardenConfigViewSchema, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      setLoaded({ ...state, view, draft: view.config });
-      setSaved(true);
-      onSaved();
+      onFinished();
     } catch (cause) {
-      setError(changeRefusalSentence(cause));
+      setProblem(changeRefusalSentence(cause));
     } finally {
       setSaving(false);
     }
   };
 
-  if (failure !== null)
-    return (
-      <SetupNote live tone="warn" name="warden-unavailable" title="Couldn’t read the Warden’s settings">
-        <span>{failure} Skip this step and set it up later in Settings › Warden.</span>
-      </SetupNote>
-    );
-  if (loaded === null)
-    return (
-      <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="warden">
-        Reading the Warden’s settings…
-      </p>
-    );
-  const dirty = Object.keys(wardenConfigPatchFrom(loaded.view.config, loaded.draft)).length > 0;
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="warden">
-      <Lead>The Warden watches your ferrets and flags the stuck ones. {jevLead(loaded)}</Lead>
-      <WardenConfigCard
-        view={loaded.view}
-        draft={loaded.draft}
-        onChange={draft => {
-          setLoaded({ ...loaded, draft });
-          setSaved(false);
-        }}
-        jevKey={jevKeyStatus(loaded.speedups)}
-        saving={saving}
-        error={error}
-        saved={saved}
-        onSave={patch => void save(loaded, patch)}
-        quiet
-      />
-      {dirty ? (
-        <p className="m-0 text-meta text-muted" data-onboarding-warden-unsaved="">
-          Not saved yet. Save puts these in effect; Continue without saving keeps the machine as it is.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-const jevLead = (loaded: WardenLoaded): string =>
-  jevKeyStatus(loaded.speedups).state === 'set'
-    ? 'A Jev key is set, so Jev is switched on: it clears healthy flags for fractions of a cent and shows you the rest.'
-    : 'Without a Jev key the safe default is rules only: flags are shown to you, and nothing is spent.';
-
-// ── Learning ─────────────────────────────────────────────────────────────────────────────────────
-
-export function OnboardingLearningStep({
-  tab,
-  onSaved,
-}: {
-  readonly tab: MachineTabProps;
-  readonly onSaved: () => void;
-}) {
-  const { connection, createClient } = tab;
-  const [passive, setPassive] = useState<boolean | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    void createClient(connection)
-      .then(async client => await client.request('/v1/learning/config', LearningConfigSchema))
-      .then(
-        config => {
-          if (live) setPassive(config.passiveDefault);
-        },
-        (cause: unknown) => {
-          if (live) setProblem(changeRefusalSentence(cause));
-        },
-      );
-    return () => {
-      live = false;
-    };
-  }, [connection, createClient]);
-
-  const choose = (passiveDefault: boolean): void => {
-    setSaving(true);
-    setProblem(null);
-    void createClient(connection)
-      .then(
-        async client =>
-          await client.request('/v1/learning/config', LearningConfigSchema, {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ passiveDefault }),
-          }),
-      )
-      .then(
-        config => {
-          setPassive(config.passiveDefault);
-          onSaved();
-        },
-        (cause: unknown) => setProblem(changeRefusalSentence(cause)),
-      )
-      .finally(() => setSaving(false));
-  };
-
-  return (
-    <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="learning">
-      <Lead>
-        Passive learning instructs NEW ferrets to file a lesson when you correct them (
-        <span className="font-mono">fy lesson suggest "…" --scope global|repo</span>). You review every lesson in the
-        Learning hub; nothing is applied on its own.
-      </Lead>
-      {passive === null && problem === null ? (
-        <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="learning">
-          Reading the learning default…
-        </p>
-      ) : passive === null ? null : (
-        <RadioChoices
-          legend="Passive learning for new ferrets"
-          legendHidden
-          name="onboarding-passive"
-          value={passive ? 'on' : 'off'}
-          onChoose={value => {
-            if (!saving) choose(value === 'on');
-          }}
-          options={[
-            { id: 'on', title: 'On', detail: 'New ferrets are taught to suggest lessons.' },
-            { id: 'off', title: 'Off', detail: 'New ferrets are not taught; you can still scan for lessons later.' },
-          ]}
+    <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="defaults">
+      <p className="m-0 text-cell leading-base text-muted">These are already set. Change any, or keep them.</p>
+      <div className="kt-panel flex min-w-0 flex-col divide-y divide-border p-0">
+        <DefaultRow
+          name="voice"
+          title="Voice on this device"
+          {...(voiceNow === null ? {} : { detail: VOICE_DETAIL[voiceNow] })}
+        >
+          {baseVoice.kind === 'reading' ? (
+            <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="voice">
+              Reading {machineName}’s voice settings…
+            </p>
+          ) : voiceNow === null ? (
+            <p className="m-0 text-cell text-warn" data-default-unread="voice">
+              Couldn’t read {machineName}’s voice settings. Choose it in Settings › Dictation.
+            </p>
+          ) : (
+            <select
+              aria-label="Voice on this device"
+              className="kt-input max-w-[20rem]"
+              value={voiceNow}
+              disabled={saving}
+              onChange={event => setPickedVoice(event.target.value as DefaultVoice)}
+            >
+              {VOICE_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </DefaultRow>
+        <DefaultRow
+          name="learning"
+          title="Learn from my corrections"
+          detail="New ferrets suggest lessons. You review each one."
+          inline
+        >
+          {passiveNow === null ? (
+            <span className="text-cell text-muted" data-default-unread="learning">
+              {basePassive.kind === 'reading' ? 'Reading…' : 'Unreadable'}
+            </span>
+          ) : (
+            <input
+              type="checkbox"
+              aria-label="Learn from my corrections"
+              className="shrink-0"
+              checked={passiveNow}
+              disabled={saving}
+              onChange={event => setPickedPassive(event.target.checked)}
+            />
+          )}
+        </DefaultRow>
+        <DefaultRow name="agents" title="Agents may use">
+          {control === null ? (
+            <span className="text-cell text-muted" data-default-unread="agents">
+              {checking ? `Checking ${machineName}…` : `${machineName}’s controls show once it answers.`}
+            </span>
+          ) : (
+            <span className="flex flex-wrap gap-x-4 gap-y-1 text-cell text-fg" data-agent-control="">
+              {AGENT_CONTROL_KINDS.map(kind => (
+                <label key={kind} className="flex items-center gap-1.5" data-agent-control-kind={kind}>
+                  <input
+                    type="checkbox"
+                    checked={control[kind]}
+                    disabled={saving}
+                    onChange={event => {
+                      setPickedControl({ ...control, [kind]: event.target.checked });
+                      changes.clear();
+                    }}
+                  />
+                  {AGENT_CONTROL_WORDS[kind].title}
+                </label>
+              ))}
+            </span>
+          )}
+        </DefaultRow>
+      </div>
+      {controlChanged || changes.refusal !== null ? (
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Use these"
+          onSubmit={() => void save()}
+          hideSubmit
         />
-      )}
+      ) : null}
       {problem === null ? null : (
-        <p role="alert" className="m-0 text-ui text-err">
+        <p role="alert" className="m-0 text-cell text-err" data-onboarding-defaults-problem="">
           {problem}
         </p>
       )}
-    </div>
-  );
-}
-
-// ── Agent controls ───────────────────────────────────────────────────────────────────────────────
-
-export function OnboardingControlsStep({ tab }: { readonly tab: MachineTabProps }) {
-  const { machine, machineName, connection, createClient, onRetry, checking } = tab;
-  const access = useSetupAccess({ connection, createClient });
-  if (machine === null)
-    return (
-      <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="controls">
-        {checking ? `Checking ${machineName}…` : `${machineName}’s controls show once it answers.`}
-      </p>
-    );
-  return (
-    <div className="flex min-w-0 flex-col gap-5" data-onboarding-step-body="controls">
-      <Lead>What ferrets on {machineName} may control, and the runtime a new ferret uses.</Lead>
-      <AgentControlSection
-        key={Object.values(machine.agentControl).join(',')}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onRetry}
-      />
-      <DefaultRuntimeSection
-        key={machine.defaultRuntime}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onRetry}
+      <PrimaryAction
+        label={saving || changes.busy ? 'Saving…' : 'Use these'}
+        disabled={reading || saving || changes.busy}
+        onClick={() => void save()}
+        name="use-defaults"
       />
     </div>
   );
@@ -501,69 +395,35 @@ export function OnboardingControlsStep({ tab }: { readonly tab: MachineTabProps 
 
 // ── Done ─────────────────────────────────────────────────────────────────────────────────────────
 
-const DONE_TONE: Readonly<Record<OnboardingDoneRow['state'], 'ok' | 'warn' | 'pend'>> = {
-  set: 'ok',
-  skipped: 'warn',
-  'not visited': 'pend',
-};
-
 export function OnboardingDoneStep({
   rows,
-  machineName,
+  defaults,
+  changeHref,
   onNavigate,
-  createRuntimeHref,
   notes = [],
 }: {
   readonly rows: readonly OnboardingDoneRow[];
-  readonly machineName: string;
+  /** "Defaults: browser voice, learning on, …": what the machine has now. */
+  readonly defaults: string;
+  /** Settings, where those defaults are changed. */
+  readonly changeHref: string;
   readonly onNavigate: (to: string) => void;
-  /** Present only while the machine has no runtime: setup is not finished until one exists. */
-  readonly createRuntimeHref?: string;
   /** What the imports did, one line each (the conversations result, a sign-in left for later). */
   readonly notes?: readonly string[];
 }) {
-  const later = rows.filter(row => row.later !== undefined);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="done">
-      <p className="m-0 text-row font-semibold text-fg">
-        {createRuntimeHref !== undefined
-          ? `${machineName} has no runtime yet, so nothing can start here.`
-          : later.length === 0
-            ? `${machineName} is ready.`
-            : `${machineName} is ready. ${later.length === 1 ? 'One step is' : `${String(later.length)} steps are`} left for later.`}
-      </p>
-      {createRuntimeHref === undefined ? null : (
-        <a
-          href={createRuntimeHref}
-          className="kt-btn self-start"
-          data-onboarding-create-runtime=""
-          onClick={event => {
-            event.preventDefault();
-            onNavigate(createRuntimeHref);
-          }}
-        >
-          Create a runtime
-        </a>
-      )}
-      {notes.length === 0 ? null : (
-        <ul className="m-0 flex min-w-0 list-none flex-col gap-1 p-0 text-cell text-muted" data-onboarding-notes="">
-          {notes.map(note => (
-            <li key={note}>{note}</li>
-          ))}
-        </ul>
-      )}
-      <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-onboarding-summary="">
+      <ul className="kt-panel m-0 flex min-w-0 list-none flex-col gap-2 p-panel text-cell" data-onboarding-summary="">
         {rows.map(row => (
           <li
             key={row.id}
-            className="kt-panel flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 p-panel"
+            className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
             data-onboarding-summary-row={row.id}
-            data-state={row.state}
+            data-state={row.set ? 'set' : 'skipped'}
           >
-            <span className="kt-badge shrink-0" data-tone={DONE_TONE[row.state]}>
-              {row.state}
+            <span className={row.set ? 'text-fg' : 'text-muted'}>
+              {row.set ? '✓' : '–'} {row.text}
             </span>
-            <span className="min-w-0 flex-1 text-ui font-semibold text-fg">{row.label}</span>
             {row.later === undefined ? null : (
               <a
                 href={row.later}
@@ -577,13 +437,30 @@ export function OnboardingDoneStep({
                 Set up later
               </a>
             )}
-            {row.detail === undefined ? null : (
-              // Its own line: on a phone a sentence beside the label is a column one word wide.
-              <span className="basis-full [overflow-wrap:anywhere] text-meta text-muted">{row.detail}</span>
-            )}
           </li>
         ))}
       </ul>
+      {notes.length === 0 ? null : (
+        <ul className="m-0 flex min-w-0 list-none flex-col gap-1 p-0 text-cell text-muted" data-onboarding-notes="">
+          {notes.map(note => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+      <p className="m-0 text-cell leading-base text-muted" data-onboarding-defaults-sentence="">
+        {defaults}{' '}
+        <a
+          href={changeHref}
+          className="font-semibold text-accent underline"
+          data-onboarding-later="defaults"
+          onClick={event => {
+            event.preventDefault();
+            onNavigate(changeHref);
+          }}
+        >
+          Change in Settings
+        </a>
+      </p>
     </div>
   );
 }

@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { SpeedupProvider, SpeedupsView, SpeedupTestResult } from '@ferretry/protocol';
+import type {
+  SpeedupProvider,
+  SpeedupsView,
+  SpeedupTestResult,
+  WardenConfig,
+  WardenConfigView,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { OnboardingSpeedupsStep } from '../../../../../src/features/fleet/setup/speedups-step.tsx';
 import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
+import { wardenConfig } from '../../../../support/warden.ts';
 import { type Call, machineView, STUDIO, scriptedClient } from './setup-support.ts';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────────────────────
@@ -60,6 +67,13 @@ const summary = (name: string) => ({
 
 const KEY = 'sk-test-0123456789';
 
+const WARDEN_PATH = '/v1/warden/config';
+const wardenView = (overrides: Partial<WardenConfig> = {}): WardenConfigView => {
+  const config = wardenConfig(overrides);
+  return { config, accounts: config.accounts, warnings: [] };
+};
+const jevOnView = (): WardenConfigView => wardenView({ layers: { jev: true, llm: false } });
+
 // ── Driving ──────────────────────────────────────────────────────────────────────────────────────
 
 let mounted: Mounted | null = null;
@@ -92,6 +106,10 @@ const typeInto = async (provider: SpeedupProvider, value: string): Promise<void>
   });
   await settle();
 };
+
+const jevBox = () => q('[data-speedups-warden-jev] input') as HTMLInputElement | null;
+const wardenWrites = (calls: readonly Call[]) =>
+  calls.filter(call => call.path === WARDEN_PATH && call.body !== undefined);
 
 const save = () => q('[data-onboarding-primary="save-keys"]') as HTMLButtonElement | null;
 
@@ -129,6 +147,10 @@ const start = async (answers: Parameters<typeof scriptedClient>[0]): Promise<Run
 const posted = (calls: readonly Call[], path: string) => calls.filter(call => call.path === path);
 
 // ── Tests ────────────────────────────────────────────────────────────────────────────────────────
+
+const byWardenMethod = () => (call: Call) => (call.body === undefined ? wardenView() : jevOnView());
+
+const secretAnswer = (call: Call) => summary((call.body as { name: string }).name);
 
 describe('OnboardingSpeedupsStep', () => {
   it('shows Jev on the page, folds Groq and Cerebras under dictation clean-up, and says keys are never shown again', async () => {
@@ -174,6 +196,7 @@ describe('OnboardingSpeedupsStep', () => {
       [SECRETS_PATH]: (call: Call) => summary((call.body as { name: string }).name),
       [testPath('jev')]: result('jev', true),
       [testPath('groq')]: result('groq', true),
+      [WARDEN_PATH]: wardenView(),
     });
     await typeInto('jev', ` ${KEY} `);
     await typeInto('groq', `${KEY}-groq`);
@@ -255,6 +278,105 @@ describe('OnboardingSpeedupsStep', () => {
     await start({ [SPEEDUPS_PATH]: view([], 'damaged') });
     expect(text('[data-setup-note="speedups-vault"]')).toContain('The secret store can’t be read');
   });
+  it('offers “Let the Warden use Jev” under the Jev key, ticked, and says what it costs', async () => {
+    await start({ [SPEEDUPS_PATH]: view() });
+    const label = must(q('[data-speedups-warden-jev]'), 'the Warden checkbox');
+    expect(label.closest('[data-speedup-field="jev"]')).toBeNull();
+    expect(label.previousElementSibling?.getAttribute('data-speedup-field')).toBe('jev');
+    expect(label.textContent).toBe('Let the Warden use Jev (fractions of a cent per decision)');
+    expect(jevBox()?.checked).toBe(true);
+  });
+
+  it('switches Jev on through the Warden’s own PATCH when a Jev key was saved, and it worked', async () => {
+    let reads = 0;
+    const run = await start({
+      [SPEEDUPS_PATH]: () => view(reads++ === 0 ? [] : ['jev']),
+      [SECRETS_PATH]: secretAnswer,
+      [testPath('jev')]: result('jev', true),
+      [WARDEN_PATH]: byWardenMethod(),
+    });
+    await typeInto('jev', KEY);
+    await clickOn(save(), 'Save keys');
+    const [patch] = wardenWrites(run.calls);
+    expect(patch?.body).toEqual({ layers: { jev: true } });
+    expect(run.finished).toHaveLength(1);
+  });
+
+  it('leaves the Warden alone when the box is unticked', async () => {
+    const run = await start({
+      [SPEEDUPS_PATH]: view(),
+      [SECRETS_PATH]: secretAnswer,
+      [testPath('jev')]: result('jev', true),
+      [WARDEN_PATH]: wardenView(),
+    });
+    await typeInto('jev', KEY);
+    await clickOn(jevBox(), 'the Warden checkbox');
+    expect(jevBox()?.checked).toBe(false);
+    await clickOn(save(), 'Save keys');
+    expect(run.calls.some(call => call.path === WARDEN_PATH)).toBe(false);
+    expect(run.finished).toHaveLength(1);
+  });
+
+  it('leaves Jev off when no Jev key was saved, even with the box ticked', async () => {
+    const run = await start({
+      [SPEEDUPS_PATH]: view(),
+      [SECRETS_PATH]: secretAnswer,
+      [testPath('groq')]: result('groq', true),
+      [WARDEN_PATH]: wardenView(),
+    });
+    await typeInto('groq', KEY);
+    await clickOn(save(), 'Save keys');
+    expect(jevBox()?.checked).toBe(true);
+    expect(run.calls.some(call => call.path === WARDEN_PATH)).toBe(false);
+    expect(run.finished).toHaveLength(1);
+  });
+
+  it('leaves Jev off when the Jev key did not pass its test', async () => {
+    const run = await start({
+      [SPEEDUPS_PATH]: view(['jev']),
+      [SECRETS_PATH]: secretAnswer,
+      [testPath('jev')]: result('jev', false, 'Jev did not accept that key.'),
+      [WARDEN_PATH]: wardenView(),
+    });
+    await typeInto('jev', KEY);
+    await clickOn(save(), 'Save keys');
+    expect(run.calls.some(call => call.path === WARDEN_PATH)).toBe(false);
+    expect(run.finished).toHaveLength(0);
+  });
+
+  it('does not touch a Warden that already has a layer on, or is turned off', async () => {
+    for (const config of [jevOnView(), wardenView({ enabled: false })]) {
+      const run = await start({
+        [SPEEDUPS_PATH]: view(['jev']),
+        [SECRETS_PATH]: secretAnswer,
+        [testPath('jev')]: result('jev', true),
+        [WARDEN_PATH]: config,
+      });
+      await typeInto('jev', KEY);
+      await clickOn(save(), 'Save keys');
+      expect(wardenWrites(run.calls)).toEqual([]);
+      expect(run.finished).toHaveLength(1);
+      await mounted?.unmount();
+      mounted = null;
+    }
+  });
+
+  it('keeps the keys, says Jev could not be switched on, and stays when the Warden refuses', async () => {
+    const run = await start({
+      [SPEEDUPS_PATH]: view(['jev']),
+      [SECRETS_PATH]: secretAnswer,
+      [testPath('jev')]: result('jev', true),
+      [WARDEN_PATH]: (call: Call) =>
+        call.body === undefined ? wardenView() : new FyHttpError('The machine refused.', 403, 'forbidden'),
+    });
+    await typeInto('jev', KEY);
+    await clickOn(save(), 'Save keys');
+    expect(run.saved).toHaveLength(1);
+    expect(run.finished).toHaveLength(0);
+    expect(text('[data-speedups-problem]')).toContain(
+      'Your keys are saved, but Jev could not be switched on for the Warden.',
+    );
+  });
 });
 
 describe('OnboardingSpeedupsStep · each provider says what it costs and what leaves the machine', () => {
@@ -335,6 +457,7 @@ describe('OnboardingSpeedupsStep · every typed key must be a whole key', () => 
       [SPEEDUPS_PATH]: view(),
       [SECRETS_PATH]: (call: Call) => summary((call.body as { name: string }).name),
       [testPath('jev')]: result('jev', true),
+      [WARDEN_PATH]: wardenView(),
       [testPath('groq')]: result('groq', true),
     });
     await typeInto('jev', KEY);
@@ -395,6 +518,7 @@ describe('OnboardingSpeedupsStep · finishing after the page was left', () => {
         [SPEEDUPS_PATH]: view(),
         [SECRETS_PATH]: (call: Call) => summary((call.body as { name: string }).name),
         [testPath('jev')]: result('jev', true),
+        [WARDEN_PATH]: wardenView(),
       },
       calls,
     );

@@ -1,22 +1,22 @@
 /**
  * New machine setup, as data (spec R4, R6; build plan P9).
  *
- * Ten steps on ONE PROGRESS RAIL, not a forced stepper and never a stepper inside a step: **Pair** →
- * **Start from** → **Claude Code** → **Codex** → **Speed-ups** → **Voice** → **Warden** → **Learning** →
- * **Agent controls** → **Done**. Every step can be skipped, any step can be opened from the rail at any
- * time, and every one of them is also a panel in Settings, so a skipped step is never lost — Done lists
- * it with a "Set up later" link to that panel. The Claude Code and Codex steps each make their runtime in
- * place (`harness-import-model.ts`): there is no separate runtime wizard.
+ * Five steps on ONE PROGRESS RAIL, not a forced stepper and never a stepper inside a step: **Claude Code** →
+ * **Codex** → **Speed-ups** → **Defaults** → **Done**, with **Start from** in front only when this browser has
+ * another machine to copy. (Pairing is always already done, so it has no step.) Every step can be skipped,
+ * any step can be opened from the rail at any time, and every one of them is also a panel in Settings, so a
+ * skipped step is never lost. The Claude Code and Codex steps each make their runtime in place
+ * (`harness-import-model.ts`): there is no separate runtime wizard.
  *
- * NOTHING HERE IS SENT ANYWHERE. A step saves through its own surface (Speed-ups through the secret
- * route, the Warden through its PATCH, a control through a reviewed change); this module only knows
- * where the person is, which steps they finished or skipped, and how to say so. The progress is kept
- * in THIS browser (`setup-progress.ts`) — step ids and two words, never a value from the machine.
+ * NOTHING HERE IS SENT ANYWHERE. A step saves through its own surface (Speed-ups through the secret route and
+ * the Warden's PATCH, Defaults through the voice, learning and agent-control saves); this module only knows
+ * where the person is, which steps they finished or skipped, and how to say so. The progress is kept in THIS
+ * browser (`setup-progress.ts`) — step ids and two words, never a value from the machine.
  *
  * Pure: the progress in, the next progress and the words out.
  */
 
-import type { WardenConfig } from '@ferretry/protocol';
+import type { FleetAgentControl, WardenConfig } from '@ferretry/protocol';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { type MachineTabId, machineHash } from '../shell/machine-route.ts';
@@ -26,15 +26,11 @@ import type { SetupHarness } from './setup-words.ts';
 
 /** The steps, in the order the rail lists them. The ids are what progress stores. */
 export const ONBOARDING_STEPS = [
-  { id: 'pair', label: 'Pair this device' },
   { id: 'start', label: 'Start from…' },
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
   { id: 'speedups', label: 'Speed-ups' },
-  { id: 'voice', label: 'Voice' },
-  { id: 'warden', label: 'Warden' },
-  { id: 'learning', label: 'Learning' },
-  { id: 'controls', label: 'Agent controls' },
+  { id: 'defaults', label: 'Defaults' },
   { id: 'done', label: 'Done' },
 ] as const;
 
@@ -51,6 +47,17 @@ const STEP_IDS: ReadonlySet<string> = new Set(ONBOARDING_STEPS.map(step => step.
 
 export const isMachineSetupStepId = (value: string): value is MachineSetupStepId => STEP_IDS.has(value);
 
+/**
+ * The steps this setup lists. Start from is there only when another machine can be copied: with none, the
+ * first page is Claude Code and no step is spent on a question with one answer.
+ */
+export const onboardingSteps = (hasSources: boolean): readonly MachineSetupStepId[] =>
+  ONBOARDING_STEPS.map(step => step.id).filter(id => hasSources || id !== 'start');
+
+/** `at`, or the first listed step when `at` is not on this setup's rail. */
+export const onboardingStepAt = (at: MachineSetupStepId, steps: readonly MachineSetupStepId[]): MachineSetupStepId =>
+  steps.includes(at) ? at : (steps[0] ?? 'claude');
+
 /** What the person did with a step. A step they never reached has no state. */
 export type MachineSetupStepState = 'done' | 'skipped';
 
@@ -66,22 +73,20 @@ export interface MachineSetupProgress {
 }
 
 /**
- * Where a new setup begins. Pairing is already done — this screen is only reachable through a pairing,
- * and pairing can never be relayed, so the device on it has already met the machine directly — so the
- * rail shows it set and the person starts on the first real choice.
+ * Where a new setup begins: the first listed step (`onboardingStepAt` moves it off Start when there is
+ * nothing to copy). Pairing is already done — this screen is only reachable through a pairing, and pairing
+ * can never be relayed — so it is not a step at all.
  */
-export const ONBOARDING_START: MachineSetupProgress = { at: 'start', states: { pair: 'done' }, start: 'fresh' };
+export const ONBOARDING_START: MachineSetupProgress = { at: 'start', states: {}, start: 'fresh' };
 
 export const onboardingStepLabel = (id: MachineSetupStepId): string =>
   (ONBOARDING_STEPS.find(step => step.id === id) as (typeof ONBOARDING_STEPS)[number]).label;
 
-const indexOf = (id: MachineSetupStepId): number => ONBOARDING_STEPS.findIndex(step => step.id === id);
+const after = (id: MachineSetupStepId, steps: readonly MachineSetupStepId[]): MachineSetupStepId =>
+  steps[Math.min(steps.indexOf(id) + 1, steps.length - 1)] ?? id;
 
-const after = (id: MachineSetupStepId): MachineSetupStepId =>
-  (ONBOARDING_STEPS[Math.min(indexOf(id) + 1, ONBOARDING_STEPS.length - 1)] as (typeof ONBOARDING_STEPS)[number]).id;
-
-const before = (id: MachineSetupStepId): MachineSetupStepId =>
-  (ONBOARDING_STEPS[Math.max(indexOf(id) - 1, 0)] as (typeof ONBOARDING_STEPS)[number]).id;
+const before = (id: MachineSetupStepId, steps: readonly MachineSetupStepId[]): MachineSetupStepId =>
+  steps[Math.max(steps.indexOf(id) - 1, 0)] ?? id;
 
 const isTask = (id: MachineSetupStepId): id is MachineSetupTaskId => id !== 'done';
 
@@ -98,14 +103,19 @@ export const goToOnboardingStep = (progress: MachineSetupProgress, id: MachineSe
 const SET_BY_THEIR_OWN_BUTTON: ReadonlySet<MachineSetupStepId> = new Set(['claude', 'codex']);
 
 /** Continue: this step is set, and the next one opens. A CLI step not imported yet counts as skipped. */
-export const continueOnboarding = (progress: MachineSetupProgress): MachineSetupProgress =>
-  SET_BY_THEIR_OWN_BUTTON.has(progress.at)
-    ? skipOnboardingStep(progress)
+export const continueOnboarding = (
+  stored: MachineSetupProgress,
+  steps: readonly MachineSetupStepId[],
+): MachineSetupProgress => {
+  const progress = { ...stored, at: onboardingStepAt(stored.at, steps) };
+  return SET_BY_THEIR_OWN_BUTTON.has(progress.at)
+    ? skipOnboardingStep(progress, steps)
     : {
         ...progress,
-        at: after(progress.at),
+        at: after(progress.at, steps),
         states: isTask(progress.at) ? { ...progress.states, [progress.at]: 'done' } : progress.states,
       };
+};
 
 /** The step that follows another, whether or not anyone is on it. */
 export const onboardingStepAfter = after;
@@ -119,9 +129,10 @@ export const completeOnboardingStep = (
   progress: MachineSetupProgress,
   id: MachineSetupTaskId,
   stillHere: boolean,
+  steps: readonly MachineSetupStepId[],
 ): MachineSetupProgress =>
-  stillHere && progress.at === id
-    ? continueOnboarding(markOnboardingStep(progress, id))
+  stillHere && onboardingStepAt(progress.at, steps) === id
+    ? continueOnboarding(markOnboardingStep(progress, id), steps)
     : markOnboardingStep(progress, id);
 
 /** Keep what was answered on a CLI's step. */
@@ -135,20 +146,26 @@ export const answerOnboardingHarness = (
  * Skip: the next one opens, and this one is marked skipped — unless it was already set, because skipping
  * past a step you finished earlier (coming back through the rail) must not unset it.
  */
-export const skipOnboardingStep = (progress: MachineSetupProgress): MachineSetupProgress => {
-  const at = progress.at;
+export const skipOnboardingStep = (
+  progress: MachineSetupProgress,
+  steps: readonly MachineSetupStepId[],
+): MachineSetupProgress => {
+  const at = onboardingStepAt(progress.at, steps);
   const keep = !isTask(at) || progress.states[at] === 'done';
   return {
     ...progress,
-    at: after(at),
+    at: after(at, steps),
     states: keep ? progress.states : { ...progress.states, [at]: 'skipped' },
   };
 };
 
 /** Back one step. Nothing is marked. */
-export const backOnboardingStep = (progress: MachineSetupProgress): MachineSetupProgress => ({
+export const backOnboardingStep = (
+  progress: MachineSetupProgress,
+  steps: readonly MachineSetupStepId[],
+): MachineSetupProgress => ({
   ...progress,
-  at: before(progress.at),
+  at: before(onboardingStepAt(progress.at, steps), steps),
 });
 
 /** Mark a step set without moving: a surface that saved on its own (a key stored, a clone copied). */
@@ -165,59 +182,51 @@ export const chooseOnboardingStart = (
   start,
 });
 
-/** "3 of 8 set": the rail's heading. */
-export const onboardingSetCount = (progress: MachineSetupProgress): string =>
-  `${String(ONBOARDING_TASKS.filter(id => progress.states[id] === 'done').length)} of ${String(ONBOARDING_TASKS.length)} set`;
+/** "3 of 5 set": the rail's heading, counting the steps this setup lists. */
+export const onboardingSetCount = (progress: MachineSetupProgress, steps: readonly MachineSetupStepId[]): string => {
+  const tasks = ONBOARDING_TASKS.filter(id => steps.includes(id));
+  return `${String(tasks.filter(id => progress.states[id] === 'done').length)} of ${String(tasks.length)} set`;
+};
 
 /** The rail's marker for one step: its number, ✓ when set, – when skipped. */
-export const onboardingRailMarker = (progress: MachineSetupProgress, id: MachineSetupStepId): string => {
+export const onboardingRailMarker = (
+  progress: MachineSetupProgress,
+  id: MachineSetupStepId,
+  steps: readonly MachineSetupStepId[],
+): string => {
   const state = isTask(id) ? progress.states[id] : undefined;
   if (state === 'done') return '✓';
   if (state === 'skipped') return '–';
-  return String(indexOf(id) + 1);
+  return String(steps.indexOf(id) + 1);
 };
 
 // ── Set up later ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Where each step lives in Settings once setup is over: a panel on its tab, a machine tab, or — for
- * Voice, whose engine belongs to this DEVICE — Settings › Behaviour › Dictation. Every address names the
- * machine by the name this browser shows, exactly as a Settings link does.
+ * Where each step lives in Settings once setup is over: a panel on its tab, a machine tab, or — for the
+ * Defaults, whose first row is this DEVICE's voice — Settings › Behaviour › Dictation is the closest
+ * single address, so Defaults opens the machine's Agents tab, where the controls and the learning default are.
+ * Every address names the machine by the name this browser shows, exactly as a Settings link does.
  */
-const LATER: Readonly<
-  Record<MachineSetupTaskId, { readonly tab: MachineTabId; readonly item?: string } | { readonly setting: string }>
-> = {
-  pair: { tab: 'machine', item: 'devices' },
+const LATER: Readonly<Record<MachineSetupTaskId, { readonly tab: MachineTabId; readonly item?: string }>> = {
   start: { tab: 'machine', item: 'clone' },
   claude: { tab: 'runtimes' },
   codex: { tab: 'runtimes' },
   speedups: { tab: 'machine', item: 'speedups' },
-  voice: { setting: 'dictation' },
-  warden: { tab: 'agents', item: 'warden' },
-  learning: { tab: 'agents', item: 'learning' },
-  controls: { tab: 'agents' },
+  defaults: { tab: 'agents' },
 };
 
 /** The Settings address a step is revisited at. */
 export const onboardingLaterHref = (daemonId: DaemonId, machineName: string, id: MachineSetupTaskId): string => {
   const place = LATER[id];
   const settings = daemonSettingsPath(daemonId);
-  if ('setting' in place) return `${settings}#${place.setting}`;
   return `${settings}${place.item === undefined ? machineHash(machineName, place.tab) : machineItemHash(machineName, place.tab, place.item)}`;
 };
 
 // ── Done ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** What Done says about one step. */
-export interface OnboardingDoneRow {
-  readonly id: MachineSetupTaskId;
-  readonly label: string;
-  readonly state: 'set' | 'skipped' | 'not visited';
-  /** "cloned from work-mac", "Jev ✓ · Groq not set". Absent when there is nothing to add. */
-  readonly detail?: string;
-  /** Settings, for every step that is not set. Pairing has none: it is always set by the time you see this. */
-  readonly later?: string;
-}
+/** The machine default speech engine as the Defaults page names it: `off` is no default at all. */
+export type DefaultVoice = 'browser' | 'parakeet' | 'off';
 
 /** Facts the steps learned on the way, so Done can say WHAT was set and not only that it was. */
 export interface OnboardingDoneFacts {
@@ -225,88 +234,116 @@ export interface OnboardingDoneFacts {
   readonly clonedFrom?: string;
   /** Which speed-up keys the machine holds, by provider label: `{ Jev: true, Groq: false }`. */
   readonly keys?: Readonly<Record<string, boolean>>;
-  /** The Warden's own one-line summary. */
-  readonly warden?: string;
   readonly passiveDefault?: boolean;
+  /** The machine's default voice, as `voice.yaml` has it now. */
+  readonly voice?: DefaultVoice;
+  /** What agents may use on the machine now. */
+  readonly agentControl?: FleetAgentControl;
   /** The runtimes each CLI has on the machine now, by name. */
   readonly runtimes?: Readonly<Partial<Record<SetupHarness, readonly string[]>>>;
   /** The runtimes whose login still needs a sign-in, by name, as the machine reads now. */
   readonly needsSignIn?: readonly string[];
 }
 
-const detailOf = (
-  id: MachineSetupTaskId,
-  progress: MachineSetupProgress,
-  facts: OnboardingDoneFacts,
-): string | undefined => {
-  switch (id) {
-    case 'start':
-      if (progress.states.start !== 'done') return undefined;
-      if (progress.start === 'fresh') return 'fresh setup';
-      return facts.clonedFrom === undefined ? 'clone from another machine' : `cloned from ${facts.clonedFrom}`;
-    case 'claude':
-    case 'codex': {
-      const names = facts.runtimes?.[id];
-      return names === undefined || names.length === 0 ? undefined : names.join(', ');
-    }
-    case 'speedups':
-      return facts.keys === undefined
-        ? undefined
-        : Object.entries(facts.keys)
-            .map(([label, set]) => (set ? `${label} ✓` : `${label} not set`))
-            .join(' · ');
-    case 'warden':
-      return facts.warden;
-    case 'learning':
-      return facts.passiveDefault === undefined
-        ? undefined
-        : facts.passiveDefault
-          ? 'passive on for new ferrets'
-          : 'passive off';
-    default:
-      return undefined;
-  }
+/** One ✓ or – line on Done. */
+export interface OnboardingDoneRow {
+  readonly id: 'claude' | 'codex' | 'runtimes' | 'speedups';
+  readonly set: boolean;
+  readonly text: string;
+  /** Settings, for a line that is a – : where to finish it. */
+  readonly later?: string;
+}
+
+const CLI_NAME: Readonly<Record<SetupHarness, string>> = { claude: 'Claude Code', codex: 'Codex' };
+
+const keysDetail = (keys: Readonly<Record<string, boolean>> | undefined): string | undefined => {
+  if (keys === undefined) return undefined;
+  const held = Object.entries(keys)
+    .filter(([, set]) => set)
+    .map(([label]) => label);
+  return held.length === 0 ? undefined : held.join(', ');
 };
 
-/** One row per step but Done, in rail order: what is set, what was skipped, and where to finish it. */
+/**
+ * Done's two or three lines: each CLI whose import made a runtime, or — when none did — one "No runtime
+ * yet" line; and Speed-ups. Defaults are a sentence of their own ({@link onboardingDefaultsSentence}), so a
+ * skipped Defaults page is never reported as unset: it is whatever the machine already has.
+ */
 export const onboardingDoneRows = (
   progress: MachineSetupProgress,
   facts: OnboardingDoneFacts,
   daemonId: DaemonId,
   machineName: string,
-): readonly OnboardingDoneRow[] =>
-  ONBOARDING_TASKS.map(id => {
-    const state = progress.states[id];
-    const shown: OnboardingDoneRow['state'] =
-      state === 'done' ? 'set' : state === 'skipped' ? 'skipped' : 'not visited';
-    const detail = detailOf(id, progress, facts);
-    return {
-      id,
-      label: onboardingStepLabel(id),
-      state: shown,
-      ...(detail === undefined ? {} : { detail }),
-      ...(shown === 'set' || id === 'pair' ? {} : { later: onboardingLaterHref(daemonId, machineName, id) }),
-    };
-  });
+): readonly OnboardingDoneRow[] => {
+  const made = (['claude', 'codex'] as const).filter(id => (facts.runtimes?.[id] ?? []).length > 0);
+  const runtimeRows: readonly OnboardingDoneRow[] =
+    made.length === 0
+      ? [
+          {
+            id: 'runtimes',
+            set: false,
+            text: 'No runtime yet',
+            later: onboardingLaterHref(daemonId, machineName, 'claude'),
+          },
+        ]
+      : made.map(id => ({ id, set: true, text: `${CLI_NAME[id]} — ${(facts.runtimes?.[id] ?? []).join(', ')}` }));
+  const keys = keysDetail(facts.keys);
+  const speedups: OnboardingDoneRow =
+    progress.states.speedups === 'done' || keys !== undefined
+      ? { id: 'speedups', set: true, text: keys === undefined ? 'Speed-ups saved' : `Speed-ups — ${keys}` }
+      : {
+          id: 'speedups',
+          set: false,
+          text: 'Speed-ups skipped',
+          later: onboardingLaterHref(daemonId, machineName, 'speedups'),
+        };
+  return [...runtimeRows, speedups];
+};
+
+const VOICE_WORDS: Readonly<Record<DefaultVoice, string>> = {
+  browser: 'browser voice',
+  parakeet: 'Parakeet voice',
+  off: 'no default voice',
+};
+
+const CONTROL_WORDS: readonly (readonly [keyof FleetAgentControl, string])[] = [
+  ['terminals', 'terminals'],
+  ['browsers', 'browsers'],
+  ['files', 'files'],
+  ['ferretrySettings', 'Ferretry settings'],
+  ['pageScripts', 'page scripts'],
+];
+
+const joinWords = (words: readonly string[]): string =>
+  words.length < 2 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1) ?? ''}`;
+
+/** "Defaults: browser voice, learning on, agents may use terminals, browsers and files." — what the machine has now. */
+export const onboardingDefaultsSentence = (facts: OnboardingDoneFacts): string => {
+  const parts = [
+    ...(facts.voice === undefined ? [] : [VOICE_WORDS[facts.voice]]),
+    ...(facts.passiveDefault === undefined ? [] : [`learning ${facts.passiveDefault ? 'on' : 'off'}`]),
+    ...(facts.agentControl === undefined
+      ? []
+      : (() => {
+          const allowed = CONTROL_WORDS.filter(([kind]) => facts.agentControl?.[kind] === true).map(([, word]) => word);
+          return [allowed.length === 0 ? 'agents may use nothing' : `agents may use ${joinWords(allowed)}`];
+        })()),
+  ];
+  return parts.length === 0 ? 'Defaults are set.' : `Defaults: ${parts.join(', ')}.`;
+};
 
 /** True only when the machine answered and has no runtime on either CLI: an unread machine claims nothing. */
 export const onboardingNeedsRuntime = (facts: OnboardingDoneFacts): boolean =>
   facts.runtimes !== undefined &&
   Object.values(facts.runtimes).every(names => names === undefined || names.length === 0);
 
-/** The steps still to do, in words: "Speed-ups and Warden", for Done's heading line. */
-export const onboardingSkippedSteps = (progress: MachineSetupProgress): readonly MachineSetupTaskId[] =>
-  ONBOARDING_TASKS.filter(id => progress.states[id] !== 'done');
-
 // ── Warden ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * What the Warden step opens on (R4 step 5): the Jev layer PRESELECTED only when a Jev key was added
- * and the machine is still on the safe default (rules only, which spends nothing). Only Jev: it makes
- * the Warden cheaper to live with, and a flag it does not clear goes to the owner, never to a spend
- * they did not choose. A machine whose owner already chose a layer, or turned the Warden off, keeps
- * that choice; a machine without a Jev key keeps rules only. Preselected is not saved: the step's own
- * Save is what changes the machine.
+ * What the Speed-ups step's "Let the Warden use Jev" box writes once a Jev key was saved: Jev switched on
+ * only when the machine is still on the safe default (rules only, which spends nothing). Only Jev: it makes
+ * the Warden cheaper to live with, and a flag it does not clear goes to the owner, never to a spend they did
+ * not choose. A machine whose owner already chose a layer, or turned the Warden off, keeps that choice.
  */
 export const wardenStartingDraft = (config: WardenConfig, jevKeySet: boolean): WardenConfig =>
   jevKeySet && config.enabled && !config.layers.jev && !config.layers.llm

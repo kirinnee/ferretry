@@ -8,14 +8,15 @@ import {
   useMachineVoiceEngine,
   VOICE_FILE,
   withMachineVoiceEngine,
+  withoutMachineVoiceEngine,
 } from '../../../../../src/features/fleet/setup/voice-default.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { DaemonClientProvider } from '../../../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../../../support/dom.ts';
 import { runAsync } from '../../../../support/react.ts';
 import { settleUntil } from '../../../../support/settle.ts';
-import { alpha, fileView } from '../../config-files/config-files-support.ts';
 import { configChangeHarness } from '../../../config-change-support.tsx';
+import { alpha, fileView } from '../../config-files/config-files-support.ts';
 
 const beta = daemonConnection({
   daemonId: 'beta',
@@ -77,6 +78,25 @@ describe('withMachineVoiceEngine', () => {
 
   it('round-trips through the reader', () => {
     expect(machineVoiceEngine(withMachineVoiceEngine('# voice\n', 'parakeet'))).toBe('parakeet');
+  });
+});
+
+describe('withoutMachineVoiceEngine', () => {
+  it('removes the default engine line and keeps the rest of the file', () => {
+    expect(withoutMachineVoiceEngine('# voice\ndefaultEngine: browser\npostProcessing:\n  provider: off\n')).toBe(
+      '# voice\npostProcessing:\n  provider: off\n',
+    );
+  });
+
+  it('leaves a file with no default engine as it was, and a nested key alone', () => {
+    expect(withoutMachineVoiceEngine('# voice\n')).toBe('# voice\n');
+    expect(withoutMachineVoiceEngine('postProcessing:\n  defaultEngine: x\n')).toBe(
+      'postProcessing:\n  defaultEngine: x\n',
+    );
+  });
+
+  it('reads back as no default', () => {
+    expect(machineVoiceEngine(withoutMachineVoiceEngine('defaultEngine: parakeet\n'))).toBeNull();
   });
 });
 

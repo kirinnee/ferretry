@@ -9,13 +9,10 @@
  */
 
 import type { FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
-import { useEffect, useId, useState } from 'react';
+import { useId } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
-import { readFleetRuntimes } from '../catalog-api.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { useQuietFooter } from '../setup/footer-slot.tsx';
-import type { SetupAccess } from '../setup/setup-access.ts';
-import { SetupSection } from '../setup/setup-ui.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import {
   AUTOMATIC_DEFAULT,
@@ -125,46 +122,5 @@ export function DefaultRuntimeControl({
         </ChangeApplyPanel>
       ) : null}
     </div>
-  );
-}
-
-/**
- * The same control for a place that has no runtimes list around it (the first-run Controls step): it
- * reads the runtimes itself, once, and keeps its own pick. Hidden while that read has not answered.
- */
-export function DefaultRuntimeSection({
-  machine,
-  machineName,
-  access,
-  onSaved,
-}: {
-  readonly machine: FleetMachineView;
-  readonly machineName: string;
-  readonly access: SetupAccess;
-  readonly onSaved: () => void;
-}) {
-  const [runtimes, setRuntimes] = useState<readonly FleetRuntimeView[] | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const { read, changes } = access;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the machine's own facts change, not on every render
-  useEffect(() => {
-    setRuntimes(null);
-    void read(client => readFleetRuntimes(client)).then(result => {
-      if (result.kind === 'done') setRuntimes(result.value.runtimes);
-    });
-  }, [machine.name, machine.runtimeCount, read]);
-  if (runtimes === null) return null;
-  return (
-    <SetupSection title={DEFAULT_RUNTIME_LABEL} name="default-runtime">
-      <DefaultRuntimeControl
-        machine={machine}
-        machineName={machineName}
-        runtimes={runtimes}
-        changes={changes}
-        picked={picked}
-        onPick={setPicked}
-        onSaved={onSaved}
-      />
-    </SetupSection>
   );
 }

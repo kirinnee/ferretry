@@ -4586,10 +4586,10 @@ describe('the full-screen machine setup route', () => {
   });
 
   it('opens on the step named by the address hash, as Settings’ Import again does', async () => {
-    const { view } = await renderShell(`/d/${ALPHA}/setup#claude`, [alpha.daemonId], { fleet: NOT_SET_UP });
+    const { view } = await renderShell(`/d/${ALPHA}/setup#codex`, [alpha.daemonId], { fleet: NOT_SET_UP });
     try {
       await settle();
-      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).not.toBeNull();
+      expect(view.container.querySelector('[data-onboarding-step-body="codex"]')).not.toBeNull();
     } finally {
       await view.unmount();
     }
@@ -4600,7 +4600,8 @@ describe('the full-screen machine setup route', () => {
     try {
       await settle();
       expect(view.container.querySelector(`[data-machine-setup="${ALPHA}"]`)).not.toBeNull();
-      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).toBeNull();
+      // One machine paired, so nothing to copy: the first page on the rail is Claude Code.
+      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).not.toBeNull();
     } finally {
       await view.unmount();
     }
