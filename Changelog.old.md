@@ -1,3 +1,9 @@
+## [4.251.2](https://github.com/kirinnee/ferretry/compare/v4.251.1...v4.251.2) (2026-11-02)
+
+### Fixes
+
+* **warden:** plain words and real buttons for the orphaned-card notice ([#1382](https://github.com/kirinnee/ferretry/issues/1382)) ([1f2cfae](https://github.com/kirinnee/ferretry/commit/1f2cfae9c21c037a0833ce38746ccec9e4b787ac))
+
 ## [4.251.1](https://github.com/kirinnee/ferretry/compare/v4.251.0...v4.251.1) (2026-11-02)
 
 ### Fixes

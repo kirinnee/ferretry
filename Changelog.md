@@ -1,3 +1,13 @@
+## [4.252.0](https://github.com/kirinnee/ferretry/compare/v4.251.2...v4.252.0) (2026-11-03)
+
+### Features
+
+* per-ferret compaction trigger (compactAt) ([#1392](https://github.com/kirinnee/ferretry/issues/1392)) ([2bcbaff](https://github.com/kirinnee/ferretry/commit/2bcbaffff24abaadd18a9ecbc61f0e7a60658b7b))
+
+### Fixes
+
+* **board:** send stale, red-CI and closed-PR alerts to the card's working ferret first ([#1395](https://github.com/kirinnee/ferretry/issues/1395)) ([aec4b9c](https://github.com/kirinnee/ferretry/commit/aec4b9c99f5950e9b1c86048f0556bbadae5a10a))
+
 ## [4.251.2](https://github.com/kirinnee/ferretry/compare/v4.251.1...v4.251.2) (2026-11-02)
 
 ### Fixes
