@@ -9,6 +9,7 @@ import {
   EMPTY_SWEEP_MEMORY,
   HELPER_ENDED_GRACE_MS,
   lineageThrough,
+  MAX_LINEAGE_DEPTH,
   type SweepBoard,
 } from '../../../src/lib/board/index.ts';
 import type { BoardWrite } from '../../../src/lib/board/index.ts';
@@ -337,6 +338,21 @@ describe('the sessions a return holds', () => {
     // Act / Assert
     should(lineageThrough(roster, 'a', 'other')).be.null();
     should(lineageThrough(roster, 'other', 'a')).be.null();
+  });
+
+  it('should be nothing when the lead sits above the lineage depth cap', () => {
+    // Arrange: s0 -> s1 -> ... -> top, every session between gone, the top farther up than the walk goes
+    const depth = MAX_LINEAGE_DEPTH + 10;
+    const roster = rosterOf([
+      liveSession('top'),
+      ...Array.from({ length: depth }, (_, index) =>
+        liveSession(`s${index}`, { lead: index === depth - 1 ? 'top' : `s${index + 1}`, status: 'stopped' }),
+      ),
+    ]);
+
+    // Act / Assert
+    should(lineageThrough(roster, 's0', `s${MAX_LINEAGE_DEPTH - 1}`)).have.length(MAX_LINEAGE_DEPTH);
+    should(lineageThrough(roster, 's0', 'top')).be.null();
   });
 });
 
