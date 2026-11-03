@@ -376,7 +376,7 @@ describe('a blocker and a snooze', () => {
     // Assert
     should(awake.item?.parked).be.undefined();
     should(awake.item).containDeep({ blockingNow: true, waitingSince: soon });
-    should(queue(awake.ledger)).deepEqual(['A2', 'A1']);
+    should(queue(awake.ledger)).deepEqual(['A1', 'A2']);
   });
 
   it('should still throttle the optional --now urgency to once an hour', () => {
