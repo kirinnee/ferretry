@@ -10,7 +10,7 @@
  */
 
 import { formatTaskRef, type LaneCategory, type SessionView, type TaskRef } from '@ferretry/protocol';
-import { groupUnderHuman, humanScope, isAgentTask } from './board-human.ts';
+import { groupUnderHuman, humanScope, isFerretCard } from './board-human.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardLoadStatus } from './board-store.ts';
 import {
@@ -128,7 +128,7 @@ export const chatCards = (model: BoardModel, who: ChatWho): ChatCards => {
   const here = model.cards.filter(card => isOn(card, who.daemonId));
   const focusId = who.focus?.id ?? null;
   const focus = focusId === null ? null : (here.find(card => card.task.id === focusId) ?? null);
-  const visible = (card: BoardCardOf): boolean => who.agents || !isAgentTask(card.task);
+  const visible = (card: BoardCardOf): boolean => who.agents || !isFerretCard(card.task);
   const { owned, children, taken } = gather(here, who, focus, visible);
   const hiddenAgents = who.agents ? 0 : gather(here, who, focus, () => true).taken.size - taken.size;
   const scope = humanScope(model.cards);

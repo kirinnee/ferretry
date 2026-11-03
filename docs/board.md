@@ -619,10 +619,13 @@ and its lead writes them.
 
 The Board shows what the OWNER asked for by default, and folds the rest away behind the one **Ferret cards** filter
 (off unless chosen; hint "Cards ferrets made for their own work (sub-cards and helper cards)"), each agent card under
-its `humanParent` where it has one. A **ferret card** is one the daemon says `askedBy: agent`, or a sub-card (a card
-with a parent) that no person asked for; a sub-card a person asked for stays on the board. The field and URL parameter
-are still `agents`, so a saved link keeps working. The app reads that through one helper (`taskAsker`) that falls back to `origin` for a daemon
-that predates `askedBy`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, ferret cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
+its `humanParent` where it has one. A **ferret card** is one the daemon says is an agent's (`origin: agent`, and
+`askedBy` is not `person`), or a sub-card (a card with a parent) that no person asked for; a sub-card a person asked
+for stays on the board. A top-level card that is `origin: human` stays on the board even when it is stored
+`askedBy: agent`: that only says no owner message matches its ask word for word (a lead's card filed from the
+owner's own chat, with words of its own added), which is the stricter test the cards to test wait on, not a reason
+to hide the owner's card. The chat side panel applies the same rule (`isFerretCard`), so it hides and counts exactly what the Board hides. The field and URL parameter are still `agents`, so a saved link keeps working. The app
+reads that through one helper (`taskAsker`), which goes by `askedBy` alone only for a daemon that sends no `origin`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, ferret cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
 `packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
 
 1. the owner made it (the Board page, a paired device, the admin CLI);
