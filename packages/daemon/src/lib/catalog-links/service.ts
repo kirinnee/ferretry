@@ -783,7 +783,11 @@ export class CatalogLinkService {
     const status = await this.deps.client.status(link.storeOrigin, [link.bundleId]);
     if (!status.ok || pending === undefined) return;
     const entry = status.value.links.find(candidate => candidate.bundleId === link.bundleId);
-    const stored = entry?.state === 'live' && entry.sequence === pending.sequence;
+    // A public link whose lease ran out while the answer was missing still shows the sequence it was taken at: the
+    // upload was accepted, and refresh revives it from there. Ended, used and one-time links are never revived.
+    const stored =
+      entry?.sequence === pending.sequence &&
+      (entry.state === 'live' || (entry.state === 'lapsed' && link.kind === 'public'));
     if (!stored) {
       if (action === 'create') await this.#drop(link.linkId);
       else await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => rest);

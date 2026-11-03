@@ -3561,8 +3561,10 @@ and deploying the store must not. It runs in the same Cloudflare account as the 
 `LINK_STORE` and forwards these paths unchanged (§13, "The link-store binding"), so a daemon and an app
 reach it at the relay's own origin, which is the host a daemon signs. The store has no address of its own
 (`workers_dev: false`). **Publishing the relay with the binding is a relay deploy and drops its sessions
-once** (§13 says what, for how long, and in what order to deploy); it waits for the owner to choose the
-time. Until it is published the store is unreachable, which is the safe state.
+once** (§13 says what, for how long, and in what order to deploy). That deploy has happened: the binding
+merged at `f59c89df`, the relay deploy succeeded and `LINK_STORE` is bound
+([catalogs.md](catalogs.md)). Whether the store answers is a separate operator runtime control, the
+`available` and `serving` switches (see "Operator routes and the kill switches"), so it can still be turned off.
 
 **Deployment is manual only.** The workflow `link-store-hosted.yaml` has `workflow_dispatch` and no
 push trigger; `task link-store:deploy` refuses to run in CI or unattended unless

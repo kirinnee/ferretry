@@ -539,6 +539,75 @@ describe('CatalogLinkService an extension the store took but never answered', ()
   });
 });
 
+describe('CatalogLinkService an upload the store took but never answered, then let lapse', () => {
+  const lapsedAt = (sequence: number) => (bundleIds: readonly string[]) =>
+    ({
+      ok: true,
+      value: { version: 1, links: bundleIds.map(bundleId => ({ bundleId, state: 'lapsed' as const, sequence })) },
+    }) as const;
+
+  it('should keep the sequence of a lost refresh the store took, and put the link back at the next one', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, 'never');
+    r.items.clock.ms += 8 * DAY;
+    r.client.uploadAnswer = UNREACHABLE;
+    await r.service.refresh();
+    should(stored(r).pendingUpload?.sequence).equal(2);
+    r.client.uploadAnswer = { ok: true, value: undefined };
+    r.items.clock.ms += 31 * DAY;
+    r.client.statusAnswer = lapsedAt(2);
+    await r.service.reconcile();
+    should(stored(r).pendingUpload).equal(undefined);
+    should(stored(r).sequence).equal(2);
+    should(stored(r).state).equal('live');
+    await r.service.refresh();
+    const upload = r.client.uploads.at(-1)?.upload;
+    should(upload?.action).equal('create');
+    should(upload?.sequence).equal(3);
+    should(stored(r).sequence).equal(3);
+    should(stored(r).revivedAt).not.equal(undefined);
+    should((await r.service.copy(made.link.linkId)).url).equal(made.url);
+  });
+
+  it('should keep a link live when the store took the removal of its end and the lease then lapsed', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, '7d');
+    r.client.uploadAnswer = UNREACHABLE;
+    await refusal(() => r.service.update(made.link.linkId, { expires: 'never' }, true));
+    should(stored(r).pendingUpload?.sequence).equal(2);
+    should(stored(r).pendingUpload?.expiresAt).equal(undefined);
+    r.items.clock.ms += 40 * DAY;
+    r.client.statusAnswer = lapsedAt(2);
+    await r.service.reconcile();
+    should(stored(r).state).equal('live');
+    should(stored(r).sequence).equal(2);
+    should(stored(r).expiresAt).equal(undefined);
+    should((await r.service.get(made.link.linkId)).state).equal('live');
+  });
+
+  it('should drop an unanswered upload when the store holds another sequence, or has ended the link', async () => {
+    const r = await linkRig();
+    await mintPublic(r, 'never');
+    r.items.clock.ms += 8 * DAY;
+    r.client.uploadAnswer = UNREACHABLE;
+    await r.service.refresh();
+    should(stored(r).pendingUpload?.sequence).equal(2);
+    r.client.statusAnswer = lapsedAt(1);
+    await r.service.reconcile();
+    should(stored(r).pendingUpload).equal(undefined);
+    should(stored(r).sequence).equal(1);
+    await r.service.refresh();
+    should(stored(r).pendingUpload?.sequence).equal(2);
+    r.client.statusAnswer = bundleIds => ({
+      ok: true,
+      value: { version: 1, links: bundleIds.map(bundleId => ({ bundleId, state: 'ended' as const, sequence: 2 })) },
+    });
+    await r.service.reconcile();
+    should(stored(r).pendingUpload).equal(undefined);
+    should(stored(r).sequence).equal(1);
+  });
+});
+
 describe('CatalogLinkService a version retired while a change is being written down', () => {
   it('should refuse the move when a retire in flight finishes before the final check', async () => {
     let r!: LinkRig;
