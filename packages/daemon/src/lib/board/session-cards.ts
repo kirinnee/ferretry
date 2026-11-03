@@ -43,7 +43,7 @@ import { effectiveAssignee } from './authority.ts';
 import { BoardError } from './errors.ts';
 import { cardCategory } from './graph.ts';
 import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, SessionFocus } from './ports.ts';
-import type { BoardService, SignalDoneOutcome } from './service.ts';
+import type { BoardService, CardHolders, SignalDoneOutcome } from './service.ts';
 import { clip } from './signal-done.ts';
 
 /** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
@@ -110,7 +110,15 @@ export interface Delegation {
   readonly project?: string;
   /** The OWNER started the ferret on this existing card (`ownerDelegation`): no lead hands it down, the owner assigns it. */
   readonly byOwner?: true;
+  /** Who held the existing card when the start judged it: the assignment writes only if it still finds them (`CardHolders`). */
+  readonly held?: CardHolders;
 }
+
+/** Who holds a card now, as a start must still find them when it assigns it. */
+const holdersOf = (card: Pick<BoardTask, 'owner' | 'assignee'>): CardHolders => ({
+  owner: card.owner,
+  assignee: card.assignee,
+});
 
 /** What delegating a card came to: the delegation, or why the start must not go on. */
 export interface DelegationOutcome {
@@ -168,13 +176,14 @@ export const askOf = (text: string, source: string): TaskMessage => ({ text: cli
  * The delegation of a start the owner made on an existing card ("Start a ferret on it"): it is assigned to the new
  * ferret as the owner's act, and the card keeps its owner and its parent.
  */
-export const ownerDelegation = (card: Pick<BoardTask, 'id' | 'owner' | 'parent'>): Delegation => ({
+export const ownerDelegation = (card: Pick<BoardTask, 'id' | 'owner' | 'assignee' | 'parent'>): Delegation => ({
   lead: card.owner,
   brief: '',
   id: card.id,
   existing: true,
   parent: card.parent,
   byOwner: true,
+  held: holdersOf(card),
 });
 
 /** The line a sub-ferret's brief gains (`subFerretFooter`): its card and where it is. */
@@ -245,6 +254,7 @@ export class SessionCards {
             id: twin.id,
             existing: true,
             parent: twin.parent,
+            held: holdersOf(twin),
             ...(project === undefined ? {} : { project }),
           },
           notes: [
@@ -368,7 +378,7 @@ export class SessionCards {
     }
     const project = await this.ports.projects.nameOf(card.projectId);
     return {
-      delegation: { lead, brief: '', id, existing: true, parent: card.parent, project },
+      delegation: { lead, brief: '', id, existing: true, parent: card.parent, project, held: holdersOf(card) },
       notes: [],
     };
   }
@@ -471,13 +481,21 @@ export class SessionCards {
 
   /** The existing card, assigned to the session just started (by the lead, or by the owner); it keeps its owner and its parent. */
   private async handOver(delegation: Delegation, sessionId: string): Promise<OpenedCard> {
+    const held = delegation.held;
+    if (held === undefined)
+      throw new Error(`${formatTaskRef({ id: delegation.id })} was not judged before it was handed over`);
     const card =
       delegation.byOwner === true
-        ? await this.ports.board.assignForOwner(delegation.id, sessionId)
-        : await this.ports.board.handOver(delegation.id, delegation.lead, sessionId);
+        ? await this.ports.board.assignForOwner(delegation.id, sessionId, held)
+        : await this.ports.board.handOver(delegation.id, delegation.lead, sessionId, held);
+    // The card is assigned: nothing after this may undo the start, so the board's name is best effort.
+    const project = await this.ports.projects.nameOf(card.projectId).catch((error: unknown) => {
+      this.ports.diagnostics.warn(`could not name the board of ${formatTaskRef(card)}: ${said(error)}`);
+      return undefined;
+    });
     return {
       card: await this.workStarted(card, sessionId),
-      project: await this.ports.projects.nameOf(card.projectId),
+      ...(project === undefined ? {} : { project }),
       notes: [],
     };
   }

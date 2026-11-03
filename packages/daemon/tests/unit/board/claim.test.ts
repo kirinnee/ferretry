@@ -303,6 +303,52 @@ describe('what a refused sub-ferret is told about a card its lead holds', () => 
     should(error.message).endWith('For anything else ask your lead: fy send lizzette "…"');
   });
 
+  describe('a refused assign', () => {
+    const assignTo = (assignee: string | null) => action({ action: 'assign', assignee });
+
+    it('should offer the claim only for a descendant of the caller that the daemon’s lineage proves', async () => {
+      // Arrange: lead > child > grandchild; the lead holds the card.
+      const { service } = treeWith({ owner: 'lead' });
+
+      // Act
+      const error = await refusal(service.act('F1', assignTo('grandchild'), ferret('child')));
+
+      // Assert
+      should(error.message).endWith('Your lead holds this card: claim it first: fy task claim &F1');
+    });
+
+    for (const [name, assignee] of [
+      ['nobody', null],
+      ['its lead (upward)', 'lead'],
+      ['a sibling (sideways)', 'sibling'],
+      ['a cousin (another line)', 'cousin'],
+      ['itself', 'child'],
+    ] as const) {
+      it(`should keep telling the sub-ferret to ask its lead when the assign is to ${name}`, async () => {
+        // Arrange
+        const { service } = treeWith({ owner: 'lead' });
+
+        // Act
+        const error = await refusal(service.act('F1', assignTo(assignee), ferret('child')));
+
+        // Assert
+        should(error.message).endWith('For anything else ask your lead: fy send lizzette "…"');
+        should(error.message).not.containEql('claim it first');
+      });
+    }
+
+    it('should not offer a claim when the card is held by a ferret outside the caller’s lineage', async () => {
+      // Arrange
+      const { service } = treeWith({ owner: 'lead', assignee: 'sibling' });
+
+      // Act
+      const error = await refusal(service.act('F1', assignTo('grandchild'), ferret('child')));
+
+      // Assert
+      should(error.message).not.containEql('claim it first');
+    });
+  });
+
   it('should word the tail from the claim command when one is given', async () => {
     // Act
     const message = await subFerretRefusal(DIRECTORY, 'child', 'move cards', undefined, 'fy task claim &F7');

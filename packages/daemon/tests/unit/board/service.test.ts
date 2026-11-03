@@ -54,6 +54,8 @@ const ferret = (sessionId: string): BoardCaller => ({ kind: 'ferret', sessionId 
 const lead = ferret('lead');
 const child = ferret('child');
 const stranger = ferret('stranger');
+const LEAD_HELD = { owner: 'lead', assignee: null } as const;
+const HANDED_DOWN_HELD = { owner: 'owner-lead', assignee: 'lead' } as const;
 
 const create = (input: Partial<BoardTaskCreateRequestInput> = {}) =>
   BoardTaskCreateRequestSchema.parse({
@@ -1172,7 +1174,7 @@ describe('handing a card to a sub-ferret', () => {
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', dropped: { at: NOW, reason: 'x' } })]);
 
     // Act
-    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+    const error = await refusal(service.handOver('F1', 'lead', 'child', LEAD_HELD));
 
     // Assert
     should(error.code).equal('invalid');
@@ -1185,7 +1187,7 @@ describe('handing a card to a sub-ferret', () => {
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', laneId: 'closed' })]);
 
     // Act
-    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+    const error = await refusal(service.handOver('F1', 'lead', 'child', LEAD_HELD));
 
     // Assert
     should(error.code).equal('invalid');
@@ -1198,11 +1200,65 @@ describe('handing a card to a sub-ferret', () => {
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead' })], { focus: new FakeFocus(new Set()) });
 
     // Act
-    const handed = await service.handOver('F1', 'lead', 'child');
+    const handed = await service.handOver('F1', 'lead', 'child', LEAD_HELD);
 
     // Assert
     should(handed).match({ id: 'F1', assignee: 'child' });
     should(ports.warnings.some(warning => warning.includes('could not focus child'))).be.true();
+  });
+});
+
+describe('handing a card on after another start changed who holds it', () => {
+  it('should refuse a hand-over when only the assignee changed, the lead still owning the card', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead', 'child-b', LEAD_HELD));
+
+    // Assert
+    should(error.code).equal('version-conflict');
+    should(error.message).equal('&F1 changed hands since you chose it (now held by child-a); nothing was assigned');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should refuse a hand-over when only the owner changed', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead-two', assignee: null })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead-two', 'child', LEAD_HELD));
+
+    // Assert
+    should(error.code).equal('version-conflict');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should refuse the owner’s start when only the assignee changed, though the owner may always assign', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
+
+    // Act
+    const error = await refusal(service.assignForOwner('F1', 'child-b', LEAD_HELD));
+
+    // Assert
+    should(error.code).equal('version-conflict');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should let the second of two sequential hand-overs through only when the card is held as it was judged', async () => {
+    // Arrange
+    const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
+
+    // Act
+    const first = await service.handOver('F1', 'lead', 'child-a', LEAD_HELD);
+    const second = await refusal(service.handOver('F1', 'lead', 'child-b', LEAD_HELD));
+    const again = await service.handOver('F1', 'lead', 'child-b', { owner: 'lead', assignee: 'child-a' });
+
+    // Assert
+    should(first.assignee).equal('child-a');
+    should(second.code).equal('version-conflict');
+    should(again.assignee).equal('child-b');
   });
 });
 
@@ -1212,7 +1268,7 @@ describe('the owner starting a ferret on a card', () => {
     const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
 
     // Act
-    const assigned = await service.assignForOwner('F1', 'child');
+    const assigned = await service.assignForOwner('F1', 'child', LEAD_HELD);
 
     // Assert
     should(assigned).match({ id: 'F1', assignee: 'child' });
@@ -1224,8 +1280,8 @@ describe('the owner starting a ferret on a card', () => {
     const closed = serviceWith([card({ id: 'F1', laneId: 'closed' })]);
 
     // Act
-    const droppedError = await refusal(dropped.service.assignForOwner('F1', 'child'));
-    const closedError = await refusal(closed.service.assignForOwner('F1', 'child'));
+    const droppedError = await refusal(dropped.service.assignForOwner('F1', 'child', LEAD_HELD));
+    const closedError = await refusal(closed.service.assignForOwner('F1', 'child', LEAD_HELD));
 
     // Assert
     should(droppedError.message).equal('&F1 is dropped; reopen it before you start a ferret on it');
@@ -1308,10 +1364,10 @@ describe('an assignee handing its card down', () => {
     });
 
     // Act
-    const sibling = await refusal(service.handOver('F1', 'lead', 'sibling'));
+    const sibling = await refusal(service.handOver('F1', 'lead', 'sibling', HANDED_DOWN_HELD));
     const outsider = await refusal(service.requireHandOver('F1', 'stranger'));
     await should(service.requireHandOver('F1', 'lead')).be.fulfilled();
-    const handedDown = await service.handOver('F1', 'lead', 'child');
+    const handedDown = await service.handOver('F1', 'lead', 'child', HANDED_DOWN_HELD);
 
     // Assert
     should(sibling.code).equal('forbidden');

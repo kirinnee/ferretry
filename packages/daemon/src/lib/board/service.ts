@@ -141,6 +141,12 @@ export interface BoardServiceDependencies {
 }
 
 /** What follows a card's lane after each write: the gate items (`GateItems`). */
+/** Who held a card when a start judged it: what the assignment write must still find, or nothing is assigned. */
+export interface CardHolders {
+  readonly owner: string;
+  readonly assignee: string | null;
+}
+
 export interface CardWriteObserver {
   written(id: BoardTaskId): Promise<void>;
 }
@@ -616,8 +622,14 @@ export class BoardService {
    * and parent stay — and becomes the session's focus and delegation anchor. Never makes a second card. The
    * assignment is recorded as the lead's; the lead's own focus is not touched.
    */
-  async handOver(id: BoardTaskId, lead: string, session: string): Promise<BoardTask> {
-    const outcome = await this.assignTo(id, { kind: 'ferret', sessionId: lead }, session, 'hand it to a sub-ferret');
+  async handOver(id: BoardTaskId, lead: string, session: string, held: CardHolders): Promise<BoardTask> {
+    const outcome = await this.assignTo(
+      id,
+      { kind: 'ferret', sessionId: lead },
+      session,
+      'hand it to a sub-ferret',
+      held,
+    );
     await this.afterWrite({ kind: 'daemon', sessionId: lead }, outcome, [outcome.projectId]);
     return await this.focusOn(outcome, session);
   }
@@ -627,15 +639,29 @@ export class BoardService {
    * as the owner's act and becomes the session's focus and anchor. Refused, with nothing changed, when the card
    * was dropped in the meantime — the same write that assigns it reads that, so a drop and this cannot both win.
    */
-  async assignForOwner(id: BoardTaskId, session: string): Promise<BoardTask> {
-    const outcome = await this.assignTo(id, { kind: 'owner' }, session, 'start a ferret on it');
+  async assignForOwner(id: BoardTaskId, session: string, held: CardHolders): Promise<BoardTask> {
+    const outcome = await this.assignTo(id, { kind: 'owner' }, session, 'start a ferret on it', held);
     await this.afterWrite({ kind: 'owner' }, outcome, [outcome.projectId]);
     return await this.focusOn(outcome, session);
   }
 
-  private async assignTo(id: BoardTaskId, caller: BoardCaller, session: string, doing: string): Promise<BoardTask> {
+  private async assignTo(
+    id: BoardTaskId,
+    caller: BoardCaller,
+    session: string,
+    doing: string,
+    held: CardHolders,
+  ): Promise<BoardTask> {
     return await this.ports.store.write(id, async current => {
       const card = this.requireCard(current, id);
+      // The caller's authority survives a change of assignee (a lead keeps the card it owns, the owner has it always), so
+      // authority alone cannot tell a second start from the first: the card must still be held as the start judged it.
+      if (card.owner !== held.owner || card.assignee !== held.assignee) {
+        throw new BoardError(
+          'version-conflict',
+          `${formatTaskRef(card)} changed hands since you chose it (now held by ${effectiveAssignee(card)}); nothing was assigned`,
+        );
+      }
       if (card.dropped !== null)
         throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing}`);
       const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
@@ -976,7 +1002,9 @@ export class BoardService {
       await this.refuseSubFerret(
         caller,
         subFerretDoing(request),
-        request.action === 'assign' ? async () => await this.claimCommand(caller, card) : undefined,
+        request.action === 'assign'
+          ? async () => await this.claimThenAssign(caller, card, request.assignee)
+          : undefined,
       );
     }
     const claimedFrom = await this.claimedFrom(caller, card, request, context.standing);
@@ -1006,9 +1034,11 @@ export class BoardService {
       );
     } catch (error) {
       // A refusal to a ferret that could take the card first says so: claim it, rather than ask the lead that holds it.
+      // An assign is not offered this here: whether a claim would let it through is judged above (`claimThenAssign`).
       if (
         claimedFrom !== undefined &&
         request.action !== 'claim' &&
+        request.action !== 'assign' &&
         error instanceof BoardError &&
         error.code === 'forbidden'
       ) {
@@ -1034,6 +1064,21 @@ export class BoardService {
   ): Promise<string | undefined> {
     if (caller.kind !== 'ferret' || (request.action !== 'claim' && standing !== 'reader')) return undefined;
     return claimableFrom(caller, card, await ancestorsOf(caller.sessionId, this.ports.parents));
+  }
+
+  /**
+   * The claim to offer a refused assign: only when claiming the card WOULD let it through, which is a hand-down to a
+   * descendant the daemon's lineage proves. An assign to nobody, upward or sideways stays forbidden to the card's holder
+   * too, so it is the lead's to do.
+   */
+  private async claimThenAssign(
+    caller: BoardCaller,
+    card: BoardTask,
+    assignee: string | null,
+  ): Promise<string | undefined> {
+    if (caller.kind !== 'ferret' || assignee === null || assignee === caller.sessionId) return undefined;
+    if (!(await ancestorsOf(assignee, this.ports.parents)).includes(caller.sessionId)) return undefined;
+    return await this.claimCommand(caller, card);
   }
 
   /** `fy task claim &F12` when the caller may claim the card; `undefined` when it may not. */
