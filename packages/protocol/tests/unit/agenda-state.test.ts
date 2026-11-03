@@ -79,6 +79,17 @@ describe('needsYouQueue', () => {
     should(queue.map(each => each.id)).deepEqual(['A4', 'A3', 'A2', 'A1']);
   });
 
+  it('should order two items that started needing the owner together by their key, whatever order they arrive in', () => {
+    // Arrange
+    const items = [item('A9', T1), item('A2', T1), item('A5', T1, { blockingNow: true }), item('A1', T1)];
+
+    // Act
+    const queue = needsYouQueue(items);
+
+    // Assert
+    should(queue.map(each => each.id)).deepEqual(['A5', 'A1', 'A2', 'A9']);
+  });
+
   it('should leave out what waits on nobody: resting, snoozed, done and notices', () => {
     // Arrange
     const items = [
