@@ -962,22 +962,6 @@ const landed = async (path: string): Promise<void> => {
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
   container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
 
-/**
- * Waits for a confirmed pairing to finish on the guide's last stage.
- *
- * NOT `settle()`. Redeeming the code is an exchange over a real session — a handshake whose
- * WebCrypto settles off the JavaScript thread — so a fixed count of timer turns is a different
- * budget on every machine. Measured: 2 to 12 turns on an idle machine and up to 20 under CPU load,
- * against `settle()`'s 12, which is how "takes a scanned pairing link" read `scan` on CI.
- */
-const pairedInGuide = async (container: HTMLElement): Promise<void> => {
-  await settleUntil(
-    () => stepOfSetup(container) === 'done',
-    () => `the pairing to finish on the guide's done stage (it is on ${stepOfSetup(container)})`,
-    interact,
-  );
-};
-
 /** Answers WHO INSTALLS IT the way a reader does. */
 const chooseDoer = async (container: HTMLElement, doer: string): Promise<void> => {
   await interact(() =>
@@ -1018,28 +1002,20 @@ const advanceStep = async (container: HTMLElement): Promise<void> => {
   );
 };
 
-/** Walks the pairing entry to the browser's half of pairing: `fy pair` elsewhere, then the scan. */
+/** Walks the pairing entry to the browser's half of pairing, which is its only page. */
 const advanceToPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'add-client');
-  /* pair → scan */
-  await advanceStep(container);
 };
 
 /**
  * Walks the LONG route: first-time setup on a computer, all the way to the step
- * that pairs it. That step is `local` now, not `scan` — the daemon is on the
+ * that pairs it. That step is `local`, not `pair` — the daemon is on the
  * machine reading the page, so there is no QR and no code, and the browser's own
  * pairing surface is the fallback for a terminal that cannot open a window.
  */
 const advanceToLocalPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'first-time');
-  /*
-   * install → agents → daemon → local. The agents step is not decoration on the
-   * way past: Ferretry runs Claude Code and Codex and is neither of them, so a
-   * daemon standing up with both missing serves perfectly and runs nothing.
-   */
-  await advanceStep(container);
-  await advanceStep(container);
+  /* install → local: installing and starting is one page now. */
   await advanceStep(container);
 };
 
@@ -1068,16 +1044,13 @@ describe('AppShell', () => {
     // after it, with the machine this device settles already stated.
     await chooseRoute(view.container, 'first-time');
     expect(stepOfSetup(view.container)).toBe('install');
-    expect(view.container.querySelector('[data-onboarding-diagram]')?.getAttribute('aria-label')).toContain(
-      'not yet linked',
-    );
     await view.unmount();
   });
 
   it('never greets an unpaired browser with "you are set up", however stale storage reads', async () => {
-    // Progress says the arc finished; the pairing registry — the authority on
-    // that — holds nothing. A cleared registry, another profile, an abandoned
-    // attempt: all of them make the stored claim unbelievable.
+    // A version-4 document says the arc finished; the pairing registry — the
+    // authority on that — holds nothing. A finished journey is not a place to
+    // resume, so the migration reads it as the first question.
     localStorage.setItem(
       'fy-onboarding-v4',
       JSON.stringify({
@@ -1296,14 +1269,14 @@ describe('AppShell', () => {
     );
     await settle();
 
-    // Assert — on the pairing step of the guide, not its first question.
+    // Assert — on the pairing page of the guide, not its first question.
     expect(window.location.pathname).toBe('/setup');
-    expect(JSON.parse(localStorage.getItem('fy-onboarding-v4') ?? '{}')).toMatchObject({
+    expect(JSON.parse(localStorage.getItem('fy-onboarding-v5') ?? '{}')).toMatchObject({
       stage: 'walk',
       route: 'add-client',
-      current: 'scan',
+      current: 'pair',
     });
-    expect(stepOfSetup(view.container)).toBe('scan');
+    expect(stepOfSetup(view.container)).toBe('pair');
     await view.unmount();
   });
 
@@ -1432,15 +1405,15 @@ describe('AppShell', () => {
     // first-time setup for that machine, so "set up another machine" must not
     // resume the last screen of a journey completed for a laptop.
     localStorage.setItem(
-      'fy-onboarding-v4',
+      'fy-onboarding-v5',
       JSON.stringify({
-        v: 4,
+        v: 5,
         stage: 'walk',
         route: 'first-time',
         target: 'this',
         doer: 'self',
-        current: 'done',
-        furthest: 'done',
+        current: 'handoff',
+        furthest: 'handoff',
       }),
     );
     const { view } = await renderShell('/', [alpha.daemonId]);
@@ -1591,12 +1564,10 @@ describe('AppShell', () => {
   it('takes a scanned pairing link through setup even when daemons already exist', async () => {
     const { store, view } = await renderShell(`/pair#${GAMMA_FRAGMENT}`, [alpha.daemonId]);
 
-    // A camera app opening this link IS the setup journey, arriving on the stage
-    // that redeems a code — not a picker with a banner on it. That stage is now
-    // `scan`: `pair` became the terminal half, which somebody holding a link has
-    // by definition already had run for them.
+    // A camera app opening this link IS the setup journey, arriving on the one
+    // page that redeems a code — not a picker with a banner on it.
     expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'scan',
+      'pair',
     );
     expect(window.location.hash).toBe('');
 
@@ -1606,22 +1577,13 @@ describe('AppShell', () => {
         'the confirmation control',
       ).click(),
     );
-    await pairedInGuide(view.container);
 
-    // Finishes in the guide, keeps the daemon this browser already had, and
-    // leaves only when the reader says so.
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'done',
-    );
+    // Pairing is the last page of this journey, so finishing it goes straight
+    // into the app, keeping the daemon this browser already had.
+    await landed(`/d/${GAMMA_ID}`);
     const snapshot = store.connections.getSnapshot();
     expect(snapshot.connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, ALPHA]);
     expect(String(snapshot.selectedDaemonId)).toBe(GAMMA_ID);
-    expect(window.location.pathname).toBe('/pair');
-
-    await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
-    );
-    await landed(`/d/${GAMMA_ID}`);
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -1629,7 +1591,7 @@ describe('AppShell', () => {
   it('stops substituting setup once the reader has left it for their fleet', async () => {
     const { view } = await renderShell('/');
     await advanceToPairing(view.container);
-    expect(stepOfSetup(view.container)).toBe('scan');
+    expect(stepOfSetup(view.container)).toBe('pair');
 
     // Pair it for real, finish, and leave for the fleet.
     const field = must(view.container.querySelector<HTMLInputElement>('#pairing-link'), 'the pairing link field');
@@ -1651,10 +1613,6 @@ describe('AppShell', () => {
         [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
         'the confirmation control',
       ).click(),
-    );
-    await pairedInGuide(view.container);
-    await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
     await landed(`/d/${GAMMA_ID}`);
     await settle();
@@ -4139,10 +4097,10 @@ describe('the connection picker slot', () => {
     const { store, view } = await renderShell(`/pair#${GAMMA_FRAGMENT}`);
 
     // An unpaired browser opened from a QR is in the setup guide — but the
-    // arrival puts it straight on the stage that redeems the code, with the
+    // arrival puts it straight on the page that redeems the code, with the
     // confirmation and the fragment hygiene of the standalone screen unchanged.
     expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'scan',
+      'pair',
     );
     expect(view.container.textContent).toContain('Pair this device?');
     expect(view.container.textContent).toContain('gamma.example.test');
@@ -4157,20 +4115,9 @@ describe('the connection picker slot', () => {
       'the confirmation control',
     );
     await interact(() => confirm.click());
-    await pairedInGuide(view.container);
-
-    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID]);
-    // Setup finishes on its own last stage rather than teleporting the reader
-    // out of the guide the moment the exchange lands.
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'done',
-    );
-    expect(window.location.pathname).toBe('/pair');
-
-    await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
-    );
+    // The last page of the journey: the exchange landing IS the end of setup.
     await landed(`/d/${GAMMA_ID}`);
+    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID]);
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -4205,17 +4152,13 @@ describe('the connection picker slot', () => {
     await view.unmount();
   });
 
-  it('opens the first run from the guide’s last stage when the machine it paired is not set up', async () => {
+  it('opens the first run from the guide’s last page when the machine it paired is not set up', async () => {
     const { view } = await renderShell(`/pair#${GAMMA_FRAGMENT}`, [], { fleet: NOT_SET_UP });
     await interact(() =>
       must(
         [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
         'the confirmation control',
       ).click(),
-    );
-    await pairedInGuide(view.container);
-    await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
     await landed(`/d/${GAMMA_ID}/setup`);
     // The first run is a full screen of its own now, outside Settings.

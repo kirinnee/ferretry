@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { browserClipboardWriter, CopyButton } from '../../../src/features/onboarding/copy-button.tsx';
+import { browserClipboardWriter, CopyAction, CopyButton } from '../../../src/features/onboarding/copy-button.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 
 const click = async (target: Element): Promise<void> => {
@@ -114,5 +114,48 @@ describe('browserClipboardWriter', () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe('CopyAction', () => {
+  it('is the labelled primary control, and turns to "Copied" in place', async () => {
+    const copied: string[] = [];
+    const view = await mount(
+      <CopyAction
+        text="the prompt"
+        label="Copy prompt"
+        write={async text => {
+          copied.push(text);
+        }}
+      />,
+    );
+    const button = must(view.container.querySelector('button'), 'the copy action');
+    expect(button.getAttribute('data-variant')).toBe('primary');
+    expect(button.getAttribute('data-onboarding-copy')).toBe('Copy prompt');
+    expect(button.textContent).toBe('Copy prompt');
+    expect(button.className).toContain('w-full');
+    const status = must(view.container.querySelector('[role="status"]'), 'the copy status');
+    expect(status.textContent).toBe('');
+
+    await click(button);
+
+    expect(copied).toEqual(['the prompt']);
+    expect(button.textContent).toBe('Copied');
+    expect(status.getAttribute('data-onboarding-copy-status')).toBe('copied');
+    await view.unmount();
+  });
+
+  it('says so when the browser refuses, and keeps its label', async () => {
+    const view = await mount(
+      <CopyAction text="x" label="Copy setup link" write={async () => Promise.reject(new Error('denied'))} />,
+    );
+
+    await click(must(view.container.querySelector('button'), 'the copy action'));
+
+    const status = must(view.container.querySelector('[role="status"]'), 'the copy status');
+    expect(status.textContent).toContain('select the text');
+    expect(status.getAttribute('data-onboarding-copy-status')).toBe('failed');
+    expect(must(view.container.querySelector('button'), 'the copy action').textContent).toBe('Copy setup link');
+    await view.unmount();
   });
 });

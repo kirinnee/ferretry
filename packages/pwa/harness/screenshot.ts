@@ -412,27 +412,19 @@ const SECTIONS = [
   // states a FACT instead, because the hardware answered the question.
   'harness-onboarding-doer',
   'harness-onboarding-doer-mobile',
+  // The agent path in ONE page, and the same page for an agent on another
+  // machine: a clipboard does not cross devices, so that frame carries the
+  // share sheet and the page's own address.
   'harness-onboarding-brief',
-  // The same prompt for an agent on another machine: a clipboard does not cross
-  // devices, so this frame carries the share sheet and the page's own address.
   'harness-onboarding-brief-elsewhere',
-  'harness-onboarding-agent-pair',
-  // And that step without the "already open in another tab" line, which is true
-  // only when the daemon is on the machine reading the page.
-  'harness-onboarding-agent-pair-elsewhere',
-  // The step that makes the daemon worth starting: Ferretry runs Claude Code and
-  // Codex and is neither, so a daemon with both missing starts and can do nothing.
-  'harness-onboarding-agents',
-  'harness-onboarding-daemon',
-  // The same-machine collapse, and the one screen that stands in for the whole
-  // "another computer, by hand" branch — the same on a phone and on a computer.
+  // By hand, this computer: install and start, then open, then the optional phone.
   'harness-onboarding-local',
+  'harness-onboarding-handoff',
+  // "Another computer, by hand" is ONE page, the same on a phone and on a computer.
   'harness-onboarding-elsewhere',
   'harness-onboarding-elsewhere-mobile',
-  'harness-onboarding-handoff',
-  'harness-onboarding-scan',
+  // Arrived holding a link: one page, `fy pair` and the scan.
   'harness-onboarding-pair',
-  'harness-onboarding-done',
   // The two picker fields AT REST, and an unreadable roster beside a field that
   // still works. The OPEN list is captured on its own pages below instead: it is
   // an absolutely-positioned popover, and this gallery is a scroller.
@@ -4361,12 +4353,12 @@ try {
               // root only mounts on load, and an init script only runs on one.
               await page.goto(`${server.url}#onboarding-keyboard`);
               await page.reload();
-              await page.locator('#harness-onboarding-scan-page').waitFor({ state: 'visible' });
+              await page.locator('#harness-onboarding-pair-page').waitFor({ state: 'visible' });
 
               // The keyboard is only up because a FIELD has focus, so the shot has
               // to start there — an unfocused capture would look identical and
               // prove nothing about the state that was reported broken.
-              await page.getByRole('button', { name: 'Paste a link instead' }).click();
+              await page.getByRole('button', { name: 'Paste a link' }).click();
               const field = page.locator('#pairing-link');
               await field.waitFor({ state: 'visible' });
               await field.focus();

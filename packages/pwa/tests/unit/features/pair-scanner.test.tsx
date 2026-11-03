@@ -227,3 +227,21 @@ describe('PairScanner', () => {
     await screen.unmount();
   });
 });
+
+describe('PairScanner quiet', () => {
+  it('is a plain secondary button when a host page leads with a different action', async () => {
+    const loud = await mount(<PairScanner host={never} label="Scan QR" onText={() => {}} onFailed={() => {}} />);
+    expect(buttonNamed(loud.container, 'Scan QR').getAttribute('data-variant')).toBe('primary');
+    await loud.unmount();
+
+    const quiet = await mount(<PairScanner host={never} label="Scan QR" quiet onText={() => {}} onFailed={() => {}} />);
+    const button = buttonNamed(quiet.container, 'Scan QR');
+    expect(button.getAttribute('data-variant')).toBeNull();
+    expect(button.className).not.toContain('min-h-[64px]');
+    // Only the weight changes: it still scans, and keeps the touch floor.
+    expect(button.className).toContain('min-h-[44px]');
+    await interact(() => button.click());
+    expect(quiet.container.textContent).toContain('Starting the camera…');
+    await quiet.unmount();
+  });
+});

@@ -2,9 +2,9 @@
  * FIRST RUN: what the reader has, which computer runs the daemon, and who installs it.
  *
  * THE ENTRY IS NOT A QUESTION ABOUT THIS DEVICE. It asks what the reader HAS —
- * nothing yet, a link, or a fleet they are adding to — because that is the only
- * thing this page cannot see. Two of those three answers lead into the SAME
- * subflow: get a daemon running.
+ * nothing yet, or a link — because that is the only thing this page cannot see.
+ * ("One more computer for a fleet I already have" is a small link, not a card.)
+ * Two of those answers lead into the SAME subflow: get a daemon running.
  *
  * THAT SUBFLOW ASKS TWO THINGS, AND ONE OF THEM DISAPPEARS ON A PHONE.
  *
@@ -14,41 +14,35 @@
  * - WHO INSTALLS IT — an agent, or the reader. Always asked, because an agent has
  *   the terminal and needs one prompt while a reader needs every command.
  *
- * "ANOTHER COMPUTER, MYSELF" OWNS ONE SCREEN AND TEACHES NOTHING. It says to open
- * this page over there, and that computer walks this same subflow answering "this
- * one". Installation is therefore taught in exactly one place, always about the
- * machine the reader is sitting at.
+ * "ANOTHER COMPUTER, MYSELF" OWNS ONE PAGE AND TEACHES NOTHING. It hands over the
+ * setup link, and that computer walks this same subflow answering "this one".
+ * Installation is therefore taught in exactly one place, always about the machine
+ * the reader is sitting at.
  *
  * FOUR RULES SHAPE EVERYTHING HERE.
  *
  * 1. THE PAGE CANNOT SEE THE TERMINAL. It is static, public, and has no way to
- *    know whether `fy` installed or the daemon came up. So `Next` is never
- *    blocked and no control claims a check it did not make; an honest "when that
- *    finishes, continue" beats a spinner that is lying.
+ *    know whether \`fy\` installed or the daemon came up. So the one button on an
+ *    install page is "I ran it" — the reader saying so — and no control claims a
+ *    check it did not make.
  * 2. LOSING SOMEONE'S PLACE IS THE CHEAPEST WAY TO FEEL BROKEN. Setup happens
  *    across a browser and a terminal, with minutes or hours in between, so the
- *    route AND the step are persisted (`OnboardingProgressStore`) and any step
- *    already reached stays one tap away.
- * 3. ONE LOUD CONTROL PER STEP. Everything a reader can do is not equally
- *    important, and a screen where four controls shout is a screen with no next
- *    action. `Next` is the only filled button; back, copy and the disclosures are
- *    quiet until wanted. This is an accessibility property, not a taste one.
- * 4. THE DEVICE IS OBSERVED, NEVER ASKED. `progress.device` is the one reading,
+ *    route AND the step are persisted (\`OnboardingProgressStore\`).
+ * 3. EVERY PAGE IS BACK, MAYBE SKIP, AND ONE PRIMARY ACTION. The primary IS the
+ *    page's action, success moves on by itself, and a pairing surface under
+ *    another primary is drawn quiet. This is an accessibility property, not a
+ *    taste one.
+ * 4. THE DEVICE IS OBSERVED, NEVER ASKED. \`progress.device\` is the one reading,
  *    taken once at hydration, and every helper here derives its steps from the
- *    PATH — the journey plus the device — rather than from the entry alone. A page
- *    that could render a journey without knowing the device would eventually
- *    render the wrong one, silently.
+ *    PATH — the journey plus the device — rather than from the entry alone.
  *
- * WHAT LIVES ELSEWHERE. The entry is `onboarding-chooser.tsx`, the two questions
- * are `onboarding-target-chooser.tsx` and `onboarding-doer-chooser.tsx`, the
- * stages are `onboarding-stages.tsx`, the track is `onboarding-track.tsx`, the
- * picture of the arrangement is `setup-diagram.tsx`. This file owns only the
- * frame: which screen is on the glass, where focus goes when that changes, and how
- * the screen behaves under a software keyboard.
+ * THE DAEMON ANSWERING IS THE ONLY THING THAT FINISHES A PAIRING PAGE. Either the
+ * embedded pairing surface pairs this browser, or the count of pairings rises
+ * because \`fy pair --open\` paired it in another tab. Both end the page, once.
  *
  * Layout note: nothing here sizes itself against the viewport. It renders inside
- * the shell's existing `kt-shell` scroller, which is already driven by `--app-h`
- * from `useAppViewport`; a `100dvh` in this file would be a second, competing
+ * the shell's existing \`kt-shell\` scroller, which is already driven by \`--app-h\`
+ * from \`useAppViewport\`; a \`100dvh\` in this file would be a second, competing
  * answer to the same question when the keyboard opens.
  */
 
@@ -56,17 +50,16 @@ import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
+import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
-import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
+import type { HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
-import { OnboardingConnectionNote } from './onboarding-connection-note.tsx';
 import { OnboardingDoerChooser } from './onboarding-doer-chooser.tsx';
 import {
   handoffTarget,
   type InstallChannelId,
   isLastOnboardingStep,
-  journeyLabel,
   nextOnboardingStep,
   type OnboardingDoerId,
   type OnboardingPath,
@@ -75,7 +68,6 @@ import {
   onboardingStep,
   onboardingStepCount,
   onboardingStepIndex,
-  pairingOnboardingStep,
   previousOnboardingStep,
   questionBehindDoer,
   questionBehindRoute,
@@ -83,22 +75,8 @@ import {
   targetBasis,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
-import {
-  AgentPairStage,
-  AgentsStage,
-  BriefStage,
-  DaemonStage,
-  DoneStage,
-  ElsewhereStage,
-  HandoffStage,
-  InstallStage,
-  LocalStage,
-  PairStage,
-  ScanStage,
-} from './onboarding-stages.tsx';
+import { BriefStage, ElsewhereStage, HandoffStage, InstallStage, LocalStage, PairStage } from './onboarding-stages.tsx';
 import { OnboardingTargetChooser } from './onboarding-target-chooser.tsx';
-import { OnboardingTrack } from './onboarding-track.tsx';
-import { SetupDiagram } from './setup-diagram.tsx';
 import { setupHandoffUrl, setupPageUrl } from './setup-handoff.ts';
 import { SetupHandoffPanel, type SetupSharePort } from './setup-handoff-panel.tsx';
 
@@ -106,13 +84,20 @@ const SHELL =
   'mx-auto flex min-h-full w-full max-w-[560px] flex-col gap-3 py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-8';
 
 export interface OnboardingPairingHost {
-  /** The daemon answered and this browser is paired; the journey is finished. */
-  readonly onPaired: () => void;
+  /**
+   * The daemon answered and this browser is paired.
+   *
+   * The id is the daemon that was just paired, so the app opens THAT one rather
+   * than whichever the snapshot says is selected a render later.
+   */
+  readonly onPaired: (daemonId?: DaemonId) => void;
   /**
    * The pairing screen is showing a failure whose sentence is the whole remedy (an older Ferretry on
    * one side, say), so this step stops adding advice about codes expiring or the step finishing itself.
    */
   readonly onStatedFailure: (stated: boolean) => void;
+  /** Draw the scan and paste controls as secondary: another control on this page is the primary action. */
+  readonly quiet: boolean;
 }
 
 export interface OnboardingPageProps {
@@ -122,26 +107,25 @@ export interface OnboardingPageProps {
   readonly channel: InstallChannelId;
   /** The real pairing screen, wired by the composition root. */
   readonly renderPairing: (host: OnboardingPairingHost) => ReactNode;
-  readonly onOpenFleet: () => void;
-  /** Whether there is a paired daemon for the final action to open. */
-  readonly fleetReady: boolean;
+  /** Go into the app: at the daemon just paired when one is named, otherwise the selected one. */
+  readonly onOpenFleet: (daemonId?: DaemonId) => void;
   /**
-   * The carrier a paired connection is actually using.
+   * How many daemons this browser is paired with.
    *
-   * Optional, and defaulted from `activeCarrierStatus` rather than from a caller:
-   * the composition root used to pass the literal 'Direct', which was a claim
-   * nothing had measured. A host may still override it — the review harness does
-   * — but nobody has to invent one to render this screen.
+   * A rise while a pairing page is showing is how a pairing that happened in
+   * ANOTHER tab (\`fy pair --open\`) finishes this one. It is a count rather than a
+   * flag because somebody adding a second computer is already paired with the
+   * first, so "paired" never changes for them.
    */
-  readonly connectionStatus?: string | null;
+  readonly pairings: number;
   /** What the runtime advertisement said about the default relay. */
   readonly fallback: HostedRelayFallback;
   /**
    * This page's own address, from which a hand-off link is built.
    *
-   * Passed in rather than read from `window`, because the origin is a deployment
+   * Passed in rather than read from \`window\`, because the origin is a deployment
    * fact and there is no hosted address baked into this bundle — and because a
-   * component that reaches for `location` cannot be rendered by a test or by the
+   * component that reaches for \`location\` cannot be rendered by a test or by the
    * screenshot harness without a browser agreeing to it first.
    */
   readonly href: string;
@@ -152,7 +136,7 @@ export interface OnboardingPageProps {
 /**
  * Waits for the shell's keyboard-sized layout, then keeps its focused control in
  * view. Exported as the narrow effect seam so its geometry can be exercised
- * without making unrelated DOM suites race over the process-wide `<html>`
+ * without making unrelated DOM suites race over the process-wide \`<html>\`
  * keyboard attribute.
  */
 export const scheduleFocusedOnboardingControl = (root: HTMLElement | null): (() => void) | undefined => {
@@ -173,8 +157,7 @@ export function OnboardingPage({
   channel,
   renderPairing,
   onOpenFleet,
-  fleetReady,
-  connectionStatus = null,
+  pairings,
   fallback,
   href,
   share,
@@ -188,7 +171,7 @@ export function OnboardingPage({
    * FOCUS FOLLOWS A REAL SCREEN CHANGE, NOT THE FIRST PAINT.
    *
    * Swapping the stage is a navigation with no page load behind it: the control
-   * that was pressed unmounts, focus falls back to `<body>`, and a reader
+   * that was pressed unmounts, focus falls back to \`<body>\`, and a reader
    * restarts from the top of the document. Moving focus to the new heading
    * restores what a real navigation would have given. The previous screen is
    * seeded during render rather than latched in an effect, because StrictMode
@@ -208,10 +191,10 @@ export function OnboardingPage({
    *
    * The pairing link is near the bottom of a stage that is taller than a phone,
    * so the keyboard opening leaves the reader typing into something they cannot
-   * see. `useKeyboardOpen` observes the SAME `data-keyboard` attribute the
+   * see. \`useKeyboardOpen\` observes the SAME \`data-keyboard\` attribute the
    * stylesheet keys off — no second measurement of the viewport — and once it
    * flips, whatever is focused inside this screen is scrolled back into the
-   * shell's own scroller. `block: 'center'` rather than 'nearest' so the label
+   * shell's own scroller. \`block: 'center'\` rather than 'nearest' so the label
    * and any error under the field come with it, and no smooth scrolling, which
    * is both pointless here and unwelcome under reduced motion.
    */
@@ -240,10 +223,9 @@ export function OnboardingPage({
       data-onboarding-device={device}
     >
       {/*
-        `data-kb-hide` is legal here and nowhere else on this screen: the brand
-        and the diagram are stateless chrome with no focus, no overlay and no
-        state to lose. The track, the active stage and its actions must all
-        survive an open keyboard.
+        \`data-kb-hide\` is legal here and nowhere else on this screen: the brand is
+        stateless chrome with no focus, no overlay and no state to lose. The active
+        stage and its actions must all survive an open keyboard.
       */}
       <header className="flex min-w-0 flex-col gap-2" data-kb-hide>
         <div className="flex min-w-0 items-baseline justify-between gap-2">
@@ -252,13 +234,6 @@ export function OnboardingPage({
           </h1>
           <OnboardingBrand />
         </div>
-        {/*
-          The picture replaces the paragraph that used to say the same thing:
-          your machine does the work, this page is a window onto it. It is absent
-          from both questions on purpose — their job is to be answered, and a
-          diagram of a journey nobody has chosen yet is decoration.
-        */}
-        {at.stage === 'walk' ? <SetupDiagram step={at.current} /> : null}
       </header>
 
       {at.stage === 'entry' ? (
@@ -300,8 +275,7 @@ export function OnboardingPage({
           channel={channel}
           renderPairing={renderPairing}
           onOpenFleet={onOpenFleet}
-          fleetReady={fleetReady}
-          connectionStatus={connectionStatus}
+          pairings={pairings}
           fallback={fallback}
           href={href}
           share={share}
@@ -334,9 +308,8 @@ interface RouteFlowProps {
   readonly write: ClipboardWriter;
   readonly channel: InstallChannelId;
   readonly renderPairing: (host: OnboardingPairingHost) => ReactNode;
-  readonly onOpenFleet: () => void;
-  readonly fleetReady: boolean;
-  readonly connectionStatus: string | null;
+  readonly onOpenFleet: (daemonId?: DaemonId) => void;
+  readonly pairings: number;
   readonly fallback: HostedRelayFallback;
   readonly href: string;
   readonly share: SetupSharePort | undefined;
@@ -352,11 +325,20 @@ interface RouteFlowProps {
 }
 
 /**
- * One journey being walked: its track, its current stage, and the way onward.
+ * The pages that end when the daemon answers rather than when the reader presses
+ * something. Every one of them has a pairing surface, or is waiting for one in
+ * another tab.
+ */
+const WAITS_FOR_DAEMON: ReadonlySet<OnboardingStepId> = new Set(['brief', 'local', 'elsewhere', 'pair']);
+
+/** Under another primary action, the pairing surface is a fallback and must not compete with it. */
+const PAIRING_UNDER_A_PRIMARY: ReadonlySet<OnboardingStepId> = new Set(['brief', 'elsewhere']);
+
+/**
+ * One journey being walked: its current page, and the way onward.
  *
- * The TRACK IS HIDDEN on a two-step journey. A rail reading "Pair · Done" tells
- * somebody who arrived holding a link nothing they did not know, and it costs
- * them a row of a 390px screen to say it.
+ * "STEP N OF M" IS ABSENT ON A ONE-PAGE JOURNEY. "Step 1 of 1" tells somebody who
+ * arrived holding a link nothing they did not know.
  */
 function RouteFlow({
   at,
@@ -366,8 +348,7 @@ function RouteFlow({
   channel,
   renderPairing,
   onOpenFleet,
-  fleetReady,
-  connectionStatus,
+  pairings,
   fallback,
   href,
   share,
@@ -382,31 +363,66 @@ function RouteFlow({
   const position = onboardingStepIndex(path, at.current);
   const first = position === 0;
   const last = isLastOnboardingStep(path, at.current);
+
   /*
-   * PAIRING ADVANCES ALONG THE JOURNEY, IT DOES NOT JUMP TO THE END.
+   * FINISHING A PAIRING PAGE HAPPENS ONCE, BY EITHER ROUTE.
    *
-   * This used to go straight to `done`, which quietly deleted the one step that
-   * makes first-time setup on the daemon's own machine more than the others in
-   * sequence: the step AFTER pairing is the offer to add the reader's phone, and
-   * a hardcoded `done` meant nobody ever saw it. Every other journey has nothing
-   * between pairing and the end, so they are unaffected — which is the point of
-   * asking the journey rather than naming a step.
+   * The embedded pairing surface reports it with the daemon's id, and a pairing
+   * in another tab shows up as a rise in the count with none. Both could fire for
+   * one pairing, and a second \`onOpenFleet\` would be a second navigation — so the
+   * page remembers it has settled, and forgets when the reader moves.
+   *
+   * PAIRING ADVANCES ALONG THE JOURNEY, IT DOES NOT JUMP TO THE END: the page
+   * after \`local\` is the offer to add the reader's phone, and a hardcoded exit
+   * meant nobody ever saw it. The LAST page of any journey goes into the app.
    */
+  const settled = useRef<OnboardingStepId | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the step is the trigger to forget a settled page
+  useEffect(() => {
+    settled.current = null;
+  }, [at.current]);
+  const settle = (daemonId?: DaemonId): void => {
+    if (settled.current === at.current) return;
+    settled.current = at.current;
+    if (last) onOpenFleet(daemonId);
+    else onGoTo(nextOnboardingStep(path, at.current));
+  };
+  const latestSettle = useRef(settle);
+  latestSettle.current = settle;
+  const knownPairings = useRef(pairings);
+  useEffect(() => {
+    const before = knownPairings.current;
+    knownPairings.current = pairings;
+    if (pairings > before && WAITS_FOR_DAEMON.has(at.current)) latestSettle.current();
+  }, [pairings, at.current]);
+
+  /*
+   * THE PHONE OFFER ONLY MAKES SENSE ONCE SOMETHING IS PAIRED. A stored place on
+   * it with nothing paired (a pairing removed since) is damaged state, not an
+   * empty one, so the reader is put back one page rather than left on buttons
+   * that open nothing.
+   */
+  const stranded = at.current === 'handoff' && pairings === 0;
+  const back = previousOnboardingStep(path, at.current);
+  useEffect(() => {
+    if (stranded) onGoTo(back);
+  }, [stranded, back, onGoTo]);
+
   // Kept per step, so a stated failure on one step never hides the advice of the next.
   const [statedAt, setStatedAt] = useState<OnboardingStepId | null>(null);
   const stated = statedAt === at.current;
   const onStatedFailure = useCallback((failed: boolean) => setStatedAt(failed ? at.current : null), [at.current]);
   const pairing = renderPairing({
-    onPaired: () => onGoTo(nextOnboardingStep(path, at.current)),
+    onPaired: settle,
     onStatedFailure,
+    quiet: PAIRING_UNDER_A_PRIMARY.has(at.current),
   });
   /*
    * THE HAND-OFF IS BUILT ONCE, HERE, AND HANDED DOWN AS A NODE.
    *
-   * Two stages need it — "open Ferretry on that computer" and "add your phone" —
-   * and both need the same link built from the same place. A stage that built its
-   * own would be a second opinion about what the other device should resume as,
-   * and the two would diverge the first time either journey changed.
+   * Two stages need it — "set it up on that computer" and "add your phone" — and
+   * both need the same link built from the same place. A stage that built its own
+   * would be a second opinion about what the other device should resume as.
    */
   const away = handoffTarget(path);
   const handoff = (
@@ -425,18 +441,13 @@ function RouteFlow({
   );
   return (
     <>
-      {count > 2 && <OnboardingTrack path={path} current={at.current} furthest={at.furthest} onJump={onGoTo} />}
-
       <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-step-title">
         <div className="min-w-0">
-          {/*
-            THE SUBFLOW'S NAME, NOT THE ENTRY'S. Two entries walk the identical
-            list of steps, and a header reading "I have a link or QR · step 1 of 3"
-            describes what the reader was holding rather than what they are doing.
-          */}
-          <p className="m-0 text-2xs font-semibold uppercase tracking-label text-faint">
-            {journeyLabel(path)} · step {position + 1} of {count}
-          </p>
+          {count > 1 && (
+            <p className="m-0 text-2xs font-semibold text-faint" data-onboarding-step-count="">
+              Step {position + 1} of {count}
+            </p>
+          )}
           <h2
             id="onboarding-step-title"
             ref={heading}
@@ -445,7 +456,9 @@ function RouteFlow({
           >
             {step.title}
           </h2>
-          <p className="m-0 text-meta leading-base text-muted">{step.summary}</p>
+          {at.current === 'install' || at.current === 'handoff' ? (
+            <p className="m-0 text-meta leading-base text-muted">{step.summary}</p>
+          ) : null}
         </div>
 
         <Stage
@@ -456,10 +469,7 @@ function RouteFlow({
           pairing={pairing}
           stated={stated}
           handoff={handoff}
-          fleetReady={fleetReady}
-          connectionStatus={connectionStatus}
           fallback={fallback}
-          onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
           onChooseRoute={onChooseRoute}
           onChooseDoer={onChooseDoer}
@@ -469,55 +479,76 @@ function RouteFlow({
         />
       </section>
 
-      {at.current === 'done' ? null : (
-        <div className="mt-auto flex min-w-0 flex-col gap-1 pt-2">
-          {stated ? null : <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>}
-          <div className="flex min-w-0 items-center gap-2">
-            {/*
-              BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first step of a
-              journey the place behind it is the question that opened THAT journey
-              — who installs it for every daemon journey, and the entry itself for
-              the pairing one, which is opened without either question being asked.
-              Picking the wrong answer is a thing a chooser must survive, and a
-              Back that lands on a question the reader never answered does not help
-              them survive it.
-            */}
+      <div className="mt-auto flex min-w-0 items-center gap-2 pt-2">
+        {/*
+          BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first page of a
+          journey the place behind it is the question that opened THAT journey —
+          who installs it for every daemon journey, and the entry itself for the
+          pairing one, which is opened without either question being asked.
+          Picking the wrong answer is a thing a chooser must survive, and a Back
+          that lands on a question the reader never answered does not help them
+          survive it.
+        */}
+        <button
+          type="button"
+          className="kt-btn min-h-[44px]"
+          data-variant="ghost"
+          onClick={first ? onLeaveRoute : () => onGoTo(back)}
+          data-onboarding-back={first ? questionBehindRoute(at.route) : 'step'}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          Back
+        </button>
+        {/*
+          A PRIMARY ONLY WHERE THE PAGE CANNOT CHECK. Installing happens on a
+          machine this page will never see, so the reader saying "I ran it" is
+          the only signal there is. Every pairing page is the opposite — the
+          daemon answers, in this tab or another, and that answer is the only
+          thing that may finish it — and a button there would manufacture a
+          "you are set up" for a browser paired with nothing.
+        */}
+        {at.current === 'install' && (
+          <button
+            type="button"
+            className="kt-btn ml-auto min-h-[44px] flex-1"
+            data-variant="primary"
+            onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
+            data-onboarding-next=""
+          >
+            I ran it
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        )}
+        {/*
+          THE PHONE PAGE IS OPTIONAL AND THE END, so both buttons go into the app.
+          They are not the same button: Skip is the reader declining, and "I
+          scanned it" is the reader saying they did — the second is the primary
+          because it is the page's action.
+        */}
+        {at.current === 'handoff' && (
+          <>
+            <button
+              type="button"
+              className="kt-btn ml-auto min-h-[44px]"
+              data-variant="ghost"
+              onClick={() => onOpenFleet()}
+              data-onboarding-skip=""
+            >
+              Skip
+            </button>
             <button
               type="button"
               className="kt-btn min-h-[44px]"
-              data-variant="ghost"
-              onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(path, at.current))}
-              data-onboarding-back={first ? questionBehindRoute(at.route) : 'step'}
+              data-variant="primary"
+              onClick={() => onOpenFleet()}
+              data-onboarding-next=""
             >
-              <ArrowLeft size={16} aria-hidden="true" />
-              Back
+              I scanned it
+              <ArrowRight size={16} aria-hidden="true" />
             </button>
-            {/*
-              NEXT EXISTS ONLY WHERE THE PAGE CANNOT CHECK.
-              Install, the daemon, an agent's whole working session and `fy pair`
-              happen on a machine this page will never see, so blocking on them
-              would block forever. Pairing is the opposite: the daemon answers, in
-              this tab, and that answer is the only thing that may declare the
-              journey finished. A Next button on a pairing step would manufacture
-              a "you are set up" for a browser that is paired with nothing — and on
-              the LAST step of a route it would advance to itself, which reads as a
-              page that is stuck.
-            */}
-            {at.current !== 'scan' && at.current !== 'agent-pair' && at.current !== 'local' && !last && (
-              <button
-                type="button"
-                className="kt-btn ml-auto min-h-[44px] flex-1"
-                data-variant="primary"
-                onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
-                data-onboarding-next=""
-              >
-                Next
-                <ArrowRight size={16} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </>
   );
 }
@@ -529,10 +560,7 @@ interface StageProps {
   readonly channel: InstallChannelId;
   readonly pairing: ReactNode;
   readonly handoff: ReactNode;
-  readonly fleetReady: boolean;
-  readonly connectionStatus: string | null;
   readonly fallback: HostedRelayFallback;
-  readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
   readonly onChooseDoer: (doer: OnboardingDoerId) => void;
@@ -544,13 +572,9 @@ interface StageProps {
 }
 
 /**
- * The step's body, and the ONE place a journey changes what a step means.
+ * The page's body, and the ONE place a journey changes what a page means.
  *
- * `scan` is shared by every journey that ends with a fresh pairing code from
- * somewhere else. `local` is the one that does NOT need one, because the daemon
- * and this browser are the same machine.
- *
- * THE MACHINE IS PASSED, NEVER GUESSED. Two stages read differently depending on
+ * THE MACHINE IS PASSED, NEVER GUESSED. Two pages read differently depending on
  * which computer runs the daemon, and both of them used to infer it from the
  * DEVICE — a computer reading this page was assumed to be the daemon's own. That
  * was a guess standing in for an answer the reader had already given, and it was
@@ -563,11 +587,7 @@ function Stage({
   channel,
   pairing,
   handoff,
-  fleetReady,
-  connectionStatus,
   fallback,
-  onOpenFleet,
-  onGoTo,
   onChooseRoute,
   onChooseDoer,
   onChooseTarget,
@@ -577,20 +597,27 @@ function Stage({
 }: StageProps) {
   /*
    * THE PAIRING JOURNEY REACHES NONE OF THE STAGES THAT READ THESE — it has no
-   * `brief`, no `agent-pair` and no `install` — but the switch below is over steps
-   * rather than over journeys, so the type cannot say so. The stand-in is the
-   * CONSERVATIVE answer rather than a plausible one: "another computer" never
-   * claims the daemon is on this machine, so nothing can end up telling a reader
-   * they are already paired in a tab that does not exist.
+   * \`brief\` and no \`install\` — but the switch below is over steps rather than
+   * over journeys, so the type cannot say so. The stand-in is the CONSERVATIVE
+   * answer rather than a plausible one: "another computer" never claims the
+   * daemon is on this machine, so nothing can end up telling a reader they are
+   * already paired in a tab that does not exist.
    */
   const daemon = path.route === 'add-client' ? undefined : path;
   const target: SetupTargetId = daemon?.target ?? 'other';
   const assumed = daemon !== undefined && targetBasis(daemon.route, daemon.device) === 'assumed';
   switch (at.current) {
     case 'brief':
-      return <BriefStage write={write} target={target} plainUrl={setupPageUrl(href)} share={share} />;
-    case 'agent-pair':
-      return <AgentPairStage pairing={pairing} target={target} stated={stated} />;
+      return (
+        <BriefStage
+          write={write}
+          target={target}
+          plainUrl={setupPageUrl(href)}
+          share={share}
+          pairing={pairing}
+          stated={stated}
+        />
+      );
     case 'install':
       return (
         <InstallStage
@@ -606,78 +633,20 @@ function Stage({
           {...(assumed ? { onOtherMachine: () => onChooseTarget('other') } : {})}
         />
       );
-    case 'agents':
-      return <AgentsStage write={write} />;
-    case 'daemon':
-      /*
-        THE CARRIER IS SAID HERE, NOT ASKED. This is the step where the daemon
-        other devices will reach comes up, so it is where the reader learns how
-        they will reach it — direct first, the hosted relay when direct fails —
-        with no question attached, because there is nothing to decide.
-      */
-      return (
-        <>
-          <DaemonStage write={write} />
-          <OnboardingConnectionNote fallback={fallback} />
-        </>
-      );
     case 'local':
-      return <LocalStage write={write} pairing={pairing} />;
+      return <LocalStage write={write} pairing={pairing} fallback={fallback} stated={stated} />;
     case 'elsewhere':
-      return <ElsewhereStage handoff={handoff} onAddAsClient={() => onChooseRoute('add-client')} />;
+      return (
+        <ElsewhereStage
+          handoff={handoff}
+          pairing={pairing}
+          stated={stated}
+          onAddAsClient={() => onChooseRoute('add-client')}
+        />
+      );
     case 'handoff':
       return <HandoffStage handoff={handoff} />;
     case 'pair':
-      return <PairStage write={write} />;
-    case 'scan':
-      return <ScanStage pairing={pairing} stated={stated} />;
-    case 'done':
-      return (
-        <DoneStage
-          fleetReady={fleetReady}
-          /*
-            THE CARRIER IN USE, DERIVED RATHER THAN ASSERTED. A host may still
-            override it; nobody has to invent one. The default states the order
-            the app dials in and where the measured answer lives.
-          */
-          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus()) : null}
-          /*
-            AND WHAT THE FALLBACK WOULD SEE. The carrier in use is only half the
-            disclosure; the other half is about the third party that carries the
-            connection whenever direct cannot.
-          */
-          fallbackDisclosure={fleetReady ? carrierDisclosure() : null}
-          onOpenFleet={onOpenFleet}
-          /*
-            THE PAIRING STEP OF THIS JOURNEY, WHICHEVER ONE THAT IS. It used to be
-            a two-way guess between `scan` and `local`, which was wrong for the
-            agent answer — whose pairing step is `agent-pair` — and would be wrong
-            again for the next journey added. The model owns the answer.
-          */
-          onBackToPairing={() => onGoTo(pairingOnboardingStep(path))}
-        />
-      );
+      return <PairStage pairing={pairing} stated={stated} />;
   }
 }
-
-/**
- * What the reader is told about moving on, per step.
- *
- * One line each, in the smallest type on the screen, because this is a caveat
- * rather than an instruction — but still present, because the alternative is a
- * page that quietly implies it checked something it cannot see. The pair step
- * deliberately promises nothing: it is the one stage this page can actually
- * verify, so it waits for the daemon rather than for a click.
- */
-const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
-  brief: 'Nothing here watches your agent. Continue when it says it has finished.',
-  'agent-pair': 'This step finishes itself when the daemon answers. Nothing here is waiting on you.',
-  install: 'This page cannot see your terminal. Continue when the install finishes.',
-  agents: 'This page cannot see which of them you have, or whether you are signed in. Continue once one runs.',
-  daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
-  local: 'This step finishes itself when the daemon answers. Nothing here is waiting on a scan.',
-  elsewhere: 'Nothing here waits on that computer. Continue when its daemon is running.',
-  handoff: 'Optional, and nothing waits on it. Skip it and add a device whenever you like.',
-  pair: 'This page cannot see your terminal. Continue once the QR code or link is on your computer.',
-  scan: 'This step finishes itself when the daemon answers.',
-};

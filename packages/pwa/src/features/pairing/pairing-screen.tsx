@@ -88,6 +88,13 @@ export interface PairingScreenProps {
    */
   readonly embedded?: boolean;
   /**
+   * The host page leads with a different action, so scanning is drawn as a plain button.
+   *
+   * Only the weight of the resting control changes; the arc behind it is the same. Meaningful only
+   * when `embedded`.
+   */
+  readonly quiet?: boolean;
+  /**
    * Told `true` while the failure on screen is `stated` — its sentence is the whole remedy — and `false`
    * otherwise, so a host drops the advice it adds around this screen (the code expiring, the step
    * finishing itself), which is about the one thing that was working.
@@ -169,6 +176,7 @@ export function PairingScreen({
   onArrivalTaken,
   onOpenSetup,
   embedded = false,
+  quiet = false,
   defaultName = browserDeviceName,
   onStatedFailure,
 }: PairingScreenProps) {
@@ -324,9 +332,10 @@ export function PairingScreen({
 
       <PairScanner
         host={scanHost}
-        label={first ? 'Scan QR code' : 'Pair another daemon'}
+        label={embedded ? 'Scan QR' : first ? 'Scan QR code' : 'Pair another daemon'}
         onText={readText}
         onFailed={revealPaste}
+        quiet={embedded && quiet}
       />
 
       {pasting || scanHost === null ? (
@@ -362,7 +371,7 @@ export function PairingScreen({
           className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
           onClick={revealPaste}
         >
-          Paste a link instead
+          {embedded ? 'Paste a link' : 'Paste a link instead'}
         </button>
       )}
 

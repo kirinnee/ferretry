@@ -55,6 +55,7 @@
         "harness/machine-skills-screenshot.tsx",
         "harness/sharing-screenshot.tsx",
         "harness/screenshot.ts",
+        "harness/first-run-screenshot.ts",
         "harness/cred-cards-screenshot.tsx",
         "harness/save-as-screenshot.tsx",
         "harness/other-site-accounts-screenshot.tsx",

@@ -1,5 +1,5 @@
 /**
- * SOLE OWNER of the `fy-onboarding-v4` browser-storage key.
+ * SOLE OWNER of the `fy-onboarding-v5` browser-storage key.
  *
  * Setup happens across two devices and a terminal: the reader leaves to run a
  * command and comes back minutes — or hours, after the tab was evicted — later.
@@ -19,6 +19,14 @@
  * thing this flow exists to establish. An older document is therefore ignored and
  * its owner is asked once. That is a lost place, not lost work: nothing on this
  * page is state the daemon does not already hold.
+ *
+ * It moved from `v4` to `v5` when the journeys were merged into fewer pages
+ * (`brief` + `agent-pair`, `elsewhere` + `scan`, `install` + `agents` + `daemon`) and the
+ * `done` page was deleted. Unlike the older moves that is a pure renaming of places the
+ * reader really was, so a `v4` document is MIGRATED rather than ignored: a half-finished
+ * setup lands on the merged page that now holds the step it was parked on. Only a
+ * document that was already damaged, or that had reached `done`, is the first question —
+ * a finished journey is not a place to resume.
  *
  * THE DEVICE IS NEVER STORED. It is detected on every load, because the same
  * document can legitimately be read by two different devices — that is exactly
@@ -62,8 +70,11 @@ import {
 } from './onboarding-model.ts';
 import { landSetupHandoff, type SetupHandoff } from './setup-handoff.ts';
 
-export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v4';
-export const ONBOARDING_PROGRESS_VERSION = 4;
+export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v5';
+export const ONBOARDING_PROGRESS_VERSION = 5;
+
+/** The previous generation, read once and never written. */
+export const ONBOARDING_PROGRESS_KEY_V4 = 'fy-onboarding-v4';
 
 /** The ENTRY question is on the glass: nothing has been answered at all. */
 export interface OnboardingAsking {
@@ -172,7 +183,7 @@ export const resumeOnboardingRoute = (handoff: SetupHandoff, device: DeviceKind)
 };
 
 /**
- * Parse, do not validate: anything that is not exactly a version-4 document whose
+ * Parse, do not validate: anything that is not exactly a version-5 document whose
  * answers are possible ON THIS DEVICE and whose two steps both belong to its own
  * journey, with `current` no further than `furthest`, is the first question. There
  * is no partial recovery, because a half-trusted step is indistinguishable from a
@@ -252,19 +263,84 @@ const parseJourney = (
 };
 
 /**
- * Setup is only over if something is actually paired.
+ * WHERE A `v4` PLACE LANDS NOW, per journey.
  *
- * Progress is a hint about where the reader was, never evidence of what they
- * achieved: the pairing registry is the authority on that. So a stored document
- * that claims the arc reached its end, read by a browser holding no daemon at
- * all, is inconsistent across the two stores — a cleared registry, a different
- * profile, a half-finished attempt — and the honest reading is the first question.
- * The benign one would greet somebody with "You are set up" beside a panel
- * explaining that nothing is paired.
+ * The `v4` lists are spelled out here rather than imported, because they are a fact
+ * about a document that no longer ships: the live model has no `agents` step to
+ * ask about. A step that was never on its journey's `v4` list (a `brief` in a
+ * pairing journey, say) is a mismatch, as it always was, and reads as the first
+ * question. `done` maps to nothing — a finished journey is not somewhere to resume.
  */
-export const reconcileOnboardingProgress = (progress: OnboardingProgress, paired: boolean): OnboardingProgress => {
-  if (paired || progress.stage !== 'walk') return progress;
-  return progress.current === 'done' || progress.furthest === 'done' ? fresh() : progress;
+const V4_STEPS = {
+  pairing: ['pair', 'scan', 'done'],
+  agent: ['brief', 'agent-pair', 'done'],
+  elsewhere: ['elsewhere', 'scan', 'done'],
+  local: ['install', 'agents', 'daemon', 'local', 'done'],
+  localFirstTime: ['install', 'agents', 'daemon', 'local', 'handoff', 'done'],
+} as const;
+
+const V4_LANDS_ON: Readonly<Record<string, OnboardingStepId>> = Object.freeze({
+  brief: 'brief',
+  'agent-pair': 'brief',
+  install: 'install',
+  agents: 'install',
+  daemon: 'install',
+  local: 'local',
+  elsewhere: 'elsewhere',
+  handoff: 'handoff',
+  pair: 'pair',
+  scan: 'pair',
+});
+
+/** `scan` was the second page of "another computer" too, and that journey's only page is now `elsewhere`. */
+const v4LandsOn = (journey: OnboardingJourney, step: string): OnboardingStepId | undefined =>
+  step === 'scan' && journey.route !== 'add-client' && journey.doer === 'self' && journey.target === 'other'
+    ? 'elsewhere'
+    : V4_LANDS_ON[step];
+
+const v4StepsOf = (journey: OnboardingJourney): readonly string[] => {
+  if (journey.route === 'add-client') return V4_STEPS.pairing;
+  if (journey.doer === 'agent') return V4_STEPS.agent;
+  if (journey.target === 'other') return V4_STEPS.elsewhere;
+  return journey.route === 'first-time' ? V4_STEPS.localFirstTime : V4_STEPS.local;
+};
+
+/**
+ * A stored `v4` document, carried to the pages that replaced its steps.
+ *
+ * The two questions are unchanged between generations, so a reader parked on one
+ * stays on it. A walk keeps its journey and has both its steps re-homed; the
+ * guards are the `v4` ones, so a document that was already inconsistent stays refused.
+ * Re-homing never moves a step backwards (the merged pages keep the old order), so
+ * `current` can never end up past `furthest`.
+ */
+export const migrateOnboardingProgressV4 = (raw: string | null | undefined, device: DeviceKind): OnboardingProgress => {
+  if (!raw) return fresh();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return fresh();
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fresh();
+  const fields = parsed as Record<string, unknown>;
+  if (fields.v !== 4) return fresh();
+  if (fields.stage === 'target' || fields.stage === 'doer') return parseQuestion(fields, device);
+  if (fields.stage !== 'walk') return fresh();
+  const { route, current, furthest, target, doer } = fields;
+  if (!isOnboardingRouteId(route) || typeof current !== 'string' || typeof furthest !== 'string') return fresh();
+  const journey = parseJourney(route, device, target, doer);
+  if (journey === undefined) return fresh();
+  const steps = v4StepsOf(journey);
+  const at = steps.indexOf(current);
+  if (at < 0 || at > steps.indexOf(furthest)) return fresh();
+  const to = v4LandsOn(journey, current);
+  const furthestTo = v4LandsOn(journey, furthest);
+  if (to === undefined || furthestTo === undefined) return fresh();
+  const path: OnboardingPath = { ...journey, device };
+  /* The re-homed pages must exist on this journey on this device, or the document is not this reader's. */
+  if (!isStepOfRoute(path, to) || !isStepOfRoute(path, furthestTo)) return fresh();
+  return { v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', ...journey, current: to, furthest: furthestTo };
 };
 
 export interface OnboardingProgressStorage {
@@ -306,7 +382,7 @@ export const resetOnboardingProgress = (
 };
 
 /**
- * Puts the next visit on the PAIR step of "Pair this browser", where a new link is scanned or pasted.
+ * Puts the next visit on the pairing page, where a new link is scanned or pasted.
  *
  * What "Pair again" needs: the person has just been told this machine no longer accepts this browser,
  * and the one thing they can do about it is pair it again — not answer which of three people they are.
@@ -320,7 +396,7 @@ export const startOnboardingPairing = (
   try {
     storage.setItem(
       ONBOARDING_PROGRESS_KEY,
-      JSON.stringify(resumeOnboardingRoute({ route: 'add-client', step: 'scan' }, device)),
+      JSON.stringify(resumeOnboardingRoute({ route: 'add-client', step: 'pair' }, device)),
     );
   } catch {
     /* storage denial is an ordinary browser condition, not a setup failure */
@@ -359,16 +435,6 @@ export interface OnboardingProgressStoreOptions {
    * here must not overwrite a place this device might still want.
    */
   readonly handoff?: SetupHandoff | undefined;
-  /**
-   * Whether this browser holds a pairing at the moment the store hydrates.
-   *
-   * Defaults to `false`, which is the fail-closed reading: a caller that cannot
-   * say loses a stale "finished" rather than asserting one. Read ONCE, on
-   * hydration — a daemon forgotten later, while the last stage is already on the
-   * glass, is answered by that stage's own honest fallback instead of by yanking
-   * the screen out from under the reader.
-   */
-  readonly paired?: boolean;
 }
 
 /**
@@ -379,7 +445,6 @@ export class OnboardingProgressStore {
   readonly #storage: OnboardingProgressStorage | undefined;
   readonly #entry: SetupHandoff | undefined;
   readonly #handoff: SetupHandoff | undefined;
-  readonly #paired: boolean;
   readonly #device: DeviceKind;
   readonly #listeners = new Set<() => void>();
   #snapshot: OnboardingProgress | null = null;
@@ -388,7 +453,6 @@ export class OnboardingProgressStore {
     this.#storage = 'storage' in options ? options.storage : browserOnboardingStorage();
     this.#entry = options.entry;
     this.#handoff = options.handoff;
-    this.#paired = options.paired ?? false;
     this.#device = options.device ?? 'desktop';
   }
 
@@ -514,25 +578,25 @@ export class OnboardingProgressStore {
    * only ever a memory of where somebody was.
    */
   #load(): OnboardingProgress {
-    const stored = reconcileOnboardingProgress(this.#read(), this.#paired);
+    const stored = this.#read();
     const handoff = this.#handoff;
     if (handoff !== undefined) return resumeOnboardingRoute(handoff, this.#device);
     const entry = this.#entry;
     if (entry === undefined) return stored;
-    /*
-     * Already walking the journey the arrival proves, and not finished with it? Keep the place; do
-     * not restart it. A FINISHED walk is not a place to keep: a link arriving at a browser whose last
-     * pairing is "done" is a NEW pairing — a second machine, or this one again after a revoke — and
-     * keeping "done" landed it on "You are set up" with the link silently ignored.
-     */
-    if (stored.stage === 'walk' && stored.route === entry.route && stored.current !== 'done') return stored;
+    /* Already walking the journey the arrival proves? Keep the place; do not restart it. */
+    if (stored.stage === 'walk' && stored.route === entry.route) return stored;
     return resumeOnboardingRoute(entry, this.#device);
   }
 
   #read(): OnboardingProgress {
     if (!this.#storage) return fresh();
     try {
-      return parseOnboardingProgress(this.#storage.getItem(ONBOARDING_PROGRESS_KEY), this.#device);
+      const current = this.#storage.getItem(ONBOARDING_PROGRESS_KEY);
+      /* Only a browser that has never written a `v5` document looks at the `v4` one. */
+      if (current === null) {
+        return migrateOnboardingProgressV4(this.#storage.getItem(ONBOARDING_PROGRESS_KEY_V4), this.#device);
+      }
+      return parseOnboardingProgress(current, this.#device);
     } catch {
       return fresh();
     }

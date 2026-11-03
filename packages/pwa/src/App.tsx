@@ -766,11 +766,6 @@ function SetupGuide() {
    * storage remembers — it demonstrably has one. So the arrival answers the
    * chooser's question on their behalf rather than asking somebody holding a
    * live, two-minute code which of three people they are.
-   *
-   * `paired` is read here, at hydration, and deliberately not tracked: it
-   * decides only whether a stored "finished" is believable for a browser that
-   * holds no daemon. A pairing removed later, with the last stage already on
-   * the glass, is that stage's own problem to state honestly.
    */
   /*
    * WHAT THIS DEVICE IS, AND WHERE ANOTHER ONE LEFT OFF.
@@ -786,9 +781,8 @@ function SetupGuide() {
     () =>
       new OnboardingProgressStore({
         device,
-        paired: snapshot.connections.length > 0,
         ...(handoff === undefined ? {} : { handoff }),
-        ...(arrival.kind === 'none' ? {} : { entry: { route: 'add-client' as const, step: 'scan' as const } }),
+        ...(arrival.kind === 'none' ? {} : { entry: { route: 'add-client' as const, step: 'pair' as const } }),
       }),
   );
   const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
@@ -822,7 +816,7 @@ function SetupGuide() {
         progress={progress}
         write={clipboardWriter}
         channel={channel}
-        fleetReady={selected !== null}
+        pairings={snapshot.connections.length}
         fallback={fallback}
         /*
          * THE ORIGIN IS A RUNTIME FACT, NEVER A BUILD CONSTANT. A hand-off link
@@ -831,18 +825,20 @@ function SetupGuide() {
          */
         href={window.location.href}
         share={browserSetupShare()}
-        onOpenFleet={() => {
-          // The selected daemon IS the one just paired: adding a connection
-          // selects it. Never a hardcoded prefix — the app's own route helper.
+        onOpenFleet={daemonId => {
+          // The daemon just paired when the page names it, otherwise the selected one: adding a
+          // connection selects it. Never a hardcoded prefix — the app's own route helper.
           // A machine that is not set up opens its first run instead of its sessions.
-          if (selected !== null)
-            void landingAfterPairing(store.connections.select(selected), daemon => store.clients.client(daemon)).then(
+          const opening = daemonId ?? selected;
+          if (opening !== null)
+            void landingAfterPairing(store.connections.select(opening), daemon => store.clients.client(daemon)).then(
               navigate,
             );
         }}
-        renderPairing={({ onPaired, onStatedFailure }) => (
+        renderPairing={({ onPaired, onStatedFailure, quiet }) => (
           <PairingScreen
             embedded
+            quiet={quiet}
             onStatedFailure={onStatedFailure}
             arrival={arrival}
             scanHost={scanHost}
@@ -850,8 +846,8 @@ function SetupGuide() {
             connections={snapshot.connections}
             selectedDaemonId={selected}
             onPair={async (seed, deviceName) => {
-              await store.pair(seed, deviceName);
-              onPaired();
+              const connection = await store.pair(seed, deviceName);
+              onPaired(connection.daemonId);
             }}
             onSelect={daemonId => {
               store.connections.select(daemonId);

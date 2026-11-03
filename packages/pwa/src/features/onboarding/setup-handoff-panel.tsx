@@ -28,7 +28,7 @@
 
 import { Share2 } from 'lucide-react';
 
-import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
+import { type ClipboardWriter, CopyAction, CopyButton } from './copy-button.tsx';
 import type { HandoffReceiver } from './onboarding-model.ts';
 import { qrModules } from './setup-handoff.ts';
 
@@ -124,11 +124,7 @@ export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label
             </p>
           </div>
         </div>
-      ) : (
-        <p className="m-0 text-meta leading-base text-muted">
-          A computer has no camera pointed at this screen, so there is no code to scan. Send it the link instead.
-        </p>
-      )}
+      ) : null}
 
       {/*
         THE LINK AND ITS COPY CONTROL ARE ONE OBJECT.
@@ -144,8 +140,11 @@ export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label
         >
           {url}
         </p>
-        <CopyButton text={url} label="Copy setup link" write={write} />
+        {receiver === 'phone' ? <CopyButton text={url} label="Copy setup link" write={write} /> : null}
       </div>
+
+      {/* Sending the link IS the page when the receiver is a computer, so copying it is the loud control. */}
+      {receiver === 'computer' ? <CopyAction text={url} label="Copy setup link" write={write} /> : null}
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {share === undefined ? null : (

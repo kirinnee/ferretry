@@ -119,7 +119,7 @@ const SETUP_TARGET = setupStep('target');
 const SETUP_DOER = setupStep('doer');
 
 /**
- * The pairing arrival used for the Done capture: a FIXED FAKE code and daemon id
+ * The pairing arrival used for the paired capture: a FIXED FAKE code and daemon id
  * against a `.test` host that cannot resolve — the reserved TLD is the point,
  * since nothing here may address a real daemon. Both values must still satisfy
  * the protocol's own schemas (`PAIRING_CODE_PATTERN`, `DaemonIdSchema`): an
@@ -505,10 +505,10 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<entry|target|doer|install|agents|daemon|reach-*|pair|brief*|agent-pair*|elsewhere|\n' +
-          '    scan|done>-\n' +
+          '    setup-<entry|target|doer|install|local|reach-*|pair|brief*|elsewhere|\n' +
+          '    paired>-\n' +
           '    <mobile|desktop>\n' +
-          '    and setup-scan-keyboard-mobile\n' +
+          '    and setup-pair-keyboard-mobile\n' +
           '    were NOT produced.\n',
       );
     } else {
@@ -557,24 +557,9 @@ try {
        */
       const JOURNEYS = [
         { name: 'install', on: 'desktop', route: 'first-time', doer: 'self', advances: 0, screen: 'install' },
-        /*
-         * The step without which everything after it is theatre: Ferretry runs
-         * Claude Code and Codex and is neither, so a daemon with both missing
-         * starts perfectly and can run nothing.
-         */
-        { name: 'agents', on: 'desktop', route: 'first-time', doer: 'self', advances: 1, screen: 'agents' },
-        { name: 'daemon', on: 'desktop', route: 'first-time', doer: 'self', advances: 2, screen: 'daemon' },
-        /*
-         * `pair` — run `fy pair` somewhere else — belongs to the pairing entry. It
-         * was pointed at first-time with a carrier answer, which since the
-         * same-machine collapse lands on `local` and waited thirty seconds for a
-         * step that journey does not have.
-         */
-        { name: 'pair', on: 'both', route: 'add-client', advances: 0, screen: 'pair' },
-        { name: 'local', on: 'desktop', route: 'first-time', doer: 'self', advances: 3, screen: 'local' },
-        /* An agent on this machine: the prompt, then a pairing that may already be done. */
+        { name: 'local', on: 'desktop', route: 'first-time', doer: 'self', advances: 1, screen: 'local' },
+        /* An agent on this machine: ONE page, the prompt and the pairing that may already be done. */
         { name: 'brief', on: 'desktop', route: 'first-time', doer: 'agent', advances: 0, screen: 'brief' },
-        { name: 'agent-pair', on: 'desktop', route: 'first-time', doer: 'agent', advances: 1, screen: 'agent-pair' },
         /*
          * An agent on ANOTHER machine, which is every phone's agent journey and a
          * real one on a computer too. It carries the share affordance, because a
@@ -588,15 +573,6 @@ try {
           target: 'other',
           advances: 0,
           screen: 'brief',
-        },
-        {
-          name: 'agent-pair-elsewhere',
-          on: 'both',
-          route: 'first-time',
-          doer: 'agent',
-          target: 'other',
-          advances: 1,
-          screen: 'agent-pair',
         },
         /*
          * THE WHOLE "ANOTHER COMPUTER, BY HAND" BRANCH, which is one screen. On a
@@ -613,8 +589,8 @@ try {
           advances: 0,
           screen: 'elsewhere',
         },
-        /* The scan half: a daemon already exists, so there is nothing to install. */
-        { name: 'scan', on: 'both', route: 'add-client', advances: 1, screen: 'scan' },
+        /* The entry that arrives holding a link: a daemon already exists, so one page, `fy pair` and the scan. */
+        { name: 'pair', on: 'both', route: 'add-client', advances: 0, screen: 'pair' },
       ] as const;
 
       const toEntry = async (page: Page): Promise<void> => {
@@ -782,7 +758,9 @@ try {
                 });
               });
             }
-            await toStep(page, journey('daemon'));
+            await toStep(page, journey('local'));
+            // The explanation lives in a disclosure; open it the way a reader would.
+            await page.locator('[data-onboarding-aside="About connections"] summary').click();
             // The readout arrives after first paint, so wait for the state the
             // shipped parser resolved rather than for a timeout.
             await page
@@ -794,13 +772,10 @@ try {
       }
 
       /*
-       * The KEYBOARD capture belongs to the scan half, not the `fy pair` half:
-       * since the split, the paste field lives on the stage that redeems a code.
-       * Pointing this at `pair` waits thirty seconds for a field that stage does
-       * not have — which is how the split announced itself here.
+       * The KEYBOARD capture is the pairing page, where the paste field lives.
        */
       const toPairStep = async (page: Page): Promise<void> => {
-        await toStep(page, journey('scan'));
+        await toStep(page, journey('pair'));
       };
 
       // 3. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
@@ -815,7 +790,7 @@ try {
         // does not exist. Both are real states, so the reveal is conditional — but
         // the FIELD is not: it has to be there either way or there is nothing to
         // focus and no keyboard to raise.
-        const reveal = page.getByRole('button', { name: 'Paste a link instead' });
+        const reveal = page.getByRole('button', { name: 'Paste a link' });
         if ((await reveal.count()) > 0) await reveal.click();
         const field = page.locator('#pairing-link');
         await field.waitFor({ state: 'visible' });
@@ -900,7 +875,7 @@ try {
         });
 
         // Screenshot FIRST: if the field is off-screen, this image is the evidence.
-        await shot(page, 'setup-scan-keyboard-mobile');
+        await shot(page, 'setup-pair-keyboard-mobile');
 
         const inside = settled && fit.top >= 0 && fit.bottom <= fit.visible;
         process.stdout.write(
@@ -912,7 +887,7 @@ try {
           defects.push(
             `#pairing-link is not inside the visual viewport with the keyboard open: ` +
               `box [${fit.top.toFixed(1)}, ${fit.bottom.toFixed(1)}] against a visible ` +
-              `[0, ${fit.visible.toFixed(1)}]. See harness/out/setup-scan-keyboard-mobile.png. ` +
+              `[0, ${fit.visible.toFixed(1)}]. See harness/out/setup-pair-keyboard-mobile.png. ` +
               `This is a production behaviour, not a harness problem — it is deliberately NOT ` +
               `worked around here with a scroll.`,
           );
@@ -921,18 +896,17 @@ try {
         if (fit.gate) defects.push('the portrait gate mounted over an upright phone with its keyboard open');
       });
 
-      // 4. A SUCCESSFUL PAIRING, ending on `done`, at both viewports. The arrival
-      // seeds the stepper at `pair`, so this is the path a phone's ordinary
-      // camera app produces — and the only honest way to reach `done`, which no
-      // button on this page may declare.
+      // 4. A SUCCESSFUL PAIRING, at both viewports, leaves setup for the app by itself.
+      // The arrival is the path a phone's ordinary camera app produces; there is no
+      // "done" page to land on, and no button on this page may declare one.
       for (const viewport of VIEWPORTS) {
         await capture(contextFor(viewport), async page => {
           await page.addInitScript(PAIR_RESPONSE_SCRIPT);
           await open(page, PAIRING_ARRIVAL);
           await page.getByText('Pair this device?').waitFor({ state: 'visible' });
           await page.getByRole('button', { name: 'Pair this device' }).click();
-          await page.locator(setupStep('done')).waitFor({ state: 'visible' });
-          await shot(page, `setup-done-${viewport.name}`);
+          await page.locator(SETUP_ROOT).waitFor({ state: 'detached' });
+          await shot(page, `setup-paired-${viewport.name}`);
         });
       }
     }

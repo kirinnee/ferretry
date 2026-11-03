@@ -500,3 +500,27 @@ describe('PairingScreen naming this device', () => {
     await screen.unmount();
   });
 });
+
+describe('the quiet embedded presentation', () => {
+  it('draws Scan QR and Paste a link as plain secondaries when quiet', async () => {
+    const screen = await screenWith({ embedded: true, quiet: true });
+
+    const scan = buttonNamed(screen.container, 'Scan QR');
+    expect(scan.getAttribute('data-variant')).toBeNull();
+    expect(scan.className).toContain('min-h-[44px]');
+    expect(buttonNamed(screen.container, 'Paste a link')).not.toBeNull();
+    await screen.unmount();
+  });
+
+  it('keeps Scan QR as the primary action when embedded but not quiet', async () => {
+    const screen = await screenWith({ embedded: true });
+    expect(buttonNamed(screen.container, 'Scan QR').getAttribute('data-variant')).toBe('primary');
+    await screen.unmount();
+  });
+
+  it('ignores quiet outside the embedded seam', async () => {
+    const screen = await screenWith({ quiet: true });
+    expect(buttonNamed(screen.container, 'Scan QR code').getAttribute('data-variant')).toBe('primary');
+    await screen.unmount();
+  });
+});
