@@ -73,4 +73,103 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
       should(await new GitWorkingCopies(join(root, 'no-such-git')).branchOf(root)).be.null();
     });
   });
+
+  describe('kept answers', () => {
+    /** A git that writes each question it is asked to `calls`, then answers it as the real one does. */
+    const countingGit = async (root: string): Promise<{ binary: string; asked: () => Promise<readonly string[]> }> => {
+      const real = Bun.which('git');
+      if (real === null) throw new Error('git is not on PATH');
+      const calls = join(root, 'git-calls');
+      const binary = join(root, 'counting-git');
+      await writeFile(binary, `#!/bin/sh\necho "$*" >> '${calls}'\nexec '${real}' "$@"\n`);
+      await chmod(binary, 0o755);
+      const asked = async () => (await readFile(calls, 'utf8').catch(() => '')).split('\n').filter(line => line !== '');
+      return { binary, asked };
+    };
+
+    it('should ask git once while the checkout is unchanged, and again once its branch or remote changes', async () => {
+      await withTempRoot(async root => {
+        // Arrange
+        const repo = await repository(root);
+        await git(repo, 'remote', 'add', 'origin', 'git@github.com:kirinnee/ferretry.git');
+        await git(repo, 'checkout', '--quiet', '-b', 'feat/one');
+        const { binary, asked } = await countingGit(root);
+        const copies = new GitWorkingCopies(binary);
+
+        // Act
+        const first = [await copies.repositoryOf(repo), await copies.branchOf(repo)];
+        const again = [await copies.repositoryOf(repo), await copies.branchOf(repo)];
+        const unchanged = (await asked()).length;
+        await git(repo, 'checkout', '--quiet', '-b', 'feat/two');
+        await git(repo, 'remote', 'set-url', 'origin', 'https://github.com/kirinnee/other.git');
+        const changed = [await copies.repositoryOf(repo), await copies.branchOf(repo)];
+
+        // Assert
+        should(first).deepEqual(['kirinnee/ferretry', 'feat/one']);
+        should(again).deepEqual(first);
+        should(unchanged).equal(2);
+        should(changed).deepEqual(['kirinnee/other', 'feat/two']);
+        should((await asked()).length).equal(4);
+      });
+    });
+
+    it("should follow a linked worktree's own branch and its repository's shared remote", async () => {
+      await withTempRoot(async root => {
+        // Arrange
+        const repo = await repository(root);
+        await git(repo, 'remote', 'add', 'origin', 'git@github.com:kirinnee/ferretry.git');
+        const tree = join(root, 'tree');
+        await git(repo, 'worktree', 'add', '--quiet', '-b', 'feat/tree', tree);
+        const { binary, asked } = await countingGit(root);
+        const copies = new GitWorkingCopies(binary);
+        const nested = join(tree, 'nested');
+        await mkdir(nested);
+
+        // Act
+        const before = [
+          await copies.repositoryOf(nested),
+          await copies.branchOf(nested),
+          await copies.branchOf(nested),
+        ];
+        await git(repo, 'checkout', '--quiet', '-b', 'feat/main-moved');
+        const mainMoved = await copies.branchOf(nested);
+        const calls = (await asked()).length;
+        await git(tree, 'checkout', '--quiet', '-b', 'feat/tree-moved');
+        await git(repo, 'remote', 'set-url', 'origin', 'https://github.com/kirinnee/other.git');
+
+        // Assert — the worktree's HEAD is its own; the remote lives in the shared config.
+        should(before).deepEqual(['kirinnee/ferretry', 'feat/tree', 'feat/tree']);
+        should(mainMoved).equal('feat/tree');
+        should(calls).equal(2);
+        should(await copies.branchOf(nested)).equal('feat/tree-moved');
+        should(await copies.repositoryOf(nested)).equal('kirinnee/other');
+      });
+    });
+
+    it('should ask again after ten minutes, and every time for a question git answered with nothing', async () => {
+      await withTempRoot(async root => {
+        // Arrange
+        const repo = await repository(root);
+        const { binary, asked } = await countingGit(root);
+        let nowMs = 0;
+        const copies = new GitWorkingCopies(binary, 'ssh', () => nowMs);
+
+        // Act
+        await copies.branchOf(repo);
+        nowMs = 9 * 60_000;
+        await copies.branchOf(repo);
+        const young = (await asked()).length;
+        nowMs = 10 * 60_000;
+        await copies.branchOf(repo);
+        const aged = (await asked()).length;
+        await copies.repositoryOf(repo);
+        await copies.repositoryOf(repo);
+
+        // Assert — no origin is `null`, which is never kept.
+        should(young).equal(1);
+        should(aged).equal(2);
+        should((await asked()).length).equal(4);
+      });
+    });
+  });
 });
