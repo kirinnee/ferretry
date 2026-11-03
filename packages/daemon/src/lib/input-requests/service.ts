@@ -3317,7 +3317,10 @@ function noteOf(state: string, reason: InputReason | undefined, kind: InputTarge
     return unsettled
       ? `The ${surfaceWord(kind)} kept changing, so nothing was typed. Ask the ferret to request again.`
       : `The ${surfaceWord(kind)} is no longer what you approved, so nothing was typed. Look at it before the ferret asks again.`;
-  return reason === undefined ? `Input request ${state}.` : `Input request ${state}: ${reason.replaceAll('_', ' ')}.`;
+  // An expiry says so once: "Input request expired.", not "Input request expired: expired."
+  return reason === undefined || reason === state
+    ? `Input request ${state}.`
+    : `Input request ${state}: ${reason.replaceAll('_', ' ')}.`;
 }
 
 /** Why a request ended, in the words the ferret is told: never a bare wire code. */

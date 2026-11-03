@@ -7,7 +7,7 @@
  */
 
 import type { AccountSummary, SignInSummary } from '@ferretry/protocol';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { readAccounts } from '../../lib/input-api.ts';
 import {
   codeKeyLabel,
@@ -24,6 +24,10 @@ export interface SignInRuleOfferProps {
   readonly client: RuleClient;
   readonly signIn: SignInSummary['id'];
   readonly askPasskey: RulesBinding['askPasskey'];
+  /** Whether there is an offer to show, once the daemon answered (`false` too when it could not). */
+  readonly onOffered?: (offered: boolean) => void;
+  /** The owner approved the rule: the offer is carried out. */
+  readonly onSaved?: () => void;
 }
 
 interface Found {
@@ -31,22 +35,28 @@ interface Found {
   readonly account: AccountSummary;
 }
 
-export function SignInRuleOffer({ client, signIn, askPasskey }: SignInRuleOfferProps) {
+export function SignInRuleOffer({ client, signIn, askPasskey, onOffered, onSaved }: SignInRuleOfferProps) {
   const [found, setFound] = useState<Found | undefined>(undefined);
   const [reading, setReading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [eligible, setEligible] = useState(false);
+  const offered = useRef(onOffered);
+  offered.current = onOffered;
 
   useEffect(() => {
     let current = true;
     setEligible(false);
     void readEligibility(client, signIn).then(
       answer => {
-        if (current) setEligible(answer.eligible);
+        if (!current) return;
+        setEligible(answer.eligible);
+        offered.current?.(answer.eligible);
       },
       () => {
-        if (current) setEligible(false);
+        if (!current) return;
+        setEligible(false);
+        offered.current?.(false);
       },
     );
     return () => {
@@ -72,6 +82,7 @@ export function SignInRuleOffer({ client, signIn, askPasskey }: SignInRuleOfferP
         onSettled={() => {
           setFound(undefined);
           setSaved(true);
+          onSaved?.();
         }}
         origin="owner"
         place={found.signIn.place}
