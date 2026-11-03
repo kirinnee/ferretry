@@ -1,3 +1,9 @@
+## [4.267.0](https://github.com/kirinnee/ferretry/compare/v4.266.0...v4.267.0) (2026-11-03)
+
+### Features
+
+* **pwa:** add the side panel's Agenda tab and remove the card views ([#1437](https://github.com/kirinnee/ferretry/issues/1437)) ([4895275](https://github.com/kirinnee/ferretry/commit/489527523862558a8c9aec15b589c45fc3fbec5c))
+
 ## [4.266.0](https://github.com/kirinnee/ferretry/compare/v4.265.0...v4.266.0) (2026-11-03)
 
 ### Features
