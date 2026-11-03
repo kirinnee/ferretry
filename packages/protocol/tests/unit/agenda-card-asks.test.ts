@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { AgendaCardAsk, AgendaGate } from '../../src/lib/agenda.ts';
+import { type AgendaCardAsk, type AgendaGate, AgendaItemSchema } from '../../src/lib/agenda.ts';
 import {
   cardAgendaReference,
   cardAskOf,
@@ -95,5 +95,31 @@ describe('needsYouQueue and card asks', () => {
     ] as AgendaQueueSource[];
 
     should(needsYouQueue(items).map(each => each.id)).deepEqual(['A2', 'A3', 'A1', 'A4']);
+  });
+});
+
+describe('an agenda item’s card asks', () => {
+  const item = (cardAsks: readonly AgendaCardAsk[]) => ({
+    id: 'A6',
+    source: 'task',
+    sourceRef: 'card-agenda:F412',
+    subject: 'Try it: open the Board',
+    why: '&F412 reached Released.',
+    waitingSince: AT,
+    howToResolve: 'Answer the card’s ask here.',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+    task: { id: 'F412' },
+    cardAsks,
+    raisedBy: 'daemon',
+    raisedBySession: null,
+    raisedByName: null,
+  });
+
+  it('should carry each card ask once', () => {
+    should(AgendaItemSchema.safeParse(item([open('F412'), open('F412', 2)])).success).be.true();
+    const twice = AgendaItemSchema.safeParse(item([open('F412'), answered('F412')]));
+    should(twice.success).be.false();
+    should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each card ask once');
   });
 });

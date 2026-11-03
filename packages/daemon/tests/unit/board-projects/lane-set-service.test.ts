@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import {
   type BoardProjectId,
   LANE_TEMPLATES,
+  type Lane,
   type LaneLayoutValue,
   type LaneSet,
   type LaneSetActionRequest,
@@ -765,5 +766,61 @@ describe('LaneSetService writes out every lane’s stage at boot', () => {
     should(accepted).be.true();
     should(store.sets.get(DOCS_ID)).match({ version: 4, confirmedBy: 'owner' });
     should(store.sets.get(DOCS_ID)?.lanes.every(lane => lane.stage !== undefined)).be.true();
+  });
+});
+
+describe('LaneSetService names waiting lanes as progress at boot', () => {
+  /** A set as stored before lanes showed progress: the template's waiting name for its Released lane. */
+  const waiting = (projectId: string): LaneSet => {
+    const set = templateLanes(projectId);
+    return {
+      ...set,
+      version: 3,
+      lanes: set.lanes.map(lane => (lane.id === 'released' ? { ...lane, name: 'Released · to test' } : lane)),
+    };
+  };
+
+  it('should rename each stored set’s template names, keep its version, move no card and ask nothing', async () => {
+    // Arrange
+    const { store, agenda, relocator, service } = world();
+    store.sets.set(FERRETRY_ID, waiting(FERRETRY_ID));
+    store.sets.set(DOCS_ID, templateLanes(DOCS_ID));
+
+    // Act
+    const outcomes = await service.progressLaneNames();
+    const again = await service.progressLaneNames();
+
+    // Assert
+    should(outcomes).deepEqual([{ projectId: FERRETRY_ID, renamed: true, version: 3 }]);
+    should(again).deepEqual([]);
+    should(store.sets.get(FERRETRY_ID)?.lanes.find(lane => lane.id === 'released')?.name).equal('Released');
+    should(relocator.moves).be.empty();
+    should(agenda.raised).be.empty();
+  });
+
+  it('should leave a set it cannot rename into a readable one, and report a store it cannot write', async () => {
+    // Arrange — a damaged set (a lane twice) still carrying a template name, and a store that fails
+    const { store, service } = world();
+    const damaged = waiting(DOCS_ID);
+    store.sets.set(DOCS_ID, { ...damaged, lanes: [...damaged.lanes, damaged.lanes[0] as Lane] });
+    const transact = store.transact.bind(store);
+    store.transact = async (projectId, decide) => {
+      if (projectId === UNFILED_PROJECT_ID) return Promise.reject('disk gone');
+      return await transact(projectId, decide);
+    };
+
+    // Act
+    const outcomes = await service.progressLaneNames();
+
+    // Assert
+    should(outcomes).deepEqual([
+      { projectId: UNFILED_PROJECT_ID, renamed: false, problem: 'disk gone' },
+      {
+        projectId: DOCS_ID,
+        renamed: false,
+        problem: 'renaming its lanes would leave them unreadable, so they are left as they are',
+      },
+    ]);
+    should(store.sets.get(DOCS_ID)?.lanes.find(lane => lane.id === 'released')?.name).equal('Released · to test');
   });
 });

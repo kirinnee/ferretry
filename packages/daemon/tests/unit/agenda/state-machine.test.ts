@@ -4685,6 +4685,49 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     should(afterAnswer.changed).be.true();
   });
 
+  it('refuses an agenda a seventeenth open ask, an answer to an ask it never carried, and a second different answer', () => {
+    // Arrange — sixteen open asks, one card entry each
+    let ledger = raised().ledger;
+    for (let entry = 1; entry <= 16; entry += 1) ledger = attach(ledger, { ...GATE, entry }).ledger;
+
+    // Act + Assert
+    should(failed(ask(ledger, { kind: 'attach', ask: { gate: { ...GATE, entry: 17 } } })).error.code).equal('full');
+    should(
+      failed(ask(ledger, { kind: 'not-yet', reference: gateReference({ ...GATE, entry: 99 }) })).error.message,
+    ).match(/carries no card ask/u);
+  });
+
+  it('keeps the owner answering a gate item from before card asks: no ferret answers it, and a bare done is refused', () => {
+    // Arrange
+    const gateItem = succeeded(
+      applyAgendaCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(DAEMON, {
+          source: 'task',
+          sourceRef: gateReference(GATE),
+          gate: GATE,
+          kind: 'choice',
+          ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
+          task: { id: 'F1' },
+        } as never),
+      ),
+    );
+    const response = { kind: 'multiple-choice' as const, choice: 'Done' };
+
+    // Act
+    const ferret = failed(
+      applyAgendaCommand(gateItem.ledger, { action: 'answer', actor: DAEMON, id: 'A1', response, at: SECOND } as never),
+    );
+    const bare = failed(
+      applyAgendaCommand(gateItem.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND } as never),
+    );
+
+    // Assert
+    should(ferret.error.code).equal('forbidden');
+    should(bare.error.message).match(/^answer A1 instead/u);
+  });
+
   it('refuses a ferret raising card asks of its own', () => {
     const result = failed(
       applyAgendaCommandToSession(null, SESSION_ID, raiseCommand(AGENT, { cardAsks: [{ gate: GATE, at: FIRST }] })),
@@ -4781,6 +4824,25 @@ describe('liftGateItems (docs/agenda.md § Card asks: the migration)', () => {
     const open = lifted.entries.filter(isActiveAgenda);
     should(open).have.length(1);
     should(open[0]?.item.cardAsks?.map(each => each.gate.entry).sort()).deepEqual([1, 2]);
+  });
+
+  it('puts a snoozed thread in the owner’s queue when it takes a gate item’s ask that was there', () => {
+    // Arrange — the owner snoozed the thread; the gate item waits on them
+    const thread = raised(AGENT, { task: { id: 'F1' } } as never);
+    const snoozed = succeeded(
+      applyAgendaCommand(thread.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: FIRST } as never),
+    );
+    const legacy = gateItem(snoozed.ledger, GATE, SECOND).ledger;
+
+    // Act
+    const lifted = reread(legacy);
+
+    // Assert
+    const item = activeEntry(lifted).item;
+    should(item.cardAsks).have.length(1);
+    should(item.parked).be.undefined();
+    should(item.waitingSince).equal(SECOND);
+    should(agendaState(item).state).equal('needs-you');
   });
 
   it('lifts a bare gateAttached into an open card ask, keeping a Not yet', () => {

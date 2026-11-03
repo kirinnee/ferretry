@@ -632,14 +632,6 @@ function isGateItem(item: Pick<AgendaItem, 'gate' | 'source'>): boolean {
   return item.gate !== undefined && item.source === 'task';
 }
 
-/**
- * The follow-up conversation a gate's Not good opened (`gate-followup:`): raised by the daemon ON BEHALF of the card's
- * ferret, so the ferret whose board holds it edits, surfaces and closes it as its own.
- */
-export function isGateFollowupAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
-  return entry.origin.kind === 'daemon' && isGateFollowupItem(entry.item);
-}
-
 /** A gate follow-up as its item says: the gate producer's `task` source, raised by the daemon, under its reference. */
 export function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return (
