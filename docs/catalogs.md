@@ -1506,7 +1506,7 @@ The Add skills page has a second group under the subscriptions, **On this machin
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4 and 3f-5,
 > [The daemon](#the-daemon-3f-4)) exist, and the daemon reports `catalogs.links.1`. The Worker is bound behind the
 > hosted relay (3f-3, merged at `f59c89df`; its relay deploy succeeded and `LINK_STORE` is bound), and no built-in app or CLI flow
-> exists yet (3f-6 is the installer, 3f-8 the app), so Ferretry offers no way to make a link by hand today. Whether the store answers is a separate operator runtime control (the
+> exists yet (3f-6 is the installer, 3f-8 the app), though an authorized owner API client can mint a link. Whether the store answers is a separate operator runtime control (the
 > `available` and `serving` switches, [relay-protocol.md](relay-protocol.md#operator-routes-and-the-kill-switches)),
 > not a release. Where a
 > sentence says "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own

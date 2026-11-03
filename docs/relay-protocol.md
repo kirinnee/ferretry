@@ -3693,9 +3693,11 @@ skills, or who installed it.
   (`src/adapters/link-store-worker.ts`), the operator routes, both wrangler configurations, `task
 link-store:check` and `link-store:deploy`, and the manual workflow.
 - **Built (3f-3)** — the hosted relay's `LINK_STORE` binding and path dispatch
-  (`src/adapters/hosted-link-store-routes.ts`) and `wrangler.hosted.json`'s `services` entry. **Not yet
-  published**: that is a relay deploy, scheduled by the owner (§13).
-- **GAP — no app opens a link.** The daemon's owner side exists (catalogs 3f-4); the app screen is 3f-6.
+  (`src/adapters/hosted-link-store-routes.ts`) and `wrangler.hosted.json`'s `services` entry. **Deployed
+  and bound**: merged at `f59c89df`, the relay deploy succeeded and `LINK_STORE` is bound. Whether the store
+  answers is a separate operator runtime control (the `available` and `serving` switches), not a release.
+- **GAP — no app opens a link.** The daemon's owner side exists (catalogs 3f-4); the app screen is 3f-8
+  (3f-6 is the installer).
 - **GAP — the runtime is faked.** The Durable Object, storage, alarm and output-gate behaviour the
   atomic fetch relies on is proved against fakes in `tests/integration`; only a deployment proves
   that Cloudflare behaves as they do.
