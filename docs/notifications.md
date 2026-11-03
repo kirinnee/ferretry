@@ -84,8 +84,9 @@ for a stop, else the oldest.
 
 **What counts as a stop.** The ferret's session state says its turn ended on the owner (`turnState` is
 `your-turn` or `needs-input`, with `turnStateAt`), and at least one non-notice item is on the owner's turn
-(no `waitingOn: 'ferret'`, unresolved). A stop is named by that `turnStateAt` instant, so the same stop
-never pushes twice — across a daemon restart too — and the next idle period is a new stop.
+(unresolved, and not resting or snoozed: [agenda.md](agenda.md#states)); a push's count is the Needs-you items
+(`agendaBadgeCount`). A stop is named by that `turnStateAt` instant, so the same stop never pushes twice — across a
+daemon restart too — and the next idle period is a new stop.
 
 **What never buzzes.**
 
@@ -93,7 +94,8 @@ never pushes twice — across a daemon restart too — and the next idle period 
 - A ferret that is working. Items raised mid-turn wait for the stop.
 - A ferret that was **already idle when the daemon started**. The start-up pass looks at deadlines only;
   a stop is something the daemon sees happen.
-- An item on the ferret's turn (the owner asked for more, or to discuss it; the ferret has the ball).
+- A RESTING item: the owner replied to or answered it, asked for more or to discuss it, or the ferret took it on
+  (`fy agenda rest`). The ferret has the ball.
 - A parked item: one the owner replied to, or snoozed and not yet woken.
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
@@ -262,11 +264,12 @@ on unless the machine default (below) is turned off.
 The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,240 characters, capped at 1,300 by a
 test; the shipped prompt as a whole has its own cap, so a new rule here is paid for by tightening words) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
 action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
-and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`edit --question-answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), tells it to answer several bugs or asks the owner raised at once with ONE `-k info` item, a short line each and where it is tracked, so the owner knows each was heard ([agenda.md](agenda.md#rules-the-writing-keeps)), teaches the card formatting (an ask of about 80 characters with the detail in `--body`, short Markdown points in every segment, no `#` headings anywhere), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
+and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`fy agenda answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), tells it to answer several bugs or asks the owner raised at once with ONE `-k info` item, a short line each and where it is tracked, so the owner knows each was heard ([agenda.md](agenda.md#rules-the-writing-keeps)), teaches the card formatting (an ask of about 80 characters with the detail in `--body`, short Markdown points in every segment, no `#` headings anywhere), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
 `--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — one line mapping each kind to its answer shape (`AGENDA_SHAPE_LINE`; [agenda.md](agenda.md#what-i-need-from-you)), what `--blocking`,
-`--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
-parks the item as replied (the ferret does the work and closes it with `done`, `--reason` to withdraw a question; `fy agenda edit --back` with the whole card refreshed — `--summary`, `--premise` and `--context` — only for something NEW, and a plain `edit` leaves it parked —
-[agenda.md](agenda.md#parked-items)).
+`--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer and `"[re !A3 …]"` is chat, and that
+both REST the item on the ferret: `fy agenda answer <id>` brings it back, `fy agenda rest <id> --why …` takes it on
+while working, `--stage` and `--where` say what it needs and where it stands, and `done` closes it once nothing is left
+(`--reason` to withdraw an open question) — [agenda.md](agenda.md#states)). `--back` is gone from it.
 
 - **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
   means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into
