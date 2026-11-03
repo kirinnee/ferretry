@@ -375,24 +375,16 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
   });
 
   it('DoD 2: things that depend on each other are always in one agenda: the listing puts the agenda carrying a dependency first', async () => {
-    // Arrange — A1 carries F1; F2 depends on F1; F3 blocks F1
+    // Arrange — A2 carries F1; F2 depends on F1; F3 blocks F1. A1 is older and shares the new ask's words, so ONLY the
+    // tie can put A2 first.
     const made = fresh();
     made.cards.set('F1', taskCard({ id: 'F1' }));
     made.cards.set('F2', taskCard({ id: 'F2', dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] }));
     made.cards.set('F3', taskCard({ id: 'F3', blocks: [{ id: 'F1' }] }));
     const daemon = serveRoutes(made);
     try {
-      const first = await fy(made, daemon.url, [
-        'add',
-        'Can you try the badge?',
-        '--title',
-        'Badge',
-        '--task',
-        'F1',
-        ...BRIEF,
-      ]);
-      should(first.code).equal(0, first.err);
-      ok(await made.service.raise(SESSION, ask('Which region?'), AGENT));
+      ok(await made.service.raise(SESSION, ask('Is the badge colour right for dark mode?'), AGENT));
+      ok(await made.service.raise(SESSION, ask('Which region?', { task: { id: 'F1' } }), AGENT));
 
       // Act
       const dependent = await fy(made, daemon.url, [
@@ -414,12 +406,13 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
         ...BRIEF,
       ]);
 
-      // Assert — neither opened; each says WHY !A1 is the one to join
+      // Assert — neither opened; each says WHY !A2 is the one to join, and lists it before the word-matching !A1
       should(dependent.code).not.equal(0);
       should(dependent.err).containEql('carries &F1, which &F2 depends on');
-      should(dependent.err).containEql('Should this join !A1?');
-      should(dependent.err.indexOf('!A1')).be.below(dependent.err.indexOf('!A2'));
+      should(dependent.err).containEql('Should this join !A2?');
       should(dependent.err.indexOf('!A2')).be.aboveOrEqual(0);
+      should(dependent.err.indexOf('!A1')).be.aboveOrEqual(0);
+      should(dependent.err.indexOf('!A2')).be.below(dependent.err.indexOf('!A1'));
       should(blocking.code).not.equal(0);
       should(blocking.err).containEql('carries &F1, which depends on &F3');
       should((await made.items()).map(item => item.id)).eql(['A1', 'A2']);
