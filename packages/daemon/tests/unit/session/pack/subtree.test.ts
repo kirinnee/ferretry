@@ -769,6 +769,70 @@ describe('SubtreeService outbox bounds', () => {
     should(granted).equal(1000);
   });
 
+  it('should keep the reservation of a read that fails after reading, so failures cannot exceed the table budget', async () => {
+    // Arrange: every outbox yields one chunk and then fails, as a file that errors mid-scan does
+    let bytesRead = 0;
+    let attempts = 0;
+    const subject = new SubtreeService(
+      portsFor(many(8), async (_id, to, maxBytes) => {
+        attempts += 1;
+        let reads = 0;
+        return await scanOutbox(
+          {
+            size: 1000,
+            read: async (_offset, length) => {
+              reads += 1;
+              if (reads > 1) throw new Error('EIO');
+              bytesRead += length;
+              return Buffer.alloc(length, 0x61);
+            },
+          },
+          to,
+          40,
+          maxBytes,
+        );
+      }),
+      limits({ concurrency: 1, outboxBytes: 300, rowBytes: 100 }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert: 40 bytes were really read per row, but the whole 100 stays charged
+    should(attempts).equal(3);
+    should(bytesRead).be.belowOrEqual(300);
+    should(view?.rows.every(row => row.last === undefined)).be.true();
+  });
+
+  it('should spend the byte budget on live rows before ended ones that sort ahead of them', async () => {
+    // Arrange: eight ended rows come first in tree order and would each take a full read
+    const sessions = [
+      sessionView('root'),
+      ...Array.from({ length: 8 }, (_, index) =>
+        child(`a-ended-${index}`, 'root', {}, { status: 'completed', finishedAt: minutesAgo(10) }),
+      ),
+      child('z-live', 'root'),
+    ];
+    const reads: string[] = [];
+    const subject = new SubtreeService(
+      portsFor(sessions, async (id, _to, maxBytes) => {
+        reads.push(id);
+        return { message: said, scanned: maxBytes };
+      }),
+      limits({ concurrency: 1, excerptRows: 9, endedRows: 8, outboxBytes: 800, rowBytes: 100 }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert: the live row is read first and keeps its position as the last row
+    should(reads[0]).equal('z-live');
+    should(reads).have.length(8);
+    should(view?.rows.at(-1)?.id).equal('z-live');
+    should(view?.rows.at(-1)?.last?.text).equal('hi');
+    should(view?.rows.filter(row => row.state === 'ended' && row.last !== undefined)).have.length(7);
+  });
+
   it('should list a row whose outbox read fails, without an excerpt, rather than fail the table', async () => {
     // Arrange
     const subject = new SubtreeService(

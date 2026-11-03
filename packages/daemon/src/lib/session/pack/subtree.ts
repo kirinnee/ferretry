@@ -328,9 +328,11 @@ export class SubtreeService {
   }
 
   /**
-   * The newest message to `callerId` of each eligible member, read `concurrency` at a time. Each read reserves
-   * its bytes from the table's budget before it starts and hands back what it did not use; one that finds the
-   * budget spent reads nothing. A member that is not eligible, or whose read finds nothing, has no message.
+   * The newest message to `callerId` of each eligible member, read `concurrency` at a time in the order
+   * `eligible` lists them (live rows before ended ones), each result at its member's position. Each read
+   * reserves its bytes from the table's budget before it starts and hands back what it reports unused; a read
+   * that fails keeps its whole reservation, since it may already have read them. One that finds the budget
+   * spent reads nothing. A member that is not eligible, or whose read finds nothing, has no message.
    */
   private async messagesFor(
     members: readonly SubtreeMember[],
@@ -339,19 +341,24 @@ export class SubtreeService {
   ): Promise<readonly (SentMessage | undefined)[]> {
     const { concurrency, outboxBytes, rowBytes } = this.limits;
     let remaining = outboxBytes;
-    return await mapBounded(members, concurrency, async (member, index) => {
-      if (!eligible.has(index) || remaining <= 0) return undefined;
+    const order = [...eligible];
+    const found = await mapBounded(order, concurrency, async index => {
+      if (remaining <= 0) return undefined;
       const reserved = Math.min(rowBytes, remaining);
       remaining -= reserved;
       try {
-        const { message, scanned } = await this.ports.lastMessage(member.view.config.id, callerId, reserved);
+        const { message, scanned } = await this.ports.lastMessage(members[index]!.view.config.id, callerId, reserved);
         remaining += Math.max(0, reserved - scanned);
         return message;
       } catch {
-        remaining += reserved;
         return undefined;
       }
     });
+    const messages: (SentMessage | undefined)[] = members.map(() => undefined);
+    order.forEach((index, position) => {
+      messages[index] = found[position];
+    });
+    return messages;
   }
 
   /** Every candidate redacted whole in ONE batch, then cut to a line; a redactor that fails withholds them all. */

@@ -357,7 +357,8 @@ cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged;
   excerpt reads `[excerpt withheld]` — the raw text is never shown.
 - **Bounded work.** A large tree cannot make the daemon scan without limit: at most 4 outbox files are open at once,
   at most 64 rows get an excerpt (live rows first; at most 8 of them recently ended), and at most 8 MiB of outbox is
-  read for the table (1 MiB per row). A row past a budget is still listed — state, card and PR intact — with no
+  read for the table (1 MiB per row), live rows spending it before ended ones. A read that fails keeps its whole
+  share of that budget, since it may already have read it. A row past a budget is still listed — state, card and PR intact — with no
   last line, so `-` in that column on a very large table means "not read", not "silent". A failed outbox read does
   the same for its row.
 - **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `card`, `pr`,
