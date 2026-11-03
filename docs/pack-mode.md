@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,285      | 321      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,276      | 319      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -90,7 +90,11 @@ splitting and chat discussion — and the Board section to say a card shows prog
 and there are no umbrella cards. It was paid for by the Board section's gate words and its full `fy task create`
 example, and by tightening the Agenda section's own wording: agenda 1,237 → 1,285, board 802 → 638, the measured total
 7,841 → 7,725. That leaves 125 characters under the cap for the agenda verbs that ship next (`answer`, `rest`, `log`,
-`split`, `merge`), which join the section when they exist.
+`split`, `merge`), which join the section when they exist. Review round 1 restored the owner's two standing rules —
+"Bug batch: ONE agenda, line each + where tracked." and "Owner Q: answer ON it, options stay; no item: ONE `-k info`." —
+paid for by tightening the Agenda section's other lines: agenda 1,285 → 1,276, the measured total 7,725 → 7,716
+(7,730 counting the 14 section-separator characters), leaving 134 characters under the 7,850 cap (120 counting the
+separators). The cap is unchanged.
 
 ## The routing prompt
 

@@ -6,6 +6,7 @@ import {
   type TaskRef,
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
+import { displayHowToResolve } from './how-to-resolve.ts';
 import { agendaReference } from './reference.ts';
 
 /**
@@ -179,11 +180,10 @@ export function agendaCandidates(items: readonly AgendaItem[], query: CandidateQ
       };
     })
     .sort((left, right) => {
-      for (let at = 0; at < left.rank.length; at += 1) {
-        const difference = (right.rank[at] ?? 0) - (left.rank[at] ?? 0);
-        if (difference !== 0 && !Number.isNaN(difference)) return difference;
-      }
-      return 0;
+      const decided = left.rank
+        .map((value, at) => (right.rank[at] ?? 0) - value)
+        .find(difference => difference !== 0 && !Number.isNaN(difference));
+      return decided ?? 0;
     })
     .map(entry => entry.candidate);
 }
@@ -208,20 +208,113 @@ const union = (left: readonly string[], right: readonly string[]): string[] => [
 
 type AddRequest = Extract<AgendaActionRequest, { action: 'add' }>;
 
-/**
- * The exact `fy agenda edit` that adds the new ask to a candidate instead of opening a new agenda: the ask joins what
- * is still open. An item the owner replied to is Resting and its card must be written again whole to come back
- * (`--back` with the ask, premise and context), so its command carries both cards' points.
- */
-export function joinCommand(binary: string, candidate: AgendaCandidate, request: AddRequest): string {
+const ASK_WORDS: Readonly<Record<NonNullable<AddRequest['ask']>['kind'], string>> = {
+  'multiple-choice': 'options to choose from',
+  permission: 'an approval to give',
+  'answer-review': 'an answer to review',
+  'open-question': 'a question to answer in words',
+  task: 'something for the owner to do',
+};
+
+/** What the new ask says that `fy agenda edit` cannot add to an open agenda, in plain words; empty when nothing. */
+function beyondEdit(candidate: AgendaCandidate, request: AddRequest, card: TaskRef | undefined): string[] {
   const { item } = candidate;
-  const stillOpen = union(points(item.stillOpen), [request.subject]);
-  const base = `${binary} agenda edit ${candidate.id}${flags('--still-open', stillOpen)}`;
-  if (item.parked?.reason !== 'replied') return base;
-  return `${base} --back${flags('--summary', [request.subject])}${flags(
-    '--premise',
-    union(points(item.premise), points(request.premise)),
-  )}${flags('--context', union(points(item.context), points(request.context)))}`;
+  const { ask } = request;
+  const sameAsk =
+    ask !== undefined && (ask.kind === 'open-question' || ask.kind === 'task') && item.ask?.kind === ask.kind;
+  const filled = (list: readonly unknown[] | undefined): boolean => list !== undefined && list.length > 0;
+  const tiedElsewhere =
+    card !== undefined && (item.task === undefined || item.task === null || refKey(item.task) !== refKey(card));
+  const found: [boolean, string][] = [
+    [ask !== undefined && !sameAsk, ask === undefined ? '' : ASK_WORDS[ask.kind]],
+    [filled(request.questions), 'questions'],
+    [filled(request.fields), 'a form'],
+    [filled(request.optionDetails), 'option details'],
+    [filled(request.steps), 'steps'],
+    [request.body !== undefined, 'a body'],
+    [request.recommendation !== undefined, 'a recommendation'],
+    [request.impact !== undefined, 'what happens if nobody answers'],
+    [request.urgency !== undefined, 'an urgency'],
+    [request.blockingNow === true, 'blocking the ferret now'],
+    [request.willBlock !== undefined, 'what it will block'],
+    [request.neededBy !== undefined, 'a deadline'],
+    [filled(request.links), 'links'],
+    [filled(request.terms), 'terms'],
+    [request.why !== request.subject, 'a reason of its own (--why)'],
+    [
+      displayHowToResolve(request.howToResolve) !== displayHowToResolve(item.howToResolve),
+      'its own way to resolve it (--resolve)',
+    ],
+    [tiedElsewhere, card === undefined ? '' : `the card ${refKey(card)}`],
+  ];
+  return found.filter(([present]) => present).map(([, words]) => words);
+}
+
+/** How a new ask reaches a candidate: the one `fy agenda edit` that loses nothing, or what would be lost. */
+export type JoinPlan =
+  | { readonly kind: 'edit'; readonly command: string }
+  | { readonly kind: 'new'; readonly carries: readonly string[] };
+
+/**
+ * Whether the new ask can join the candidate without losing any of it, and the exact command when it can. `fy agenda
+ * edit` rewords an open agenda: it can add lines to what is still open, the premise, the context and the earlier
+ * answers, but it cannot give the agenda a new question, options, body, blocking, urgency or deadline. So an ask that
+ * is plain words (a line, with its premise and context) joins by one edit that keeps everything both agendas say, and
+ * any other ask is never squeezed into one: the plan says what would be lost, and its own agenda is the safe way out.
+ *
+ * An item the owner replied to is Resting, and its card must be written again whole to come back (`--back` with the
+ * summary, premise and context): the new line becomes its summary and the old summary moves into what is still open.
+ */
+export function joinPlan(
+  binary: string,
+  candidate: AgendaCandidate,
+  request: AddRequest,
+  card?: TaskRef | undefined,
+): JoinPlan {
+  const carries = beyondEdit(candidate, request, card);
+  if (carries.length > 0) return { kind: 'new', carries };
+  const { item } = candidate;
+  const replied = item.parked?.reason === 'replied';
+  const stillOpen = union(
+    union(points(item.stillOpen), replied ? [item.subject] : []),
+    union([request.subject], points(request.stillOpen)),
+  );
+  const decided = union(points(item.decided), points(request.decided));
+  const edit = [
+    `${binary} agenda edit ${candidate.id}`,
+    flags('--still-open', stillOpen),
+    flags('--premise', union(points(item.premise), points(request.premise))),
+    flags('--context', union(points(item.context), points(request.context))),
+    decided.length > points(item.decided).length ? flags('--decided', decided) : '',
+    replied ? ` --back${flags('--summary', [request.subject])}` : '',
+  ].join('');
+  return { kind: 'edit', command: edit };
+}
+
+/** The way out when the ask cannot join: its own agenda, said why, naming the closest one it was weighed against. */
+const newWay = (binary: string, candidate: AgendaCandidate): string =>
+  `${binary} agenda add … --new "<why none fits; closest is ${agendaReference(candidate.id)}>"`;
+
+/** What choosing to join prints: the edit that adds the ask, or why it cannot be added and the way out. */
+export function joinAdvice(binary: string, candidate: AgendaCandidate, plan: JoinPlan): string {
+  const reference = agendaReference(candidate.id);
+  if (plan.kind === 'edit') return `Nothing was opened. Add it to ${reference}:\n${plan.command}`;
+  return [
+    `Nothing was opened. This ask has ${plan.carries.join(', ')}, which ${reference} cannot take: an agenda edit cannot add them until the agenda edit verbs land, and squeezing it in would drop them.`,
+    `The safe way out is its own agenda, saying why and naming ${reference} as the closest:`,
+    `  ${newWay(binary, candidate)}`,
+  ].join('\n');
+}
+
+/** What a person who did not say yes is told: nothing was opened, and the two ways out. */
+export function waysOut(binary: string, candidate: AgendaCandidate, plan: JoinPlan): string {
+  if (plan.kind === 'new') return joinAdvice(binary, candidate, plan);
+  return [
+    `Nothing was opened. Join it to ${agendaReference(candidate.id)}:`,
+    `  ${plan.command}`,
+    'or open a new agenda only when none passes the test:',
+    `  ${binary} agenda add … --new "<why none fits>"`,
+  ].join('\n');
 }
 
 /** Why a candidate is listed first, in plain words: the card it shares with the new item. */
@@ -239,8 +332,17 @@ function tieLine(tie: NonNullable<AgendaCandidate['tie']>, named: string): strin
 /** The listing `fy agenda add` prints before it opens anything: the candidates, the question, the two ways out. */
 export function renderCandidates(
   candidates: readonly AgendaCandidate[],
-  options: { readonly binary: string; readonly request: AddRequest; readonly named?: TaskRef | undefined },
+  options: {
+    readonly binary: string;
+    readonly request: AddRequest;
+    readonly named?: TaskRef | undefined;
+    /** Set when a new agenda is being opened anyway (`--new`): the reason given, or empty for a bare `--new`. */
+    readonly opening?: string | undefined;
+  },
 ): string {
+  const [closest] = candidates;
+  if (closest === undefined) return '';
+  const plan = joinPlan(options.binary, closest, options.request, options.named);
   const listed = candidates.slice(0, MAX_LISTED_CANDIDATES);
   const refWidth = Math.max(...listed.map(each => agendaReference(each.id).length));
   const stateWidth = Math.max(...listed.map(each => each.state.length));
@@ -253,18 +355,31 @@ export function renderCandidates(
     ].join(''),
   );
   const more = candidates.length - listed.length;
-  const [closest] = listed;
-  if (closest === undefined) return '';
   return [
     'Search, check, then open: these agendas are open, closest first.',
     ...rows,
     ...(more > 0 ? [`  … and ${String(more)} more: ${options.binary} agenda ls`] : []),
     '',
     `Should this join ${agendaReference(closest.id)}? It does when all three hold: same place, same context, same pace;`,
-    'dependent things always share one. If unsure, join the closest. Add it there instead (nothing is opened):',
-    `  ${joinCommand(options.binary, closest, options.request)}`,
+    ...(plan.kind === 'edit'
+      ? [
+          'dependent things always share one. If unsure, join the closest. Add it there instead (nothing is opened):',
+          `  ${plan.command}`,
+        ]
+      : [
+          `dependent things always share one. But this ask has ${plan.carries.join(', ')}, which an agenda edit cannot add`,
+          'to it until the agenda edit verbs land: joining would drop them, so it is not joined for you.',
+        ]),
     '',
-    'Open a new agenda only when none passes the test:',
-    `  ${options.binary} agenda add … --new "<why none fits>"`,
+    ...(options.opening === undefined
+      ? [
+          'Open a new agenda only when none passes the test:',
+          `  ${plan.kind === 'edit' ? `${options.binary} agenda add … --new "<why none fits>"` : newWay(options.binary, closest)}`,
+        ]
+      : [
+          options.opening === ''
+            ? 'Opening a new agenda anyway: no reason was given.'
+            : `Opening a new agenda anyway: ${options.opening}`,
+        ]),
   ].join('\n');
 }

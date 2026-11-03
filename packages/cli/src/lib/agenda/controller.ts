@@ -24,9 +24,11 @@ import {
   type AgendaCandidate,
   agendaCandidates,
   type CardTies,
-  joinCommand,
+  joinAdvice,
+  joinPlan,
   renderCandidates,
   shellQuote,
+  waysOut,
 } from './candidates.ts';
 import { type CardFlag, resolveCardFlag } from './card-flag.ts';
 import type { IAgendaBriefInput, IAgendaCardTies, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
@@ -208,8 +210,9 @@ export class AgendaController {
     this.#report(after, options, () => renderRepliesSent(held, sessionId));
   }
 
-  async add(words: readonly string[], options: AgendaAddOptions): Promise<void> {
-    const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
+  async add(typed: readonly string[], given: AgendaAddOptions): Promise<void> {
+    const [file, body] = await this.#inputs(given.jsonFile, given.bodyFile);
+    const [words, options] = this.#legacyNew(typed, given, file);
     const pointer = this.#relatedPointer(options);
     const flag = resolveCardFlag(words, pointer.card === undefined ? options : { ...options, task: pointer.card });
     const composed = composeAddRequest(
@@ -243,6 +246,25 @@ export class AgendaController {
   }
 
   /**
+   * `--new` was a bare flag, so `add --title T --new "Choose region"` raised "Choose region". It now takes the reason, and
+   * Commander hands it the next word. With no other ask given, that word is the ask the old form meant: it is read as
+   * the ask, with a warning, and `--new` stays bare for the one release it is still accepted.
+   */
+  #legacyNew(
+    words: readonly string[],
+    options: AgendaAddOptions,
+    file: BriefFile | undefined,
+  ): [readonly string[], AgendaAddOptions] {
+    const swallowed = typeof options.new === 'string' ? options.new.trim() : '';
+    const named = [options.ask, options.summary, file?.ask, file?.summary].some(line => (line?.trim() ?? '') !== '');
+    if (swallowed === '' || words.some(word => word.trim() !== '') || named) return [words, options];
+    this.out.diagnostic(
+      `--new now takes the reason no open agenda fits, so "${swallowed}" was read as your ask: write the ask as words or --ask, and the reason after --new`,
+    );
+    return [[swallowed], { ...options, new: true }];
+  }
+
+  /**
    * SEARCH, CHECK, THEN OPEN (docs/agenda.md § One channel per topic): whether the add may open a new agenda. The open
    * agendas on the caller's own ledger are the candidates, closest first — one carrying the named card, or a card it
    * depends on or blocks, leads (dependent things share one agenda). With none, the add opens, after the daemon's
@@ -258,18 +280,21 @@ export class AgendaController {
   ): Promise<boolean> {
     const why = typeof options.new === 'string' ? options.new.trim() : '';
     const bare = options.new === true || (typeof options.new === 'string' && why === '');
+    const opening = bare || why !== '';
     const binary = this.related?.binary ?? 'fy';
     if (bare) {
       this.out.diagnostic(
         `a bare --new is deprecated and stops working in a later release: say why no open agenda fits, --new "<why none fits>"`,
       );
     }
-    const as = this.#actor(options);
+    // `--new` skips the refusal, never the discovery: the search runs and the open agendas are listed either way.
     // The daemon's related check is asked once: it ranks the candidates and catches a strong duplicate elsewhere.
-    const related =
-      bare || why !== ''
-        ? undefined
-        : await this.related?.matches('agenda', request.title ?? request.subject, askOf(request), as);
+    const related = await this.related?.matches(
+      'agenda',
+      request.title ?? request.subject,
+      askOf(request),
+      this.#actor(options),
+    );
     const ties = card === undefined ? undefined : await this.#ties(card);
     const candidates = agendaCandidates(own.items, {
       sessionId: own.sessionId,
@@ -278,17 +303,23 @@ export class AgendaController {
       related,
       ties,
     });
-    const tied = candidates.find(candidate => candidate.tie !== undefined);
-    if (bare || why !== '') {
-      if (tied !== undefined) this.out.diagnostic(tiedWarning(tied, card, binary));
-      return true;
-    }
-    if (candidates.length === 0) {
+    const [closest] = candidates;
+    if (closest === undefined) {
       // Nothing of the caller's own to join: only another ferret's (or a card's) strong duplicate stops the add.
-      if (related !== undefined && card === undefined) await this.#refuseStrong(related, options);
+      if (!opening && related !== undefined && card === undefined) await this.#refuseStrong(related, options);
       return true;
     }
-    const listing = renderCandidates(candidates, { binary, request, named: card });
+    const listing = renderCandidates(candidates, {
+      binary,
+      request,
+      named: card,
+      ...(opening ? { opening: why } : {}),
+    });
+    // The listing goes to stderr when a new agenda is opened anyway, so `--json` still prints the raised snapshot alone.
+    if (opening) {
+      this.out.diagnostic(listing);
+      return true;
+    }
     if (options.json === true) {
       this.out.success(
         JSON.stringify(
@@ -301,18 +332,15 @@ export class AgendaController {
         'open agendas could take this; nothing was opened. Join one with agenda edit, or pass --new "<why none fits>"',
       );
     }
-    if (this.prompt?.interactive() === true) {
-      const [closest] = candidates;
-      this.out.diagnostic(listing);
-      if (closest !== undefined && (await this.#confirmed(`Should this join ${agendaReference(closest.id)}?`))) {
-        this.out.success(
-          `Nothing was opened. Add it to ${agendaReference(closest.id)}:\n${joinCommand(binary, closest, request)}`,
-        );
-        return false;
-      }
-      return true;
+    if (this.prompt?.interactive() !== true) throw new Error(`${listing}\n\nNothing was opened.`);
+    this.out.diagnostic(listing);
+    const plan = joinPlan(binary, closest, request, card);
+    if (await this.#confirmed(`Should this join ${agendaReference(closest.id)}?`)) {
+      this.out.success(joinAdvice(binary, closest, plan));
+      return false;
     }
-    throw new Error(`${listing}\n\nNothing was opened.`);
+    // Enter, no or anything else is not a yes: nothing is opened without a reason, so the two ways out are said.
+    throw new Error(waysOut(binary, closest, plan));
   }
 
   /** What the named card depends on and blocks, or nothing when the board cannot say: the check never stops an add. */
@@ -635,12 +663,6 @@ const candidateJson = (candidate: AgendaCandidate) => ({
   cards: candidate.cards,
   ...(candidate.tie === undefined ? {} : { tie: candidate.tie }),
 });
-
-/** Said when a new agenda is opened beside one that carries a dependent card: dependent things share one. */
-function tiedWarning(tied: AgendaCandidate, card: TaskRef | undefined, binary: string): string {
-  const named = card === undefined ? 'this card' : formatTaskRef(card);
-  return `${agendaReference(tied.id)} already carries ${tied.tie?.card ?? ''}, tied to ${named}: dependent things share one agenda. If deciding one changes the other, add this there instead: ${binary} agenda edit ${tied.id} …`;
-}
 
 /** The options minus `--by`, which is read separately into `neededBy`. */
 function withoutBy<T extends { readonly by?: string }>(options: T): Omit<T, 'by'> {

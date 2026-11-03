@@ -431,6 +431,8 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // The agenda's bug-batch and card-formatting rules measured 7,856; its wording was tightened (agenda 1,252 → 1,244).
     // The agenda-first model (F559) measured 7,725 (agenda 1,237 → 1,285, board 802 → 638: the gate words and the
     // create syntax went), leaving 125 for the agenda verbs that ship next (answer, rest, log, split, merge).
+    // Review round 1 restored the owner's bug-batch and owner-question rules, tightening the agenda's other lines
+    // (agenda 1,285 → 1,276): 7,716 measured by this test, 134 under the 7,850 cap (120 counting the section separators).
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
     should(sizes.pack).be.below(1_050);
@@ -440,7 +442,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);
     should(sizes.notify).be.below(450);
-    should(sizes.agenda).be.below(1_300);
+    should(sizes.agenda).be.below(1_290);
   });
 
   it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {

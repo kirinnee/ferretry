@@ -352,13 +352,15 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     const refused = await cli(['add', 'Ship the release now?', '--title', 'Release', '--kind', 'yesno']);
     const listed = await cli(['ls']);
 
-    // Assert — a ferret (nobody at the terminal) is refused with the candidates and the two ways out; nothing is opened.
+    // Assert — a ferret (nobody at the terminal) is refused with the candidates and the way out; a yes or no cannot be
+    // squeezed into !A5, so no edit is offered and nothing is opened.
     should(refused.code).not.equal(0);
     should(refused.err).containEql('Search, check, then open: these agendas are open, closest first.');
     should(refused.err).containEql('!A5  needs you  Work login plan');
     should(refused.err).containEql('Should this join !A5?');
-    should(refused.err).containEql("fy agenda edit A5 --still-open 'Ship the release now?'");
-    should(refused.err).containEql('--new "<why none fits>"');
+    should(refused.err).containEql('which an agenda edit cannot add');
+    should(refused.err).not.containEql('fy agenda edit A5');
+    should(refused.err).containEql('--new "<why none fits; closest is !A5>"');
     should(listed.out).not.containEql('!A6');
   });
 

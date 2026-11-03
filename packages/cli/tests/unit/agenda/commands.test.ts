@@ -790,6 +790,37 @@ describe('attention needs-info command', () => {
     should(bare.out.diagnostics).be.empty();
   });
 
+  it('should keep the legacy `add --title … --new "Choose region"` working: the swallowed words are the ask', async () => {
+    // Arrange + Act — the old boolean --new came last, with the ask after it; Commander hands the ask to --new.
+    const legacy = run(
+      ['agenda', 'add', '--title', 'Deploy', '--premise', 'x', '--context', 'y', '--new', 'Choose region'],
+      afterAdd,
+      [],
+      true,
+    );
+    await legacy.parsed;
+
+    // Assert
+    should(legacy.gateway.applied).have.length(1);
+    should(legacy.gateway.applied[0]?.request).match({ action: 'add', subject: 'Choose region', title: 'Deploy' });
+    should(legacy.out.diagnostics.join('\n')).containEql('--new now takes the reason');
+    should(legacy.out.diagnostics.join('\n')).containEql('was read as your ask');
+  });
+
+  it('should take --new as the reason when the ask is given as words, before or after it', async () => {
+    // Arrange + Act
+    const after = run(['agenda', 'add', 'Choose region', '--title', 'Deploy', '--new', 'its own decision'], afterAdd);
+    await after.parsed;
+    const before = run(['agenda', 'add', '--new', 'its own decision', 'Choose region', '--title', 'Deploy'], afterAdd);
+    await before.parsed;
+
+    // Assert
+    for (const each of [after, before]) {
+      should(each.gateway.applied[0]?.request).match({ subject: 'Choose region' });
+      should(each.out.diagnostics.join('\n')).not.containEql('was read as your ask');
+    }
+  });
+
   it('should raise the item without its card on an older daemon, and say so', async () => {
     // Arrange + Act
     const { parsed, gateway, out } = run(

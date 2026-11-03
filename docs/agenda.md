@@ -47,6 +47,9 @@ they would want to hear about in the same place, against the same background, an
 - **Chat discussion lands in the agenda.** When the owner discusses an agenda in the main chat, the ferret puts the
   exchange into it — the owner's words verbatim, then its reply — and links the agenda from its chat reply. Unsure
   which agenda: the closest, and it says so.
+- **Two standing rules, in the prompt word for word.** "Bug batch: ONE agenda, line each + where tracked." and "Owner
+  Q: answer ON it, options stay; no item: ONE `-k info`." (an owner's question about an item is answered on that
+  item and its options stay; with no item to answer on, one `info` agenda carries the answer).
 
 **`fy agenda add` runs the check.** Before it opens anything it lists the open agendas on the caller's own agenda
 (its lineage: a sub-ferret has none of its own), closest first, each with its reference, its state (`needs you`,
@@ -59,11 +62,31 @@ Search, check, then open: these agendas are open, closest first.
 
 Should this join !A7? It does when all three hold: same place, same context, same pace;
 dependent things always share one. If unsure, join the closest. Add it there instead (nothing is opened):
-  fy agenda edit A7 --still-open 'Pick the relay region'
+  fy agenda edit A7 --still-open 'Pick the relay region' --premise '…' --context '…'
 
 Open a new agenda only when none passes the test:
   fy agenda add … --new "<why none fits>"
 ```
+
+- **What a join carries.** `fy agenda edit` rewords an open agenda: it adds lines to what is still open, the premise,
+  the context and what is decided, but it cannot give the agenda a new question, options, a body, blocking, an
+  urgency or a deadline (the agenda edit verbs that can arrive later). So a **plain-words ask** (a line with its
+  premise and context) joins by the one printed `edit`, which keeps every line both agendas say: the old still-open
+  lines stay, the new ask is added to them, and the premise and context are the union of both. An item the owner
+  replied to is brought back by the same edit with `--back --summary '<the new ask>'`, the old subject kept as a
+  still-open line. A **structured ask** (options, an approval, a form, questions, steps, a body, `--blocking`,
+  `--will-block`, `--by`, links, terms, its own `--why` or `--resolve`, a different card) is never squeezed in:
+  the listing says what would be lost and the safe way out, `--new "<why none fits; closest is !A7>"`.
+- **`--new` bypasses the refusal, not the listing.** With `--new "<why>"` the same search runs and the same list is
+  printed (to stderr, so `--json` still prints the raised item on stdout), ending "Opening a new agenda anyway: <why>";
+  then the agenda opens. A bare `--new` still works for now, with a warning that the reason is wanted.
+- **At a terminal** the question is asked ("Should this join !A7? [y/N]"). Only `y` joins (the edit is printed and
+  nothing is opened). Enter, `n` or anything else opens nothing either: the two ways out are printed, and a new
+  agenda needs `--new "<why>"`.
+- **The old spelling still works.** `fy agenda add --title Deploy --premise x --context y --new "Choose region"`, from when
+  `--new` was a flag with no value, reads the words `--new` swallowed as the ask (with a warning that `--new` now takes the
+  reason). When the ask is given in words or with `--ask`, `--new` is the reason. The one ambiguity: a legacy bare
+  `--new` followed by the ask's first word, with more ask words after it, reads that first word as the reason.
 
 - **The order.** An agenda carrying the card `--task` names, or a card that one depends on or blocks, comes first
   (dependent things share one agenda); then the daemon's strong and weak related matches
@@ -639,7 +662,7 @@ or bold the answer first. Lists, tables, headings and fenced code are not counte
 
 **No Markdown headings in the ask or a segment.** A `#` heading draws as a huge title inside a card (the "What I need from you" card read as one wall of H1s), so the ask and every segment — premise, context, decided, still-open, question answer, impact, recommendation and option details — are short points or a bold lead, never `# …` to `###### …`. `fy agenda add` and `agenda edit` warn, never block, when the ask is over about 80 characters (saying to move the detail to `--body` or `--context`) and when the ask or any of those segments holds a heading line (outside fenced code; `#812` is a reference, not a heading). `--body` is left alone: it is where longer instructions go.
 
-**A bunch of bugs or asks heard at once is not a pile of new items.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret adds each to the agenda it belongs with, by the three-part test ([One channel per topic](#one-channel-per-topic)), and opens a new one only for what fits none. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule follows from the test the Agenda-mode instruction teaches (`AGENDA_INSTRUCTION`).
+**A bunch of bugs or asks heard at once is not a pile of new items.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret adds each to the agenda it belongs with, by the three-part test ([One channel per topic](#one-channel-per-topic)), and opens a new one only for what fits none. The prompt says it in one line — "Bug batch: ONE agenda, line each + where tracked." — a line per bug and where each is tracked. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule follows from the test the Agenda-mode instruction teaches (`AGENDA_INSTRUCTION`).
 
 **A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
 as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from

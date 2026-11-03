@@ -5,11 +5,13 @@ import {
   agendaCandidates,
   candidateState,
   isAgendaCandidate,
-  joinCommand,
+  joinAdvice,
+  joinPlan,
   MAX_LISTED_CANDIDATES,
   points,
   renderCandidates,
   sharedWords,
+  waysOut,
 } from '../../../src/lib/agenda/candidates';
 import { agentItem, humanItem, SESSION } from './fixtures';
 
@@ -81,6 +83,40 @@ describe('agenda candidates', () => {
     should(tied[0]?.cards).eql(['&F9']);
   });
 
+  it('should not tie a card that is neither the named one nor related to it', () => {
+    // Act
+    const [candidate] = agendaCandidates([{ ...agentItem('A1', 'x'), task: { id: 'F77' } } as AgendaItem], {
+      ...query,
+      ties: { card: { id: 'F12' }, dependsOn: [{ id: 'F9' }], blocks: [{ id: 'F14' }] },
+    });
+
+    // Assert
+    should(candidate?.tie).be.undefined();
+    should(candidate?.cards).eql(['&F77']);
+  });
+
+  it('should say in the listing why a card-tied agenda comes first, for each kind of tie', () => {
+    // Arrange
+    const ties = { card: { id: 'F12' }, dependsOn: [{ id: 'F9' }], blocks: [{ id: 'F14' }] };
+    const items = [
+      { ...agentItem('A1', 'a'), task: { id: 'F12' } },
+      { ...agentItem('A2', 'b'), task: { id: 'F9' } },
+      { ...agentItem('A3', 'c'), task: { id: 'F14' } },
+    ] as AgendaItem[];
+
+    // Act
+    const text = renderCandidates(agendaCandidates(items, { ...query, ties }), {
+      binary: 'zz',
+      request,
+      named: { id: 'F12' },
+    });
+
+    // Assert
+    should(text).containEql('← carries &F12, the card this one names');
+    should(text).containEql('← carries &F9, which &F12 depends on');
+    should(text).containEql('← carries &F14, which depends on &F12');
+  });
+
   it('should ignore a related match in another ferret’s agenda', () => {
     // Act
     const ranked = agendaCandidates([agentItem('A1', 'token saving'), agentItem('A3', 'logo colours')], {
@@ -105,17 +141,22 @@ describe('agenda candidates', () => {
     ]);
   });
 
-  it('should add the ask to what is still open, keeping what was there', () => {
+  it('should join a plain-words ask by one edit that keeps what was there and adds the ask', () => {
     // Arrange
     const [candidate] = agendaCandidates([agentItem('A2', 'relay', { stillOpen: '- Which size' })], query);
 
-    // Act + Assert
-    should(candidate && joinCommand('fy', candidate, request)).equal(
-      "fy agenda edit A2 --still-open 'Which size' --still-open 'Pick the relay region'",
-    );
+    // Act
+    const plan = candidate && joinPlan('fy', candidate, request);
+
+    // Assert
+    should(plan).eql({
+      kind: 'edit',
+      command:
+        "fy agenda edit A2 --still-open 'Which size' --still-open 'Pick the relay region' --premise 'The relay goes live' --context 'Two regions are near'",
+    });
   });
 
-  it('should bring a Resting item back whole after the owner replied', () => {
+  it('should bring a Resting item back whole, keeping its old subject in what is still open', () => {
     // Arrange
     const replied = {
       ...agentItem('A2', 'relay', { premise: '- Old premise', context: '- The relay goes live' }),
@@ -123,9 +164,87 @@ describe('agenda candidates', () => {
     };
     const [candidate] = agendaCandidates([replied], query);
 
-    // Act + Assert
-    should(candidate && joinCommand('fy', candidate, request)).equal(
-      "fy agenda edit A2 --still-open 'Pick the relay region' --back --summary 'Pick the relay region' --premise 'Old premise' --premise 'The relay goes live' --context 'The relay goes live' --context 'Two regions are near'",
+    // Act
+    const plan = candidate && joinPlan('fy', candidate, request);
+
+    // Assert
+    should(plan).eql({
+      kind: 'edit',
+      command:
+        "fy agenda edit A2 --still-open 'relay' --still-open 'Pick the relay region' --premise 'Old premise' --premise 'The relay goes live' --context 'The relay goes live' --context 'Two regions are near' --back --summary 'Pick the relay region'",
+    });
+  });
+
+  it('should carry the new decided points over, and a plain ask on a same-kind question', () => {
+    // Arrange
+    const [candidate] = agendaCandidates(
+      [agentItem('A2', 'relay', { decided: '- EU is out', ask: { kind: 'open-question' } })],
+      query,
+    );
+
+    // Act
+    const plan =
+      candidate && joinPlan('fy', candidate, { ...request, decided: '- US is in', ask: { kind: 'open-question' } });
+
+    // Assert
+    should(plan?.kind).equal('edit');
+    should(plan?.kind === 'edit' ? plan.command : '').containEql("--decided 'EU is out' --decided 'US is in'");
+  });
+
+  it('should not join an ask an edit cannot carry, and say what would be lost', () => {
+    // Arrange
+    const [candidate] = agendaCandidates([agentItem('A2', 'relay', { kind: 'info' })], query);
+    const structured: (typeof request)[] = [
+      { ...request, ask: { kind: 'multiple-choice' as const, options: [{ label: 'EU' }, { label: 'US' }] } },
+      { ...request, blockingNow: true as const },
+      { ...request, neededBy: '2026-08-01T09:00:00.000Z' },
+      { ...request, body: 'the long story' },
+      { ...request, why: 'a different reason' },
+    ];
+
+    // Act
+    const plans = structured.map(each => candidate && joinPlan('fy', candidate, each));
+
+    // Assert
+    for (const plan of plans) should(plan?.kind).equal('new');
+    should(plans.map(each => (each?.kind === 'new' ? each.carries : []))).eql([
+      ['options to choose from'],
+      ['blocking the ferret now'],
+      ['a deadline'],
+      ['a body'],
+      ['a reason of its own (--why)'],
+    ]);
+  });
+
+  it('should answer a structured ask with the safe way out that names the closest agenda', () => {
+    // Arrange
+    const [candidate] = agendaCandidates([agentItem('A2', 'relay')], query);
+    const plan =
+      candidate && joinPlan('fy', candidate, { ...request, blockingNow: true, neededBy: '2026-08-01T09:00:00.000Z' });
+
+    // Act
+    const advice = candidate && plan && joinAdvice('fy', candidate, plan);
+    const out = candidate && plan && waysOut('fy', candidate, plan);
+
+    // Assert
+    should(advice).containEql('blocking the ferret now, a deadline');
+    should(advice).containEql('fy agenda add … --new "<why none fits; closest is !A2>"');
+    should(advice).not.containEql('fy agenda edit A2');
+    should(out).equal(advice);
+  });
+
+  it('should tell a person who did not say yes both ways out for a plain ask', () => {
+    // Arrange
+    const [candidate] = agendaCandidates([agentItem('A2', 'relay')], query);
+    const plan = candidate && joinPlan('fy', candidate, request);
+
+    // Act
+    const text = candidate && plan && waysOut('fy', candidate, plan);
+
+    // Assert
+    should(text).startWith('Nothing was opened. Join it to !A2:\n  fy agenda edit A2 --still-open');
+    should(text).endWith(
+      'or open a new agenda only when none passes the test:\n  fy agenda add … --new "<why none fits>"',
     );
   });
 
@@ -153,6 +272,33 @@ describe('agenda candidates', () => {
     should(text).endWith(
       'Open a new agenda only when none passes the test:\n  zz agenda add … --new "<why none fits>"',
     );
+  });
+
+  it('should explain what a structured ask would lose instead of printing an edit', () => {
+    // Act
+    const text = renderCandidates(agendaCandidates([agentItem('A1', 'relay region')], query), {
+      binary: 'zz',
+      request: { ...request, blockingNow: true },
+    });
+
+    // Assert
+    should(text).containEql('this ask has blocking the ferret now');
+    should(text).not.containEql('zz agenda edit A1');
+    should(text).endWith('  zz agenda add … --new "<why none fits; closest is !A1>"');
+  });
+
+  it('should end by saying a new agenda is opening anyway, with the reason or without one', () => {
+    // Arrange
+    const candidates = agendaCandidates([agentItem('A1', 'relay region')], query);
+
+    // Act
+    const reasoned = renderCandidates(candidates, { binary: 'zz', request, opening: 'the region is its own call' });
+    const bare = renderCandidates(candidates, { binary: 'zz', request, opening: '' });
+
+    // Assert
+    should(reasoned).endWith('Opening a new agenda anyway: the region is its own call');
+    should(bare).endWith('Opening a new agenda anyway: no reason was given.');
+    should(renderCandidates([], { binary: 'zz', request })).equal('');
   });
 });
 

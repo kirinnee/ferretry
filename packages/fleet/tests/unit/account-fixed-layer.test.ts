@@ -768,14 +768,12 @@ describe('AGENDA_INSTRUCTION', () => {
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith("Agenda mode: one channel of the owner's attention, for what only they can give.");
-    should(text).containEql('Two things share one if all 3 hold: same place, same context, same pace;');
+    should(text).startWith("Agenda mode: one channel of the owner's attention; only what they can give.");
+    should(text).containEql('Share if same place, same context, same pace;');
     // Dependent things are always one agenda: splitting them would make the owner decide half a thing.
     should(text).containEql('dependent things always share.');
-    should(text).containEql(
-      'Search, check, then open (`zz search`): open only if none passes, else add to the closest (unsure: closest).',
-    );
-    should(text).containEql('Split off a part that stops passing.');
+    should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest (unsure: closest).');
+    should(text).containEql('Split parts that stop fitting.');
   });
 
   it('should teach the one command that opens one, cold-readable, with the shape of every kind', () => {
@@ -802,18 +800,30 @@ describe('AGENDA_INSTRUCTION', () => {
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert
-    should(text).containEql('Needs you buzzes the owner; Resting is quiet.');
-    should(text).containEql('Their reply ("[re !A3 …]") rests it;');
+    should(text).containEql('Needs you buzzes; Resting is quiet.');
+    should(text).containEql('Owner reply rests it;');
     // The ferret's answer ON the item brings it back; an owner's question is answered there, its options open.
-    should(text).containEql('your answer on it (`edit <id> --question-answer "<text>"` or `--back`) brings it back.');
+    should(text).containEql('your answer (`edit <id> --question-answer "<text>"` or `--back`) brings it back.');
     should(text).containEql(
-      'Keep it current (`edit`); only you mark it Done (`done <id>`), when nothing more is expected.',
+      'Keep current (`edit`); only you mark it Done (`done <id>`) when nothing more is expected.',
     );
-    should(text).containEql('Type evolves: explainer→question→plan→tracker→test.');
+    should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
     should(text).containEql(
-      'Owner discusses it in chat: add their words verbatim + your reply to it, link it in your reply; unsure: closest, say so.',
+      'Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.',
     );
+  });
+
+  it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
+    // Act
+    const text = AGENDA_INSTRUCTION('zz');
+
+    // Assert — the bug batch is ONE agenda with a line per bug and where each is tracked.
+    should(text).containEql('Bug batch: ONE agenda, line each + where tracked.');
+    // Both owner-question cases: it is about an item → answer ON it, the options stay; there is none → ONE `-k info`.
+    should(text).containEql('Owner Q: answer ON it, options stay; no item: ONE `-k info`.');
+    // The retired tracking rule stays gone.
+    should(text).not.containEql('No tracking items');
   });
 
   it('should name only the verbs that exist today, under the binary name given', () => {
@@ -830,8 +840,8 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,285 for the agenda-first model (was 1,237); the total keeps its headroom below.
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
+    // Assert — measured 1,276 with both owner rules restored; the total keeps its headroom below.
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_290);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {

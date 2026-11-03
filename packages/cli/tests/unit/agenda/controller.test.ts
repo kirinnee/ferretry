@@ -6,6 +6,7 @@ import {
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
 import should from 'should';
+import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
 import { AgendaController } from '../../../src/lib/agenda/controller';
 import type { IAgendaCardTies } from '../../../src/lib/agenda/ports';
 import { RelatedCheck } from '../../../src/lib/work-search/related';
@@ -810,7 +811,9 @@ describe('agenda controller clear --agents', () => {
 });
 
 describe('agenda controller add — related work', () => {
-  const own = snapshot([agentItem('A3', 'pick a relay')]);
+  const raised = (id: AgendaItem['id'], subject: string, overrides: Parameters<typeof agentItem>[2] = {}) =>
+    agentItem(id, subject, { howToResolve: DEFAULT_HOW_TO_RESOLVE, ask: { kind: 'open-question' }, ...overrides });
+  const own = snapshot([raised('A3', 'pick a relay')]);
   const strong = [{ strength: 'strong' as const, hit: agendaHit({ sessionId: LIZZETTE }) }];
 
   const withCheck = (
@@ -888,7 +891,7 @@ describe('agenda controller add — related work', () => {
 
   it('should refuse a ferret with its open agendas listed, the join question and the two ways out', async () => {
     // Arrange — an agent runs non-interactively: there is nobody to ask, so it is told.
-    const board = snapshot([agentItem('A3', 'pick a relay', { title: 'Relay choice' }), agentItem('A5', 'tokens')]);
+    const board = snapshot([raised('A3', 'pick a relay', { title: 'Relay choice' }), raised('A5', 'tokens')]);
     const { controller, gateway, asked } = withCheck([], board);
 
     // Act
@@ -909,7 +912,7 @@ describe('agenda controller add — related work', () => {
 
   it('should list a Resting item with the edit that brings it back whole, the owner having replied', async () => {
     // Arrange
-    const replied = agentItem('A3', 'pick a relay', {
+    const replied = raised('A3', 'pick a relay', {
       premise: '- Two relays are up',
       context: '- Cost differs',
     }) as AgendaItem;
@@ -923,21 +926,62 @@ describe('agenda controller add — related work', () => {
     const message = (failure as Error).message;
     should(message).match(/!A3\s+resting/u);
     should(message).containEql(
-      "fy agenda edit A3 --still-open 'choose a relay' --back --summary 'choose a relay' --premise 'Two relays are up' --premise 'A ferret needs the owner.' --context 'Cost differs' --context 'The work waits on this answer.'",
+      "fy agenda edit A3 --still-open 'pick a relay' --still-open 'choose a relay' --premise 'Two relays are up' --premise 'A ferret needs the owner.' --context 'Cost differs' --context 'The work waits on this answer.' --back --summary 'choose a relay'",
     );
   });
 
-  it('should open a new one with --new "<why>", and not ask', async () => {
+  it('should open a new one with --new "<why>" without asking, but still search and list the candidates', async () => {
     // Arrange
-    const { controller, gateway, search, out } = withCheck(strong, own);
+    const { controller, gateway, search, out, asked } = withCheck(strong, own);
 
     // Act
     await controller.add(['choose', 'a', 'relay'], { ...brief, new: 'a relay for the phone, not the laptop' });
 
     // Assert
     should(gateway.applied).have.length(1);
-    should(search.relatedCalls).eql([]);
+    should(asked).eql([]);
+    should(search.relatedCalls).have.length(1);
+    should(out.diagnostics[0]).containEql('Search, check, then open');
+    should(out.diagnostics[0]).match(/!A3\s+needs you\s+pick a relay/u);
+    should(out.diagnostics[0]).containEql('Opening a new agenda anyway: a relay for the phone, not the laptop');
+  });
+
+  it('should keep --json on stdout as the raised snapshot with --new, the listing going to stderr', async () => {
+    // Arrange
+    const { controller, gateway, out } = withCheck([], own);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...brief, json: true, new: 'its own decision' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(out.diagnostics[0]).containEql('Opening a new agenda anyway: its own decision');
+    should(() => JSON.parse(out.messages[0] ?? '')).not.throw();
+    should(JSON.parse(out.messages[0] ?? '')).not.have.property('candidates');
+  });
+
+  it('should not search or list when there is nothing open to join and no strong match, even with --new', async () => {
+    // Arrange
+    const { controller, gateway, out } = withCheck([]);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...brief, new: 'its own decision' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
     should(out.diagnostics).eql([]);
+  });
+
+  it('should list a strong duplicate of another ferret’s with --new, and open anyway', async () => {
+    // Arrange
+    const { controller, gateway, search } = withCheck(strong);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...brief, new: 'the other ferret is on a different relay' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(search.relatedCalls).have.length(1);
   });
 
   it('should still open with a bare --new for one release, warning that the reason is wanted', async () => {
@@ -949,8 +993,35 @@ describe('agenda controller add — related work', () => {
 
     // Assert
     should(gateway.applied).have.length(1);
-    should(out.diagnostics[0]).containEql('a bare --new is deprecated');
-    should(out.diagnostics[0]).containEql('--new "<why none fits>"');
+    should(out.diagnostics.join('\n')).containEql('a bare --new is deprecated');
+    should(out.diagnostics.join('\n')).containEql('--new "<why none fits>"');
+    should(out.diagnostics.join('\n')).containEql('Opening a new agenda anyway: no reason was given.');
+  });
+
+  it('should read the argument a legacy --new swallowed as the ask, warning that --new now takes the reason', async () => {
+    // Arrange — `add --title Deploy --premise x --context y --new "Choose region"` under the old boolean flag.
+    const { controller, gateway, out } = withCheck([], own);
+
+    // Act
+    await controller.add([], { ...BRIEF, title: 'Deploy', new: 'Choose region' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(gateway.applied[0]?.request).containEql({ action: 'add', subject: 'Choose region' });
+    should(out.diagnostics.join('\n')).containEql('--new now takes the reason');
+    should(out.diagnostics.join('\n')).containEql('was read as your ask');
+  });
+
+  it('should keep --new as the reason when the ask was given in words', async () => {
+    // Arrange
+    const { controller, gateway, out } = withCheck([], own);
+
+    // Act
+    await controller.add(['Choose', 'region'], { ...BRIEF, title: 'Deploy', new: 'its own decision' });
+
+    // Assert
+    should(gateway.applied[0]?.request).containEql({ action: 'add', subject: 'Choose region' });
+    should(out.diagnostics.join('\n')).not.containEql('was read as your ask');
   });
 
   it('should ask a person at a terminal, and print the edit and open nothing on yes', async () => {
@@ -969,15 +1040,52 @@ describe('agenda controller add — related work', () => {
     );
   });
 
-  it('should open it when the person at the terminal says no', async () => {
+  it.each([
+    ['no', 'n'],
+    ['Enter', ''],
+    ['an invalid answer', 'maybe'],
+  ])(
+    'should open nothing and print the two ways out when the person at the terminal answers %s',
+    async (_name, answer) => {
+      // Arrange
+      const { controller, gateway, asked } = withCheck([], own, { interactive: true, answer });
+
+      // Act
+      const failure = await controller.add(['choose', 'a', 'relay'], brief).catch((error: unknown) => error);
+
+      // Assert
+      should(asked).eql(['Should this join !A3? [y/N]']);
+      should(gateway.applied).eql([]);
+      const message = (failure as Error).message;
+      should(message).startWith('Nothing was opened. Join it to !A3:');
+      should(message).containEql("fy agenda edit A3 --still-open 'choose a relay'");
+      should(message).containEql('fy agenda add … --new "<why none fits>"');
+    },
+  );
+
+  it('should answer a structured ask with guidance and open nothing, non-interactive or declined', async () => {
     // Arrange
-    const { controller, gateway } = withCheck([], own, { interactive: true, answer: 'n' });
+    const structured = {
+      ...brief,
+      option: ['EU', 'US'],
+      blocking: true,
+      by: '2026-08-01T09:00:00Z',
+    } as typeof brief;
+    const quiet = withCheck([], own);
+    const declined = withCheck([], own, { interactive: true, answer: 'y' });
 
     // Act
-    await controller.add(['choose', 'a', 'relay'], brief);
+    const refused = await quiet.controller.add(['pick', 'a', 'region'], structured).catch((error: unknown) => error);
+    await declined.controller.add(['pick', 'a', 'region'], structured);
 
     // Assert
-    should(gateway.applied).have.length(1);
+    should(quiet.gateway.applied).eql([]);
+    should((refused as Error).message).containEql('blocking the ferret now');
+    should((refused as Error).message).not.containEql('fy agenda edit A3');
+    should((refused as Error).message).containEql('--new "<why none fits; closest is !A3>"');
+    should(declined.gateway.applied).eql([]);
+    should(declined.out.messages[0]).containEql('Nothing was opened. This ask has');
+    should(declined.out.messages[0]).containEql('--new "<why none fits; closest is !A3>"');
   });
 
   it('should print the candidates as JSON with --json, and open nothing', async () => {
@@ -1001,8 +1109,8 @@ describe('agenda controller add — related work', () => {
   it('should list first the agenda carrying a card the named card depends on (dependent things share one)', async () => {
     // Arrange
     const board = snapshot([
-      agentItem('A2', 'choose a relay soon'),
-      agentItem('A7', 'ship the cache', { task: { id: 'F9' } } as never),
+      raised('A2', 'choose a relay soon'),
+      raised('A7', 'ship the cache', { task: { id: 'F9' } } as never),
     ]);
     const ties: IAgendaCardTies = {
       ties: card => Promise.resolve(card.id === 'F12' ? { dependsOn: [{ id: 'F9' }], blocks: [] } : undefined),
@@ -1024,7 +1132,7 @@ describe('agenda controller add — related work', () => {
 
   it('should warn when a new one opens beside an agenda carrying a tied card', async () => {
     // Arrange
-    const board = snapshot([agentItem('A7', 'ship the cache', { task: { id: 'F14' } } as never)]);
+    const board = snapshot([raised('A7', 'ship the cache', { task: { id: 'F14' } } as never)]);
     const ties: IAgendaCardTies = { ties: () => Promise.resolve({ dependsOn: [], blocks: [{ id: 'F14' }] }) };
     const { controller, gateway, out } = withCheck([], board, { ties });
     gateway.offered = [DAEMON_FEATURES.agendaTask];
@@ -1034,15 +1142,16 @@ describe('agenda controller add — related work', () => {
 
     // Assert
     should(gateway.applied).have.length(1);
-    should(out.diagnostics[0]).containEql('!A7 already carries &F14, tied to &F12: dependent things share one agenda.');
+    should(out.diagnostics[0]).containEql('&F14  ← carries &F14, which depends on &F12');
+    should(out.diagnostics[0]).containEql('Opening a new agenda anyway: its own decision');
   });
 
   it('should not list what a ferret cannot add to: the owner’s items, notices, gates and held changes', async () => {
     // Arrange
     const board = snapshot([
       humanItem('A1', 'approve the deploy'),
-      agentItem('A2', 'a notice', { notice: true }),
-      agentItem('A4', 'allow the change', { confirms: { file: 'machine.yaml' } } as never),
+      raised('A2', 'a notice', { notice: true }),
+      raised('A4', 'allow the change', { confirms: { file: 'machine.yaml' } } as never),
     ]);
     const { controller, gateway } = withCheck([], board);
 
