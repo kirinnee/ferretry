@@ -7,7 +7,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, rename, rm } from 'node:fs/promises';
+import { open, realpath, rename, rm } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, sep } from 'node:path';
 import { parseSettings } from '@ferretry/fleet';
 import { isFerretryLocalEntry } from '../../lib/mcp-inventory/declarations.ts';
 import type { ClaudeLocalScope, LocalScopeServer } from '../../lib/mcp-inventory/project-sign-in.ts';
@@ -35,18 +36,58 @@ export function unreadableDocument(path: string, error: unknown): McpDocumentUnr
   return new McpDocumentUnreadable(`${path} could not be read${code === undefined ? '' : ` (${code})`}.`);
 }
 
-async function readText(path: string): Promise<{ readonly text: string; readonly mode: number } | null> {
+const isWithin = (root: string, candidate: string): boolean => {
+  const path = relative(root, candidate);
+  return path === '' || (!path.startsWith('..') && !isAbsolute(path));
+};
+
+/**
+ * Where a document may be read from: `confinedTo` is the folder it must really lie in. The parent is resolved
+ * and must be that folder or inside it, the file is opened with `O_NOFOLLOW`, and a file with a second hard
+ * link is refused. A repo can plant a link to any file the daemon can read; this stops the read following it.
+ */
+async function confinedParent(path: string, confinedTo: string): Promise<'inside' | 'absent'> {
+  const outside = new McpDocumentUnreadable(`${path} is a link or lies outside its folder, so it was not read.`);
+  let boundary: string;
+  try {
+    boundary = await realpath(confinedTo);
+  } catch {
+    throw outside;
+  }
+  let parent: string;
+  try {
+    parent = await realpath(dirname(path));
+  } catch (error) {
+    if (codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR') return 'absent';
+    throw unreadableDocument(path, error);
+  }
+  if (!isWithin(boundary, parent)) throw outside;
+  return 'inside';
+}
+
+async function readText(
+  path: string,
+  confinedTo?: string,
+): Promise<{ readonly text: string; readonly mode: number } | null> {
+  if (confinedTo !== undefined && (await confinedParent(path, confinedTo)) === 'absent') return null;
   let handle: Awaited<ReturnType<typeof open>>;
   try {
     // O_NONBLOCK: a FIFO planted at the path must not hang the read.
-    handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NONBLOCK | (confinedTo === undefined ? 0 : constants.O_NOFOLLOW),
+    );
   } catch (error) {
     if (codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR') return null;
+    if (confinedTo !== undefined && codeOf(error) === 'ELOOP')
+      throw new McpDocumentUnreadable(`${path} is a link or lies outside its folder, so it was not read.`);
     throw unreadableDocument(path, error);
   }
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new McpDocumentUnreadable(`${path} is not a regular file.`);
+    if (confinedTo !== undefined && info.nlink > 1)
+      throw new McpDocumentUnreadable(`${path} has another hard link, so it was not read.`);
     if (info.size > MAX_DOCUMENT_BYTES) throw new McpDocumentUnreadable(`${path} is too large to read.`);
     return { text: await handle.readFile('utf8'), mode: info.mode & 0o777 };
   } catch (error) {
@@ -58,7 +99,11 @@ async function readText(path: string): Promise<{ readonly text: string; readonly
 
 export class FileMcpHarnessDocuments implements McpHarnessDocuments {
   async read(path: string, format: 'json' | 'toml'): Promise<unknown> {
-    const read = await readText(path);
+    return await this.readWithin(path, format, undefined);
+  }
+
+  protected async readWithin(path: string, format: 'json' | 'toml', confinedTo: string | undefined): Promise<unknown> {
+    const read = await readText(path, confinedTo);
     if (read === null || read.text.trim() === '') return null;
     try {
       return parseSettings(read.text, format);
@@ -68,6 +113,24 @@ export class FileMcpHarnessDocuments implements McpHarnessDocuments {
         `${path} is not valid ${format === 'json' ? 'JSON' : 'TOML'}, so its MCP servers cannot be read.`,
       );
     }
+  }
+}
+
+/**
+ * The same documents, for a COPY: a path under one of the `boundaries` (a registered project folder, the
+ * fleet) is read confined to it, never through a link and never as a shared hard link. A path under none
+ * is the person's own configuration and is read as the inventory reads it.
+ */
+export class ConfinedMcpHarnessDocuments extends FileMcpHarnessDocuments {
+  constructor(private readonly boundaries: () => Promise<readonly string[]>) {
+    super();
+  }
+
+  override async read(path: string, format: 'json' | 'toml'): Promise<unknown> {
+    const covering = (await this.boundaries())
+      .filter(boundary => path.startsWith(boundary.endsWith(sep) ? boundary : `${boundary}${sep}`))
+      .toSorted((left, right) => right.length - left.length)[0];
+    return await this.readWithin(path, format, covering);
   }
 }
 

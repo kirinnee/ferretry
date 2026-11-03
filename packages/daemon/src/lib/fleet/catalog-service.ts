@@ -109,6 +109,14 @@ import {
 } from './runtime-sessions.ts';
 import { applyFailureSummary, applyResultSummary, operationSummary, skippedWithinRuntimes } from './wire.ts';
 
+/**
+ * An installer's check of the stored component a change is about to act on (`undefined` when there is none): it
+ * throws to refuse. It is handed the very reading the change is staged from.
+ */
+export type StoredComponentCheck = (stored: unknown) => void | Promise<void>;
+
+const isInstallerKind = (kind: string): kind is 'mcp' | 'skills' => kind === 'mcp' || kind === 'skills';
+
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
 /** Every refusal this surface answers with, so a client branches on cause rather than on prose. */
@@ -510,8 +518,10 @@ export class FleetCatalogService {
    * cannot be applied is refused now rather than stored, because a proposal nobody can apply is
    * worse than a refusal nobody stored.
    */
-  async propose(change: FleetAccountChange): Promise<FleetAccountChangeView> {
+  async propose(change: FleetAccountChange, verify?: StoredComponentCheck): Promise<FleetAccountChangeView> {
     const reading = await this.#read();
+    if (verify !== undefined && change.kind === 'component.remove' && isInstallerKind(change.componentKind))
+      await verify(reading.model.components[change.componentKind][change.name]);
     const staged = await this.#stage(reading, change);
     const record = this.#proposals(() =>
       this.#changes.open({
@@ -530,10 +540,14 @@ export class FleetCatalogService {
    * read nor apply it — its only caller is the catalog installer, after the installer's own checks
    * (signature, digest, publisher pin, passkey, no ferret). The same `fleet.configure` decision as an
    * ordinary apply still has to come with it.
+   *
+   * `verify` is the installer's own check of the component it is replacing, run on THIS reading: the one the
+   * change is built from and the one the revision check protects, so no edit can land between them.
    */
   async installCatalogItem(
     change: FleetCatalogInstallChange,
     governance: CallerGovernance | undefined,
+    verify?: StoredComponentCheck,
   ): Promise<{ readonly outcome: FleetAccountChangeOutcome; readonly component: unknown }> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
@@ -547,6 +561,8 @@ export class FleetCatalogService {
         checked.error.issues[0]?.message ?? 'this is not a change the catalog installer makes',
       );
     const reading = await this.#read();
+    if (verify !== undefined)
+      await verify(reading.model.components[change.component.kind === 'skills' ? 'skills' : 'mcp'][change.name]);
     const staged = await this.#stagePlan(reading, change);
     await this.#assertCurrent({ revision: reading.revision });
     const outcome = await this.#execute({ payload: staged.payload, mutation: change });

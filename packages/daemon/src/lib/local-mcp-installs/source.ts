@@ -23,6 +23,7 @@ import {
   SessionMcpEnvNameSchema,
   CATALOG_MCP_MAX_ENV,
 } from '@ferretry/protocol';
+import { firstArgumentCredential } from '../local-skill-installs/credentials.ts';
 import { type McpComponentRecord, mcpSetupOf, type McpSourceServer } from '../shared-catalogs/mcp-source.ts';
 
 /** A server the inventory lists, with where it was found. */
@@ -50,6 +51,46 @@ const PLAIN_NAME = /^[A-Za-z0-9_.-]{1,128}$/u;
 /** A name worth showing: plain characters only, so a hostile one cannot reach a screen. */
 const shown = (name: string): string => (PLAIN_NAME.test(name) ? name : 'a variable with an unusual name');
 
+/** The most times a piece of an address is percent-decoded: enough for a doubly encoded name, bounded for a hostile one. */
+const MAX_DECODE_ROUNDS = 3;
+
+/**
+ * Every form of an address piece a reader could take it for: as written, then percent-decoded (a `+` is a space)
+ * up to {@link MAX_DECODE_ROUNDS} times. `null` when the first decoding is malformed, because a piece nobody can read
+ * the same way twice is not one to vouch for. A later round that cannot decode is just where the piece stops
+ * (`100%25` is a literal percent sign, not a credential).
+ */
+function decodedForms(piece: string): readonly string[] | null {
+  const forms = [piece];
+  let current = piece.replaceAll('+', ' ');
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return round === 0 ? null : forms;
+    }
+    if (next === current) return forms;
+    forms.push(next);
+    current = next;
+  }
+  return forms;
+}
+
+/** Whether a query pair announces or holds a key in any spelling it can be read as; `null` when it cannot be read. */
+function pairLooksLikeKey(pair: string): boolean | null {
+  const equals = pair.indexOf('=');
+  const name = equals === -1 ? pair : pair.slice(0, equals);
+  const value = equals === -1 ? '' : pair.slice(equals + 1);
+  const names = decodedForms(name);
+  const values = decodedForms(value);
+  if (names === null || values === null) return null;
+  const spellings = names.flatMap(decodedName => values.map(decodedValue => [decodedName, decodedValue] as const));
+  return spellings.some(
+    ([decodedName, decodedValue]) => announcesKey(decodedName) || holdsRawKey(`${decodedName} ${decodedValue}`),
+  );
+}
+
 /** The address without its credentials, and what was left out. A query piece that announces or holds a key goes. */
 function cleanAddress(url: string): { readonly url: string; readonly problems: readonly CatalogSourceProblem[] } {
   const match = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/u.exec(url);
@@ -67,20 +108,31 @@ function cleanAddress(url: string): { readonly url: string; readonly problems: r
   const query = tail.startsWith('?') ? tail.slice(1, hashAt === -1 ? undefined : hashAt) : '';
   const fragment = hashAt === -1 ? '' : tail.slice(hashAt);
   const pairs = query === '' ? [] : query.split('&');
+  let keyLike = 0;
+  let unreadable = 0;
   const kept = pairs.filter(pair => {
-    const [name = '', value = ''] = pair.split('=');
-    return !(announcesKey(name) || holdsRawKey(`${name} ${value}`));
+    const looks = pairLooksLikeKey(pair);
+    if (looks === null) unreadable += 1;
+    else if (looks) keyLike += 1;
+    return looks === false;
   });
-  if (kept.length !== pairs.length)
+  if (keyLike > 0)
     problems.push({
       subject: 'url',
-      reason: `${pairs.length - kept.length} query parameter${pairs.length - kept.length === 1 ? '' : 's'} that look like keys ${pairs.length - kept.length === 1 ? 'was' : 'were'} left out of the address, not copied`,
+      reason: `${keyLike} query parameter${keyLike === 1 ? '' : 's'} that look like keys ${keyLike === 1 ? 'was' : 'were'} left out of the address, not copied`,
     });
-  const keptFragment = fragment !== '' && holdsRawKey(fragment) ? '' : fragment;
+  if (unreadable > 0)
+    problems.push({
+      subject: 'url',
+      reason: `${unreadable} query parameter${unreadable === 1 ? '' : 's'} with a malformed percent-encoding ${unreadable === 1 ? 'was' : 'were'} left out of the address, not copied`,
+    });
+  const fragmentForms = fragment === '' ? [] : decodedForms(fragment.slice(1));
+  const keptFragment =
+    fragmentForms?.some(form => holdsRawKey(form) || holdsRawKey(`#${form}`)) === false ? fragment : '';
   if (keptFragment !== fragment)
     problems.push({
       subject: 'url',
-      reason: 'a fragment that looks like a key was left out of the address, not copied',
+      reason: 'a fragment that looks like a key, or cannot be read, was left out of the address, not copied',
     });
   return {
     url: `${scheme}${host}${path}${kept.length === 0 ? '' : `?${kept.join('&')}`}${keptFragment}`,
@@ -136,8 +188,23 @@ const originOf = (server: LocalMcpInventoryServer): LocalMcpOrigin => ({
   id: server.id,
 });
 
+/** The command and its arguments as the server launches them, or none for an address. */
+function commandLine(server: LocalMcpInventoryServer): readonly string[] {
+  const { declaration, component } = server;
+  if (declaration?.transport === 'stdio') return [declaration.command, ...declaration.args];
+  if (component?.url === undefined && component?.command !== undefined)
+    return [component.command, ...(component.args ?? [])];
+  return [];
+}
+
 /** What can be copied of `server`, or the sentence for why none of it can. */
 export function copiableMcp(server: LocalMcpInventoryServer): CopiableMcp {
+  const credential = firstArgumentCredential(commandLine(server));
+  if (credential !== undefined)
+    return {
+      ok: false,
+      reason: `${credential === 1 ? 'Its command' : `Its argument ${credential - 1}`} holds what looks like a password or key, and an argument is copied as it stands. Take it out of that server, then copy it.`,
+    };
   const { bare, envNames, addressProblems } = stripped(server);
   const converted = mcpSetupOf(bare);
   if (!converted.ok) return { ok: false, reason: converted.reason };

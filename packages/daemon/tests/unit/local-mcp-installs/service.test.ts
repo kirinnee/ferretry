@@ -308,15 +308,53 @@ describe('applying an MCP server copy into a project', () => {
     );
   });
 
-  it('should refuse when the file changes while it is being written', async () => {
+  it('should write a new file only while it is still absent, carrying that very reading into the write', async () => {
     const rigged = rig();
     const preview = await previewOf(rigged);
-    rigged.mcp.racing = true;
+    const bindings = { API_TOKEN: null, REGION: null };
 
+    await rigged.service.apply('project', preview.previewId, bindings, CALLER, GOVERNANCE);
+
+    should(rigged.mcp.replaced).deepEqual([{ expected: null }]);
+
+    const racing = rig();
+    const second = await previewOf(racing);
+    racing.mcp.afterRead = reads => {
+      if (reads === 3) racing.mcp.editElsewhere(JSON.stringify({ mcpServers: { other: { command: 'o' } } }));
+    };
     await refusedWith('local_mcp_conflict', () =>
-      rigged.service.apply('project', preview.previewId, { API_TOKEN: null, REGION: null }, CALLER, GOVERNANCE),
+      racing.service.apply('project', second.previewId, bindings, CALLER, GOVERNANCE),
     );
-    should(rigged.store.writes).equal(0);
+    should(racing.mcp.replaced).deepEqual([{ expected: null }]);
+    should(entryNamed(racing, 'search')).be.undefined();
+    should(racing.store.writes).equal(0);
+  });
+
+  it('should replace an existing file only as it was read, and give way when it was saved in between', async () => {
+    const rigged = rig();
+    rigged.mcp.editElsewhere(JSON.stringify({ mcpServers: { other: { command: 'o' } } }));
+    const preview = await previewOf(rigged);
+    const bindings = { API_TOKEN: null, REGION: null };
+    const version = rigged.mcp.version;
+
+    await rigged.service.apply('project', preview.previewId, bindings, CALLER, GOVERNANCE);
+
+    should(rigged.mcp.replaced).deepEqual([{ expected: `e${version}` }]);
+
+    const racing = rig();
+    racing.mcp.editElsewhere(JSON.stringify({ mcpServers: { other: { command: 'o' } } }));
+    const second = await previewOf(racing);
+    const before = racing.mcp.text;
+    racing.mcp.afterRead = reads => {
+      if (reads === 3) racing.mcp.editElsewhere(JSON.stringify({ mcpServers: { other: { command: 'changed' } } }));
+    };
+    await refusedWith('local_mcp_conflict', () =>
+      racing.service.apply('project', second.previewId, bindings, CALLER, GOVERNANCE),
+    );
+    should(racing.mcp.replaced).deepEqual([{ expected: 'e1' }]);
+    should(racing.mcp.text).not.equal(before);
+    should(entryNamed(racing, 'search')).be.undefined();
+    should(racing.store.writes).equal(0);
   });
 
   it('should let a failure of the file port that is not a race travel on, writing nothing', async () => {
@@ -498,11 +536,30 @@ describe('removing an MCP server copy', () => {
 
     const racing = rig();
     const second = await copy(racing, projectTarget());
-    racing.mcp.racing = true;
+    const written = racing.mcp.text;
+    const etag = `e${racing.mcp.version}`;
+    racing.mcp.replaced.length = 0;
+    racing.mcp.afterRead = () => {
+      racing.mcp.afterRead = undefined;
+      racing.mcp.editElsewhere(
+        JSON.stringify({
+          mcpServers: { search: JSON.parse(written ?? '{}').mcpServers.search, other: { command: 'o' } },
+        }),
+      );
+    };
     await refusedWith('local_mcp_conflict', () =>
       racing.service.remove('project', second.installed.install.installId, GOVERNANCE, STEP_UP),
     );
+    should(racing.mcp.replaced).deepEqual([{ expected: etag }]);
+    should(entryNamed(racing, 'search')).not.be.undefined();
     should(racing.store.state.installs.length).equal(1);
+
+    const clean = rig();
+    const third = await copy(clean, projectTarget());
+    const cleanEtag = `e${clean.mcp.version}`;
+    clean.mcp.replaced.length = 0;
+    await clean.service.remove('project', third.installed.install.installId, GOVERNANCE, STEP_UP);
+    should(clean.mcp.replaced).deepEqual([{ expected: cleanEtag }]);
   });
 
   it('should say there is no such copy, or none in that scope', async () => {
@@ -577,5 +634,166 @@ describe('removing an MCP server copy', () => {
         rigged.service.remove('runtime', installed.install.installId, GOVERNANCE, STEP_UP),
       );
     }
+  });
+});
+
+describe('what a copy never carries out of the source', () => {
+  const OPAQUE = 'dummy-credential-0123456789abcdef';
+  const remote = (url: string) =>
+    stdioServer({
+      id: URL_ID,
+      name: 'remote',
+      declaration: { name: 'remote', transport: 'http', url, headers: {} },
+    });
+  const launching = (command: string, args: string[]) =>
+    stdioServer({
+      id: BAD_ID,
+      name: 'launched',
+      declaration: { name: 'launched', transport: 'stdio', command, args, env: {} },
+    });
+
+  it('should leave an encoded credential out of the review, the project file and the runtime definition', async () => {
+    for (const target of [projectTarget(), runtimeTarget()]) {
+      const rigged = rig();
+      rigged.servers = [
+        remote(`https://mcp.example.com/mcp?api%5Fkey=${OPAQUE}&sk%2Dlive%2Dabcdefghijklmnopqrstuv=1&keep=1&bad=%ZZ`),
+      ];
+
+      const { preview } = await copy(rigged, target, { id: URL_ID });
+
+      const everything = JSON.stringify([preview, rigged.mcp.text, rigged.fleet.proposed, rigged.store.state]);
+      should(everything).not.match(/api%5Fkey|api_key|sk%2Dlive|abcdefghijklmnopqrstuv|dummy-credential/u);
+      should(everything).match(/keep=1/u);
+      should(preview.skipped.map(problem => problem.reason).join(' ')).match(/malformed percent-encoding/u);
+    }
+  });
+
+  it('should refuse a command whose arguments hold a credential, writing nothing and echoing nothing', async () => {
+    const shapes: [string, string[]][] = [
+      ['curl', ['--user', `dummy:${OPAQUE}`]],
+      ['curl', [`--user=dummy:${OPAQUE}`]],
+      ['node', ['server.js', `https://dummy:${OPAQUE}@mcp.example.com`]],
+      ['npx', ['mcp-remote', '--header', `Authorization: Bearer ${OPAQUE}`]],
+    ];
+    for (const target of [projectTarget(), runtimeTarget()])
+      for (const [command, args] of shapes) {
+        const rigged = rig();
+        rigged.servers = [launching(command, args)];
+
+        const error = await refusedWith('local_mcp_source_invalid', () => previewOf(rigged, target, BAD_ID));
+
+        should(error.message).match(/holds what looks like a password or key/u);
+        should(error.message).not.match(/dummy/u);
+        should(rigged.mcp.text).be.null();
+        should(rigged.mcp.replaced).deepEqual([]);
+        should(rigged.fleet.proposed).deepEqual([]);
+        should(rigged.store.writes).equal(0);
+      }
+  });
+
+  it('should write what was reviewed even when the source changes after the preview', async () => {
+    for (const target of [projectTarget(), runtimeTarget()]) {
+      const rigged = rig();
+      const preview = await previewOf(rigged, target);
+
+      rigged.servers = [
+        stdioServer({
+          declaration: {
+            name: 'search',
+            transport: 'stdio',
+            command: 'swapped-command',
+            args: [`https://dummy:${OPAQUE}@mcp.example.com`],
+            env: { OTHER_TOKEN: FAKE_VALUE },
+          },
+        }),
+      ];
+      await rigged.service.apply(
+        target.scope,
+        preview.previewId,
+        { API_TOKEN: null, REGION: null },
+        CALLER,
+        GOVERNANCE,
+      );
+
+      const written = JSON.stringify([rigged.mcp.text, rigged.fleet.proposed]);
+      should(written).match(/search-mcp/u);
+      should(written).not.match(/swapped-command|OTHER_TOKEN|dummy/u);
+    }
+  });
+});
+
+describe('a configuration edit that lands between our check and the fleet staging a runtime change', () => {
+  const edit = (rigged: Rig): void => {
+    rigged.fleet.afterStoredComponent = () => {
+      rigged.fleet.afterStoredComponent = undefined;
+      const [stored] = rigged.fleet.components.get('mcp') ?? [];
+      rigged.fleet.components.set('mcp', [
+        { ...stored, detail: { ...(stored?.detail as object), command: 'edited-meanwhile' } } as never,
+      ]);
+    };
+  };
+
+  it('should not replace the edited server, and keep the record', async () => {
+    const rigged = rig();
+    const { installed } = await copy(rigged, runtimeTarget());
+    const preview = await previewOf(rigged, runtimeTarget());
+    const staged = rigged.fleet.proposed.length;
+    edit(rigged);
+
+    const error = await refusedWith('local_mcp_conflict', () =>
+      rigged.service.apply('runtime', preview.previewId, { API_TOKEN: null, REGION: null }, CALLER, GOVERNANCE),
+    );
+
+    should(error.message).match(/edited on this machine just now/u);
+    should(rigged.fleet.proposed.length).equal(staged);
+    should(JSON.stringify(rigged.fleet.components.get('mcp'))).match(/edited-meanwhile/u);
+    should(rigged.store.state.installs.map(install => install.installId)).deepEqual([installed.install.installId]);
+  });
+
+  it('should not install over a server that appeared once we had looked and found none', async () => {
+    const rigged = rig();
+    const preview = await previewOf(rigged, runtimeTarget());
+    rigged.fleet.afterStoredComponent = () => {
+      rigged.fleet.afterStoredComponent = undefined;
+      rigged.fleet.components.set('mcp', [{ name: 'search', detail: { kind: 'mcp', command: 'mine' } } as never]);
+    };
+
+    await refusedWith('local_mcp_conflict', () =>
+      rigged.service.apply('runtime', preview.previewId, { API_TOKEN: null, REGION: null }, CALLER, GOVERNANCE),
+    );
+
+    should(rigged.fleet.proposed).deepEqual([]);
+    should(rigged.store.writes).equal(0);
+  });
+
+  it('should not remove the edited server, and keep the record', async () => {
+    const rigged = rig();
+    const { installed } = await copy(rigged, runtimeTarget());
+    const staged = rigged.fleet.proposed.length;
+    edit(rigged);
+
+    const error = await refusedWith('local_mcp_conflict', () =>
+      rigged.service.remove('runtime', installed.install.installId, GOVERNANCE, STEP_UP),
+    );
+
+    should(error.message).match(/edited on this machine just now, so it was not removed/u);
+    should(rigged.fleet.proposed.length).equal(staged);
+    should(rigged.fleet.components.get('mcp')?.length).equal(1);
+    should(rigged.store.state.installs.length).equal(1);
+  });
+
+  it('should not remove a server that was deleted in that window', async () => {
+    const rigged = rig();
+    const { installed } = await copy(rigged, runtimeTarget());
+    rigged.fleet.afterStoredComponent = () => {
+      rigged.fleet.afterStoredComponent = undefined;
+      rigged.fleet.components.set('mcp', []);
+    };
+
+    await refusedWith('local_mcp_conflict', () =>
+      rigged.service.remove('runtime', installed.install.installId, GOVERNANCE, STEP_UP),
+    );
+
+    should(rigged.store.state.installs.length).equal(1);
   });
 });

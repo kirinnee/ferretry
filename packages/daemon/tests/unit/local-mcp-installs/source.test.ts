@@ -86,6 +86,51 @@ describe('what of an MCP server on this machine can be copied', () => {
     should(noQuery.ok && noQuery.skipped).deepEqual([]);
   });
 
+  it('should read a query name and value as the server would, so an encoded credential is still left out', () => {
+    const copied = copiableMcp(
+      http(
+        'https://mcp.example.com/mcp?api%5Fkey=zzz&keep=1&x=sk%2Dlive%2Dabcdefghijklmnopqrstuv&dbl%255Ftoken=q&a+pi%5Fkey=1&ok=100%25',
+      ),
+    );
+
+    should(copied.ok).be.true();
+    if (!copied.ok) return;
+    should(copied.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp?keep=1&ok=100%25' });
+    should(copied.skipped.map(problem => problem.reason)).deepEqual([
+      '4 query parameters that look like keys were left out of the address, not copied',
+    ]);
+    should(JSON.stringify(copied)).not.match(/api%5Fkey|sk%2Dlive|zzz|dbl%255F/u);
+  });
+
+  it('should leave out a query parameter whose encoding is malformed, and say so', () => {
+    const one = copiableMcp(http('https://mcp.example.com/mcp?keep=1&bad%ZZ=zzz'));
+    const two = copiableMcp(http('https://mcp.example.com/mcp?a=%E0%A4%A&b=%&keep=1'));
+
+    should(one.ok && one.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp?keep=1' });
+    should(one.ok && one.skipped.map(problem => problem.reason)).deepEqual([
+      '1 query parameter with a malformed percent-encoding was left out of the address, not copied',
+    ]);
+    should(two.ok && two.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp?keep=1' });
+    should(two.ok && two.skipped[0]?.reason).match(/^2 query parameters with a malformed percent-encoding were left/u);
+  });
+
+  it('should leave out a fragment that is an encoded key or cannot be decoded', () => {
+    const encoded = copiableMcp(http('https://mcp.example.com/mcp#access%5Ftoken=sk%2Dlive%2Dabcdefghijklmnopqrstuv'));
+    const malformed = copiableMcp(http('https://mcp.example.com/mcp#%ZZ'));
+    const plain = copiableMcp(http('https://mcp.example.com/mcp#section%202'));
+
+    should(encoded.ok && encoded.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp' });
+    should(malformed.ok && malformed.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp' });
+    should(plain.ok && plain.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp#section%202' });
+    should(plain.ok && plain.skipped).deepEqual([]);
+  });
+
+  it('should keep a value containing an equals sign whole when classifying it', () => {
+    const copied = copiableMcp(http('https://mcp.example.com/mcp?next=a=b&token=sk-live-abcdefghijklmnopqrstuv'));
+
+    should(copied.ok && copied.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp?next=a=b' });
+  });
+
   it('should keep the declaration’s own problems, such as headers that were not copied', () => {
     const copied = copiableMcp(
       stdioServer({
@@ -136,5 +181,78 @@ describe('what of an MCP server on this machine can be copied', () => {
       should(result.ok).be.false();
       should(!result.ok && result.reason.length).be.above(0);
     }
+  });
+});
+
+describe('a command whose arguments hold a credential is refused, never copied', () => {
+  const refused = (command: string, args: string[], component = false) =>
+    copiableMcp(
+      component
+        ? stdioServer({ scope: 'component', declaration: null, component: { command, args, env: {} } })
+        : stdioServer({ declaration: { name: 'search', transport: 'stdio', command, args, env: {} } }),
+    );
+
+  const cases: [string, string, string[], string][] = [
+    [
+      'an address with a password',
+      'node',
+      ['server.js', 'https://dummy:hunter2dummy@mcp.example.com'],
+      'Its argument 2',
+    ],
+    [
+      'curl --user split across arguments',
+      'curl',
+      ['--user', 'dummy:hunter2dummy', 'https://mcp.example.com'],
+      'Its argument 1',
+    ],
+    ['curl -u split across arguments', 'curl', ['-u', 'dummy:hunter2dummy'], 'Its argument 1'],
+    ['curl --user= in one argument', 'curl', ['--user=dummy:hunter2dummy'], 'Its argument 1'],
+    ['curl -u with its login attached', 'curl', ['-sS', '-udummy:hunter2dummy'], 'Its argument 2'],
+    [
+      'an Authorization header argument',
+      'npx',
+      ['mcp-remote', '--header', 'Authorization: Bearer dummy1'],
+      'Its argument 3',
+    ],
+    ['an Authorization header after --header=', 'npx', ['--header=Authorization:Basic dummy1'], 'Its argument 1'],
+    ['a credential in the command itself', 'run --token=sk-live-abcdefghijklmnopqrstuv', [], 'Its command'],
+    [
+      'a value split by a line break',
+      'npx',
+      ['x', 'https://dummy:hunter2dummy@mcp.example.com\n/path'],
+      'Its argument 2',
+    ],
+  ];
+  for (const [title, command, args, where] of cases) {
+    it(`should refuse ${title}, naming the place and not the value`, () => {
+      for (const result of [refused(command, args), refused(command, args, true)]) {
+        should(result.ok).be.false();
+        if (result.ok) return;
+        should(result.reason).startWith(where);
+        should(result.reason).not.match(/hunter2dummy|dummy1|sk-live|dummy:/u);
+      }
+    });
+  }
+
+  it('should copy ordinary arguments, references to a secret, and an Authorization header with no value', () => {
+    for (const args of [
+      ['-y', '@modelcontextprotocol/server-filesystem', '/work/app'],
+      ['--header', 'Authorization: $TOKEN'],
+      ['--header', 'Authorization:'],
+      ['--authorization-file', '/etc/mcp/auth'],
+      ['curl', '-u', 'dummy', 'https://user@mcp.example.com'],
+      ['--user=dummy:$PASS', '-uname', '--user=nocolon', '--user=dummy:'],
+    ]) {
+      should(refused('npx', args).ok).be.true();
+    }
+  });
+
+  it('should not look at the arguments of an address', () => {
+    should(copiableMcp(http('https://mcp.example.com/mcp')).ok).be.true();
+    should(
+      copiableMcp(
+        stdioServer({ scope: 'component', declaration: null, component: { url: 'https://mcp.example.com/mcp' } }),
+      ).ok,
+    ).be.true();
   });
 });

@@ -399,6 +399,7 @@ import {
   SessionPassiveChannel,
 } from '../src/adapters/learning/index.ts';
 import {
+  ConfinedMcpHarnessDocuments,
   FileClaudeLocalScope,
   FileMcpHarnessDocuments,
   TransportMcpProbe,
@@ -13954,7 +13955,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const mcpInventory = (() => {
         mcpFolderSources.known = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
         mcpFolderSources.ferrets = async () => (await mounted.sessions.list()).map(view => view.config.cwd);
-        const inventory = new McpInventoryService({
+        const inventoryDeps = {
           accounts: mcpAccounts,
           components: async () =>
             (await mounted.fleetCatalog.components()).kinds
@@ -13971,9 +13972,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           connections: async () => await mcpOAuth.connections(),
           documents: mcpDocuments,
           sessions: mounted.sessions,
-        });
+        };
+        const inventory = new McpInventoryService(inventoryDeps);
         return {
           inventory,
+          /** The same inventory for a copy: a registered folder's files and the fleet's are read confined to them. */
+          copySources: new McpInventoryService({
+            ...inventoryDeps,
+            documents: new ConfinedMcpHarnessDocuments(async () => [
+              ...(await mcpFolders.list()).map(folder => folder.root),
+              paths.fleet,
+            ]),
+          }),
           check: new McpCheckService({
             inventory,
             probe: new TransportMcpProbe(),
@@ -14254,7 +14264,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           store: new FileLocalMcpInstallStore(paths, stateFiles),
           servers: async () => {
             const model = (await fleetCatalogDeps.document()).model;
-            return (await mcpInventory.inventory.servers()).map(server => {
+            return (await mcpInventory.copySources.servers()).map(server => {
               const name = server.declaration?.name ?? '';
               return {
                 id: server.id,

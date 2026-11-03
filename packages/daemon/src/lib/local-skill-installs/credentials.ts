@@ -241,3 +241,46 @@ export function firstCredentialLine(text: string): number | undefined {
   const glued = credentialOffset(lines.join(''), new Set(starts));
   return glued === -1 ? undefined : lineHolding(starts, glued);
 }
+
+const HEADER_NAME = 'authorization';
+
+/** Whether `part` gives an HTTP authorization header (or `--authorization=`) a value that is not a reference. */
+function givesAuthorization(part: string): boolean {
+  const folded = foldedForScan(part);
+  const lower = folded.toLowerCase();
+  let from = lower.indexOf(HEADER_NAME);
+  while (from !== -1) {
+    let index = from + HEADER_NAME.length;
+    while (index < folded.length && isSpace(folded.charAt(index))) index += 1;
+    if (folded.charAt(index) === ':' || folded.charAt(index) === '=') {
+      const value = bare(folded.slice(index + 1).trim());
+      if (value !== '' && !isReference(value)) return true;
+    }
+    from = lower.indexOf(HEADER_NAME, from + HEADER_NAME.length);
+  }
+  return false;
+}
+
+/** `--user=name:pass` or `-uname:pass`: the flag and its login in one piece, which `curlUser` (two words) does not see. */
+function attachedCurlUser(piece: string): boolean {
+  const folded = foldedForScan(piece);
+  const login = folded.startsWith('--user=') ? folded.slice(7) : /^-u[^-]/u.test(folded) ? folded.slice(2) : '';
+  const password = login.slice(login.indexOf(':') + 1);
+  return login.includes(':') && password !== '' && !isReference(bare(password));
+}
+
+/**
+ * The 1-based place, among the pieces of a command line, of the first one that holds a password or key: any of the
+ * shapes above read across pieces (`curl`, `--user`, `name:pass` in three arguments), or an `Authorization` header
+ * given any value. The pieces are read one to a line, so the place is never a guess. Undefined when none does.
+ */
+export function firstArgumentCredential(pieces: readonly string[]): number | undefined {
+  const single = pieces.map(piece => foldedForScan(piece).replace(/\r\n|[\r\n]/gu, ' '));
+  const curlAt = single.findIndex(piece => bare(piece).toLowerCase().endsWith('curl'));
+  const header = single.findIndex(
+    (piece, index) => givesAuthorization(piece) || (curlAt !== -1 && curlAt < index && attachedCurlUser(piece)),
+  );
+  const line = firstCredentialLine(single.join('\n'));
+  if (header === -1) return line;
+  return line === undefined ? header + 1 : Math.min(line, header + 1);
+}

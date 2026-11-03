@@ -56,7 +56,7 @@ import {
   withoutTrailingSlash,
   writeProjectMcp,
 } from '../catalog-installs/mcp-writes.ts';
-import type { FleetCatalogService, FreshStepUpContext } from '../fleet/catalog-service.ts';
+import type { FleetCatalogService, FreshStepUpContext, StoredComponentCheck } from '../fleet/catalog-service.ts';
 import {
   base64Url,
   canonical,
@@ -222,7 +222,7 @@ export class LocalMcpInstallService {
       const written =
         held.target.scope === 'project'
           ? await this.#writeProject(held, resolved, bindings, seen)
-          : await this.#writeRuntime(held, held.target, bindings, replaces, governance);
+          : await this.#writeRuntime(held, held.target, bindings, replaces, governance, seen);
       const record: LocalMcpInstallRecord = {
         installId: this.deps.mint('lmi') as LocalMcpInstallRecord['installId'],
         installedAt: new Date(this.deps.now()).toISOString(),
@@ -369,8 +369,8 @@ export class LocalMcpInstallService {
 
   /**
    * What is at the destination right now, at preview and again at apply: refuses when something no record of
-   * ours wrote is there, or what we wrote was changed. Answers a project entry's hash as READ (`null` when there
-   * is none), so the write is guarded by that very reading.
+   * ours wrote is there, or what we wrote was changed. Answers a project entry's hash as READ, or a runtime
+   * component's (`null` when there is none), so the write is guarded by that very reading.
    */
   async #destinationState(
     name: string,
@@ -398,7 +398,20 @@ export class LocalMcpInstallService {
       if ((await this.#hash(canonical(component))) !== replaces?.componentSha256)
         refuse('local_mcp_conflict', `${name} was edited on this machine since it was copied, so it was not replaced.`);
     }
-    return null;
+    return component === undefined ? null : await this.#hash(canonical(component));
+  }
+
+  /**
+   * The check the fleet runs on the very component reading it stages from: that component is still the one this
+   * service judged (`seen` is its hash, or null for none), so an edit that lands between our check and the
+   * fleet's staging is a conflict and never a new baseline to overwrite or remove.
+   */
+  #componentIs(name: string, seen: string | null, past: 'replaced' | 'removed'): StoredComponentCheck {
+    return async stored => {
+      const now = stored === undefined ? null : await this.#hash(canonical(stored));
+      if (now !== seen)
+        refuse('local_mcp_conflict', `${name} was edited on this machine just now, so it was not ${past}.`);
+    };
   }
 
   /**
@@ -455,6 +468,7 @@ export class LocalMcpInstallService {
     bindings: CatalogSecretBindings,
     replaces: LocalMcpInstallRecord | undefined,
     governance: CallerGovernance | undefined,
+    seen: string | null,
   ): Promise<{ componentSha256: string; notes: string[] }> {
     const notes: string[] = [];
     const made = runtimeComponentOf(held.setup, bindings, notes);
@@ -471,6 +485,7 @@ export class LocalMcpInstallService {
         replace: replaces !== undefined,
       },
       governance,
+      this.#componentIs(held.name, seen, 'replaced'),
     );
     return {
       componentSha256: await this.#hash(canonical(stored)),
@@ -496,12 +511,15 @@ export class LocalMcpInstallService {
     if (component === undefined) return;
     if ((await this.#hash(canonical(component))) !== record.componentSha256)
       refuse('local_mcp_conflict', `${name} was edited on this machine since it was copied, so it was not removed.`);
-    const change = await this.deps.fleet.propose({
-      kind: 'component.remove',
-      componentKind: 'mcp',
-      name,
-      removeFromProfiles: true,
-    });
+    const change = await this.deps.fleet.propose(
+      {
+        kind: 'component.remove',
+        componentKind: 'mcp',
+        name,
+        removeFromProfiles: true,
+      },
+      this.#componentIs(name, record.componentSha256, 'removed'),
+    );
     await this.deps.fleet.apply(change.id, governance, freshStepUp);
   }
 
