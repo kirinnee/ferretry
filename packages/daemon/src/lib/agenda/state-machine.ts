@@ -20,6 +20,7 @@ import {
   type AgendaInputRef,
   type AgendaItem,
   AgendaItemSchema,
+  fitAgendaItem,
   type AgendaKind,
   type AgendaResponse,
   type AgendaRevisableField,
@@ -808,10 +809,42 @@ function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
  * held to the schema the reader holds it to, and a change that fails is refused instead of written.
  */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
-  const mutation = transition(ledger, command);
-  if (!mutation.ok || !mutation.changed) return mutation;
+  const transitioned = transition(ledger, command);
+  if (!transitioned.ok || !transitioned.changed) return transitioned;
+  const mutation = fitted(ledger, transitioned);
   const problem = unreadableWrite(ledger, mutation.ledger);
   return problem === undefined ? mutation : failure('invalid', problem);
+}
+
+/**
+ * Every item a change made or changed, fit to the transport bound by shedding its oldest versions (`fitAgendaItem`):
+ * a long item stays closable, restable and shortenable, because its history never crowds the room those need.
+ */
+function fitted(
+  before: AgendaLedger,
+  mutation: Extract<AgendaMutation, { ok: true }>,
+): Extract<AgendaMutation, { ok: true }> {
+  const kept = new Set(before.entries);
+  const swaps = new Map<object, object>();
+  const entries = mutation.ledger.entries.map(entry => {
+    if (kept.has(entry)) return entry;
+    const item = fitAgendaItem(entry.item);
+    if (item === entry.item) return entry;
+    swaps.set(entry.item, item);
+    return { ...entry, item } as typeof entry;
+  });
+  if (swaps.size === 0) return mutation;
+  const ledger = { ...mutation.ledger, entries };
+  const item = mutation.item === undefined ? undefined : (swaps.get(mutation.item) as AgendaItem | undefined);
+  const addressed =
+    mutation.addressed === undefined ? undefined : (swaps.get(mutation.addressed) as ResolvedAgendaItem | undefined);
+  return {
+    ...mutation,
+    ledger,
+    snapshot: agendaSnapshot(ledger),
+    ...(item === undefined ? {} : { item }),
+    ...(addressed === undefined ? {} : { addressed }),
+  };
 }
 
 /** Why one of the entries `after` made or changed would not read back, or `undefined` when every one does. */
@@ -1298,7 +1331,12 @@ function restAnswered(
     ownerAnswer: { at: command.at, response: command.response, ...(note === undefined ? {} : { note }), request },
     parked: { reason: 'replied', at: command.at },
     resting: { sub: 'waiting-on-ferret', at: command.at },
-    history: withHistory(open.history, { at: command.at, kind: 'replied', ...(note === undefined ? {} : { note }) }),
+    history: withHistory(open.history, {
+      at: command.at,
+      kind: 'replied',
+      ...(note === undefined ? {} : { note }),
+      response: command.response,
+    }),
   };
   return replaceItem(ledger, rested, command.at, 'answered');
 }
@@ -1649,17 +1687,17 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
     if (stale !== null) return failure('invalid', stale);
   }
   const newlyBlocking = command.patch.blockingNow === true && target.item.blockingNow !== true;
-  const urge = command.now === true || newlyBlocking;
   const back = staysResting
     ? target.item
-    : backFromParked(target.item, command.actor, command.at, urge, placeOnReturn(command, target.item));
-  const notes: string[] = [];
-  if ('code' in back && command.now !== true) {
-    // Only the blocker asked to wake it, and it already woke this hour: the edit goes ahead, the item sleeps on.
-    notes.push(`${command.id} stays snoozed: ${back.message}`);
-  } else if ('code' in back) {
-    return failure(back.code, back.message);
-  }
+    : backFromParked(
+        target.item,
+        command.actor,
+        command.at,
+        command.now === true,
+        placeOnReturn(command, target.item),
+        newlyBlocking,
+      );
+  if ('code' in back) return failure(back.code, back.message);
   if (!('code' in back) && back !== target.item) {
     // The ferret's edit brings a parked item back first, then edits it as it stands.
     const unparked = replaceItem(ledger, back, command.at, 'unparked');
@@ -1667,8 +1705,7 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
     const edited = edit(unparked.ledger, { ...command, now: false, back: false });
     return !edited.ok || edited.change === 'unchanged' ? (edited.ok ? unparked : edited) : edited;
   }
-  const result = editInPlace(ledger, target.item, command);
-  return result.ok && notes.length > 0 ? { ...result, notes: [...(result.notes ?? []), ...notes] } : result;
+  return editInPlace(ledger, target.item, command);
 }
 
 /** The edit applied to an item that is where it stays: in the queue, resting, snoozed, or on the ferret's turn. */
@@ -1907,6 +1944,8 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
  * What a ferret's edit that brings an item back does to a PARKED one: a RESTING item (parked as `replied`) comes back
  * to the owner, in its old place or a fresh one (`place`, see `placeOnReturn`); one the owner `snoozed` stays asleep
  * unless the ferret says it is urgent (`now`), and then at most once an hour per item (`AGENDA_URGENT_WAKE_MS`), fresh.
+ * A newly asserted blocker (`blocker`) wakes it too, but it is a separate reason: the hourly throttle belongs to the
+ * optional urgency only, so a new blocker is never left asleep because of an earlier urgent wake.
  * Anyone else's move, and any item in play, is returned as it is.
  */
 function backFromParked(
@@ -1915,11 +1954,17 @@ function backFromParked(
   at: string,
   now: boolean,
   place: 'old' | 'fresh' = 'fresh',
+  blocker = false,
 ): AgendaItem | AgendaFailure {
   if (item.parked === undefined || actor.kind !== 'agent') return item;
   if (item.parked.reason === 'snoozed') {
-    if (!now) return item;
-    if (item.urgentAt !== undefined && Date.parse(at) - Date.parse(item.urgentAt) < AGENDA_URGENT_WAKE_MS) {
+    if (!now && !blocker) return item;
+    if (
+      now &&
+      !blocker &&
+      item.urgentAt !== undefined &&
+      Date.parse(at) - Date.parse(item.urgentAt) < AGENDA_URGENT_WAKE_MS
+    ) {
       return {
         code: 'rate-limited',
         message: `${item.id} was already woken as urgent at ${item.urgentAt}; the owner snoozed it, so it may be woken again an hour after that`,
@@ -2082,7 +2127,7 @@ function reopenReplied(
     resolvedByName: _resolvedByName,
     ...rest
   } = closed.item;
-  const parsed = AgendaItemSchema.safeParse({ ...rest, history: withHistory(rest.history, entry) });
+  const parsed = AgendaItemSchema.safeParse(fitAgendaItem({ ...rest, history: withHistory(rest.history, entry) }));
   if (!parsed.success) return unchanged(ledger);
   const next: AgendaLedger = {
     ...ledger,
@@ -2182,9 +2227,16 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
   if (command.request !== undefined) {
     const target = active.find(entry => entry.item.id === command.id);
     // An ANSWER that rested the item and never arrived: the item is the owner's again, in its old place, with the
-    // answer kept for a retry — but only while it still rests on that answer (the ferret may have moved it since).
+    // answer kept for a retry — but only while it still rests, waiting on the ferret, from that very answer: the
+    // ferret may have taken it on (`rest --why`) or the owner replied again since, and then the old failure is stale.
     const answer = target?.item.ownerAnswer;
-    if (target !== undefined && answer?.request === command.request && target.item.parked?.reason === 'replied') {
+    if (
+      target !== undefined &&
+      answer?.request === command.request &&
+      target.item.parked?.reason === 'replied' &&
+      target.item.resting?.sub === 'waiting-on-ferret' &&
+      target.item.resting.at === answer.at
+    ) {
       const { parked: _p, resting: _r, ...open } = target.item;
       const item: AgendaItem = {
         ...open,
@@ -2245,10 +2297,9 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
           ...(note === undefined ? {} : { note }),
           ...(response === undefined ? {} : { response }),
         };
-  const parsed = AgendaItemSchema.safeParse({
-    ...rest,
-    undelivered: { at: command.at, reply, reason: command.reason },
-  });
+  const parsed = AgendaItemSchema.safeParse(
+    fitAgendaItem({ ...rest, undelivered: { at: command.at, reply, reason: command.reason } }),
+  );
   if (!parsed.success) return unchanged(ledger);
   const next: AgendaLedger = {
     ...ledger,

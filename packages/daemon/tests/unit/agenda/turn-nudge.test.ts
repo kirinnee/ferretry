@@ -96,6 +96,24 @@ describe('finishedTurn', () => {
     should(actual?.raised).equal(7);
   });
 
+  it('should count `agenda answer` as returning an item to the owner, but not `agenda rest`', () => {
+    // Arrange
+    const events = [
+      owner('go'),
+      call('Bash', { command: 'fy agenda answer A3 "use eu-west"' }),
+      call('Bash', { command: 'fy attention answer A4 "ok"' }),
+      call('Bash', { command: 'fy agenda rest A5 --why "checking prices"' }),
+      result(),
+      said(LEAD_REPLY),
+    ];
+
+    // Act
+    const actual = finishedTurn(events);
+
+    // Assert
+    should(actual?.raised).equal(2);
+  });
+
   it('should not count raising calls from an earlier turn', () => {
     // Arrange
     const events = [owner('a'), call('Bash', { command: 'fy attention add "x"' }), owner('b'), said(LEAD_REPLY)];

@@ -28,6 +28,15 @@ export const MAX_AGENDA_DETAIL_LENGTH = 2_048;
  * below it, so every schema stays bounded; together they may add up to more, and the item's own check refuses that.
  */
 export const MAX_AGENDA_ITEM_LENGTH = 1_000_000;
+/**
+ * What an item's OWN content (everything but its control metadata and versions) may weigh, as JSON. It is held well
+ * under the transport bound so the room that is left always covers what closing, resting or answering adds
+ * (`agendaContentLength`), and so every accepted item stays closable and shortenable: its revisions and history are
+ * the only things shed to fit (`fitAgendaItem`).
+ */
+export const MAX_AGENDA_CONTENT_LENGTH = 560_000;
+/** The most one owner response weighs, as JSON: it is kept on the item (`ownerAnswer`), in its history and on its close. */
+export const MAX_AGENDA_RESPONSE_LENGTH = 70_000;
 /** The longest context an item carries: the facts around the situation, as Markdown. */
 export const MAX_AGENDA_CONTEXT_LENGTH = 64_000;
 /** The longest the owner's own words are — an answer, a reply, a note — so every reply shows whole. */
@@ -250,31 +259,35 @@ export const AgendaFormAnswerSchema = z.strictObject({
 });
 export type AgendaFormAnswer = z.infer<typeof AgendaFormAnswerSchema>;
 
-export const AgendaResponseSchema = z.union([
-  z.strictObject({ kind: z.literal('permission'), decision: z.enum(['approve', 'reject']) }),
-  z.strictObject({
-    kind: z.literal('multiple-choice'),
-    choice: singleLine(MAX_AGENDA_ASK_OPTION_LENGTH),
-  }),
-  AnswerReviewResponseSchema,
-  z.strictObject({
-    kind: z.literal('open-question'),
-    answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
-  }),
-  /** A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). */
-  z.strictObject({
-    kind: z.literal('form'),
-    answers: z.array(AgendaFormAnswerSchema).min(1).max(MAX_AGENDA_FIELDS),
-  }),
-  /**
-   * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it
-   * (a choice, a permission, a review), so the ferret reads it apart from a picked option and its note.
-   */
-  z.strictObject({
-    kind: z.literal('other'),
-    answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
-  }),
-]);
+export const AgendaResponseSchema = z
+  .union([
+    z.strictObject({ kind: z.literal('permission'), decision: z.enum(['approve', 'reject']) }),
+    z.strictObject({
+      kind: z.literal('multiple-choice'),
+      choice: singleLine(MAX_AGENDA_ASK_OPTION_LENGTH),
+    }),
+    AnswerReviewResponseSchema,
+    z.strictObject({
+      kind: z.literal('open-question'),
+      answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
+    }),
+    /** A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). */
+    z.strictObject({
+      kind: z.literal('form'),
+      answers: z.array(AgendaFormAnswerSchema).min(1).max(MAX_AGENDA_FIELDS),
+    }),
+    /**
+     * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it
+     * (a choice, a permission, a review), so the ferret reads it apart from a picked option and its note.
+     */
+    z.strictObject({
+      kind: z.literal('other'),
+      answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
+    }),
+  ])
+  .refine(response => JSON.stringify(response).length <= MAX_AGENDA_RESPONSE_LENGTH, {
+    message: `an answer is at most ${MAX_AGENDA_RESPONSE_LENGTH} characters as JSON`,
+  });
 export type AgendaResponse = z.infer<typeof AgendaResponseSchema>;
 
 export const MAX_AGENDA_TERMS = 12;
@@ -648,6 +661,8 @@ export const AgendaHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
   kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied', 'gate-answered']),
   note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
+  /** What the owner picked or typed, on a `replied` entry from an ANSWER: `ownerAnswer` keeps only the latest. */
+  response: AgendaResponseSchema.optional(),
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
 
@@ -1122,6 +1137,12 @@ export const AgendaItemSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    if (agendaContentLength(value) > MAX_AGENDA_CONTENT_LENGTH) {
+      context.addIssue({
+        code: 'custom',
+        message: `an agenda item's own content is at most ${MAX_AGENDA_CONTENT_LENGTH} characters as JSON: move the long part to a file and link it`,
+      });
+    }
     if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
       context.addIssue({
         code: 'custom',
@@ -1220,6 +1241,62 @@ const AgendaResolutionSchema = z.discriminatedUnion('resolvedBy', [
 function responseKindFitsAsk(ask: string | undefined, response: string): boolean {
   if (response === 'other') return ask !== undefined && ask !== 'open-question' && ask !== 'task';
   return ask === response;
+}
+
+/** The keys that are about the item's life, not what it says: its versions, its state and how it was closed. */
+const AGENDA_CONTROL_KEYS: ReadonlySet<string> = new Set([
+  'revisions',
+  'history',
+  'ownerAnswer',
+  'undelivered',
+  'resting',
+  'parked',
+  'stages',
+  'urgentAt',
+  'resolvedAt',
+  'resolutionNote',
+  'response',
+  'answerReceipt',
+  'disposition',
+  'resolvedBy',
+  'resolvedBySession',
+  'resolvedByName',
+]);
+
+/** How much an item's own content weighs as JSON: the item without its control metadata (`MAX_AGENDA_CONTENT_LENGTH`). */
+export function agendaContentLength(item: object): number {
+  const content = Object.fromEntries(Object.entries(item).filter(([key]) => !AGENDA_CONTROL_KEYS.has(key)));
+  return JSON.stringify(content).length;
+}
+
+/**
+ * An item that fits the transport bound: when it weighs more than `MAX_AGENDA_ITEM_LENGTH`, its oldest revisions go
+ * first, then its oldest history (a card gate's `gate-answered` entry never goes: it keeps that gate asked for good).
+ * Content is bounded far below the transport bound, so what is left always fits; an item that already fits is returned
+ * as it is.
+ */
+export function fitAgendaItem<
+  T extends {
+    readonly revisions?: readonly unknown[] | undefined;
+    readonly history?: readonly { readonly kind: string }[] | undefined;
+  },
+>(item: T): T {
+  const weighs = (candidate: T) => JSON.stringify(candidate).length;
+  let fitted = item;
+  while (weighs(fitted) > MAX_AGENDA_ITEM_LENGTH && (fitted.revisions?.length ?? 0) > 0) {
+    const { revisions, ...rest } = fitted;
+    const kept = (revisions ?? []).slice(1);
+    fitted = (kept.length === 0 ? rest : { ...rest, revisions: kept }) as T;
+  }
+  while (weighs(fitted) > MAX_AGENDA_ITEM_LENGTH) {
+    const history = fitted.history ?? [];
+    const oldest = history.findIndex(entry => entry.kind !== 'gate-answered');
+    if (oldest < 0) break;
+    const kept = history.filter((_, index) => index !== oldest);
+    const { history: _history, ...rest } = fitted;
+    fitted = (kept.length === 0 ? rest : { ...rest, history: kept }) as T;
+  }
+  return fitted;
 }
 
 export const ResolvedAgendaItemSchema = z
@@ -1514,6 +1591,12 @@ export const AgendaActionRequestSchema = z
       return;
     }
     if (value.action !== 'add') return;
+    if (JSON.stringify(value).length > MAX_AGENDA_CONTENT_LENGTH) {
+      context.addIssue({
+        code: 'custom',
+        message: `an agenda item's own content is at most ${MAX_AGENDA_CONTENT_LENGTH} characters as JSON: move the long part to a file and link it`,
+      });
+    }
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
     }

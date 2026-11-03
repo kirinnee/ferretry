@@ -272,7 +272,9 @@ describe('attention routes', () => {
     const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
 
     // Act
-    const rested = await dispatch(post({ action: 'rest', id, why: 'checking both branches' }, agentIn('s1')));
+    const rested = await dispatch(
+      post({ action: 'rest', id, why: 'checking both branches' }, { ...agentIn('s1'), 'x-fy-agenda-channel': '1' }),
+    );
 
     // Assert
     should(rested.status).equal(200);
@@ -290,7 +292,10 @@ describe('attention routes', () => {
 
     // Act
     const answered = await dispatch(
-      post({ action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } }),
+      post(
+        { action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } },
+        { ...human, 'x-fy-agenda-channel': '1' },
+      ),
     );
 
     // Assert — a ferret's item RESTS on the owner's answer (docs/agenda.md § States): still open, the choice on it.
@@ -1199,5 +1204,24 @@ describe('agenda route snooze', () => {
     should(items(urgent)[0]).containDeep({ urgentAt: '2024-05-01T10:00:00.000Z' });
     should(items(urgent)[0]).not.have.property('parked');
     should(again.status).equal(429);
+  });
+});
+
+describe('attention routes for an older app', () => {
+  it('should leave the channel fields off an answer unless the caller names the channel', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    const resolve = { action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } };
+
+    // Act
+    const answered = await dispatch(post(resolve));
+
+    // Assert
+    const [item] = jsonBody(answered).items as readonly Record<string, unknown>[];
+    should(item).not.have.property('ownerAnswer');
+    should(item).not.have.property('resting');
+    should(item?.parked).containDeep({ reason: 'replied' });
   });
 });

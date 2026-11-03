@@ -54,11 +54,11 @@ export interface FinishedTurn {
 }
 
 /**
- * A tool call that raises, edits or notifies: a shell command running `agenda add` / `edit` / `notify`
+ * A tool call that raises, edits, answers or notifies: a shell command running `agenda add` / `edit` / `answer` / `notify`
  * (the CLI, under whatever binary name), a Ferretry `*_ask_owner` tool, or the harness's own question tool,
  * which the daemon raises as an item itself (`harness-prompt.ts`).
  */
-const RAISING_COMMAND = /\b(?:(?:attention|agenda)["',\s]+(?:add|edit)|notify)\b/u;
+const RAISING_COMMAND = /\b(?:(?:attention|agenda)["',\s]+(?:add|edit|answer)|notify)\b/u;
 const RAISING_TOOL = /(?:^|_)ask_owner$|^AskUserQuestion$/u;
 
 export const raisesAgendaItem = (event: TranscriptEvent): boolean => {

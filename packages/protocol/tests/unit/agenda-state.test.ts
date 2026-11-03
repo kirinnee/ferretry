@@ -106,7 +106,7 @@ describe('the agenda channel on the wire', () => {
     should(parsed.success).be.true();
   });
 
-  it('should take a long report whole, and refuse an item past the transport bound', () => {
+  it('should take a long report whole, and refuse an item whose own content is past its bound', () => {
     // Arrange
     const report = 'x'.repeat(150_000);
 
@@ -128,7 +128,7 @@ describe('the agenda channel on the wire', () => {
     // Assert
     should(long.success).be.true();
     should(tooBig.success).be.false();
-    should(tooBig.error?.issues[0]?.message).match(/at most 1000000 characters as JSON/u);
+    should(tooBig.error?.issues[0]?.message).match(/at most 560000 characters as JSON/u);
   });
 
   it('should take a rest with a why, and an edit or add that names a stage, where we are and the detail', () => {

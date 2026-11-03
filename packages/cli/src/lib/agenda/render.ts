@@ -115,10 +115,12 @@ function itemLines(item: AgendaItem, now?: string): string[] {
     lines.push(...restingLines(item, now));
   } else if (agendaInDiscussion(item)) {
     lines.push(
-      `${INDENT}ferret's turn: the owner wrote about this — \`agenda edit\` it, \`agenda surface\` it back, or \`agenda done\` it ${item.askedAt ?? ''}`.trimEnd(),
+      `${INDENT}${restedPrefix(item, now)}ferret's turn: the owner wrote about this — \`agenda edit\` it, \`agenda surface\` it back, or \`agenda done\` it ${item.askedAt ?? ''}`.trimEnd(),
     );
   } else if (item.waitingOn !== undefined) {
-    lines.push(`${INDENT}ferret's turn: more information asked ${item.askedAt ?? ''}`.trimEnd());
+    lines.push(
+      `${INDENT}${restedPrefix(item, now)}ferret's turn: more information asked ${item.askedAt ?? ''}`.trimEnd(),
+    );
   } else if (agendaTurn(item) === 'owner') {
     lines.push(`${INDENT}owner's turn`);
   }
@@ -133,6 +135,14 @@ function ageOf(since: string, now: string | undefined): string {
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/** "resting 2h (since …), " for an item that derives as Resting but is not the replied kind; empty otherwise. */
+function restedPrefix(item: AgendaItem, now: string | undefined): string {
+  const view = agendaState(item);
+  if (view.state !== 'resting') return '';
+  const age = ageOf(view.since, now);
+  return `resting${age === '' ? '' : ` ${age}`} (since ${view.since}), `;
 }
 
 /**

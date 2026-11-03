@@ -226,7 +226,7 @@ describe('a blocker and a snooze', () => {
     should(queue(woken.ledger)).deepEqual(['A2', 'A1']);
   });
 
-  it('should leave it asleep, saying so, when it already woke as urgent within the hour', () => {
+  it('should wake it for a new blocker even when it already woke as urgent within the hour', () => {
     // Arrange — woken by a blocker, cleared, snoozed again, and marked blocking again a minute later
     const woken = block(snoozed()).ledger;
     const cleared = ok(
@@ -236,12 +236,27 @@ describe('a blocker and a snooze', () => {
     const soon = new Date(Date.parse(T2) + AGENDA_URGENT_WAKE_MS / 2).toISOString();
 
     // Act
-    const asleep = block(again, soon);
+    const awake = block(again, soon);
 
     // Assert
-    should(asleep.item?.parked?.reason).equal('snoozed');
-    should(asleep.item?.blockingNow).be.true();
-    should(asleep.notes?.join(' ')).match(/stays snoozed/u);
+    should(awake.item?.parked).be.undefined();
+    should(awake.item).containDeep({ blockingNow: true, waitingSince: soon });
+    should(queue(awake.ledger)).deepEqual(['A2', 'A1']);
+  });
+
+  it('should still throttle the optional --now urgency to once an hour', () => {
+    // Arrange
+    const woken = block(snoozed()).ledger;
+    const again = ok(apply(woken, { action: 'snooze', actor: HUMAN, id: 'A1', until: T4, at: T2 })).ledger;
+    const soon = new Date(Date.parse(T2) + AGENDA_URGENT_WAKE_MS / 2).toISOString();
+
+    // Act
+    const result = refused(
+      apply(again, { action: 'edit', actor: AGENT, id: 'A1', patch: { stillOpen: 'x' }, now: true, at: soon }),
+    );
+
+    // Assert
+    should(result.error.code).equal('rate-limited');
   });
 });
 
@@ -367,5 +382,80 @@ describe('the migration to the channel (ledger v2)', () => {
 
     // Assert
     should(read === null ? undefined : agendaSnapshot(read).resolved[0]?.stage).equal('done');
+  });
+});
+
+describe('a late delivery failure', () => {
+  const failed = (ledger: AgendaLedger, request: number, at = T4) =>
+    ok(apply(ledger, { action: 'undelivered', actor: SYSTEM, id: 'A1', request, reason: 'no receipt', at }));
+
+  it('should put an answer back for a retry while the item still rests from that very answer', () => {
+    // Arrange
+    const answered = ok(answerOwner(board())).ledger;
+
+    // Act
+    const result = failed(answered, 1);
+
+    // Assert
+    should(result.change).equal('reopened');
+    should(agendaState(result.item ?? item(result.ledger)).state).equal('needs-you');
+    should(result.item?.undelivered).containDeep({ reason: 'no receipt' });
+  });
+
+  it('should leave the ferret’s newer Resting state alone when the old answer’s receipt fails after rest --why', () => {
+    // Arrange
+    const answered = ok(answerOwner(board())).ledger;
+    const working = ok(apply(answered, { action: 'rest', actor: AGENT, id: 'A1', why: 'deploying', at: T3 })).ledger;
+
+    // Act
+    const result = failed(working, 1);
+
+    // Assert
+    should(result.change).equal('unchanged');
+    should(agendaState(item(result.ledger))).containDeep({ state: 'resting', sub: 'working' });
+    should(item(result.ledger).undelivered).be.undefined();
+  });
+
+  it('should leave a newer owner reply alone when the earlier answer’s receipt fails', () => {
+    // Arrange
+    const answered = ok(answerOwner(board())).ledger;
+    const answeredAgain = ok(
+      apply(answerFerret(answered).ledger, {
+        action: 'reply',
+        actor: HUMAN,
+        id: 'A1',
+        note: 'and what about US?',
+        at: T4,
+      }),
+    ).ledger;
+
+    // Act
+    const result = failed(answeredAgain, 1, new Date(Date.parse(T4) + 60_000).toISOString());
+
+    // Assert
+    should(result.change).equal('unchanged');
+    should(agendaState(item(result.ledger)).state).equal('resting');
+  });
+});
+
+describe('the owner’s earlier answers', () => {
+  it('should keep every answer’s response beside its note in the history, across a serialize and parse', () => {
+    // Arrange
+    const first = ok(answerOwner(board(), 'EU', T1)).ledger;
+    const returned = answerFerret(first, T2).ledger;
+
+    // Act
+    const second = ok(answerOwner(returned, 'US', T3)).ledger;
+    const reread = parseAgendaLedger(JSON.parse(JSON.stringify(second)), SESSION_ID);
+
+    // Assert
+    should(reread).not.be.null();
+    const answers = (reread ? item(reread) : item(second)).history?.filter(entry => entry.kind === 'replied');
+    should(answers?.map(entry => entry.response)).deepEqual([
+      { kind: 'multiple-choice', choice: 'EU' },
+      { kind: 'multiple-choice', choice: 'US' },
+    ]);
+    should(answers?.map(entry => entry.note)).deepEqual(['keep it near', 'keep it near']);
+    should(item(second).ownerAnswer?.response).deepEqual({ kind: 'multiple-choice', choice: 'US' });
   });
 });

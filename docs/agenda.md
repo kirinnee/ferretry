@@ -185,8 +185,8 @@ fields every item already carries, so an item from any daemon reads as exactly o
   dismiss closes it too. `fy agenda ls` shows each Resting item's age, so a finished one gets closed. A ferret's
   `done` on an item the owner answered needs no `--reason`: the question was answered.
 - **A blocker wakes a snooze.** A ferret's edit that newly sets `--blocking` on a snoozed item wakes it, fresh, as
-  `--now` does, and under the same once-an-hour limit; past the limit the edit applies and the item sleeps on, and
-  the ferret is told so.
+  `--now` does — but it is its own reason, outside the once-an-hour limit that `--now` keeps, so an item that woke as
+  urgent a moment ago still wakes for a new blocker.
 
 **What a Resting item stores.** The field every app reads stays `parked: { reason: 'replied', at }` (or
 `waitingOn: 'ferret'` for a request for more information), so an app from before Resting lists it under
@@ -206,7 +206,7 @@ resting, snoozed or done item, or a notice, never moves them.
 - **`stage`** is what the item needs from the owner right now — `explainer`, `question`, `plan`, `tracker`, `test`,
   then `done` — separate from its state (a question can rest; a tracker can need the owner). A ferret sets it with
   `--stage` on `add` and `edit`; without one it is read from the kind (`agendaStageOfKind`: info is an explainer, a
-  permission or review a plan, a to-do a test, the rest a question), and a replaced kind moves it the same way.
+  permission or review a plan, a to-do a test, the rest a question).
   Every stage the item entered is kept, oldest first, in `stages` (at most 64); closing it adds `done`.
 - **`whereWeAre`** (`--where`, point form or Markdown) is where things stand now. Anything the owner asked for to
   complete the item — an explainer, a report — lives here.
@@ -221,6 +221,17 @@ the detail and an answer to the owner's question 200,000; the context and every 
 64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history.
 The history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to their
 own store.
+
+**An item can always be closed, rested, edited shorter and answered.** What the item says (its fields; `MAX_AGENDA_CONTENT_LENGTH`,
+560,000) is bounded well under the transport bound, and so is each owner response (`MAX_AGENDA_RESPONSE_LENGTH`,
+70,000): what an edit, an answer or a closing adds — a retained version, a history entry, the answer, the resolution —
+therefore always has room. A request that raises or edits an item past the content bound is refused, naming it. When
+what the machine records would still push the item over the transport bound, the machine **sheds the oldest
+retained versions first, then the oldest history entries** (never the record of a card gate the owner answered)
+until it fits, so a very long item never becomes one nobody can write to.
+
+An owner's earlier answers are kept: each `replied` history entry carries the `response` (the choice or typed
+answer) next to its note, because `ownerAnswer` keeps only the latest.
 
 ### The migration (ledger version 2)
 
@@ -258,10 +269,9 @@ is off their list: a plain `edit` updates the card and leaves it resting, `fy ag
 place, and a bare `surface` is refused there. **None of them pings the owner.**
 
 - `fy agenda answer <id> "<text>"` — answer the owner on it: it is theirs again, in its old place.
-- `fy agenda edit <id> …` — change the card (settled answers, what is still open, its stage, or — with `--kind` — a
-  new ask). Any edit by the raising agent on its own turn for more information hands the item back to the owner,
+- `fy agenda edit <id> …` — change the card (settled answers, what is still open, its stage). Any edit by the raising agent on its own turn for more information hands the item back to the owner,
   even one that changes nothing. (Not an item resting on a reply: that edit keeps it resting, unless it answers on
-  it or replaces the ask. `--back` is retired: the CLI refuses it and names the verbs above.)
+  it. `--back` is retired: the CLI refuses it and names the verbs above.)
 - `fy agenda rest <id> --why "…"` — take it on, quiet, while working.
 - `fy agenda surface <id> [--why "…"]` — hand a discussed item back as it stands.
 - `fy agenda done <id>` / `dismiss <id>` — close it, once nothing more is expected.
@@ -338,7 +348,9 @@ list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the c
 - **The ferret is told without text tags**: the state is the item's own field, and `fy agenda ls` says
   "snoozed by the owner until …". A ferret's `edit` or `surface` leaves a snoozed item asleep (an edit still
   changes its words). Only `--now` — it is urgent — wakes it, and a ferret may do that **once an hour per item**
-  (`urgentAt`; a second try inside the hour is refused as `rate-limited`).
+  (`urgentAt`; a second try inside the hour is refused as `rate-limited`). A **newly blocking** edit (`--blocking`)
+  wakes it on its own, outside that throttle: an item that woke as urgent half an hour ago still wakes for a new
+  blocker.
 - Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
 - **The app ships first**: a daemon reports `agenda.snooze.1` on `GET /v1/health`, and the app sends snooze or
   unsnooze only to a machine that lists it. To an older machine it sends nothing and says the machine needs an
@@ -1030,6 +1042,22 @@ optional, so an app or CLI from before reads every item; the request fields (`st
 `rest` action) are refused as malformed by an older daemon, so the CLI checks the feature first and says the daemon
 needs an update. `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
+
+### An older app keeps reading the board
+
+An app from before the channel parses a **whole** board with its own schema, so one item it cannot read makes the board
+unreadable. Its limits were smaller (a point-form segment 1,024, the context and every note 2,048, a step 2,000, a body
+8,000), and its revisions and history entries are strict, so an edit of `whereWeAre` or `detail` or a `response` on a
+history entry is a key it refuses. A daemon therefore serves the items in two shapes, chosen by the **request header
+`x-fy-agenda-channel: 1`** (the same version as `agenda.channel.1` on `GET /v1/health`):
+
+- **With the header** — the whole shape, exactly as stored. The CLI sends it on every request; an app that reads the channel sends it to a
+  machine that lists `agenda.channel.1` (the header is already allowed by the daemon's CORS preflight).
+- **Without it** — the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
+  every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
+  `stages`, `whereWeAre`, `detail`) and the `response` of a history entry left out, and a revision that only changed a
+  field the older app does not know dropped. The projection is a view: it is never written back, so nothing is lost on
+  the machine. It covers the board, the roll-up of every conversation and the machine agenda.
 
 ### Both spellings, one window
 

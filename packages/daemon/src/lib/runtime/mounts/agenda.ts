@@ -8,7 +8,9 @@ import {
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
+  legacyAgendaSnapshot,
   MAX_AGENDA_SUBJECT_LENGTH,
+  readsAgendaChannel,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
@@ -112,6 +114,13 @@ function pathSessionId(context: RouteContext): string {
 type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 
 /**
+ * The board in the shape its caller reads: a caller that has not said it reads the channel (`x-fy-agenda-channel`)
+ * gets the legacy projection, so an app that shipped before it never meets an item its strict schema refuses.
+ */
+export const servedAgendaSnapshot = (context: RouteContext, snapshot: AgendaSnapshot): AgendaSnapshot =>
+  readsAgendaChannel(context.request.headers) ? snapshot : legacyAgendaSnapshot(snapshot);
+
+/**
  * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
  * but not yet proven to arrive (`delivery`), so the owner's screen can say "Sending…". An outbox that
  * cannot be read is left off: the board is the answer.
@@ -131,7 +140,9 @@ async function withReplies(replies: HeldReplies, sessionId: string, snapshot: Ag
 async function list(agenda: AgendaService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
-  return result.ok ? jsonResponse(await withReplies(replies, sessionId, result.value)) : refusal(result.error);
+  return result.ok
+    ? jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, result.value)))
+    : refusal(result.error);
 }
 
 /**
@@ -240,7 +251,7 @@ async function apply(
   const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...(await withReplies(replies, sessionId, mutation.snapshot)),
+    ...servedAgendaSnapshot(context, await withReplies(replies, sessionId, mutation.snapshot)),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),

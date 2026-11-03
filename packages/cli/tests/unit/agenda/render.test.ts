@@ -749,4 +749,21 @@ describe('a resting item in the list', () => {
     should(working).containEql('`agenda answer A3 "<text>"` when you need the owner');
     should(working).containEql('`agenda done A3` when nothing more is expected');
   });
+
+  it('should show the resting age of an item waiting on the ferret for information or a discussion, keeping its instructions', () => {
+    // Arrange
+    const asked = '2026-07-31T09:10:00.000Z';
+    const board = snapshot([
+      agentItem('A2', 'log in', { waitingOn: 'ferret', waitingFor: 'info', askedAt: asked }),
+      agentItem('A3', 'pick a region', { waitingOn: 'ferret', waitingFor: 'discussion', askedAt: asked }),
+    ]);
+
+    // Act
+    const text = renderAgendaList(board, '2026-07-31T12:10:00.000Z');
+
+    // Assert
+    should(text).containEql(`resting 3h (since ${asked}), ferret's turn: more information asked`);
+    should(text).containEql(`resting 3h (since ${asked}), ferret's turn: the owner wrote about this`);
+    should(text).containEql('`agenda surface`');
+  });
 });
