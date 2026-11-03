@@ -1,3 +1,10 @@
+## [4.255.1](https://github.com/kirinnee/ferretry/compare/v4.255.0...v4.255.1) (2026-11-03)
+
+### Fixes
+
+* **daemon:** resolve known session credentials by digest ([#1417](https://github.com/kirinnee/ferretry/issues/1417)) ([815eb40](https://github.com/kirinnee/ferretry/commit/815eb408710024d04212dda9acad3207cd468cf0))
+* **pwa:** close an input card's agenda view when its request ends (#B147) ([#1419](https://github.com/kirinnee/ferretry/issues/1419)) ([4113241](https://github.com/kirinnee/ferretry/commit/4113241a1e2b4c96ed1c64d1807258aec9f97425)), closes [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147)
+
 ## [4.255.0](https://github.com/kirinnee/ferretry/compare/v4.254.1...v4.255.0) (2026-11-03)
 
 ### Features

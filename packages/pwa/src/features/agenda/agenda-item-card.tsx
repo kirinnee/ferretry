@@ -22,6 +22,7 @@ import {
   type AgendaCardAnswer,
   type AgendaItem,
   type AgendaTerm,
+  inputContextLines,
   singleAgendaQuestion,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
@@ -310,12 +311,16 @@ export function AgendaItemCard({
   const mark = (text: string): string => markTerms(text, terms, seen);
   const premise = read.premise?.trim() ? mark(read.premise) : null;
   // A notice with cards lists them as rows with buttons, so its context (the same lines, for an older app) says nothing more.
-  const context = cardsForm === undefined && read.context?.trim() ? mark(read.context) : null;
-
   const answerable = latest && settled === undefined;
+  const isInput = inputForm !== undefined && item.kind === 'input';
+  // Only a card that is DRAWN says the agent's prompt itself, under the daemon's facts, so only then does the context keep
+  // just the daemon's own lines: a settled record and an older version draw no card, and keep the prompt as written.
+  const inputDrawn = isInput && answerable;
+  const contextText = inputDrawn ? inputContextLines(read.context) : read.context;
+  const context = cardsForm === undefined && contextText?.trim() ? mark(contextText) : null;
+
   const formFields = item.fields ?? [];
   const formPicks = useFormPicks(formKey ?? item.id, formFields);
-  const isInput = inputForm !== undefined && item.kind === 'input';
   // A gate item is a card to try or approve: its steps are the card's How to test, and Not needed is a button under it.
   const gated = item.gate !== undefined;
   const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated && !dismissAside;
@@ -454,77 +459,80 @@ export function AgendaItemCard({
             <PointForm renderProse={renderProse} text={mark(questionAnswer)} />
           </div>
         )}
-        <AgendaNeed
-          shape={shape}
-          {...(gated && body !== null ? { heading: 'How to test' } : {})}
-          {...(gated ? { lead: '' } : {})}
-          {...(!answerable || (shape === 'form' && formKey !== undefined)
-            ? // A form filled in here says how to send in its own pinned foot, with the count.
-              { lead: '' }
-            : shape === 'form'
-              ? { lead: FORM_ELSEWHERE }
-              : {})}
-          {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
-        >
-          {askLine === '' ||
-          cardsForm !== undefined ||
-          (gated && body !== null) ||
-          shape === 'answers' ||
-          shape === 'input' ||
-          shape === 'form' ? null : (
-            <div className="fy-card__question" data-agenda-question-line="">
-              {renderProse(mark(askLine))}
-            </div>
-          )}
-          {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
-          {cardsForm}
-          {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
-          {choosing && showList ? (
-            <OptionsList
-              busy={busy}
-              onPick={label => {
-                const option = options.find(entry => entry.label === label);
-                if (option !== undefined && !busy) onAct(optionAction(option, ''));
-              }}
-              options={listed}
-              renderProse={renderProse}
-            />
-          ) : null}
-          {effectInNeed && item.impact !== undefined ? (
-            <div className="fy-card__need-part" data-agenda-need-effect="">
-              <h5 className="fy-card__label">What it does</h5>
-              <PointForm renderProse={renderProse} text={mark(item.impact)} />
-            </div>
-          ) : null}
-          {linksInNeed && item.links !== undefined ? (
-            <div className="fy-card__need-part" data-agenda-need-review="">
-              <h5 className="fy-card__label">What to review</h5>
-              <LinksList links={item.links} renderProse={renderProse} />
-            </div>
-          ) : null}
-          {shape === 'form' ? (
-            <AgendaFormFields
-              disabled={busy || !answerable}
-              fields={formFields}
-              formKey={formKey ?? null}
-              instruction={answerable ? AGENDA_SHAPE_LEADS.form : null}
-              picks={formPicks}
-              renderProse={renderProse}
-            />
-          ) : null}
-          {shape === 'answers' ? (
-            <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />
-          ) : null}
-          {stepsInNeed && steps.length > 0 ? (
-            <AgendaSteps
-              disabled={busy || !answerable}
-              done={item.stepsDone ?? []}
-              renderProse={renderProse}
-              steps={steps}
-              {...(onProgress === undefined || !answerable ? {} : { onProgress })}
-            />
-          ) : null}
-        </AgendaNeed>
+        {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
+        {inputDrawn ? null : (
+          <AgendaNeed
+            shape={shape}
+            {...(gated && body !== null ? { heading: 'How to test' } : {})}
+            {...(gated ? { lead: '' } : {})}
+            {...(!answerable || (shape === 'form' && formKey !== undefined)
+              ? // A form filled in here says how to send in its own pinned foot, with the count.
+                { lead: '' }
+              : shape === 'form'
+                ? { lead: FORM_ELSEWHERE }
+                : {})}
+            {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
+          >
+            {askLine === '' ||
+            cardsForm !== undefined ||
+            (gated && body !== null) ||
+            shape === 'answers' ||
+            shape === 'input' ||
+            shape === 'form' ? null : (
+              <div className="fy-card__question" data-agenda-question-line="">
+                {renderProse(mark(askLine))}
+              </div>
+            )}
+            {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
+            {cardsForm}
+            {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
+            {choosing && showList ? (
+              <OptionsList
+                busy={busy}
+                onPick={label => {
+                  const option = options.find(entry => entry.label === label);
+                  if (option !== undefined && !busy) onAct(optionAction(option, ''));
+                }}
+                options={listed}
+                renderProse={renderProse}
+              />
+            ) : null}
+            {effectInNeed && item.impact !== undefined ? (
+              <div className="fy-card__need-part" data-agenda-need-effect="">
+                <h5 className="fy-card__label">What it does</h5>
+                <PointForm renderProse={renderProse} text={mark(item.impact)} />
+              </div>
+            ) : null}
+            {linksInNeed && item.links !== undefined ? (
+              <div className="fy-card__need-part" data-agenda-need-review="">
+                <h5 className="fy-card__label">What to review</h5>
+                <LinksList links={item.links} renderProse={renderProse} />
+              </div>
+            ) : null}
+            {shape === 'form' ? (
+              <AgendaFormFields
+                disabled={busy || !answerable}
+                fields={formFields}
+                formKey={formKey ?? null}
+                instruction={answerable ? AGENDA_SHAPE_LEADS.form : null}
+                picks={formPicks}
+                renderProse={renderProse}
+              />
+            ) : null}
+            {shape === 'answers' ? (
+              <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />
+            ) : null}
+            {stepsInNeed && steps.length > 0 ? (
+              <AgendaSteps
+                disabled={busy || !answerable}
+                done={item.stepsDone ?? []}
+                renderProse={renderProse}
+                steps={steps}
+                {...(onProgress === undefined || !answerable ? {} : { onProgress })}
+              />
+            ) : null}
+          </AgendaNeed>
+        )}
       </TermLayer>
       {recommendation === undefined || recommendation.why === undefined ? null : (
         <Section name="recommendation" title={`Why I recommend ${recommendedOption?.name ?? recommendation.decision}`}>

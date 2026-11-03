@@ -258,7 +258,8 @@ const item = {
   title: view === 'google' || view === 'steered' || view === 'unsubmitted' ? 'Needs a login' : view === 'chain' || view === 'codeterm' ? 'Needs a code' : 'Needs a secret',
   subject,
   why: subject,
-  context: 'The rebuild you asked for in &F131',
+  // As the daemon words it (agenda-adapter.ts, contextOf): the agent's prompt last, after "The agent says: ".
+  context: 'The agent says: ' + request.prompt,
   howToResolve: 'Open the card and type the value in its form. Nothing is sent until you press Send.',
   input: { requestId: request.id },
   neededBy: request.expiresAt,
