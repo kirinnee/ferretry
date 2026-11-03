@@ -178,6 +178,47 @@ describe('an approve-on-phone card in the Inbox', () => {
   });
 });
 
+describe('a suggested sign-in recipe card in the Inbox', () => {
+  const REF = { signIn: 'si_0000000000000001', id: 'rp_0123456789abcdef' };
+  const task = (ref: boolean) =>
+    inboxCard(
+      agendaItem('A11', {
+        kind: 'task',
+        raisedBy: 'agent',
+        subject: 'Approve a new way to sign in to github.com',
+        ...(ref ? { recipeProposal: REF } : {}),
+      } as never),
+    );
+
+  const draw = async (ref: boolean, connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[task(ref)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('is drawn only from the daemon’s own reference, never from a ferret’s words copying its title', async () => {
+    expect((await draw(false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw(true)).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});
+
 describe('a staged 2FA seed card in the Inbox', () => {
   const REF = { stage: `st_${'a'.repeat(24)}`, account: 'GITHUB' };
   const seed = (ref: boolean) =>

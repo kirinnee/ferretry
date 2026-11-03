@@ -129,6 +129,7 @@ import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { BoardSendBack, type SendBack, type SendBackPorts, useSendBackFiles } from '../board/board-send-back.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
+import { RecipeProposalHost } from '../secrets/recipe-proposal-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
 import { useAnsweredSuggestionSweep } from '../secure-copy/answered-suggestion-sweep.ts';
@@ -285,6 +286,10 @@ const inputFormFor = (
           sessionId={card.view.config.id}
         />
       ),
+    };
+  if (connection !== undefined && card.item.recipeProposal !== undefined)
+    return {
+      planForm: <RecipeProposalHost agentName={inboxWho(card).ferret} connection={connection} item={card.item} />,
     };
   if (connection !== undefined && card.item.twoFactorSeed !== undefined)
     return { planForm: <TwoFactorSeedHost connection={connection} item={card.item} /> };
