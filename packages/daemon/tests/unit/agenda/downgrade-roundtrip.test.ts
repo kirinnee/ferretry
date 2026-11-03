@@ -301,6 +301,38 @@ describe("The ferret's answer given on 2a", () => {
     should(thread.at(-1)).match({ at: T(5), by: 'ferret', via: 'question-answer' });
   });
 
+  it('should come back after the owner words it answers when the edit that dated it is gone', () => {
+    // Arrange: the version holds only the owner (q1 at T1); the answer was edited in on 2a, and more than ten later
+    // edits pushed that revision out, so only the item's own times are left, and the earliest is before the version.
+    const before = run(raised(), { action: 'reply', actor: HUMAN, id: 'A1', note: 'q1', at: T(1) });
+    const document = strippedBy2a(before, each => {
+      (each.entries[0]?.item as { questionAnswer?: string }).questionAnswer = 'ans';
+    });
+
+    // Act
+    const back = upgraded(document, recordedOf(before));
+
+    // Assert
+    const thread = back.conversations?.A1 ?? [];
+    should(texts(thread)).deepEqual(['q1', 'ans']);
+    should(thread.at(-1)).match({ at: before.updatedAt, by: 'ferret', via: 'question-answer' });
+    should(upgraded(JSON.parse(agendaLedgerDocument(back)), recordedOf(back)).conversations?.A1).deepEqual(thread);
+  });
+
+  it('should keep an answer dated after the version where the version held no words at all', () => {
+    // Arrange: a version with an empty thread has nothing to come after.
+    const before = raised();
+    const document = strippedBy2a(before, each => {
+      (each.entries[0]?.item as { questionAnswer?: string }).questionAnswer = 'ans';
+    });
+
+    // Act
+    const back = upgraded(document, { A1: { ...recordedOf(before).A1!, conversation: [] } });
+
+    // Assert
+    should(back.conversations?.A1?.at(-1)).match({ at: T(0), via: 'question-answer' });
+  });
+
   it('should come back after the owner words said on 2a before it, not at the version it replaces', () => {
     // Arrange: the version holds the ferret's first answer (T2); on 2a the owner wrote q2 (T5), then the ferret a2 (T6).
     const before = log(raised(), 'A1', 'm1', 1, 'q1', 'a1');

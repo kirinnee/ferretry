@@ -1150,6 +1150,208 @@ export function agendaVersionRecoveryContract() {
       }
     });
 
+    /** The previous release (2a) rewrites the board as it understands it: threads, links and the chat tags are gone. */
+    const olderDaemonStrips = async (w: Awaited<ReturnType<typeof world>>) => {
+      const document = JSON.parse((await w.files.read(SESSION, 'agenda.json')) ?? '{}');
+      document.version = 2;
+      delete document.conversations;
+      delete document.carriedEntries;
+      for (const entry of document.entries) {
+        for (const key of ['conversation', 'conversationCount', 'conversationLastAt', 'relatedTasks'])
+          delete entry.item[key];
+        for (const key of ['mergedFrom', 'mergedInto', 'splitFrom', 'splitInto']) delete entry.item[key];
+      }
+      await w.files.writeAtomic(SESSION, 'agenda.json', JSON.stringify(document));
+    };
+    const splitChild = (w: Awaited<ReturnType<typeof world>>) =>
+      w.repo.transact(
+        SESSION,
+        current =>
+          applyAgendaCommandToSession(current, SESSION, {
+            action: 'split',
+            actor: ACTOR,
+            id: 'A1',
+            request: { ...REQUEST, subject: 'Child' },
+            at: AT,
+          }),
+        'ferret',
+        { actor: ACTOR, via: 'board' },
+      );
+    const logChat = (w: Awaited<ReturnType<typeof world>>) =>
+      w.repo.transact(
+        SESSION,
+        current =>
+          applyAgendaCommandToSession(current, SESSION, {
+            action: 'log',
+            actor: ACTOR,
+            id: 'A1',
+            mode: 'reply',
+            words: 'ferret answer',
+            chat: { messageId: 'm1', at: '2026-11-03T10:00:30.000Z', text: 'owner chat words' },
+            at: '2026-11-03T10:01:00.000Z',
+          }),
+        'ferret',
+        { actor: ACTOR, via: 'conversation' },
+      );
+    /** Fails the next write or removal of `name` once, as a disk hiccup or a SIGTERM after the agenda file landed would. */
+    const failOnce = (
+      w: Awaited<ReturnType<typeof world>>,
+      how: 'writeAtomic' | 'remove',
+      matches: (name: string, text?: string) => boolean,
+    ) => {
+      const real = w.files[how].bind(w.files) as (...args: string[]) => Promise<void>;
+      let armed = true;
+      (w.files as unknown as Record<string, unknown>)[how] = async (session: string, name: string, text?: string) => {
+        if (armed && matches(name, text)) {
+          armed = false;
+          throw new Error(`${how} ${name} failed`);
+        }
+        await real(...(text === undefined ? [session, name] : [session, name, text]));
+      };
+    };
+    const outboxChanges = async (w: Awaited<ReturnType<typeof world>>): Promise<string[]> =>
+      (JSON.parse((await w.files.read(SESSION, AGENDA_CHANGE_OUTBOX)) ?? '[]') as { event: { change: string } }[]).map(
+        effect => effect.event.change,
+      );
+
+    for (const failing of ['the intent cannot be removed', 'the change event cannot be copied'] as const) {
+      it(`keeps a split that committed when ${failing} and the previous release then writes: links, versions and the event`, async () => {
+        const w = await world();
+        try {
+          await w.raise();
+          if (failing === 'the intent cannot be removed')
+            failOnce(w, 'remove', name => name === AGENDA_VERSION_PENDING);
+          else failOnce(w, 'writeAtomic', name => name === AGENDA_CHANGE_OUTBOX);
+          await should(splitChild(w)).be.rejected();
+          await olderDaemonStrips(w);
+          w.restart();
+
+          const read = await w.repo.read(SESSION);
+
+          const [parent, child] = read?.entries.map(entry => entry.item) ?? [];
+          should(parent?.splitInto).deepEqual(['A2']);
+          should(child?.splitFrom).equal('A1');
+          should((await w.backing.list(SESSION, 'A1')).map(version => version.change)).deepEqual(['created', 'split']);
+          should((await w.backing.list(SESSION, 'A2')).map(version => version.change)).deepEqual(['created']);
+          should(await outboxChanges(w)).deepEqual(['split']);
+          should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
+          should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).be.undefined();
+          should(w.warnings).be.empty();
+          ok(await w.save({ action: 'edit', actor: ACTOR, id: 'A2', patch: { subject: 'Edited' } }));
+          should((await w.backing.list(SESSION, 'A2')).map(version => version.version)).deepEqual([1, 2]);
+        } finally {
+          await w.close();
+        }
+      });
+
+      it(`keeps a chat log that committed when ${failing} and the previous release then writes: tags, times and the event`, async () => {
+        const w = await world();
+        try {
+          await w.raise();
+          if (failing === 'the intent cannot be removed')
+            failOnce(w, 'remove', name => name === AGENDA_VERSION_PENDING);
+          else failOnce(w, 'writeAtomic', name => name === AGENDA_CHANGE_OUTBOX);
+          await should(logChat(w)).be.rejected();
+          const versions = await w.backing.list(SESSION, 'A1');
+          const thread = await w.backing.conversation(SESSION, 'A1', versions.at(-1)?.version ?? 0);
+          should(thread?.map(word => word.fromChat?.messageId)).containEql('m1');
+          await olderDaemonStrips(w);
+          w.restart();
+
+          const read = await w.repo.read(SESSION);
+
+          should(read?.conversations?.A1).deepEqual(thread);
+          should((await w.backing.list(SESSION, 'A1')).map(version => version.change)).deepEqual(['created', 'logged']);
+          should(await outboxChanges(w)).deepEqual(['logged']);
+          should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
+          should(w.warnings).be.empty();
+        } finally {
+          await w.close();
+        }
+      });
+    }
+
+    it('keeps a change that committed even when the intent was not yet marked committed, finding it in the file the previous release wrote', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        failOnce(
+          w,
+          'writeAtomic',
+          (name, text) => name === AGENDA_VERSION_PENDING && text?.includes('"committed"') === true,
+        );
+        await should(splitChild(w)).be.rejected();
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).containEql('"drafts"');
+        await olderDaemonStrips(w);
+        w.restart();
+
+        const read = await w.repo.read(SESSION);
+
+        const [parent, child] = read?.entries.map(entry => entry.item) ?? [];
+        should(parent?.splitInto).deepEqual(['A2']);
+        should(child?.splitFrom).equal('A1');
+        should((await w.backing.list(SESSION, 'A2')).map(version => version.change)).deepEqual(['created']);
+        should(await outboxChanges(w)).deepEqual(['split']);
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
+        should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).be.undefined();
+        should(w.warnings.filter(message => message.includes('were kept'))).have.length(1);
+        should(w.warnings.filter(message => message.includes('voided'))).be.empty();
+      } finally {
+        await w.close();
+      }
+    });
+
+    it('does not append or cut the history again for an intent whose agenda file already committed', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        const base = (await w.files.read(SESSION, 'agenda.json')) ?? '';
+        const record = {
+          kind: 'owner-history' as const,
+          id: 'A1',
+          entry: { at: AT, kind: 'replied' as const, note: 'committed history' },
+        };
+        const line = `${JSON.stringify(record)}\n`;
+        const result = JSON.stringify({
+          ...JSON.parse(base),
+          archive: { bytes: new TextEncoder().encode(line).length, count: 1 },
+        });
+        const digest = (text: string) => createHash('sha256').update(text).digest('hex');
+        // The state a crash leaves after the agenda file landed and before the history mark was lifted.
+        await w.files.appendSynced(SESSION, AGENDA_ARCHIVE_FILE, new TextEncoder().encode(line));
+        await w.files.writeAtomic(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: 0 }));
+        await w.files.writeAtomic(SESSION, 'agenda.json', result);
+        await w.files.writeAtomic(
+          SESSION,
+          AGENDA_VERSION_PENDING,
+          JSON.stringify({
+            ledger: result,
+            base: digest(base),
+            result: digest(result),
+            archive: { bytes: 0, count: 0 },
+            records: [record],
+            drafts: [],
+          }),
+        );
+        const history = await w.files.read(SESSION, AGENDA_ARCHIVE_FILE);
+        const refuse = async () => {
+          throw new Error('the committed history must not be written again');
+        };
+        w.files.truncate = refuse;
+        w.files.appendSynced = refuse;
+        w.restart();
+
+        await w.repo.read(SESSION);
+
+        should(await w.files.read(SESSION, AGENDA_ARCHIVE_FILE)).equal(history);
+        should(await w.files.read(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`)).be.undefined();
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
+        should(JSON.stringify(await w.repo.readArchive(SESSION))).containEql('committed history');
+      } finally {
+        await w.close();
+      }
+    });
+
     it('upgrades a pre-idempotency SQLite archive without losing its versions', async () => {
       const w = await world();
       try {

@@ -201,7 +201,8 @@ const sameWords = (left: AgendaConversationEntry, right: AgendaConversationEntry
  * what was said since. A seeded word at or before the version is already in it, once the version's thread holds words
  * from its speaker (a version recorded before the item's older words were kept holds none); a later one is added unless it is
  * there (the same chat message, or the same time, speaker and text). The ferret's answer to a question has no time of
- * its own, so it is matched by its text alone and, when new, placed no earlier than the version.
+ * its own, so it is matched by its text alone and, when new, placed no earlier than the version whenever the version's
+ * thread holds any words (the owner's alone included), even if the edit that dated it is gone.
  *
  * Pure and total: nothing the version holds is dropped or changed, and nothing is said twice.
  */
@@ -218,7 +219,7 @@ export function resumedConversation(
     const answer = word.via === 'question-answer';
     const older = Date.parse(word.at) <= after && covered(base, word);
     if (answer ? base.some(entry => entry.via === word.via && sameWords(entry, word)) : older) continue;
-    const placed = answer && older ? { ...word, at: recorded.at } : word;
+    const placed = answer && base.length > 0 && Date.parse(word.at) < after ? { ...word, at: recorded.at } : word;
     if ([...base, ...added].some(entry => entry.at === placed.at && sameWords(entry, placed))) continue;
     added.push(placed);
   }

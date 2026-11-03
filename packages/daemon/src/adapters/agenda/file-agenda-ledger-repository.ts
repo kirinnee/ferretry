@@ -27,6 +27,12 @@ const EntrySchema = z.unknown().transform((value, context) => {
 /** What a file said, as the intent names it: a different text is a different file, whoever wrote it. */
 const digestOf = (text: string): string => createHash('sha256').update(text).digest('hex');
 
+/**
+ * The intent once the agenda file it commits is written: all that is left is the change event and the clean-up. It
+ * carries no drafts, so a later set-aside can never void what already committed.
+ */
+const CommittedSchema = z.strictObject({ committed: z.literal(true), effect: AgendaChangeEffectSchema.optional() });
+
 const PreparedSchema = z.strictObject({
   /** The agenda file this commits, as it will be written: replay writes these bytes as they are. */
   ledger: z.string(),
@@ -70,6 +76,7 @@ import {
   isAgendaSessionId,
   NO_AGENDA_VERSIONS,
   parseAgendaLedger,
+  draftsLanded,
   versionDrafts,
 } from '../../lib/agenda/index.ts';
 import {
@@ -273,13 +280,19 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return Object.keys(recorded).length === 0 ? undefined : recorded;
   }
 
-  /** The digest of the agenda file the reader would read, or `null` when there is none. */
-  private async ledgerDigest(sessionId: string): Promise<string | null> {
+  /** The text of the agenda file the reader would read, or `undefined` when there is none. */
+  private async ledgerText(sessionId: string): Promise<string | undefined> {
     for (const name of [AGENDA_FILES.ledger.current, AGENDA_FILES.ledger.legacy]) {
       const text = await this.files.read(sessionId, name);
-      if (text !== undefined) return digestOf(text);
+      if (text !== undefined) return text;
     }
-    return null;
+    return undefined;
+  }
+
+  /** The digest of the agenda file the reader would read, or `null` when there is none. */
+  private async ledgerDigest(sessionId: string): Promise<string | null> {
+    const text = await this.ledgerText(sessionId);
+    return text === undefined ? null : digestOf(text);
   }
 
   async transact(
@@ -352,14 +365,35 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     if (text === undefined) return;
     if (this.versions === NO_AGENDA_VERSIONS)
       throw new Error('agenda version archive is required to recover this transaction');
-    const prepared = PreparedSchema.parse(JSON.parse(text));
-    const now = await this.ledgerDigest(sessionId);
-    if (now !== prepared.base && now !== prepared.result) {
+    const raw: unknown = JSON.parse(text);
+    const committed = CommittedSchema.safeParse(raw);
+    if (committed.success) {
+      await this.finish(sessionId, committed.data.effect);
+      return;
+    }
+    const prepared = PreparedSchema.parse(raw);
+    const found = await this.ledgerText(sessionId);
+    const now = found === undefined ? null : digestOf(found);
+    if (now === prepared.result) {
+      // The agenda file it commits is already written, and its history records were appended before that: nothing is
+      // appended or written again, so a crash here cannot leave the history shorter than the file's cursor.
+      await this.finish(sessionId, prepared.effect);
+      return;
+    }
+    if (now !== prepared.base) {
       // The agenda file is neither what this was prepared from nor what it commits: another daemon wrote it since
       // (a rollback to one that ignores this file). Replaying would overwrite that daemon's words, and its history
       // appends would be cut back to a cursor behind its own. The intent is kept aside, never replayed.
+      if (draftsLanded(found, prepared.drafts)) {
+        // The hot commit landed and only its clean-up did not: the change is the board's own, and so are its versions.
+        await this.finish(sessionId, prepared.effect);
+        this.runtime.warn(
+          `agenda ${sessionId}: an unfinished change had committed before the agenda file was written by another daemon, so its versions and change event were kept`,
+        );
+        return;
+      }
       const kept = await this.setAside(sessionId, text);
-      // What it recorded was never committed, and the board now belongs to someone else's items: none of it may
+      // What it recorded never committed, and the board now belongs to someone else's items: none of it may
       // become a base for them (a different item can hold the same id, or the same item other words).
       await this.versions.discard?.(sessionId, prepared.drafts);
       await this.files.remove(sessionId, AGENDA_VERSION_PENDING);
@@ -397,7 +431,21 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     effect?: AgendaChangeEffect,
   ): Promise<void> {
     await this.versions.record(sessionId, drafts);
-    await this.commit(sessionId, commit.document, commit.archive, commit.records);
+    // The moment the agenda file lands the intent says so, ahead of the history mark and the event: from there on a
+    // failure leaves a committed intent, which nothing sets aside.
+    await this.commit(sessionId, commit.document, commit.archive, commit.records, () =>
+      this.files.writeAtomic(sessionId, AGENDA_VERSION_PENDING, JSON.stringify({ committed: true, effect })),
+    );
+    await this.retire(sessionId, effect);
+  }
+
+  /** What follows a committed agenda file: its history mark lifted, its change event kept, its intent retired. */
+  private async finish(sessionId: string, effect: AgendaChangeEffect | undefined): Promise<void> {
+    await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
+    await this.retire(sessionId, effect);
+  }
+
+  private async retire(sessionId: string, effect: AgendaChangeEffect | undefined): Promise<void> {
     if (effect !== undefined) await this.changeOutbox?.append(sessionId, effect);
     await this.files.remove(sessionId, AGENDA_VERSION_PENDING);
   }
@@ -502,16 +550,18 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return committed;
   }
 
-  /** The history records first, from where the file said it ended, then the agenda file as given. */
+  /** The history records first, from where the file said it ended, then the agenda file as given, then `landed`. */
   private async commit(
     sessionId: string,
     document: string,
     archive: AgendaArchiveCursor,
     records: readonly AgendaArchiveRecord[],
+    landed?: () => Promise<void>,
   ): Promise<void> {
     try {
       await appendLogRecords(this.files, sessionId, AGENDA_ARCHIVE_FILE, archive, records);
       await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, document);
+      await landed?.();
       // The ledger now says where history ends (or that a version-2 board has none), so no append is pending.
       await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
     } finally {

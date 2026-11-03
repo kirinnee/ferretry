@@ -1,4 +1,5 @@
 import type { AgendaConversationEntry, AgendaId, AgendaVersion, AgendaVersionSummary } from '@ferretry/protocol';
+import { z } from 'zod';
 import { speakerOf } from './item-words.ts';
 import type { AgendaActor, AgendaEntry, AgendaLedger, AgendaMutation } from './state-machine.ts';
 
@@ -106,4 +107,57 @@ export function versionDrafts(
     });
   }
   return drafts;
+}
+
+const FileItemSchema = z.looseObject({
+  id: z.string(),
+  waitingSince: z.string(),
+  subject: z.string().optional(),
+  raisedBy: z.string().optional(),
+  history: z.array(z.looseObject({ at: z.string() })).optional(),
+  revisions: z.array(z.looseObject({ at: z.string() })).optional(),
+  ownerAnswer: z.looseObject({ at: z.string() }).optional(),
+  resolvedAt: z.string().optional(),
+});
+const FileEntrySchema = z.looseObject({ item: FileItemSchema });
+
+/**
+ * WHETHER A CHANGE THAT WAS PREPARED REACHED THE AGENDA FILE `text` (docs/agenda.md § Versions), for a file someone else
+ * has written since: the one place a committed intent and an uncommitted one look alike. Evidence, per draft, is the
+ * same item in the file (its id and `waitingSince`) with the draft's own mark on it. A created item is marked by its
+ * subject; any other change by the draft's `at` among the item's history, revisions, owner answer or closing time, with
+ * the subject or the raiser unchanged. One agenda file write commits every draft of an intent, so one marked draft
+ * means all of them landed, including those that leave no time on the item (a link, a tick).
+ *
+ * Pure and total: a file that cannot be read is no evidence, and an unmarked change counts as not landed.
+ */
+export function draftsLanded(text: string | undefined, drafts: readonly AgendaVersionDraft[]): boolean {
+  if (text === undefined) return false;
+  let entries: unknown[];
+  try {
+    const document = z.looseObject({ entries: z.array(z.unknown()) }).safeParse(JSON.parse(text));
+    if (!document.success) return false;
+    entries = document.data.entries;
+  } catch {
+    return false;
+  }
+  const items = new Map(
+    entries.flatMap(entry => {
+      const parsed = FileEntrySchema.safeParse(entry);
+      return parsed.success ? [[parsed.data.item.id, parsed.data.item] as const] : [];
+    }),
+  );
+  return drafts.some(draft => {
+    const written = draft.entry.item;
+    const found = items.get(written.id);
+    if (found === undefined || found.waitingSince !== written.waitingSince) return false;
+    if (draft.change === 'created') return found.subject === written.subject;
+    if (found.subject !== written.subject && found.raisedBy !== written.raisedBy) return false;
+    return [
+      ...(found.history ?? []).map(entry => entry.at),
+      ...(found.revisions ?? []).map(revision => revision.at),
+      ...(found.ownerAnswer === undefined ? [] : [found.ownerAnswer.at]),
+      ...(found.resolvedAt === undefined ? [] : [found.resolvedAt]),
+    ].includes(draft.at);
+  });
 }
