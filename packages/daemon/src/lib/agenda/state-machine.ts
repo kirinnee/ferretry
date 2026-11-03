@@ -7,6 +7,8 @@ import {
   type AgendaCardRow,
   type AgendaClearableField,
   type AgendaConfirms,
+  type AgendaConversationEntry,
+  AgendaConversationEntrySchema,
   type AgendaCopyPlanRef,
   type AgendaDisposition,
   type AgendaErrorCode,
@@ -52,6 +54,9 @@ import {
   formatTaskRef,
   gateReference,
   MAX_AGENDA_PER_SESSION,
+  MAX_AGENDA_CARDS,
+  MAX_AGENDA_LINKS,
+  MAX_AGENDA_REST_WHY_LENGTH,
   MAX_AGENDA_REPLY_ENVELOPE_LENGTH,
   MAX_AGENDA_REPLY_LENGTH,
   MAX_AGENDA_RESOLUTIONS,
@@ -73,6 +78,19 @@ import {
   type AgendaArchiveRecord,
   AgendaArchiveRecordSchema,
 } from './archive.ts';
+import {
+  interleaved,
+  loggedFromChat,
+  mergedThreads,
+  type RecordedItem,
+  relinked,
+  responseWords,
+  resumedConversation,
+  said,
+  seedConversation,
+  speakerOf,
+  wordsOf,
+} from './item-words.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -130,6 +148,10 @@ export interface AgendaLedger {
   readonly sessionId: string;
   readonly nextId: number;
   readonly entries: readonly AgendaEntry[];
+  /** Full threads, outside the bounded current item, committed atomically with the ledger. Never sent in snapshots. */
+  readonly conversations?: Readonly<Record<string, readonly AgendaConversationEntry[]>>;
+  /** Original legacy entries whose bounded history/revisions had to move to make room for new metadata. */
+  readonly carriedEntries?: Readonly<Record<string, AgendaEntry>>;
   readonly updatedAt: string;
   /**
    * The entries on disk that do not read as an item, exactly as they were read: kept so a write never drops
@@ -145,9 +167,11 @@ export interface AgendaLedger {
 
 /**
  * The ledger shape this daemon writes. 2 (docs/agenda.md § States): an item an owner's reply parked RESTS, saying
- * how (`resting`), and every item names its stage.
+ * how (`resting`), and every item names its stage. 3 (§ The conversation): an item stores what is said on it
+ * (`conversation`), seeded from its history as it is read. Version 4 moves full threads into the ledger-level
+ * conversations map, leaving bounded recent tails in current items and wire snapshots.
  */
-export const AGENDA_LEDGER_VERSION = 2;
+export const AGENDA_LEDGER_VERSION = 4;
 
 /** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
 export interface AgendaCardFields {
@@ -224,6 +248,7 @@ export type AgendaCarried = Pick<
   | 'infoRequests'
   | 'history'
   | 'revisions'
+  | 'conversation'
   | 'urgentAt'
   | 'resting'
   | 'stage'
@@ -239,6 +264,7 @@ const CARRIED_FIELDS = [
   'infoRequests',
   'history',
   'revisions',
+  'conversation',
   'urgentAt',
   'resting',
   'stage',
@@ -354,6 +380,40 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      /** The chat message the words came from, kept on the conversation entry; a message is logged on an item once. */
+      readonly fromChat?: { readonly messageId: string; readonly at: string };
+      readonly at: string;
+    }
+  | {
+      /**
+       * The ferret LOGS the owner's chat message on the item (`fy agenda log`, docs/agenda.md § The conversation): the
+       * daemon copied `chat` verbatim from the session's own messages. The owner's words rest the item, as a reply
+       * does; then the ferret's `words` either answer them (`reply`: the item returns to the owner, to its old place)
+       * or say what it is doing (`rest`: the item rests as working).
+       */
+      readonly action: 'log';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly mode: 'reply' | 'rest';
+      readonly words: string;
+      readonly chat: { readonly messageId: string; readonly at: string; readonly text: string };
+      readonly at: string;
+    }
+  | {
+      /** `from` is merged into `id` (`fy agenda merge`): one conversation, every card and link kept, `from` closed. */
+      readonly action: 'merge';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly from: AgendaId;
+      readonly at: string;
+    }
+  | {
+      /** A new item is split off `id` (`fy agenda split`), linked both ways; `moveCards` go along with it. */
+      readonly action: 'split';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly request: RaiseAgendaRequest;
+      readonly moveCards?: readonly TaskRef[];
       readonly at: string;
     }
   | {
@@ -506,6 +566,9 @@ export type AgendaChange =
   | 'rested'
   | 'nudged'
   | 'answered'
+  | 'logged'
+  | 'merged'
+  | 'split'
   | 'resolved'
   | 'dismissed'
   | 'unchanged';
@@ -620,7 +683,12 @@ export function applyAgendaCommandToSession(
  * machine. Keeping this validation in the pure layer prevents corrupt storage
  * from being silently replaced by a fresh board.
  */
-export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedger | null {
+export function parseAgendaLedger(
+  value: unknown,
+  sessionId: string,
+  archived: readonly AgendaArchiveRecord[] = [],
+  recorded?: Readonly<Record<string, RecordedItem>>,
+): AgendaLedger | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   if (
@@ -632,6 +700,18 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     !Array.isArray(raw.entries)
   ) {
     return null;
+  }
+  const threads = z.record(AgendaIdSchema, z.array(AgendaConversationEntrySchema)).safeParse(raw.conversations ?? {});
+  if (!threads.success) return null;
+  const carriedEntries: Record<string, AgendaEntry> = {};
+  if (raw.carriedEntries !== undefined) {
+    if (raw.carriedEntries === null || typeof raw.carriedEntries !== 'object' || Array.isArray(raw.carriedEntries))
+      return null;
+    for (const [id, value] of Object.entries(raw.carriedEntries)) {
+      const entry = parseAgendaEntry(value, false, []);
+      if (entry === null || entry.item.id !== id) return null;
+      carriedEntries[id] = entry;
+    }
   }
   const entries: AgendaEntry[] = [];
   const archive = ArchivedOwnerHistorySchema.safeParse(raw.ownerHistory ?? []);
@@ -685,12 +765,14 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     sessionId,
     nextId: raw.nextId as number,
     entries,
+    ...(Object.keys(threads.data).length === 0 ? {} : { conversations: threads.data }),
+    ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
     updatedAt: raw.updatedAt,
     ...(cursor.data === undefined ? {} : { archive: cursor.data }),
     ...(archivePending.length === 0 ? {} : { archivePending }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
   });
-  return toChannel(parked, legacy);
+  return toChannel(parked, legacy, archived, recorded);
 }
 
 /**
@@ -703,18 +785,115 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
  *   path parked without saying how; it rests the same way, unmarked.
  * - An item that names no stage gets the one its kind says (`done` once it is closed), as the first of its stages.
  * - The ledger is marked {@link AGENDA_LEDGER_VERSION}.
+ * - An item with no stored conversation gets one, seeded from the words its history, answers and closing note kept
+ *   ({@link seedConversation}); nothing is dropped, and an item that has one is left as it is. An item with a
+ *   `recorded` version (a board an older daemon wrote after this one kept it) starts from that version's whole thread
+ *   and its merge and split links, and adds only the words said since ({@link resumedConversation}).
+ * - What the fit to the transport bound shed from an item's history of the owner's words goes to `archivePending`.
  *
  * Pure, total and idempotent: a ledger already in this shape comes back as it came, the same object.
  */
-export function toChannel(ledger: AgendaLedger, legacy: boolean): AgendaLedger {
+export function toChannel(
+  ledger: AgendaLedger,
+  legacy: boolean,
+  archived: readonly AgendaArchiveRecord[] = [],
+  recorded?: Readonly<Record<string, RecordedItem>>,
+): AgendaLedger {
   let moved = ledger.version !== AGENDA_LEDGER_VERSION;
+  const conversations = { ...(ledger.conversations ?? {}) };
+  const carriedEntries = { ...(ledger.carriedEntries ?? {}) };
+  const shed: AgendaArchiveRecord[] = [];
   const entries = ledger.entries.map(entry => {
-    const item = channelItem(entry.item, legacy);
+    const history = [
+      ...[...archived, ...(ledger.archivePending ?? [])]
+        .filter(
+          (record): record is Extract<AgendaArchiveRecord, { kind: 'owner-history' }> =>
+            record.kind === 'owner-history' && record.id === entry.item.id,
+        )
+        .map(record => record.entry),
+      ...(entry.item.history ?? []),
+    ];
+    const stored = conversations[entry.item.id] ?? entry.item.conversation;
+    const version = recorded?.[entry.item.id];
+    const seed = (): AgendaConversationEntry[] => {
+      const seeded = seedConversation({ ...entry.item, history });
+      return version === undefined ? seeded : resumedConversation(version, seeded);
+    };
+    const previous = stored ?? seed();
+    const full = interleaved(previous, undefined);
+    if (full.some((word, index) => word !== previous[index])) moved = true;
+    conversations[entry.item.id] = full;
+    const normalized = channelItem(version === undefined ? entry.item : relinked(entry.item, version), legacy);
+    const item = fitAgendaItem(boundedConversation(normalized, full));
+    (entry.lifecycle === 'active' ? AgendaItemSchema : ResolvedAgendaItemSchema).parse(item);
+    shed.push(...shedOwnerHistory(entry.item, item));
+    if (
+      item.history !== normalized.history ||
+      item.revisions !== normalized.revisions ||
+      (entry.item.stages !== undefined && normalized.stages !== entry.item.stages)
+    ) {
+      carriedEntries[entry.item.id] ??= entry;
+    }
     if (item === entry.item) return entry;
     moved = true;
     return { ...entry, item } as AgendaEntry;
   });
-  return moved ? { ...ledger, entries, version: AGENDA_LEDGER_VERSION } : ledger;
+  return moved
+    ? {
+        ...ledger,
+        entries,
+        ...(Object.keys(conversations).length === 0 ? {} : { conversations }),
+        ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
+        ...(shed.length === 0 ? {} : { archivePending: [...(ledger.archivePending ?? []), ...shed] }),
+        version: AGENDA_LEDGER_VERSION,
+      }
+    : ledger;
+}
+
+/** The owner's words in history entries that `fitted` shed from `before` (they are kept in the sidecar, as the fit does). */
+function shedOwnerHistory(before: AgendaItem | ResolvedAgendaItem, after: AgendaItem | ResolvedAgendaItem) {
+  const kept = (after.history ?? []).map(record => JSON.stringify(record));
+  const shed: AgendaArchiveRecord[] = [];
+  for (const record of before.history ?? []) {
+    const index = kept.indexOf(JSON.stringify(record));
+    if (index >= 0) kept.splice(index, 1);
+    else if (['replied', 'needs-info', 'discuss'].includes(record.kind))
+      shed.push({ kind: 'owner-history', id: before.id, entry: record });
+  }
+  return shed;
+}
+
+/** A bounded recent tail; complete entries only. The durable thread is held separately. */
+function boundedConversation<Item extends AgendaItem | ResolvedAgendaItem>(
+  item: Item,
+  full: readonly AgendaConversationEntry[],
+): Item {
+  const tail: AgendaConversationEntry[] = [];
+  let size = 0;
+  for (const entry of [...full].reverse()) {
+    size += JSON.stringify(entry).length;
+    if (size > 8192) break;
+    tail.unshift(entry);
+  }
+  const { conversation: _conversation, conversationCount: _count, conversationLastAt: _last, ...rest } = item;
+  const next = {
+    ...rest,
+    ...(tail.length === 0 ? {} : { conversation: tail }),
+    conversationCount: full.length,
+    ...(full.at(-1) === undefined ? {} : { conversationLastAt: full.at(-1)?.at }),
+  } as Item;
+  return JSON.stringify(next) === JSON.stringify(item) ? item : next;
+}
+
+/** Internal reopen boundary: validate the current item without putting the full thread on the wire. */
+function parseTransitionItem(item: AgendaItem) {
+  const parsed = AgendaItemSchema.safeParse(fitAgendaItem(boundedConversation(item, item.conversation ?? [])));
+  return parsed.success
+    ? {
+        ...parsed,
+        data: { ...parsed.data, ...(item.conversation === undefined ? {} : { conversation: item.conversation }) },
+      }
+    : parsed;
 }
 
 /** One item in the channel's shape: resting as its park says, and naming its stage; the same item when it already is. */
@@ -883,15 +1062,28 @@ function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
  */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
   command = restoredRetry(ledger, command);
+  // Accepted chat has its own send bound: reply keeps that full source outside the bounded legacy history note.
   if (
     ['answer', 'resolve', 'dismiss', 'needs-info', 'discuss', 'reply'].includes(command.action) &&
+    !(command.action === 'reply' && command.fromChat !== undefined) &&
     agendaReplyEnvelopeLength(command as { response?: AgendaResponse; note?: string | null }) >
       MAX_AGENDA_REPLY_ENVELOPE_LENGTH
   ) {
     return failure('invalid', `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`);
   }
-  const transitioned = transition(ledger, command);
-  if (!transitioned.ok || !transitioned.changed) return transitioned;
+  // Transitions see the full thread; only the fitted, validated item can leave this boundary.
+  const expanded: AgendaLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry => {
+      const conversation = ledger.conversations?.[entry.item.id];
+      return conversation === undefined || conversation.length === 0
+        ? entry
+        : ({ ...entry, item: { ...entry.item, conversation: [...conversation] } } as AgendaEntry);
+    }),
+  };
+  const transitioned = transition(expanded, command);
+  if (!transitioned.ok) return transitioned;
+  if (!transitioned.changed) return unchanged(ledger);
   const mutation = fitted(ledger, transitioned);
   const problem = unreadableWrite(ledger, mutation.ledger);
   return problem === undefined ? mutation : failure('invalid', problem);
@@ -932,6 +1124,7 @@ function fitted(
   mutation: Extract<AgendaMutation, { ok: true }>,
 ): Extract<AgendaMutation, { ok: true }> {
   const kept = new Set(before.entries);
+  const conversations = { ...(before.conversations ?? {}) };
   const swaps = new Map<object, object>();
   const archived = [...(mutation.ledger.archivePending ?? [])];
   const remaining = new Set(mutation.ledger.entries.map(entry => entry.item.id));
@@ -950,7 +1143,9 @@ function fitted(
   }
   const entries = mutation.ledger.entries.map(entry => {
     if (kept.has(entry)) return entry;
-    const item = fitAgendaItem(entry.item);
+    const full = entry.item.conversation ?? conversations[entry.item.id] ?? [];
+    conversations[entry.item.id] = full;
+    const item = fitAgendaItem(boundedConversation(entry.item, full));
     // Include the old history too: some transitions fit an intermediate item before returning it.
     const previous = before.entries.find(old => old.item.id === entry.item.id)?.item.history ?? [];
     const candidates = [...(entry.item.history ?? [])];
@@ -973,7 +1168,12 @@ function fitted(
     return { ...entry, item } as typeof entry;
   });
   if (swaps.size === 0 && archived.length === (mutation.ledger.archivePending?.length ?? 0)) return mutation;
-  const ledger = { ...mutation.ledger, entries, ...(archived.length === 0 ? {} : { archivePending: archived }) };
+  const ledger = {
+    ...mutation.ledger,
+    entries,
+    conversations,
+    ...(archived.length === 0 ? {} : { archivePending: archived }),
+  };
   const item = mutation.item === undefined ? undefined : (swaps.get(mutation.item) as AgendaItem | undefined);
   const addressed =
     mutation.addressed === undefined ? undefined : (swaps.get(mutation.addressed) as ResolvedAgendaItem | undefined);
@@ -988,6 +1188,8 @@ function fitted(
 
 /** Why one of the entries `after` made or changed would not read back, or `undefined` when every one does. */
 function unreadableWrite(before: AgendaLedger, after: AgendaLedger): string | undefined {
+  const threads = z.record(AgendaIdSchema, z.array(AgendaConversationEntrySchema)).safeParse(after.conversations ?? {});
+  if (!threads.success) return 'conversation words would not read back';
   const kept = new Set(before.entries);
   for (const entry of after.entries) {
     if (kept.has(entry)) continue;
@@ -1029,6 +1231,12 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
       return discuss(ledger, command);
     case 'reply':
       return reply(ledger, command);
+    case 'log':
+      return log(ledger, command);
+    case 'merge':
+      return merge(ledger, command);
+    case 'split':
+      return split(ledger, command);
     case 'surface':
       return surface(ledger, command);
     case 'rest':
@@ -1080,6 +1288,9 @@ type ProgressCommand = Extract<AgendaCommand, { action: 'progress' }>;
 type NeedsInfoCommand = Extract<AgendaCommand, { action: 'needs-info' }>;
 type DiscussCommand = Extract<AgendaCommand, { action: 'discuss' }>;
 type ReplyCommand = Extract<AgendaCommand, { action: 'reply' }>;
+type LogCommand = Extract<AgendaCommand, { action: 'log' }>;
+type MergeCommand = Extract<AgendaCommand, { action: 'merge' }>;
+type SplitCommand = Extract<AgendaCommand, { action: 'split' }>;
 type SurfaceCommand = Extract<AgendaCommand, { action: 'surface' }>;
 type RestCommand = Extract<AgendaCommand, { action: 'rest' }>;
 type NudgingCommand = Extract<AgendaCommand, { action: 'nudging' }>;
@@ -1499,6 +1710,7 @@ function restAnswered(
       ...(note === undefined ? {} : { note }),
       response: command.response,
     }),
+    ...said(open, ...responseWords(command.response, note).map(text => wordsOf(command.at, 'owner', 'answer', text))),
   };
   return replaceItem(ledger, rested, command.at, 'answered');
 }
@@ -1520,7 +1732,7 @@ function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): Age
     : addressed(ledger, target, command.actor, command.note ?? null, command.at, 'done', 'resolved');
 }
 
-function parseAgendaEntry(value: unknown, legacy: boolean, pending: AgendaArchiveRecord[]): AgendaEntry | null {
+export function parseAgendaEntry(value: unknown, legacy: boolean, pending: AgendaArchiveRecord[]): AgendaEntry | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const origin = parseAgendaActor(raw.origin);
@@ -1627,6 +1839,12 @@ function addressed(
       ...open,
       ...staged(open, 'done', at),
       ...(entry === undefined ? {} : { history: withHistory(open.history, entry) }),
+      ...said(
+        open,
+        ...responseWords(response, note).map(text =>
+          wordsOf(at, speakerOf(actor), change === 'answered' ? 'answer' : 'close', text),
+        ),
+      ),
       resolvedAt: at,
       resolutionNote: note,
       disposition,
@@ -2035,7 +2253,9 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   const stageFields = stage === undefined || stage === agendaStage(item) ? {} : staged(item, stage, command.at);
   // The ferret's edit answers its turn: the item goes back to the owner, whether or not the words changed.
   const handsBack = (item.waitingOn !== undefined && command.actor.kind === 'agent') || replaces;
-  if (changed.length === 0 && !handsBack && Object.keys(stageFields).length === 0) return unchanged(ledger);
+  const answering = patch.questionAnswer !== undefined && !clears.includes('questionAnswer');
+  if (changed.length === 0 && !handsBack && !answering && Object.keys(stageFields).length === 0)
+    return unchanged(ledger);
   const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = item;
   const revision: AgendaRevision = {
     at: command.at,
@@ -2057,6 +2277,10 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
       changed.map(field => [field, clears.some(cleared => cleared === field) ? undefined : patch[field]]),
     ),
     ...(changed.length === 0 ? {} : { revisions: [...(item.revisions ?? []), revision].slice(-MAX_AGENDA_REVISIONS) }),
+    ...said(
+      item,
+      answering ? wordsOf(command.at, speakerOf(command.actor), 'question-answer', patch.questionAnswer) : undefined,
+    ),
     ...stageFields,
     // A new ask: asked again, fresh, under the next version; the owner's answer to the old one is history.
     // The answer that failed to reach the ferret answered the OLD ask: its Retry goes with it.
@@ -2096,6 +2320,7 @@ function replaceItem(
     | 'rested'
     | 'nudged'
     | 'answered'
+    | 'logged'
   >,
 ): AgendaMutation {
   const tidy = tidied(item);
@@ -2174,6 +2399,7 @@ function needsInfo(ledger: AgendaLedger, command: NeedsInfoCommand): AgendaMutat
     resting: { sub: 'waiting-on-ferret', at: command.at },
     infoRequests: (target.item.infoRequests ?? 0) + 1,
     history: withHistory(target.item.history, { at: command.at, kind: 'needs-info', ...(note === '' ? {} : { note }) }),
+    ...said(current, wordsOf(command.at, 'owner', 'needs-info', note)),
   };
   return replaceItem(ledger, item, command.at, 'needs-info');
 }
@@ -2204,6 +2430,7 @@ function discuss(ledger: AgendaLedger, command: DiscussCommand): AgendaMutation 
     resting: { sub: 'waiting-on-ferret', at: command.at },
     infoRequests: (target.item.infoRequests ?? 0) + 1,
     history: withHistory(target.item.history, { at: command.at, kind: 'discuss', ...(note === '' ? {} : { note }) }),
+    ...said(current, wordsOf(command.at, 'owner', 'discuss', note)),
   };
   return replaceItem(ledger, item, command.at, 'discussing');
 }
@@ -2228,18 +2455,40 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
   if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
   // A gate item is never parked by a chat message: nobody but the owner's answer could bring it back.
   if (isGateAgenda(target)) return unchanged(ledger);
+  if (command.fromChat !== undefined && loggedFromChat(target.item, command.fromChat.messageId)) {
+    return unchanged(ledger);
+  }
   const words = command.note?.trim() ?? '';
   const note = words === '' ? null : words.slice(0, MAX_AGENDA_REPLY_LENGTH);
-  // RESTING, not closed: the item leaves the owner's queue (and any discussion) and waits on the ferret, whose answer
-  // brings it back to its place and whose `done` closes it. A reply to a snoozed or working item is a reply too.
-  const { waitingOn: _w, askedAt: _a, waitingFor: _f, parked: _p, resting: _r, ...open } = target.item;
-  const item: AgendaItem = {
+  return restOnOwnerWords(
+    ledger,
+    target.item,
+    command.at,
+    note,
+    wordsOf(command.fromChat?.at ?? command.at, 'owner', 'reply', command.note, command.fromChat),
+  );
+}
+
+/**
+ * RESTING, not closed: the item leaves the owner's queue (and any discussion) and waits on the ferret, whose answer
+ * brings it back to its place and whose `done` closes it. A reply to a snoozed or working item is a reply too.
+ */
+function restOnOwnerWords(
+  ledger: AgendaLedger,
+  item: AgendaItem,
+  at: string,
+  note: string | null,
+  entry: AgendaConversationEntry | undefined,
+): AgendaMutation {
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, parked: _p, resting: _r, ...open } = item;
+  const rested: AgendaItem = {
     ...open,
-    parked: { reason: 'replied', at: command.at },
-    resting: { sub: 'waiting-on-ferret', at: command.at },
-    history: withHistory(open.history, { at: command.at, kind: 'replied', ...(note === null ? {} : { note }) }),
+    parked: { reason: 'replied', at },
+    resting: { sub: 'waiting-on-ferret', at },
+    history: withHistory(open.history, { at, kind: 'replied', ...(note === null ? {} : { note }) }),
+    ...said(open, entry),
   };
-  return replaceItem(ledger, item, command.at, 'replied');
+  return replaceItem(ledger, rested, at, 'replied');
 }
 
 /**
@@ -2277,6 +2526,245 @@ function backFromParked(
   // A woken snooze and a new ask are fresh; the ferret's answer to the owner's reply goes back to its old place.
   const fresh = parked.reason === 'snoozed' || place === 'fresh';
   return { ...rest, ...(fresh ? { waitingSince: at } : {}), ...(parked.reason === 'snoozed' ? { urgentAt: at } : {}) };
+}
+
+/**
+ * The ferret LOGS the owner's chat message on an item it speaks for (docs/agenda.md § The conversation). The owner's
+ * words, copied verbatim by the daemon, are entered with their chat tag and rest the item as a chat reply does; then
+ * the ferret's `words` follow: `reply` answers them — the item is back with the owner, to its old place — and `rest`
+ * says what it is doing, so the item rests as working. One message is logged on an item once. Nothing is written
+ * unless both steps are.
+ */
+function log(ledger: AgendaLedger, command: LogCommand): AgendaMutation {
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (command.actor.kind !== 'agent' || !canAddressAgenda(command.actor, target)) {
+    return failure('forbidden', 'only the ferret that raised an item (or its lead) logs the owner\u2019s words on it');
+  }
+  if (target.item.notice === true) return failure('invalid', 'a notice is read, not talked through');
+  if (isGateAgenda(target)) return failure('forbidden', `${command.id} is a card's gate: only the owner answers it`);
+  if (loggedFromChat(target.item, command.chat.messageId)) {
+    return failure(
+      'invalid',
+      `message ${command.chat.messageId} is already on ${command.id}\u2019s conversation: its words are kept; answer them with an edit (--back) or take the item on with rest`,
+    );
+  }
+  if (command.chat.text.trim() === '') return failure('invalid', 'the owner message has no words');
+  const words = command.words.trim();
+  if (words === '') return failure('invalid', 'say what you answer or what you are doing');
+  if (command.mode === 'rest' && words.length > MAX_AGENDA_REST_WHY_LENGTH) {
+    return failure(
+      'too-long',
+      `what you are doing is held to ${MAX_AGENDA_REST_WHY_LENGTH} characters: say it shorter`,
+    );
+  }
+  const fromChat = { messageId: command.chat.messageId, at: command.chat.at };
+  const rested = restOnOwnerWords(
+    ledger,
+    target.item,
+    command.at,
+    command.chat.text.slice(0, MAX_AGENDA_REPLY_LENGTH),
+    wordsOf(command.chat.at, 'owner', 'chat-log', command.chat.text, fromChat),
+  );
+  if (!rested.ok) return rested;
+  const next =
+    command.mode === 'rest'
+      ? rest(rested.ledger, { action: 'rest', actor: command.actor, id: command.id, why: words, at: command.at })
+      : edit(rested.ledger, {
+          action: 'edit',
+          actor: command.actor,
+          id: command.id,
+          patch: { questionAnswer: words },
+          at: command.at,
+        });
+  return next.ok ? { ...next, change: 'logged' } : next;
+}
+
+/** Without `machineId` a ref means "on this machine", which this layer cannot name, so a bare ref matches any machine's id. */
+const sameCard = (left: TaskRef, right: TaskRef): boolean =>
+  left.id === right.id &&
+  (left.machineId === undefined || right.machineId === undefined || left.machineId === right.machineId);
+
+/** `items` without a repeat, by `key`; the first of each kept, in order. */
+function distinctBy<Item>(items: readonly Item[], key: (item: Item) => string): Item[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const each = key(item);
+    if (seen.has(each)) return false;
+    seen.add(each);
+    return true;
+  });
+}
+
+/** A thread the owner and a ferret talk through: not a gate, a notice, or a card the daemon acts on. */
+function plainThread(item: AgendaItem): boolean {
+  return (
+    !isGateItem(item) &&
+    item.notice !== true &&
+    item.gateAttached === undefined &&
+    item.confirms === undefined &&
+    item.kind !== 'input' &&
+    item.input === undefined &&
+    item.taskPlan === undefined &&
+    item.copyPlan === undefined &&
+    item.signInRuleSuggestion === undefined &&
+    item.twoFactorSeed === undefined &&
+    item.phoneApproval === undefined
+  );
+}
+
+/**
+ * `from` is MERGED INTO `id` (docs/agenda.md § Merge and split): the two are one thread. Their conversations are one,
+ * interleaved by time; every card, related card and link of both is kept, and nothing is trimmed to fit — a merge that
+ * would pass a bound is refused. `id` keeps its state and its ask. `from` closes as "merged into !<id>", with both
+ * pointing at the other (`mergedFrom`, `mergedInto`) and its versions kept. The owner may merge, and a ferret over
+ * its own board (or a lead over a sub-ferret's); never a gate, a notice or a card the daemon acts on, an item with
+ * itself, or into a closed item.
+ */
+function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
+  if (command.id === command.from) return failure('invalid', `${command.id} cannot be merged into itself`);
+  if (command.actor.kind === 'daemon') return failure('forbidden', 'only the owner or a ferret merges items');
+  const active = ledger.entries.filter(isActiveAgenda);
+  const into = active.find(entry => entry.item.id === command.id);
+  const from = active.find(entry => entry.item.id === command.from);
+  const closedOrMissing = (id: AgendaId): AgendaMutation =>
+    ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === id)
+      ? failure('invalid', `${id} is already done: merge into, and from, open items`)
+      : failure('not-found', `no unresolved agenda item ${id} in this session`);
+  if (into === undefined) return closedOrMissing(command.id);
+  if (from === undefined) return closedOrMissing(command.from);
+  if (!canAddressAgenda(command.actor, into) || !canAddressAgenda(command.actor, from)) {
+    return failure(
+      'forbidden',
+      'a ferret merges only the items it raised (or a sub-ferret\u2019s); the owner merges any',
+    );
+  }
+  for (const entry of [into, from]) {
+    if (!plainThread(entry.item)) {
+      return failure('invalid', `${entry.item.id} is a gate, a notice or a card the daemon acts on: it is not merged`);
+    }
+  }
+  const survivor = into.item;
+  const absorbed = from.item;
+  const cards = distinctBy([...(survivor.cards ?? []), ...(absorbed.cards ?? [])], row => formatTaskRef(row.task));
+  const links = distinctBy([...(survivor.links ?? []), ...(absorbed.links ?? [])], link => sortedJson(link));
+  const adopts = survivor.task === undefined || survivor.task === null ? absorbed.task : undefined;
+  const task = adopts ?? survivor.task;
+  const related = distinctBy(
+    [...(survivor.relatedTasks ?? []), ...(absorbed.task ? [absorbed.task] : []), ...(absorbed.relatedTasks ?? [])],
+    formatTaskRef,
+  ).filter(ref => task === undefined || task === null || !sameCard(ref, task));
+  if (cards.length > MAX_AGENDA_CARDS || related.length > MAX_AGENDA_CARDS || links.length > MAX_AGENDA_LINKS) {
+    return failure(
+      'full',
+      `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_CARDS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
+    );
+  }
+  const conversation = mergedThreads(survivor.conversation, absorbed.conversation);
+  const mergedFrom = distinctBy(
+    [...(survivor.mergedFrom ?? []), absorbed.id, ...(absorbed.mergedFrom ?? [])],
+    id => id,
+  );
+  const { cards: _cards, links: _links, task: _task, relatedTasks: _related, ...base } = survivor;
+  const merged: AgendaItem = {
+    ...base,
+    ...(cards.length === 0 ? {} : { cards }),
+    ...(links.length === 0 ? {} : { links }),
+    ...(task === undefined ? {} : { task }),
+    ...(related.length === 0 ? {} : { relatedTasks: related }),
+    ...(conversation.length === 0 ? {} : { conversation }),
+    mergedFrom,
+  };
+  const kept: AgendaLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry => (entry === into ? { ...into, item: tidied(merged) } : entry)),
+  };
+  const closed = addressed(
+    kept,
+    from,
+    command.actor,
+    `merged into !${command.id}`,
+    command.at,
+    'dismissed',
+    'dismissed',
+  );
+  if (!closed.ok || closed.addressed === undefined) return closed;
+  const absorbedItem: ResolvedAgendaItem = { ...closed.addressed, mergedInto: command.id };
+  const next: AgendaLedger = {
+    ...closed.ledger,
+    entries: closed.ledger.entries.map(entry =>
+      entry.lifecycle === 'addressed' && entry.item.id === absorbedItem.id ? { ...entry, item: absorbedItem } : entry,
+    ),
+  };
+  return success(next, true, 'merged', tidied(merged), absorbedItem);
+}
+
+/**
+ * A new item is SPLIT OFF `id` (docs/agenda.md § Merge and split): part of it stopped passing the one-agenda test. The
+ * new item is raised as a fresh item of the same ferret (its own ask, its own place in the owner's queue), linked both
+ * ways (`splitFrom`, `splitInto`); the cards named in `moveCards` go along with it. `id` keeps its state, ask and
+ * conversation. Refused for a gate, a notice or a card the daemon acts on, a card `id` does not hold, and a request an
+ * open item of the ferret already makes.
+ */
+function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (command.actor.kind === 'daemon' || !canAddressAgenda(command.actor, target)) {
+    return failure(
+      'forbidden',
+      'a ferret splits only the items it raised (or a sub-ferret\u2019s); the owner splits any',
+    );
+  }
+  if (!plainThread(target.item)) {
+    return failure('invalid', `${command.id} is a gate, a notice or a card the daemon acts on: it is not split`);
+  }
+  const original = target.item;
+  const moving = command.moveCards ?? [];
+  const holds = (ref: TaskRef): boolean =>
+    (original.task !== undefined && original.task !== null && sameCard(original.task, ref)) ||
+    (original.cards ?? []).some(row => sameCard(row.task, ref)) ||
+    (original.relatedTasks ?? []).some(card => sameCard(card, ref));
+  const missing = moving.find(ref => !holds(ref));
+  if (missing !== undefined) return failure('invalid', `${formatTaskRef(missing)} is not a card of ${command.id}`);
+  const made = raise(ledger, { action: 'raise', actor: target.origin, request: command.request, at: command.at });
+  if (!made.ok) return made;
+  if (made.change !== 'created' || made.item === undefined) {
+    return failure('invalid', 'an open item of this ferret already says the same: nothing was split off');
+  }
+  const moves = (ref: TaskRef): boolean => moving.some(card => sameCard(card, ref));
+  const movedRows = (original.cards ?? []).filter(row => moves(row.task));
+  const keptRows = (original.cards ?? []).filter(row => !moves(row.task));
+  const movedRelated = (original.relatedTasks ?? []).filter(moves);
+  const keptRelated = (original.relatedTasks ?? []).filter(ref => !moves(ref));
+  const movesTask = original.task !== undefined && original.task !== null && moves(original.task);
+  const { cards: _cards, task: _task, relatedTasks: _related, ...base } = original;
+  const parent: AgendaItem = {
+    ...base,
+    ...(keptRows.length === 0 ? {} : { cards: keptRows }),
+    ...(original.task === undefined || movesTask ? {} : { task: original.task }),
+    ...(keptRelated.length === 0 ? {} : { relatedTasks: keptRelated }),
+    splitInto: [...(original.splitInto ?? []), made.item.id],
+  };
+  const child: AgendaItem = {
+    ...made.item,
+    ...(movedRows.length === 0 ? {} : { cards: movedRows }),
+    ...(movesTask && original.task ? { task: original.task } : {}),
+    ...(movedRelated.length === 0 ? {} : { relatedTasks: movedRelated }),
+    splitFrom: original.id,
+  };
+  const next: AgendaLedger = {
+    ...made.ledger,
+    entries: made.ledger.entries.map(entry =>
+      entry.lifecycle !== 'active'
+        ? entry
+        : entry.item.id === original.id
+          ? { ...entry, item: parent }
+          : entry.item.id === child.id
+            ? { ...entry, item: child }
+            : entry,
+    ),
+  };
+  return success(next, true, 'split', child);
 }
 
 /** The owner puts an open item away until a time still ahead: off their queue, back as fresh when it wakes. */
@@ -2375,6 +2863,7 @@ function rest(ledger: AgendaLedger, command: RestCommand): AgendaMutation {
     parked: { reason: 'replied', at: command.at },
     resting: { sub: 'working', at: command.at, why },
     history: withHistory(open.history, { at: command.at, kind: 'updated', note: `working: ${why}` }),
+    ...said(open, wordsOf(command.at, 'ferret', 'rest', why)),
   };
   return replaceItem(ledger, item, command.at, 'rested');
 }
@@ -2483,7 +2972,13 @@ function reopenReplied(
     resolvedByName: _resolvedByName,
     ...rest
   } = closed.item;
-  const parsed = AgendaItemSchema.safeParse(fitAgendaItem({ ...rest, history: withHistory(rest.history, entry) }));
+  const parsed = parseTransitionItem(
+    fitAgendaItem({
+      ...rest,
+      history: withHistory(rest.history, entry),
+      ...said(rest, entry.kind === 'surfaced' ? wordsOf(at, speakerOf(actor), 'surface', entry.note) : undefined),
+    }),
+  );
   if (!parsed.success) return unchanged(ledger);
   const next: AgendaLedger = {
     ...ledger,
@@ -2543,6 +3038,7 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
     const item: AgendaItem = {
       ...(back.waitingFor === 'discussion' ? open : back),
       history: withHistory(back.history, { at: command.at, kind: 'surfaced', ...(why === '' ? {} : { note: why }) }),
+      ...said(back, wordsOf(command.at, speakerOf(command.actor), 'surface', why)),
     };
     return replaceItem(ledger, item, command.at, 'unparked');
   }
@@ -2559,6 +3055,7 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
       kind: 'surfaced',
       ...(why === '' ? {} : { note: why }),
     }),
+    ...said(open, wordsOf(command.at, speakerOf(command.actor), 'surface', why)),
   };
   return replaceItem(ledger, item, command.at, 'surfaced');
 }
@@ -2653,7 +3150,7 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
           ...(note === undefined ? {} : { note }),
           ...(response === undefined ? {} : { response }),
         };
-  const parsed = AgendaItemSchema.safeParse(
+  const parsed = parseTransitionItem(
     fitAgendaItem({ ...rest, undelivered: { at: command.at, reply, reason: command.reason } }),
   );
   if (!parsed.success) return unchanged(ledger);

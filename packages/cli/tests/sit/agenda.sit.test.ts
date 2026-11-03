@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   AGENDA_SCHEMA_VERSION,
+  DAEMON_FEATURES,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaItem,
@@ -14,6 +15,7 @@ import {
   ResolvedAgendaItemSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { type AgendaLedger, applyAgendaCommandToSession } from '../../../daemon/src/lib/agenda/state-machine.ts';
 import pkg from '../../package.json' with { type: 'json' };
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';
 
@@ -52,6 +54,7 @@ class FakeAgendaDaemon {
   readonly #items: AgendaItem[] = [];
   readonly #resolved: ResolvedAgendaItem[] = [];
   #ordinal = 0;
+  #conversations: AgendaLedger['conversations'];
   readonly #server: ReturnType<typeof Bun.serve>;
 
   constructor() {
@@ -81,6 +84,30 @@ class FakeAgendaDaemon {
   async #handle(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     const session = `/v1/sessions/${encodeURIComponent(SESSION)}`;
+    if (path === '/v1/health')
+      return Response.json({
+        ok: true,
+        bootstrapping: false,
+        bootstrapState: 'complete',
+        bootstrapDegraded: false,
+        version: 'sit',
+        pid: 1,
+        sessions: 1,
+        running: 0,
+        monitors: 0,
+        unmonitoredRunning: 0,
+        wardenLastSweepSeconds: null,
+        wardenTimerArmed: false,
+        eventLoopLagMs: 0,
+        lastSelfCheckAt: null,
+        wedgeCount: 0,
+        scratchGcEnabled: false,
+        scratchReclaimedSessions: 0,
+        scratchReclaimedBytes: 0,
+        bootstrapErrors: 0,
+        features: [DAEMON_FEATURES.agendaConversation],
+        time: EPOCH,
+      });
     // A daemon of this build answers the agenda spelling and the older attention one alike
     // (docs/agenda.md § Compatibility), and refuses anything else the way the real one does.
     if (path !== `${session}/agenda` && path !== `${session}/attention`) {
@@ -97,7 +124,11 @@ class FakeAgendaDaemon {
       } catch {
         return Response.json({ error: 'invalid body' }, { status: 400 });
       }
-      this.#apply(AgendaActionRequestSchema.parse(body));
+      try {
+        this.#apply(AgendaActionRequestSchema.parse(body));
+      } catch (error) {
+        return Response.json({ error: String(error), code: 'invalid' }, { status: 400 });
+      }
       return Response.json(this.#snapshot());
     }
     return Response.json({ error: 'method not allowed' }, { status: 405 });
@@ -128,6 +159,53 @@ class FakeAgendaDaemon {
           raisedByName: null,
         }),
       );
+      return;
+    }
+
+    if (request.action === 'log' || request.action === 'merge' || request.action === 'split') {
+      const actor = { kind: 'agent' as const, sessionId: SESSION, name: null };
+      const ledger: AgendaLedger = {
+        sessionId: SESSION,
+        nextId: this.#ordinal + 1,
+        updatedAt: EPOCH,
+        conversations: this.#conversations,
+        entries: [
+          ...this.#items.map(item => ({ lifecycle: 'active' as const, origin: actor, item })),
+          ...this.#resolved.map(item => ({ lifecycle: 'addressed' as const, origin: actor, item })),
+        ],
+      };
+      // This seam exercises shipped transitions behind the binary's HTTP/argv/schema path. No live daemon or tmux.
+      const command =
+        request.action === 'log'
+          ? {
+              action: 'log' as const,
+              actor,
+              at: EPOCH,
+              id: request.id,
+              mode: request.mode,
+              words: request.text,
+              chat: {
+                messageId: request.messageId ?? 'owner-1',
+                at: EPOCH,
+                text: request.messageId === 'owner-2' ? 'Second owner message' : '    Use eu-west, please.\n',
+              },
+            }
+          : request.action === 'merge'
+            ? { action: 'merge' as const, actor, at: EPOCH, id: request.id, from: request.from }
+            : {
+                action: 'split' as const,
+                actor,
+                at: EPOCH,
+                id: request.id,
+                request: { source: 'agent-raised' as const, sourceRef: null, ...request.item },
+                moveCards: request.moveCards,
+              };
+      const mutation = applyAgendaCommandToSession(ledger, SESSION, command);
+      if (!mutation.ok) throw new Error(mutation.error.message);
+      this.#conversations = mutation.ledger.conversations;
+      this.#ordinal = mutation.ledger.nextId - 1;
+      this.#items.splice(0, this.#items.length, ...mutation.snapshot.items);
+      this.#resolved.splice(0, this.#resolved.length, ...mutation.snapshot.resolved);
       return;
     }
 
@@ -416,5 +494,71 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(listed.out).containEql('notice: read, not answered (pinged)');
     should(retired.code).not.equal(0);
     should(retired.err).containEql("unknown option '--title'");
+  });
+});
+
+describe('agenda conversation verbs (SIT)', () => {
+  it('logs exact words and repeated replies, refuses duplicates, merges and splits through the CLI', async () => {
+    const server = new FakeAgendaDaemon();
+    const run = (args: string[]) =>
+      driver.run(['agenda', ...args, '--session', SESSION], {
+        FY_URL: server.baseUrl,
+        FY_TOKEN: 'sit-test-token',
+        FY_SESSION_ID: SESSION,
+      });
+    try {
+      const add = (ask: string) =>
+        run([
+          'add',
+          ask,
+          '--title',
+          ask,
+          '--premise',
+          'A release is ready.',
+          '--context',
+          'The deploy needs a region.',
+          '--new',
+          'This decision has its own rollout schedule.',
+        ]);
+      for (const ask of ['Which region?', 'Which quota?']) {
+        const result = await add(ask);
+        should(result.code).equal(0, result.err);
+      }
+      for (const message of ['owner-1', 'owner-2']) {
+        const result = await run(['log', 'A1', '--reply', 'OK', '--message', message]);
+        should(result.code).equal(0, result.err);
+      }
+      const duplicate = await run(['log', 'A1', '--reply', 'OK', '--message', 'owner-1']);
+      should(duplicate.code).not.equal(0);
+      should(duplicate.err).containEql('already');
+      const logged = await run(['ls', '--json']);
+      should(logged.code).equal(0, logged.err);
+      should(logged.out).containEql('    Use eu-west, please.\\n');
+      should(logged.out.match(/"text":\s*"OK"/gu) ?? []).have.length(2);
+      const merged = await run(['merge', 'A1', 'A2']);
+      should(merged.code).equal(0, merged.err);
+      const split = await run([
+        'split',
+        'A1',
+        'Which cache?',
+        '--title',
+        'Cache',
+        '--premise',
+        'A cache is needed.',
+        '--context',
+        'Cache rollout has its own schedule.',
+      ]);
+      should(split.code).equal(0, split.err);
+      should(split.out).containEql('!A3');
+      const listed = await run(['ls', '--json']);
+      should(listed.code).equal(0, listed.err);
+      should(listed.out).containEql('splitInto');
+      should(listed.out).containEql('splitFrom');
+      const history = await run(['history', '--json']);
+      should(history.code).equal(0, history.err);
+      should(history.out).containEql('mergedInto');
+    } finally {
+      server.stop();
+    }
   });
 });

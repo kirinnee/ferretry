@@ -1304,3 +1304,27 @@ describe('editable asks (agenda.asks.1)', () => {
     should(kind.gateway.applied).be.empty();
   });
 });
+
+it('dispatches log, merge and split arguments through the public command registration', async () => {
+  const cases = [
+    ['agenda', 'log', 'A1', '--reply', 'OK', '--message', 'owner-1'],
+    ['agenda', 'merge', 'A1', 'A2'],
+    [
+      'agenda',
+      'split',
+      'A1',
+      'Which cache?',
+      '--title',
+      'Cache',
+      '--premise',
+      'A cache is needed.',
+      '--context',
+      'It has a separate rollout.',
+    ],
+  ];
+  for (const argv of cases) {
+    const { parsed, gateway } = run(argv, afterAdd, [DAEMON_FEATURES.agendaConversation]);
+    await parsed;
+    should(gateway.applied[0]?.request.action).equal(argv[1]);
+  }
+});

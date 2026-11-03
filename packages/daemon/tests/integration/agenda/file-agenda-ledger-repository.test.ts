@@ -10,7 +10,12 @@ import {
   InvalidAgendaLedgerError,
 } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { AGENDA_ARCHIVE_FILE } from '../../../src/lib/agenda/archive.ts';
-import { type AgendaMutation, agendaSnapshot, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
+import {
+  AGENDA_LEDGER_VERSION,
+  type AgendaMutation,
+  agendaSnapshot,
+  emptyAgendaLedger,
+} from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
 
 const homes: string[] = [];
@@ -188,7 +193,7 @@ describe('FileAgendaLedgerRepository', () => {
     });
     should(await readdir(directory)).not.containEql(`${AGENDA_ARCHIVE_FILE}.pending`);
     should(JSON.parse(await readFile(file, 'utf8'))).containDeep({
-      version: 2,
+      version: AGENDA_LEDGER_VERSION,
       archive: { bytes: Buffer.byteLength(text), count: 1 },
     });
     should(await repository.readArchive('session-1')).deepEqual([record]);

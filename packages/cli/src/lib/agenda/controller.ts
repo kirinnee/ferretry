@@ -117,6 +117,26 @@ export interface AgendaRestOptions extends AgendaCommandOptions {
   readonly why?: string;
 }
 
+/** Flags of `fy agenda log`: the ferret's words, and which of the owner's chat messages they go with. */
+export interface AgendaLogOptions extends AgendaCommandOptions {
+  /** `--reply`: the ferret's answer to what the owner said in chat; the item goes back to the owner's list. */
+  readonly reply?: string;
+  /** `--rest`: what the ferret is doing about it; the item rests as working. */
+  readonly rest?: string;
+  /** `--message`: the owner's message to log, by id (the latest by default). */
+  readonly message?: string;
+}
+
+/** Flags of `fy agenda split`: the new item's writing, and the cards that go with it. */
+export interface AgendaSplitOptions extends AgendaCommandOptions, Omit<BriefFlags, 'neededBy' | 'task'> {
+  /** `--move-cards F12,F13`: cards of the item that move to the new one. */
+  readonly moveCards?: string;
+  /** A JSON body with the same fields as `add`; `-` reads standard input. */
+  readonly jsonFile?: string;
+  /** A Markdown file for the new item's body; `-` reads standard input. */
+  readonly bodyFile?: string;
+}
+
 /** Flags that tick or untick a step. */
 export interface AgendaStepOptions extends AgendaCommandOptions {
   readonly undo?: boolean;
@@ -475,6 +495,96 @@ export class AgendaController {
     await this.#requireChannel('taking an item on (agenda rest)');
     const snapshot = await this.gateway.apply(this.#target(options), { action: 'rest', id, why });
     this.#report(snapshot, options, () => renderAgendaMutation('resting (working)', agendaReference(id), snapshot, id));
+  }
+
+  /**
+   * LOG what the owner said in chat onto the item (docs/agenda.md § Logging a chat). The owner's words are never typed
+   * here: the daemon copies them from this session's own chat, so the item holds exactly what they wrote.
+   */
+  async log(reference: string, options: AgendaLogOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const reply = text(options.reply);
+    const rest = text(options.rest);
+    if ((reply === undefined) === (rest === undefined)) {
+      throw new Error(
+        `say one thing: \`agenda log ${id} --reply "<your answer>"\` (back to their list) or \`--rest "<what you are doing>"\``,
+      );
+    }
+    await this.#requireChannel('logging a chat (agenda log)', DAEMON_FEATURES.agendaConversation);
+    const messageId = text(options.message);
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'log',
+      id,
+      mode: reply === undefined ? 'rest' : 'reply',
+      text: reply ?? rest ?? '',
+      ...(messageId === undefined ? {} : { messageId }),
+    });
+    this.#report(snapshot, options, () =>
+      renderAgendaMutation(
+        reply === undefined ? 'logged the chat and rested' : 'logged the chat and answered',
+        agendaReference(id),
+        snapshot,
+        id,
+      ),
+    );
+  }
+
+  /** MERGE `from` into `id`: both conversations, every card and link are kept; `from` closes as merged. */
+  async merge(reference: string, fromReference: string, options: AgendaCommandOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const from = parseAgendaReference(fromReference);
+    await this.#requireChannel('merging items (agenda merge)', DAEMON_FEATURES.agendaConversation);
+    const snapshot = await this.gateway.apply(this.#target(options), { action: 'merge', id, from });
+    this.#report(snapshot, options, () =>
+      renderAgendaMutation(`merged ${agendaReference(from)} into`, agendaReference(id), snapshot, id),
+    );
+  }
+
+  /** SPLIT a new item off `id`: written as an add is, linked both ways, with the named cards moved to it. */
+  async split(reference: string, words: readonly string[], options: AgendaSplitOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
+    const composed = composeAddRequest(words, { ...options, ...(body === undefined ? {} : { body }) }, file);
+    requireBrief(composed);
+    const {
+      action: _action,
+      source: _source,
+      sourceRef: _sourceRef,
+      confirms: _confirms,
+      notice: _notice,
+      ping: _ping,
+      task: _task,
+      offerClose: _offerClose,
+      surface: _surface,
+      ...item
+    } = composed;
+    const moveCards = (options.moveCards ?? '')
+      .split(',')
+      .map(each => each.trim())
+      .filter(each => each !== '')
+      .map(each => {
+        const card = parseTaskRef(each);
+        if (!card.ok) throw new Error(`--move-cards names cards like F12,F13, not "${each}"`);
+        return card.value;
+      });
+    await this.#requireChannel('splitting an item (agenda split)', DAEMON_FEATURES.agendaConversation);
+    const sessionId = this.#target(options);
+    const before = await this.gateway.snapshot(sessionId);
+    const after = await this.gateway.apply(sessionId, {
+      action: 'split',
+      id,
+      item,
+      ...(moveCards.length === 0 ? {} : { moveCards }),
+    });
+    const raised = onlyNewId(before, after);
+    this.#report(after, options, () =>
+      renderAgendaMutation(
+        `split ${raised === undefined ? 'a new item' : agendaReference(raised)} off`,
+        agendaReference(id),
+        after,
+        raised ?? id,
+      ),
+    );
   }
 
   /** Refuses, in words, before sending what a daemon without `feature` (the channel's, by default) would refuse. */

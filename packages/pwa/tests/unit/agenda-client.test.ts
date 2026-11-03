@@ -6,7 +6,10 @@ import {
   applyAgendaAction,
   DaemonAgendaClient,
   fetchAgendaCount,
+  fetchAgendaVersion,
+  fetchAgendaVersions,
   fetchAgendaSnapshot,
+  markAgendaVersionSeen,
   SNOOZE_NEEDS_UPDATE,
   sendAgendaReplies,
 } from '../../src/lib/agenda-client.ts';
@@ -915,5 +918,58 @@ describe('DaemonAgendaClient reading many boards', () => {
     await Promise.allSettled(reads);
     should(asked).have.length(AGENDA_READS_PER_DAEMON);
     should(client.store.agenda(daemonSessionScope(daemonA, 's0'))).be.undefined();
+  });
+});
+
+describe('item versions', () => {
+  it('lists the versions of an item from the item’s own path, with this device’s last seen', async () => {
+    const asked: Array<{ url: string; method: string | undefined }> = [];
+    const list = {
+      sessionId: 'same/session',
+      id: 'A1',
+      latest: 2,
+      seen: 1,
+      versions: [
+        { version: 1, at: '2026-07-31T00:00:00.000Z', by: 'ferret', change: 'created', lifecycle: 'active' },
+        { version: 2, at: '2026-07-31T00:01:00.000Z', by: 'owner', change: 'replied', lifecycle: 'active' },
+      ],
+    };
+
+    const got = await fetchAgendaVersions(daemonA, scopeA, 'A1', async (input, init) => {
+      asked.push({ url: String(input), method: init?.method });
+      return response(list);
+    });
+
+    should(got).deepEqual(list);
+    should(asked).deepEqual([
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda/A1/versions', method: 'GET' },
+    ]);
+  });
+
+  it('fetches one version in full, and marks a version seen with a PUT that answers the mark that stands', async () => {
+    const asked: Array<{ url: string; method: string | undefined; body: unknown }> = [];
+    const version = {
+      version: 2,
+      at: '2026-07-31T00:01:00.000Z',
+      by: 'owner',
+      change: 'replied',
+      lifecycle: 'active',
+      item: snapshot('same/session', undefined, 1).items[0],
+    };
+    const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      asked.push({ url: String(input), method: init?.method, body: init?.body });
+      return String(input).endsWith('/seen') ? response({ seen: 3 }) : response(version);
+    };
+
+    const got = await fetchAgendaVersion(daemonA, scopeA, 'A1', 2, fetcher);
+    const mark = await markAgendaVersionSeen(daemonA, scopeA, 'A1', 2, fetcher);
+
+    should(got.version).equal(2);
+    should(mark).equal(3);
+    should(asked.map(each => [each.method, each.url.replace('https://a.example.test', '')])).deepEqual([
+      ['GET', '/v1/sessions/same%2Fsession/agenda/A1/versions/2'],
+      ['PUT', '/v1/sessions/same%2Fsession/agenda/A1/seen'],
+    ]);
+    should(asked[1]?.body).equal(JSON.stringify({ version: 2 }));
   });
 });

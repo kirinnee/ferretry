@@ -183,9 +183,10 @@ const options = parse(Bun.argv.slice(2));
 /**
  * The entry spelled the way `join` spells the workers beside it. Bun 1.4 lays a compiled binary's
  * entrypoints out by their spelling: `./packages/daemon/bin/fyd.ts` (compile.sh's) beside
- * `packages/daemon/bin/session.worker.ts` embeds the worker at `<root>/packages/daemon/bin/`, not at
+ * `packages/daemon/bin/session.worker.ts` can embed the worker at `<root>/packages/daemon/bin/`, not at
  * `<root>/session.worker.js`, so no worker starts (`ModuleNotFound resolving
- * "/$bunfs/root/session.worker.js"`). Bun 1.3 normalised them itself.
+ * "/$bunfs/root/session.worker.js"`). Normalize their spelling and pin the entry directory as the build
+ * root below; spelling alone is insufficient under Bun 1.4.4. Bun 1.3 normalised them itself.
  */
 const entry = normalize(options.entry);
 /** Every worker program beside the entry, in a stable order. */
@@ -194,6 +195,9 @@ const workers = [...new Bun.Glob('*.worker.ts').scanSync({ cwd: dirname(entry) }
   .map(name => join(dirname(entry), name));
 const result = await Bun.build({
   entrypoints: [entry, ...workers],
+  // Bun 1.4 may otherwise retain the project path for extra entries even when their spelling agrees.
+  // The runtime resolves every embedded worker beside the binary's root entry, so pin that common root.
+  root: dirname(entry),
   compile: {
     outfile: options.outfile,
     ...(options.target === undefined ? {} : { target: options.target as Bun.Build.CompileTarget }),

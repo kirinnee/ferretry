@@ -957,9 +957,10 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      109 + // the session table and everything that is not the account model (one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      112 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       2 + // the owner's view of who holds the terminal slots, and closing the finished ferrets' terminals (`fy terminal close --all-finished`)
       7 + // the project boards: the board query, its card ids, one card, a new card, an action on a card (board-design.md §2), a ferret's skip (§3.4), and the owner's start of a new ferret on a card (docs/board.md, "Start a ferret on a card")
+      1 + // bounded full-conversation reads, including historical version threads
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       1 + // one ferret's tidy plan: its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy")
       2 + // the machine agenda: its read and the owner's dismiss, snooze or resolve (docs/agenda.md, "The machine agenda")
@@ -1359,6 +1360,10 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'GET /v1/sessions/:sessionId/agenda',
       'POST /v1/sessions/:sessionId/agenda',
+      'GET /v1/sessions/:sessionId/agenda/:id/conversation',
+      'GET /v1/sessions/:sessionId/agenda/:id/versions',
+      'GET /v1/sessions/:sessionId/agenda/:id/versions/:version',
+      'PUT /v1/sessions/:sessionId/agenda/:id/seen',
       'POST /v1/sessions/:sessionId/agenda/replies',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',

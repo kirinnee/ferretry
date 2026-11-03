@@ -703,6 +703,22 @@ export const AgendaHistoryEntrySchema = z.strictObject({
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
 
+/**
+ * One thing SAID on an item (docs/agenda.md § The conversation): the owner's words or the ferret's, in the order they
+ * were said, kept whole. `via` is the path the words took — an owner `reply` in chat, an `answer` with a note, a
+ * request for `needs-info` or to `discuss`, the ferret's `question-answer` or `rest` line or its `surface` why, the `close`
+ * note, or words the ferret LOGGED from the owner's chat (`chat-log`). `fromChat` names the chat message the words were
+ * copied from, which is also how one message is never logged twice.
+ */
+export const AgendaConversationEntrySchema = z.strictObject({
+  at: InstantSchema,
+  by: z.enum(['owner', 'ferret', 'daemon']),
+  text: z.string().refine(text => text.trim().length > 0, { message: 'words must not be empty' }),
+  via: z.enum(['reply', 'answer', 'needs-info', 'discuss', 'question-answer', 'rest', 'surface', 'close', 'chat-log']),
+  fromChat: z.strictObject({ messageId: z.string().trim().min(1).max(128), at: InstantSchema }).optional(),
+});
+export type AgendaConversationEntry = z.infer<typeof AgendaConversationEntrySchema>;
+
 /** The `gate:` references of the card gates the owner answered on this item, as its history records them. */
 export const gatesAnsweredOn = (item: { readonly history?: readonly AgendaHistoryEntry[] | undefined }): string[] =>
   (item.history ?? []).flatMap(entry =>
@@ -1096,6 +1112,23 @@ const AgendaItemBaseShape = {
   history: z.array(AgendaHistoryEntrySchema).min(1).max(MAX_AGENDA_HISTORY).optional(),
   /** Bounded, oldest first: every edit since the item was raised (`AgendaRevision`). Absent: never edited. */
   revisions: z.array(AgendaRevisionSchema).min(1).max(MAX_AGENDA_REVISIONS).optional(),
+  /**
+   * Bounded recent tail of complete entries, oldest first. The full thread lives outside the item and is read
+   * through GET …/conversation. Count and last time describe the full thread, including words outside this tail.
+   */
+  conversation: z.array(AgendaConversationEntrySchema).min(1).optional(),
+  conversationCount: z.number().int().nonnegative().optional(),
+  conversationLastAt: InstantSchema.optional(),
+  /** The items this one absorbed (`fy agenda merge`), oldest first; on the survivor. */
+  mergedFrom: z.array(AgendaIdSchema).min(1).optional(),
+  /** The item this one was merged into; on the closed, absorbed item. */
+  mergedInto: AgendaIdSchema.optional(),
+  /** The item this one was split off (`fy agenda split`); on the new item. */
+  splitFrom: AgendaIdSchema.optional(),
+  /** The items split off this one, oldest first; on the original. */
+  splitInto: z.array(AgendaIdSchema).min(1).optional(),
+  /** The cards of the items merged into this one, besides its own `task`: nothing a merge absorbed loses its card. */
+  relatedTasks: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
   /** Off the owner's queue for now, and why (`AgendaParked`); absent on an item in play. */
   parked: AgendaParkedSchema.optional(),
   /** When the ferret last woke a snoozed item as urgent (`now`): it may again only `AGENDA_URGENT_WAKE_MS` later. */
@@ -1312,6 +1345,10 @@ function responseKindFitsAsk(ask: string | undefined, response: string): boolean
 
 /** The keys that are about the item's life, not what it says: its versions, its state and how it was closed. */
 const AGENDA_CONTROL_KEYS: ReadonlySet<string> = new Set([
+  'stage',
+  'conversation',
+  'conversationCount',
+  'conversationLastAt',
   'revisions',
   'history',
   'ownerAnswer',
@@ -1526,6 +1563,20 @@ const AddAgendaRequestSchema = z.strictObject({
   ...AgendaBriefShape,
 });
 
+/** The new item a split writes: an ordinary add, minus what a split never carries. */
+export const SplitAgendaItemSchema = AddAgendaRequestSchema.omit({
+  action: true,
+  source: true,
+  sourceRef: true,
+  confirms: true,
+  notice: true,
+  ping: true,
+  task: true,
+  offerClose: true,
+  surface: true,
+});
+export type SplitAgendaItem = z.infer<typeof SplitAgendaItemSchema>;
+
 /** What an offer to close may not be: a notice has no answers to carry it. */
 export const agendaOfferCloseProblems = (value: {
   readonly offerClose?: true | undefined;
@@ -1662,6 +1713,40 @@ export const AgendaActionRequestSchema = z
       action: z.literal('rest'),
       id: AgendaIdSchema,
       why: z.string().trim().min(1).max(MAX_AGENDA_REST_WHY_LENGTH),
+    }),
+    /**
+     * The ferret LOGS THE OWNER'S CHAT WORDS on an item (`fy agenda log`, `agenda.conversation.1`): the daemon copies
+     * them verbatim from this session's own message store — the owner's latest chat message, or `messageId` — and
+     * the ferret never retypes them. `reply` returns the item to its old place as an answer does; `rest` (what the
+     * ferret is doing) leaves it resting as working.
+     */
+    z.strictObject({
+      action: z.literal('log'),
+      id: AgendaIdSchema,
+      mode: z.enum(['reply', 'rest']),
+      /**
+       * The FERRET's words: with `reply`, its answer to what the owner said (kept as its answer on the item); with `rest`,
+       * what it is doing (held to the length of a rest line). The owner's words are never in the request.
+       */
+      text: z.string().trim().min(1).max(MAX_AGENDA_BODY_LENGTH),
+      messageId: z.string().trim().min(1).max(128).optional(),
+    }),
+    /** Merge `from` into `id` (`agenda.conversation.1`): both conversations, all cards and links kept; `from` closes. */
+    z.strictObject({
+      action: z.literal('merge'),
+      id: AgendaIdSchema,
+      from: AgendaIdSchema,
+    }),
+    /**
+     * Split a NEW item off `id` (`agenda.conversation.1`): its own writing, linked both ways, the named cards moved to it.
+     */
+    z.strictObject({
+      action: z.literal('split'),
+      id: AgendaIdSchema,
+      /** The new item, written as an add is (its ask, title, premise and context), raised by the same ferret. */
+      item: SplitAgendaItemSchema,
+      /** Cards of `id` that go to the new item: its `task` and `relatedTasks`. */
+      moveCards: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).optional(),
     }),
     /** The owner puts an open item away `until` a time still ahead; it comes back then as a fresh item. */
     z.strictObject({

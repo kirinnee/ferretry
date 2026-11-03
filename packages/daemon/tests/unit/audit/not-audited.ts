@@ -85,6 +85,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'the owner skipping the settle window for answers already recorded; the send ledger is that history',
   'POST /v1/sessions/:sessionId/agenda':
     'an agent raising an agenda item (the agenda spelling of the agenda route above); the agenda list is that history',
+  'PUT /v1/sessions/:sessionId/agenda/:id/seen':
+    'a device marking the item version it opened; a per-device read marker, not a change to the item or to anyone\u2019s access',
   'POST /v1/sessions/:sessionId/agenda/replies':
     'the owner skipping the settle window for answers already recorded (the agenda spelling of the agenda route above); the send ledger is that history',
   'POST /v1/agenda/clear-agents':

@@ -422,6 +422,22 @@ const agendaCases: SchemaCase[] = [
     },
   },
   {
+    name: 'conversation entry',
+    schema: agenda.AgendaConversationEntrySchema,
+    value: {
+      at: '2026-05-01T10:00:00.000Z',
+      by: 'owner',
+      text: 'use eu-west',
+      via: 'chat-log',
+      fromChat: { messageId: 'm1', at: '2026-05-01T09:59:00.000Z' },
+    },
+  },
+  {
+    name: 'split item',
+    schema: agenda.SplitAgendaItemSchema,
+    value: { subject: 'Another ask', why: 'It grew', howToResolve: 'Reply' },
+  },
+  {
     name: 'direct notification',
     schema: agenda.DirectNotificationRequestSchema,
     value: { body: 'Finished', title: 'Complete', kind: 'completed' },

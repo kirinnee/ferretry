@@ -743,7 +743,7 @@ describe('the schemas that must never hold a value', () => {
     it(`should give ${name} no field named or shaped like a value`, () => {
       const offenders = propertyNames(schema).filter(property => VALUE_LIKE.test(property));
       const allowedElsewhere =
-        name === 'AgendaItem' ? new Set(['body', 'data', 'response', 'answer', 'input']) : new Set<string>();
+        name === 'AgendaItem' ? new Set(['body', 'data', 'response', 'answer', 'input', 'text']) : new Set<string>();
 
       should(offenders.filter(property => !allowedElsewhere.has(property))).deepEqual([]);
     });

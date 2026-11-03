@@ -209,6 +209,15 @@ One consequence: agenda actions are gated by **who acts** (the human or a ferret
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.
 The machine agenda's routes (`GET` and `POST /v1/machine/agenda`, [agenda.md](agenda.md#the-machine-agenda)) sit on
 the same axis: owner-only, `caller: 'person'`, no grant, and a non-human actor is refused with 403.
+The full conversation read (`GET /v1/sessions/:sessionId/agenda/:id/conversation`) requires `operator`,
+`caller: 'any'`, no capability; its session authorization is the item's. Responses are bounded fragments, and
+relayed loopback callers remain remote.
+
+The item's versions follow the same axis ([agenda.md](agenda.md#versions)): `GET /v1/sessions/:sessionId/agenda/:id/versions`
+and `GET …/versions/:version` are `operator`, `caller: 'any'`, no capability; `PUT …/seen` (a device marks the version it
+opened) is `operator`, `caller: 'person'`, no capability, and keys the mark by the credential's device (`host` for the
+local one). `log`, `merge` and `split` are actions of the existing agenda `POST`, gated by who acts: a ferret may touch
+only its own items (and a lead its sub-ferrets'), the owner any.
 The one governed act inside the agenda is an answer that **confirms a held configuration change**
 ([agenda.md](agenda.md#confirming-a-configuration-change)): it asks that file's grant, exactly as
 `POST /v1/config/confirm` does. The answer route therefore declares `consultsGrants` — no demand of its own,

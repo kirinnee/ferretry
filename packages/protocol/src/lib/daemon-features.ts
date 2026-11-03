@@ -106,6 +106,14 @@ export const DAEMON_FEATURES = {
    */
   agendaAsks: 'agenda.asks.1',
   /**
+   * THE CONVERSATION ON THE ITEM (docs/agenda.md § The conversation): every word the owner and the ferret say on an item
+   * is kept on it (`conversation`), `fy agenda log` copies the owner's chat words onto it, `merge` and `split` join and
+   * divide items, and every change to an item is kept as a full version that can be listed and fetched, with a per-device
+   * "last seen" mark. A daemon without this name refuses the `log`, `merge` and `split` actions as malformed and has no
+   * version routes, so a client sends them only to one that reports it; an older app drops the new item fields.
+   */
+  agendaConversation: 'agenda.conversation.1',
+  /**
    * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
    * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
    * machine that reports it, because there the gate item is the card's one ask.

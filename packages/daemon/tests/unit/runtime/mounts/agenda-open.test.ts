@@ -131,3 +131,10 @@ describe('GET /v1/agenda/open', () => {
     should(response.headers.get('cache-control')).equal('no-store');
   });
 });
+
+it('serves the full channel view to a caller that declares it can read it', async () => {
+  const { get } = fixture();
+  const response = await get([], { ...human, 'x-fy-agenda-channel': '1' });
+  should(response.status).equal(200);
+  should(jsonBody(response)).deepEqual({ sessions: [] });
+});
