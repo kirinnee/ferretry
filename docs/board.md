@@ -638,8 +638,10 @@ and is repaired the same way.
 reads private (nobody has chosen yet) records `chosen`, so a later repair of the default cannot turn it public; it is
 refused as "already private" only once that choice is on the card. **A ferret's choice to hide a card is judged on
 who asked for it, settled strictly:** on create (`--private`) and on edit, the daemon reads the owner's words again
-and, if it cannot, answers unavailable and writes nothing, rather than hide a card on a guess a later boot would have
-to take back. The owner is never held up by that lookup.
+and requires complete reads of the queue, send ledger, lineage and turn documents (including any author files).
+An unreadable record answers unavailable and writes nothing. Strict reads bypass the turn cache, so an earlier
+partial read cannot authorize hiding. Ordinary creates and boot backfills still use the readable records; the owner
+is never held up by that lookup.
 
 | Who                                             | May                                                                                                             |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |

@@ -39,8 +39,11 @@ import {
   type TaskRef,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
+import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
+import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
+import type { SessionRoster } from './activity.ts';
 import {
   type BoardCaller,
   type BoardStanding,
@@ -52,51 +55,48 @@ import {
 } from './authority.ts';
 import {
   applyAction,
-  closeAsDaemon,
   type CardContext,
   type CardOutcome,
+  closeAsDaemon,
   newCard,
   requireLocalCard,
   requireStanding,
   triggerMove,
   withEvent,
 } from './card-actions.ts';
-import type { SessionRoster } from './activity.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
+import { gateEntry } from './gate-policy.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
-import { gateEntry } from './gate-policy.ts';
 import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
-import { defaultVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
-import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
-import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type {
   ActivityDeriver,
   AgendaLinkSource,
+  BoardAttachmentSource,
   BoardChangeSink,
   BoardClock,
   BoardDiagnostics,
   BoardOptIn,
   BoardSnapshot,
-  BoardThreads,
   BoardStore,
+  BoardThreads,
+  DoneNotice,
+  DoneNotifier,
   LaneSetSource,
   OwnerWords,
   ProjectAdopter,
-  BoardAttachmentSource,
-  DoneNotifier,
   ReopenNotifier,
   SessionFocus,
   SessionParents,
-  DoneNotice,
 } from './ports.ts';
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
-import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { returnCard, returnLead } from './return-to-lead.ts';
+import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
+import { defaultVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 export interface BoardServiceDependencies {
   readonly store: BoardStore;
@@ -868,12 +868,17 @@ export class BoardService {
    * A caller that needs the answer settled (a ferret's choice to hide a card) asks for it strictly: not knowing is
    * an unavailable board, never a guess that a later boot would have to take back.
    */
-  private async askedByOf(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean, lenient = false) {
+  private async askedByOf(
+    card: Pick<BoardTask, 'createdBy' | 'ask'>,
+    ownerApp: boolean,
+    options: { readonly lenient?: boolean; readonly strict?: boolean } = {},
+  ) {
     return await decideAskedBy(card, ownerApp, async sessionId => {
       try {
-        return (await this.ports.ownerWords?.said(sessionId)) ?? [];
+        if (options.strict && this.ports.ownerWords === undefined) throw new Error('owner words are unavailable');
+        return (await this.ports.ownerWords?.said(sessionId, { strict: options.strict })) ?? [];
       } catch (error) {
-        if (!lenient) throw error;
+        if (!options.lenient) throw error;
         this.ports.diagnostics.warn(
           `board: could not read what the owner said to ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -912,7 +917,9 @@ export class BoardService {
     // an agent's must not be hidden for good, so that lookup may not fail softly here.
     const hides = request.visibility === 'private' && facts.caller.kind !== 'owner';
     const ownerApp = facts.caller.kind === 'owner' && facts.caller.via === undefined;
-    const askedBy = hides ? await this.settledAskedBy(made, ownerApp) : await this.askedByOf(made, ownerApp, true);
+    const askedBy = hides
+      ? await this.settledAskedBy(made, ownerApp)
+      : await this.askedByOf(made, ownerApp, { lenient: true });
     const visibility = request.visibility ?? defaultVisibility({ ...made, askedBy });
     const visibilitySource = request.visibility === undefined ? 'default' : 'chosen';
     if (request.visibility !== undefined) {
@@ -977,7 +984,7 @@ export class BoardService {
   /** Who asked for the card, or an unavailable board when that cannot be read: a guess here would hide a card for good. */
   private async settledAskedBy(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean) {
     try {
-      return await this.askedByOf(card, ownerApp);
+      return await this.askedByOf(card, ownerApp, { strict: true });
     } catch (error) {
       throw new BoardUnavailableError(
         `who asked for this card cannot be settled right now: ${error instanceof Error ? error.message : String(error)}`,

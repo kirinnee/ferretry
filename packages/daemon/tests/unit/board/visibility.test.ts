@@ -1,14 +1,16 @@
 import { describe, it } from 'bun:test';
 import {
   type BoardActor,
+  BoardQuerySchema,
   type BoardTask,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
-  BoardQuerySchema,
   type BoardTaskVisibility,
   type PrLink,
 } from '@ferretry/protocol';
 import should from 'should';
+import type { BoardStanding } from '../../../src/lib/board/authority.ts';
+import type { OwnerWords } from '../../../src/lib/board/index.ts';
 import {
   type BoardCaller,
   BoardError,
@@ -19,8 +21,6 @@ import {
   visibilityVerdict,
   withDefaultVisibility,
 } from '../../../src/lib/board/index.ts';
-import type { OwnerWords } from '../../../src/lib/board/index.ts';
-import type { BoardStanding } from '../../../src/lib/board/authority.ts';
 import { card, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
 
 const PERSON_ASK = { text: 'build the board', source: 'owner (board)' } as const;
@@ -31,7 +31,7 @@ const lead: BoardCaller = { kind: 'ferret', sessionId: 'lead' };
 const stranger: BoardCaller = { kind: 'ferret', sessionId: 'stranger' };
 
 const serviceWith = (cards: readonly BoardTask[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ...overrides });
+  const ports = world({ store: new MemoryBoardStore(cards), ownerWords: { said: async () => [] }, ...overrides });
   return { ports, service: new BoardService(ports) };
 };
 const stored = (ports: ServiceWorld, id: string): BoardTask => ports.store.cards.get(id) as BoardTask;
