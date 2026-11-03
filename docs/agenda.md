@@ -1029,6 +1029,20 @@ defined with `--term`, never a secret value. The daemon lints for this and answe
 refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
 whose blocker has cleared is a bug.
 
+**Every link says what it is.** A link is a label, a target and a plain `meaning` (`AgendaLink`, at most
+`MAX_AGENDA_TERM_MEANING_LENGTH` characters, the bound a term's meaning has), because the item is
+self-contained: its terms-and-references table lists every term and every PR, card or link with a plain meaning,
+and an address explains nothing. `fy agenda add|edit --link "label=target=meaning"` gives one; `label=target` and a
+bare target still work, and the `--json-file` form takes `{"label", "target", "meaning"}`. Splitting is on the
+first two `=`, and only when the part before the first reads as a label (no `/`, `?`, `&` or `\`), so a bare
+target with an `=` of its own (`https://host/page?a=b`) stays a target; a target that carries a query is followed
+by a meaning only through `--json-file`. The daemon lint warns, never refuses, for a link with no meaning
+("say what it is, in plain words"). Where the item view draws the table, a link shows its meaning, and falls back
+to its label for an item raised before meanings existed. The daemon reports `agenda.link-meaning.1` on
+`GET /v1/health`; the CLI sends a meaning only to a daemon that lists it, and to an older one sends each link as
+`label=target` and says so. A card the daemon raises on a ferret's behalf (an input form) links its closest agenda
+with a meaning of its own.
+
 **Every segment is short points, never a paragraph.** The premise, context, decided, still-open, question
 answer, body, option details, ask, revision notes and terms all read as the same Markdown on the card: bullets
 (`-` or `•`), numbered lists, **bold**, `code`, references, and a single line break kept as a line

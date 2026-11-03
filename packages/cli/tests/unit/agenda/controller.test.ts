@@ -1310,3 +1310,62 @@ describe('agenda controller add — related work', () => {
     should(search.relatedCalls).eql([]);
   });
 });
+
+describe('agenda link meanings toward an older daemon (agenda.link-meaning.1)', () => {
+  const after = snapshot([agentItem('A2', 'pick a cluster')]);
+  const links = ['Plan=&F12=The plan to keep the login alive', 'PR=https://example.invalid/pr/1'];
+
+  it('should send the meaning to a daemon that lists agenda.link-meaning.1', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, after);
+    gateway.offered = [DAEMON_FEATURES.agendaLinkMeaning];
+
+    // Act
+    await controller.add(['pick', 'a', 'cluster'], { ...BRIEF, title: 'Pick a cluster', link: links });
+    await controller.edit('A2', { link: links });
+
+    // Assert
+    for (const call of gateway.applied) {
+      should(call.request).containDeep({
+        links: [
+          { label: 'Plan', target: '&F12', meaning: 'The plan to keep the login alive' },
+          { label: 'PR', target: 'https://example.invalid/pr/1' },
+        ],
+      });
+    }
+    should(out.diagnostics.filter(line => line.includes('link meanings'))).be.empty();
+  });
+
+  it('should send label=target to an older daemon on add and on edit, and say so', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, after);
+    gateway.offered = [];
+
+    // Act
+    await controller.add(['pick', 'a', 'cluster'], { ...BRIEF, title: 'Pick a cluster', link: links });
+    await controller.edit('A2', { link: links });
+
+    // Assert
+    for (const call of gateway.applied) {
+      const sent = (call.request as { links?: unknown }).links;
+      should(sent).deepEqual([
+        { label: 'Plan', target: '&F12' },
+        { label: 'PR', target: 'https://example.invalid/pr/1' },
+      ]);
+    }
+    should(gateway.applied).have.length(2);
+    should(out.diagnostics.filter(line => line.includes('older than link meanings'))).have.length(2);
+  });
+
+  it('should say nothing, and send the links untouched, when none carries a meaning', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, after);
+
+    // Act
+    await controller.edit('A2', { link: ['Plan=&F12'] });
+
+    // Assert
+    should(gateway.applied[0]?.request).containDeep({ links: [{ label: 'Plan', target: '&F12' }] });
+    should(out.diagnostics.filter(line => line.includes('link meanings'))).be.empty();
+  });
+});

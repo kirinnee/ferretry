@@ -89,7 +89,10 @@ export interface BriefFlags extends AskFlags {
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
 /** Text, or a list of short points that is drawn as bullets. */
 const Prose = z.union([z.string(), z.array(z.string())]);
-const LinkInput = z.union([z.string(), z.object({ label: z.string().optional(), target: z.string() })]);
+const LinkInput = z.union([
+  z.string(),
+  z.object({ label: z.string().optional(), target: z.string(), meaning: z.string().optional() }),
+]);
 
 /**
  * The JSON body `--json-file` reads: the same fields as the flags, in the protocol's own shapes where it
@@ -512,9 +515,36 @@ function option(value: string | { label: string; description?: string | undefine
   return { label: value.label.trim(), ...(value.description === undefined ? {} : { description: value.description }) };
 }
 
-function link(value: string | { label?: string | undefined; target: string }): AgendaLink {
-  if (typeof value === 'string') return { target: value.trim() };
-  return { target: value.target.trim(), ...(value.label === undefined ? {} : { label: value.label }) };
+function link(
+  value: string | { label?: string | undefined; target: string; meaning?: string | undefined },
+): AgendaLink {
+  if (typeof value === 'string') return linkFrom(value);
+  const meaning = text(value.meaning);
+  return {
+    target: value.target.trim(),
+    ...(value.label === undefined ? {} : { label: value.label }),
+    ...(meaning === undefined ? {} : { meaning }),
+  };
+}
+
+/**
+ * `--link`: a bare target, `label=target`, or `label=target=meaning` (the meaning is the plain words the item view's
+ * terms-and-references table shows). The label is read only when it looks like one: a word or two, never a URL or a path,
+ * so a bare target that carries an `=` of its own (`https://host/page?a=b`) stays a target. A target that carries a
+ * query cannot be followed by a meaning here (its `=` is its own); give that link through `--json-file`.
+ */
+function linkFrom(raw: string): AgendaLink {
+  const value = raw.trim();
+  const first = value.indexOf('=');
+  const label = first < 0 ? '' : value.slice(0, first).trim();
+  if (first < 0 || label === '' || /[/?&\\]/u.test(label)) return { target: value };
+  const rest = value.slice(first + 1);
+  const second = rest.indexOf('=');
+  const targetEnd = second < 0 || rest.slice(0, second).includes('?') ? rest.length : second;
+  const target = rest.slice(0, targetEnd).trim();
+  if (target === '') throw new Error(`--link needs label=target or label=target=meaning, got "${raw}"`);
+  const meaning = text(rest.slice(targetEnd + 1));
+  return { label, target, ...(meaning === undefined ? {} : { meaning }) };
 }
 
 /**

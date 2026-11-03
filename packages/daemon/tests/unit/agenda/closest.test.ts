@@ -71,6 +71,7 @@ describe('closestAgenda', () => {
     should(closestAgendaLink({ id: 'A3', title: 'Deploy the relay' })).eql({
       label: 'Part of: Deploy the relay',
       target: '!A3',
+      meaning: 'The open agenda this belongs with: the same topic, so the answer lands in one place.',
     });
     should(closestAgendaLink({ id: 'A3', title: 'x'.repeat(200) }).label).have.length(120);
   });

@@ -323,3 +323,35 @@ describe('attention writing lint: walls of text', () => {
     should(lintAgendaWriting({ ...clean, body })).deepEqual([]);
   });
 });
+
+describe('attention writing lint: a link says what it is', () => {
+  it('should warn, never refuse, for a link with no meaning, naming it and the form', () => {
+    // Arrange / Act
+    const actual = lintAgendaWriting({
+      ...clean,
+      links: [
+        { label: 'Plan', target: '&F12' },
+        { target: '#F13' },
+        { label: 'PR', target: '#F14', meaning: 'The fix' },
+      ],
+    });
+
+    // Assert
+    should(actual).have.length(1);
+    should(actual[0]).match(/^links without a meaning \("Plan", "#F13"\): say what each is, in plain words/u);
+    should(actual[0]).containEql('--link "label=target=meaning"');
+  });
+
+  it('should say it in the singular for one link', () => {
+    should(lintAgendaWriting({ ...clean, links: [{ label: 'Plan', target: '&F12' }] })[0]).containEql(
+      'say what it is, in plain words',
+    );
+  });
+
+  it('should say nothing when every link has a meaning, or there are no links', () => {
+    should(lintAgendaWriting({ ...clean, links: [{ label: 'Plan', target: '&F12', meaning: 'The plan' }] })).deepEqual(
+      [],
+    );
+    should(lintAgendaWriting(clean)).deepEqual([]);
+  });
+});

@@ -272,6 +272,14 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
     );
   }
 
+  const unexplainedLinks = (item.links ?? []).filter(entry => isBlank(entry.meaning));
+  if (unexplainedLinks.length > 0) {
+    const names = unexplainedLinks.map(entry => entry.label ?? entry.target);
+    warnings.push(
+      `links without a meaning (${quoted(names)}): say what ${names.length === 1 ? 'it is' : 'each is'}, in plain words — --link "label=target=meaning" — because the item's terms-and-references table shows the meaning, not the address`,
+    );
+  }
+
   const prose = fields.map(field => ({
     ...field,
     text: field.text.replaceAll(TICKET_ID, ' ').replaceAll(URL, ' ').replaceAll(FILE_PATH, ' '),

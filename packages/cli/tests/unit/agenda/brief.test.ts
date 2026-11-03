@@ -888,3 +888,63 @@ describe('clearing the answer to the owner’s question', () => {
     );
   });
 });
+
+describe('agenda --link: target, label=target and label=target=meaning', () => {
+  it('should read a bare target, label=target and label=target=meaning, with the meaning trimmed', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: [
+        '#F12',
+        'Plan=&F12',
+        'PR = https://example.invalid/pr/1 = The change that keeps the login alive ',
+        'Notes=docs/a.md=What was decided',
+      ],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { target: '#F12' },
+      { label: 'Plan', target: '&F12' },
+      { label: 'PR', target: 'https://example.invalid/pr/1', meaning: 'The change that keeps the login alive' },
+      { label: 'Notes', target: 'docs/a.md', meaning: 'What was decided' },
+    ]);
+  });
+
+  it('should keep a bare target that carries an = of its own, and a query target, whole', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: ['https://example.invalid/page?a=b', 'Run=https://example.invalid/run?id=7', 'docs/a=b.md'],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { target: 'https://example.invalid/page?a=b' },
+      { label: 'Run', target: 'https://example.invalid/run?id=7' },
+      { target: 'docs/a=b.md' },
+    ]);
+  });
+
+  it('should drop an empty meaning and refuse a label with no target', () => {
+    // Arrange / Act
+    const request = add(['pick'], { link: ['Plan=&F12='] });
+
+    // Assert
+    should(request.links).deepEqual([{ label: 'Plan', target: '&F12' }]);
+    should(() => add(['pick'], { link: ['Plan='] })).throw(/--link needs label=target or label=target=meaning/u);
+  });
+
+  it('should read a meaning from the JSON file, and send it on edit', () => {
+    // Arrange
+    const file = parseBriefFile(
+      JSON.stringify({ links: [{ label: 'Plan', target: '&F12', meaning: ' The plan ' }, '#F13'] }),
+    );
+
+    // Act
+    const added = add(['pick'], {}, file);
+    const edited = composeEditRequest('A1', { link: ['Plan=&F12=The plan'] }, undefined);
+
+    // Assert
+    should(added.links).deepEqual([{ label: 'Plan', target: '&F12', meaning: 'The plan' }, { target: '#F13' }]);
+    should(edited).containDeep({ links: [{ label: 'Plan', target: '&F12', meaning: 'The plan' }] });
+  });
+});

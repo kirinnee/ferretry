@@ -84,6 +84,12 @@ export const DAEMON_FEATURES = {
    */
   agendaOfferClose: 'agenda.offer-close.1',
   /**
+   * An agenda link (`AgendaLink`) may carry a `meaning`: the plain words the item view's terms-and-references table
+   * shows for it (docs/agenda.md § Rules the writing keeps). A daemon without this name refuses the whole request
+   * over the field, so the CLI sends a meaning only where the machine reports it.
+   */
+  agendaLinkMeaning: 'agenda.link-meaning.1',
+  /**
    * A machine notice may list board cards (`AgendaItem.cards`), each with Open, Start a ferret on it and Close card:
    * `POST /v1/board/tasks/:taskId/start` starts a new ferret on the card with the card's brief. A daemon without this
    * name has neither the field nor the route, so the app draws its Got it alone.

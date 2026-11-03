@@ -11,12 +11,14 @@ import {
   AgendaItemSchema,
   type AgendaSnapshot,
   agendaBriefOf,
+  DAEMON_FEATURES,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { type AgendaLedger, applyAgendaCommandToSession } from '../../../daemon/src/lib/agenda/state-machine.ts';
 import pkg from '../../package.json' with { type: 'json' };
+import { health } from '../unit/daemon/fixtures';
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';
 
 // SIT journeys; SIT_DRIVER picks the compiled binary (no coverage) or in-process (coverage). See
@@ -84,30 +86,9 @@ class FakeAgendaDaemon {
   async #handle(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     const session = `/v1/sessions/${encodeURIComponent(SESSION)}`;
-    if (path === '/v1/health')
-      return Response.json({
-        ok: true,
-        bootstrapping: false,
-        bootstrapState: 'complete',
-        bootstrapDegraded: false,
-        version: 'sit',
-        pid: 1,
-        sessions: 1,
-        running: 0,
-        monitors: 0,
-        unmonitoredRunning: 0,
-        wardenLastSweepSeconds: null,
-        wardenTimerArmed: false,
-        eventLoopLagMs: 0,
-        lastSelfCheckAt: null,
-        wedgeCount: 0,
-        scratchGcEnabled: false,
-        scratchReclaimedSessions: 0,
-        scratchReclaimedBytes: 0,
-        bootstrapErrors: 0,
-        features: [DAEMON_FEATURES.agendaConversation],
-        time: EPOCH,
-      });
+    if (path === '/v1/health' && request.method === 'GET') {
+      return Response.json(health({ features: [DAEMON_FEATURES.agendaConversation, DAEMON_FEATURES.agendaLinkMeaning] }));
+    }
     // A daemon of this build answers the agenda spelling and the older attention one alike
     // (docs/agenda.md § Compatibility), and refuses anything else the way the real one does.
     if (path !== `${session}/agenda` && path !== `${session}/attention`) {
@@ -373,7 +354,17 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
     try {
       // Act
-      const added = await cli(['add', '--json-file', body, '--urgency', 'today', '--link', '#F12']);
+      const added = await cli([
+        'add',
+        '--json-file',
+        body,
+        '--urgency',
+        'today',
+        '--link',
+        '#F12',
+        '--link',
+        'Plan=&F9=The plan to keep the login alive',
+      ]);
       const listed = await cli(['ls']);
 
       // Assert
@@ -385,7 +376,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
       should(listed.out).containEql('recommended: Defaults');
       should(listed.out).containEql('impact: You stay logged out — by today');
       should(listed.out).containEql('terms: OCI = Oracle Cloud Infrastructure');
-      should(listed.out).containEql('links: #F12');
+      should(listed.out).containEql('links: #F12 · Plan (The plan to keep the login alive)');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

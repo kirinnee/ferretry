@@ -212,7 +212,16 @@ function briefLines(item: AgendaItem): string[] {
     lines.push(`${INDENT}terms: ${compact(item.terms.map(term => `${term.term} = ${term.meaning}`).join('; '))}`);
   }
   if (item.links !== undefined) {
-    lines.push(`${INDENT}links: ${compact(item.links.map(link => link.label ?? link.target).join(' · '))}`);
+    lines.push(
+      `${INDENT}links: ${compact(
+        item.links
+          .map(link => {
+            const name = link.label ?? link.target;
+            return link.meaning === undefined ? name : `${name} (${link.meaning})`;
+          })
+          .join(' · '),
+      )}`,
+    );
   }
   return lines;
 }

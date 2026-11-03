@@ -4673,3 +4673,42 @@ describe('link-task (docs/board.md § One ask per thing)', () => {
     should(failed(link(notice.ledger, { id: 'F5' })).error.code).equal('invalid');
   });
 });
+
+describe('agenda ledger link meanings', () => {
+  const MEANT = [
+    { label: 'Plan', target: '&F12', meaning: 'The plan to keep the work login alive' },
+    { target: 'https://github.com/kirinnee/ferretry/pull/1' },
+  ];
+
+  it('should keep a link’s meaning when it is raised, and read back through the item schema', () => {
+    // Arrange / Act
+    const created = raised(AGENT, { links: MEANT });
+
+    // Assert
+    should(created.snapshot.items[0]?.links).eql(MEANT);
+    should(AgendaItemSchema.parse(created.snapshot.items[0]).links).eql(MEANT);
+  });
+
+  it('should replace the links, meanings included, on an edit, and keep them when an edit leaves them alone', () => {
+    // Arrange
+    const created = raised(AGENT, { links: [{ target: '#F12' }] });
+    const edit = (patch: EditAgendaPatch) =>
+      applyAgendaCommand(created.ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: SECOND });
+
+    // Act
+    const meant = succeeded(edit({ links: MEANT }));
+    const kept = succeeded(
+      applyAgendaCommand(meant.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { urgency: 'today' },
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(meant.snapshot.items[0]?.links).eql(MEANT);
+    should(kept.snapshot.items[0]?.links).eql(MEANT);
+  });
+});

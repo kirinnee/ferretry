@@ -792,7 +792,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`).');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
     should(text).containEql(
-      'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
+      'Read cold: no ids/paths/jargon (`--term "X=meaning"`, `--link "X=target=meaning"`); short points, answer first, no headings.',
     );
     // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
     should(text).containEql(AGENDA_SHAPE_LINE);

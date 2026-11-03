@@ -43,7 +43,8 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
                  (options "Label: what it means", a leading * recommends one; "Name~Question" names its answer line)
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
   --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
-  --link         a PR, file or reference worth opening (repeat)
+  --link         a PR, file or reference worth opening, "label=target=meaning" (repeat): the meaning says in
+                 plain words what it is; "label=target" and a bare target still work, but warn
   --step         when the human must DO something: one Markdown step each, in order (repeat) — the
                  complete instructions (commands in code blocks, where to click, what to paste where;
                  never a secret value), so the item alone is enough
@@ -76,7 +77,7 @@ JSON body (title and ask are required; questions and options may be plain string
                   "recommended": "Defaults", "why": "Matches what runs today"}],
    "recommendation": {"decision": "Defaults", "why": "Lowest risk"},
    "impact": "You stay logged out of work accounts", "urgency": "today",
-   "links": [{"label": "Plan", "target": "&F12"}],
+   "links": [{"label": "Plan", "target": "&F12", "meaning": "The plan to keep the login alive"}],
    "steps": ["Open **Settings** and choose Logins", "Run \`fy login work\` and paste the code it prints"],
    "body": "Anything longer than a list, as Markdown"}`;
 
@@ -254,7 +255,12 @@ function mountVerbs(
         [],
       )
       .option('--urgency <when>', 'by when it matters, in words')
-      .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
+      .option(
+        '-l, --link <label=target=meaning>',
+        'a PR, file or reference worth opening, with what it is in plain words; repeat',
+        collect,
+        [],
+      )
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
       .option('--body-file <path>', 'a Markdown file of instructions, or - for stdin')
       .option('--blocking', 'you are stopped until the owner answers')
@@ -337,7 +343,12 @@ function mountVerbs(
         [],
       )
       .option('--urgency <when>', 'replace by when it matters')
-      .option('-l, --link <target>', 'replace the links with these; repeat', collect, [])
+      .option(
+        '-l, --link <label=target=meaning>',
+        'replace the links with these (the meaning says what each is); repeat',
+        collect,
+        [],
+      )
       .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])
       .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin')
       .option(
