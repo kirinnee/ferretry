@@ -1,3 +1,10 @@
+## [4.257.2](https://github.com/kirinnee/ferretry/compare/v4.257.1...v4.257.2) (2026-11-03)
+
+### Fixes
+
+* **agenda:** refuse an over-long body with the count and the remedy ([#1429](https://github.com/kirinnee/ferretry/issues/1429)) ([2b138b4](https://github.com/kirinnee/ferretry/commit/2b138b4d95757cdf2fbf2cb764872e82ee16c0dd)), closes [#1404](https://github.com/kirinnee/ferretry/issues/1404)
+* **fleet:** accept compactAt in profile files ([#1432](https://github.com/kirinnee/ferretry/issues/1432)) ([03aa19d](https://github.com/kirinnee/ferretry/commit/03aa19d3cc577a951d317b51688df4027d0f63cb))
+
 ## [4.257.1](https://github.com/kirinnee/ferretry/compare/v4.257.0...v4.257.1) (2026-11-03)
 
 ### Fixes
