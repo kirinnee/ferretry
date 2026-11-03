@@ -94,6 +94,8 @@ interface Faults {
   readonly cardAskRefuses?: boolean;
   /** The board refuses these actions. */
   readonly refuses?: readonly BoardTaskActionRequest['action'][];
+  /** Runs right after the board moves a card, before the answer is recorded: the agenda changes under the answer. */
+  readonly afterAct?: () => Promise<void>;
   /** Telling the ferret throws. */
   readonly tellThrows?: boolean;
   /** Listing every session throws this many times, then answers. */
@@ -246,6 +248,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
           if (faults.refuses?.includes(request.action) === true)
             throw new Error(`the board refused the ${request.action}`);
           await cards_.act(id, request, caller, expect);
+          await faults.afterAct?.();
         },
       },
       lanes: stageGateLanes,
@@ -1132,6 +1135,26 @@ describe('answering a card ask', () => {
     should(world.done.notices).have.length(1);
   });
 
+  it('puts the ask again when the owner said Not yet on a ferret’s thread and then set the thread aside', async () => {
+    // Arrange — the ask rides the lead's thread, and the owner says Not yet to it there
+    const world = fixture([leads({ laneId: 'todo' })]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    await world.move('plan');
+    await world.answer(raised.item.id, choose('Not yet'), { sessionId: 'lead', cardAsk: 'gate:F1:plan:2' });
+
+    // Act — Not needed on the thread drops the thread, and the Not yet was never an answer
+    await world.agenda.dismiss('lead', raised.item.id, HUMAN);
+    await world.gates.written('F1');
+
+    // Assert — the card's own agenda carries the ask, open
+    const items = world.open('lead');
+    should(items).have.length(1);
+    should(items[0]?.sourceRef).equal('card-agenda:F1');
+    should(items[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:plan:2']);
+    should(items[0]?.cardAsks?.[0]?.answer).be.undefined();
+  });
+
   it('puts the ask again when the owner sets aside a ferret’s thread that carried it', async () => {
     // Arrange — the ask rides the lead's thread
     const world = fixture([leads()]);
@@ -1958,8 +1981,8 @@ describe('what a card ask takes as an answer', () => {
 
 describe('card asks across merge and split (docs/agenda.md § Merge and split)', () => {
   /** Two of the lead's threads, each about a card at its gate: A1 carries F1's ask, A2 carries F2's. */
-  const twoAsking = async () => {
-    const world = fixture([leads(), leads({ id: 'F2' })]);
+  const twoAsking = async (faults: Faults = {}) => {
+    const world = fixture([leads(), leads({ id: 'F2' })], faults);
     const first = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
     const second = await world.agenda.raise('lead', { ...threadAbout('F2'), subject: 'And the menu?' }, AGENT);
     if (!first.ok || !second.ok || first.item === undefined || second.item === undefined) {
@@ -2038,6 +2061,27 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
     should(world.stored('F2').laneId).equal('tested');
   });
 
+  it('records an answer on the item the ask went to when a merge came between the card moving and the record', async () => {
+    // Arrange — the merge lands right after the board moved F2, as the answer was being recorded on the absorbed item
+    let between: (() => Promise<unknown>) | undefined;
+    const { world, kept, absorbed } = await twoAsking({ afterAct: async () => void (await between?.()) });
+    between = async () => {
+      between = undefined;
+      await world.agenda.merge('lead', kept, absorbed, HUMAN);
+    };
+
+    // Act
+    const outcome = await world.answer(absorbed, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F2:tested:2' });
+
+    // Assert — the card moved, the answer and its receipt are on the kept item, the ferret is told of that one
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F2').laneId).equal('closed');
+    const f2 = openOf(world, 'lead', kept).cardAsks?.find(ask => ask.gate.cardId === 'F2');
+    should(f2?.answer).match({ response: choose('Done'), receipt: /^[0-9a-f]{64}$/u });
+    should(world.told.some(each => each.message.includes(`!${kept}`))).be.true();
+    should(world.told.some(each => each.message.includes(`!${absorbed}`))).be.false();
+  });
+
   /** The lead's thread about F1 carries F1's ask at To test and its sub-card F2's at Plan. */
   const parentAndSub = async () => {
     const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })]);
@@ -2091,5 +2135,27 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
     should(agendaState(openOf(world, 'lead', child))).match({ state: 'resting', sub: 'waiting-on-ferret' });
     should(wrong).match({ handled: true, refused: { code: 'moved-on' } });
     should(world.stored('F1').laneId).equal('tested');
+  });
+
+  it('answers a split-off ask by the id of the item it was split from, though it was split off again since', async () => {
+    // Arrange — F2's ask went to the child, and then to a grandchild split off the child
+    const { world, parent, child } = await parentAndSub();
+    const { task: _task, ...plain } = threadAbout('F2');
+    const again = await world.agenda.split(
+      'lead',
+      child,
+      { ...plain, subject: 'Is the sub-card right, once more?' },
+      AGENT,
+      [{ id: 'F2' }],
+    );
+    if (!again.ok || again.item === undefined) throw new Error('expected a second split');
+
+    // Act — a screen still showing the original answers F2's ask
+    const outcome = await world.answer(parent, choose('OK to build'), { sessionId: 'lead', cardAsk: 'gate:F2:plan:2' });
+
+    // Assert — it reached the grandchild, which carries the ask now
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F2').laneId).equal('implement');
+    should(openOf(world, 'lead', again.item.id).cardAsks?.[0]?.answer).match({ response: choose('OK to build') });
   });
 });

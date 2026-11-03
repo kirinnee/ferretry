@@ -379,8 +379,9 @@ export const withoutCardAsks = (item: AgendaItem): AgendaItem => {
 /**
  * The asks `incoming` brings to `item`, which keeps its own (docs/agenda.md § Merge and split): ONE per card and entry
  * — of two for the same, the one the owner got further with (an answer, then Not yet), else `item`'s — in the order
- * they were put. Nothing is trimmed to fit: more open asks than one agenda carries are refused, and so is an item that
- * cannot carry a card's ask, since the gate engine would not find it there and would ask again.
+ * they were put. Nothing is trimmed to fit: more asks than one agenda carries (16 in all, answered or not, so no answer
+ * or receipt is lost) are refused, and so is an item that cannot carry a card's ask, since the gate engine would not
+ * find it there and would ask again.
  *
  * An ask still waiting on the owner that comes in does to `item` what putting it there does: an item not on the owner's
  * turn wakes into Needs you, at the stage the ask puts it in, and the ask remembers the turn it ended (`woke`), or the
@@ -408,11 +409,11 @@ export const joinCardAsks = (
     if (held === undefined || progressOf(ask) > progressOf(held)) chosen.set(askKey(ask), ask);
   }
   const kept = [...chosen.values()].sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
-  if (kept.filter(isOpenCardAsk).length > MAX_AGENDA_CARD_ASKS) {
+  if (kept.length > MAX_AGENDA_CARD_ASKS) {
     return {
       kind: 'refused',
       code: 'full',
-      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} open card asks: answer some first`,
+      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} card asks, answered or not: nothing is dropped to fit`,
     };
   }
   const waitingOn = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] =>

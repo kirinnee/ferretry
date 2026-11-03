@@ -166,6 +166,27 @@ describe('joining card asks onto an item (the pure half)', () => {
     should(notice).match({ kind: 'refused', code: 'invalid' });
   });
 
+  it('refuses answered asks past what one agenda carries too, and drops no answer or receipt to fit', () => {
+    // Arrange — all answered: 18 would not fit, and no receipt may be the one that goes; exactly 16 fit
+    const half = Math.ceil((MAX_AGENDA_CARD_ASKS + 1) / 2);
+    const mine = Array.from({ length: half }, (_, index) => answered(`F${String(index + 1)}`, index));
+    const theirs = Array.from({ length: half }, (_, index) => answered(`F${String(index + 100)}`, index));
+    const exactly = Array.from({ length: MAX_AGENDA_CARD_ASKS - half }, (_, index) =>
+      answered(`F${String(index + 200)}`, index),
+    );
+
+    // Act
+    const over = joinCardAsks(thread({ cardAsks: mine }), theirs, minute(10), stage);
+    const at = joinCardAsks(thread({ cardAsks: mine }), exactly, minute(10), stage);
+
+    // Assert
+    should(over).match({ kind: 'refused', code: 'full' });
+    should(at).match({ kind: 'moved' });
+    should(at.kind === 'moved' ? at.into.cardAsks?.filter(each => each.answer !== undefined) : []).have.length(
+      MAX_AGENDA_CARD_ASKS,
+    );
+  });
+
   it('wakes an item off the owner’s turn into Needs you, at the ask’s stage, remembering the turn it ended', () => {
     // Arrange — a resting thread takes an ask still waiting on the owner
     const into = resting();
@@ -443,7 +464,7 @@ describe('a merge carries card asks', () => {
     should(kept.cardAsks?.[0]?.woke).match({ resting: { sub: 'working' } });
   });
 
-  it('refuses a merge that would carry more open asks than one agenda does, and writes nothing', () => {
+  it('refuses a merge that would carry more asks than one agenda does, and writes nothing', () => {
     // Arrange
     const half = Math.ceil((MAX_AGENDA_CARD_ASKS + 1) / 2);
     const ledger = twoThreads(

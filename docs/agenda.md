@@ -701,7 +701,7 @@ each other (`mergedFrom` on A2, `mergedInto` on A5), A5's versions kept.
   the one the owner got further with (an answer, then a Not yet), else A2's own. Every receipt is kept.
 - **Still asking.** An ask still waiting on the owner does to A2 what putting it there does: a resting or snoozed A2
   wakes into Needs you, at stage `test` or `plan`.
-- **Refused.** More open asks than one agenda carries (16), or an A2 that cannot carry a card's ask (an input, a
+- **Refused.** More asks than one agenda carries (16 in all, answered or not: no answer or receipt is dropped to fit), or an A2 that cannot carry a card's ask (an input, a
   confirmation, a task plan, …).
 - **Answering.** The owner answers the ask on A2 as before: owner only, the card moves first, the same receipt and
   replay. An answer that names its ask (`cardAsk`) but reaches A5, from a screen that still shows it, is answered on

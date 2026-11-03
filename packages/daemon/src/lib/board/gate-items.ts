@@ -316,15 +316,21 @@ const followed = (answer: GateAnswer, items: readonly (AgendaItem | ResolvedAgen
     const item = items.find(each => each.id === id);
     return item !== undefined && cardAskOf(item, reference) !== undefined;
   };
-  // Each hop is to another item, so a path longer than the agenda is a loop, and the answer stays where it was.
-  let id = answer.id;
-  for (let hop = 0; hop < items.length && !carries(id); hop += 1) {
-    const item = items.find(each => each.id === id);
-    const next = item?.mergedInto ?? item?.splitInto?.find(carries);
-    if (next === undefined) return answer;
-    id = next;
+  if (carries(answer.id)) return answer;
+  // Merges and splits can chain (a split child that split again), so every item reached is visited once: a loop ends
+  // when nothing new is left, and the answer stays where it was.
+  const seen = new Set<AgendaId>([answer.id]);
+  const queue: AgendaId[] = [answer.id];
+  for (const from of queue) {
+    const item = items.find(each => each.id === from);
+    for (const next of item?.mergedInto !== undefined ? [item.mergedInto] : (item?.splitInto ?? [])) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      if (carries(next)) return { ...answer, id: next };
+      queue.push(next);
+    }
   }
-  return id === answer.id || !carries(id) ? answer : { ...answer, id };
+  return answer;
 };
 
 /** Whether the answer is to a card ask at all: it names one, or says it picks the shown one's option. */
@@ -496,16 +502,36 @@ export class GateItems implements CardWriteObserver {
                 response: answer.response,
                 ...(decision.note === null ? {} : { note: decision.note }),
                 receipt,
+                // The version of the ask on the screen the owner answered from, kept as given even when the ask has
+                // since moved to another item (a merge, a split): it is what they saw, and nothing checks it here.
                 ...(answer.askVersion === undefined ? {} : { askVersion: answer.askVersion }),
               },
             };
-      const mutation = await this.ports.agenda.cardAsk(answer.sessionId, answer.id, operation);
-      if (mutation.ok && decision.kind === 'option') await this.tellAnswered(card.task, gate, decision, answer);
+      const { mutation, carrier } = await this.record(answer, operation);
+      if (mutation.ok && decision.kind === 'option') await this.tellAnswered(card.task, gate, decision, carrier);
       return { handled: true, mutation };
     } finally {
       this.answering.delete(card.task.id);
       await this.written(card.task.id);
     }
+  }
+
+  /**
+   * Records the operation on the item the answer reached. The card has moved by now, so an item merged or split since
+   * (the ask went with it) is not a reason to lose the answer: its carrier is looked for again, and the operation goes
+   * there. Returns the answer as addressed to where it was recorded.
+   */
+  private async record(
+    answer: GateAnswer,
+    operation: CardAskOperation,
+  ): Promise<{ readonly mutation: AgendaMutation; readonly carrier: GateAnswer }> {
+    const mutation = await this.ports.agenda.cardAsk(answer.sessionId, answer.id, operation);
+    if (mutation.ok || mutation.error.code !== 'not-found') return { mutation, carrier: answer };
+    const listed = await this.ports.agenda.list(answer.sessionId).catch(() => undefined);
+    if (listed === undefined || !listed.ok) return { mutation, carrier: answer };
+    const carrier = followed(answer, [...listed.value.items, ...listed.value.resolved]);
+    if (carrier.id === answer.id) return { mutation, carrier: answer };
+    return { mutation: await this.ports.agenda.cardAsk(carrier.sessionId, carrier.id, operation), carrier };
   }
 
   /**
@@ -767,8 +793,11 @@ export class GateItems implements CardWriteObserver {
           )
             asked.add(cardAskReference(ask));
         }
+        // Not yet is written as an answer too, but leaves its ask open: when the thread is then set aside the ask is put
+        // again, so a line for an ask the item itself still shows open is not an answer.
+        const stillOpen = new Set((item.cardAsks ?? []).filter(isOpenCardAsk).map(cardAskReference));
         for (const reference of gatesAnsweredOn(item)) {
-          if (parseGateReference(reference)?.cardId === cardId) asked.add(reference);
+          if (parseGateReference(reference)?.cardId === cardId && !stillOpen.has(reference)) asked.add(reference);
         }
         if (item.resolvedBy === 'human' && item.gate !== undefined && item.gate.cardId === cardId) {
           asked.add(gateReference(item.gate));
