@@ -1348,6 +1348,27 @@ describe('Clone from a machine that may have been broken into', () => {
     should(plan.model.profiles.default).deepEqual({ layers: ['instructions/main'] });
   });
 
+  it('should land a copied document outside a folder an item here owns, not inside it', () => {
+    // Arrange: a hook here owns components/shared; the copy's document would be components/shared/README.md.
+    const bundle = bundleWith({
+      components: { instructions: { main: { file: 'components/shared/README.md' } } },
+      profiles: { default: { layers: ['instructions/main'] } },
+      files: [{ path: 'components/shared/README.md', content: '# Main' }],
+    });
+    const target = parseAccountModel({
+      version: 2,
+      components: { hooks: { mine: { harness: 'claude', directory: 'components/shared' } } },
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.instructions.main?.file).equal('components/shared-2/README.md');
+    should(plan.model.components.hooks.mine?.directory).equal('components/shared');
+    should(plan.files).deepEqual([{ path: 'components/shared-2/README.md', content: '# Main' }]);
+  });
+
   it('should keep a profile entry that is not a layer list as it is, for the model check to judge', () => {
     // Arrange
     const bundle = bundleWith({

@@ -1169,6 +1169,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   const runtimes: Record<string, Runtime> = { ...target.runtimes };
   const credentials: Record<string, Credential> = { ...target.credentials };
   const usedFiles = referencedFiles(target);
+  for (const entry of itemsOfModel(target)) for (const owned of ownedHere(entry)) usedFiles.add(owned.path);
   // Where the review moved a taken item off a shared path is spoken for before anything new is placed.
   for (const item of analysis.items) for (const moved of item.relocated?.values() ?? []) usedFiles.add(moved);
   const theirContents = new Map(bundle.files.map(file => [plain(file.path), file.content]));

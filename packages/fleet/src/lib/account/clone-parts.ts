@@ -52,7 +52,33 @@ export function bundleModel(bundle: FleetCloneBundle, sourceName: string): Accou
   }
 }
 
-/** The file a renamed component's document moves to, never one the target already uses. */
+/** Whether two asset paths are the same or one sits inside the other, by whole path segments. */
+export function pathsOverlap(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+/**
+ * Whether a destination is free: it is not a path another item here owns, does not sit inside a folder one
+ * owns, and does not cover one. `used` holds both documents and folders, so one rule serves both.
+ */
+const isFree = (used: ReadonlySet<string>, candidate: string): boolean =>
+  ![...used].some(path => pathsOverlap(candidate, path));
+
+/**
+ * Beside the outermost owned folder that holds `path`, or undefined when none does. Inside an owned folder no
+ * sibling name escapes it, so the destination steps out next to that folder and keeps the rest of the path.
+ */
+function outsideOwner(path: string, used: ReadonlySet<string>): string | undefined {
+  const outer = [...used].filter(owned => path.startsWith(`${owned}/`)).toSorted((a, b) => a.length - b.length)[0];
+  if (outer === undefined) return undefined;
+  const rest = path.slice(outer.length);
+  return `${freeName(outer, candidate => !isFree(used, `${candidate}${rest}`))}${rest}`;
+}
+
+/**
+ * The file a renamed component's document moves to, never a path another item here owns: not the same file,
+ * not one inside a folder an item owns, and not a folder that would cover a file an item owns.
+ */
 export function movedFile(file: string, from: string, to: string, used: ReadonlySet<string>): string {
   if (!isAssetRelative(file)) return file;
   const dot = file.lastIndexOf('.');
@@ -60,27 +86,20 @@ export function movedFile(file: string, from: string, to: string, used: Readonly
   const stem = dot > slash ? file.slice(0, dot) : file;
   const extension = dot > slash ? file.slice(dot) : '';
   const renamedStem = from !== to && stem.endsWith(`/${from}`) ? `${stem.slice(0, -from.length)}${to}` : stem;
-  const freeStem = freeName(renamedStem, candidate => used.has(`${candidate}${extension}`));
-  return `${freeStem}${extension}`;
-}
-
-/** Whether two asset paths are the same or one sits inside the other, by whole path segments. */
-export function pathsOverlap(a: string, b: string): boolean {
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  const renamed = `${renamedStem}${extension}`;
+  if (isFree(used, renamed)) return renamed;
+  const outside = outsideOwner(renamed, used);
+  if (outside !== undefined) return outside;
+  return `${freeName(renamedStem, candidate => !isFree(used, `${candidate}${extension}`))}${extension}`;
 }
 
 /** The folder a renamed component's scripts move to, never one that overlaps a path the target already uses. */
 export function movedFolder(folder: string, from: string, to: string, used: ReadonlySet<string>): string {
-  const clashes = (candidate: string): boolean => [...used].some(path => pathsOverlap(candidate, path));
-  if (!clashes(folder)) return folder;
-  // Inside a folder the target uses, no sibling name escapes it: step out beside that outermost folder.
-  const outer = [...used].filter(path => folder.startsWith(`${path}/`)).toSorted((a, b) => a.length - b.length)[0];
-  if (outer !== undefined) {
-    const rest = folder.slice(outer.length);
-    return `${freeName(outer, candidate => clashes(`${candidate}${rest}`))}${rest}`;
-  }
+  if (isFree(used, folder)) return folder;
+  const outside = outsideOwner(folder, used);
+  if (outside !== undefined) return outside;
   const renamed = from !== to && folder.endsWith(`/${from}`) ? `${folder.slice(0, -from.length)}${to}` : folder;
-  return freeName(renamed, clashes);
+  return freeName(renamed, candidate => !isFree(used, candidate));
 }
 
 /** Where a carried file lands when a folder above it moved, or undefined when none did. */

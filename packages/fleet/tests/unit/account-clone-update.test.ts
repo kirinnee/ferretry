@@ -18,7 +18,7 @@ import {
   cloneOriginKeys,
   EMPTY_CLONE_BASE,
 } from '../../src/lib/account/clone-base.ts';
-import { CloneRefusal } from '../../src/lib/account/clone-parts.ts';
+import { CloneRefusal, movedFile, movedFolder } from '../../src/lib/account/clone-parts.ts';
 import { COMPONENT_KINDS, parseAccountModel } from '../../src/lib/account/schema.ts';
 
 const KEY_MAIN = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -1290,6 +1290,135 @@ describe('a taken item never writes a path another item here uses (#F544 finding
     should(plan.files).eql([{ path: 'skills/own/SKILL.md', content: 'own, changed' }]);
     should(plan.keptSkillItems).eql(['review']);
     should(plan.removals).eql([]);
+  });
+});
+
+describe('a moved path respects folder ownership both ways (#F544 finding 1, ancestors)', () => {
+  const folder = 'components/shared';
+  const readme = `${folder}/README.md`;
+  const sourceOf = (readmeContent: string) =>
+    sourceBundle({
+      keys: { 'hooks/h': KEY_A, 'instructions/i': KEY_B },
+      components: {
+        hooks: { h: { harness: 'claude', directory: 'components/hooks/h' } },
+        instructions: { i: { file: readme } },
+      },
+      files: [
+        { path: 'components/hooks/h/run.sh', content: 'run' },
+        { path: readme, content: readmeContent },
+      ],
+    });
+  const targetWith = (hookDirectory = folder) =>
+    parseAccountModel({
+      version: 2,
+      components: {
+        hooks: { h: hooksAt(hookDirectory, KEY_A) },
+        instructions: { i: { file: readme, ...FROM, clonedFromKey: KEY_B } },
+      },
+    });
+
+  it.each([
+    ['hidden as the same', 'run', {}],
+    ['kept after a both-changed review', 'edited', { 'hooks/h': 'keep' as const }],
+  ])('should land a taken document outside a hook folder here that is %s', (_name, mine, extra) => {
+    // Arrange: the hook folder is components/shared; the taken document's path sits inside it.
+    const bundle = sourceOf('new');
+    const analysis = analyseCloneUpdate(bareInput(bundle, targetWith(), [{ path: `${folder}/run.sh`, content: mine }]));
+
+    // Act
+    const plan = planCloneUpdate(analysis, { decisions: { 'instructions/i': 'take', ...extra } });
+
+    // Assert: nothing is written inside the folder, and the hook's bytes and folder are as they were.
+    const written = plan.files.map(file => file.path);
+    should(written.some(path => path === folder || path.startsWith(`${folder}/`))).be.false();
+    should(written).containEql('components/shared-2/README.md');
+    should(plan.model.components.instructions.i?.file).equal('components/shared-2/README.md');
+    should(plan.model.components.hooks.h?.directory).equal(folder);
+    should(plan.removals).eql([]);
+  });
+
+  it('should land a taken document outside a hook folder here that has changed here since the last copy', () => {
+    // Arrange: the record says the hook folder was run; here it is edited, and the source did not change it.
+    const old = sourceOf('old');
+    const base = applyCloneToBase(EMPTY_CLONE_BASE, {
+      source: SOURCE,
+      at: AT,
+      replace: true,
+      copied: cloneBaseEntries(old, old, new Map()),
+      sourceKeys: new Set(cloneOriginKeys(old).values()),
+      model: targetWith(),
+    });
+    const bundle = sourceOf('newer');
+    const analysis = analyseCloneUpdate(
+      bareInput(bundle, targetWith(), [{ path: `${folder}/run.sh`, content: 'edited here' }], {
+        base: base.sources[SOURCE.id],
+      }),
+    );
+
+    // Act
+    const plan = planCloneUpdate(analysis, { decisions: { 'instructions/i': 'take' } });
+
+    // Assert
+    should(plan.files.map(file => file.path)).eql(['components/shared-2/README.md']);
+    should(plan.model.components.hooks.h?.directory).equal(folder);
+  });
+
+  it('should land a new folder beside a document another item here owns, never over it', () => {
+    // Arrange: an item here owns components/shared/README.md; the source's new hook wants components/shared.
+    const bundle = sourceBundle({
+      keys: { 'hooks/n': KEY_A },
+      components: { hooks: { n: { harness: 'claude', directory: folder } } },
+      files: [{ path: `${folder}/run.sh`, content: 'run' }],
+    });
+    const target = parseAccountModel({
+      version: 2,
+      components: { instructions: { own: { file: readme } } },
+    });
+    const analysis = analyseCloneUpdate(bareInput(bundle, target, [{ path: readme, content: 'mine' }]));
+
+    // Act
+    const plan = planCloneUpdate(analysis, { decisions: { 'hooks/n': 'add' } });
+
+    // Assert
+    should(plan.model.components.hooks.n?.directory).equal('components/shared-2');
+    should(plan.files).eql([{ path: 'components/shared-2/run.sh', content: 'run' }]);
+    should(plan.model.components.instructions.own?.file).equal(readme);
+  });
+});
+
+describe('movedFile and movedFolder choose a destination no owned path touches', () => {
+  const none = new Set<string>();
+
+  it('should leave a free folder where it is and keep a free document on its renamed stem', () => {
+    should(movedFolder('components/hooks/a', 'a', 'b', none)).equal('components/hooks/a');
+    should(movedFile('components/instructions/a.md', 'a', 'b', none)).equal('components/instructions/b.md');
+  });
+
+  it('should refuse an exact file collision with a numbered sibling', () => {
+    const used = new Set(['components/instructions/x.md']);
+    should(movedFile('components/instructions/x.md', 'x', 'x', used)).equal('components/instructions/x-2.md');
+  });
+
+  it('should step a document out of an owned folder, not number it inside', () => {
+    const used = new Set(['components/shared']);
+    should(movedFile(`components/shared/README.md`, 'README', 'README', used)).equal('components/shared-2/README.md');
+  });
+
+  it('should step out beside the outermost owned folder and skip names already taken', () => {
+    const used = new Set(['components/shared', 'components/shared-2', 'components/shared/deep']);
+    should(movedFile('components/shared/deep/a.md', 'a', 'a', used)).equal('components/shared-3/deep/a.md');
+    should(movedFolder('components/shared/deep/x', 'x', 'x', used)).equal('components/shared-3/deep/x');
+  });
+
+  it('should not number a document into the folder that holds a file it would cover', () => {
+    // A document named like an owned folder is renumbered; it is never an ancestor of an owned path.
+    const used = new Set(['components/shared/run.sh']);
+    should(movedFile('components/shared', 'shared', 'shared', used)).equal('components/shared-2');
+  });
+
+  it('should number a folder that would cover an owned document', () => {
+    const used = new Set(['components/shared/README.md']);
+    should(movedFolder('components/shared', 'shared', 'shared', used)).equal('components/shared-2');
   });
 });
 
