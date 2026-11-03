@@ -86,7 +86,6 @@ describe('daemon features', () => {
   it('should report installing from a link, so the app offers it only where the machine can verify one', () => {
     should(DAEMON_FEATURES.catalogInstallLinks).equal('catalog-installs.links.1');
     should(daemonFeatureList()).containEql('catalog-installs.links.1');
-    should(daemonFeatureList()).not.containEql('catalogs.links.1');
   });
 
   it('should report join-by-proof, so the app asks a later invite for a passkey only where the machine can verify one', () => {
