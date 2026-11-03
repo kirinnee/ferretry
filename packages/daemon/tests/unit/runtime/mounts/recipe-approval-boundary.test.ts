@@ -208,7 +208,7 @@ async function machine(
     should(options.status).equal(200);
     should((await ask('POST', '/v1/step-up', assertionBody)).status).equal(200);
   };
-  return { ...world, ask, fromHost, unlock, prove };
+  return { ...world, ask, fromHost, unlock, prove, service };
 }
 
 const codeOf = (response: { body: string }): string | undefined =>
@@ -245,6 +245,69 @@ for (const spelling of spellings) {
       // Assert
       should(approved.status).equal(200);
       should(await world.recipeOf()).equal('Open site.example, then the 2FA page');
+    });
+
+    it('should spend the ordinary step-up with the approval, so a zero-minute window buys exactly one act', async () => {
+      // Arrange
+      const world = await machine(PER_ACTION);
+      await world.unlock();
+      await world.prove(A);
+      const approved = await world.ask('POST', spelling.path(world, A), APPROVE);
+      const heldAfterApproval = world.service.held(phone);
+
+      // Act
+      const ordinary = await world.ask('PUT', `/v1/accounts/sign-ins/${world.signIn.id}`, {
+        recipe: 'Changed without another ceremony',
+      });
+
+      // Assert
+      should([approved.status, heldAfterApproval, ordinary.status]).deepEqual([200, false, 403]);
+      should(await world.recipeOf()).equal('Open site.example, then the 2FA page');
+    });
+
+    it('should leave the held step-up untouched when the claim names the wrong proposal', async () => {
+      // Arrange
+      const world = await machine(PER_ACTION);
+      await world.unlock();
+      await world.prove(A);
+
+      // Act
+      const wrong = await world.ask('POST', spelling.path(world, B), APPROVE);
+
+      // Assert
+      should(wrong.status).equal(403);
+      should(world.service.held(phone)).equal(true);
+    });
+
+    it('should leave the held step-up untouched when the answer is a decline', async () => {
+      // Arrange
+      const world = await machine(PER_ACTION);
+      await world.unlock();
+      await world.prove(A);
+
+      // Act
+      const decline = await world.ask('POST', spelling.path(world, A), DECLINE);
+
+      // Assert
+      should(decline.status).equal(200);
+      should(world.service.held(phone)).equal(true);
+    });
+
+    it('should not break the ordinary operations that follow, inside a positive window', async () => {
+      // Arrange
+      const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 15 });
+      await world.unlock();
+      await world.prove(A);
+
+      // Act
+      const approved = await world.ask('POST', spelling.path(world, A), APPROVE);
+      const ordinary = await world.ask('PUT', `/v1/accounts/sign-ins/${world.signIn.id}`, {
+        recipe: 'Changed inside the window',
+      });
+
+      // Assert
+      should([approved.status, ordinary.status]).deepEqual([200, 200]);
+      should(world.service.held(phone)).equal(true);
     });
 
     it('should ask for the proof, naming the proposal, when none was proved', async () => {

@@ -325,7 +325,11 @@ function recipeProofRefusal(
   proposal: LoginRecipeProposalId,
 ): ApiResponse | undefined {
   if (answer.decision !== 'approve' || context.governance?.governed !== true) return undefined;
-  if (context.claimFreshStepUp?.(STEP_UP_ACTS.approveRecipe, proposal) === true) return undefined;
+  if (context.claimFreshStepUp?.(STEP_UP_ACTS.approveRecipe, proposal) === true) {
+    // The ceremony also left an ordinary held step-up; a zero-minute window means one confirmation buys one act.
+    context.spendStepUp?.();
+    return undefined;
+  }
   return jsonResponse(
     {
       error: 'approving a sign-in recipe needs a passkey confirmation for it, from this device',
