@@ -323,7 +323,8 @@ grow with the conversation. Transaction-local `archivePending` records are appen
 ledger is atomically written without them. A temporary `agenda-history.jsonl.pending` journal records the byte
 offset and next append; recovery completes a torn append, including a split UTF-8 character, on the next write or the next history read (which
 queues behind writers), so a crash never leaves the history unreadable. If the ledger's
-cursor lags a completed append, matching records in that suffix are reused once. The generic append mechanism
+cursor lags a completed append, only a retry's leading matching records are reused (once); the rest of the
+uncommitted tail is cut, and history reads stop at the committed cursor. The generic append mechanism
 can also hold later versions. Existing in-ledger `ownerHistory` records move here on the next transaction,
 including an unchanged one, with the same replay protection.
 
@@ -1219,8 +1220,10 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
 - **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
 - **The ledger says its shape** (`version`, 2 since the channel): it is read as 1 when absent and brought to 2 as it
   is read ([the migration](#the-migration-ledger-version-2)). An older daemon reads a version-2 file as it always did
-  and drops the fields it does not know (`resting`, `stage`, `ownerAnswer`…) on its next write; its `parked: replied`
-  still says the item rests, so the next upgrade rests it again.
+  and drops the fields it does not know (`resting`, `stage`, `ownerAnswer`…) on its next write, and with them the `archive` cursor and the `version`; its
+  `parked: replied` still says the item rests, so the next upgrade rests it again. The sidecar is left alone, and a
+  ledger that reads as version 1 with no cursor is upgraded by adopting the sidecar's complete lines as committed
+  history (the cursor covers them), so no owner history is lost across a downgrade and an upgrade.
 - Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
   one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same

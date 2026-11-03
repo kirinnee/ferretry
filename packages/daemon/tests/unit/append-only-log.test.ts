@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type AppendOnlyFiles, appendLogRecords } from '../../src/lib/append-only-log.ts';
+import { type AppendOnlyFiles, appendLogRecords, completeLinesCursor } from '../../src/lib/append-only-log.ts';
 
 class MemoryLog implements AppendOnlyFiles {
   readonly documents = new Map<string, string>();
@@ -105,6 +105,13 @@ describe('an append-only log', () => {
       bytes: Buffer.byteLength(text),
       count: 1,
     });
+  });
+
+  it('should cover exactly the complete lines of a log when no cursor was kept, leaving a torn last line out', () => {
+    const text = Buffer.from('{"a":"雪"}\n{"b":1}\n{"c":');
+    should(completeLinesCursor(text)).deepEqual({ bytes: Buffer.byteLength('{"a":"雪"}\n{"b":1}\n'), count: 2 });
+    should(completeLinesCursor(Buffer.from('{"torn":'))).deepEqual({ bytes: 0, count: 0 });
+    should(completeLinesCursor(new Uint8Array())).deepEqual({ bytes: 0, count: 0 });
   });
 
   it('should fail closed on a corrupt journal or tail without discarding any bytes', async () => {

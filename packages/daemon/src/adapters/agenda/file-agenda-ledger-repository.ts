@@ -10,7 +10,12 @@ import {
   isAgendaSessionId,
   parseAgendaLedger,
 } from '../../lib/agenda/index.ts';
-import { type AppendOnlyFiles, appendLogRecords, recoverLogAppend } from '../../lib/append-only-log.ts';
+import {
+  type AppendOnlyFiles,
+  appendLogRecords,
+  completeLinesCursor,
+  recoverLogAppend,
+} from '../../lib/append-only-log.ts';
 import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
 import { FileAgendaFileStore } from './file-agenda-file-store.ts';
 
@@ -86,7 +91,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
       const ledger = deepFreezeJson(
-        this.parse(sessionId, name, read.text) as unknown as JsonValue,
+        (await this.parse(sessionId, name, read.text)) as unknown as JsonValue,
       ) as unknown as AgendaLedger;
       this.cache.delete(sessionId);
       for (const oldest of this.cache.keys()) {
@@ -100,14 +105,23 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return null;
   }
 
-  private parse(sessionId: string, name: string, text: string): AgendaLedger {
+  private async parse(sessionId: string, name: string, text: string): Promise<AgendaLedger> {
+    let ledger: AgendaLedger | null;
+    let rewrittenByOlderDaemon: boolean;
     try {
-      const ledger = parseAgendaLedger(JSON.parse(text), sessionId);
+      const raw: unknown = JSON.parse(text);
+      ledger = parseAgendaLedger(raw, sessionId);
       if (ledger === null) throw new Error('invalid ledger');
-      return ledger;
+      const version = (raw as { readonly version?: unknown }).version;
+      rewrittenByOlderDaemon = version === undefined || version === 1;
     } catch {
       throw new InvalidAgendaLedgerError(this.files.file(sessionId, name));
     }
+    // An older daemon's write drops the cursor and the version but leaves the sidecar: its complete lines are
+    // the history it was keeping, so they are adopted as committed rather than cut as an uncommitted tail.
+    if (!rewrittenByOlderDaemon || ledger.archive !== undefined) return ledger;
+    const adopted = completeLinesCursor(await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0));
+    return adopted.count === 0 ? ledger : { ...ledger, archive: adopted };
   }
 
   async transact(sessionId: string, apply: (current: AgendaLedger | null) => AgendaMutation): Promise<AgendaMutation> {

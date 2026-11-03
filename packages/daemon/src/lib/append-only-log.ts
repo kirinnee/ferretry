@@ -74,3 +74,9 @@ export async function appendLogRecords(
   }
   return { bytes: bytes + new TextEncoder().encode(text).length, count: cursor.count + lines.length };
 }
+
+/** The cursor that covers every complete line of `bytes`: a log's committed extent when no cursor was ever kept. */
+export function completeLinesCursor(bytes: Uint8Array): { readonly bytes: number; readonly count: number } {
+  const end = bytes.lastIndexOf(0x0a) + 1;
+  return { bytes: end, count: bytes.subarray(0, end).filter(byte => byte === 0x0a).length };
+}
