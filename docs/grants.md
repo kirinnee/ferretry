@@ -352,7 +352,10 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) Â
    "They need a new passkey" on an invite ([catalogs.md](catalogs.md#lost-devices-they-need-a-new-passkey)):
    `PUT /v1/catalog-shares/:shareId/new-passkey` is `sharing.use` for a person caller only (a ferret is refused) and,
    because it widens who a code can add, takes a fresh `share-catalog` passkey from a governed caller, claimed like
-   a mint's. `DELETE` on the same path only narrows, so it takes no step-up. The mint accepts an optional
+   a mint's. `DELETE` on the same path only narrows, so it takes no step-up. The mint, the mark and every route that
+   only takes access away (ending a share, revoking a person, removing a browser or a catalog) ask the grant and the
+   unlock at the door as a [narrowing](#narrowing-never-asks-again) demand; the mint and the mark then claim their
+   `share-catalog` proof themselves, so a zero-minute step-up window cannot spend it first. The mint accepts an optional
    `newPasskey` under the same step-up it already needs, and its answer carries an optional `noPasskeyLeft` that
    only pre-ticks the app's box; no route sets the mark by itself. A later join of an existing person proves one of
    their passkeys over the sealed `join-options`/`join` records, which are no route and carry no grant

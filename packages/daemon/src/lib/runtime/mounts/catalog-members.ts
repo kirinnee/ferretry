@@ -7,8 +7,9 @@
  * hand a stranger every skill and MCP setup on this machine.
  *
  * MINTING ADDS ACCESS, so a governed caller proves a fresh passkey for the act `share-catalog` alone, claimed
- * atomically (a replayed proof is refused) exactly as a catalog install claims its own. Ending, revoking and
- * removing only take access away and ask for nothing.
+ * atomically (a replayed proof is refused) exactly as a catalog install claims its own. The mint and the "new
+ * passkey" mark are the `narrowing` boundary demand (below) so the boundary cannot spend that proof first.
+ * Ending, revoking and removing only take access away and ask for nothing: they are `narrowing` too.
  *
  * THE CODE AND THE LINK LEAVE THIS MACHINE IN ONE ANSWER: the mint's. Nothing else here can return either —
  * the list view has no field for one, and the audit decorator reads only the named response fields.
@@ -40,6 +41,13 @@ import {
 import type { CatalogMemberService } from '../../catalog-members/service.ts';
 
 const SHARING_USE: CapabilityDemand = { capability: 'sharing', axis: 'use' };
+/**
+ * What the routes that mint, mark or take access away demand at the boundary: the grant, the device and the unlock,
+ * and NOT a generic per-action proof. The boundary cannot tell a widening from a narrowing, and with a zero-minute
+ * step-up window it would spend the held proof before the handler claims the fresh `share-catalog` one that a mint
+ * or the mark needs, so that act could never succeed; the handler asks that itself. Removing access asks nothing more.
+ */
+const SHARING_NARROWING: CapabilityDemand = { ...SHARING_USE, narrowing: true };
 
 export interface CatalogMemberSubsystem {
   readonly members: Pick<
@@ -144,7 +152,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-shares',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'share a catalog');
@@ -161,7 +169,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-shares/:shareId/new-passkey',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'approve a new passkey for an invite');
@@ -176,7 +184,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-shares/:shareId/new-passkey',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'take back the approval of a new passkey');
@@ -198,7 +206,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-shares/:shareId',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'end a share');
@@ -237,7 +245,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-members/:memberId',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'remove a person');
@@ -250,7 +258,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-members/:memberId/keys/:keyId',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, "remove a person's browser");
@@ -264,7 +272,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-members/:memberId/catalogs/:catalogId',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'take a catalog away from a person');
