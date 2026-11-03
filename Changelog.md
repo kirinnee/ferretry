@@ -1,3 +1,10 @@
+## [4.253.0](https://github.com/kirinnee/ferretry/compare/v4.252.1...v4.253.0) (2026-11-03)
+
+### Features
+
+* **relay:** bind the hosted link store behind the relay origin ([#1396](https://github.com/kirinnee/ferretry/issues/1396)) ([f59c89d](https://github.com/kirinnee/ferretry/commit/f59c89df398c395c6166349d2f7682ac0b90ee3e))
+* **send:** paste short peer messages whole instead of a turn-file pointer ([#1398](https://github.com/kirinnee/ferretry/issues/1398)) ([e6cbe0f](https://github.com/kirinnee/ferretry/commit/e6cbe0f472fc7b5c3a7b78e03f22349c912a9e00))
+
 ## [4.252.1](https://github.com/kirinnee/ferretry/compare/v4.252.0...v4.252.1) (2026-11-03)
 
 ### Fixes
