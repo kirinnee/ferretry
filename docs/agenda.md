@@ -75,7 +75,7 @@ Open a new agenda only when none passes the test:
   lines stay, the new ask is added to them, and the premise and context are the union of both. An item the owner
   replied to is brought back by the same edit with `--back --summary '<the new ask>'`, the old subject kept as a
   still-open line. A **structured ask** (options, an approval, a form, questions, steps, a body, `--blocking`,
-  `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different card) is never squeezed in:
+  `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different card, `--offer-close` onto an agenda that does not already offer the Done button) is never squeezed in:
   the listing says what would be lost and the safe way out, `--new "<why none fits; closest is !A7>"`.
 - **`--new` bypasses the refusal, not the listing.** With `--new "<why>"` the same search runs and the same list is
   printed (to stderr, so `--json` still prints the raised item on stdout), ending "Opening a new agenda anyway: <why>";

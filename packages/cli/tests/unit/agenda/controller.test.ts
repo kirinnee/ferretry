@@ -6,16 +6,16 @@ import {
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
 import should from 'should';
-import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
 import { AgendaController } from '../../../src/lib/agenda/controller';
+import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
 import type { IAgendaCardTies } from '../../../src/lib/agenda/ports';
 import { RelatedCheck } from '../../../src/lib/work-search/related';
 import {
   agendaHit,
-  CapturingOutput as WorkSearchOutput,
   FakeWorkSearchGateway,
   LIZZETTE,
   response,
+  CapturingOutput as WorkSearchOutput,
 } from '../work-search/fixtures';
 import {
   agentItem,
@@ -1144,6 +1144,51 @@ describe('agenda controller add — related work', () => {
     should(gateway.applied).have.length(1);
     should(out.diagnostics[0]).containEql('&F14  ← carries &F14, which depends on &F12');
     should(out.diagnostics[0]).containEql('Opening a new agenda anyway: its own decision');
+  });
+
+  it('should not join an ask for the Done button into an agenda that lacks it, and show --new instead of an edit', async () => {
+    // Arrange — !A7 carries the card but does not offer to close it; the new ask wants the Done button.
+    const board = snapshot([raised('A7', 'ship the cache', { task: { id: 'F12' } } as never)]);
+    const { controller, gateway } = withCheck([], board);
+    gateway.offered = [DAEMON_FEATURES.agendaTask, DAEMON_FEATURES.agendaOfferClose];
+
+    // Act
+    const failure = await controller
+      .add(['choose', 'a', 'relay'], { ...brief, task: 'F12', offerClose: true })
+      .catch((error: unknown) => error);
+
+    // Assert
+    const message = (failure as Error).message;
+    should(gateway.applied).eql([]);
+    should(message).containEql('the Done button (--offer-close)');
+    should(message).containEql('--new "<why none fits; closest is !A7>"');
+    should(message).not.containEql('fy agenda edit A7');
+  });
+
+  it('should join an ask for the Done button into an agenda that already offers it, and into any when it is not asked', async () => {
+    // Arrange
+    const offering = snapshot([raised('A7', 'ship the cache', { task: { id: 'F12' }, offerClose: true } as never)]);
+    const plain = snapshot([raised('A7', 'ship the cache', { task: { id: 'F12' } } as never)]);
+    const withOffer = withCheck([], offering);
+    const without = withCheck([], plain);
+    withOffer.gateway.offered = [DAEMON_FEATURES.agendaTask, DAEMON_FEATURES.agendaOfferClose];
+    without.gateway.offered = [DAEMON_FEATURES.agendaTask];
+
+    // Act
+    const joined = await withOffer.controller
+      .add(['choose', 'a', 'relay'], { ...brief, task: 'F12', offerClose: true })
+      .catch((error: unknown) => error);
+    const unasked = await without.controller
+      .add(['choose', 'a', 'relay'], { ...brief, task: 'F12' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    for (const failure of [joined, unasked]) {
+      should((failure as Error).message).containEql('fy agenda edit A7');
+      should((failure as Error).message).not.containEql('Done button');
+    }
+    should(withOffer.gateway.applied).eql([]);
+    should(without.gateway.applied).eql([]);
   });
 
   it('should not list what a ferret cannot add to: the owner’s items, notices, gates and held changes', async () => {

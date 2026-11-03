@@ -216,6 +216,23 @@ describe('agenda candidates', () => {
     ]);
   });
 
+  it('should not join an ask for the Done button into an agenda that does not offer it', () => {
+    // Arrange
+    const [plain] = agendaCandidates([agentItem('A2', 'relay')], query);
+    const [offering] = agendaCandidates([{ ...agentItem('A3', 'relay'), offerClose: true as const }], query);
+    const asked = { ...request, offerClose: true as const };
+
+    // Act
+    const refused = plain && joinPlan('fy', plain, asked);
+    const joined = offering && joinPlan('fy', offering, asked);
+    const unasked = plain && joinPlan('fy', plain, request);
+
+    // Assert
+    should(refused).eql({ kind: 'new', carries: ['the Done button (--offer-close)'] });
+    should(joined?.kind).equal('edit');
+    should(unasked?.kind).equal('edit');
+  });
+
   it('should answer a structured ask with the safe way out that names the closest agenda', () => {
     // Arrange
     const [candidate] = agendaCandidates([agentItem('A2', 'relay')], query);

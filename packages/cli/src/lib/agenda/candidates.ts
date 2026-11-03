@@ -1,9 +1,9 @@
 import {
   type AgendaActionRequest,
   type AgendaCardAnswer,
-  agendaCardAnswers,
   type AgendaId,
   type AgendaItem,
+  agendaCardAnswers,
   formatTaskRef,
   type TaskRef,
   type WorkRelatedResponse,
@@ -258,6 +258,7 @@ function beyondEdit(candidate: AgendaCandidate, request: AddRequest, card: TaskR
       'its own way to resolve it (--resolve)',
     ],
     [tiedElsewhere, card === undefined ? '' : `the card ${refKey(card)}`],
+    [request.offerClose === true && item.offerClose !== true, 'the Done button (--offer-close)'],
   ];
   return found.filter(([present]) => present).map(([, words]) => words);
 }

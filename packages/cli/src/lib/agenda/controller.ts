@@ -10,6 +10,8 @@ import {
   type TaskRef,
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
+import { DaemonFeaturesUnreadable } from '../daemon/features.ts';
+import { listedMatches, type RelatedCheck } from '../work-search/related.ts';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
 import {
   type BriefFile,
@@ -19,7 +21,6 @@ import {
   type EditFlags,
   parseBriefFile,
 } from './brief.ts';
-import { listedMatches, type RelatedCheck } from '../work-search/related.ts';
 import {
   type AgendaCandidate,
   agendaCandidates,
@@ -43,7 +44,6 @@ import {
 } from './render.ts';
 import { twoDecisionsWarning } from './two-decisions.ts';
 import { parseNeededBy } from './when.ts';
-import { DaemonFeaturesUnreadable } from '../daemon/features.ts';
 
 /**
  * The daemon's features for the agenda's OPTIONAL probes, with a failed health read taken as "none reported". Lenient
@@ -235,7 +235,9 @@ export class AgendaController {
     const warning = twoDecisionsWarning(composed);
     if (warning !== undefined) this.out.diagnostic(warning);
     // A held configuration change is its own card: the owner's Allow applies that one change, so it joins nothing.
-    if (composed.confirms === undefined && !(await this.#searchCheckOpen(before, composed, flag.card, options))) return;
+    // The Done button is sent later (only to a daemon that has it), but it is part of the ask the join analysis weighs.
+    const asked = options.offerClose === true ? { ...composed, offerClose: true as const } : composed;
+    if (composed.confirms === undefined && !(await this.#searchCheckOpen(before, asked, flag.card, options))) return;
     const carded = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
     const request = options.offerClose === true ? await this.#withOfferClose(carded) : carded;
     const after = await this.gateway.apply(sessionId, request);

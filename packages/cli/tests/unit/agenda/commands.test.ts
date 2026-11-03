@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerAgendaCommands } from '../../../src/lib/agenda/commands';
 import { AgendaController } from '../../../src/lib/agenda/controller';
+import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
 import { DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import {
   agentItem,
@@ -1107,5 +1108,53 @@ describe('agenda clear', () => {
     // Assert
     should(gateway.clears).deepEqual([true, false]);
     should(out.messages).deepEqual(['cleared 2 open agenda items on 1 agent ferret']);
+  });
+
+  describe('--offer-close beside an open agenda carrying the same card', () => {
+    const offered = [DAEMON_FEATURES.agendaTask, DAEMON_FEATURES.agendaOfferClose];
+    const runAgainst = (item: ReturnType<typeof agentItem>, argv: string[]) => {
+      const gateway = new RecordingAgendaGateway(snapshot([item]), afterAdd);
+      gateway.offered = offered;
+      const program = new Command().name('fy').exitOverride();
+      program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+      registerAgendaCommands(program, new AgendaController(gateway, new CapturingOutput(), SESSION), async () => {});
+      return { gateway, parsed: program.parseAsync(['node', 'fy', ...withBrief(argv)]) };
+    };
+    const add = ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12'];
+    const base = { howToResolve: DEFAULT_HOW_TO_RESOLVE, ask: { kind: 'open-question' as const }, task: { id: 'F12' } };
+    const carrying = agentItem('A1', 'Try the build', base as never);
+
+    it('should not offer an edit that would drop the Done button, and point to --new', async () => {
+      // Arrange + Act
+      const { parsed, gateway } = runAgainst(carrying, [...add, '--offer-close']);
+      const failure = await parsed.then(
+        () => '',
+        (error: unknown) => (error as Error).message,
+      );
+
+      // Assert
+      should(failure).containEql('the Done button (--offer-close)');
+      should(failure).containEql('--new "<why none fits; closest is !A1>"');
+      should(failure).not.containEql('fy agenda edit A1');
+      should(gateway.applied).be.empty();
+    });
+
+    it('should still offer the edit when the agenda already offers the Done button, or it is not asked for', async () => {
+      // Arrange
+      const offering = agentItem('A1', 'Try the build', { ...base, offerClose: true } as never);
+
+      // Act + Assert
+      await should(runAgainst(offering, [...add, '--offer-close']).parsed).be.rejectedWith(/fy agenda edit A1/u);
+      await should(runAgainst(carrying, add).parsed).be.rejectedWith(/fy agenda edit A1/u);
+    });
+
+    it('should open the add with --new, sending the Done button', async () => {
+      // Arrange + Act
+      const { parsed, gateway } = runAgainst(carrying, [...add, '--offer-close', '--new', 'its own sign-off']);
+      await parsed;
+
+      // Assert
+      should(gateway.applied[0]?.request).match({ task: { id: 'F12' }, offerClose: true });
+    });
   });
 });
