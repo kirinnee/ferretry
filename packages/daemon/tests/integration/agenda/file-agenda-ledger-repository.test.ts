@@ -111,7 +111,7 @@ describe('the agenda file store, read with its identity', () => {
 });
 
 describe('FileAgendaLedgerRepository', () => {
-  it('should durably migrate owner history to a private append-only sidecar and recover a torn UTF-8 append', async () => {
+  it('should durably migrate owner history to a private append-only sidecar, replacing a torn UTF-8 append', async () => {
     const { repository } = await createRepository();
     const file = repository.file('session-1');
     const directory = dirname(file);
@@ -124,7 +124,7 @@ describe('FileAgendaLedgerRepository', () => {
     const text = `${JSON.stringify(record)}\n`;
     const firstByteOfSnow = Buffer.from(text).indexOf(Buffer.from('雪'));
     await writeFile(join(directory, AGENDA_ARCHIVE_FILE), Buffer.from(text).subarray(0, firstByteOfSnow + 1));
-    await writeFile(join(directory, `${AGENDA_ARCHIVE_FILE}.pending`), JSON.stringify({ bytes: 0, text }));
+    await writeFile(join(directory, `${AGENDA_ARCHIVE_FILE}.pending`), JSON.stringify({ bytes: 0 }));
     await writeFile(
       file,
       JSON.stringify({
@@ -140,6 +140,7 @@ describe('FileAgendaLedgerRepository', () => {
     should(await repository.readArchive('session-1')).deepEqual([record]);
     should((await repository.read('session-1'))?.archive).deepEqual({ bytes: Buffer.byteLength(text), count: 1 });
     should(await readFile(file, 'utf8')).not.containEql('ownerHistory');
+    should(await readdir(directory)).not.containEql(`${AGENDA_ARCHIVE_FILE}.pending`);
     should(await repository.readArchive('no-history')).deepEqual([]);
     await writeFile(join(directory, AGENDA_ARCHIVE_FILE), 'partial');
     await should(repository.readArchive('session-1')).be.rejectedWith('incomplete agenda history');
@@ -160,6 +161,37 @@ describe('FileAgendaLedgerRepository', () => {
     await writeFile(file, JSON.stringify(older));
     should(await repository.readArchive('session-1')).deepEqual([record]);
     should((await repository.read('session-1'))?.archive).deepEqual({ bytes: Buffer.byteLength(text), count: 1 });
+  });
+  it('should adopt only the history before an append whose mark says its commit never landed', async () => {
+    const { repository } = await createRepository();
+    const file = repository.file('session-1');
+    const directory = dirname(file);
+    await mkdir(directory, { recursive: true });
+    const record = {
+      kind: 'owner-history',
+      id: 'A1',
+      entry: { at: '2026-11-03T08:00:00Z', kind: 'replied', note: '雪 owner words' },
+    };
+    const text = `${JSON.stringify(record)}\n`;
+    const phantom = `${JSON.stringify({ ...record, entry: { ...record.entry, note: 'PHANTOM' } })}\n`;
+    await writeFile(join(directory, AGENDA_ARCHIVE_FILE), text + phantom);
+    await writeFile(
+      join(directory, `${AGENDA_ARCHIVE_FILE}.pending`),
+      JSON.stringify({ bytes: Buffer.byteLength(text) }),
+    );
+    const { version: _version, ...older } = emptyAgendaLedger('session-1', '2026-11-03T08:00:00Z');
+    await writeFile(file, JSON.stringify(older));
+    should(await repository.readArchive('session-1')).deepEqual([record]);
+    await repository.transact('session-1', current => {
+      if (current === null) throw new Error('no ledger');
+      return { ok: true, changed: true, change: 'refreshed', ledger: current, snapshot: agendaSnapshot(current) };
+    });
+    should(await readdir(directory)).not.containEql(`${AGENDA_ARCHIVE_FILE}.pending`);
+    should(JSON.parse(await readFile(file, 'utf8'))).containDeep({
+      version: 2,
+      archive: { bytes: Buffer.byteLength(text), count: 1 },
+    });
+    should(await repository.readArchive('session-1')).deepEqual([record]);
   });
 
   it('should keep serving correct agendas past its cache limit, dropping only the copy read longest ago', async () => {

@@ -320,13 +320,21 @@ explicitly requested; an ordinary transaction never rereads or rewrites the comm
 **Storage layout.** Each line is an `owner-history` record (`id`, `entry`) or a `version` record (`id`, `item`).
 `agenda.json` holds only an `archive` cursor with a UTF-8 byte offset and record count, so the hot file does not
 grow with the conversation. Transaction-local `archivePending` records are appended and synced before the hot
-ledger is atomically written without them. A temporary `agenda-history.jsonl.pending` journal records the byte
-offset and next append; recovery completes a torn append, including a split UTF-8 character, on the next write or the next history read (which
-queues behind writers), so a crash never leaves the history unreadable. If the ledger's
-cursor lags a completed append, only a retry's leading matching records are reused (once); the rest of the
-uncommitted tail is cut, and history reads stop at the committed cursor. The generic append mechanism
-can also hold later versions. Existing in-ledger `ownerHistory` records move here on the next transaction,
-including an unchanged one, with the same replay protection.
+ledger is atomically written without them; that ledger write is the commit. Every byte past the committed cursor
+was never committed (a rolled-back command's records, or an append a crash tore, split UTF-8 characters included),
+so history reads stop at the cursor and the next append cuts that tail before it writes: a retried command's
+records land once, and a different command never adopts another's. Before it writes, an append puts down a
+`agenda-history.jsonl.pending` mark saying where it began, and every successful ledger write lifts it, so a mark
+on disk means "this append was not committed". The cursor decides wherever there is one; the mark matters to a
+ledger with none (below). The generic append mechanism can also hold later versions. Existing in-ledger
+`ownerHistory` records move here on the next transaction, including an unchanged one, with the same rule: a
+migration whose ledger write fails is cut and written again, never twice.
+
+**A ledger with no cursor** reads as version 1 (no `version`, or 1): one a daemon before the cursor wrote, or one an
+older daemon rewrote after a downgrade. Its sidecar's complete lines are adopted as committed history (the cursor
+then covers them), stopping at the mark when one is down, so an append whose ledger write failed is never
+served or adopted, and a torn last line is left out and cut by the next append. A version-2 ledger with no
+cursor has no history yet and adopts nothing.
 
 **Older ledgers are decoded before today's wire budgets are applied.** An old-valid item whose escaped versions
 exceed the transport bound keeps its complete original snapshot as a sidecar `version`; its served view sheds
@@ -1223,7 +1231,10 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   and drops the fields it does not know (`resting`, `stage`, `ownerAnswer`…) on its next write, and with them the `archive` cursor and the `version`; its
   `parked: replied` still says the item rests, so the next upgrade rests it again. The sidecar is left alone, and a
   ledger that reads as version 1 with no cursor is upgraded by adopting the sidecar's complete lines as committed
-  history (the cursor covers them), so no owner history is lost across a downgrade and an upgrade.
+  history up to any mark ([a ledger with no cursor](#no-size-limit)), so no owner history is lost across
+  a downgrade and an upgrade. Two limits are declared: an uncommitted tail a later commit outlived (it lifted the
+  mark, and its cursor went with the downgrade) is adopted too, and a crash between a commit and the lifting of its
+  mark, followed by a downgrade before that session's next write, leaves that last append out.
 - Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
   one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same

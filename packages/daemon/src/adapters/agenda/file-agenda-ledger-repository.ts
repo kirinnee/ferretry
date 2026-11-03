@@ -13,8 +13,9 @@ import {
 import {
   type AppendOnlyFiles,
   appendLogRecords,
+  commitLogAppend,
   completeLinesCursor,
-  recoverLogAppend,
+  uncommittedLogFrom,
 } from '../../lib/append-only-log.ts';
 import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
 import { FileAgendaFileStore } from './file-agenda-file-store.ts';
@@ -118,9 +119,14 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       throw new InvalidAgendaLedgerError(this.files.file(sessionId, name));
     }
     // An older daemon's write drops the cursor and the version but leaves the sidecar: its complete lines are
-    // the history it was keeping, so they are adopted as committed rather than cut as an uncommitted tail.
+    // the history it was keeping, so they are adopted as committed rather than cut as an uncommitted tail. A
+    // pre-cursor ledger whose own write failed after an append looks the same, so the append's mark stops the
+    // adoption where that never-committed append began. The history is read before the mark: a write racing
+    // this read marks before it appends, so any appended byte read here has its mark there to be read next.
     if (!rewrittenByOlderDaemon || ledger.archive !== undefined) return ledger;
-    const adopted = completeLinesCursor(await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0));
+    const history = await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0);
+    const uncommitted = await uncommittedLogFrom(this.files, sessionId, AGENDA_ARCHIVE_FILE);
+    const adopted = completeLinesCursor(uncommitted === undefined ? history : history.subarray(0, uncommitted));
     return adopted.count === 0 ? ledger : { ...ledger, archive: adopted };
   }
 
@@ -129,7 +135,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return await this.serial(sessionId, async () => {
       let current = await this.read(sessionId);
       // Migrate old in-ledger history before applying even an unchanged command. Appending precedes the
-      // atomic cursor write; retry after a crash reuses the appended suffix instead of copying it again.
+      // atomic cursor write; a retry after a crash cuts the uncommitted append and writes it once again.
       if ((current?.archivePending?.length ?? 0) > 0 && current !== null)
         current = await this.write(sessionId, current);
       const mutation = apply(current);
@@ -143,15 +149,13 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
 
   /**
    * Explicit, lazy history read. Snapshots and transactions never read committed archive records. It queues
-   * behind writers and completes a torn append first, so a crash never leaves history unreadable. It serves
-   * only the bytes the ledger's cursor has committed: a record appended by a transaction whose ledger write
-   * then failed is not history.
+   * behind writers and serves only the bytes the ledger's cursor has committed: a record appended by a
+   * transaction whose ledger write then failed, or torn by a crash, is not history.
    */
   async readArchive(sessionId: string): Promise<readonly AgendaArchiveRecord[]> {
     this.assertSessionId(sessionId);
     await this.ready;
     return await this.serial(sessionId, async () => {
-      await recoverLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
       const committed = (await this.read(sessionId))?.archive?.bytes ?? 0;
       if (committed === 0) return [];
       const bytes = Buffer.from((await this.files.read(sessionId, AGENDA_ARCHIVE_FILE)) ?? '');
@@ -179,6 +183,8 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
             );
       const committed = { ...clean, ...(archive === undefined ? {} : { archive }) };
       await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, agendaLedgerDocument(committed));
+      // The ledger now says where history ends (or that a version-2 board has none), so no append is pending.
+      await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
       return committed;
     } finally {
       // After the disk, whether or not it landed: the next read asks the file. A read racing this write may

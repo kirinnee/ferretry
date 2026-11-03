@@ -11,32 +11,20 @@ export interface AppendOnlyFiles {
   remove(sessionId: string, name: string): Promise<void>;
 }
 
-const PendingAppendSchema = z.strictObject({
-  bytes: z.number().int().nonnegative().safe(),
-  text: z.string().min(1),
-});
+/** Where an append the caller has not committed yet began. Extra fields of an earlier shape are ignored. */
+const UncommittedAppendSchema = z.object({ bytes: z.number().int().nonnegative().safe() });
 
-/** Complete an append whose write-ahead journal survived a crash; a no-op when none did. */
-export async function recoverLogAppend(files: AppendOnlyFiles, sessionId: string, name: string): Promise<void> {
-  const journal = `${name}.pending`;
-  const interrupted = await files.read(sessionId, journal);
-  if (interrupted === undefined) return;
-  const pending = PendingAppendSchema.parse(JSON.parse(interrupted));
-  const tail = await files.readAfter(sessionId, name, pending.bytes);
-  const intended = new TextEncoder().encode(pending.text);
-  if (!tail.subarray(0, intended.length).every((byte, index) => byte === intended[index])) {
-    throw new Error(`inconsistent append tail: ${name}`);
-  }
-  await files.appendSynced(sessionId, name, intended.subarray(tail.length));
-  await files.remove(sessionId, journal);
-}
+const markOf = (name: string) => `${name}.pending`;
 
 /**
- * Append JSONL records once, then return the new bounded cursor. A small write-ahead file completes a torn
- * append on restart. Bytes past the cursor were never committed: the leading records of that tail that equal
- * this call's leading records are reused (a retry of the same command after a crash), and every other tail
- * byte is cut, so a rolled-back command's records can never be adopted by a different one. Only the
+ * Append JSONL records past the committed cursor and return the cursor that commits them. Every byte past the
+ * cursor was never committed — a rolled-back command's records, or a torn append — so it is cut first: a retry
+ * of the same command writes its records once, and a different command never adopts another's. Only that
  * uncommitted tail is read; committed history is never read or rewritten here.
+ *
+ * Before anything is written, a durable mark records where this append begins. It stays until the caller's
+ * commit lands ({@link commitLogAppend}), so a reader whose commit record has no cursor still knows where the
+ * committed history ends ({@link uncommittedLogFrom}).
  */
 export async function appendLogRecords(
   files: AppendOnlyFiles,
@@ -45,34 +33,28 @@ export async function appendLogRecords(
   cursor: { readonly bytes: number; readonly count: number },
   records: readonly unknown[],
 ): Promise<{ readonly bytes: number; readonly count: number }> {
-  const journal = `${name}.pending`;
-  await recoverLogAppend(files, sessionId, name);
-  const tailBytes = await files.readAfter(sessionId, name, cursor.bytes);
-  const tail = new TextDecoder('utf-8', { fatal: true }).decode(tailBytes);
-  if (tail !== '' && !tail.endsWith('\n')) throw new Error(`incomplete append tail: ${name}`);
-  const replay = tail === '' ? [] : tail.slice(0, -1).split('\n');
-  // Validate recovery data before advancing the cursor. The record schema belongs to the caller.
-  for (const line of replay) JSON.parse(line);
-  const lines = records.map(record => JSON.stringify(record));
-  let reused = 0;
-  while (reused < replay.length && reused < lines.length && replay[reused] === lines[reused]) reused += 1;
-  const bytes =
-    cursor.bytes +
-    new TextEncoder().encode(
-      replay
-        .slice(0, reused)
-        .map(line => `${line}\n`)
-        .join(''),
-    ).length;
-  if (bytes < cursor.bytes + tailBytes.length) await files.truncate(sessionId, name, bytes);
-  const added = lines.slice(reused);
-  const text = added.length === 0 ? '' : `${added.join('\n')}\n`;
-  if (text !== '') {
-    const pending = { bytes, text };
-    await files.writeAtomic(sessionId, journal, JSON.stringify(pending));
-    await recoverLogAppend(files, sessionId, name);
-  }
-  return { bytes: bytes + new TextEncoder().encode(text).length, count: cursor.count + lines.length };
+  if (records.length === 0) return cursor;
+  const text = new TextEncoder().encode(`${records.map(record => JSON.stringify(record)).join('\n')}\n`);
+  await files.writeAtomic(sessionId, markOf(name), JSON.stringify({ bytes: cursor.bytes }));
+  if ((await files.readAfter(sessionId, name, cursor.bytes)).length > 0)
+    await files.truncate(sessionId, name, cursor.bytes);
+  await files.appendSynced(sessionId, name, text);
+  return { bytes: cursor.bytes + text.length, count: cursor.count + records.length };
+}
+
+/** Where an append that was never committed begins, or `undefined` when every append was committed. */
+export async function uncommittedLogFrom(
+  files: AppendOnlyFiles,
+  sessionId: string,
+  name: string,
+): Promise<number | undefined> {
+  const mark = await files.read(sessionId, markOf(name));
+  return mark === undefined ? undefined : UncommittedAppendSchema.parse(JSON.parse(mark)).bytes;
+}
+
+/** Drop the mark once the commit naming the log's cursor has landed; a no-op when there is none. */
+export async function commitLogAppend(files: AppendOnlyFiles, sessionId: string, name: string): Promise<void> {
+  await files.remove(sessionId, markOf(name));
 }
 
 /** The cursor that covers every complete line of `bytes`: a log's committed extent when no cursor was ever kept. */
