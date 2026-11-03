@@ -516,6 +516,7 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import {
+  FileOutboxTail,
   FileSendChannel,
   FileSendLedger,
   FileSendReproofMarker,
@@ -623,7 +624,6 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
-import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
@@ -657,6 +657,7 @@ import {
 import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
 import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
 import { OrphanList } from '../src/lib/warden/orphan-list.ts';
+import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
 import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
@@ -825,7 +826,6 @@ import {
   CapabilityGrantService,
   type CatalogIdentitySource,
   CatalogLinkService,
-  linkUsageOf,
   CatalogMemberService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -895,6 +895,7 @@ import {
   decodeInitialAttachments,
   defaultAutoResumeSettings,
   defaultManagedWorktreeRoot,
+  defaultQueueDeliverySettings,
   defaultSendTrackerSettings,
   defaultSessionLifecycleSettings,
   defaultSessionMonitorSettings,
@@ -1024,6 +1025,7 @@ import {
   launchGuardActive,
   launchReasoningEffort,
   limitedCredentials,
+  linkUsageOf,
   locateHarnessCommand,
   lookBeforeReading,
   MachineAgenda,
@@ -1131,7 +1133,6 @@ import {
   publisherLabel,
   QUEUE_ANSWER_WAIT_MS,
   QuarantineRegistry,
-  defaultQueueDeliverySettings,
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
@@ -1462,7 +1463,7 @@ import {
 import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
-import { SessionPackService } from '../src/lib/session/pack/index.ts';
+import { SessionPackService, SubtreeService } from '../src/lib/session/pack/index.ts';
 import { cutOffResume, resumeUnderCutOff } from '../src/lib/session/resume/cut-off.ts';
 import {
   restoreRestamped,
@@ -12867,6 +12868,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         agentPins,
       );
+      const subtreeOutbox = new FileOutboxTail(id => createSessionPaths(paths, id).directory);
+      const subtreeService = new SubtreeService({
+        sessions: async () => await sessions.list(),
+        board: async () => await boardWorld.board.snapshot(),
+        lastMessage: async (sessionId, to) => await subtreeOutbox.newestMessageTo(sessionId, to),
+        nowMs: () => Date.parse(clock.now()),
+      });
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -12888,6 +12896,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               view,
               async () => await stateFiles.readText(join(createSessionPaths(paths, id).directory, 'summary.md')),
             );
+          },
+          subtree: async reference => {
+            const id = tryParseSessionId(reference);
+            return id === undefined ? undefined : await subtreeService.view(id);
           },
           setSwitch: createSessionPackSwitch(
             storage,

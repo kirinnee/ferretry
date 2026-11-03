@@ -1,6 +1,7 @@
 import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import { type Command, Option } from 'commander';
 import type { AnswerQuestionController } from './answer-controller.ts';
+import { SessionCommandError } from './errors.ts';
 import type { InterruptSessionController, ResumeSessionController } from './lifecycle-controllers.ts';
 import type { SuggestNamesController } from './name-controller.ts';
 import type { SessionPresenter } from './presenter.ts';
@@ -10,6 +11,7 @@ import type { SendMessageController } from './send-controller.ts';
 import type { SignalSessionController } from './signal-controller.ts';
 import type { StartSessionController } from './start-controller.ts';
 import type { SessionStatusController } from './status-controller.ts';
+import type { SessionSubtreeController } from './subtree-controller.ts';
 
 /** The agent runtime a first run makes for Claude Code, named the way the import names it. */
 const FIRST_RUN_EXAMPLE = importedRuntimeName('claude', IMPORT_NAMES.defaultProfile);
@@ -20,6 +22,7 @@ export interface SessionCommandDeps {
   readonly start: StartSessionController;
   readonly list: ListSessionsController;
   readonly status: SessionStatusController;
+  readonly subtree: SessionSubtreeController;
   readonly send: SendMessageController;
   readonly answer: AnswerQuestionController;
   readonly names: SuggestNamesController;
@@ -172,12 +175,19 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
 
   program
     .command('status')
-    .description('show one session in detail')
-    .argument('<id>', 'session id or callsign')
-    .option('--json', 'print the session as JSON')
+    .description('show one session in detail, or with --subtree a table of its sub-ferrets')
+    .argument('[id]', 'session id or callsign (with --subtree: defaults to the calling session)')
+    .option(
+      '--subtree',
+      'one table of every live descendant (and those ended in the last 2h): model, state, card, PR and its last line',
+    )
+    .option('--json', 'print the session, or with --subtree its rows, as JSON')
     .action(
-      guard(async (id: string, options: CommanderOptions) => {
-        await deps.status.execute(id, { ...(flag(options, 'json') === undefined ? {} : { json: true }) });
+      guard(async (id: string | undefined, options: CommanderOptions) => {
+        const json = flag(options, 'json') === undefined ? {} : { json: true };
+        if (flag(options, 'subtree') !== undefined) return await deps.subtree.execute(id, json);
+        if (id === undefined) throw new SessionCommandError('missing the session id: status <id>, or status --subtree');
+        await deps.status.execute(id, json);
       }),
     );
 

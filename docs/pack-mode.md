@@ -44,7 +44,8 @@ Pack mode: you may hand self-contained parts of your task to sub-ferrets — oth
 1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
 2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
 3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.
-4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself. Message a sub-ferret with `fy send <id> --kind blocker|action|fyi` (default action; fyi rarely).
+4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself. Label sends: `--kind blocker|action|fyi` (fyi rarely).
+Check your children with `fy status --subtree` instead of asking them. Delegate screenshot review to a sub-agent and keep only its verdict.
 Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 ```
 
@@ -316,6 +317,40 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
 
+## Checking on your sub-ferrets
+
+A lead does not need its children to message it progress. A sub-ferret puts routine progress on its card
+(`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
+**looks when it wants to**:
+
+```text
+$ fy status --subtree
+rhett (mvzxdjv2-58f11bc0): 3 descendants
+SESSION  MODEL        STATE      CARD             PR               LAST
+ada      sonnet-5-5   running    &F767 Implement  #321 CI pending  [2m] route and table done, writing tests
+  bo     glm-5.3      needs-you  &F770 Review     -                [14m] which lane should review move to?
+cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged; nothing left
+```
+
+- **One call.** `fy status --subtree [<id>]` asks `GET /v1/sessions/:sessionId/subtree` once (default: the calling
+  session; the owner outside a pane names an id). The daemon builds every row from what it already holds — the
+  sessions registry, one read of the board's cards, the PR cache the board keeps, and the tail of each
+  descendant's outbox. It never calls GitHub per row, so fifty descendants cost one request.
+- **Rows.** One per live descendant, plus any that ended in the last two hours (`ended 25m`), in tree order: a
+  ferret, then its own sub-ferrets indented beneath it, then the next sibling (by callsign). Lineage is the
+  registry's `parent` links (the shared `subtreeDepths` walk `fy stop` also uses), never the request.
+- **State.** `running`; `waiting` (parked or rate limited); `needs-you` (an open question, an agenda item or a
+  flagged need — painted amber); `ended`.
+- **Card and PR.** The card a session works on (`&F767`) and its lane; the card's open PR (else its newest) with CI
+  as the board's PR cache last read it (`CI passing|failing|pending`, or `merged`/`closed`). `-` where there is none.
+- **Last line.** The newer of the card's last note and the ferret's last message to the asking lead, cut to one line
+  of at most 100 characters (`…`). A tie goes to the note.
+- **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `card`, `pr`,
+  `last`, `endedAt`).
+
+The route is `fleet.use` ([grants.md](grants.md)). The lead's instruction line is: check your children with
+`fy status --subtree` instead of asking them; delegate screenshot review to a sub-agent and keep only its verdict.
+
 ## Sub-ferret limits
 
 The owner's decision (2026-10-30): **only lead ferrets raise agenda items and move cards; sub-ferrets report to
@@ -341,8 +376,8 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on card (a password, code or approval the daemon asks for) stays
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2520**.
+  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); routine progress goes on its card (`fy task note`) and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
+  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2641**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

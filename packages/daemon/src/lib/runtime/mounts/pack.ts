@@ -15,15 +15,17 @@ import {
   type SessionResult,
   SessionResultSchema,
   type SessionView,
+  type SubtreeView,
+  SubtreeViewSchema,
 } from '@ferretry/protocol';
 import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { lineageOf } from '../../api/lineage.ts';
-import { type StateHomeReach, stateHomeLaunchRefusal } from '../../api/state-homes.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { type StateHomeReach, stateHomeLaunchRefusal } from '../../api/state-homes.ts';
 import type { CleanUpService, GuideFileService } from '../../pack/cleanup/index.ts';
 import type { PackService } from '../../pack/service.ts';
 import { type PackSwitchOutcome, SessionPackError } from '../../session/pack/service.ts';
@@ -32,7 +34,7 @@ import { type PackSwitchOutcome, SessionPackError } from '../../session/pack/ser
  * PACK MODE (docs/pack-mode.md): the settings page's view, a recommendation, a sub-ferret start, a
  * finished ferret's result, and one ferret's own switch.
  *
- * `fleet.use` for the two reads of the fleet, as `/v1/fleet/runtimes` is. A start is the session
+ * `fleet.use` for the two reads of the fleet, as `/v1/fleet/runtimes` is. `GET /v1/sessions/:sessionId/subtree` is `fleet.use` too: a lead's table of its descendants. A start is the session
  * start's own posture — `operator`, no capability — and the session start route's limits apply to it
  * inside the daemon. A folder chosen by a caller off this machine would be terminal access, so only a
  * caller AT the machine may name one; anyone else's sub-ferret runs in its parent's folder.
@@ -51,6 +53,8 @@ export interface PackSubsystem {
   };
   /** `undefined` when there is no such session. */
   result(sessionId: string): Promise<SessionResult | undefined>;
+  /** A lead's table of its descendants (docs/pack-mode.md § Checking on your sub-ferrets); `undefined` when there is no such session. */
+  subtree(sessionId: string): Promise<SubtreeView | undefined>;
   setSwitch(
     sessionId: string,
     enabled: boolean,
@@ -129,6 +133,13 @@ async function result(subsystem: PackSubsystem, context: RouteContext): Promise<
   const found = await subsystem.result(id);
   if (found === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
   return jsonResponse(SessionResultSchema.parse(found));
+}
+
+async function subtree(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const id = sessionParameter(context);
+  const found = await subsystem.subtree(id);
+  if (found === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
+  return jsonResponse(SubtreeViewSchema.parse(found));
 }
 
 async function setSwitch(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
@@ -230,6 +241,15 @@ export function packRoutes(
       caller: 'any',
       noStore: true,
       handle: async context => await result(subsystem, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/subtree',
+      minimum: 'operator',
+      caller: 'any',
+      capability: USE,
+      noStore: true,
+      handle: async context => await subtree(subsystem, context),
     },
     {
       method: 'PATCH',

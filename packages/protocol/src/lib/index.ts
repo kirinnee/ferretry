@@ -107,6 +107,7 @@ export * from './session-queue-wait.ts';
 export * from './session-restart.ts';
 export * from './session-revive.ts';
 export * from './session-search.ts';
+export * from './session-subtree.ts';
 export * from './session-transcript.ts';
 export * from './session-transfer.ts';
 export * from './shared-catalog.ts';

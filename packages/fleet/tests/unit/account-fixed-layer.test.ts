@@ -714,6 +714,8 @@ describe('Pack mode teaching', () => {
       '--name "<short task title>"',
       '`zz wait <id>`',
       'Label sends: `--kind blocker|action|fyi` (fyi rarely)',
+      '`zz status --subtree` instead of asking them',
+      'Delegate screenshot review to a sub-agent and keep only its verdict.',
       '`zz stop children',
     ])
       should(teaching).containEql(step);
@@ -1139,6 +1141,9 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
     should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
+    should(text).containEql(
+      'Routine progress goes on your card (`zz task note`), not in a message; message your lead only for a result, a blocker or a decision it must make.',
+    );
     should(text).containEql('Your final report says how the owner tests it.');
     should(text).containEql('it moves itself (start, PR, merge, `zz signal done`). No card? Make none.');
     should(text).not.containEql('agenda add');
@@ -1151,7 +1156,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(900);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {
