@@ -16,7 +16,18 @@ import type { z } from 'zod';
 import type { IBoardGateway, SessionDirectoryEntry } from '../../lib/board/ports';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../../lib/session/connection';
 
-const QUERY_FIELDS = ['project', 'ferret', 'kind', 'prState', 'activity', 'state', 'query', 'cursor', 'limit'] as const;
+const QUERY_FIELDS = [
+  'project',
+  'ferret',
+  'kind',
+  'prState',
+  'activity',
+  'state',
+  'query',
+  'visibility',
+  'cursor',
+  'limit',
+] as const;
 
 const queryString = (query: BoardQueryInput): string => {
   const parameters = new URLSearchParams();

@@ -60,6 +60,7 @@ import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
 import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
+import { cardVisibility, visibilityVerdict } from './visibility.ts';
 
 /** An event's actor and, beside it, how an owner actor acted (`BoardActorVia`). */
 const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
@@ -749,6 +750,29 @@ const edit = (
   return { task: next };
 };
 
+/**
+ * Makes a card public or private ({@link visibilityVerdict} says who may). The change is stored on the card and
+ * written to its history as a note, which every app already reads.
+ */
+const setVisibility = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'visibility' }>,
+  context: CardContext,
+): CardOutcome => {
+  const ref = formatTaskRef(card);
+  const from = cardVisibility(card);
+  const refusal = visibilityVerdict(card, action.visibility, context.standing);
+  if (refusal !== null) throw new BoardError('forbidden', `${ref}: ${refusal.message}`, refusal.allowed);
+  if (action.visibility === from) throw new BoardError('invalid', `${ref} is already ${from}`);
+  const why = action.reason === undefined ? '' : `: ${action.reason}`;
+  return {
+    task: {
+      ...withEvent(card, { type: 'note', text: `visibility: ${from} → ${action.visibility}${why}` }, context),
+      visibility: action.visibility,
+    },
+  };
+};
+
 const file = (
   card: BoardTask,
   action: Extract<BoardTaskActionRequest, { action: 'file' }>,
@@ -1071,6 +1095,8 @@ export const applyAction = (
       return refile(card, action, refileTarget, context);
     case 'reparent':
       return reparent(card, action, context, parentStanding);
+    case 'visibility':
+      return setVisibility(card, action, context);
   }
 };
 

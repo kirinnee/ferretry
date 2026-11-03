@@ -706,3 +706,80 @@ describe('the board import’s own second line', () => {
     should(calls).deepEqual([]);
   });
 });
+
+describe('public and private cards on the wire', () => {
+  const visibility = (value: string) => JSON.stringify({ action: 'visibility', visibility: value });
+
+  it('should hand the visibility filter to the board, and answer an unknown one as invalid', async () => {
+    // Arrange
+    const { calls, board } = recording();
+    const live = await dispatcher(board);
+
+    // Act
+    const asked = await live.dispatch(
+      request({ path: '/v1/board', headers: human, query: [['visibility', 'public']] }),
+    );
+    const bad = await live.dispatch(request({ path: '/v1/board', headers: human, query: [['visibility', 'secret']] }));
+
+    // Assert
+    should(asked.status).equal(200);
+    should(calls[0]?.value).match({ visibility: 'public' });
+    should(bad.status).equal(400);
+    should(jsonBody(bad).code).equal('invalid');
+  });
+
+  it('should send no visibility when the query names none, so an older app keeps every card', async () => {
+    const { calls, board } = recording();
+    await (await dispatcher(board)).dispatch(request({ path: '/v1/board', headers: human }));
+    should(calls[0]?.value).not.have.property('visibility');
+  });
+
+  it('should refuse a ferret that hides the owner’s ask, naming who may', async () => {
+    // Arrange: F1 is the owner's ask, owned by `lead`
+    const { board } = recording();
+
+    // Act
+    const response = await (
+      await dispatcher(board)
+    ).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1', headers: agentIn('lead'), body: visibility('private') }),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response)).match({ code: 'forbidden', allowed: ['owner-human'] });
+  });
+
+  it('should let the owner at the machine hide it, and a paired device the fleet grant lets in', async () => {
+    const { board } = recording();
+    const live = await dispatcher(board);
+    const hidden = await live.dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1', headers: human, body: visibility('private') }),
+    );
+    should(hidden.status).equal(200);
+    should(jsonBody(hidden)).match({ task: { visibility: 'private' } });
+    const shown = await live.dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1', device: phone, body: visibility('public') }),
+    );
+    should(shown.status).equal(200);
+    should(jsonBody(shown)).match({ task: { visibility: 'public' } });
+  });
+
+  it('should keep a remote device from changing visibility when the fleet grant is off', async () => {
+    const { calls, board } = recording();
+    const response = await (
+      await dispatcher(board, { use: false, configure: false })
+    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1', device: phone, body: visibility('private') }));
+    should(response.status).equal(403);
+    should(calls).eql([]);
+  });
+
+  it('should refuse a malformed visibility before it reaches the board', async () => {
+    const { calls, board } = recording();
+    const response = await (
+      await dispatcher(board)
+    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1', headers: human, body: visibility('hidden') }));
+    should(response.status).equal(400);
+    should(calls).eql([]);
+  });
+});

@@ -423,6 +423,13 @@ export const LegacyTaskRefSchema = z.string().regex(/^[^\s:]+:[BFIC][1-9][0-9]{0
 export const BoardTaskAskedBySchema = z.enum(['person', 'agent']);
 export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
 
+/**
+ * Whether a card is on the board by default. `public` is what the owner asked for; `private` is the ferrets' own
+ * bookkeeping: sub-cards, helper cards and cards a ferret made for itself (docs/board.md § Public and private cards).
+ */
+export const BoardTaskVisibilitySchema = z.enum(['public', 'private']);
+export type BoardTaskVisibility = z.infer<typeof BoardTaskVisibilitySchema>;
+
 const BoardTaskShape = {
   v: z.literal(BOARD_TASK_SCHEMA_VERSION),
   id: BoardTaskIdSchema,
@@ -481,6 +488,13 @@ const BoardTaskShape = {
    * Absent on a card stored before it existed; a reader then falls back to the ask's source.
    */
   askedBy: BoardTaskAskedBySchema.optional(),
+  /**
+   * Whether the card shows on the board by default. Stored once (at creation, or at the first boot that finds the
+   * card without it) and changed only by `visibility` actions the daemon authorises. A card that has none reads by
+   * the rule in the daemon's `cardVisibility`: public when a person asked and it has no parent, otherwise private.
+   * The VIEW always carries it; absent only on a card stored before it existed.
+   */
+  visibility: BoardTaskVisibilitySchema.optional(),
   /**
    * The owner's Yes this card was made on where its board is off (docs/board.md § The board is opt-in): an item on
    * the creating ferret's agenda. One Yes makes one card. Absent on every other card.
@@ -648,6 +662,13 @@ export const isInBoardState = (filter: BoardStateFilter, category: LaneCategory,
   return filter === 'closed' ? category === 'closed' : filter === 'open' && category !== 'closed';
 };
 
+/**
+ * Which cards a board read selects by visibility: `public`, `private` or `all`. Absent reads `all`, so an app that
+ * sends no filter keeps every card it relies on; the Board page and `fy board` ask for `public` themselves.
+ */
+export const BoardVisibilityFilterSchema = z.enum(['public', 'private', 'all']);
+export type BoardVisibilityFilter = z.infer<typeof BoardVisibilityFilterSchema>;
+
 export const BoardQuerySchema = z.strictObject({
   /** One project's board; absent reads every project's. */
   project: BoardProjectIdSchema.optional(),
@@ -657,6 +678,8 @@ export const BoardQuerySchema = z.strictObject({
   prState: BoardPrStateFilterSchema.optional(),
   activity: BoardActivityFilterSchema.optional(),
   state: BoardStateFilterSchema.default('open'),
+  /** Public cards, private ones, or both (absent). It scopes the board, so the header counts follow it. */
+  visibility: BoardVisibilityFilterSchema.optional(),
   /** Free text over id, title, summary and ask. */
   query: z.string().trim().min(1).max(MAX_BOARD_QUERY_LENGTH).optional(),
   cursor: z.string().min(1).max(MAX_BOARD_LINK_LENGTH).optional(),
@@ -776,6 +799,11 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   approval: AgendaIdSchema.optional(),
   /** The caller's own open agenda thread this card carries out: only linked to it (the thread's `task`), nothing else. */
   thread: AgendaIdSchema.optional(),
+  /**
+   * `public` or `private`; absent takes the default (public when a person asked and it has no parent). A ferret may
+   * choose for its own agent-asked card, and never hides a person's ask or publishes a sub-card.
+   */
+  visibility: BoardTaskVisibilitySchema.optional(),
 });
 export type BoardTaskCreateRequest = z.infer<typeof BoardTaskCreateRequestSchema>;
 export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestSchema>;
@@ -861,6 +889,8 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
     reason: reason.optional(),
   }),
   z.strictObject({ action: z.literal('order'), order: NonNegativeIntegerSchema.nullable() }),
+  /** Show the card on the board by default (`public`) or fold it with the ferrets' bookkeeping (`private`). */
+  z.strictObject({ action: z.literal('visibility'), visibility: BoardTaskVisibilitySchema, reason: reason.optional() }),
   /** Put the card aside until `until`, or wake it now with `null`. The owner's own, like Done. */
   z.strictObject({ action: z.literal('snooze'), until: InstantSchema.nullable() }),
   /** Move the card under another card (or to the top level with `parent: null`); the reason goes in its history. */

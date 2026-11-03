@@ -221,8 +221,8 @@ describe('fy board', () => {
     await controller.board({});
 
     // Assert
-    should(gateway.boardCalls).eql([{ project: FERRETRY_ID, limit: 500 }]);
-    should(log).have.length(1);
+    should(gateway.boardCalls).eql([{ project: FERRETRY_ID, visibility: 'public', limit: 500 }]);
+    should(log).have.length(2);
     should(log[0]).startWith('ok: Ferretry — 0 cards');
   });
 
@@ -236,8 +236,27 @@ describe('fy board', () => {
     await controller.board({ project: ALL_PROJECTS });
 
     // Assert
-    should(gateway.boardCalls).eql([{ limit: 500 }, { limit: 500 }]);
+    should(gateway.boardCalls).eql([
+      { visibility: 'public', limit: 500 },
+      { visibility: 'public', limit: 500 },
+    ]);
     should(log[0]).startWith('ok: all projects — 0 cards');
+  });
+
+  it('should show public cards and say so, and show the rest with --private or --all', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+
+    // Act
+    await controller.board({});
+    await controller.board({ private: true });
+    await controller.board({ all: true });
+
+    // Assert
+    should(gateway.boardCalls.map(query => query.visibility)).eql(['public', 'private', undefined]);
+    should(log.filter(line => line.includes('public cards only'))).eql([
+      "ok: public cards only: fy board --private shows the ferrets' own cards, --all shows both",
+    ]);
   });
 
   it('should show every project when the session has no project and none is named', async () => {
@@ -249,7 +268,7 @@ describe('fy board', () => {
     await controller.board({ project: '  ' });
 
     // Assert
-    should(gateway.boardCalls).eql([{ limit: 500 }]);
+    should(gateway.boardCalls).eql([{ visibility: 'public', limit: 500 }]);
   });
 
   it('should resolve --project by name or id and refuse an unknown board', async () => {
@@ -280,6 +299,7 @@ describe('fy board', () => {
       activity: 'stale',
       state: 'closed',
       query: 'widget',
+      visibility: 'public',
       limit: 500,
     });
   });
@@ -461,6 +481,18 @@ describe('fy task create', () => {
       brief: '',
     });
     should(log).eql(['ok: &F2 created — Todo, denisha, idle']);
+  });
+
+  it('should create a private or public card with --private or --public', async () => {
+    // Arrange
+    const { controller, gateway } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    await controller.create([], { ...base, private: true });
+    await controller.create([], { ...base, public: true });
+
+    // Assert
+    should(gateway.createCalls.map(call => call.request.visibility)).eql(['private', 'public']);
   });
 
   it("should send the owner's Yes a card rests on, in any spelling fy agenda takes", async () => {
@@ -993,6 +1025,24 @@ describe('the action verbs', () => {
       /pass --brief or --brief-file, not both/u,
     );
     should(await refusal(() => controller.edit('F1', {}))).match(/nothing to edit/u);
+  });
+
+  it('should change only the visibility with --visibility, and edit then change it when text comes too', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+
+    // Act
+    await controller.edit('F1', { visibility: 'private' });
+    await controller.edit('F1', { title: 'New name', visibility: 'public' });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'visibility', visibility: 'private' },
+      { action: 'edit', title: 'New name' },
+      { action: 'visibility', visibility: 'public' },
+    ]);
+    should(log).have.length(3);
+    should(await refusal(() => controller.edit('F1', { visibility: 'secret' }))).match(/--visibility must be one of/u);
   });
 
   it('should edit How to test from --how-to-test or --how-to-test-file', async () => {

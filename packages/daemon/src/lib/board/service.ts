@@ -69,6 +69,7 @@ import { ancestorsOf } from './lineage.ts';
 import { gateEntry } from './gate-policy.ts';
 import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
+import { defaultVisibility, visibilityVerdict } from './visibility.ts';
 import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
 import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type {
@@ -249,6 +250,7 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   reparent: 'move cards under another card',
   refile: 'refile cards',
   snooze: 'snooze cards',
+  visibility: 'make cards public or private',
   trigger: 'report events on cards',
 };
 
@@ -415,6 +417,35 @@ export class BoardService {
       } catch (error) {
         this.ports.diagnostics.warn(
           `board: could not store who asked for ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return stored;
+  }
+
+  /**
+   * Stores the visibility every card still without one reads as ({@link defaultVisibility}), so a card keeps it when
+   * its parent or its asker is later seen differently. It never changes a stored value, so it is idempotent and
+   * cannot undo a choice; it writes no history and does not touch the card's last-touched time. A card that cannot
+   * be written is reported and left for the next boot. Answers how many cards it stored.
+   */
+  async backfillVisibility(): Promise<number> {
+    const { cards } = await this.ports.store.read();
+    let stored = 0;
+    for (const { id, visibility } of cards) {
+      if (visibility !== undefined) continue;
+      try {
+        const done = await this.ports.store.write(id, async current => {
+          if (current === undefined || current.visibility !== undefined) return { task: null, result: false };
+          return {
+            task: requireValidCard({ ...current, visibility: defaultVisibility(current) }),
+            result: true,
+          };
+        });
+        if (done) stored += 1;
+      } catch (error) {
+        this.ports.diagnostics.warn(
+          `board: could not store the visibility of ${id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -862,9 +893,17 @@ export class BoardService {
       laneSet: facts.laneSet,
       index: facts.index,
     });
+    const askedBy = await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true);
+    const visibility = request.visibility ?? defaultVisibility({ ...made, askedBy });
+    if (request.visibility !== undefined) {
+      const standing = facts.caller.kind === 'owner' ? 'owner-human' : 'owner';
+      const refusal = visibilityVerdict({ ...made, askedBy }, request.visibility, standing);
+      if (refusal !== null) throw new BoardError('forbidden', refusal.message, refusal.allowed);
+    }
     const card = requireValidCard({
       ...made,
-      askedBy: await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true),
+      askedBy,
+      visibility,
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
     await this.ports.store.write(id, async current => {

@@ -34,6 +34,8 @@ import {
   buildDependAction,
   buildDropAction,
   buildEditAction,
+  buildVisibilityAction,
+  editsFields,
   buildFileAction,
   buildFocusAction,
   buildLinkAction,
@@ -48,6 +50,7 @@ import {
   buildUndependAction,
   createPrLinks,
   requireCardRef,
+  visibilityOf,
 } from './board-request';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from './ports';
 
@@ -179,6 +182,11 @@ export class BoardController {
     const label = scoped?.name ?? 'all projects';
     const render = options.md === true ? renderBoardMarkdown : renderBoard;
     this.deps.output.success(render(response, listing.projects, names, label));
+    if (query.visibility === 'public') {
+      this.deps.output.success(
+        `public cards only: ${this.deps.binary} board --private shows the ferrets' own cards, --all shows both`,
+      );
+    }
   }
 
   /** `fy task show <id>`: one card in full. */
@@ -434,8 +442,13 @@ export class BoardController {
   }
 
   async edit(idText: string, options: TaskEditFlags) {
+    const ref = requireCardRef(idText);
+    const visibility = visibilityOf(options.visibility);
     const texts = await this.resolveTexts(options);
-    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, texts));
+    if (visibility === undefined || editsFields(options, texts)) {
+      await this.perform('edit', ref, options, buildEditAction(options, texts));
+    }
+    if (visibility !== undefined) await this.perform('visibility', ref, options, buildVisibilityAction(visibility));
   }
 
   async refile(
