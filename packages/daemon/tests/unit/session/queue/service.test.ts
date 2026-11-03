@@ -176,12 +176,20 @@ describe('how long a ferret message is held', () => {
     should(heldMs(message)).equal(600_000);
   });
 
-  it('should hold a question labelled fyi only for the action window', async () => {
+  it('should never hold a question, whatever label it arrives with or without', async () => {
     const { service } = subject();
 
-    const { message } = await service.enqueue(ID, { ...agent, id: 'q', label: 'fyi', replyExpected: true });
+    for (const label of ['fyi', 'action', undefined] as const) {
+      const { message } = await service.enqueue(ID, {
+        ...agent,
+        id: `q-${label}`,
+        ...(label === undefined ? {} : { label }),
+        replyExpected: true,
+      });
 
-    should(heldMs(message)).equal(60_000);
+      should(message).not.have.property('holdUntil');
+      should(message).have.property('label', 'blocker');
+    }
   });
 
   it('should never hold a blocker or an interrupt', async () => {

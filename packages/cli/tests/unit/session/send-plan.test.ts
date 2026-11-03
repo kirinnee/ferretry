@@ -102,11 +102,12 @@ describe('planSend', () => {
 });
 
 describe('planSend label', () => {
-  it('should default to action, and make a question or an interrupt a blocker', () => {
+  it('should default to action, and make a question (--ask, --expect-reply) or an interrupt a blocker', () => {
     should(planSend({ message: 'x' }, HUMAN).label).equal('action');
     should(planSend({ message: 'x', ask: true }, IN_PANE).label).equal('blocker');
     should(planSend({ message: 'x', now: true }, HUMAN).label).equal('blocker');
-    should(planSend({ message: 'x', expectReply: true }, HUMAN).label).equal('action');
+    should(planSend({ message: 'x', expectReply: true }, HUMAN).label).equal('blocker');
+    should(planSend({ message: 'x', expectReply: true, kind: 'action' }, HUMAN).label).equal('blocker');
     should(planSend({ message: 'x', ask: true, kind: 'action' }, IN_PANE).label).equal('blocker');
   });
 

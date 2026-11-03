@@ -132,8 +132,8 @@ this page, which is still how a message reaches the pane.
 
 ## Labels and combined delivery
 
-A ferret labels every message it sends: `fy send --kind blocker|action|fyi` (default `action`; `--ask` and
-`--now` are blockers). The label is the sender's own word about how soon the receiver needs the message, and
+A ferret labels every message it sends: `fy send --kind blocker|action|fyi` (default `action`; `--ask`,
+`--expect-reply` and `--now` are blockers). The label is the sender's own word about how soon the receiver needs the message, and
 it decides how long the queue may hold it so that several can ride in one turn instead of waking the receiver
 once each (owner-approved 2026-11-03).
 
@@ -144,10 +144,13 @@ once each (owner-approved 2026-11-03).
 | `fyi`     | When the receiver ends a turn that began after it arrived, or after `fyiMaxHoldMs` (10 min), whichever first. |
 
 These are never held, whatever label they carry or lack: **the owner's messages, the daemon's (Warden,
-Board, Agenda) and a ferret's `--now`**. A **question** (`--ask`, `--expect-reply`) is never an FYI — the
-CLI refuses the pair, and the queue treats an `fyi` with a reply expected as an `action` — and **the reply to
-a ferret the receiver is parked on is a blocker**. A message with no label (queued before this existed, or by
-an older CLI) is delivered at once, as it always was.
+Board, Agenda) and a ferret's `--now`**. A **question** (`--ask`, `--expect-reply`) is never held at all, as
+news or to be combined: the CLI makes it a blocker and refuses `--kind fyi` beside it, and the daemon treats
+any message that expects a reply as a blocker whatever label it arrives with (a raw or older client included).
+**The reply to a ferret the receiver is parked on is a blocker** too. A message with no label is delivered at
+once only when it was queued before this existed. One that arrives with no label from an older CLI is an
+`action`: the queue stamps it with the 60 s window and combines it, unless it expects a reply or is an
+interrupt, which go at once.
 
 - **One decision** — `planDelivery` (`lib/session/queue/policy.ts`) is pure: it takes the queue, the
   receiver's turn state, the clock and the settings, and answers `single`, `batch` or `hold`. A person's
@@ -156,7 +159,9 @@ an older CLI) is delivered at once, as it always was.
 - **Hold** — `enqueue` stamps `holdUntil` on a held message; the answer to `fy send` says so
   (`heldUntil`) and the CLI prints "held until …; do not resend". An FYI-only batch is never delivered to a
   STOPPED session (an FYI must not revive a ferret); it waits as `stopped` until a blocker or action
-  arrives or the session runs.
+  arrives or the session runs. That is judged on the WHOLE pending queue: once a blocker or action is
+  waiting behind any number of FYIs, they drain in order (a capped batch of FYIs included) so its turn
+  comes. FYIs alone never hold back a daemon message.
 - **One turn, one record** — the members are all moved to `typing` on disk, each carrying the batch id, BEFORE
   anything is typed; the send ledger gets ONE record, under the oldest member's id. `deliveredAs` on every
   member names that id, so a member's ticks and `GET …/sends/:id` come from the batch's record
@@ -164,7 +169,8 @@ an older CLI) is delivered at once, as it always was.
   `queued`, none is typed twice.
 - **What the receiver reads** — one turn that lists each message with its place, kind, label and sender, in
   order ([format](ferret-messages.md#combined-deliveries)). Each part keeps its own kind, so the one that
-  answers a wait still ends it.
+  answers a wait still ends it. If the turn cannot be proven delivered, EVERY sender in it is told, each
+  under its own message id (the ledger row keeps the members in `batch`).
 - **Settings** — `delivery` in `config/daemon.json`: `coalesce` (default `true`; `false` is the kill switch —
   every ferret message is a blocker and goes alone, as before), `actionWindowMs` (60 000),
   `fyiMaxHoldMs` (600 000), `batchMax` (20). Read at start.

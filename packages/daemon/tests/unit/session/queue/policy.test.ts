@@ -196,11 +196,12 @@ describe('what to deliver next, and when', () => {
     should(ids(plan([ferret('f', 0, 'fyi'), ferret('a', 30, 'action')], 90))).eql(['f', 'a']);
   });
 
-  it('should never hold a question as an FYI, nor a reply to a ferret that is waiting on it', () => {
-    const question = ferret('q', 0, 'fyi', { replyExpected: true });
-    should(effectiveLabel(question, TARGET, SETTINGS)).equal('action');
-    should(plan([question], 30)?.kind).equal('hold');
-    should(ids(plan([question], 60))).eql(['q']);
+  it('should never hold a question — as news or to be combined — nor a reply to a ferret that is waiting on it', () => {
+    for (const label of ['fyi', 'action', undefined] as const) {
+      const question = ferret('q', 0, label, { replyExpected: true });
+      should(effectiveLabel(question, TARGET, SETTINGS)).equal('blocker');
+      should(ids(plan([question], 1))).eql(['q']);
+    }
 
     const reply = ferret('r', 0, 'action', { from: 'peer-1' });
     should(ids(plan([reply], 1, { waiting: { peer: 'peer-1' } }))).eql(['r']);
@@ -213,6 +214,30 @@ describe('what to deliver next, and when', () => {
   it('should not let FYIs alone revive a stopped session, and say why', () => {
     should(plan([ferret('f', 0, 'fyi')], 700, { status: 'stopped' })).eql({ kind: 'hold', reason: 'stopped' });
     should(ids(plan([ferret('f', 0, 'fyi'), ferret('a', 10, 'blocker')], 700, { status: 'stopped' }))).eql(['f', 'a']);
+  });
+
+  it('should not let an expired FYI hold a Warden alert behind it on a stopped session', () => {
+    const queue = [ferret('f', 0, 'fyi'), message('warden', 'daemon', 650)];
+    const stopped = { status: 'stopped' } as const;
+
+    should(ids(plan(queue, 700, stopped))).eql(['warden']);
+    should(plan([ferret('f', 0, 'fyi')], 700, stopped)).eql({ kind: 'hold', reason: 'stopped' });
+  });
+
+  it('should drain FYIs capped at batchMax so a blocker, action or reply behind them is not held forever on a stopped session', () => {
+    const fyis = ['f1', 'f2', 'f3'].map((id, index) => ferret(id, index, 'fyi'));
+    const later: Readonly<Record<string, QueuedMessage>> = {
+      blocker: ferret('later', 10, 'blocker'),
+      action: ferret('later', 10, 'action'),
+      reply: ferret('later', 10, 'action', { from: 'peer-1' }),
+    };
+    for (const [name, last] of Object.entries(later)) {
+      const target = { status: 'stopped', ...(name === 'reply' ? { waiting: { peer: 'peer-1' } } : {}) } as const;
+      const queue = [...fyis, last];
+
+      should(ids(plan(queue, 700, target, { batchMax: 3 }))).eql(['f1', 'f2', 'f3']);
+      should(ids(plan([last], 700, target, { batchMax: 3 }))).eql(['later']);
+    }
   });
 
   it('should cap one turn at batchMax and leave the rest for the next', () => {

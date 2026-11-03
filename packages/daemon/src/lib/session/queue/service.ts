@@ -76,7 +76,12 @@ export class SessionQueueService {
       const existing = (await this.list(id)).find(message => message.id === request.id);
       if (existing !== undefined) return { message: existing, created: false };
       const at = this.ports.clock.now();
-      const label = request.sender === 'agent' ? (request.label ?? 'action') : undefined;
+      const label =
+        request.sender === 'agent'
+          ? request.replyExpected === true
+            ? 'blocker'
+            : (request.label ?? 'action')
+          : undefined;
       const holdUntil = this.holdUntil(request, label, at);
       const message: QueuedMessage = {
         v: 1,
@@ -104,13 +109,12 @@ export class SessionQueueService {
   /**
    * How long a ferret's message is held to ride with others, fixed NOW so a later settings change never
    * moves a hold already promised. Never for a person, the daemon, a blocker, an interrupt or with the
-   * kill switch off — and a question that arrived labelled `fyi` is an action, not an FYI.
+   * kill switch off. A question is a blocker whatever it was labelled, so it is never held.
    */
   private holdUntil(request: QueueRequest, label: PeerMessageLabel | undefined, at: string): string | undefined {
     if (!this.coalescing.coalesce || label === undefined || label === 'blocker' || request.interrupt === true)
       return undefined;
-    const windowMs =
-      label === 'fyi' && request.replyExpected !== true ? this.coalescing.fyiMaxHoldMs : this.coalescing.actionWindowMs;
+    const windowMs = label === 'fyi' ? this.coalescing.fyiMaxHoldMs : this.coalescing.actionWindowMs;
     return new Date(Date.parse(at) + windowMs).toISOString();
   }
 

@@ -75,8 +75,8 @@ export function planSend(flags: SendFlags, environment: SessionEnvironment): Sen
 }
 
 /**
- * The label a send carries. A question or an interrupt is a blocker by nature (it is delivered at once), so
- * those flags set it; the one thing they cannot be is an FYI, which is held for the receiver's next turn end.
+ * The label a send carries. A question (`--ask`, `--expect-reply`) or an interrupt is a blocker by nature
+ * (it is delivered at once, whatever `--kind` says), so those flags set it; the one thing they cannot be is an FYI, which is held for the receiver's next turn end.
  */
 function planLabel(flags: SendFlags): PeerMessageLabel {
   const parsed = flags.kind === undefined ? undefined : PeerMessageLabelSchema.safeParse(flags.kind.trim());
@@ -88,8 +88,7 @@ function planLabel(flags: SendFlags): PeerMessageLabel {
     throw new SessionCommandError(
       'a question is never an FYI: --kind fyi cannot be combined with --ask, --expect-reply or --now',
     );
-  if (flags.ask === true || flags.now === true) return 'blocker';
-  return asked ?? 'action';
+  return urgent ? 'blocker' : (asked ?? 'action');
 }
 
 const DISPOSITION_NOTES: Readonly<Record<SendDisposition, string>> = {

@@ -645,12 +645,9 @@ describe('labels and combined delivery', () => {
     should(world.handed).eql(['f']);
   });
 
-  it('should deliver a question labelled fyi as an action, and a reply the sender is waited on for at once', async () => {
+  it('should deliver a question at once, however it is labelled, and a reply the sender is waited on for', async () => {
     const question = new World(fyi('q', 0, { replyExpected: true, holdUntil: new Date(T0 + 60_000).toISOString() }));
     await question.deliverer.enqueued(ID);
-    should(question.handed).be.empty();
-    question.nowMs = T0 + 60_000;
-    await question.deliverer.look(ID);
     should(question.handed).eql(['q']);
 
     const reply = new World(action('r', 0, { from: 'peer-session' }));

@@ -52,18 +52,23 @@ function answersWait(message: QueuedMessage, target: SendTarget): boolean {
 
 /**
  * How a ferret's message is to be treated NOW. A blocker, an interrupt (`--now`), the answer its receiver
- * is parked on, and every message while the kill switch is off all go at once; an FYI that expects an
- * answer is an action — a question is never held as news. No label is an action.
+ * is parked on, a question (a reply is expected) and every message while the kill switch is off all go at
+ * once — a question is never held, as news or to be combined. No label is an action.
  */
 export function effectiveLabel(
   message: QueuedMessage,
   target: SendTarget,
   settings: Pick<QueueCoalesceSettings, 'coalesce'>,
 ): EffectiveLabel {
-  if (!settings.coalesce || message.label === 'blocker' || message.interrupt === true || answersWait(message, target))
+  if (
+    !settings.coalesce ||
+    message.label === 'blocker' ||
+    message.interrupt === true ||
+    message.replyExpected === true ||
+    answersWait(message, target)
+  )
     return 'blocker';
-  if (message.label === 'fyi' && message.replyExpected !== true) return 'fyi';
-  return 'action';
+  return message.label === 'fyi' ? 'fyi' : 'action';
 }
 
 /** Whether the receiver ended a turn after this message arrived. A turn end BEFORE it does not count. */
@@ -114,7 +119,8 @@ const isStopped = (target: SendTarget): boolean => TERMINAL_SEND_STATUSES.has(ta
  *     ferret message still being held, but never one that is due.
  *  5. Otherwise the session holds until the earliest hold ends.
  *
- * A batch that holds only FYIs is not delivered to a stopped session: an FYI never revives a ferret.
+ * FYIs alone are not delivered to a stopped session — an FYI never revives a ferret — but they never hold
+ * the daemon's message behind them, and any blocker or action in the queue releases them in order.
  */
 export function planDelivery(
   messages: readonly QueuedMessage[],
@@ -132,21 +138,25 @@ export function planDelivery(
   const ferrets = waiting
     .filter(message => message.sender === 'agent')
     .map(message => ({ message, label: effectiveLabel(message, view.target, settings) }));
+  let stoppedFyis = false;
   if (ferrets.some(entry => isDue(entry.message, entry.label, view.target, instant))) {
     // The kill switch is today's queue: one turn per message.
-    const members = ferrets.slice(0, settings.coalesce ? Math.max(1, settings.batchMax) : 1);
-    if (isStopped(view.target) && members.every(entry => entry.label === 'fyi')) {
-      return { kind: 'hold', reason: 'stopped' };
+    // An FYI never revives a stopped session — judged on the WHOLE pending queue, not the capped prefix:
+    // twenty FYIs ahead of a blocker must drain (in order) so the blocker's turn comes, not wedge it.
+    if (!(isStopped(view.target) && ferrets.every(entry => entry.label === 'fyi'))) {
+      const members = ferrets.slice(0, settings.coalesce ? Math.max(1, settings.batchMax) : 1);
+      const flushed = members.map(entry => entry.message);
+      const [only, ...rest] = flushed;
+      return only !== undefined && rest.length === 0
+        ? { kind: 'single', message: only }
+        : { kind: 'batch', members: flushed };
     }
-    const flushed = members.map(entry => entry.message);
-    const [only, ...rest] = flushed;
-    return only !== undefined && rest.length === 0
-      ? { kind: 'single', message: only }
-      : { kind: 'batch', members: flushed };
+    stoppedFyis = true;
   }
 
   const daemon = waiting.find(message => message.sender === 'daemon');
   if (daemon !== undefined) return { kind: 'single', message: daemon };
+  if (stoppedFyis) return { kind: 'hold', reason: 'stopped' };
   const until = ferrets
     .flatMap(entry => (entry.message.holdUntil === undefined ? [] : [entry.message.holdUntil]))
     .toSorted((left, right) => Date.parse(left) - Date.parse(right))[0];
