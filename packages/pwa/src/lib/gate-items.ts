@@ -86,16 +86,15 @@ export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
 };
 
 /**
- * What the second answer row says about its card, after the card's id: "Badge colour is ready to test." for a card
- * waiting to be tried (its options reopen it), else "Badge colour is at Review."; the lane alone when the title is not known.
+ * What a card ask says about its card, under the heading that names its id: "Badge colour is ready to test." for a card
+ * waiting to be tried (its options reopen it), else "Badge colour is at Review."; "It is ..." when the title is not known.
  */
 export const attachedGateLead = (gate: AgendaGate): string => {
-  const named = gate.cardTitle === undefined ? '' : `${gate.cardTitle} `;
-  return `${named}is ${attachedGateStanding(gate)}.`;
+  return `${gate.cardTitle ?? 'It'} is ${attachedGateStanding(gate)}.`;
 };
 
 /** Where the attached card stands, in the owner's words: "ready to test", else "at Review". */
-export const attachedGateStanding = (gate: AgendaGate): string =>
+const attachedGateStanding = (gate: AgendaGate): string =>
   gate.options.some(option => option.outcome === 'reopen-with-agenda') ? 'ready to test' : `at ${gate.laneName}`;
 
 /** An answer from the attached gate's row: marked so the daemon answers the gate, never the thread. */

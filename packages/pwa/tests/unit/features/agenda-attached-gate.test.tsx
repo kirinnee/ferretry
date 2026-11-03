@@ -82,7 +82,7 @@ describe('a thread with a gate attached', () => {
       thread({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
     );
     const lead = must(root.querySelector<HTMLElement>('.fy-card__gate-lead'), 'the lead');
-    expect(lead.textContent).toBe('&F12 Badge colour is ready to test.');
+    expect(lead.textContent).toBe('Badge colour is ready to test.');
     // It is answered inside the item, in What I need from you: never docked, never a separate item.
     expect(lead.closest('[data-agenda-part="needs"]')).not.toBeNull();
   });

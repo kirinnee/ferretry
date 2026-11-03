@@ -49,7 +49,7 @@ import {
 } from '../../lib/agenda-item-sections.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
-import { attachedGateLead, attachedGateStanding, toGateAction } from '../../lib/gate-items.ts';
+import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
@@ -300,7 +300,7 @@ function ReferencesTable({
 }
 
 /**
- * ONE CARD ASK inside "What I need from you": its own heading ("Card &F559 · ready to test: your answer for the card"),
+ * ONE CARD ASK inside "What I need from you": its own heading ("Card &F559: your answer for the card"),
  * the card and what it waits on, its How to test when the ask carries one, and ITS buttons (Done / Not good, or OK to
  * build) — tap only, so the arrows and swipes stay the item's own.
  */
@@ -318,11 +318,9 @@ function CardAskBlock({
   return (
     <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
       <h5 className="fy-card__label fy-card__card-ask-title" data-agenda-card-ask-title="">
-        Card &amp;{ask.gate.cardId} · {attachedGateStanding(ask.gate)}: your answer for the card
+        Card &amp;{ask.gate.cardId}: your answer for the card
       </h5>
-      <p className="fy-card__gate-lead">
-        <strong>&amp;{ask.gate.cardId}</strong> {attachedGateLead(ask.gate)}
-      </p>
+      <p className="fy-card__gate-lead">{attachedGateLead(ask.gate)}</p>
       {ask.howToTest === null || ask.howToTest.trim() === '' ? null : (
         <div className="fy-card__need-part" data-agenda-card-ask-test="">
           <h5 className="fy-card__label">How to test</h5>

@@ -281,9 +281,7 @@ describe('what it needs from you', () => {
   test('gives every card ask its own heading, and the board’s How to test when the host has it', async () => {
     await draw(full, { howToTestFor: id => (id === 'F12' ? '1. Open the badge.\n2. See it is blue.' : null) });
     const ask = one('[data-agenda-card-ask]');
-    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe(
-      'Card &F12 · ready to test: your answer for the card',
-    );
+    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Card &F12: your answer for the card');
     const steps = must(ask.querySelector('[data-agenda-card-ask-test]'), 'the test steps');
     expect(steps.textContent).toContain('How to test');
     expect(steps.textContent).toContain('Open the badge.');
@@ -298,7 +296,7 @@ describe('what it needs from you', () => {
     expect(root().querySelector('[data-agenda-item-answer]')).toBeNull();
   });
 
-  test('draws a review’s links once: in the table, not again under "What to review"', async () => {
+  test('draws a review’s links once: under "What to review", not again in the references table', async () => {
     await draw(
       agendaItem('A8', {
         ask: choices('Approve', 'Reject'),
@@ -307,6 +305,10 @@ describe('what it needs from you', () => {
       } as Partial<AgendaItem>),
     );
     expect(root().querySelectorAll('a[href="https://github.com/kirinnee/ferretry/pull/9"]')).toHaveLength(1);
+    expect(
+      one('a[href="https://github.com/kirinnee/ferretry/pull/9"]').closest('[data-agenda-part="needs"]'),
+    ).not.toBeNull();
+    expect(root().querySelector('[data-agenda-reference="link"]')).toBeNull();
   });
 
   test('draws no card ask on an earlier version, which only reads', async () => {
