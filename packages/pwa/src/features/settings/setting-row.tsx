@@ -50,6 +50,8 @@ export interface SettingRowProps {
   /** The setting this row is, which makes it a deep-link target. */
   readonly settingId?: SettingId;
   readonly name: string;
+  /** A tooltip on the name, for a value too long for the row. */
+  readonly title?: string;
   /** One short, true line under the name. */
   readonly hint?: ReactNode;
   /** The long text behind the (i). */
@@ -67,6 +69,7 @@ export interface SettingRowProps {
 export function SettingRow({
   settingId,
   name,
+  title,
   hint,
   explanation,
   control,
@@ -105,7 +108,7 @@ export function SettingRow({
     >
       <div className="flex min-h-[var(--row-min-h)] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
         <span className={cn('flex min-w-0 flex-1 flex-col', wide ? 'max-md:basis-full' : 'basis-40')}>
-          <span id={labelId} className="text-ui font-semibold text-fg">
+          <span id={labelId} title={title} className="text-ui font-semibold text-fg">
             {name}
           </span>
           {hint === undefined ? null : (
@@ -150,9 +153,19 @@ export interface SettingSwitchProps {
   readonly onChange: (next: boolean) => void;
   readonly labelledBy: string;
   readonly disabled?: boolean;
+  /** An element that says why it is off, for a screen reader. */
+  readonly describedBy?: string | undefined;
+  readonly attrs?: Readonly<Record<`data-${string}`, string>>;
 }
 
-export function SettingSwitch({ checked, onChange, labelledBy, disabled = false }: SettingSwitchProps) {
+export function SettingSwitch({
+  checked,
+  onChange,
+  labelledBy,
+  disabled = false,
+  describedBy,
+  attrs,
+}: SettingSwitchProps) {
   return (
     <button
       type="button"

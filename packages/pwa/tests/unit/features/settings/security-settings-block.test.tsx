@@ -105,6 +105,25 @@ const press = async (block: ReactTestRenderer, marker: string, value: string): P
   });
 };
 
+/** Picks one of the common choices from the dropdown beside the number. */
+const choose = async (block: ReactTestRenderer, field: string, value: string): Promise<void> => {
+  const select = must(marked(block, 'data-security-preset-select', field)[0], `${field} dropdown`);
+  await runAsync(async () => {
+    select.props.onChange({ currentTarget: { value } });
+  });
+};
+
+/** Opens the (i) of the row called `name`, which holds the setting's long explanation. */
+const openInfo = async (block: ReactTestRenderer, name: string): Promise<void> => {
+  const info = must(
+    block.root.findAll(node => node.type === 'button' && node.props['aria-label'] === `More about ${name}`)[0],
+    `${name} (i)`,
+  );
+  await runAsync(async () => {
+    info.props.onClick();
+  });
+};
+
 const saveButton = (block: ReactTestRenderer, field: string) => marked(block, 'data-security-save', field)[0];
 
 describe('SecuritySettingsBlock reading', () => {
@@ -131,12 +150,18 @@ describe('SecuritySettingsBlock reading', () => {
 
     // Assert
     expect(text(block)).toContain('Unlock with a passkey on opening');
-    expect(text(block)).toContain('A device must unlock this machine with its passkey before it can do anything.');
     expect(text(block)).toContain('An unlock lasts');
     expect(text(block)).toContain('Ask again for each change');
+    // The long explanations sit behind each row's (i) and are not deleted.
+    expect(text(block)).not.toContain('A device must unlock this machine with its passkey before it can do anything.');
+    await openInfo(block, 'Unlock with a passkey on opening');
+    await openInfo(block, 'Ask again for each change');
+    await openInfo(block, 'An unlock lasts');
+    expect(text(block)).toContain('A device must unlock this machine with its passkey before it can do anything.');
     expect(text(block)).toContain(
       'Ask for a passkey again before changes, terminals and other sensitive acts, even while unlocked.',
     );
+    expect(text(block)).toContain('How long one unlock lasts for a device, across page loads.');
     should(marked(block, 'data-security-value', 'stepUpOnActions')[0]?.children).eql(['Off']);
     should(marked(block, 'data-security-setting', 'stepUpWindowMinutes')).be.empty();
     expect(text(block)).not.toContain('A change confirmation lasts');
@@ -316,7 +341,7 @@ describe('SecuritySettingsBlock loosening', () => {
 });
 
 describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, with a passkey)', () => {
-  it('offers the common choices, the current one pressed, each said in its own unit', async () => {
+  it('offers the common choices in one dropdown on the row, the current one chosen, each said in its own unit', async () => {
     // Arrange / Act
     const block = await mountBlock(machine(view(), () => new Error('unused')));
 
@@ -330,7 +355,8 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
       'unlockValidityHours:168',
     ]);
     should(presets.map(node => node.children)).eql([['1 hour'], ['8 hours'], ['1 day'], ['3 days'], ['7 days']]);
-    should(presets.filter(node => node.props['aria-pressed'] === true).map(node => node.children)).eql([['8 hours']]);
+    should(marked(block, 'data-security-preset-select', 'unlockValidityHours')[0]?.props.value).equal('8');
+    should(marked(block, 'data-security-input', 'unlockValidityHours')[0]?.props.value).equal('8');
     run(() => block.unmount());
   });
 
@@ -342,7 +368,7 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
     );
 
     // Act
-    await press(block, 'data-security-preset', 'unlockValidityHours:168');
+    await choose(block, 'unlockValidityHours', '168');
 
     // Assert
     should(marked(block, 'data-security-input', 'unlockValidityHours')[0]?.props.value).equal('168');
@@ -367,8 +393,8 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
     const atMachine = await mountBlock(machine(view({ mayWiden: true }), () => new Error('unused')));
 
     // Act
-    await press(shorter, 'data-security-preset', 'unlockValidityHours:1');
-    await press(atMachine, 'data-security-preset', 'unlockValidityHours:168');
+    await choose(shorter, 'unlockValidityHours', '1');
+    await choose(atMachine, 'unlockValidityHours', '168');
 
     // Assert
     should(marked(shorter, 'data-security-note', 'unlockValidityHours')).be.empty();
@@ -383,7 +409,7 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
     const block = await mountBlock(machine(view(), () => refused));
 
     // Act
-    await press(block, 'data-security-preset', 'unlockValidityHours:72');
+    await choose(block, 'unlockValidityHours', '72');
     await press(block, 'data-security-save', 'unlockValidityHours');
 
     // Assert

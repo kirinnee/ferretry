@@ -38,6 +38,7 @@ import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 import { cn } from '../../lib/class-names.ts';
 import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
+import { SettingGroup, SettingRow, SettingSwitch } from '../settings/setting-row.tsx';
 import {
   type JevKeyStatus,
   movedAccount,
@@ -147,7 +148,7 @@ function Card({
   readonly children: ReactNode;
 }) {
   return (
-    <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel">
+    <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
       {title !== undefined && <h3 className="m-0 text-row font-semibold text-fg">{title}</h3>}
       {children}
       {note !== undefined && <p className="m-0 text-meta leading-base text-muted">{note}</p>}
@@ -174,7 +175,7 @@ function NumberField({
 }) {
   const id = useId();
   return (
-    <label htmlFor={id} className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+    <label htmlFor={id} className="flex min-w-0 flex-col gap-1 text-meta font-medium text-fg">
       {label}
       <input
         id={id}
@@ -184,7 +185,7 @@ function NumberField({
         max={max}
         step={step}
         aria-invalid={error === undefined ? undefined : true}
-        className="kt-input min-h-[44px] w-full max-w-[12rem] rounded-control border border-border bg-surface-2 px-2 text-fg"
+        className="kt-input !h-control-sm !min-h-0 w-28 rounded-control border border-border bg-surface-2 px-2 text-fg"
         value={Number.isFinite(value) ? value : ''}
         onChange={event => onChange(numberFrom(event.target.value))}
       />
@@ -332,7 +333,7 @@ function LayerRow({
 }) {
   return (
     <div
-      className="flex min-w-0 flex-col gap-3 rounded-control border border-border-strong bg-surface-2 px-cell-x py-2"
+      className="flex min-w-0 flex-col gap-2 rounded-control border border-border-strong bg-surface-2 px-cell-x py-1.5"
       data-warden-layer={title}
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -451,7 +452,7 @@ function MoveToAnotherLogin({
           checked={moving.forceStopBackground}
           onChange={forceStopBackground => setMoving({ forceStopBackground })}
         />
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
           {!moving.forceStopBackground && (
             <NumberField
               label="Wait for the ferret to stop them (min)"
@@ -594,9 +595,9 @@ export function WardenSettingsForm({
                 )}
               </div>
             )}
-            <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+            <label className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0 text-cell font-medium text-fg">
               Leaves a flag alone only when at least this sure it is healthy
-              <span className="flex items-center gap-sm">
+              <span className="ml-auto flex w-full min-w-0 max-w-[16rem] items-center gap-sm max-sm:max-w-none">
                 <input
                   type="range"
                   min={WARDEN_GUARD_THRESHOLD_RANGE.min}
@@ -609,7 +610,7 @@ export function WardenSettingsForm({
                 />
                 <output className="mono w-14 text-right text-ui">{jevActBarLabel(value.guard.threshold)}</output>
               </span>
-              <span className="text-meta font-normal leading-base text-muted">
+              <span className="basis-full text-meta font-normal leading-base text-muted">
                 Lower: more cleared and cheaper. Higher: more passed on and safer.
               </span>
             </label>
@@ -626,13 +627,13 @@ export function WardenSettingsForm({
                   <label
                     key={act.id}
                     className={cn(
-                      'flex min-w-0 flex-col gap-1 text-cell font-medium text-fg',
+                      'flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0 text-cell font-medium text-fg',
                       !allowed && 'opacity-60',
                     )}
                     data-warden-jev-act={act.id}
                   >
                     {act.label}
-                    <span className="flex items-center gap-sm">
+                    <span className="ml-auto flex w-full min-w-0 max-w-[16rem] items-center gap-sm max-sm:max-w-none">
                       <input
                         type="range"
                         min={WARDEN_JEV_ACT_THRESHOLD_RANGE.min}
@@ -647,7 +648,7 @@ export function WardenSettingsForm({
                       <output className="mono w-14 text-right text-ui">{jevActBarLabel(bar)}</output>
                     </span>
                     {!allowed && (
-                      <span className="text-meta font-normal leading-base text-muted">
+                      <span className="basis-full text-meta font-normal leading-base text-muted">
                         Off — the Warden may not {act.label.toLowerCase()} alone
                       </span>
                     )}
@@ -682,7 +683,7 @@ export function WardenSettingsForm({
               format={policy => FAILOVER_POLICY_LABELS[policy]}
               onChange={policy => set({ failover: { ...value.failover, policy } })}
             />
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
               <NumberField
                 label="LLM cap ($/day)"
                 value={value.caps.investigationUsdPerDay}
@@ -722,7 +723,7 @@ export function WardenSettingsForm({
               A read-only LLM ferret that reads the transcript, pane, diffs and CI, then writes a report with a verdict:
               leave · nudge · resume · stop · needs you. Every verdict records who ran it and with which model.
             </p>
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
               <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
                 Login
                 <select
@@ -839,7 +840,7 @@ export function WardenSettingsForm({
                 </ol>
               )}
             </div>
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
               <NumberField
                 label="Investigations at a time"
                 value={value.maxAssignedWardens}
@@ -875,30 +876,37 @@ export function WardenSettingsForm({
         </Card>
 
         {(llm || value.layers.jev) && (
-          <Card title="May act alone">
-            {ACT_ALONE.map(action => (
-              <Check
-                key={action.id}
-                label={action.label}
-                detail={action.detail}
-                checked={value.mayActAlone[action.id]}
-                onChange={checked => set({ mayActAlone: { ...value.mayActAlone, [action.id]: checked } })}
-              />
-            ))}
-            {browserHref === undefined ? null : (
-              <p className="m-0 text-meta leading-base text-muted" data-warden-browser-link="">
-                The browser’s mode and proxy are in{' '}
-                <RouteLink
-                  to={browserHref}
-                  {...(onNavigate === undefined ? {} : { onNavigate })}
-                  className="font-semibold text-accent"
-                >
-                  Settings › machine › Browser
-                </RouteLink>
-                .
-              </p>
-            )}
-          </Card>
+          <div className="flex min-w-0 flex-col gap-2" data-warden-may-act-alone="">
+            <SettingGroup label="May act alone">
+              {ACT_ALONE.map(action => (
+                <SettingRow
+                  key={action.id}
+                  name={action.label}
+                  explanation={action.detail}
+                  control={labelId => (
+                    <SettingSwitch
+                      checked={value.mayActAlone[action.id]}
+                      labelledBy={labelId}
+                      onChange={checked => set({ mayActAlone: { ...value.mayActAlone, [action.id]: checked } })}
+                    />
+                  )}
+                />
+              ))}
+              {browserHref === undefined ? null : (
+                <li className="px-panel py-2 text-meta leading-base text-muted" data-warden-browser-link="">
+                  The browser’s mode and proxy are in{' '}
+                  <RouteLink
+                    to={browserHref}
+                    {...(onNavigate === undefined ? {} : { onNavigate })}
+                    className="font-semibold text-accent"
+                  >
+                    Settings › machine › Browser
+                  </RouteLink>
+                  .
+                </li>
+              )}
+            </SettingGroup>
+          </div>
         )}
 
         <MoveToAnotherLogin value={value} errors={errors} runtimes={runtimes} onChange={onChange} />

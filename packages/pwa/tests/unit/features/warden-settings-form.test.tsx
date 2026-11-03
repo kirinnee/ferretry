@@ -81,6 +81,12 @@ const option = (renderer: ReactTestRenderer, words: string): ReactTestInstance =
   return label.find(node => node.type === 'input');
 };
 
+/** The may-act-alone switch row for one act, by the name on its row. */
+const actSwitch = (renderer: ReactTestRenderer, name: string): ReactTestInstance => {
+  const row = renderer.root.find(node => node.type === 'li' && node.props['data-setting-row'] === name);
+  return row.find(node => node.props.role === 'switch');
+};
+
 const last = (changes: WardenConfig[]): WardenConfig => {
   const value = changes.at(-1);
   if (value === undefined) throw new Error('no change was reported');
@@ -376,13 +382,15 @@ describe('WardenSettingsForm', () => {
     // Act
     run(() => option(renderer, '10 min').props.onChange());
     run(() => option(renderer, 'Pane died').props.onChange({ target: { checked: false } }));
-    run(() => option(renderer, 'Stop a ferret').props.onChange({ target: { checked: true } }));
+    expect(actSwitch(renderer, 'Stop a ferret').props['aria-checked']).toBe(false);
+    run(() => actSwitch(renderer, 'Stop a ferret').props.onClick());
 
     // Assert
     const value = last(changes);
     expect(value.intervalMinutes).toBe(10);
     expect(value.events).toEqual({ turnEnd: true, question: true, paneDied: false });
     expect(value.mayActAlone.stop).toBe(true);
+    expect(actSwitch(renderer, 'Stop a ferret').props['aria-checked']).toBe(true);
     expect(text(renderer)).not.toContain('stopping always asks you first');
     expect(text(renderer)).toContain('Every 10 min the rules flag anomalies');
     run(() => renderer.unmount());
@@ -471,7 +479,10 @@ describe('What Jev may do alone', () => {
     expect(jevRow(renderer, 'nudge').slider.props.disabled).toBe(true);
 
     // Act
-    run(() => option(renderer, 'Sends a short').props.onChange({ target: { checked: true } }));
+    expect(text(renderer)).not.toContain('Sends a short');
+    run(() => renderer.root.findByProps({ 'aria-label': 'More about Nudge' }).props.onClick());
+    expect(text(renderer)).toContain('Sends a short');
+    run(() => actSwitch(renderer, 'Nudge').props.onClick());
 
     // Assert
     expect(text(renderer)).toContain('May act alone');
