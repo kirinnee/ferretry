@@ -12897,9 +12897,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               async () => await stateFiles.readText(join(createSessionPaths(paths, id).directory, 'summary.md')),
             );
           },
-          subtree: async reference => {
+          subtree: async (reference, caller) => {
             const id = tryParseSessionId(reference);
-            return id === undefined ? undefined : await subtreeService.view(id);
+            return id === undefined ? undefined : await subtreeService.view(id, caller);
           },
           setSwitch: createSessionPackSwitch(
             storage,

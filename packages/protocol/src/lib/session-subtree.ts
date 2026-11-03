@@ -19,8 +19,11 @@ import { SessionStatusSchema } from './session-base.ts';
 /** How long after it ended a descendant still has a row, marked `ended`: long enough to read a result. */
 export const SUBTREE_ENDED_WINDOW_MS = 2 * 60 * 60_000;
 
-/** The longest a row's last line may be, in characters, ellipsis included. */
+/** The longest a row's last line may be, in characters (code points, so an emoji is one), ellipsis included. */
 export const SUBTREE_LAST_LINE_MAX = 100;
+
+/** How many characters a row's last line has — the one rule the daemon cuts by and the schema checks by. */
+export const lastLineLength = (text: string): number => [...text].length;
 
 /** The four settled terminal states have no live work left; `kill_failed` is not one — it is still to be dealt with. */
 export const SESSION_ENDED_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
@@ -60,7 +63,12 @@ export const SubtreeRowSchema = z.strictObject({
     .strictObject({
       at: InstantSchema,
       source: SubtreeLastSourceSchema,
-      text: z.string().min(1).max(SUBTREE_LAST_LINE_MAX),
+      text: z
+        .string()
+        .min(1)
+        .refine(text => lastLineLength(text) <= SUBTREE_LAST_LINE_MAX, {
+          message: `at most ${SUBTREE_LAST_LINE_MAX} characters`,
+        }),
     })
     .optional(),
   /** When it ended; present exactly on an `ended` row. */

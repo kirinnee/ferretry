@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type BoardTask, type PrLink, SubtreeViewSchema } from '@ferretry/protocol';
+import { type BoardTask, type PrLink, SubtreeRowSchema, SubtreeViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   lastLineOf,
@@ -12,6 +12,7 @@ import {
   subtreeMembers,
   subtreeStateOf,
 } from '../../../../src/lib/session/pack/subtree.ts';
+import { newestMessageScanning } from '../../../../src/lib/session/pack/outbox-scan.ts';
 import { card, lanes, PROJECT } from '../../board/support.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 
@@ -142,6 +143,32 @@ describe('oneLine', () => {
     should(oneLine('y'.repeat(100))).equal('y'.repeat(100));
     should(oneLine('   \n  ')).equal('');
   });
+
+  it('should cut by the same character count the table schema checks, even with emoji at the limit', () => {
+    // Arrange: emoji are one character but two UTF-16 units
+    const exact = '🚀'.repeat(100);
+    const over = `${'a'.repeat(99)}🚀🚀`;
+
+    // Act
+    const lines = [oneLine(exact), oneLine(over), oneLine('🚀'.repeat(300))];
+
+    // Assert
+    should(lines[0]).equal(exact);
+    for (const text of lines) {
+      should([...text].length).be.belowOrEqual(100);
+      should(
+        SubtreeRowSchema.safeParse({
+          id: 's',
+          callsign: 'c',
+          depth: 1,
+          model: 'm',
+          state: 'running',
+          status: 'thinking',
+          last: { at: '2026-11-03T12:00:00.000Z', source: 'note', text },
+        }).success,
+      ).be.true();
+    }
+  });
 });
 
 describe('lastLineOf', () => {
@@ -233,6 +260,78 @@ describe('newestMessageTo', () => {
   });
 });
 
+describe('newestMessageScanning', () => {
+  const line = (entry: Record<string, unknown>): string => JSON.stringify(entry);
+  const message = (to: string, text: string, at = '2026-11-03T10:00:00.000Z') =>
+    line({ at, type: 'message', from: 'c', to, message: text });
+  const sourceOf = (text: string) => {
+    const bytes = Buffer.from(text, 'utf8');
+    const reads: Array<readonly [number, number]> = [];
+    return {
+      reads,
+      source: {
+        size: bytes.length,
+        read: async (offset: number, length: number) => {
+          reads.push([offset, length]);
+          return bytes.subarray(offset, offset + length);
+        },
+      },
+    };
+  };
+
+  it('should find the newest message even when it is a single report much larger than the tail', async () => {
+    // Arrange: an older note, then a 70 KB report, as the last record
+    const huge = 'r'.repeat(70_000);
+    const { source } = sourceOf(
+      `${[message('lead', 'older note'), message('lead', huge, '2026-11-03T11:00:00.000Z')].join('\n')}\n`,
+    );
+
+    // Act
+    const found = await newestMessageScanning(source, 'lead', 64 * 1024);
+
+    // Assert
+    should(found).deepEqual({ at: '2026-11-03T11:00:00.000Z', text: huge });
+  });
+
+  it('should reach back past a big report to the recipient it was not sent to, without reading the whole file', async () => {
+    // Arrange: lead's message, then 200 KB of reports to someone else
+    const text = [
+      message('lead', 'for the lead'),
+      message('other', 'x'.repeat(100_000)),
+      message('other', 'y'.repeat(100_000)),
+    ].join('\n');
+    const { source, reads } = sourceOf(`${text}\n`);
+
+    // Act
+    const found = await newestMessageScanning(source, 'lead', 64 * 1024);
+    const bounded = await newestMessageScanning(sourceOf(`${text}\n`).source, 'lead', 64 * 1024, 128 * 1024);
+
+    // Assert
+    should(found).deepEqual({ at: '2026-11-03T10:00:00.000Z', text: 'for the lead' });
+    should(reads.length).be.above(1);
+    should(bounded).be.undefined();
+  });
+
+  it('should decode a multi-byte character cut by a chunk edge and handle a file without a trailing newline', async () => {
+    // Arrange
+    const body = `${message('lead', 'first')}\n${message('lead', '🚀'.repeat(40))}`;
+    const { source } = sourceOf(body);
+
+    // Act: chunk sizes that land inside the emoji bytes
+    const results = await Promise.all(
+      [7, 13, 64, 1000].map(async chunk => await newestMessageScanning(source, 'lead', chunk)),
+    );
+
+    // Assert
+    for (const found of results) should(found?.text).equal('🚀'.repeat(40));
+  });
+
+  it('should answer undefined for an empty file and for a recipient it never wrote to', async () => {
+    should(await newestMessageScanning(sourceOf('').source, 'lead')).be.undefined();
+    should(await newestMessageScanning(sourceOf(`${message('other', 'hi')}\n`).source, 'lead')).be.undefined();
+  });
+});
+
 describe('SubtreeService', () => {
   const laneSets = new Map([[PROJECT, lanes()]]);
   const cards = [
@@ -311,6 +410,27 @@ describe('SubtreeService', () => {
     should(cy?.last?.text).equal('hello');
     should(reads.board).equal(1);
     should(reads.messages.every(([, to]) => to === 'root')).be.true();
+  });
+
+  it('should show the messages sent to the asking caller, not to the root of the subtree', async () => {
+    // Arrange: lead A asks for B's subtree; B's child wrote to A (the caller), and to B
+    const { subject, reads } = service(
+      [sessionView('a'), child('b', 'a'), child('kid', 'b')],
+      {},
+      {
+        lastMessage: async (id, to) =>
+          id === 'kid' ? { at: minutesAgo(1), text: to === 'a' ? 'result for A' : 'status for B' } : undefined,
+      },
+    );
+
+    // Act
+    const asked = await subject.view('b', 'a');
+    const owner = await subject.view('b');
+
+    // Assert
+    should(asked?.rows[0]?.last?.text).equal('result for A');
+    should(owner?.rows[0]?.last?.text).equal('status for B');
+    should(reads.board).equal(0);
   });
 
   it('should take the note when it is newer than the message', async () => {

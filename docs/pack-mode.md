@@ -334,7 +334,7 @@ cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged;
 
 - **One call.** `fy status --subtree [<id>]` asks `GET /v1/sessions/:sessionId/subtree` once (default: the calling
   session; the owner outside a pane names an id). The daemon builds every row from what it already holds — the
-  sessions registry, one read of the board's cards, the PR cache the board keeps, and the tail of each
+  sessions registry, one read of the board's cards, the PR cache the board keeps, and the end of each
   descendant's outbox. It never calls GitHub per row, so fifty descendants cost one request.
 - **Rows.** One per live descendant, plus any that ended in the last two hours (`ended 25m`), in tree order: a
   ferret, then its own sub-ferrets indented beneath it, then the next sibling (by callsign). Lineage is the
@@ -343,8 +343,12 @@ cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged;
   flagged need — painted amber); `ended`.
 - **Card and PR.** The card a session works on (`&F767`) and its lane; the card's open PR (else its newest) with CI
   as the board's PR cache last read it (`CI passing|failing|pending`, or `merged`/`closed`). `-` where there is none.
-- **Last line.** The newer of the card's last note and the ferret's last message to the asking lead, cut to one line
-  of at most 100 characters (`…`). A tie goes to the note.
+- **Last line.** The newer of the card's last note and the ferret's last message to the asking ferret, cut to one line
+  of at most 100 characters (`…`; an emoji counts as one). A tie goes to the note. "The asking ferret" is the caller the
+  daemon derives from its credential, not the id in the path: when lead A asks for `--subtree B`, a grandchild's result
+  sent to A shows, not only what was sent to B. The owner outside a pane has no such caller, so it sees messages sent to the
+  named root. The outbox is read backwards in 64 KiB chunks, whole records at a time, up to 1 MiB: a long report never
+  hides the message under it, and only a message older than the last megabyte falls back to the card's note.
 - **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `card`, `pr`,
   `last`, `endedAt`).
 
@@ -377,7 +381,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); routine progress goes on its card (`fy task note`) and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2641**.
+  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2552**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

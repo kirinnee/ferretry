@@ -1,16 +1,12 @@
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
+import { newestMessageScanning } from '../../../lib/session/pack/outbox-scan.ts';
 import type { SentMessage } from '../../../lib/session/pack/subtree.ts';
-import { newestMessageTo } from '../../../lib/session/pack/subtree.ts';
 import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
-
-/** How much of an outbox's end is read: enough for the last few dozen messages, never the whole log. */
-export const OUTBOX_TAIL_BYTES = 64 * 1024;
 
 /**
  * The newest message a session sent to one recipient, read from the END of its `outbox.jsonl` so a long
- * conversation costs the same as a short one. A message older than the tail is not found: the table shows
- * the card's note instead, which is the newest of the two it can see.
+ * conversation costs the same as a short one. The scan itself (chunking, bound) is `newestMessageScanning`.
  */
 export class FileOutboxTail {
   constructor(private readonly sessionDirectory: (id: SessionId) => string) {}
@@ -27,10 +23,17 @@ export class FileOutboxTail {
     if (handle === undefined) return undefined;
     try {
       const { size } = await handle.stat();
-      const length = Math.min(size, OUTBOX_TAIL_BYTES);
-      const buffer = Buffer.alloc(length);
-      await handle.read(buffer, 0, length, size - length);
-      return newestMessageTo(buffer.toString('utf8'), to);
+      return await newestMessageScanning(
+        {
+          size,
+          read: async (offset, length) => {
+            const buffer = Buffer.alloc(length);
+            const { bytesRead } = await handle.read(buffer, 0, length, offset);
+            return buffer.subarray(0, bytesRead);
+          },
+        },
+        to,
+      );
     } finally {
       await handle.close();
     }

@@ -196,7 +196,10 @@ class FakePack implements PackSubsystem {
     return 'result' in this.options ? this.options.result : { ...RESULT, id: sessionId };
   }
 
-  async subtree(sessionId: string): Promise<SubtreeView | undefined> {
+  readonly subtreeCallers: Array<string | undefined> = [];
+
+  async subtree(sessionId: string, caller?: string): Promise<SubtreeView | undefined> {
+    this.subtreeCallers.push(caller);
     return 'subtree' in this.options
       ? this.options.subtree
       : { ...SUBTREE, root: { id: sessionId, callsign: 'rhett' } };
@@ -614,6 +617,20 @@ describe('GET /v1/sessions/:sessionId/subtree', () => {
     should(answer.status).equal(403);
     should(jsonBody(answer).code).equal('grant_not_granted');
     should(reads).equal(0);
+  });
+
+  it("should hand the service the caller's session from its credential, and none for a person", async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act: a ferret asks for another's subtree; the owner asks too
+    await dispatcher(subsystem).dispatch(
+      request({ method: 'GET', path: '/v1/sessions/child/subtree', headers: agentIn('lead-a') }),
+    );
+    await dispatcher(subsystem).dispatch(call('GET', '/v1/sessions/child/subtree'));
+
+    // Assert
+    should(subsystem.subtreeCallers).deepEqual(['lead-a', undefined]);
   });
 
   it('should let a ferret read its own subtree, as it reads any session', async () => {

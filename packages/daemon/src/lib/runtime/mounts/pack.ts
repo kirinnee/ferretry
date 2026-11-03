@@ -18,7 +18,7 @@ import {
   type SubtreeView,
   SubtreeViewSchema,
 } from '@ferretry/protocol';
-import { isAgentCaller } from '../../api/agent-caller.ts';
+import { agentSessionOf, isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
@@ -53,8 +53,11 @@ export interface PackSubsystem {
   };
   /** `undefined` when there is no such session. */
   result(sessionId: string): Promise<SessionResult | undefined>;
-  /** A lead's table of its descendants (docs/pack-mode.md § Checking on your sub-ferrets); `undefined` when there is no such session. */
-  subtree(sessionId: string): Promise<SubtreeView | undefined>;
+  /**
+   * A lead's table of its descendants (docs/pack-mode.md § Checking on your sub-ferrets); `undefined` when there is
+   * no such session. `caller` is the asking ferret, derived from its credential; absent for a person.
+   */
+  subtree(sessionId: string, caller?: string): Promise<SubtreeView | undefined>;
   setSwitch(
     sessionId: string,
     enabled: boolean,
@@ -137,7 +140,7 @@ async function result(subsystem: PackSubsystem, context: RouteContext): Promise<
 
 async function subtree(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
   const id = sessionParameter(context);
-  const found = await subsystem.subtree(id);
+  const found = await subsystem.subtree(id, agentSessionOf(context));
   if (found === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
   return jsonResponse(SubtreeViewSchema.parse(found));
 }

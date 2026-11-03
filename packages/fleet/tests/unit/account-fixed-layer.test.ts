@@ -1133,7 +1133,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('Never raise agenda items or notify the owner;');
     should(text).containEql(
-      'Label every send: `--kind blocker` only when you are stuck until answered, `--kind action` (default) when it needs doing, `--kind fyi` rarely, for news that needs nothing.',
+      'Label every send: `--kind blocker` (stuck until answered), `--kind action` (default; to do), `--kind fyi` (rarely; no action).',
     );
     should(text).containEql(
       "Blockers go at once, actions are combined for a minute, FYIs wait for the receiver's turn to end.",
@@ -1142,7 +1142,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
     should(text).containEql(
-      'Routine progress goes on your card (`zz task note`), not in a message; message your lead only for a result, a blocker or a decision it must make.',
+      'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make; routine progress: `zz task note` on your card.',
     );
     should(text).containEql('Your final report says how the owner tests it.');
     should(text).containEql('it moves itself (start, PR, merge, `zz signal done`). No card? Make none.');
@@ -1156,7 +1156,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(900);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {

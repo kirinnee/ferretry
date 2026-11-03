@@ -5,7 +5,9 @@
  * carry the PR cache the watcher keeps; nothing here calls GitHub) and each ferret's outbox — in ONE pass, so a
  * lead with fifty descendants costs one request, one board read and one small file read per descendant.
  *
- * Lineage comes from the registry's `parent` links and nothing else: the request names only the root.
+ * Lineage comes from the registry's `parent` links and nothing else: the request names only the root. The
+ * messages shown are those sent to the AUTHENTICATED CALLER (derived by the route, never read from the
+ * request), which is the root itself only when no ferret is asking — the owner at the machine.
  */
 import {
   type BoardTask,
@@ -209,8 +211,11 @@ export function rowOf(
 export class SubtreeService {
   constructor(private readonly ports: SubtreePorts) {}
 
-  /** The table for `rootId` (a session id), or `undefined` when no such session is in the registry. */
-  async view(rootId: string): Promise<SubtreeView | undefined> {
+  /**
+   * The table for `rootId` (a session id), or `undefined` when no such session is in the registry. A row's
+   * message is the newest one its ferret sent to `callerId` — the asking ferret, or `rootId` when none asks.
+   */
+  async view(rootId: string, callerId: string = rootId): Promise<SubtreeView | undefined> {
     const nowMs = this.ports.nowMs();
     const sessions = await this.ports.sessions();
     const root = sessionsById(sessions).get(rootId);
@@ -223,7 +228,7 @@ export class SubtreeService {
       : { cards: [] as readonly BoardTask[], laneSets: new Map() as LaneSets };
     const cards = new Map(board.cards.map(card => [card.id, card]));
     const messages = await Promise.all(
-      members.map(async member => await this.ports.lastMessage(member.view.config.id, rootId)),
+      members.map(async member => await this.ports.lastMessage(member.view.config.id, callerId)),
     );
 
     const rows = members.map((member, index) => {
