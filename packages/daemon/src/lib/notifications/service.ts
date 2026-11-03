@@ -126,6 +126,8 @@ export class NotificationService implements AgendaRaisedObserver {
       first,
       session => stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
       stopShows([first, ...rest]),
+      // A high stop keeps the ferret's tag: under the shown item's, that item's clear would take the group's line down.
+      { ownTag: true },
     );
   }
 

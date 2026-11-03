@@ -649,7 +649,8 @@ describe('NotificationService high priority', () => {
     should(shown.push.dispatches[0]?.urgency).equal('high');
     should(shown.push.dispatches[0]?.payload).containDeep({
       urgency: 'high',
-      tag: `attention-${SESSION}:A2`,
+      // The group's line keeps the ferret's tag even when loud, so a clear of the code card never takes it down.
+      tag: `attention-${SESSION}`,
       url: `/session/${SESSION}?attention=A2`,
     });
     should(behind.push.dispatches[0]?.urgency).be.undefined();

@@ -201,7 +201,10 @@ worker.addEventListener('push', event => {
       }
       // A handled item: its notifications come down here, never through the filter — a clear carries nothing to hide.
       if (parsed.data.kind === 'clear') {
-        await applyClear(worker.registration, parsed.data, machine, origin, { recent: recentlyCleared, place });
+        const clear = parsed.data;
+        await recentlyCleared.serial(
+          async () => await applyClear(worker.registration, clear, machine, origin, { recent: recentlyCleared, place }),
+        );
         return;
       }
       // Every daemon sends every event now (no server-side filter left to consult — see
@@ -225,11 +228,12 @@ worker.addEventListener('push', event => {
         machine === null
           ? unverifiedNotification(parsed.data, origin)
           : machineNotification(parsed.data, machine, origin);
-      // A clear for this line that arrived after this push, while it read its filter, settles it as the clear would have...
-      if (await settleIfCleared(worker.registration, shown.tag, recentlyCleared, place, machine, origin)) return;
-      await showGroupedNotification(worker.registration, shown);
-      // ...and so does one that arrived while it was being shown, when the clear found nothing yet to take down.
-      await settleIfCleared(worker.registration, shown.tag, recentlyCleared, place, machine, origin);
+      // One show or clear at a time, so a clear always sees this line once it is up; and a clear that arrived after this
+      // push, while it read its filter, settles it as the clear would have instead of letting it show.
+      await recentlyCleared.serial(async () => {
+        if (await settleIfCleared(worker.registration, shown.tag, recentlyCleared, place, machine, origin)) return;
+        await showGroupedNotification(worker.registration, shown);
+      });
     })().catch(() => undefined),
   );
 });

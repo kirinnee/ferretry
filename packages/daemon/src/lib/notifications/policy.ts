@@ -205,6 +205,11 @@ export interface DeliveredAlert {
   readonly tag?: string;
   /** An approve-on-phone push recorded without a tag: its tag is its approval's, read from the item on the board. */
   readonly approval?: true;
+  /**
+   * A STOP's push recorded without a tag, and when: a high one went out under the tag of the item it showed — a
+   * one-time code card waiting then, which the ledger did not name — so its clear names those cards' tags too.
+   */
+  readonly legacyStopAt?: string;
 }
 
 /** What one clear takes down (at most `PUSH_CLEAR_MAX_TAGS` tags), and which pushes it answers for. */
@@ -235,6 +240,13 @@ export const alertStillWanted = (item: AgendaItem): boolean =>
  * Nothing is cleared for an item that never buzzed, which is what keeps a phone that must show something for every
  * push (an iPhone) from collecting a "Handled" line for every item a ferret ever closed.
  */
+/**
+ * Whether a stop's line ("N need you") may come down: no item it could count — on the owner's turn, not a gate item —
+ * is left, the `opened` one aside (the owner has it in front of them).
+ */
+export const stopLineDone = (snapshot: AgendaSnapshot, opened?: string): boolean =>
+  ownerTurnItems(snapshot.items.filter(item => item.id !== opened)).every(item => item.gate !== undefined);
+
 export function alertsToClear(
   sessionId: string,
   uncovered: readonly DeliveredAlert[],
@@ -243,13 +255,19 @@ export function alertsToClear(
 ): readonly AlertClear[] {
   const others = snapshot.items.filter(item => item.id !== opened);
   const waiting = new Set(others.filter(alertStillWanted).map(item => item.id));
-  const stopDone = ownerTurnItems(others).every(item => item.gate !== undefined);
+  const stopDone = stopLineDone(snapshot, opened);
   const sessionTag = agendaSessionPushTag(sessionId);
   const approvals = new Map(
     [...snapshot.items, ...snapshot.resolved].flatMap(item =>
       item.phoneApproval === undefined ? [] : [[item.id, phoneApprovalTag(item.phoneApproval.id)] as const],
     ),
   );
+  // The one-time code cards that were waiting at an instant: what a legacy high stop may have shown.
+  const codeCardTags = (at: string): string[] =>
+    [...snapshot.items, ...snapshot.resolved]
+      .filter(item => item.input !== undefined && Date.parse(item.waitingSince) <= Date.parse(at))
+      .filter(item => !('resolvedAt' in item) || Date.parse(String(item.resolvedAt)) >= Date.parse(at))
+      .map(item => agendaItemPushTag(sessionId, item.id));
   const tagOf = (alert: DeliveredAlert): string | undefined =>
     alert.tag ?? (alert.approval === true ? approvals.get(alert.agendaId) : sessionTag);
   const handled = uncovered.flatMap(alert => {
@@ -261,16 +279,21 @@ export function alertsToClear(
         : opened === undefined
           ? !waiting.has(alert.agendaId)
           : alert.agendaId === opened;
-    return down ? [{ key: alert.key, tag }] : [];
+    if (!down) return [];
+    return [tag, ...(alert.legacyStopAt === undefined ? [] : codeCardTags(alert.legacyStopAt))].map(each => ({
+      key: alert.key,
+      tag: each,
+    }));
   });
   const tags = [...new Set(handled.map(alert => alert.tag))];
+  // A key is covered by every clear that names one of its tags: a burst split across clears still clears it once each.
   // One clear names at most `PUSH_CLEAR_MAX_TAGS`: a burst that handled more is sent as several.
   const clears: AlertClear[] = [];
   for (let start = 0; start < tags.length; start += PUSH_CLEAR_MAX_TAGS) {
     const chunk = tags.slice(start, start + PUSH_CLEAR_MAX_TAGS);
     clears.push({
       tags: chunk,
-      covers: handled.filter(alert => chunk.includes(alert.tag)).map(alert => alert.key),
+      covers: [...new Set(handled.filter(alert => chunk.includes(alert.tag)).map(alert => alert.key))],
     });
   }
   return clears;

@@ -675,6 +675,31 @@ describe('a legacy push (recorded before tags were; review round 1)', () => {
     ]);
   });
 
+  it('should clear a legacy stop under every code card waiting when it went out, which a high stop showed (review round 3)', async () => {
+    // Arrange — the ledger names the stop's oldest item, A1, but a high stop showed the blocking code card A2's tag.
+    const EARLIER = '2026-11-03T08:00:00.000Z';
+    const code = (id: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
+      ({ ...item(id, extra), kind: 'input', ask: undefined, input: { requestId: 'a'.repeat(32) } }) as AgendaItem;
+    const gone = { ...resolved(code('A4', { waitingSince: EARLIER })), resolvedAt: EARLIER } as ResolvedAgendaItem;
+    const test = world(pushed('A1', { stoppedAt: AT }, { tag: null }));
+    test.boards.set(
+      SESSION,
+      ledgerOf(
+        SESSION,
+        [{ ...code('A3', { waitingSince: LATER }), gate: GATE } as AgendaItem],
+        [resolved(item('A1')), resolved(code('A2', { waitingSince: EARLIER })), gone],
+      ),
+    );
+
+    // Act
+    await test.clearer.changed(SESSION, CHANGE);
+
+    // Assert — A3 came after the stop and A4 was handled before it: neither was the stop's line.
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1', 'attention-session-1:A2'],
+    ]);
+  });
+
   it('should leave an approve-on-phone push uncovered when its item is gone from the board', () => {
     // Act / Assert
     should(
@@ -722,6 +747,29 @@ describe('a push still on its way when its item is handled or opened (review rou
     should(test.sent).have.length(1);
     should(test.sent[0]).not.have.property('exceptDevice');
     should(test.sent[0]?.payload).containDeep({ tags: ['attention-session-1:A1'] });
+  });
+
+  it('should honour an open of the last item for a stop on its way, and not while another item still waits (review round 3)', async () => {
+    // Arrange — a grouped stop is on its way; the owner opens an item before it lands.
+    const stopOnItsWay = pushed('A1', { stoppedAt: AT }).slice(0, 1);
+    const stopLanding = pushed('A1', { stoppedAt: AT })[1] as NotificationRecord;
+    const last = world(stopOnItsWay);
+    last.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+    const notLast = world(stopOnItsWay);
+    notLast.boards.set(SESSION, ledgerOf(SESSION, [item('A1'), item('A2')]));
+
+    // Act
+    for (const test of [last, notLast]) {
+      await test.clearer.seen(SESSION, 'A1', 'device-1');
+      await test.ledger.append(stopLanding);
+      await test.clearer.recheck(SESSION);
+    }
+
+    // Assert
+    should(last.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1'],
+    ]);
+    should(notLast.sent).deepEqual([]);
   });
 
   it("should keep waiting while the push has not landed, and forget an open for another ferret's push", async () => {

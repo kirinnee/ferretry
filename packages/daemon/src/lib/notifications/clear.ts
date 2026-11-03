@@ -9,6 +9,7 @@ import {
 import type { PushDispatch } from '../push/types.ts';
 import {
   alertsToClear,
+  stopLineDone,
   clearNotificationKey,
   clearPushPayload,
   type DeliveredAlert,
@@ -104,7 +105,9 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
   async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
     return await this.run(sessionId, async snapshot => {
       if (![...snapshot.items, ...snapshot.resolved].some(item => item.id === agendaId)) return { found: false };
-      for (const key of inFlightAlerts(sessionId, agendaId, await this.options.ledger.entries()))
+      // A stop on its way counts too when this open is what lets its line come down (the last item it could count).
+      const stopsToo = stopLineDone(snapshot, agendaId);
+      for (const key of inFlightAlerts(sessionId, agendaId, stopsToo, await this.options.ledger.entries()))
         this.remember(key, { sessionId, agendaId });
       return {
         found: true,
@@ -192,12 +195,20 @@ const ITEM_VARIANT = '#item';
 const pushKeyOf = (alert: DeliveredAlert): string =>
   alert.key.endsWith(ITEM_VARIANT) ? alert.key.slice(0, -ITEM_VARIANT.length) : alert.key;
 
-/** The keys of one item's pushes that are recorded as requested and have no outcome yet: on their way. */
-function inFlightAlerts(sessionId: string, agendaId: string, entries: readonly NotificationLedgerEntry[]): string[] {
+/**
+ * The keys of one item's pushes that are recorded as requested and have no outcome yet: on their way. With `stopsToo`,
+ * the session's stops on their way as well, whichever item a stop's record names (a stop is about the group).
+ */
+function inFlightAlerts(
+  sessionId: string,
+  agendaId: string,
+  stopsToo: boolean,
+  entries: readonly NotificationLedgerEntry[],
+): string[] {
   return entries.flatMap(({ requested, outcome }) =>
     (requested.origin === 'agenda' || requested.origin === 'attention') &&
     requested.sessionId === sessionId &&
-    requested.agendaId === agendaId &&
+    (requested.agendaId === agendaId || (stopsToo && requested.stoppedAt !== undefined)) &&
     outcome === undefined
       ? [normalizedNotificationKey(requested.key)]
       : [],
@@ -209,7 +220,8 @@ function inFlightAlerts(sessionId: string, agendaId: string, entries: readonly N
  * errored, has no line on any screen to take down.
  *
  * A push recorded before tags were is named by every tag it may have gone out under: an approve-on-phone push by its
- * approval's (`approval`, resolved from the board), and any other by the session's AND — as a second alert, keyed
+ * approval's (`approval`, resolved from the board), a stop's by the session's and the code cards waiting then
+ * (`legacyStopAt`: a high stop showed one), and any other by the session's AND — as a second alert, keyed
  * `<key>#item` and covered on its own — the item's, which a high push used.
  */
 export function uncoveredAlerts(
@@ -231,15 +243,17 @@ export function uncoveredAlerts(
         ? [{ key, ...base, tag: requested.tag }]
         : requested.phoneApproval !== undefined
           ? [{ key, ...base, approval: true }]
-          : [
-              { key, ...base },
-              {
-                key: `${key}${ITEM_VARIANT}`,
-                ...base,
-                stop: false,
-                tag: agendaItemPushTag(sessionId, requested.agendaId),
-              },
-            ];
+          : requested.stoppedAt !== undefined
+            ? [{ key, ...base, legacyStopAt: requested.at }]
+            : [
+                { key, ...base },
+                {
+                  key: `${key}${ITEM_VARIANT}`,
+                  ...base,
+                  stop: false,
+                  tag: agendaItemPushTag(sessionId, requested.agendaId),
+                },
+              ];
     return alerts.filter(alert => !covered.has(alert.key));
   });
 }

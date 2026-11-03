@@ -139,22 +139,32 @@ export const applyClear = async (
 /** How long a clear is remembered in this worker: far longer than one push handler takes to read its filter and show. */
 export const CLEARED_TAG_MEMORY_MS = 60_000;
 
+/** What a push about to show under a tag must do (`RecentlyCleared.verdict`). */
+export type ShowVerdict = 'show' | 'cleared' | 'superseded';
+
 /**
  * THE ORDER PUSHES REACHED THIS WORKER, AND WHAT EACH CLEAR TOOK DOWN.
  *
  * A push and the clear that follows it can be handled at once in one worker, and a push handler awaits the filter
  * mirror before it shows anything: a clear handled in that gap finds nothing to close, and the push would then put the
- * stale line up after it. So every push takes its place in arrival order ({@link arrived}), a clear remembers its
- * tags with its own place, and a push is settled as the clear would have settled it ({@link settleIfCleared}) only when
- * a clear of its tag arrived AFTER it. A push that arrives after the clear — the item woke again, a new number — is a
- * newer line and shows as usual.
+ * stale line up after it. So:
+ *
+ * - every push takes its place in arrival order ({@link arrived}) before it awaits anything;
+ * - showing and clearing run one at a time ({@link serial}), so a clear always sees a line a push put up;
+ * - a clear remembers its tags with its own place, and a push about to show under one is settled as that clear would
+ *   have settled it ONLY when the clear arrived after it ({@link verdict}). A push that arrives after the clear — the
+ *   item woke again, a new number — is a newer line and shows as usual, and a stale push never touches a newer
+ *   push's line under the same tag (`superseded`).
  *
  * In memory: a worker that stopped in between had no such race. A clear the push service delivers BEFORE the push it
  * clears is not caught: nothing on the wire tells a stale push from a newer one, and the clear carries no more.
  */
 export class RecentlyCleared {
   #place = 0;
-  readonly #cleared = new Map<string, { readonly place: number; readonly at: number }>();
+  #chain: Promise<unknown> = Promise.resolve();
+  readonly #cleared = new Map<string, Stamp>();
+  /** The newest push that showed under each tag. */
+  readonly #shown = new Map<string, Stamp>();
 
   constructor(private readonly now: () => number) {}
 
@@ -164,24 +174,54 @@ export class RecentlyCleared {
     return this.#place;
   }
 
-  /** A clear at \`place\` took these shown tags down. */
+  /** Runs one show or one clear after every earlier one: never two at once. A failure does not stop the next. */
+  serial<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.#chain.then(work, work);
+    this.#chain = next.catch(() => undefined);
+    return next;
+  }
+
+  /** A clear at `place` took these shown tags down. */
   remember(tags: readonly string[], place: number): void {
     const at = this.now();
-    for (const [tag, entry] of this.#cleared) if (at - entry.at > CLEARED_TAG_MEMORY_MS) this.#cleared.delete(tag);
+    for (const stamps of [this.#cleared, this.#shown])
+      for (const [tag, stamp] of stamps) if (at - stamp.at > CLEARED_TAG_MEMORY_MS) stamps.delete(tag);
     for (const tag of tags) this.#cleared.set(tag, { place, at });
   }
 
-  /** Whether a clear of \`tag\` arrived after the push at \`place\`, within memory. */
-  clearedAfter(tag: string, place: number): boolean {
-    const entry = this.#cleared.get(tag);
-    return entry !== undefined && entry.place > place && this.now() - entry.at <= CLEARED_TAG_MEMORY_MS;
+  /**
+   * What the push at `place` does under `tag`: `show`; `cleared` when a clear that arrived after it took the tag down;
+   * `superseded` when, after that clear, a newer push already showed its own line there.
+   */
+  verdict(tag: string, place: number): ShowVerdict {
+    const cleared = this.#fresh(this.#cleared, tag);
+    if (cleared === undefined || cleared.place <= place) return 'show';
+    const shown = this.#fresh(this.#shown, tag);
+    return shown !== undefined && shown.place > cleared.place ? 'superseded' : 'cleared';
+  }
+
+  /** The push at `place` showed under `tag`. */
+  showed(tag: string, place: number): void {
+    const shown = this.#shown.get(tag);
+    if (shown === undefined || shown.place < place) this.#shown.set(tag, { place, at: this.now() });
+  }
+
+  #fresh(stamps: Map<string, Stamp>, tag: string): Stamp | undefined {
+    const stamp = stamps.get(tag);
+    return stamp !== undefined && this.now() - stamp.at <= CLEARED_TAG_MEMORY_MS ? stamp : undefined;
   }
 }
 
+interface Stamp {
+  readonly place: number;
+  readonly at: number;
+}
+
 /**
- * A push at \`place\`, about to show or just shown under \`tag\`, that a later clear took down meanwhile: settled as that
- * clear would have — whatever is under the tag closed, or on Apple's service replaced by the quiet line (a push must
- * show something there). Answers whether it was.
+ * A push at `place` about to show under `tag` (inside {@link RecentlyCleared.serial}): settled as a later clear would
+ * have, instead of showing — on Apple's service the quiet line under the tag (or under the fixed tag when a newer push
+ * owns it, or nothing is under it), elsewhere nothing. Answers whether it was; `false` means show it, and it is
+ * recorded as shown.
  */
 export const settleIfCleared = async (
   registration: ClearRegistration,
@@ -191,11 +231,15 @@ export const settleIfCleared = async (
   machine: PushMachine | null,
   origin: string,
 ): Promise<boolean> => {
-  if (!recent.clearedAfter(tag, place)) return false;
-  const showing = await registration.getNotifications({ tag });
-  const plan = planClear([tag], await deliveredByApple(registration), machine, origin);
+  const verdict = recent.verdict(tag, place);
+  if (verdict === 'show') {
+    recent.showed(tag, place);
+    return false;
+  }
+  // Only the clear's own quiet line can be under a cleared tag here; a newer push's line is never touched.
+  const showing = verdict === 'cleared' ? await registration.getNotifications({ tag }) : [];
+  const plan = planClear(showing.length > 0 ? [tag] : [], await deliveredByApple(registration), machine, origin);
   if (plan.show !== undefined) await registration.showNotification(plan.show.title, plan.show.options);
-  if (plan.close.includes(tag)) for (const notification of showing) notification.close();
   return true;
 };
 

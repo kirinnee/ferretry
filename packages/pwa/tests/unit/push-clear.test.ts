@@ -508,27 +508,50 @@ describe('a push and its clear handled at once in one worker (review round 2)', 
     await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN);
 
     // Assert
-    expect(registration.shown).toEqual([{ title: 'Work laptop · Handled on another device', tag }]);
+    // Nothing of the item's was up when the clear ran, so both quiet lines go under the fixed tag: one line, never two.
+    expect(registration.shown).toEqual([
+      { title: 'Work laptop · Handled on another device', tag: `fy-handled:${encodeURIComponent(WORK.daemonId)}` },
+    ]);
+    expect(registration.lines.has(tag)).toBe(false);
   });
 
-  it('should take the line down after it showed, when the clear ran while it was being shown', async () => {
-    // Arrange — the push checked (nothing cleared yet), then the clear ran, then the line went up.
+  it('should run a clear only after the show in progress, so it always finds the line that show put up', async () => {
+    // Arrange — the push is part-way through showing when the clear arrives.
     const registration = new LiveRegistration(FCM);
     const recent = order();
     const push = recent.arrived();
-    expect(await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN)).toBe(false);
-    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
-      recent,
-      place: recent.arrived(),
+    let release = (): void => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
     });
-    await registration.showNotification('Work laptop · Deploy?', { tag });
+    const showing = recent.serial(async () => {
+      if (await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN)) return;
+      await held;
+      await registration.showNotification('Work laptop · Deploy?', { tag });
+    });
+    const clearing = recent.serial(() =>
+      applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, { recent, place: recent.arrived() }),
+    );
 
     // Act
-    const settled = await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN);
+    release();
+    await Promise.all([showing, clearing]);
 
     // Assert
-    expect(settled).toBe(true);
+    expect(registration.shown).toEqual([{ title: 'Work laptop · Deploy?', tag }]);
     expect(registration.lines.has(tag)).toBe(false);
+  });
+
+  it('should keep running after one piece of work fails', async () => {
+    // Arrange
+    const recent = order();
+    const failed = recent.serial(async () => {
+      throw new Error('show failed');
+    });
+
+    // Act / Assert
+    await expect(failed).rejects.toThrow('show failed');
+    expect(await recent.serial(async () => 'next')).toBe('next');
   });
 
   it('should let a push that arrived after the clear show: it is a newer line (the item woke again)', async () => {
@@ -542,7 +565,82 @@ describe('a push and its clear handled at once in one worker (review round 2)', 
 
     // Act / Assert
     expect(await settleIfCleared(registration, tag, recent, recent.arrived(), WORK, ORIGIN)).toBe(false);
-    expect(recent.clearedAfter(shownTag('attention-session-1:A4', WORK), 0)).toBe(false);
+    expect(recent.verdict(shownTag('attention-session-1:A4', WORK), 0)).toBe('show');
+  });
+
+  for (const [service, endpoint] of [
+    ['Android', FCM],
+    ['an iPhone', APPLE],
+  ] as const) {
+    it(`should never touch a newer push’s line when an older push resumes after its clear (${service}, review round 3)`, async () => {
+      // Arrange — push1 arrives, clear2 takes A3 down, push3 (the item woke again) shows, then push1 resumes.
+      const registration = new LiveRegistration(endpoint);
+      const recent = order();
+      const push1 = recent.arrived();
+      await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
+        recent,
+        place: recent.arrived(),
+      });
+      const push3 = recent.arrived();
+      expect(await settleIfCleared(registration, tag, recent, push3, WORK, ORIGIN)).toBe(false);
+      await registration.showNotification('Work laptop · Deploy again?', { tag });
+      const before = registration.shown.length;
+
+      // Act
+      const settled = await settleIfCleared(registration, tag, recent, push1, WORK, ORIGIN);
+
+      // Assert — push3's line stays; on an iPhone the old push shows only the fixed quiet line.
+      expect(settled).toBe(true);
+      expect(registration.lines.get(tag)).toBe(1);
+      expect(registration.shown.slice(before)).toEqual(
+        endpoint === APPLE
+          ? [
+              {
+                title: 'Work laptop · Handled on another device',
+                tag: `fy-handled:${encodeURIComponent(WORK.daemonId)}`,
+              },
+            ]
+          : [],
+      );
+    });
+  }
+
+  it('should show the fixed quiet line, never one under the item’s tag, on an iPhone when nothing is up there (review round 3)', async () => {
+    // Arrange — the clear's quiet line is gone (swiped away) when the old push resumes.
+    const registration = new LiveRegistration(APPLE);
+    const recent = order();
+    const push = recent.arrived();
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN, {
+      recent,
+      place: recent.arrived(),
+    });
+    registration.lines.clear();
+    registration.shown.splice(0);
+
+    // Act
+    await settleIfCleared(registration, tag, recent, push, WORK, ORIGIN);
+
+    // Assert
+    expect(registration.shown).toEqual([
+      { title: 'Work laptop · Handled on another device', tag: `fy-handled:${encodeURIComponent(WORK.daemonId)}` },
+    ]);
+    expect(registration.lines.has(tag)).toBe(false);
+  });
+
+  it('should keep only the newest show under a tag', () => {
+    // Arrange
+    const recent = order();
+    const older = recent.arrived();
+    const cleared = recent.arrived();
+    recent.remember([tag], cleared);
+    const newer = recent.arrived();
+
+    // Act
+    recent.showed(tag, newer);
+    recent.showed(tag, older);
+
+    // Assert
+    expect(recent.verdict(tag, older)).toBe('superseded');
   });
 
   it(`should forget a clear after ${CLEARED_TAG_MEMORY_MS / 1000} s`, () => {
@@ -551,15 +649,16 @@ describe('a push and its clear handled at once in one worker (review round 2)', 
     const recent = order();
     const push = recent.arrived();
     recent.remember([tag], recent.arrived());
+    recent.showed(tag, recent.arrived());
 
     // Act
     clock.now = CLEARED_TAG_MEMORY_MS + 1;
-    const forgotten = recent.clearedAfter(tag, push);
+    const forgotten = recent.verdict(tag, push);
     recent.remember([shownTag('attention-session-1:A4', WORK)], recent.arrived());
 
     // Assert
-    expect(forgotten).toBe(false);
-    expect(recent.clearedAfter(tag, push)).toBe(false);
+    expect(forgotten).toBe('show');
+    expect(recent.verdict(tag, push)).toBe('show');
     clock.now = 0;
   });
 });
