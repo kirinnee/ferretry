@@ -8,6 +8,8 @@ import {
 } from '../../src/lib/agenda.ts';
 import {
   AGENDA_KIND_LABELS,
+  AGENDA_ANSWER_TEXT_CHARS,
+  agendaAnswerText,
   agendaCanDiscuss,
   agendaCardAnswers,
   agendaCardKind,
@@ -328,6 +330,40 @@ describe('attention card', () => {
   it('clips at a word with an ellipsis', () => {
     should(clipAtWord('one two three four', 10)).equal('one two…');
     should(clipAtWord('short', 10)).equal('short');
+  });
+
+  describe('what an answer’s button says', () => {
+    // The owner's case: options with descriptions once drew "← A | → B" — letters that mean nothing once the ask is
+    // off screen.
+    const described = {
+      ...item,
+      ask: {
+        kind: 'multiple-choice' as const,
+        options: [
+          { label: 'No', description: 'Keep counting every snoozed item, as today' },
+          { label: 'Only blockers', description: 'Count a snoozed item only once a blocker wakes it' },
+        ],
+      },
+    };
+
+    it('is each described option’s short label; the answer it sends is the label, its description kept beside it', () => {
+      const answers = agendaCardAnswers(described);
+      should(layout(answers)).eql(['left:No', 'right:Only blockers']);
+      should(answers.map(each => agendaAnswerText(each.label))).eql(['No', 'Only blockers']);
+      should(answers.map(each => each.description)).eql([
+        'Keep counting every snoozed item, as today',
+        'Count a snoozed item only once a blocker wakes it',
+      ]);
+    });
+
+    it('is cut at a word only when very long, and is never empty', () => {
+      should(agendaAnswerText('Needs a different approach')).equal('Needs a different…');
+      should(agendaAnswerText('Needs a different approach').length).be.belowOrEqual(AGENDA_ANSWER_TEXT_CHARS);
+      should(agendaAnswerText('  Ship   it ')).equal('Ship it');
+      should(agendaAnswerText('Supercalifragilisticexpialidocious')).equal('Supercalifragilisticexp…');
+      should(agendaAnswerText('.'.repeat(40))).not.equal('');
+      should(agendaAnswerText('.'.repeat(40))).not.equal('…');
+    });
   });
 });
 

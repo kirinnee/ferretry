@@ -308,7 +308,7 @@ describe('the question and its options', () => {
     expect(why.textContent).toContain('It can never overspend.');
   });
 
-  test('letters every option when one label is not a single word, and the buttons say the letters too', async () => {
+  test('letters every option in the list when one label is not a single word; the buttons still say the labels', async () => {
     await draw(
       agendaItem('A92', {
         ask: {
@@ -326,9 +326,9 @@ describe('the question and its options', () => {
       '**Studio disk**',
     );
     expect([...root().querySelectorAll('.fy-qr__label')].map(label => label.textContent).sort()).toEqual([
-      'A',
-      'B',
-      'C',
+      'S3',
+      'Skip',
+      'Studio disk',
     ]);
   });
 

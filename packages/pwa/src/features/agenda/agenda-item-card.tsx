@@ -173,7 +173,7 @@ export function Situation({
 
 interface ListedOption {
   readonly label: string;
-  /** What the list and the button call it: the option's one word, or its letter. */
+  /** What the list calls it: the option's one word, or its letter (its button always says its label). */
   readonly name: string;
   /** What it means: its explanation, led by its full label when the name is a letter. */
   readonly meaning: string | null;
@@ -333,8 +333,6 @@ function CardAskBlock({
         map={{}}
         model={cardModel(ask.view)}
         onAct={action => onAct(toGateAction(action, ask.gate))}
-        options={ask.view.ask?.kind === 'multiple-choice' ? ask.view.ask.options : []}
-        plainLabels
         swipeable={false}
         tapOnly
       />
@@ -494,8 +492,6 @@ export function AgendaItemCard({
       map={swipeMap(item)}
       model={model}
       onAct={onAct}
-      options={options}
-      plainLabels={item.gate !== undefined}
       swipeable={swipeable}
       {...(onSkip === undefined ? {} : { onSkip })}
       {...(doneClose === undefined ? {} : { doneClose })}

@@ -6,7 +6,6 @@ import {
 } from '../../../src/features/agenda/agenda-quick-replies.tsx';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
-import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -36,7 +35,6 @@ const draw = async (item: AgendaItem, extra: Partial<AgendaQuickRepliesProps> = 
       map={swipeMap(item)}
       model={cardModel(item)}
       onAct={action => spy.acted.push(action)}
-      options={itemOptions(item)}
       onSkip={() => {
         spy.skipped += 1;
       }}
@@ -360,5 +358,48 @@ describe('the pull down over the chips: Skip', () => {
     const mouse = await draw(chosen);
     await drag({ x: 200, y: 400 }, { pointerType: 'mouse' });
     expect(mouse.skipped).toBe(0);
+  });
+});
+
+describe('options with descriptions', () => {
+  // The owner's case: each option explained, so the row once said only "← A | → B", which means nothing once the
+  // ask has scrolled away. Each button says its option's short label; what it sends is unchanged.
+  const described = agendaItem('A48', {
+    ask: {
+      kind: 'multiple-choice',
+      options: [
+        { label: 'No', description: 'Keep counting every snoozed item, as today' },
+        { label: 'Only blockers', description: 'Count a snoozed item only once a blocker wakes it' },
+      ],
+    },
+  } as Partial<AgendaItem>);
+  const said = (): string[] =>
+    [...root().querySelectorAll('[data-agenda-option] .fy-qr__label')].map(label => label.textContent ?? '');
+
+  test('each button says the option’s short label, never a letter or the description', async () => {
+    await draw(described);
+    expect(said()).toEqual(['No', 'Only blockers']);
+    expect([...root().querySelectorAll<HTMLElement>('[data-agenda-option]')].map(b => b.dataset.agendaAnswer)).toEqual([
+      'left',
+      'right',
+    ]);
+    expect(root().textContent).not.toContain('Keep counting');
+  });
+
+  test('a tap, a swipe and the arrow keys’ map still send the matching option', async () => {
+    const tapped = await draw(described);
+    await interact(() => answer('Only blockers').click());
+    await interact(() => answer('No').click());
+    expect(tapped.acted).toMatchObject([
+      { kind: 'respond', response: { choice: 'Only blockers' } },
+      { kind: 'respond', response: { choice: 'No' } },
+    ]);
+    const swiped = await draw(described);
+    await drag({ x: 400, y: 200 });
+    await drag({ x: 0, y: 200 });
+    expect(swiped.acted).toMatchObject([{ response: { choice: 'Only blockers' } }, { response: { choice: 'No' } }]);
+    const keys = swipeMap(described);
+    expect(keys.right).toMatchObject({ response: { choice: 'Only blockers' } });
+    expect(keys.left).toMatchObject({ response: { choice: 'No' } });
   });
 });

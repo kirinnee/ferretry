@@ -450,6 +450,19 @@ export const clipAtWord = (text: string, limit: number): string => {
   return `${cut.trimEnd().replace(/[\s,;:.\-–—]+$/u, '')}…`;
 };
 
+/** The most characters an answer's button says: a longer label is cut at a word, so a phone's row stays one line. */
+export const AGENDA_ANSWER_TEXT_CHARS = 24;
+
+/**
+ * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a card ask, the deck's arrow keys and the
+ * CLI's answers line alike: the option's own short label ("No", "Only blockers"), one line, cut at a word only when it
+ * is very long. Never its description, never a bare letter, never empty. The answer it sends is its label, untouched.
+ */
+export const agendaAnswerText = (label: string): string => {
+  const text = clipAtWord(label, AGENDA_ANSWER_TEXT_CHARS);
+  return text.replaceAll('…', '').trim() === '' ? label : text;
+};
+
 /**
  * The card's title: the one it was raised with, else — an item from before titles — the start of its
  * ask, cut at a word to fit a lock screen's heading.

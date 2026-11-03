@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import { type AgendaId, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -1383,13 +1383,13 @@ const RUN_MOVES: readonly RunKey[] = [
   { key: 'Esc', word: 'Close' },
 ];
 
-/** The arrows an agenda card answers by, in the words of its own answers, then Skip. */
+/** The arrows an agenda card answers by, in its buttons' words (`agendaAnswerText`), then Skip. */
 const agendaRunKeys = (card: InboxCard): readonly RunKey[] => {
   const targets = swipeTargets(card.item);
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: targets.left.label }]),
-    ...(targets.up === undefined ? [] : [{ key: '↑', word: targets.up.label }]),
-    ...(targets.right === undefined ? [] : [{ key: '→', word: targets.right.label }]),
+    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label) }]),
+    ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label) }]),
+    ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label) }]),
     ...RUN_MOVES,
   ];
 };

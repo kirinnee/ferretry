@@ -1,7 +1,6 @@
 /**
- * THE OPTIONS OF AN AGENDA ITEM, LETTERED: "A — <label>", then its explanation. The Options section and the quick
- * replies draw from this one list, so a button that says "B" and the section that says "B — Keep both" can never
- * disagree. An option's explanation is the item's `optionDetails` entry (Markdown) when it has one, else the
+ * THE OPTIONS OF AN AGENDA ITEM, LETTERED: "A — <label>", then its explanation, for the options list. The answer
+ * buttons never say a letter: each says its option's short label (`agendaAnswerText`). An option's explanation is the item's `optionDetails` entry (Markdown) when it has one, else the
  * option's own one-line `description`. Pure.
  */
 
@@ -45,20 +44,14 @@ export const itemOptions = (item: AgendaItem): readonly AgendaAskOption[] =>
     option => option.label,
   );
 
-/** The letter of an option label among `options`, or `undefined` when the label is not one of them. */
-export const letterOf = (options: readonly AgendaAskOption[], label: string): string | undefined => {
-  const at = options.findIndex(option => same(option.label, label));
-  return at < 0 ? undefined : optionLetter(at);
-};
-
-/** A label this short is its own button text; a longer one is drawn as its letter. */
+/** A label this short names itself in the Options section; a longer one is named there by its letter. */
 const SHORT_LABEL_WORDS = 2;
-/** A single word longer than this would break mid-word in a third of a phone's width, so it is drawn as its letter. */
+/** A single word longer than this would break mid-word in a third of a phone's width, so it is named by its letter. */
 const SHORT_WORD_CHARS = 8;
 
 /**
- * What a quick-reply button says: the label when it is one or two words ("Looks good"), else its letter. A label
- * too long with no letter is left whole — the row clips it, and its full text is the accessible name.
+ * What the Options section names an option by: the label when it is one or two words ("Looks good"), else its
+ * letter. A label too long with no letter is left whole.
  */
 export const shortLabel = (label: string, letter: string | undefined, lettered = false): string => {
   if (letter === undefined) return label;
@@ -74,16 +67,16 @@ const tooLong = (label: string): boolean => {
 };
 
 /**
- * Whether a ROW of quick replies is drawn as letters: one lettered label too long to stand as a button letters the
- * whole row, so it reads one way ("A B C"), never a mix of words and letters.
+ * Whether the Options section names a ROW of options by letter: one lettered label too long to stand alone letters
+ * them all, so it reads one way ("A B C"), never a mix of words and letters.
  */
 export const rowLettered = (
   replies: readonly { readonly label: string; readonly letter: string | undefined }[],
 ): boolean => replies.some(reply => reply.letter !== undefined && tooLong(reply.label));
 
 /**
- * Whether the Options section earns its place: some option says more than its label, or some quick reply is
- * drawn as a bare letter that the section has to explain. A plain "Yes / No" would only repeat its buttons.
+ * Whether the Options section earns its place: some option says more than its label, or some label is too long to
+ * stand alone (its button cuts it), so the section names it whole. A plain "Yes / No" would only repeat its buttons.
  */
 export const needsOptionsSection = (options: readonly LetteredOption[]): boolean => {
   const lettered = rowLettered(options);
@@ -102,8 +95,8 @@ export const isOneWord = (label: string): boolean => {
 };
 
 /**
- * Whether the card names its options by LETTER: one label that is not a single short word letters them all, so the
- * list and its buttons read one way ("A B C"), never a mix of words and letters.
+ * Whether the card's options LIST names its options by letter: one label that is not a single short word letters
+ * them all, so the list reads one way ("A B C"), never a mix of words and letters. Its buttons still say the labels.
  */
 export const cardLettered = (options: readonly { readonly label: string }[]): boolean =>
   options.some(option => !isOneWord(option.label));

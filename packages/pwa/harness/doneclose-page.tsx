@@ -17,7 +17,6 @@ import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { cardModel } from '../src/lib/agenda-card-model.ts';
 import { swipeMap } from '../src/lib/agenda-inbox.ts';
-import { itemOptions } from '../src/lib/agenda-options.ts';
 import type { DoneCloseCard, DoneCloseSource } from '../src/lib/agenda-done-close.ts';
 import { AgendaQuickReplies } from '../src/features/agenda/agenda-quick-replies.tsx';
 import { useDoneCloseFlow } from '../src/features/agenda/use-done-close-flow.ts';
@@ -116,7 +115,6 @@ function Harness() {
           map={swipeMap(target)}
           model={cardModel(target)}
           onAct={() => undefined}
-          options={itemOptions(target)}
           swipeable={false}
           {...(doneClose === undefined ? {} : { doneClose })}
         />
