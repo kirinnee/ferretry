@@ -28,6 +28,7 @@ import {
   type ReleasedIn,
 } from '@ferretry/protocol';
 import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './card-actions.ts';
+import type { PrAlertReason } from './notice-route.ts';
 
 /**
  * How often an unchanged PR's `polledAt` is rewritten. A poll that learns nothing new does not write the
@@ -61,7 +62,7 @@ export interface PrUpdate {
 
 /** A message the watcher queues about a card; WHO gets it is the sender's call (`notice-route.ts`). */
 interface PrNudge {
-  readonly reason: 'closed-unmerged' | 'ci-failing';
+  readonly reason: PrAlertReason;
   readonly message: string;
 }
 

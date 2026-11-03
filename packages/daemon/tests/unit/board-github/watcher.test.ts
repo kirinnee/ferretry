@@ -87,7 +87,7 @@ interface Rig {
   readonly store: MemoryBoardStore;
   readonly gh: FakeGh;
   readonly warnings: string[];
-  readonly nudges: { sessionId: string; message: string }[];
+  readonly nudges: { sessionId: string; reason: string; message: string }[];
   readonly timers: { ms: number; run: () => Promise<void>; cancelled: boolean }[];
   readonly clock: { ms: number };
   readonly stored: (id?: string) => BoardTask;
@@ -130,7 +130,7 @@ const rig = (options: RigOptions): Rig => {
   );
   const gh = options.gh ?? new FakeGh();
   const warnings: string[] = [];
-  const nudges: { sessionId: string; message: string }[] = [];
+  const nudges: { sessionId: string; reason: string; message: string }[] = [];
   const timers: { ms: number; run: () => Promise<void>; cancelled: boolean }[] = [];
   const clock = { ms: Date.parse(NOW) };
   const folders = options.folders ?? { '/p': { repo: REPO, branch: 'main' } };
@@ -162,9 +162,9 @@ const rig = (options: RigOptions): Rig => {
       },
     },
     nudges: {
-      send: async (card, message) => {
+      send: async (card, message, reason) => {
         if (options.failingNudges === true) throw new Error('session gone');
-        nudges.push({ sessionId: card.assignee ?? card.owner, message });
+        nudges.push({ sessionId: card.assignee ?? card.owner, reason, message });
       },
     },
     timers: {
@@ -691,6 +691,7 @@ describe('GitHubWatcher: nudges and refiling', () => {
     });
     await subject.watcher.tick();
     should(subject.nudges.map(nudge => nudge.sessionId)).deepEqual(['lead']);
+    should(subject.nudges.map(nudge => nudge.reason)).deepEqual(['closed-unmerged']);
     const failing = rig({
       cards: [withLinks([link(940, { state: 'open', polledAt: NOW })], { laneId: 'review' })],
       gh: new FakeGh(closed),
