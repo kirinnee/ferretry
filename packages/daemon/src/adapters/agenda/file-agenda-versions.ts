@@ -2,12 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgendaId } from '@ferretry/protocol';
+import { z } from 'zod';
 import { type AgendaSeenStore, isAgendaSessionId } from '../../lib/agenda/index.ts';
 
 export { AGENDA_VERSIONS_DIRECTORY } from './sqlite-agenda-versions.ts';
 export { FileAgendaVersionStore } from './worker-agenda-versions.ts';
 
 const AGENDA_SEEN_FILE = 'agenda-seen.json';
+
+const SeenMarksSchema = z.record(z.string(), z.record(z.string(), z.number().int().nonnegative()));
 
 /** The per-device "last seen" marks of a session: `agenda-seen.json`, `{ [deviceId]: { [itemId]: version } }`. */
 export class FileAgendaSeenStore implements AgendaSeenStore {
@@ -23,19 +26,22 @@ export class FileAgendaSeenStore implements AgendaSeenStore {
     return join(this.sessionDirectory(sessionId), AGENDA_SEEN_FILE);
   }
 
+  /** An absent file holds no marks. One that cannot be read or understood throws: a mark must never be written over marks it could not see. */
   private async load(sessionId: string): Promise<Record<string, Record<string, number>>> {
+    let text: string;
     try {
-      const parsed: unknown = JSON.parse(await readFile(this.file(sessionId), 'utf8'));
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        ? (parsed as Record<string, Record<string, number>>)
-        : {};
-    } catch {
-      return {};
+      text = await readFile(this.file(sessionId), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      throw error;
     }
+    return SeenMarksSchema.parse(JSON.parse(text));
   }
 
   async seen(sessionId: string, id: AgendaId, deviceId: string): Promise<number | undefined> {
-    const mark = (await this.load(sessionId))[deviceId]?.[id];
+    // Only a display hint: marks that cannot be read are none. A mark, which writes the file back, never starts from them.
+    const marks = await this.load(sessionId).catch((): Record<string, Record<string, number>> => ({}));
+    const mark = marks[deviceId]?.[id];
     return typeof mark === 'number' ? mark : undefined;
   }
 

@@ -552,11 +552,15 @@ export class AgendaService {
     const unauthorized = await this.authorize(sessionId);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
     await this.read(sessionId);
-    const [versions, seen] = await Promise.all([
-      this.versions.list(sessionId, id).catch(() => [] as readonly AgendaVersionSummary[]),
+    const [listed, seen] = await Promise.all([
+      this.versions.list(sessionId, id).then(
+        versions => ({ versions }),
+        (error: unknown) => ({ error }),
+      ),
       deviceId === undefined ? undefined : this.seen.seen(sessionId, id, deviceId).catch(() => undefined),
     ]);
-    return { ok: true, value: { versions, ...(seen === undefined ? {} : { seen }) } };
+    if ('error' in listed) return { ok: false, error: versionsUnavailable(id, listed.error) };
+    return { ok: true, value: { versions: listed.versions, ...(seen === undefined ? {} : { seen }) } };
   }
 
   /** One version of an item in full. */
@@ -564,7 +568,12 @@ export class AgendaService {
     const unauthorized = await this.authorize(sessionId);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
     await this.read(sessionId);
-    const found = await this.versions.get(sessionId, id, version).catch(() => undefined);
+    let found: AgendaVersion | undefined;
+    try {
+      found = await this.versions.get(sessionId, id, version);
+    } catch (error) {
+      return { ok: false, error: versionsUnavailable(id, error) };
+    }
     return found === undefined
       ? { ok: false, error: { code: 'not-found', message: `${id} has no version ${version} in this session` } }
       : { ok: true, value: found };
@@ -580,7 +589,12 @@ export class AgendaService {
     const unauthorized = await this.authorize(sessionId);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
     await this.read(sessionId);
-    const kept = await this.versions.list(sessionId, id).catch(() => [] as readonly AgendaVersionSummary[]);
+    let kept: readonly AgendaVersionSummary[];
+    try {
+      kept = await this.versions.list(sessionId, id);
+    } catch (error) {
+      return { ok: false, error: versionsUnavailable(id, error) };
+    }
     const latest = kept.at(-1)?.version ?? 0;
     if (version > latest) {
       return {
@@ -931,4 +945,9 @@ function invalidSession(sessionId: string): AgendaFailure | null {
   return isAgendaSessionId(sessionId)
     ? null
     : { code: 'invalid', message: `not a valid agenda session id: ${sessionId}` };
+}
+
+/** A version store that cannot answer is not an item with no versions: say it is unavailable. */
+function versionsUnavailable(id: AgendaId, error: unknown): AgendaFailure {
+  return { code: 'corrupt', message: `the versions of ${id} could not be read: ${String(error)}` };
 }

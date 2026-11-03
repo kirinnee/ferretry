@@ -34,12 +34,23 @@ export async function appendLogRecords(
   records: readonly unknown[],
 ): Promise<{ readonly bytes: number; readonly count: number }> {
   if (records.length === 0) return cursor;
-  const text = new TextEncoder().encode(`${records.map(record => JSON.stringify(record)).join('\n')}\n`);
   await files.writeAtomic(sessionId, markOf(name), JSON.stringify({ bytes: cursor.bytes }));
   if ((await files.readAfter(sessionId, name, cursor.bytes)).length > 0)
     await files.truncate(sessionId, name, cursor.bytes);
-  await files.appendSynced(sessionId, name, text);
-  return { bytes: cursor.bytes + text.length, count: cursor.count + records.length };
+  await files.appendSynced(sessionId, name, encodedRecords(records));
+  return appendedCursor(cursor, records);
+}
+
+const encodedRecords = (records: readonly unknown[]): Uint8Array =>
+  new TextEncoder().encode(`${records.map(record => JSON.stringify(record)).join('\n')}\n`);
+
+/** The cursor {@link appendLogRecords} returns for these records, without writing anything. Pure. */
+export function appendedCursor(
+  cursor: { readonly bytes: number; readonly count: number },
+  records: readonly unknown[],
+): { readonly bytes: number; readonly count: number } {
+  if (records.length === 0) return cursor;
+  return { bytes: cursor.bytes + encodedRecords(records).length, count: cursor.count + records.length };
 }
 
 /** Where an append that was never committed begins, or `undefined` when every append was committed. */

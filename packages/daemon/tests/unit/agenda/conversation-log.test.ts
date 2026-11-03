@@ -320,6 +320,25 @@ describe('Agenda split', () => {
     should(lifecycleOf(split.ledger, 'A1')).equal('active');
   });
 
+  it('should move a card named without its machine when the item holds it with one', () => {
+    // Arrange
+    const ledger = raise(null, { task: { id: 'F12', machineId: 'machine-1' } }).ledger;
+
+    // Act
+    const split = run(ledger, {
+      action: 'split',
+      actor: AGENT,
+      id: 'A1',
+      request: request({ subject: 'Which cloud account?' }),
+      moveCards: [{ id: 'F12' }],
+      at: T(2),
+    });
+
+    // Assert
+    should(itemOf(split.ledger, 'A2').task).deepEqual({ id: 'F12', machineId: 'machine-1' });
+    should(itemOf(split.ledger, 'A1').task).be.undefined();
+  });
+
   it('should refuse a split that moves a card the item does not hold', () => {
     // Arrange
     const ledger = raise(null, { task: { id: 'F12' } }).ledger;

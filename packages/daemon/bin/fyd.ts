@@ -131,7 +131,7 @@ import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-sto
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
-import { SessionOwnerChat } from '../src/adapters/agenda/session-owner-chat.ts';
+import { SessionOwnerChat, typedWords } from '../src/adapters/agenda/session-owner-chat.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
@@ -3738,7 +3738,7 @@ function createSessionSendSubsystem(
         // Still held to be combined with others: say so, so the sender does not read "queued" as stuck.
         const held = queued?.state === 'queued' && queued.label !== undefined && queued.holdUntil !== undefined;
         if (turn.referenced.length > 0) {
-          await conversation.settle(id, turn, request.message, {
+          await conversation.settle(id, turn, typedWords(request.message), {
             messageId: enqueued.message.id,
             at: enqueued.message.enqueuedAt,
           });
@@ -3768,7 +3768,7 @@ function createSessionSendSubsystem(
       // Only once the words were accepted: an item must never close as replied for a message the
       // ferret was not given.
       if (turn.referenced.length > 0) {
-        await conversation.settle(id, turn, request.message, {
+        await conversation.settle(id, turn, typedWords(request.message), {
           messageId: outcome.record.sendId,
           at: outcome.record.acceptedAt,
         });

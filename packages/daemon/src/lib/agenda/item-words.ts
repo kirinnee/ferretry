@@ -59,6 +59,27 @@ export function interleaved(
   return [...(first ?? []), ...(second ?? [])].sort(byTime);
 }
 
+/**
+ * Two conversations merged into one: {@link interleaved}, minus the absorbed entries the survivor already holds — the
+ * same chat message (one message that names both items is logged on both) or the very same entry. Nothing else is dropped.
+ */
+export function mergedThreads(
+  survivor: readonly AgendaConversationEntry[] | undefined,
+  absorbed: readonly AgendaConversationEntry[] | undefined,
+): AgendaConversationEntry[] {
+  const messages = new Set(
+    (survivor ?? []).flatMap(entry => (entry.fromChat === undefined ? [] : [entry.fromChat.messageId])),
+  );
+  const exact = new Set((survivor ?? []).map(entry => JSON.stringify(entry)));
+  return interleaved(
+    survivor,
+    (absorbed ?? []).filter(
+      entry =>
+        !(entry.fromChat !== undefined && messages.has(entry.fromChat.messageId)) && !exact.has(JSON.stringify(entry)),
+    ),
+  );
+}
+
 /** The textual parts of an answer, in source order, with an optional distinct note. */
 export function responseWords(response: AgendaResponse | undefined, note?: string | null): string[] {
   const words: string[] = [];
@@ -149,4 +170,56 @@ export function seedConversation(item: AgendaItem | ResolvedAgendaItem): AgendaC
     );
   }
   return seeded.filter((entry): entry is AgendaConversationEntry => entry !== undefined).sort(byTime);
+}
+
+/** An item as its latest recorded version kept it: when, the bounded item, and the whole thread, tags included. */
+export interface RecordedItem {
+  readonly at: string;
+  readonly item: AgendaItem | ResolvedAgendaItem;
+  readonly conversation: readonly AgendaConversationEntry[];
+}
+
+const sameWords = (left: AgendaConversationEntry, right: AgendaConversationEntry): boolean =>
+  left.by === right.by && left.text === right.text;
+
+/**
+ * THE THREAD AFTER A ROUND TRIP THROUGH A DAEMON THAT DOES NOT KEEP ONE: the item's latest recorded version holds the
+ * whole thread as it stood (verbatim, tagged, in order), and the history `seeded` from what the older daemon kept says
+ * what was said since. A seeded word at or before the version is already in it; a later one is added unless it is
+ * there (the same chat message, or the same time, speaker and text). The ferret's answer to a question has no time of
+ * its own, so it is matched by its text alone and, when new, placed no earlier than the version.
+ *
+ * Pure and total: nothing the version holds is dropped or changed, and nothing is said twice.
+ */
+export function resumedConversation(
+  recorded: Pick<RecordedItem, 'at' | 'conversation'>,
+  seeded: readonly AgendaConversationEntry[],
+): AgendaConversationEntry[] {
+  const base = recorded.conversation;
+  const after = Date.parse(recorded.at);
+  const added: AgendaConversationEntry[] = [];
+  for (const word of seeded) {
+    const message = word.fromChat?.messageId;
+    if (message !== undefined && base.some(entry => entry.fromChat?.messageId === message)) continue;
+    const answer = word.via === 'question-answer';
+    const older = Date.parse(word.at) <= after;
+    if (answer ? base.some(entry => entry.via === word.via && sameWords(entry, word)) : older) continue;
+    const placed = answer && older ? { ...word, at: recorded.at } : word;
+    if ([...base, ...added].some(entry => entry.at === placed.at && sameWords(entry, placed))) continue;
+    added.push(placed);
+  }
+  return interleaved(base, added);
+}
+
+const LINKS = ['relatedTasks', 'mergedFrom', 'mergedInto', 'splitFrom', 'splitInto'] as const;
+
+/**
+ * THE LINKS AN OLDER DAEMON'S WRITE STRIPS: the cards a merge brought in and the merge and split links between items.
+ * They are the item's, so one the item lacks comes back from its latest recorded version; one it still holds stays.
+ * The same item when it lacks none.
+ */
+export function relinked<Item extends AgendaItem | ResolvedAgendaItem>(item: Item, recorded: RecordedItem): Item {
+  const missing = LINKS.filter(key => item[key] === undefined && recorded.item[key] !== undefined);
+  if (missing.length === 0) return item;
+  return { ...item, ...Object.fromEntries(missing.map(key => [key, recorded.item[key]])) };
 }

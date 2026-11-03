@@ -776,7 +776,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // Dependent things are always one agenda: splitting them would make the owner decide half a thing.
     should(text).containEql('dependent things always share.');
     should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest.');
-    should(text).containEql('`split` what stops fitting, `merge` twins.');
+    should(text).containEql('`split` misfits, `merge` items that share.');
   });
 
   it('should teach the one command that opens one, cold-readable, with the shape of every kind', () => {
@@ -835,7 +835,7 @@ describe('AGENDA_INSTRUCTION', () => {
 
     // The conversation verbs ship on this branch, inside the unchanged section and total budgets.
     should(text).containEql('`log <id> --reply|--rest`');
-    should(text).containEql('`split` what stops fitting, `merge` twins');
+    should(text).containEql('`split` misfits, `merge` items that share');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
     // The retired rules: an agenda now evolves into a tracker, and a reply no longer parks it.

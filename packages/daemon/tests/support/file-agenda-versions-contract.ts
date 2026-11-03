@@ -151,6 +151,31 @@ export function agendaVersionStoreContract() {
       );
     });
 
+    it('should create no archive file by being asked about an id nothing was recorded for', async () => {
+      // Arrange
+      const file = join(root, AGENDA_VERSIONS_DIRECTORY, 'A7.sqlite');
+
+      // Act
+      await store.list(SESSION, 'A7');
+      await store.get(SESSION, 'A7', 1);
+      await store.conversation(SESSION, 'A7', 1);
+      const asked = await stat(file).then(
+        () => true,
+        () => false,
+      );
+      const entry = entryOf(raised.ledger);
+      await store.record(SESSION, [
+        draft({ ...entry, item: { ...entry.item, id: 'A7' } } as AgendaEntry, 'created', T(0)),
+      ]);
+      const recorded = await stat(file).then(
+        () => true,
+        () => false,
+      );
+
+      // Assert
+      should([asked, recorded]).deepEqual([false, true]);
+    });
+
     it('should make a version of each entry a committed change touched', () => {
       // Arrange
       const replied = ok(
@@ -199,6 +224,26 @@ export function agendaVersionStoreContract() {
 
       // Assert
       should([other, item]).deepEqual([undefined, undefined]);
+    });
+
+    it('should refuse to mark over a seen document it cannot read, and leave it and every device untouched', async () => {
+      // Arrange
+      const seen = new FileAgendaSeenStore(() => root);
+      await seen.mark(SESSION, 'A1', 'laptop', 4);
+      const file = join(root, 'agenda-seen.json');
+      await writeFile(file, '{"laptop":{"A1":4},');
+      const damaged = await readFile(file, 'utf8');
+
+      // Act
+      const marked = await seen.mark(SESSION, 'A1', 'phone', 2).then(
+        () => 'marked',
+        () => 'refused',
+      );
+
+      // Assert
+      should(marked).equal('refused');
+      should(await readFile(file, 'utf8')).equal(damaged);
+      should(await seen.seen(SESSION, 'A1', 'phone')).be.undefined();
     });
 
     it('should hold up under marks made at once, and leave a readable file', async () => {

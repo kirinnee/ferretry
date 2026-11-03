@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type AgendaConversationEntry,
@@ -86,6 +86,22 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     if (!isAgendaSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
     if (!AgendaIdSchema.safeParse(id).success) throw new Error(`not a valid agenda id: ${id}`);
     return join(this.sessionDirectory(sessionId), AGENDA_VERSIONS_DIRECTORY, `${id}.sqlite`);
+  }
+
+  /** A read opens only what a record created: an id nothing was recorded for has no store, and asking never makes one. */
+  private async openExisting(sessionId: string, id: AgendaId): Promise<Database | undefined> {
+    const file = this.file(sessionId, id);
+    for (const candidate of [file, file.replace(/\.sqlite$/u, '.jsonl')]) {
+      const present = await access(candidate).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error;
+          return false;
+        },
+      );
+      if (present) return await this.open(sessionId, id);
+    }
+    return undefined;
   }
 
   private async open(sessionId: string, id: AgendaId): Promise<Database> {
@@ -194,7 +210,8 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
   }
 
   async list(sessionId: string, id: AgendaId): Promise<readonly AgendaVersionSummary[]> {
-    const db = await this.open(sessionId, id);
+    const db = await this.openExisting(sessionId, id);
+    if (db === undefined) return [];
     try {
       return db
         .query<{ summary: string }, []>('SELECT summary FROM versions ORDER BY version')
@@ -208,7 +225,8 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
   private async load(sessionId: string, id: AgendaId, version: number): Promise<CachedVersion | undefined> {
     const key = `${this.file(sessionId, id)}:${version}`;
     if (this.cached?.key === key) return this.cached;
-    const db = await this.open(sessionId, id);
+    const db = await this.openExisting(sessionId, id);
+    if (db === undefined) return undefined;
     try {
       const row = db
         .query<{ snapshot: string }, [number]>('SELECT snapshot FROM versions WHERE version = ?')
@@ -237,7 +255,8 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     const found = await this.load(sessionId, id, version);
     if (found === undefined) return undefined;
     if (found.conversation !== undefined) return found.conversation;
-    const db = await this.open(sessionId, id);
+    const db = await this.openExisting(sessionId, id);
+    if (db === undefined) return undefined;
     try {
       const rows = db
         .query<{ entry: string }, [number]>(

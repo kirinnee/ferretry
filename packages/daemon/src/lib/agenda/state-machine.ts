@@ -81,7 +81,11 @@ import {
 import {
   interleaved,
   loggedFromChat,
+  mergedThreads,
+  type RecordedItem,
+  relinked,
   responseWords,
+  resumedConversation,
   said,
   seedConversation,
   speakerOf,
@@ -683,6 +687,7 @@ export function parseAgendaLedger(
   value: unknown,
   sessionId: string,
   archived: readonly AgendaArchiveRecord[] = [],
+  recorded?: Readonly<Record<string, RecordedItem>>,
 ): AgendaLedger | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
@@ -767,7 +772,7 @@ export function parseAgendaLedger(
     ...(archivePending.length === 0 ? {} : { archivePending }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
   });
-  return toChannel(parked, legacy, archived);
+  return toChannel(parked, legacy, archived, recorded);
 }
 
 /**
@@ -781,7 +786,10 @@ export function parseAgendaLedger(
  * - An item that names no stage gets the one its kind says (`done` once it is closed), as the first of its stages.
  * - The ledger is marked {@link AGENDA_LEDGER_VERSION}.
  * - An item with no stored conversation gets one, seeded from the words its history, answers and closing note kept
- *   ({@link seedConversation}); nothing is dropped, and an item that has one is left as it is.
+ *   ({@link seedConversation}); nothing is dropped, and an item that has one is left as it is. An item with a
+ *   `recorded` version (a board an older daemon wrote after this one kept it) starts from that version's whole thread
+ *   and its merge and split links, and adds only the words said since ({@link resumedConversation}).
+ * - What the fit to the transport bound shed from an item's history of the owner's words goes to `archivePending`.
  *
  * Pure, total and idempotent: a ledger already in this shape comes back as it came, the same object.
  */
@@ -789,10 +797,12 @@ export function toChannel(
   ledger: AgendaLedger,
   legacy: boolean,
   archived: readonly AgendaArchiveRecord[] = [],
+  recorded?: Readonly<Record<string, RecordedItem>>,
 ): AgendaLedger {
   let moved = ledger.version !== AGENDA_LEDGER_VERSION;
   const conversations = { ...(ledger.conversations ?? {}) };
   const carriedEntries = { ...(ledger.carriedEntries ?? {}) };
+  const shed: AgendaArchiveRecord[] = [];
   const entries = ledger.entries.map(entry => {
     const history = [
       ...[...archived, ...(ledger.archivePending ?? [])]
@@ -803,14 +813,20 @@ export function toChannel(
         .map(record => record.entry),
       ...(entry.item.history ?? []),
     ];
-    const previous =
-      conversations[entry.item.id] ?? entry.item.conversation ?? seedConversation({ ...entry.item, history });
+    const stored = conversations[entry.item.id] ?? entry.item.conversation;
+    const version = recorded?.[entry.item.id];
+    const seed = (): AgendaConversationEntry[] => {
+      const seeded = seedConversation({ ...entry.item, history });
+      return version === undefined ? seeded : resumedConversation(version, seeded);
+    };
+    const previous = stored ?? seed();
     const full = interleaved(previous, undefined);
     if (full.some((word, index) => word !== previous[index])) moved = true;
     conversations[entry.item.id] = full;
-    const normalized = channelItem(entry.item, legacy);
+    const normalized = channelItem(version === undefined ? entry.item : relinked(entry.item, version), legacy);
     const item = fitAgendaItem(boundedConversation(normalized, full));
     (entry.lifecycle === 'active' ? AgendaItemSchema : ResolvedAgendaItemSchema).parse(item);
+    shed.push(...shedOwnerHistory(entry.item, item));
     if (
       item.history !== normalized.history ||
       item.revisions !== normalized.revisions ||
@@ -828,9 +844,23 @@ export function toChannel(
         entries,
         ...(Object.keys(conversations).length === 0 ? {} : { conversations }),
         ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
+        ...(shed.length === 0 ? {} : { archivePending: [...(ledger.archivePending ?? []), ...shed] }),
         version: AGENDA_LEDGER_VERSION,
       }
     : ledger;
+}
+
+/** The owner's words in history entries that `fitted` shed from `before` (they are kept in the sidecar, as the fit does). */
+function shedOwnerHistory(before: AgendaItem | ResolvedAgendaItem, after: AgendaItem | ResolvedAgendaItem) {
+  const kept = (after.history ?? []).map(record => JSON.stringify(record));
+  const shed: AgendaArchiveRecord[] = [];
+  for (const record of before.history ?? []) {
+    const index = kept.indexOf(JSON.stringify(record));
+    if (index >= 0) kept.splice(index, 1);
+    else if (['replied', 'needs-info', 'discuss'].includes(record.kind))
+      shed.push({ kind: 'owner-history', id: before.id, entry: record });
+  }
+  return shed;
 }
 
 /** A bounded recent tail; complete entries only. The durable thread is held separately. */
@@ -2550,8 +2580,10 @@ function log(ledger: AgendaLedger, command: LogCommand): AgendaMutation {
   return next.ok ? { ...next, change: 'logged' } : next;
 }
 
-/** The same card, by its id and machine. */
-const sameCard = (left: TaskRef, right: TaskRef): boolean => left.id === right.id && left.machineId === right.machineId;
+/** Without `machineId` a ref means "on this machine", which this layer cannot name, so a bare ref matches any machine's id. */
+const sameCard = (left: TaskRef, right: TaskRef): boolean =>
+  left.id === right.id &&
+  (left.machineId === undefined || right.machineId === undefined || left.machineId === right.machineId);
 
 /** `items` without a repeat, by `key`; the first of each kept, in order. */
 function distinctBy<Item>(items: readonly Item[], key: (item: Item) => string): Item[] {
@@ -2628,7 +2660,7 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
       `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_CARDS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
     );
   }
-  const conversation = interleaved(survivor.conversation, absorbed.conversation);
+  const conversation = mergedThreads(survivor.conversation, absorbed.conversation);
   const mergedFrom = distinctBy(
     [...(survivor.mergedFrom ?? []), absorbed.id, ...(absorbed.mergedFrom ?? [])],
     id => id,

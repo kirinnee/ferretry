@@ -261,8 +261,15 @@ it('lists versions and seen marks, handles absent sessions and disk failures, an
       throw new Error('unreadable');
     },
   });
-  const refused = await broken.service.versionsOf(SESSION, 'A1', 'phone');
-  should(refused.ok && refused.value.versions).deepEqual([]);
-  should(await broken.service.versionOf(SESSION, 'A1', 1)).containDeep({ ok: false, error: { code: 'not-found' } });
+  // A store that cannot answer is unavailable — never an item with no versions, nor a version that does not exist.
+  should(await broken.service.versionsOf(SESSION, 'A1', 'phone')).containDeep({
+    ok: false,
+    error: { code: 'corrupt' },
+  });
+  should(await broken.service.versionOf(SESSION, 'A1', 1)).containDeep({ ok: false, error: { code: 'corrupt' } });
+  should(await broken.service.markSeen(SESSION, 'A1', 1, 'phone')).containDeep({
+    ok: false,
+    error: { code: 'corrupt' },
+  });
   should((await service.log(SESSION, 'A1', 'reply', 'OK', AGENT)).ok).be.false();
 });

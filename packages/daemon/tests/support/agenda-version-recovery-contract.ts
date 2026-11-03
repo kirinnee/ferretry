@@ -992,6 +992,65 @@ export function agendaVersionRecoveryContract() {
       }
     });
 
+    /** What the previous release (2a) writes over a v4 ledger: version 2 and the cursor kept, the thread fields stripped. */
+    const olderDaemonWrites = async (w: Awaited<ReturnType<typeof world>>, subject: string, history: string) => {
+      const document = JSON.parse((await w.files.read(SESSION, 'agenda.json')) ?? '{}');
+      const cursor = document.archive ?? { bytes: 0, count: 0 };
+      const line = `${JSON.stringify({ kind: 'owner-history', id: 'A1', entry: { at: AT, kind: 'replied', note: history } })}\n`;
+      await w.files.appendSynced(SESSION, AGENDA_ARCHIVE_FILE, new TextEncoder().encode(line));
+      document.entries[0].item.subject = subject;
+      document.version = 2;
+      delete document.conversations;
+      delete document.carriedEntries;
+      document.archive = { bytes: cursor.bytes + line.length, count: cursor.count + 1 };
+      await w.files.writeAtomic(SESSION, 'agenda.json', JSON.stringify(document));
+    };
+
+    it("sets a stale intent aside when an older daemon wrote after it, keeping that daemon's items and history", async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        w.fail('error');
+        await should(
+          w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Intermediate' } }),
+        ).be.rejected();
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.a.String();
+        await olderDaemonWrites(w, 'From the older daemon', 'OWNER_WORDS_FROM_2A');
+        const sidecar = await w.files.read(SESSION, AGENDA_ARCHIVE_FILE);
+        w.restart();
+
+        const read = await w.repo.read(SESSION);
+
+        should(read?.entries[0]?.item.subject).equal('From the older daemon');
+        should(await w.files.read(SESSION, AGENDA_ARCHIVE_FILE)).equal(sidecar);
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
+        should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).be.a.String();
+        should(w.warnings.filter(message => message.includes('stale'))).have.length(1);
+        ok(await w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Later' } }));
+        should(await w.files.read(SESSION, AGENDA_ARCHIVE_FILE)).startWith(sidecar ?? '');
+        should(JSON.stringify(await w.repo.readArchive(SESSION))).containEql('OWNER_WORDS_FROM_2A');
+      } finally {
+        await w.close();
+      }
+    });
+
+    it('still replays an intent whose agenda file is the one it was prepared from, and ignores one that already committed', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        w.fail('error');
+        await should(
+          w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Intermediate' } }),
+        ).be.rejected();
+        w.restart();
+        should((await w.repo.read(SESSION))?.entries[0]?.item.subject).equal('Intermediate');
+        should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).be.undefined();
+        should(w.warnings).be.empty();
+      } finally {
+        await w.close();
+      }
+    });
+
     it('upgrades a pre-idempotency SQLite archive without losing its versions', async () => {
       const w = await world();
       try {

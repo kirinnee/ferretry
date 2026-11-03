@@ -368,12 +368,16 @@ There is no size limit a reader meets: **an item may weigh up to a transport bou
 JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound under it — the body, where we are,
 the detail and an answer to the owner's question 200,000; the context and every reply or answer of the owner's
 64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history.
-The wire history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to
-their own store. Before an owner record leaves that history, it is durably appended to the session's
+The wire history (20 entries) and the revisions (10) stay bounded: the full conversation and every version live in
+their own stores ([the conversation](#the-conversation), [versions](#versions)). Before an owner record leaves that history, it is durably appended to the session's
 `agenda-history.jsonl`, keyed by item id. The sidecar has no eviction policy and stays off the wire. Pruning a
 closed item removes its hot view, retaining all its owner words in this file: its conversation, and the closing note
 and any structured answer, as the item's complete last snapshot (a `version` record). History is read only when
-explicitly requested; an ordinary transaction never rereads or rewrites the committed sidecar.
+explicitly requested; an ordinary transaction never rewrites the committed sidecar and rereads it only for one
+fallback: a thread leaving the hot ledger whose item has no version in the version store takes its last snapshot from
+a `version` record **inside the committed cursor** (a line past the cursor, or in a ledger with no cursor, is never
+used; the transaction fails closed instead). A pruned item's `version` record holds the snapshot with only the
+bounded recent tail (8 KB) of its thread; the whole thread is in the version store.
 
 **Storage layout.** Each line is an `owner-history` record (`id`, `entry`) or a `version` record (`id`, `item`).
 `agenda.json` holds an `archive` cursor with a UTF-8 byte offset and record count rather than embedding that
@@ -561,9 +565,14 @@ would corrupt every version after it. The board file holds the item as it is now
 (20 history entries, 10 revisions); the sidecar holds how it got there, uncapped. An item from before versions is kept
 as it stood first (change `carried`) when it is next changed. A merge or a split makes a version of each item it
 touched. Before writing versions, the repository syncs the exact mutation drafts and next ledger to
-`agenda-versions.pending.json`. An archive failure rejects the request and leaves that intent for recovery; the
-current ledger stays unchanged until every draft is acknowledged. Reads and transactions replay an outstanding
-intent before proceeding. A retry after an uncertain acknowledgement uses the same per-item transaction identities,
+`agenda-versions.pending.json`, with `base` (a digest of the `agenda.json` it was prepared from) and `results` (the
+digests of the files its commit can leave). An archive failure rejects the request and leaves that intent for
+recovery; the current ledger stays unchanged until every draft is acknowledged. Reads and transactions replay an
+outstanding intent before proceeding, **but only when `agenda.json` is still its `base` or already one of its
+`results`**. Any other file was written by someone else since (a previous release, after a downgrade), and replaying
+would overwrite their writes and cut their sidecar lines: the intent is set aside as
+`agenda-versions.pending.json.stale`, a warning says so, and nothing is replayed. A version a set-aside intent had
+already recorded stays in the store (see the declared limits under [downgrading](#on-disk)). A retry after an uncertain acknowledgement uses the same per-item transaction identities,
 so partial merge/split batches and commits whose replies were lost never duplicate or omit a version. The intent is
 removed only after the hot ledger commit and an idempotent copy of its original change event to
 `agenda-changes.pending.json`. That event keeps the actor, origin (`board` or `conversation`), affected items and
@@ -1465,14 +1474,27 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
 - **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
 - **The ledger says its shape** (`version`, 4 since stored conversations): it is read as 1 when absent and brought to
   4 as it is read ([the channel migration](#the-migration-ledger-version-2) and [the conversation
-  migration](#the-conversation)). An older daemon reads a version-4 file as it always did and drops the fields it
-  does not know (`resting`, `stage`, `ownerAnswer`…) on its next write, and with them the `archive` cursor and the
-  `version`; its `parked: replied` still says the item rests, so the next upgrade rests it again. The sidecar is
-  left alone, and a ledger that reads as version 1 with no cursor is upgraded by adopting the sidecar's complete
-  lines as committed history up to any mark ([a ledger with no cursor](#no-size-limit)), so no owner history is
-  lost across a downgrade and an upgrade. Two limits are declared: an uncommitted tail a later commit outlived (it
-  lifted the mark, and its cursor went with the downgrade) is adopted too, and a crash between a commit and the
-  lifting of its mark, followed by a downgrade before that session's next write, leaves that last append out.
+  migration](#the-conversation)).
+- **Downgrading** goes to the previous release (the rollback target, "2a"). It reads a version-4 file as version 2
+  and keeps the `version` and the `archive` cursor, but drops everything it does not know on its next write: the
+  `conversations` map, `carriedEntries`, each item's `conversation`, `conversationCount` and `conversationLastAt`,
+  `relatedTasks`, and the merge and split links (`mergedFrom`, `mergedInto`, `splitFrom`, `splitInto`). It also
+  ignores `agenda-versions/` and `agenda-versions.pending.json`. What it keeps writing — owner replies in each
+  item's history, owner-history lines in the sidecar under its cursor — is read back on the way up.
+- **Coming back up** loses no owner word and repeats none. Each item resumes from its **latest recorded version**
+  in the version store, which holds the whole tagged thread (verbatim, in order, chat tags included, and chat text
+  over the history bound too) and the links 2a stripped, so merges, splits and related cards return. Only what the
+  item's history says was said after that version is added, once, after the thread; a word already in the thread
+  (same chat message, or same time, speaker and text) is never added again, and a second read finds nothing new. An
+  item with no recorded version is seeded from its history and the sidecar only. Owner history that rejoining the
+  thread makes fit under the item bound is queued to the sidecar first, so 2a dropping its copy loses nothing.
+- **Declared limits.** A version recorded by a set-aside (stale) intent can become an item's latest version and
+  bring back words 2a had no part in; an item with no versions is seeded from history only, so chat text over 64,000
+  characters is verbatim only where a version exists. A ledger that reads as version 1 with no cursor (an older
+  rewrite) is upgraded by adopting the sidecar's complete lines as committed history up to any mark ([a ledger with
+  no cursor](#no-size-limit)). An uncommitted tail a later commit outlived (it lifted the mark, and its cursor went
+  with the downgrade) is adopted too, and a crash between a commit and the lifting of its mark, followed by a
+  downgrade before that session's next write, leaves that last append out.
 - Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
   one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same

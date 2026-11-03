@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import type { AgendaConversationEntry, AgendaVersion } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENDA_CACHE_LIMIT,
@@ -7,6 +8,7 @@ import {
 import { AGENDA_ARCHIVE_FILE, type AgendaArchiveRecord } from '../../../src/lib/agenda/archive.ts';
 import { AGENDA_FILES, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
+import type { AgendaVersionDraft, AgendaVersionStore } from '../../../src/lib/agenda/versions.ts';
 import {
   AGENDA_LEDGER_VERSION,
   type AgendaLedger,
@@ -102,6 +104,57 @@ class MemoryFiles {
   }
 }
 
+/** An in-memory version store that counts how often it is asked, so a test can tell a read that consulted it from one that did not. */
+class MemoryVersions implements AgendaVersionStore {
+  readonly kept = new Map<string, { snapshot: AgendaVersion; conversation: readonly AgendaConversationEntry[] }[]>();
+  private readonly mutations = new Set<string>();
+  reads = 0;
+
+  async record(_session: string, drafts: readonly AgendaVersionDraft[]): Promise<void> {
+    for (const draft of drafts) {
+      if (draft.mutationId !== undefined) {
+        const key = `${draft.entry.item.id}:${draft.mutationId}`;
+        if (this.mutations.has(key)) continue;
+        this.mutations.add(key);
+      }
+      const versions = this.kept.get(draft.entry.item.id) ?? [];
+      versions.push({
+        snapshot: {
+          version: versions.length + 1,
+          at: draft.at,
+          by: draft.by,
+          change: draft.change,
+          lifecycle: draft.entry.lifecycle,
+          item: draft.entry.item,
+        } as AgendaVersion,
+        conversation: draft.conversation ?? draft.entry.item.conversation ?? [],
+      });
+      this.kept.set(draft.entry.item.id, versions);
+    }
+  }
+
+  async list(_session: string, id: string) {
+    this.reads += 1;
+    return (this.kept.get(id) ?? []).map(({ snapshot: { version, at, by, change, lifecycle } }) => ({
+      version,
+      at,
+      by,
+      change,
+      lifecycle,
+    }));
+  }
+
+  async get(_session: string, id: string, version: number) {
+    this.reads += 1;
+    return this.kept.get(id)?.[version - 1]?.snapshot;
+  }
+
+  async conversation(_session: string, id: string, version: number) {
+    this.reads += 1;
+    return this.kept.get(id)?.[version - 1]?.conversation;
+  }
+}
+
 const request = {
   source: 'agent-raised' as const,
   sourceRef: null,
@@ -113,9 +166,15 @@ const request = {
   ask: { kind: 'multiple-choice' as const, options: [{ label: 'eu' }, { label: 'us' }] },
 };
 
-const subject = () => {
+const subject = (versions?: MemoryVersions) => {
   const files = new MemoryFiles();
-  const repository = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+  const repository = new FileAgendaLedgerRepository(
+    id => `/state/sessions/${id}`,
+    undefined,
+    undefined,
+    files,
+    versions,
+  );
   const service = new AgendaService(
     repository,
     { now: () => NOW },
@@ -276,86 +335,87 @@ describe('the private agenda archive', () => {
   const save = async (repository: FileAgendaLedgerRepository, command: Parameters<typeof applyAgendaCommand>[1]) =>
     ok(await repository.transact(SESSION, current => applyAgendaCommandToSession(current, SESSION, command)));
 
-  it('should retain sixty owner rounds with bounded current entries and no reread of archived history, even after pruning', async () => {
-    const { files, repository } = subject();
-    await save(repository, {
-      action: 'raise',
-      actor: agent,
-      at: NOW,
-      request: {
-        ...request,
-        ask: { kind: 'open-question' },
-        body: 'b'.repeat(200_000),
-        whereWeAre: 'w'.repeat(200_000),
-        detail: 'd'.repeat(118_000),
-        context: 'c'.repeat(40_000),
-      },
-    });
-    for (let n = 1; n <= 60; n++) {
+  for (const withVersions of [false, true])
+    it(`should retain sixty owner rounds with bounded current entries and no reread of archived history, even after pruning${withVersions ? ' (with a version store)' : ''}`, async () => {
+      const { files, repository } = subject(withVersions ? new MemoryVersions() : undefined);
       await save(repository, {
-        action: 'answer',
-        actor: human,
-        at: NOW,
-        id: 'A1',
-        response: { kind: 'open-question', answer: `ANSWER_${n}:${'a'.repeat(63_970)}` },
-        note: `NOTE_${n}:${'n'.repeat(63_970)}`,
-      });
-      await save(repository, {
-        action: 'edit',
+        action: 'raise',
         actor: agent,
         at: NOW,
-        id: 'A1',
-        patch: { questionAnswer: `Round ${n}` },
+        request: {
+          ...request,
+          ask: { kind: 'open-question' },
+          body: 'b'.repeat(200_000),
+          whereWeAre: 'w'.repeat(200_000),
+          detail: 'd'.repeat(118_000),
+          context: 'c'.repeat(40_000),
+        },
       });
-    }
-    const hot = files.files.get(`${SESSION}/${current}`)?.text ?? '';
-    const archived = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
-    // v4 commits full conversations with state. The old whole-file ceiling applies to the current-item view,
-    // not the uncapped durable threads; keep the same ceiling and prove every round survives in those threads.
-    const { conversations, carriedEntries: _carried, ...currentView } = JSON.parse(hot) as AgendaLedger;
-    should(JSON.stringify(currentView).length).be.below(1_100_000);
-    should(conversations?.A1).have.length(180);
-    for (let n = 1; n <= 60; n++) {
-      should(conversations?.A1?.some(entry => entry.text.startsWith(`ANSWER_${n}:`))).be.true();
-      should(conversations?.A1?.some(entry => entry.text.startsWith(`NOTE_${n}:`))).be.true();
-    }
-    should(archived.length).be.above(7_000_000);
-    should(hot).not.containEql('archivePending');
-    should(hot).not.containEql('ownerHistory');
-    should(files.fullReads).not.containEql(AGENDA_ARCHIVE_FILE);
-    should(files.tailReads.filter(offset => offset === 0)).have.length(1);
-    const ledger = await repository.read(SESSION);
-    if (ledger === null) throw new Error('no board');
-    const words = JSON.stringify(await repository.readArchive(SESSION)) + JSON.stringify(agendaSnapshot(ledger));
-    for (let n = 1; n <= 60; n++) {
-      should(words).containEql(`ANSWER_${n}:`);
-      should(words).containEql(`NOTE_${n}:`);
-    }
-    const closed = await save(repository, { action: 'resolve', actor: agent, at: NOW, id: 'A1' });
-    const entry = closed.ledger.entries[0];
-    if (entry?.lifecycle !== 'addressed') throw new Error('not closed');
-    const {
-      body: _body,
-      whereWeAre: _where,
-      detail: _detail,
-      history: _history,
-      revisions: _revisions,
-      ownerAnswer: _answer,
-      ...small
-    } = entry.item;
-    const full: AgendaLedger = {
-      ...closed.ledger,
-      nextId: 101,
-      entries: [...Array.from({ length: 99 }, (_, n) => ({ ...entry, item: { ...small, id: `A${n + 2}` } })), entry],
-    };
-    files.put(SESSION, current, JSON.stringify(full));
-    await save(repository, { action: 'raise', actor: agent, at: NOW, request });
-    const pruned = await save(repository, { action: 'resolve', actor: human, at: NOW, id: 'A101' });
-    should(pruned.ledger.entries.some(entry => entry.item.id === 'A1')).be.false();
-    const remainingWords = JSON.stringify(await repository.readArchive(SESSION));
-    for (let n = 1; n <= 60; n++) should(remainingWords).containEql(`ANSWER_${n}:`);
-    should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).startWith(archived);
-  });
+      for (let n = 1; n <= 60; n++) {
+        await save(repository, {
+          action: 'answer',
+          actor: human,
+          at: NOW,
+          id: 'A1',
+          response: { kind: 'open-question', answer: `ANSWER_${n}:${'a'.repeat(63_970)}` },
+          note: `NOTE_${n}:${'n'.repeat(63_970)}`,
+        });
+        await save(repository, {
+          action: 'edit',
+          actor: agent,
+          at: NOW,
+          id: 'A1',
+          patch: { questionAnswer: `Round ${n}` },
+        });
+      }
+      const hot = files.files.get(`${SESSION}/${current}`)?.text ?? '';
+      const archived = files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text ?? '';
+      // v4 commits full conversations with state. The old whole-file ceiling applies to the current-item view,
+      // not the uncapped durable threads; keep the same ceiling and prove every round survives in those threads.
+      const { conversations, carriedEntries: _carried, ...currentView } = JSON.parse(hot) as AgendaLedger;
+      should(JSON.stringify(currentView).length).be.below(1_100_000);
+      should(conversations?.A1).have.length(180);
+      for (let n = 1; n <= 60; n++) {
+        should(conversations?.A1?.some(entry => entry.text.startsWith(`ANSWER_${n}:`))).be.true();
+        should(conversations?.A1?.some(entry => entry.text.startsWith(`NOTE_${n}:`))).be.true();
+      }
+      should(archived.length).be.above(7_000_000);
+      should(hot).not.containEql('archivePending');
+      should(hot).not.containEql('ownerHistory');
+      should(files.fullReads).not.containEql(AGENDA_ARCHIVE_FILE);
+      should(files.tailReads.filter(offset => offset === 0)).have.length(1);
+      const ledger = await repository.read(SESSION);
+      if (ledger === null) throw new Error('no board');
+      const words = JSON.stringify(await repository.readArchive(SESSION)) + JSON.stringify(agendaSnapshot(ledger));
+      for (let n = 1; n <= 60; n++) {
+        should(words).containEql(`ANSWER_${n}:`);
+        should(words).containEql(`NOTE_${n}:`);
+      }
+      const closed = await save(repository, { action: 'resolve', actor: agent, at: NOW, id: 'A1' });
+      const entry = closed.ledger.entries[0];
+      if (entry?.lifecycle !== 'addressed') throw new Error('not closed');
+      const {
+        body: _body,
+        whereWeAre: _where,
+        detail: _detail,
+        history: _history,
+        revisions: _revisions,
+        ownerAnswer: _answer,
+        ...small
+      } = entry.item;
+      const full: AgendaLedger = {
+        ...closed.ledger,
+        nextId: 101,
+        entries: [...Array.from({ length: 99 }, (_, n) => ({ ...entry, item: { ...small, id: `A${n + 2}` } })), entry],
+      };
+      files.put(SESSION, current, JSON.stringify(full));
+      await save(repository, { action: 'raise', actor: agent, at: NOW, request });
+      const pruned = await save(repository, { action: 'resolve', actor: human, at: NOW, id: 'A101' });
+      should(pruned.ledger.entries.some(entry => entry.item.id === 'A1')).be.false();
+      const remainingWords = JSON.stringify(await repository.readArchive(SESSION));
+      for (let n = 1; n <= 60; n++) should(remainingWords).containEql(`ANSWER_${n}:`);
+      should(files.files.get(`${SESSION}/${AGENDA_ARCHIVE_FILE}`)?.text).startWith(archived);
+    }, 60_000);
 
   it('should keep the closing note and structured answer of an item whose closed history is pruned', async () => {
     const { repository } = subject();
@@ -737,51 +797,119 @@ describe('the private agenda archive', () => {
       should(sidecar(files)).not.containEql('torn');
     });
 
-    it("should seed an upgraded board's conversation from the history it adopts, once, never from an uncommitted append", async () => {
-      // Arrange — a board as a daemon before the cursor and the conversation left it: no version, cursor or thread.
-      const { files, repository } = subject();
-      const raised = ok(
-        await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
-      );
-      const document = JSON.parse(agendaLedgerDocument(raised.ledger)) as Record<string, unknown> & {
-        entries: { item: Record<string, unknown> }[];
+    for (const withVersions of [false, true])
+      it(`should seed an upgraded board's conversation from the history it adopts, once, never from an uncommitted append${withVersions ? ' (with a version store)' : ''}`, async () => {
+        // Arrange — a board as a daemon before the cursor and the conversation left it: no version, cursor or thread.
+        const versions = withVersions ? new MemoryVersions() : undefined;
+        const { files, repository } = subject(versions);
+        const raised = ok(
+          await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })),
+        );
+        const document = JSON.parse(agendaLedgerDocument(raised.ledger)) as Record<string, unknown> & {
+          entries: { item: Record<string, unknown> }[];
+        };
+        for (const key of ['version', 'archive', 'conversations', 'carriedEntries']) delete document[key];
+        for (const entry of document.entries) {
+          delete entry.item.conversation;
+          delete entry.item.conversationCount;
+        }
+        files.put(SESSION, current, JSON.stringify(document));
+        const record = (note: string) =>
+          `${JSON.stringify({ kind: 'owner-history', id: 'A1', entry: { at: '2026-10-31T10:05:00.000Z', kind: 'replied', note } })}\n`;
+        const committed = record('ADOPTED_WORDS');
+        // The second record's append never committed: its mark is still down where it began.
+        files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + record('UNCOMMITTED_WORDS'));
+        files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed) }));
+        const upgraded = new FileAgendaLedgerRepository(
+          id => `/state/sessions/${id}`,
+          undefined,
+          undefined,
+          files,
+          versions,
+        );
+
+        // Act
+        const read = await upgraded.read(SESSION);
+        ok(
+          await upgraded.transact(SESSION, ledger => {
+            if (ledger === null) throw new Error('no board');
+            return { ok: true, changed: true, change: 'refreshed', ledger, snapshot: agendaSnapshot(ledger) };
+          }),
+        );
+        const askedBefore = versions?.reads ?? 0;
+        const reread = await new FileAgendaLedgerRepository(
+          id => `/state/sessions/${id}`,
+          undefined,
+          undefined,
+          files,
+          versions,
+        ).read(SESSION);
+
+        // Assert — one adoption feeds the one migration; the persisted version-4 board never reads the sidecar again,
+        // nor does it ask the version store to seed it a second time.
+        should(versions?.reads ?? 0).equal(askedBefore);
+        should(read?.archive).deepEqual({ bytes: Buffer.byteLength(committed), count: 1 });
+        should(read?.conversations?.A1?.map(entry => entry.text)).deepEqual(['ADOPTED_WORDS']);
+        should(reread?.version).equal(AGENDA_LEDGER_VERSION);
+        should(reread?.archive).deepEqual(read?.archive);
+        should(reread?.conversations?.A1?.map(entry => entry.text)).deepEqual(['ADOPTED_WORDS']);
+        should(JSON.stringify(await upgraded.readArchive(SESSION))).not.containEql('UNCOMMITTED_WORDS');
+      });
+
+    describe('a cold thread whose snapshot only the history file holds', () => {
+      /** A board whose only thread belongs to an item no longer on it, with no version kept anywhere but the sidecar. */
+      const orphaned = async (cursor: 'covers' | 'none') => {
+        const versions = new MemoryVersions();
+        const { files, repository } = subject(versions);
+        ok(await repository.transact(SESSION, command({ action: 'raise', actor: agent, at: NOW, request })));
+        ok(await repository.transact(SESSION, command(resolveA1('ORPHAN_WORDS'))));
+        const ledger = await repository.read(SESSION);
+        const item = ledger?.entries[0]?.item;
+        if (ledger === null || item === undefined) throw new Error('no board');
+        const {
+          conversation: _thread,
+          conversationCount: _count,
+          conversationLastAt: _last,
+          ...stored
+        } = item as unknown as Record<string, unknown>;
+        const line = `${JSON.stringify({ kind: 'version', id: 'A1', item: stored })}\n`;
+        const document = JSON.parse(agendaLedgerDocument(ledger)) as Record<string, unknown>;
+        document.entries = [];
+        delete document.archive;
+        if (cursor === 'covers') document.archive = { bytes: Buffer.byteLength(line), count: 1 };
+        files.put(SESSION, current, JSON.stringify(document));
+        files.put(SESSION, AGENDA_ARCHIVE_FILE, line);
+        versions.kept.clear();
+        const reopened = new FileAgendaLedgerRepository(
+          id => `/state/sessions/${id}`,
+          undefined,
+          undefined,
+          files,
+          versions,
+        );
+        return { reopened, versions };
       };
-      for (const key of ['version', 'archive', 'conversations', 'carriedEntries']) delete document[key];
-      for (const entry of document.entries) {
-        delete entry.item.conversation;
-        delete entry.item.conversationCount;
-      }
-      files.put(SESSION, current, JSON.stringify(document));
-      const record = (note: string) =>
-        `${JSON.stringify({ kind: 'owner-history', id: 'A1', entry: { at: NOW, kind: 'replied', note } })}\n`;
-      const committed = record('ADOPTED_WORDS');
-      // The second record's append never committed: its mark is still down where it began.
-      files.put(SESSION, AGENDA_ARCHIVE_FILE, committed + record('UNCOMMITTED_WORDS'));
-      files.put(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`, JSON.stringify({ bytes: Buffer.byteLength(committed) }));
-      const upgraded = new FileAgendaLedgerRepository(id => `/state/sessions/${id}`, undefined, undefined, files);
+      const refresh = (ledger: AgendaLedger | null): AgendaMutation => {
+        if (ledger === null) throw new Error('no board');
+        return { ok: true, changed: true, change: 'refreshed', ledger, snapshot: agendaSnapshot(ledger) };
+      };
 
-      // Act
-      const read = await upgraded.read(SESSION);
-      ok(
-        await upgraded.transact(SESSION, ledger => {
-          if (ledger === null) throw new Error('no board');
-          return { ok: true, changed: true, change: 'refreshed', ledger, snapshot: agendaSnapshot(ledger) };
-        }),
-      );
-      const reread = await new FileAgendaLedgerRepository(
-        id => `/state/sessions/${id}`,
-        undefined,
-        undefined,
-        files,
-      ).read(SESSION);
+      it('should archive the thread from a history line the ledger cursor covers', async () => {
+        const { reopened, versions } = await orphaned('covers');
 
-      // Assert — one adoption feeds the one migration; the persisted version-4 board never reads the sidecar again.
-      should(read?.archive).deepEqual({ bytes: Buffer.byteLength(committed), count: 1 });
-      should(read?.conversations?.A1?.map(entry => entry.text)).deepEqual(['ADOPTED_WORDS']);
-      should(reread?.version).equal(AGENDA_LEDGER_VERSION);
-      should(reread?.archive).deepEqual(read?.archive);
-      should(reread?.conversations?.A1?.map(entry => entry.text)).deepEqual(['ADOPTED_WORDS']);
-      should(JSON.stringify(await upgraded.readArchive(SESSION))).not.containEql('UNCOMMITTED_WORDS');
+        ok(await reopened.transact(SESSION, refresh));
+
+        should(versions.kept.get('A1')?.map(each => each.snapshot.change)).deepEqual(['archived']);
+        should(versions.kept.get('A1')?.[0]?.conversation.map(each => each.text)).containEql('ORPHAN_WORDS');
+      });
+
+      it('should refuse to use a history line no cursor covers, and archive nothing', async () => {
+        const { reopened, versions } = await orphaned('none');
+
+        await should(reopened.transact(SESSION, refresh)).be.rejectedWith('missing cold agenda snapshot');
+
+        should(versions.kept.size).equal(0);
+      });
     });
 
     it('should serve no history from a rewrite by an older daemon when there is no sidecar', async () => {
