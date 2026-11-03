@@ -29,9 +29,12 @@ import type { ToTestCard } from './to-test-inbox.ts';
 /** An item that is a gate: it carries the card, lane and options. */
 export type GateItem = AgendaItem & { readonly gate: AgendaGate };
 
+/** Whether a gate item is a plan to approve ("OK to build"), not a card to test. The one place that reads it. */
+export const isPlanGate = (item: Pick<AgendaItem, 'subject'>): boolean => item.subject.startsWith('OK to build');
+
 /** What a gate item is, in the owner's verb: a card to test, or a plan to approve. */
 export const gateVerb = (item: Pick<AgendaItem, 'subject'>): string =>
-  item.subject.startsWith('OK to build') ? AGENDA_KIND_LABELS.permission : TEST_KIND_LABEL;
+  isPlanGate(item) ? AGENDA_KIND_LABELS.permission : TEST_KIND_LABEL;
 
 export const isGateItem = (item: AgendaItem): item is GateItem => item.gate !== undefined;
 
@@ -88,9 +91,12 @@ export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
  */
 export const attachedGateLead = (gate: AgendaGate): string => {
   const named = gate.cardTitle === undefined ? '' : `${gate.cardTitle} `;
-  const waiting = gate.options.some(option => option.outcome === 'reopen-with-agenda');
-  return waiting ? `${named}is ready to test.` : `${named}is at ${gate.laneName}.`;
+  return `${named}is ${attachedGateStanding(gate)}.`;
 };
+
+/** Where the attached card stands, in the owner's words: "ready to test", else "at Review". */
+export const attachedGateStanding = (gate: AgendaGate): string =>
+  gate.options.some(option => option.outcome === 'reopen-with-agenda') ? 'ready to test' : `at ${gate.laneName}`;
 
 /** An answer from the attached gate's row: marked so the daemon answers the gate, never the thread. */
 export const toGateAction = (action: InboxAction, gate?: AgendaGate): InboxAction =>

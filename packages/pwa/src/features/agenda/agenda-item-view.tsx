@@ -13,11 +13,14 @@
  *            its own buttons), the body, and the folded activity log
  *
  * OPENED AT ITS ASK (`startAt: 'ask'`): a Needs-you push and a link that names the item open it scrolled to "What I need
- * from you", with that part focused, so the owner lands on what to do; the keys still answer from there.
+ * from you", with that part focused, so the owner lands on what to do; the keys still answer from there. Each tap
+ * brings its own `startTap`, so a second push for the item already open at its ask scrolls there again.
  *
  * THE HEAD STICKS to the top of the scroller, and a one-row answer (choice, approval, to-do, notice, review) is drawn in
- * a DOCK that sticks to its bottom, so the title, the pager and the buttons are in reach however long the card runs. A
- * card answered in words (reply, mixed, form) has no dock: the composer is its answer. The scroller keeps room for both
+ * a DOCK that sticks to its bottom — the view's foot, whatever the card's height — so the title, the pager and the
+ * buttons are in reach however long the card runs. A card answered in words (reply, mixed, form) has no dock: the
+ * composer is its answer. An item with a card ask has no dock either: both button sets are inline, each under its own
+ * heading. The scroller keeps room for both
  * (`scroll-padding`), so a focused field never lands behind one.
  *
  * The body is the ONE scroller (`overscroll-behavior: contain`). ✕ and Esc go back to the chat; ‹ › page through the
@@ -100,6 +103,10 @@ export interface AgendaItemViewProps {
    * Absent: the view opens at its top.
    */
   readonly startAt?: 'ask';
+  /** Which tap asked for `startAt`: a new one scrolls to the ask again, though the item is already open. */
+  readonly startTap?: number;
+  /** A card's How to test, read from the board the app holds: a card ask on this item shows it. */
+  readonly howToTestFor?: (cardId: string) => string | null | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string;
 }
@@ -168,6 +175,8 @@ export function AgendaItemView({
   tools,
   wrapTitle = false,
   startAt,
+  startTap,
+  howToTestFor,
   itemKey,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
@@ -209,7 +218,7 @@ export function AgendaItemView({
     // focus, so a screen reader starts there and the arrow keys still answer.
     ask.scrollIntoView?.({ block: 'start' });
     ask.focus({ preventScroll: true });
-  }, [item.id, startAt]);
+  }, [item.id, startAt, startTap]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (ownsKeys(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -291,6 +300,7 @@ export function AgendaItemView({
             answerDock={dock}
             history={history}
             {...(itemKey === undefined ? {} : { itemKey })}
+            {...(howToTestFor === undefined ? {} : { howToTestFor })}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}

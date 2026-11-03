@@ -43,9 +43,9 @@ const BRIEF = {
     { term: 'needsYouQueue', meaning: 'The one function that lists what needs you, blockers first.' },
   ],
   links: [
-    { label: 'The fix', target: 'https://github.com/kirinnee/ferretry/pull/1413' },
-    { label: 'Its card', target: '&F559' },
-    { target: 'docs/agenda.md' },
+    { label: 'The fix: every count reads one queue', target: 'https://github.com/kirinnee/ferretry/pull/1413' },
+    { label: 'The card this work is tracked on', target: '&F559' },
+    { label: 'Where the item view is written down', target: 'docs/agenda.md' },
   ],
 } satisfies Partial<AgendaItem>;
 
@@ -179,6 +179,16 @@ const TEST = item('A124', 5, {
     { at: ago(50), kind: 'updated' },
   ],
 } as unknown as Partial<AgendaItem>);
+
+/** The card's How to test, as the board holds it: the card ask above its Done / Not good carries these steps. */
+export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
+  F559: [
+    '1. Open the Inbox on your phone.',
+    '2. Snooze one item, then look at the number on the Inbox tab: it must drop by one.',
+    '3. Ask a ferret to raise a blocker on the snoozed item: the number must go back up by one.',
+    '4. Open Settings, then Notifications: the push count must say the same number.',
+  ].join('\n'),
+};
 
 export const PARTS_ITEMS = [EXPLAINER, QUESTION, PLAN, TRACKER, TEST] as const;
 

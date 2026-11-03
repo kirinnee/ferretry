@@ -49,7 +49,7 @@ import {
 } from '../../lib/agenda-item-sections.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
-import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
+import { attachedGateLead, attachedGateStanding, toGateAction } from '../../lib/gate-items.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
@@ -113,6 +113,8 @@ export interface AgendaItemCardProps {
   readonly history?: readonly HistoryEvent[] | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string | undefined;
+  /** A card's How to test, read from the board the app holds: what a card ask shows under its heading. Absent: none. */
+  readonly howToTestFor?: ((cardId: string) => string | null | undefined) | undefined;
 }
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
@@ -260,9 +262,9 @@ function Part({
 }
 
 /**
- * TERMS AND REFERENCES as ONE table: every term, then every link, each with what it means in plain words. A link is
- * drawn by the one reference renderer (`AgendaLinkRow` → the chat's prose), so `&F12`, `!A3` and a PR read and open
- * exactly as they do in a message.
+ * TERMS AND REFERENCES as ONE table: every term with what it means, then every link, named by its target and meaning
+ * its label (empty when it has none: nothing is made up). A link's target is drawn by the one reference renderer
+ * (`AgendaLinkRow` → the chat's prose), so `&F12`, `!A3` and a PR read and open exactly as they do in a message.
  */
 function ReferencesTable({
   rows,
@@ -283,9 +285,13 @@ function ReferencesTable({
         {rows.map(row => (
           <tr data-agenda-reference={row.kind} key={row.key}>
             <th className="fy-card__ref-name" scope="row">
-              {row.kind === 'term' ? row.term : <AgendaLinkRow link={row.link} renderProse={renderProse} />}
+              {row.kind === 'term' ? (
+                row.term
+              ) : (
+                <AgendaLinkRow link={{ target: row.link.target }} renderProse={renderProse} />
+              )}
             </th>
-            <td className="fy-card__ref-meaning">{renderProse(row.meaning)}</td>
+            <td className="fy-card__ref-meaning">{row.meaning === '' ? null : renderProse(row.meaning)}</td>
           </tr>
         ))}
       </tbody>
@@ -294,8 +300,9 @@ function ReferencesTable({
 }
 
 /**
- * ONE CARD ASK inside "What I need from you": which card and what it waits on, its How to test when the ask carries
- * one, and ITS buttons (Done / Not good, or OK to build) — tap only, so the arrows and swipes stay the item's own.
+ * ONE CARD ASK inside "What I need from you": its own heading ("Card &F559 · ready to test: your answer for the card"),
+ * the card and what it waits on, its How to test when the ask carries one, and ITS buttons (Done / Not good, or OK to
+ * build) — tap only, so the arrows and swipes stay the item's own.
  */
 function CardAskBlock({
   ask,
@@ -310,6 +317,9 @@ function CardAskBlock({
 }) {
   return (
     <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
+      <h5 className="fy-card__label fy-card__card-ask-title" data-agenda-card-ask-title="">
+        Card &amp;{ask.gate.cardId} · {attachedGateStanding(ask.gate)}: your answer for the card
+      </h5>
       <p className="fy-card__gate-lead">
         <strong>&amp;{ask.gate.cardId}</strong> {attachedGateLead(ask.gate)}
       </p>
@@ -393,6 +403,7 @@ export function AgendaItemCard({
   formKey,
   history = [],
   itemKey,
+  howToTestFor,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
@@ -465,10 +476,11 @@ export function AgendaItemCard({
   const whereWeAre = read.whereWeAre?.trim() ? read.whereWeAre : null;
   const detail = read.detail?.trim() ? read.detail : null;
   const steps = item.steps ?? [];
-  const references = referenceRows(item);
-  // What the segment already says is not said again below it: an approval's effect, a review's links, a to-do's steps.
+  // What the segment already says is not said again below it: an approval's effect, a review's links (they stay under
+  // "What to review", beside the buttons, so the table does not list them twice), a to-do's steps.
   const effectInNeed = shape === 'approval' && item.impact !== undefined;
   const linksInNeed = shape === 'review' && item.links !== undefined;
+  const references = referenceRows(linksInNeed ? { terms: item.terms } : item);
   const stepsInNeed = shape === 'todo';
   const requestChanges =
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
@@ -476,7 +488,7 @@ export function AgendaItemCard({
       : undefined;
   // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
   // separate item. Only the latest version is answerable, so an earlier one draws none.
-  const cardAsks = latest && settled === undefined ? itemCardAsks(item) : [];
+  const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
   const replies = (
     <AgendaQuickReplies
       busy={busy}
@@ -494,12 +506,16 @@ export function AgendaItemCard({
     />
   );
   // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
+  // With card asks the item's own row is not docked: it sits inline under its ask, labelled, so two button sets never
+  // share the foot of the view and the card ask's buttons are never covered.
+  const rowInline = cardAsks.length > 0 && !isInput && planForm === undefined;
   const docked =
     answerDock != null &&
     latest &&
     settled === undefined &&
     !isInput &&
     planForm === undefined &&
+    cardAsks.length === 0 &&
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
@@ -674,6 +690,13 @@ export function AgendaItemCard({
               ) : null}
             </AgendaNeed>
           )}
+          {rowInline ? (
+            <div className="fy-card__item-answer" data-agenda-item-answer="">
+              <h5 className="fy-card__label fy-card__item-answer-title">Your answer for this item</h5>
+              {parkedNote}
+              {replies}
+            </div>
+          ) : null}
           {recommendation === undefined || recommendation.why === undefined ? null : (
             <Section
               name="recommendation"
@@ -742,8 +765,8 @@ export function AgendaItemCard({
             </div>
           ) : (
             <>
-              {parkedNote}
-              {docked ? createPortal(replies, answerDock) : replies}
+              {rowInline ? null : parkedNote}
+              {rowInline ? null : docked ? createPortal(replies, answerDock) : replies}
             </>
           )}
         </div>

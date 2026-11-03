@@ -47,7 +47,10 @@ const full = agendaItem('A47', {
   context: '- Two colours tested well',
   detail: 'The badge is the small dot on each row. It tells the owner which items need them.',
   terms: [{ term: 'badge', meaning: 'the small dot on a row' }],
-  links: [{ label: 'The PR', target: 'https://github.com/kirinnee/ferretry/pull/1428' }, { target: '&F12' }],
+  links: [
+    { label: 'The change this item is about', target: 'https://github.com/kirinnee/ferretry/pull/1428' },
+    { target: '&F12' },
+  ],
   whereWeAre: REPORT,
   decided: '- The shape stays round',
   stillOpen: '- The colour',
@@ -180,16 +183,41 @@ describe('the folded parts', () => {
   });
 });
 
+describe('the folded parts, when storage refuses reads and writes', () => {
+  test('still open and close, remembering nothing', async () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    const refuse = (): never => {
+      throw new Error('quota');
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: { getItem: refuse, setItem: refuse, removeItem: refuse },
+    });
+    try {
+      await draw(full);
+      const fold = one<HTMLButtonElement>('[data-agenda-fold="detail"]');
+      expect(fold.getAttribute('aria-expanded')).toBe('false');
+      await interact(() => fold.click());
+      expect(one('[data-agenda-fold="detail"]').getAttribute('aria-expanded')).toBe('true');
+      await interact(() => one<HTMLButtonElement>('[data-agenda-fold="detail"]').click());
+      expect(one('[data-agenda-fold="detail"]').getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      if (original !== undefined) Object.defineProperty(window, 'localStorage', original);
+    }
+  });
+});
+
 describe('terms and references', () => {
   test('are ONE table of every term and every link, each with its meaning, links through the reference renderer', async () => {
     await draw(full);
     const table = one('[data-agenda-part="references"] table');
     const rows = [...table.querySelectorAll('tbody tr')];
     expect(rows.map(row => row.getAttribute('data-agenda-reference'))).toEqual(['term', 'link', 'link']);
+    // A link means its own label; with none, the cell is empty (never a made-up sentence).
     expect(rows.map(row => row.querySelector('td')?.textContent)).toEqual([
       'the small dot on a row',
-      'A pull request.',
-      'A card on the board.',
+      'The change this item is about',
+      '',
     ]);
     expect(rows[1]?.querySelector('a')?.getAttribute('href')).toBe('https://github.com/kirinnee/ferretry/pull/1428');
     expect(rows[2]?.querySelector('th')?.textContent).toContain('&F12');
@@ -243,8 +271,42 @@ describe('what it needs from you', () => {
     expect(labels).toEqual(['Not good', 'Done']);
     await interact(() => must(ask.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
     expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
-    // The item's own answers are still its own row, docked at the foot.
-    expect(root().querySelector('.fy-item-view__dock [data-agenda-option="Blue"]')).not.toBeNull();
+    // The item's own answers are its own row, inline under its ask and labelled: never docked beside the card's.
+    expect(root().querySelector('.fy-item-view__dock [data-agenda-option="Blue"]')).toBeNull();
+    const own = must(needs.querySelector('[data-agenda-item-answer]'), 'the item’s own answer');
+    expect(own.textContent).toContain('Your answer for this item');
+    expect(own.querySelector('[data-agenda-option="Blue"]')).not.toBeNull();
+  });
+
+  test('gives every card ask its own heading, and the board’s How to test when the host has it', async () => {
+    await draw(full, { howToTestFor: id => (id === 'F12' ? '1. Open the badge.\n2. See it is blue.' : null) });
+    const ask = one('[data-agenda-card-ask]');
+    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe(
+      'Card &F12 · ready to test: your answer for the card',
+    );
+    const steps = must(ask.querySelector('[data-agenda-card-ask-test]'), 'the test steps');
+    expect(steps.textContent).toContain('How to test');
+    expect(steps.textContent).toContain('Open the badge.');
+    await unmount();
+    await draw(full);
+    expect(root().querySelector('[data-agenda-card-ask-test]')).toBeNull();
+  });
+
+  test('docks the item’s row at the view’s foot only when no card ask shares the view', async () => {
+    await draw(agendaItem('A3', { ask: choices('Yes', 'No'), premise: '- a', context: '- b' } as Partial<AgendaItem>));
+    expect(root().querySelector('.fy-item-view__dock [data-agenda-option="Yes"]')).not.toBeNull();
+    expect(root().querySelector('[data-agenda-item-answer]')).toBeNull();
+  });
+
+  test('draws a review’s links once: in the table, not again under "What to review"', async () => {
+    await draw(
+      agendaItem('A8', {
+        ask: choices('Approve', 'Reject'),
+        kind: 'review',
+        links: [{ label: 'The change', target: 'https://github.com/kirinnee/ferretry/pull/9' }],
+      } as Partial<AgendaItem>),
+    );
+    expect(root().querySelectorAll('a[href="https://github.com/kirinnee/ferretry/pull/9"]')).toHaveLength(1);
   });
 
   test('draws no card ask on an earlier version, which only reads', async () => {
@@ -293,7 +355,7 @@ describe('the activity log', () => {
     const lines = [...one('[data-agenda-activity]').querySelectorAll('.fy-activity__text > span')].map(
       span => span.textContent,
     );
-    expect(lines).toEqual(['Started as Explainer', 'Moved to Question', 'Card updated to v2']);
-    expect(one('[data-agenda-part="conversation"]').textContent).not.toContain('Card updated');
+    expect(lines).toEqual(['Started as Explainer', 'Moved to Question', 'Updated to v2']);
+    expect(one('[data-agenda-part="conversation"]').textContent).not.toContain('Updated to v2');
   });
 });

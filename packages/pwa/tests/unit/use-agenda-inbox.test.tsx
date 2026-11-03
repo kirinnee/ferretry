@@ -23,7 +23,7 @@ import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
 import '../support/dom.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
-import { interact, type Mounted, mount } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { healthOf } from '../support/health.ts';
 import { sessionView } from '../support/sessions.ts';
 import { laptop as boardLaptop, boardModelOf, card } from './board-support.ts';
@@ -179,6 +179,25 @@ describe('useAgendaInboxModel', () => {
     expect(read.total).toBe(2);
     expect(read.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
     expect(read.cards).toEqual([]);
+  });
+
+  test('gives a card ask the card’s How to test from the board it already reads, for that machine only', async () => {
+    const { client } = fakeClient(new Map());
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const rows = toTestCards(
+      await boardModelOf([card('F1', { laneId: 'tested', howToTest: '1. Try it.' }), card('F2', { laneId: 'tested' })]),
+    );
+    view = await mount(
+      <Probe client={client} machines={[]} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
+    );
+    await settle();
+    const read = inbox as unknown as AgendaInbox;
+    const machine = must(rows[0], 'a row').card.daemonId;
+    expect(read.howToTestFor?.(machine, 'F1')).toBe('1. Try it.');
+    expect(read.howToTestFor?.(machine, 'F2')).toBe('');
+    expect(read.howToTestFor?.(machine, 'F9')).toBeNull();
+    expect(read.howToTestFor?.('another-machine' as typeof machine, 'F1')).toBeNull();
   });
 
   describe('the health switch for gate items', () => {

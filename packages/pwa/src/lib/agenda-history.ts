@@ -13,7 +13,7 @@
  *   about the item. A lead answers many things in one reply, so the rest of that reply is never this item's history;
  *   a reply with no such part says nothing here (the card itself carries the answer). Only assistant TEXT: tool
  *   calls, thinking, commands and notices are other row kinds and are never read.
- * - THE ITEM ITSELF: one "Card updated to vN" line per edit, with what the edit changed in plain words (the points
+ * - THE ITEM ITSELF: one "Updated to vN" line per edit, with what the edit changed in plain words (the points
  *   added or removed from the premise, context, decided and still-open lists, the fields reworded). Its raise is the
  *   ferret's own message citing it; nothing is made up to stand for it, so the card's words are never said twice.
  *   The item view draws these in its folded activity log, apart from the conversation.

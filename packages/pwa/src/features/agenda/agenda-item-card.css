@@ -23,8 +23,10 @@
   }
 }
 .fy-item-view__body {
+  display: flex;
   min-height: 0;
   flex: 1 1 0;
+  flex-direction: column;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -34,6 +36,7 @@
    (`.fy-chat-input__column`). The same sums, against the view's own width (`100cqw`), give this column the same
    left edge and width — anchored from the left, so the body's own scrollbar never shifts it. */
 .fy-item-view__column {
+  flex: 1 0 auto;
   --fy-view-room: calc(100cqw - var(--fy-chat-gutter, 0px));
   --fy-view-measure: min(var(--fy-view-room), var(--chat-column, 720px));
   --fy-view-gutter: var(--chat-input-gutter-x, var(--chat-gutter-x, 12px));
@@ -88,6 +91,7 @@
   position: sticky;
   bottom: 0;
   z-index: 2;
+  margin-top: auto;
   margin-inline: calc(-1 * var(--fy-view-gutter));
   padding: 0 var(--fy-view-gutter) var(--gap-xs);
   background: var(--bg);
@@ -397,6 +401,17 @@
 }
 .fy-card__where .fy-attn-body,
 .fy-card__fold-body .fy-attn-body {
+  margin: 0;
+}
+/* Part 7: the item's own answer row, inline right under its ask when the item also carries card asks (never docked, so
+   the card ask's buttons are never covered), and each card ask's heading: which buttons answer what. */
+.fy-card__item-answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-card__item-answer-title,
+.fy-card__card-ask-title {
   margin: 0;
 }
 /* Part 7's card asks: each one its own framed block with its own buttons, under the item's own ask. */

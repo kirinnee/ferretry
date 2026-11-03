@@ -29,7 +29,8 @@ import { createRoot } from 'react-dom/client';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
 import { HEADING_ASK_ID, HEADING_ASK_PATCH } from './agenda-heading-ask.ts';
-import { PARTS_ENTRIES, PARTS_ITEMS } from './agenda-parts.ts';
+import { AgendaInboxContext, type AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
+import { PARTS_ENTRIES, PARTS_HOW_TO_TEST, PARTS_ITEMS } from './agenda-parts.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -896,25 +897,31 @@ const live =
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
+// The shell's Inbox model gives the chat the board's How to test for a card ask; the fixture stands one in.
+const boardSteps = {
+  howToTestFor: (_daemon: string, card: string) => PARTS_HOW_TO_TEST[card] ?? null,
+} as unknown as AgendaInbox;
 createRoot(root).render(
-  <div className="h-dvh" data-fixture="" style={fakeKeyboard ? { height: 'calc(100dvh - 300px)' } : undefined}>
-    <AgendaChatHarness
-      agendaMode={view !== 'none'}
-      board={board}
-      entries={
-        parts
-          ? PARTS_ENTRIES
-          : v6
-            ? V6_ENTRIES
-            : v5
-              ? [...HISTORY_ENTRIES, ...V5_ENTRIES]
-              : withHistory || long
-                ? HISTORY_ENTRIES
-                : undefined
-      }
-      live={live}
-      now={NOW}
-      target={target}
-    />
-  </div>,
+  <AgendaInboxContext.Provider value={parts ? boardSteps : null}>
+    <div className="h-dvh" data-fixture="" style={fakeKeyboard ? { height: 'calc(100dvh - 300px)' } : undefined}>
+      <AgendaChatHarness
+        agendaMode={view !== 'none'}
+        board={board}
+        entries={
+          parts
+            ? PARTS_ENTRIES
+            : v6
+              ? V6_ENTRIES
+              : v5
+                ? [...HISTORY_ENTRIES, ...V5_ENTRIES]
+                : withHistory || long
+                  ? HISTORY_ENTRIES
+                  : undefined
+        }
+        live={live}
+        now={NOW}
+        target={target}
+      />
+    </div>
+  </AgendaInboxContext.Provider>,
 );

@@ -389,7 +389,7 @@ function OpenItem({
   skip,
   place,
   canSnooze,
-  atAsk = false,
+  askTap,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
@@ -397,8 +397,8 @@ function OpenItem({
   readonly skip: () => void;
   readonly place: OpenItemPlace;
   readonly canSnooze: boolean;
-  /** A tapped notification opened it: it opens at its ask. */
-  readonly atAsk?: boolean;
+  /** A tapped notification opened it: it opens at its ask, and each tap is a new number. */
+  readonly askTap?: number;
 }) {
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
@@ -426,7 +426,8 @@ function OpenItem({
           formKey={card.key}
           history={history}
           itemKey={card.key}
-          {...(atAsk ? { startAt: 'ask' as const } : {})}
+          {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
+          howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
           wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
@@ -1467,7 +1468,8 @@ export function AgendaInboxPage({
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
   // The card a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
-  const [askAt, setAskAt] = useState<string | null>(null);
+  const [askAt, setAskAt] = useState<{ readonly key: string; readonly tap: number } | null>(null);
+  const askTaps = useRef(0);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
   const [machine, setMachine] = useState<DaemonId | null>(null);
@@ -1633,11 +1635,14 @@ export function AgendaInboxPage({
   const openCardKey = openCard?.key;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `openAt` and the host callback are re-made every render; the target and what it resolves to are the inputs
   useEffect(() => {
+    // The request is gone from the address once it was honoured: a later tap for the same item is a new one.
+    if (wantedKey === null) openedFor.current = null;
     if (wantedKey === null || openedFor.current === wantedKey) return;
     if (openCardKey !== undefined) {
       openedFor.current = wantedKey;
       setFilter('open');
-      setAskAt(openCardKey);
+      askTaps.current += 1;
+      setAskAt({ key: openCardKey, tap: askTaps.current });
       openAt(openCardKey);
       onOpenSettled?.(true);
       return;
@@ -1653,6 +1658,12 @@ export function AgendaInboxPage({
     const timer = setTimeout(giveUp, OPEN_WAIT_MS);
     return () => clearTimeout(timer);
   }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+
+  // Paging away or closing the deck leaves the item the tap was for: opening one from the list starts at its top.
+  const askedKey = askAt?.key;
+  useEffect(() => {
+    if (askedKey !== undefined && (!deckOpen || deckPlace !== askedKey)) setAskAt(null);
+  }, [askedKey, deckOpen, deckPlace]);
 
   // A reply moves the deck on by itself (the card leaves, `nextSelection` deals the one after it). Undo brings the card
   // back and the deck opens it, so the owner sees the words it restored.
@@ -1980,11 +1991,11 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
-                    atAsk={askAt === card.key}
+                    key={card.key}
+                    {...(askAt?.key === card.key ? { askTap: askAt.tap } : {})}
                     canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}
-                    key={card.key}
                     place={{
                       index: Math.max(0, index),
                       total: runOrder.length,

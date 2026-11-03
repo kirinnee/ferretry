@@ -120,6 +120,11 @@ export interface AgendaInbox {
   readonly replied: RepliedAgenda;
   readonly repliedState: RepliedState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
+  /**
+   * A card's How to test, from the board this device already reads (any lane the card is in a verify lane for the
+   * owner's try, snoozed or not): what a card ask inside an agenda item shows. `null` when the board holds no steps.
+   */
+  readonly howToTestFor?: (daemonId: DaemonId, cardId: string) => string | null;
   /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
   readonly canSnooze?: (daemonId: DaemonId) => boolean;
 }
@@ -448,6 +453,12 @@ export function useAgendaInboxModel(
     () => toTestBesideGates(split.snoozed, holders, offersGates).filter(row => !hasCardAsks(row.card.daemonId)),
     [split.snoozed, holders, offersGates, hasCardAsks],
   );
+  // Every card read for a try, replaced by a gate item or not: a card ask carries the card's id, the board its steps.
+  const howToTestFor = useCallback(
+    (daemonId: DaemonId, cardId: string): string | null =>
+      named.find(row => row.card.daemonId === daemonId && row.card.task.id === cardId)?.howToTest ?? null,
+    [named],
+  );
   const toTest = useStable(awakeRows, toTestKeyOf(awakeRows));
   const toTestSnoozed = useStable(snoozedRows, toTestKeyOf(snoozedRows));
   const freshWithFerretCards = useMemo(
@@ -558,6 +569,7 @@ export function useAgendaInboxModel(
       replied,
       repliedState,
       connectionFor,
+      howToTestFor,
       canSnooze,
     }),
     [
@@ -579,6 +591,7 @@ export function useAgendaInboxModel(
       replied,
       repliedState,
       connectionFor,
+      howToTestFor,
       canSnooze,
     ],
   );

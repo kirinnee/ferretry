@@ -4,7 +4,7 @@
  * its name and the time, with no tool calls and no thinking — the relevance rule that decides what is here is
  * `itemHistory`'s. Every reply is drawn WHOLE: nothing is cut, however long. Never folded.
  *
- * The edits ("Card updated to v2") are not words anyone said: they are the activity log's (`agenda-activity-log.tsx`).
+ * The edits ("Updated to v2") are not words anyone said: they are the activity log's (`agenda-activity-log.tsx`).
  */
 
 import { Check } from 'lucide-react';

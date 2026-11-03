@@ -1190,7 +1190,7 @@ and a part the item does not carry is not drawn:
 | 1   | Title, state and stage | the title row; the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done), the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done), and the version slot |
 | 2   | Premise and context    | the two tinted blocks; long is fine                                                                                                                                                                                      |
 | 3   | Detailed context       | `detail`, explained from zero — **folded**                                                                                                                                                                               |
-| 4   | Terms and references   | ONE table of every term and every link (PR, card, file, page), each with a plain meaning; links are drawn by the one reference renderer                                                                                  |
+| 4   | Terms and references   | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none           |
 | 5   | Where we are now       | `whereWeAre` — the report or explainer the owner asked for — then the ferret's answer to their question, what is decided and what is still open                                                                          |
 | 6   | Conversation           | the owner's and the ferret's words about the item, oldest first, each whole                                                                                                                                              |
 | 7   | What I need from you   | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build)                                   |
@@ -1207,9 +1207,14 @@ and a part the item does not carry is not drawn:
 - **Card asks live inside the item.** A card ready to test or approve is answered in part 7, with its own buttons,
   never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
-  one-row answer stays in the sticky dock at the foot, in reach however long the item runs.
+  one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until card asks
+  share the view: then it sits inline right under the item's own ask, headed **Your answer for this item**, and
+  every card ask has its own heading (**Card &F12 · ready to test: your answer for the card**), so two button sets are
+  never docked beside each other and never mistaken for one another. A card ask carries the card's **How to test**,
+  read from the board the app already loads (`howToTestFor`), above its Done / Not good.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
-  part 7 with it focused. An item the owner opens themselves starts at its top.
+  part 7 with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
+  the owner opens themselves, or one paged to from the one a push opened, starts at its top.
 - **The head keeps a slot** (`data-agenda-version-slot`) for the version and diff control; today it holds the
   version picker.
 

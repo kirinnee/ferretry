@@ -357,7 +357,7 @@ Every push names a page, and the worker opens a page even when one does not:
 - **How the window gets there.** The worker brings the window forward and asks the app to route there
   in place (`packages/pwa/src/lib/notification-open.ts`). The app's entry point listens before React
   mounts, so a tap that lands while the app is still starting is routed once it is up. It moves the app
-  to the tapped machine, and the conversation opens at the item — scrolled to its ask — again on every new tap.
+  to the tapped machine, and the conversation opens at the item — scrolled to its ask — again on every new tap (each tap carries its own number, and paging or closing leaves the request, so the same item opened from the list starts at its top).
 - **A window that never answers** (an app too old for the message) cannot be navigated by a machine's
   worker, which controls no page. So the worker opens the conversation in a window of its own.
 - **Old workers.** The browser never re-checks a machine's push worker on its own, because no page loads

@@ -1,13 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import { readFold, writeFold } from '../../src/lib/agenda-fold.ts';
 import {
   activityLog,
+  activityStamp,
   FOLDED_PARTS,
   ITEM_VIEW_PARTS,
   itemCardAsks,
   itemStage,
-  plainTargetMeaning,
   referenceRows,
   stateChip,
 } from '../../src/lib/agenda-item-sections.ts';
@@ -80,7 +80,7 @@ describe('the stage', () => {
 });
 
 describe('terms and references', () => {
-  test('are one list: every term, then every link, each with a plain meaning', () => {
+  test('are one list: every term with its meaning, then every link meaning its label', () => {
     const rows = referenceRows({
       terms: [{ term: 'WAL', meaning: 'write-ahead log' }],
       links: [
@@ -97,23 +97,9 @@ describe('terms and references', () => {
       '!A3',
       'docs/agenda.md',
     ]);
-    expect(rows.map(row => row.meaning)).toEqual([
-      'write-ahead log',
-      'A pull request.',
-      'A card on the board.',
-      'Another agenda item.',
-      'A file.',
-    ]);
+    // A link means what its label says, and nothing is made up for one that has none.
+    expect(rows.map(row => row.meaning)).toEqual(['write-ahead log', 'The PR', '', '', '']);
     expect(referenceRows({})).toEqual([]);
-  });
-
-  test('name what each kind of target is', () => {
-    expect(plainTargetMeaning('https://example.test')).toBe('A web page.');
-    expect(plainTargetMeaning('#12')).toBe('A pull request.');
-    expect(plainTargetMeaning('%terminal:dev')).toBe('A terminal.');
-    expect(plainTargetMeaning('%browser:app')).toBe('A browser page.');
-    expect(plainTargetMeaning('/babysit-pr')).toBe('A skill.');
-    expect(plainTargetMeaning('/home/x/file.ts')).toBe('A file.');
   });
 });
 
@@ -129,6 +115,22 @@ describe('card asks', () => {
       { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
     ],
   };
+
+  test('carry the card’s How to test from the board, and none when the board has none', () => {
+    const attached = item({ gateAttached: gate } as Partial<AgendaItem>);
+    const asked: string[] = [];
+    const steps = itemCardAsks(attached, cardId => {
+      asked.push(cardId);
+      return '  1. Open the badge.\n2. See it is blue.  ';
+    });
+    expect(asked).toEqual(['F12']);
+    expect(steps[0]?.howToTest).toBe('1. Open the badge.\n2. See it is blue.');
+    expect(itemCardAsks(attached, () => null)[0]?.howToTest).toBeNull();
+    expect(itemCardAsks(attached, () => '   ')[0]?.howToTest).toBeNull();
+    expect(itemCardAsks(attached, () => undefined)[0]?.howToTest).toBeNull();
+    expect(itemCardAsks(attached)[0]?.howToTest).toBeNull();
+    expect(itemCardAsks(item(), () => 'steps')).toEqual([]);
+  });
 
   test('are a list: today the one gate the thread carries, keyed by its reference', () => {
     const asks = itemCardAsks(item({ gateAttached: gate } as Partial<AgendaItem>));
@@ -168,7 +170,7 @@ describe('the activity log', () => {
       'You asked for more information',
       'Zoe updated it',
       'Moved to Question',
-      'Card updated to v2',
+      'Updated to v2',
       'Moved to Plan to approve',
       'You replied',
       'Moved to Tracker',
@@ -242,9 +244,23 @@ describe('the activity log', () => {
   test('is empty for an item nothing happened to', () => {
     expect(activityLog(item(), 'Zoe', [], NOW)).toEqual([]);
   });
+
+  test('stamps a line with its time, and says none for an instant it cannot read', () => {
+    expect(activityStamp(0, NOW)).toBe('');
+    expect(activityStamp(Date.parse('2026-08-01T11:00:00.000Z'), NOW)).not.toBe('');
+  });
 });
 
 describe('the folds, remembered per item on this device', () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  afterEach(() => {
+    if (real === undefined) Reflect.deleteProperty(globalThis, 'window');
+    else Object.defineProperty(globalThis, 'window', real);
+  });
+  const withWindow = (value: unknown): void => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value });
+  };
+
   const memory = (): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { readonly kept: Map<string, string> } => {
     const kept = new Map<string, string>();
     return {
@@ -264,6 +280,32 @@ describe('the folds, remembered per item on this device', () => {
     expect(readFold('laptop/s2/A5', 'detail', store)).toBe(false);
     writeFold('laptop/s1/A5', 'detail', false, store);
     expect(store.kept.size).toBe(0);
+  });
+
+  test('use this device’s localStorage when none is handed in, and read as closed where it cannot be read', () => {
+    const kept = new Map<string, string>();
+    withWindow({
+      localStorage: {
+        getItem: (key: string) => kept.get(key) ?? null,
+        setItem: (key: string, value: string) => void kept.set(key, value),
+        removeItem: (key: string) => void kept.delete(key),
+      },
+    });
+    writeFold('k', 'activity', true);
+    expect(readFold('k', 'activity')).toBe(true);
+    writeFold('k', 'activity', false);
+    expect(readFold('k', 'activity')).toBe(false);
+    // Blocked site data: touching localStorage throws, and nothing is kept.
+    withWindow({
+      get localStorage(): never {
+        throw new Error('blocked');
+      },
+    });
+    expect(readFold('k', 'activity')).toBe(false);
+    expect(() => writeFold('k', 'activity', true)).not.toThrow();
+    // No window at all (a worker, a test): the same.
+    Reflect.deleteProperty(globalThis, 'window');
+    expect(readFold('k', 'activity')).toBe(false);
   });
 
   test('read as closed, and drop the write, when the storage throws or is missing', () => {

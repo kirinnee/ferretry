@@ -9,8 +9,9 @@
  * does (`?agenda=A…`), and FAILS (after writing every picture) when: a page scrolls sideways; the card is drawn in a
  * fallback font; the parts are out of the spec's order; a stage chip is wrong; a folded part starts open or does not
  * open; the terms table is not one table with a meaning per row; the long report is cut (its last line missing, or
- * its box clipping it); the conversation drops a reply; the card ask's buttons are not inside "What I need from you";
- * the activity log does not list each stage; or a push does not open the item at its ask.
+ * its box clipping it); the conversation drops a reply; the card ask's buttons are not inside "What I need from you",
+ * lack their own heading or the card's test steps, are cut off, or sit under the dock; the item's own answer is docked
+ * beside a card ask; the activity log does not list each stage; or a push does not open the item at its ask.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -225,6 +226,12 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       check(table.tables === 1, `terms ${form} ${theme}: ${table.tables} tables, wanted 1`);
       check(table.rows === 6, `terms ${form} ${theme}: ${table.rows} rows, wanted 3 terms and 3 links`);
       check(table.meanings === table.rows, `terms ${form} ${theme}: a row has no meaning`);
+      const filler = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-agenda-part="references"] tbody td')]
+          .map(cell => cell.textContent ?? '')
+          .filter(words => /^A (pull request|card on the board|file|web page|terminal|skill)\.$/u.test(words.trim())),
+      );
+      check(filler.length === 0, `terms ${form} ${theme}: a made-up meaning is drawn (${filler.join(' | ')})`);
       await shot(page, 'terms', form, theme);
 
       // The long report in "where we are now", with no cut-off.
@@ -269,7 +276,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
         lines.includes('Started as Explainer') && lines.includes('Moved to Question'),
         `activity ${form} ${theme}: the stages are missing (${lines.join(' | ')})`,
       );
-      check(lines.includes('Card updated to v2'), `activity ${form} ${theme}: the edit is missing`);
+      check(lines.includes('Updated to v2'), `activity ${form} ${theme}: the edit is missing`);
       await page.locator('.fy-item-view__body').evaluate(node => {
         node.scrollTop = node.scrollHeight;
       });
@@ -296,6 +303,21 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
         `test ${form} ${theme}: the card ask's buttons are ${at.buttons.join(',')}`,
       );
       check(!at.docked, `test ${form} ${theme}: the card ask is docked, not in the item`);
+      const own = await page.evaluate(() => ({
+        heading: document.querySelector('[data-agenda-card-ask-title]')?.textContent ?? '',
+        steps: document.querySelector('[data-agenda-card-ask-test]')?.textContent ?? '',
+        inline:
+          document.querySelector('[data-agenda-part="needs"] [data-agenda-item-answer] [data-agenda-option="Yes"]') !==
+          null,
+        dockedRow: document.querySelector('.fy-item-view__dock [data-agenda-option]') !== null,
+      }));
+      check(
+        own.heading.includes('Card &F559') && own.heading.includes('your answer for the card'),
+        `test ${form} ${theme}: the card ask has no heading of its own (${own.heading})`,
+      );
+      check(own.steps.includes('Snooze one item'), `test ${form} ${theme}: the card's test steps are missing`);
+      check(own.inline, `test ${form} ${theme}: the item's own answer is not inline under its ask`);
+      check(!own.dockedRow, `test ${form} ${theme}: the item's answer is docked beside the card ask's`);
       await page.close();
       const pushed = await open('A124');
       const landing = await pushed.evaluate(() => {
@@ -322,6 +344,43 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
         );
       }
       await shot(pushed, 'test-card-ask', form, theme);
+      // Done / Not good must be fully visible, and never under the dock, at the ask and with the card ask scrolled to.
+      const fullyVisible = async (where: string): Promise<void> => {
+        const found = await pushed.evaluate(() => {
+          const view = document.querySelector<HTMLElement>('.fy-item-view__body');
+          const clip = view?.getBoundingClientRect();
+          const dock = document.querySelector('.fy-item-view__dock')?.getBoundingClientRect();
+          const buttons = [...document.querySelectorAll('[data-agenda-card-ask] [data-agenda-option]')].map(node => {
+            const box = node.getBoundingClientRect();
+            return {
+              label: node.getAttribute('data-agenda-option') ?? '',
+              cut: clip === undefined || box.top < clip.top - 1 || box.bottom > clip.bottom + 1,
+              underDock:
+                dock !== undefined && dock.height > 0 && box.bottom > dock.top + 1 && box.top < dock.bottom - 1,
+              offWidth: box.left < -1 || box.right > window.innerWidth + 1,
+            };
+          });
+          return buttons;
+        });
+        check(found.length === 2, `test ${where} ${form} ${theme}: ${found.length} card-ask buttons, wanted 2`);
+        for (const button of found) {
+          check(!button.cut, `test ${where} ${form} ${theme}: "${button.label}" is cut off by the scroller`);
+          check(!button.underDock, `test ${where} ${form} ${theme}: "${button.label}" is under the dock`);
+          check(!button.offWidth, `test ${where} ${form} ${theme}: "${button.label}" is off the screen's width`);
+        }
+      };
+      await pushed.evaluate(() => {
+        document.querySelector('[data-agenda-card-ask]')?.scrollIntoView({ block: 'end' });
+      });
+      await pushed.waitForTimeout(200);
+      await fullyVisible('scrolled to the card ask');
+      await shot(pushed, 'test-card-ask-buttons', form, theme);
+      await scrollTop(pushed);
+      await pushed.evaluate(() => {
+        document.querySelector('.fy-item-view__body')?.scrollTo({ top: 0 });
+      });
+      await pushed.waitForTimeout(150);
+      await shot(pushed, 'test-top', form, theme);
       await pushed.close();
       continue;
     }

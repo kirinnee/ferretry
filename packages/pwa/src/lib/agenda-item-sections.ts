@@ -26,7 +26,7 @@ import {
 } from '@ferretry/protocol';
 import { revisionStamp } from './agenda-revisions.ts';
 import { agendaAuthor, parkedUntilWords } from './agenda-status.ts';
-import { attachedGateView, type GateItem } from './gate-items.ts';
+import { attachedGateView, type GateItem, isPlanGate } from './gate-items.ts';
 
 /** The view's parts, in the order they are drawn. */
 export const ITEM_VIEW_PARTS = [
@@ -103,8 +103,7 @@ export const STAGE_WORDS: Readonly<Record<AgendaStage, string>> = {
  */
 export const itemStage = (item: AgendaItem): AgendaStage => {
   const closed = (item as { readonly resolvedAt?: string }).resolvedAt !== undefined;
-  if (item.stage === undefined && !closed && item.gate !== undefined)
-    return item.subject.startsWith('OK to build') ? 'plan' : 'test';
+  if (item.stage === undefined && !closed && item.gate !== undefined) return isPlanGate(item) ? 'plan' : 'test';
   return agendaStage(item);
 };
 
@@ -112,46 +111,28 @@ export const itemStage = (item: AgendaItem): AgendaStage => {
 // 4. Terms and references, as one table
 // ---------------------------------------------------------------------------------------------------
 
-/** One row of the terms and references table. */
+/**
+ * One row of the terms and references table. A term says what it means; a link is named by its target (drawn by the one
+ * reference renderer) and means its label, or nothing when it has none: a link carries no more than that.
+ */
 export type ReferenceRow =
   | { readonly kind: 'term'; readonly key: string; readonly term: string; readonly meaning: string }
   | {
       readonly kind: 'link';
       readonly key: string;
       readonly link: NonNullable<AgendaItem['links']>[number];
-      /** What kind of thing it is, in plain words ("A pull request."); its label, if any, is drawn with the link. */
+      /** The link's own label; empty when it has none. */
       readonly meaning: string;
     };
 
-/** What a link is, in plain words, read from the shape of its target. */
-export const plainTargetMeaning = (target: string): string => {
-  const at = target.trim();
-  if (/^https?:\/\/[^/]*github\.com\/[^/]+\/[^/]+\/pull\/\d+/iu.test(at)) return 'A pull request.';
-  if (/^https?:\/\//iu.test(at)) return 'A web page.';
-  if (/^#\d+$/u.test(at)) return 'A pull request.';
-  if (/^&/u.test(at)) return 'A card on the board.';
-  if (/^!/u.test(at)) return 'Another agenda item.';
-  if (/^%terminal:/u.test(at)) return 'A terminal.';
-  if (/^%browser:/u.test(at)) return 'A browser page.';
-  if (/^[@:]/u.test(at)) return 'A ferret.';
-  if (/^[$/][A-Za-z][\w-]*$/u.test(at)) return 'A skill.';
-  return 'A file.';
-};
-
-/** Every term, then every link, each once and with its meaning. Empty when the item names neither. */
+/** Every term, then every link, each once. Empty when the item names neither. */
 export const referenceRows = (item: Pick<AgendaItem, 'terms' | 'links'>): readonly ReferenceRow[] => [
   ...(item.terms ?? []).map(
     (entry, index) =>
       ({ kind: 'term', key: `term:${String(index)}`, term: entry.term, meaning: entry.meaning }) as const,
   ),
   ...(item.links ?? []).map(
-    (link, index) =>
-      ({
-        kind: 'link',
-        key: `link:${String(index)}`,
-        link,
-        meaning: plainTargetMeaning(link.target),
-      }) as const,
+    (link, index) => ({ kind: 'link', key: `link:${String(index)}`, link, meaning: link.label?.trim() ?? '' }) as const,
   ),
 ];
 
@@ -174,10 +155,18 @@ export interface ItemCardAsk {
   readonly howToTest: string | null;
 }
 
-/** The open card asks an item carries, oldest first. */
-export const itemCardAsks = (item: AgendaItem): readonly ItemCardAsk[] => {
+/**
+ * The open card asks an item carries, oldest first. `howToTestFor` is where the card's How to test is read from: the board
+ * the app already holds (the ask itself carries the card's id and lane, not its steps); absent or empty, the ask has none.
+ */
+export const itemCardAsks = (
+  item: AgendaItem,
+  howToTestFor?: (cardId: string) => string | null | undefined,
+): readonly ItemCardAsk[] => {
   const view = attachedGateView(item);
-  return view === undefined ? [] : [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: null }];
+  if (view === undefined) return [];
+  const steps = howToTestFor?.(view.gate.cardId)?.trim() ?? '';
+  return [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: steps === '' ? null : steps }];
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -255,7 +244,7 @@ export const activityLog = (
       ({
         key: revision.key,
         at: revision.at,
-        text: `Card updated to v${String(revision.version)}`,
+        text: `Updated to v${String(revision.version)}`,
         details: revision.summary,
       }) as const,
   );

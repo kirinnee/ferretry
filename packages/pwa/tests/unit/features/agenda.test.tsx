@@ -15,6 +15,7 @@ import {
   agendaLedgerIds,
   useAgenda,
 } from '../../../src/features/agenda/agenda.tsx';
+import { AgendaInboxContext, type AgendaInbox } from '../../../src/hooks/use-agenda-inbox.ts';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
 import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
@@ -96,6 +97,8 @@ interface HostProps {
   readonly onAnswered?: () => void;
   readonly onItemOpened?: (daemon: unknown, sessionId: string, agendaId: string) => unknown;
   readonly projectId?: string;
+  /** The board's How to test for a card, as the shell's Inbox model gives it. */
+  readonly boardSteps?: (daemonId: string, cardId: string) => string | null;
 }
 
 let current: Agenda | undefined;
@@ -150,7 +153,16 @@ afterEach(() => {
   }
 });
 const mount = (props: HostProps) => {
-  const view = render(<Host {...props} />);
+  const host = <Host {...props} />;
+  const view = render(
+    props.boardSteps === undefined ? (
+      host
+    ) : (
+      <AgendaInboxContext.Provider value={{ howToTestFor: props.boardSteps } as unknown as AgendaInbox}>
+        {host}
+      </AgendaInboxContext.Provider>
+    ),
+  );
   mounted.push(view);
   return view;
 };
@@ -467,6 +479,41 @@ describe('a request to show an item (`?attention=A5`)', () => {
   test('an item the owner opened by clicking a reference opens at its top', () => {
     const view = mount({ snapshot: board(MIXED), focus: target('A2') });
     expect(view.root.findByType(AgendaItemView).props.startAt).toBeUndefined();
+  });
+
+  test('each new request for the item is a new tap, so an item already at its ask is brought to it again', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { ...target('A2'), onEntry: true } });
+    expect(view.root.findByType(AgendaItemView).props.startTap).toBe(1);
+    run(() => view.update(<Host focus={{ ...target('A2', 2), onEntry: true }} snapshot={board(MIXED)} />));
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBe('ask');
+    expect(view.root.findByType(AgendaItemView).props.startTap).toBe(2);
+  });
+
+  test('paging to another item leaves the request: the next one opens at its top', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { ...target('A3'), onEntry: true } });
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBe('ask');
+    run(() => view.root.findByType(AgendaItemView).props.onNext());
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBeUndefined();
+  });
+
+  test('reads a card ask’s How to test from the board the shell holds, for this machine', () => {
+    const asked: string[] = [];
+    const view = mount({
+      snapshot: board(MIXED),
+      focus: target('A2'),
+      boardSteps: (daemon, card) => {
+        asked.push(`${daemon}:${card}`);
+        return '1. Open it.';
+      },
+    });
+    expect(view.root.findByType(AgendaItemView).props.howToTestFor('F12')).toBe('1. Open it.');
+    expect(asked).toEqual(['agenda:F12']);
+  });
+
+  test('has no steps to give when the shell holds no board', () => {
+    const view = mount({ snapshot: board(MIXED), focus: target('A2') });
+    expect(view.root.findByType(AgendaItemView).props.howToTestFor('F12')).toBeUndefined();
   });
 
   test('opens a resolved item read-only: how it ended, no quick replies, no snooze, no reply prefix', () => {
