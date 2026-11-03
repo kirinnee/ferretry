@@ -110,6 +110,12 @@ export interface SendBatchMember {
   readonly from: string;
 }
 
+/** A failure notice still owed to one sender: who is told, and the message id the notice is keyed by. */
+export interface SendNoticeOwed {
+  readonly from: string;
+  readonly sendId: string;
+}
+
 export interface SendRecord {
   /** The caller's idempotency key. A retry with the same one must never become a second message. */
   readonly sendId: string;
@@ -179,6 +185,12 @@ export interface SendRecord {
   readonly untyped?: boolean | undefined;
   /** What a `cancelled` fate did to the agent's screen. */
   readonly cancelEffect?: SendCancelEffect | undefined;
+  /**
+   * The failure notices a final `unaccounted` / `timed_out` fate still owes its senders, written in the
+   * SAME ledger line as the fate and shortened one member at a time as each notice is sent, so a crash
+   * between the fate and the news cannot drop any. The daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly noticesOwed?: readonly SendNoticeOwed[] | undefined;
 }
 
 /** The fields the tracker and a re-attempt may move on an existing record. */
@@ -200,6 +212,7 @@ export type SendSettlement = Partial<
     | 'busyTyped'
     | 'untyped'
     | 'cancelEffect'
+    | 'noticesOwed'
     | 'held'
     | 'path'
     | 'matchText'

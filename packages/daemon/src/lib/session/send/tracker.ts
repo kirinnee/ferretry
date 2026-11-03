@@ -16,6 +16,7 @@ import {
 import {
   type SendHeldAt,
   type SendLedger,
+  type SendNoticeOwed,
   type SendRecord,
   type SendRepository,
   SendRetypeWithheld,
@@ -204,8 +205,30 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     return (record.fate === 'unaccounted' || record.fate === 'timed_out') && age < this.settings.holdLimitMs;
   }
 
+  /**
+   * One look, then the news a crash left owed. The debt is paid AFTER the proofs so a send this look finds
+   * delivered after all is not reported lost, and in a `finally` so a look that threw does not leave it
+   * unpaid. A ledger that will not take a crossing-off is retried by the next look, and a notice already sent
+   * dedupes under its own key.
+   */
   private async checkLocked(id: SessionId): Promise<void> {
-    const records = await this.ports.ledger.list(id);
+    let seen: readonly SendRecord[] | undefined;
+    try {
+      seen = await this.ports.ledger.list(id);
+      await this.look(id, seen);
+    } finally {
+      await this.payOwedNotices(id, seen);
+    }
+  }
+
+  /** Reads the ledger again only when the look's own reading showed a debt, or never got that far. */
+  private async payOwedNotices(id: SessionId, seen: readonly SendRecord[] | undefined): Promise<void> {
+    if (seen?.some(owesNotices) === false) return;
+    for (const record of await this.ports.ledger.list(id).catch(() => []))
+      if (owesNotices(record)) await this.tell(id, record, record.noticesOwed ?? []).catch(() => undefined);
+  }
+
+  private async look(id: SessionId, records: readonly SendRecord[]): Promise<void> {
     const now = Date.parse(this.ports.clock.now());
     // A person's send nothing has been typed for goes FIRST: it is the owner's message, and every other
     // send in this look would otherwise be typed ahead of it into the same queue.
@@ -273,6 +296,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       unaccountedReason: undefined,
       retryable: undefined,
       cancelEffect: undefined,
+      // Delivered after all: the "it did not arrive" news a crash left owed would now be false.
+      noticesOwed: undefined,
     });
     await this.ports.repository.journal(id, 'control.send_delivered', {
       sendId: record.sendId,
@@ -589,6 +614,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     fate: 'unaccounted' | 'timed_out',
     reason: SendUnaccountedReason,
   ): Promise<SendRecord> {
+    // A combined turn is ledgered once, but every sender whose message was in it is owed the news, each
+    // under its own message id. The debt is written WITH the fate, in one ledger line, so no crash after
+    // the fate can leave a final record that forgot whom it still had to tell.
+    const audience = record.senderKind === 'agent' ? failureAudience(record) : [];
     const next =
       (await this.ports.ledger.settle(id, record.sendId, {
         fate,
@@ -597,6 +626,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         // Only a send proven absent from a session that can still take input may be retried as-is.
         retryable: fate === 'timed_out' && reason !== 'session_ended',
         deadlineAt: undefined,
+        noticesOwed: audience.length > 0 ? audience : undefined,
       })) ?? record;
     await this.ports.repository.journal(
       id,
@@ -607,17 +637,47 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         attempt: record.attempt ?? 1,
       },
     );
-    // A combined turn is ledgered once, but every sender whose message was in it is owed the news, each
-    // under its own message id so a replay after a restart tells each of them once.
-    if (record.senderKind === 'agent')
-      for (const member of failureAudience(record))
-        await this.ports.notifier.notify(member.from, id, { ...next, sendId: member.sendId }).catch(() => undefined);
-    return next;
+    return await this.tell(id, next, audience);
+  }
+
+  /**
+   * Tells each owed sender once, and crosses a member off the record only AFTER its notice was sent.
+   *
+   * A crash anywhere in here leaves the record owing exactly the members not yet crossed off, and the
+   * boot walk replays them. A member whose notice was sent but not yet crossed off is told again under the
+   * same `send-failed:<recipient>:<sendId>` key, which the notifier's send dedupes — replay can repeat a
+   * notice's attempt, never its delivery. A notice that throws stays owed for the next look.
+   */
+  private async tell(id: SessionId, record: SendRecord, owed: readonly SendNoticeOwed[]): Promise<SendRecord> {
+    let current = record;
+    let remaining = owed;
+    for (const member of owed) {
+      const sent = await this.ports.notifier
+        .notify(member.from, id, { ...current, sendId: member.sendId })
+        .then(() => true)
+        .catch(() => false);
+      if (!sent) continue;
+      remaining = remaining.filter(entry => entry !== member);
+      current =
+        (await this.ports.ledger.settle(id, record.sendId, {
+          noticesOwed: remaining.length > 0 ? remaining : undefined,
+        })) ?? current;
+    }
+    return current;
   }
 }
 
+/** A final fate that still owes its senders news: only an unconfirmed or timed-out send is ever told of. */
+function owesNotices(record: SendRecord): boolean {
+  return (
+    (record.fate === 'unaccounted' || record.fate === 'timed_out') &&
+    record.noticesOwed !== undefined &&
+    record.noticesOwed.length > 0
+  );
+}
+
 /** Who is told a send failed, and under which message id: every member of a combined turn, else its one sender. */
-function failureAudience(record: SendRecord): readonly { readonly from: string; readonly sendId: string }[] {
+function failureAudience(record: SendRecord): readonly SendNoticeOwed[] {
   if (record.batch !== undefined && record.batch.length > 0)
     return record.batch.map(member => ({ from: member.from, sendId: member.queueId }));
   return record.from === undefined ? [] : [{ from: record.from, sendId: record.sendId }];

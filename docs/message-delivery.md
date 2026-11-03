@@ -171,6 +171,13 @@ interrupt, which go at once.
   order ([format](ferret-messages.md#combined-deliveries)). Each part keeps its own kind, so the one that
   answers a wait still ends it. If the turn cannot be proven delivered, EVERY sender in it is told, each
   under its own message id (the ledger row keeps the members in `batch`).
+- **A failure notice survives a crash** — the senders still to be told are written on the ledger row
+  (`noticesOwed`, daemon-internal, never on the wire) in the SAME line as the `unaccounted` / `timed_out` fate,
+  and each member is crossed off only after its notice was sent. A crash after the fate, or mid-loop, leaves
+  the row owing exactly the members not yet crossed off; the next look — the boot walk included — pays them
+  under the existing per-member key `send-failed:<recipient>:<sendId>`, so a notice sent but not yet crossed
+  off is attempted again and lands once. A notice that throws stays owed. A send later proven `delivered`
+  drops its debt, and a final row owing nothing stays quiet.
 - **Settings** — `delivery` in `config/daemon.json`: `coalesce` (default `true`; `false` is the kill switch —
   every ferret message is a blocker and goes alone, as before), `actionWindowMs` (60 000),
   `fyiMaxHoldMs` (600 000), `batchMax` (20). Read at start.

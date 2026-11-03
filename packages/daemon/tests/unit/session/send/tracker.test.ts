@@ -114,6 +114,13 @@ class World {
   enterTakes = false;
   resubmitDeclines = false;
   readonly notices: Array<{ sender: string; recipient: string; record: SendRecord }> = [];
+  /** What reached a sender, keyed as the real notifier keys it — a repeated attempt lands once, as in the send service. */
+  readonly told = new Set<string>();
+  /** The notifier throws, so a notice is attempted and not sent. */
+  noticeFails = false;
+  /** The daemon dies on this write of a notice crossed off a record (1 = the first), before the line is written. */
+  crashOnCrossOff: number | undefined;
+  private crossOffs = 0;
   reading: SendEvidenceReading = { readable: true, inputs: [] };
   readFails = false;
   readonly sinces: string[] = [];
@@ -152,6 +159,8 @@ class World {
             return [...this.records.values()];
           },
           settle: async (_id, sendId, patch: SendSettlement) => {
+            if (Object.keys(patch).join() === 'noticesOwed' && ++this.crossOffs === this.crashOnCrossOff)
+              throw new Error('daemon died');
             const current = this.records.get(sendId);
             if (current === undefined) return undefined;
             const merged: Record<string, unknown> = { ...current, ...patch };
@@ -231,7 +240,11 @@ class World {
           },
         },
         notifier: {
-          notify: async (sender, recipient, entry) => void this.notices.push({ sender, recipient, record: entry }),
+          notify: async (sender, recipient, entry) => {
+            this.notices.push({ sender, recipient, record: entry });
+            if (this.noticeFails) throw new Error('sender unreachable');
+            this.told.add(`send-failed:${recipient}:${entry.sendId}`);
+          },
         },
         scheduler: {
           schedule: (id, delayMs, run) => void this.scheduled.push({ id, delayMs, run }),
@@ -603,6 +616,123 @@ describe('a combined send that fails', () => {
     await world.checkAt(15_000);
 
     should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([[SENDER, 'send-1']]);
+  });
+});
+
+describe('a failure notice a crash interrupted', () => {
+  const owedAll = [
+    { from: SENDER, sendId: 'send-1' },
+    { from: 'session-3', sendId: 'q-2' },
+    { from: SENDER, sendId: 'q-3' },
+  ];
+  const combined = () =>
+    record({
+      senderKind: 'agent',
+      from: SENDER,
+      batch: [
+        { queueId: 'send-1', from: SENDER },
+        { queueId: 'q-2', from: 'session-3' },
+        { queueId: 'q-3', from: SENDER },
+      ],
+    });
+  const keys = (...sendIds: string[]) => sendIds.map(sendId => `send-failed:${ID}:${sendId}`);
+  const reboot = async (world: World) => {
+    world.notices.length = 0;
+    world.crashOnCrossOff = undefined;
+    world.noticeFails = false;
+    await world.tracker.check(ID);
+  };
+
+  it('writes the debt with the fate, so a notice that cannot be sent is still owed afterwards', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted' });
+    should(world.only.noticesOwed).eql(owedAll);
+    should(world.told.size).equal(0);
+  });
+
+  it('crash after the fate, before any notice: a reboot tells every member once and clears the debt', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+    await world.checkAt(15_000);
+    world.notices.length = 0;
+    world.noticeFails = false;
+
+    await world.tracker.check(ID);
+
+    should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([
+      [SENDER, 'send-1'],
+      ['session-3', 'q-2'],
+      [SENDER, 'q-3'],
+    ]);
+    should(world.notices.every(notice => notice.record.fate === 'unaccounted')).be.true();
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+  });
+
+  it('crash mid-loop: a reboot tells only the members not yet crossed off, and nobody twice', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.crashOnCrossOff = 2;
+    await world.checkAt(15_000).catch(() => undefined);
+    // send-1 was told and crossed off; q-2 was told but the daemon died before it was crossed off.
+    should(world.only.noticesOwed).eql(owedAll.slice(1));
+    should([...world.told]).eql(keys('send-1', 'q-2'));
+
+    await reboot(world);
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+  });
+
+  it('a boot that finds nothing owed stays quiet, however many times it looks', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    await world.checkAt(15_000);
+    world.notices.length = 0;
+
+    await world.tracker.check(ID);
+    await world.tracker.check(ID);
+
+    should(world.notices).be.empty();
+  });
+
+  it('keeps quiet for final records that owe nothing, and for one delivered after the failure was written', async () => {
+    const settled = record({ sendId: 'a', senderKind: 'agent', from: SENDER, fate: 'timed_out', fateAt: at(10_000) });
+    const delivered = record({
+      sendId: 'b',
+      senderKind: 'agent',
+      from: SENDER,
+      fate: 'delivered',
+      noticesOwed: [{ from: SENDER, sendId: 'b' }],
+    });
+    const world = new World(settled, delivered);
+
+    await world.tracker.check(ID);
+
+    should(world.notices).be.empty();
+  });
+
+  it('crosses a debt off when the send turns out to have been delivered', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+    await world.checkAt(15_000);
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 400, 'late')]);
+    world.notices.length = 0;
+    world.noticeFails = false;
+
+    await world.checkAt(16_000);
+
+    should(world.only.fate).equal('delivered');
+    should(world.only.noticesOwed).be.undefined();
+    should(world.notices).be.empty();
   });
 });
 
