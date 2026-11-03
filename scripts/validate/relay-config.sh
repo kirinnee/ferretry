@@ -63,6 +63,25 @@ assert_hosted '
   ]
 ' 'durable_objects.bindings must bind exactly RENDEZVOUS, RELAY_CONTROL and TUNNEL_CONTROL to their classes'
 
+# The link store (relay-protocol.md §17) is a SEPARATE Worker reached through one service binding. The
+# binding names the store Worker by its deployed name, so that name is read from the store's own
+# configuration rather than typed twice. Two failure shapes are worth a gate: a renamed store leaves this
+# binding pointing at nothing, so the relay would either fail to publish or serve every store path as
+# unavailable; and the dispatch silently never matching `env.LINK_STORE`.
+link_store_service="$(jq -r '.name' packages/relay/wrangler.link-store.hosted.json)"
+[[ -n ${link_store_service} && ${link_store_service} != null ]] ||
+  fail "packages/relay/wrangler.link-store.hosted.json has no name for the relay's LINK_STORE binding to target"
+jq -e --arg service "${link_store_service}" '
+  .services == [{binding: "LINK_STORE", service: $service}]
+' "${hosted_config}" >/dev/null 2>&1 ||
+  fail "${hosted_config}: services must be exactly the LINK_STORE binding to the Worker named ${link_store_service}"
+rg -qF -- 'LINK_STORE?: LinkStoreBinding' "${worker}" ||
+  fail "${worker} must read the LINK_STORE service binding that ${hosted_config} declares"
+# A self-hosted relay must never reach for Ferretry's store: the target Worker does not exist in its account.
+if rg -q 'LINK_STORE|"services"' "${byo_config}"; then
+  fail "${byo_config} must not bind the hosted link store; a self-hosted relay's account has no such Worker"
+fi
+
 # SQLite-backed classes are what the Workers Free plan allows, and `new_classes` would silently
 # provision the key-value backend instead — a different storage product under the same code.
 assert_hosted '

@@ -66,8 +66,11 @@ shipping it never restarts the relay's rendezvous objects.
   `.github/workflows/link-store-hosted.yaml`; there is no automatic deploy.
 - Operator switches and limits: `GET|PUT /v1/operator/link-store`, behind the `LINK_STORE_OPERATOR_TOKEN` Worker secret.
 
-**Nothing routes to it yet**: the hosted relay Worker has no binding to it and no daemon or app discovers it
-(slice 3f-3). The contract, the limits and the honest gaps are `docs/relay-protocol.md` §17; running your own is
+**The hosted relay routes to it**: `wrangler.hosted.json` binds it as `LINK_STORE`, and
+`src/adapters/hosted-link-store-routes.ts` forwards the store's paths, unchanged and unread, in hosted mode only
+(a self-hosted relay has no binding and answers 404). Publishing that is a relay deploy and drops every live
+session once; what it drops, for how long and in what order to deploy are `docs/relay-protocol.md` §13 ("The
+link-store binding"). The contract, the limits and the honest gaps are `docs/relay-protocol.md` §17; running your own is
 "Your own link store" in [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md).
 
 ## Deploying one of your own (expert)

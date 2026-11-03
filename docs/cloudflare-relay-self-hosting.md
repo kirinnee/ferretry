@@ -513,8 +513,10 @@ links stored in their own Cloudflare account instead. You do not need a relay of
 and a relay does not need a store. What the store is and what it can see:
 [relay-protocol.md](relay-protocol.md) §17.
 
-**Nothing routes to it yet.** Deploying it gets you a running store at its own `workers.dev` address.
-Whether a daemon uses it and whether an app opens its links is slice 3f-3, not this runbook.
+**Your relay does not route to it.** Deploying it gets you a running store at its own `workers.dev` address.
+The `LINK_STORE` binding that puts a store behind a relay's origin is the **hosted** relay's alone
+(`wrangler.hosted.json`; [relay-protocol.md](relay-protocol.md) §13): a self-hosted relay answers every
+store path with the same 404 as any unknown path, and `wrangler.jsonc` never carries the binding.
 
 ### What you configure
 

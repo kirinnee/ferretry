@@ -856,6 +856,95 @@ starts deriving a bearer the Worker has never been told about and every operatio
 recovery is one `workflow_dispatch` with `operation: deploy`, which reinstalls the derived secret;
 run it _before_ you need the kill switch, not during the incident that needs it.
 
+### The link-store binding
+
+`wrangler.hosted.json` declares one **service binding**, `LINK_STORE`, to the separate link-store Worker
+(§17; its deployed name is read from `wrangler.link-store.hosted.json`, and `scripts/validate/relay-config.sh`
+refuses a drift). The relay Worker gains one dispatch, in hosted mode only
+(`src/adapters/hosted-link-store-routes.ts`): these paths are handed to `env.LINK_STORE.fetch(request)`,
+**the request it received, unchanged and unread**:
+
+| Path                                                | Methods                        |
+| --------------------------------------------------- | ------------------------------ |
+| `/v1/link-store`                                    | `GET`, `OPTIONS`               |
+| `/v1/link-store/challenge`, `/v1/link-store/status` | `POST`                         |
+| `/v1/links/<bundleId>`, `/peek`, `/fetch`           | `PUT`, `DELETE`, `POST`        |
+| `/v1/operator/link-store`                           | `GET`, `PUT` (operator bearer) |
+
+Unchanged is what keeps the signing rule intact: a daemon signs the host it discovered, and the store judges
+the signature against the host of the URL it receives, which is this Worker's discovery host. Unread is what
+keeps the relay out of the store's limits: an upload streams straight through and only the store bounds it.
+The relay adds no header, strips none, and holds no link state, token, or log of a body.
+
+- **Binding absent.** `GET /v1/link-store` answers `{ version: 1, available: false, … }` (public, `no-store`,
+  CORS `*`), which is how a client already treats a failed read; every other path is a plain `404 not found`.
+- **Binding present but the call fails** (the store Worker threw, or is mid-deploy): the advertisement
+  answers `available: false`, and every other path answers the store's own `link_store_unavailable` (`503`).
+- **A self-hosted relay is untouched.** The dispatch is behind `RELAY_MODE=hosted`; `wrangler.jsonc` never
+  carries the binding (the gate refuses it), and every store path there is the same `404` as any unknown path.
+
+#### What deploying this change drops
+
+**One relay deploy, and it is an outage for every connected user** (the rule in "Reserve, then route" above
+and the `relay-hosted.yaml` header). Publishing restarts the Worker and its Durable Objects, so:
+
+| Dropped                                                                    | Back by itself? | How fast (from the code)                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Each online daemon's **rendezvous claim** (one socket per daemon)          | yes             | `relayRedialDelayMs` (`daemon/src/lib/relay/carrier.ts`): the first redial is immediate; a `4409` from a not-yet-evicted incumbent becomes attempt 1, then 0.25–0.5 s, 0.5–1 s, 1–2 s, then 2.5–5 s (ceiling 1–10 s)                                              |
+| Every relayed **browser session** (end-to-end channel; new keys on return) | yes             | `reconnectDelayMs` (`pwa/src/lib/connection-health.ts`): 0.15–0.3 s, 0.3–0.6 s, 0.6–1.2 s, 1.2–2.4 s, 2.4–4.8 s, then 5–10 s forever; `online`/foreground/"Retry now" skip the wait                                                                               |
+| In-flight frames at that instant                                           | no (lost)       | §9: frames in flight are lost and known lost; the application may re-request: reads are re-sent on the new session, live streams reopen from their cursor, a write is never re-sent blind (the send ledger decides), and terminal input in flight is not replayed |
+
+**Not dropped:** tunnels (traffic goes straight to the host through Cloudflare, and the tunnel control
+object holds provisioning rows only), direct connections, anything the daemon is doing (only its carrier
+restarts), the hosted meter and its leases (durable rows; the dead sockets' reservations are reclaimed on the
+next report or by the 10-minute lease, and a daemon is nowhere near its 16-socket ceiling with one stale
+slot), and the link store (its own Worker).
+
+**Healthy-path expectation (unmeasured): about 1 to 3 seconds of reconnecting.** The new version is serving
+as soon as the old sockets end, so the daemon's immediate redial lands on it. A browser whose first retry
+beats its daemon's rendezvous gets `4404` and retries; its five doubling retries span about 9 seconds at their
+longest. The pill says "reconnecting" only after 1.5 s of outage (`RECONNECTING_GRACE_MS`), so a drop under
+that is invisible; the screen keeps showing the last good content meanwhile.
+
+**There is no upper bound on the outage.** The 10 s figure caps _each_ browser retry delay, not the total:
+browser retries continue forever. Slower paths exist: a daemon dial can itself wait up to 15 s
+(`carrier.ts`) before it fails and backs off; detection of a dead socket can take a ping interval plus the 10 s pong bound
+("Endpoint keepalive"); and a deployment sitting at the 16-per-daemon or 512-global socket ceiling can have reservations
+stranded until the 10-minute lease, because an admission without live evidence cannot reclaim them at once
+(`hosted-control.ts`, `hosted.ts`) — a `4432` then makes the daemon wait 60–120 s before its next try
+(`bun-relay-carrier.ts`, `carrier.ts`). **Durable daemon work is preserved**, because the relay holds no
+durable daemon application data: a session is a pair of sockets and the work lives on the daemon. **Transport state is not:**
+frames in flight are lost, and terminal bytes in flight can be lost — the browser sends them as stream
+records (`web-terminals.ts`), and a new attach redraws the screen without replaying input; per §9, writes are
+never blindly retried. These figures are derived from the constants above, not measured on the live
+deployment.
+
+#### Deploying it (operator, in this order)
+
+**Merging to `main` is the deploy.** `relay-hosted.yaml` publishes on a push that touches `packages/relay/**`
+whenever the bundle fingerprint changed, and this change changes it. Merge at a quiet time, after step 1.
+
+1. **Warn the owner**, and pick the quiet time.
+2. **The link-store Worker must already be deployed**, because a service binding names a Worker that has to
+   exist in the account (Cloudflare is expected to refuse the relay publish otherwise, with a "could not
+   resolve service binding" error; the dry-run does not check). Run `Deploy Hosted Link Store` from
+   `workflow_dispatch`: `operation: deploy`, `confirm_deploy` ticked. That deploy drops no relay session. It
+   need not be _enabled_ first: the store's flags (`available`, `serving`) default **on**, and the Worker has
+   no address of its own (`workers_dev: false`), so nothing can reach it until step 3.
+3. **Deploy the relay**: merge the PR (or run `Deploy Hosted Relay` with `operation: deploy`). Watch the job
+   finish; the daemons and phones reconnect as above.
+4. **Verify**: `curl -s https://<relay-origin>/v1/link-store` answers `200` with `"version":1`. Then set the
+   repository variable `LINK_STORE_ORIGIN` to the relay's origin (the same value as `HOSTED_RELAY_ORIGIN`, or
+   its `workers.dev` address) and run `Deploy Hosted Link Store` with `operation: metrics`; counts coming back
+   prove the operator route crosses the binding. The relay's own `/v1/default-relay` is unchanged.
+5. **If the store should stay closed until the app ships (3f-6)**, run `operation: disable` now. It is a
+   runtime flag and drops nothing.
+
+**Roll back** with the flags first: `disable` and `serving-off` stop the store from taking or serving a link
+without a deploy. Removing the binding itself needs a second relay deploy (revert this change and publish),
+which drops sessions once more; there is no reason to except a defect in the dispatch, and the dispatch fails to
+`available: false` rather than breaking the relay.
+
 ### What is metered and capped
 
 Every metric is keyed by the daemon fingerprint. The control object stores each daemon in a separate
@@ -3468,11 +3557,12 @@ false`; the self-hosted `wrangler.link-store.jsonc` is the §11 equivalent). It 
 store fix never restarts the rendezvous objects: deploying the relay drops every live session (§13),
 and deploying the store must not. It runs in the same Cloudflare account as the hosted relay.
 
-**It is not routed from anywhere yet.** The hosted relay Worker has no `LINK_STORE` binding and
-dispatches none of these paths; a deployed store is reachable only by its own address. Wiring the
-relay's dispatch, the daemon's discovery and the app is slice 3f-3, which changes the relay Worker
-and therefore drops its sessions — it waits for the owner to be warned first. **GAP, by design**
-until then.
+**It is routed from the hosted relay, and from nowhere else.** The hosted relay Worker binds it as
+`LINK_STORE` and forwards these paths unchanged (§13, "The link-store binding"), so a daemon and an app
+reach it at the relay's own origin, which is the host a daemon signs. The store has no address of its own
+(`workers_dev: false`). **Publishing the relay with the binding is a relay deploy and drops its sessions
+once** (§13 says what, for how long, and in what order to deploy); it waits for the owner to choose the
+time. Until it is published the store is unreachable, which is the safe state.
 
 **Deployment is manual only.** The workflow `link-store-hosted.yaml` has `workflow_dispatch` and no
 push trigger; `task link-store:deploy` refuses to run in CI or unattended unless
@@ -3600,8 +3690,10 @@ skills, or who installed it.
 - **Built** — the wire contract and the reducer (`src/lib`, 100% unit coverage), and the Worker with its three objects
   (`src/adapters/link-store-worker.ts`), the operator routes, both wrangler configurations, `task
 link-store:check` and `link-store:deploy`, and the manual workflow.
-- **GAP — nothing routes to it.** See above: the hosted relay Worker has no binding, the daemon does
-  not discover the store and the app does not open a link. That is slice 3f-3.
+- **Built (3f-3)** — the hosted relay's `LINK_STORE` binding and path dispatch
+  (`src/adapters/hosted-link-store-routes.ts`) and `wrangler.hosted.json`'s `services` entry. **Not yet
+  published**: that is a relay deploy, scheduled by the owner (§13).
+- **GAP — no app opens a link.** The daemon's owner side exists (catalogs 3f-4); the app screen is 3f-6.
 - **GAP — the runtime is faked.** The Durable Object, storage, alarm and output-gate behaviour the
   atomic fetch relies on is proved against fakes in `tests/integration`; only a deployment proves
   that Cloudflare behaves as they do.

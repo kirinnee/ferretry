@@ -30,6 +30,12 @@ export {
   TUNNEL_CONTROL_ROUTES,
   TUNNEL_RECLAIM_CONTINUE_MS,
 } from './hosted-tunnel-control.ts';
+export {
+  type HostedLinkStoreEnvironment,
+  hostedLinkStoreFetch,
+  isHostedLinkStorePath,
+  type LinkStoreBinding,
+} from './hosted-link-store-routes.ts';
 export { type HostedTunnelEnvironment, TUNNEL_REQUEST_MAX_BYTES } from './hosted-tunnel-routes.ts';
 export { RelayKeyHandleError, WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
 export {

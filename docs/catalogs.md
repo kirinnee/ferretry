@@ -1504,7 +1504,7 @@ The Add skills page has a second group under the subscriptions, **On this machin
 ## Links (catalogs 3f)
 
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4,
-> [The daemon](#the-daemon-3f-4)) exist. The Worker is not deployed or bound behind the relay yet (3f-3), no app
+> [The daemon](#the-daemon-3f-4)) exist. The Worker is bound behind the hosted relay in code (3f-3) but not published yet (that is a relay deploy), no app
 > screen exists (3f-6), and the daemon does not report `catalogs.links.1`, so no client offers links today. Where a
 > sentence says "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own
 > behind the relay by service binding.
@@ -1629,7 +1629,7 @@ could Copy would read a public link's key.
 relay advertisement names), `{ "url": "https://…" }` (a self-hosted store; links then carry `s=`) or
 `{ "enabled": false }`. The daemon signs only for the **host of the origin it discovered or was configured with**; the
 client uses `redirect: "error"`, `cache: "no-store"` and a 20 s timeout, and reports no store body: a closed refusal
-code, or `unreachable`. Nothing is deployed by this slice; 3f-3 binds the Worker behind the relay.
+code, or `unreachable`. Nothing is deployed by this slice; 3f-3 binds the Worker behind the hosted relay.
 
 **Mint**, in this order: locate the store → daemon identity → quota (50 live) → `linkSubject` (the item frozen as a
 shared item, **kept only after the upload succeeds**) → digest check against the preview → sign and envelope → seal the
@@ -1671,7 +1671,7 @@ client offers links against this daemon yet.
 - 3f-5: move, `PATCH`, refresh, lease and revival (so a public link with no end lapses after 30 days until then),
   `usedBy.linkIds`, `version_linked`, the `catalog.link.moved|changed|revived` events, an identity rotation ending
   links, and reporting `catalogs.links.1`.
-- 3f-3 (the Worker binding), 3f-6 (the app), 3f-7 and 3f-8.
+- 3f-6 (the app), 3f-7 and 3f-8. (3f-3, the Worker binding, is built and waits for the owner's relay deploy.)
 - Preview returns no `matches`, and it needs no summary, so a skill that needs one is `source_refused` at preview.
   `link_kind_unsupported` is unreachable today. A stored link carries the item's name and kind.
 - **A new item whose upload answer never came is never kept**, so its `pending` public link reconciles to `ended`

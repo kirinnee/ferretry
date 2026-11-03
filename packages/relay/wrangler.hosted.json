@@ -23,6 +23,12 @@
       }
     ]
   },
+  "services": [
+    {
+      "binding": "LINK_STORE",
+      "service": "ferretry-hosted-link-store"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1",
