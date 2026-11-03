@@ -12,6 +12,10 @@
  * sends neither is older still, and the app does not guess: it shows every card and hides the filter
  * ({@link splitAvailable}). {@link askedByPerson} is the stricter "a person asked" the cards to test are
  * limited to; there, silence reads as no.
+ *
+ * PUBLIC AND PRIVATE: a newer daemon also sends `visibility` (public | private) on every card, and that is the
+ * answer to "does the Board show it by default" ({@link isPrivateCard}). A card from a daemon that sends none
+ * keeps the older rule ({@link isFerretCard}), so the toggle works the same on an older machine.
  */
 
 import { isSubCard, type TaskRef } from '@ferretry/protocol';
@@ -42,12 +46,28 @@ export const isAgentTask = (task: object): boolean => taskAsker(task) === 'agent
 /** Whether the daemon says a person asked for this card; a daemon that says nothing reads as "no". */
 export const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
 
-/** A FERRET card: one a ferret asked for, or a sub-card no person asked for (hidden unless "Ferret cards" is on). */
-export const isFerretCard = (task: { readonly parent: TaskRef | null }): boolean =>
+/** A FERRET card by the older rule: one a ferret asked for, or a sub-card no person asked for. Only an older daemon needs it. */
+const isFerretCard = (task: { readonly parent: TaskRef | null }): boolean =>
   isAgentTask(task) || (isSubCard(task) && !askedByPerson(task));
 
-/** Whether the daemons behind these cards say who asked for a card: without it there is nothing to split. */
-export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskAsker(task) !== null);
+/** What a daemon said about a card's visibility, `null` when it said nothing (an older daemon). */
+const declaredVisibility = (task: object): 'public' | 'private' | null => {
+  const value = declared(task, 'visibility');
+  return value === 'public' || value === 'private' ? value : null;
+};
+
+/**
+ * A PRIVATE card: the ferrets' own bookkeeping, hidden unless "Show private" is on. The daemon's `visibility` is
+ * believed; a card without one reads by the older {@link isFerretCard} rule.
+ */
+export const isPrivateCard = (task: { readonly parent: TaskRef | null }): boolean => {
+  const visibility = declaredVisibility(task);
+  return visibility === null ? isFerretCard(task) : visibility === 'private';
+};
+
+/** Whether the daemons behind these cards say who asked for a card, or its visibility: without either there is nothing to split. */
+export const splitAvailable = (tasks: readonly object[]): boolean =>
+  tasks.some(task => taskAsker(task) !== null || declaredVisibility(task) !== null);
 
 /** The card an agent card serves, as the daemon declared it: `undefined` when the daemon said nothing, `null` for none. */
 const declaredHumanParent = (task: object): TaskRef | null | undefined => {

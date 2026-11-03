@@ -1033,7 +1033,7 @@ describe('everything else on a card', () => {
 
   describe('re-parenting a card', () => {
     const cards = () => [
-      card({ id: 'F1', owner: 'lead', assignee: 'child' }),
+      card({ id: 'F1', owner: 'lead', assignee: 'child', askedBy: 'agent' }),
       card({ id: 'F2', owner: 'lead' }),
       card({ id: 'F3', owner: 'stranger', assignee: 'stranger' }),
     ];
@@ -1083,7 +1083,10 @@ describe('everything else on a card', () => {
     it('should let the human, the owner and an ancestor re-parent', async () => {
       // Arrange
       const human = serviceWith(cards());
-      const ancestor = serviceWith([card({ id: 'F1', owner: 'child' }), card({ id: 'F2', owner: 'lead' })]);
+      const ancestor = serviceWith([
+        card({ id: 'F1', owner: 'child', askedBy: 'agent' }),
+        card({ id: 'F2', owner: 'lead' }),
+      ]);
 
       // Act
       await human.service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), owner);

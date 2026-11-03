@@ -1,3 +1,10 @@
+## [4.255.0](https://github.com/kirinnee/ferretry/compare/v4.254.1...v4.255.0) (2026-11-03)
+
+### Features
+
+* **board:** public and private cards; the board shows public by default ([#1401](https://github.com/kirinnee/ferretry/issues/1401)) ([efeb0bc](https://github.com/kirinnee/ferretry/commit/efeb0bc2e4d6b3348d850810e8c48bb8d4a901d8))
+* **pwa:** give Settings a set width and a tighter rhythm ([#1406](https://github.com/kirinnee/ferretry/issues/1406)) ([cfaabf5](https://github.com/kirinnee/ferretry/commit/cfaabf56f046f4b7809d0b78652867418dd66fc1))
+
 ## [4.254.1](https://github.com/kirinnee/ferretry/compare/v4.254.0...v4.254.1) (2026-11-03)
 
 ### Fixes

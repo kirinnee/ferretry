@@ -2,7 +2,7 @@
  * The board query (`GET /v1/board`): which cards a `BoardQuery` selects, in what order, one page at a
  * time, plus the header counts over the whole scoped board. Pure over already-derived views.
  *
- * SCOPE vs FILTER. The project, ferret, kind and free-text fields SCOPE the board: they decide which
+ * SCOPE vs FILTER. The project, ferret, kind, visibility and free-text fields SCOPE the board: they decide which
  * board the header describes. State, activity and PR state are the views a person flips between on that
  * board (the pills, the Archive), so they FILTER the page and never change the counts.
  */
@@ -16,6 +16,7 @@ import {
   type PrLink,
 } from '@ferretry/protocol';
 import { BoardError } from './errors.ts';
+import { cardVisibility } from './visibility.ts';
 
 /** A view with the category of its lane; `undefined` when its board has no lanes this build knows. */
 export interface ScopedView {
@@ -66,6 +67,9 @@ export const inScope = (query: BoardQuery, scoped: ScopedView): boolean => {
   if (query.project !== undefined && view.projectId !== query.project) return false;
   if (query.ferret !== undefined && view.owner !== query.ferret && view.assignee !== query.ferret) return false;
   if (query.kind !== undefined && view.kind !== query.kind) return false;
+  if (query.visibility === 'public' || query.visibility === 'private') {
+    if (cardVisibility(view) !== query.visibility) return false;
+  }
   if (query.query !== undefined) {
     const needle = query.query.toLowerCase();
     const haystack = [view.id, view.title, view.summary, view.ask.text].join('\n').toLowerCase();

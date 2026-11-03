@@ -10763,11 +10763,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       // Every card from before who asked was stored gets it now, from the owner's messages to the session it came
       // from. Idempotent, so every boot runs it; a card it cannot settle is reported and left for the next boot.
+      // Then every card without a visibility stores the one it reads as (public cards are the owner's asks), which
+      // needs who asked settled first, so it runs after, even when the first could not finish.
       unrefTimer(2000, () => {
         void boardWorld.board
           .backfillAskedBy()
           .then(stored => {
             if (stored > 0) process.stderr.write(`board: stored who asked for ${String(stored)} card(s)\n`);
+          })
+          .catch(() => undefined)
+          .then(async () => await boardWorld.board.backfillVisibility())
+          .then(stored => {
+            if (stored > 0) process.stderr.write(`board: stored the visibility of ${String(stored)} card(s)\n`);
           })
           .catch(() => undefined);
       });
