@@ -2076,6 +2076,11 @@ describe('labels and combined deliveries', () => {
     should(text.indexOf('first')).be.below(text.indexOf('second'));
     should(ledger.records.size).equal(1);
     should(ledger.only().sendId).equal('q-1');
+    // Every sender is remembered, so a failure of the turn can be handed back to each of them.
+    should(ledger.only().batch).eql([
+      { queueId: 'q-1', from: PEER },
+      { queueId: 'q-2', from: OTHER },
+    ]);
     // Short enough to paste whole into an idle Claude composer.
     should(ledger.only().path).equal('direct');
     should(terminal.typed).have.length(1);
@@ -2127,6 +2132,7 @@ describe('labels and combined deliveries', () => {
       }),
     );
     should(ledger.only().message).startWith('[message from ferret loge');
+    should(ledger.only()).not.have.property('batch');
   });
 });
 

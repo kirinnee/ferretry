@@ -607,10 +607,20 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         attempt: record.attempt ?? 1,
       },
     );
-    if (record.senderKind === 'agent' && record.from !== undefined)
-      await this.ports.notifier.notify(record.from, id, next).catch(() => undefined);
+    // A combined turn is ledgered once, but every sender whose message was in it is owed the news, each
+    // under its own message id so a replay after a restart tells each of them once.
+    if (record.senderKind === 'agent')
+      for (const member of failureAudience(record))
+        await this.ports.notifier.notify(member.from, id, { ...next, sendId: member.sendId }).catch(() => undefined);
     return next;
   }
+}
+
+/** Who is told a send failed, and under which message id: every member of a combined turn, else its one sender. */
+function failureAudience(record: SendRecord): readonly { readonly from: string; readonly sendId: string }[] {
+  if (record.batch !== undefined && record.batch.length > 0)
+    return record.batch.map(member => ({ from: member.from, sendId: member.queueId }));
+  return record.from === undefined ? [] : [{ from: record.from, sendId: record.sendId }];
 }
 
 /**

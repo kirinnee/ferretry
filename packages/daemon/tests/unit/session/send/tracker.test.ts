@@ -557,6 +557,55 @@ describe('an agent-to-agent send', () => {
   });
 });
 
+describe('a combined send that fails', () => {
+  const combined = () =>
+    record({
+      senderKind: 'agent',
+      from: SENDER,
+      batch: [
+        { queueId: 'send-1', from: SENDER },
+        { queueId: 'q-2', from: 'session-3' },
+        { queueId: 'q-3', from: SENDER },
+      ],
+    });
+
+  it('tells every sender whose message was in it, each under its own message id', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+
+    await world.checkAt(15_000);
+
+    should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([
+      [SENDER, 'send-1'],
+      ['session-3', 'q-2'],
+      [SENDER, 'q-3'],
+    ]);
+    should(world.notices.every(notice => notice.record.fate === 'unaccounted')).be.true();
+  });
+
+  it('tells them once more after a restart re-derives the failure, under the same ids so the notice dedupes', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    await world.checkAt(15_000);
+    const first = world.notices.map(notice => notice.record.sendId);
+    world.notices.length = 0;
+    world.records.set('send-1', combined());
+
+    await world.checkAt(15_000);
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(first);
+  });
+
+  it('still tells the one sender of an ordinary send', async () => {
+    const world = new World(record({ senderKind: 'agent', from: SENDER }));
+    world.reading = { readable: false, inputs: [] };
+
+    await world.checkAt(15_000);
+
+    should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([[SENDER, 'send-1']]);
+  });
+});
+
 describe('a message a revive carried', () => {
   const pointer = turnFileInstruction('/state/sessions/session-1/turns/turn-004.md');
   const revived = (overrides: Partial<SendRecord> = {}) =>

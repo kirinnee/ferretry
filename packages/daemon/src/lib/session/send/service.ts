@@ -1312,6 +1312,9 @@ export class SessionSendService {
         : { attachmentIds: [...request.attachmentIds] }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),
       ...this.attribution(sender),
+      ...(request.parts === undefined || request.parts.length < 2
+        ? {}
+        : { batch: request.parts.map(part => ({ queueId: part.queueId, from: part.senderReference })) }),
     });
     if (!accepted.created) return accepted;
     try {
