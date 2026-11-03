@@ -892,34 +892,32 @@
   list-style: none;
 }
 
+/* The mini board's frame: one visible surface the lanes sit in, so a board reads as a board next to a lone card. */
 .fy-card-embed-board {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: var(--gap-sm);
+  gap: var(--gap-xs);
+  padding: var(--gap-xs);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
 }
 
-.fy-card-embed-lane {
-  display: flex;
+/* The Board's own lane, stacked: it is a column on the Board page, here it is a band the full width of the frame. */
+.fy-card-embed-board .fy-board-lane {
   min-width: 0;
-  flex-direction: column;
-  gap: 4px;
+  max-width: none;
+  flex: none;
 }
-
-.md .fy-card-embed-lane-name,
-.fy-card-embed-lane-name {
+.md .fy-card-embed .fy-board-lane__head {
   margin: 0;
-  color: var(--fg-soft);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
-.fy-card-embed-lane-count {
-  margin-left: 4px;
-  color: var(--faint);
-  font-weight: 400;
+/* A link inside Markdown turns accent and underlined; a card on the Board is not that, and nor is one here. */
+.md .fy-card-embed .fy-board-card__main {
+  color: inherit;
+  text-decoration: none;
 }
 
 .fy-card-embed-more {

@@ -23,29 +23,59 @@ const PR = {
   mergedAt: null,
   mergeSha: null,
   releasedIn: null,
-  polledAt: '2026-08-01T10:00:00.000Z',
+  polledAt: new Date().toISOString(),
 } as const;
 
-const cards = new Map([
+const MINUTE = 60_000;
+const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+const NIMBUS = 'mvuc7tsf-0c3d50df';
+const EMBER = 'mvudnuly-ec442385';
+const callsigns = new Map([
+  [NIMBUS, 'nimbus'],
+  [EMBER, 'ember'],
+]);
+
+const CATEGORY: Record<string, 'backlog' | 'active' | 'review' | 'shipped'> = {
+  todo: 'backlog',
+  implement: 'active',
+  review: 'review',
+  merged: 'shipped',
+};
+const KIDS = ['F413', 'F414', 'F415'] as const;
+const rollupOf = (lastTouchedAt: string) => {
+  const byCategory = { backlog: 0, active: 0, review: 0, shipped: 0, verify: 0, closed: 0 };
+  for (const id of KIDS) byCategory[CATEGORY[cards.get(id)?.laneId ?? 'todo'] ?? 'backlog'] += 1;
+  return { children: KIDS.length, byCategory, active: byCategory.active, lastTouchedAt };
+};
+const child = (id: string, title: string, laneId: string, touchedAgo: number, assignee: string | null) =>
+  card(id, { title, parent: { id: 'F412' }, laneId, assignee, owner: NIMBUS, lastTouchedAt: ago(touchedAgo) });
+
+const cards = new Map<string, ReturnType<typeof card>>([
   [
     'F412',
     card('F412', {
       title: 'Live cards in chat',
       laneId: 'implement',
+      owner: NIMBUS,
+      lastTouchedAt: ago(4 * MINUTE),
       links: { prs: [PR], branch: null, commits: [], docs: [] },
-      rollup: {
-        children: 3,
-        byCategory: { backlog: 1, active: 1, review: 0, shipped: 1, verify: 0, closed: 0 },
-        active: 1,
-        lastTouchedAt: null,
-      },
     }),
   ],
-  ['F413', card('F413', { title: 'Parse card and board', parent: { id: 'F412' }, laneId: 'merged' })],
-  ['F414', card('F414', { title: 'Draw the real card', parent: { id: 'F412' }, laneId: 'implement' })],
-  ['F415', card('F415', { title: 'Teach the prompt line', parent: { id: 'F412' }, laneId: 'todo' })],
-  ['F420', card('F420', { title: 'Relay directory discovery', laneId: 'review' })],
+  ['F413', child('F413', 'Parse card and board', 'merged', 3 * 24 * 60 * MINUTE, EMBER)],
+  ['F414', child('F414', 'Draw the real card', 'implement', 2 * 60 * MINUTE, NIMBUS)],
+  ['F415', child('F415', 'Teach the prompt line', 'todo', 3 * 24 * 60 * MINUTE, null)],
+  [
+    'F420',
+    card('F420', {
+      title: 'Relay directory discovery',
+      laneId: 'review',
+      owner: EMBER,
+      lastTouchedAt: ago(35 * MINUTE),
+    }),
+  ],
 ]);
+const withRollup = () => cards.set('F412', card('F412', { ...cards.get('F412'), rollup: rollupOf(ago(MINUTE)) }));
+withRollup();
 
 const lanes = laneSetFor();
 const store = new DaemonBoardStore({
@@ -72,7 +102,7 @@ const store = new DaemonBoardStore({
   },
 });
 
-const surface = { cardEmbed: { store, connection: laptop }, onTaskOpen: () => undefined };
+const surface = { cardEmbed: { store, connection: laptop, callsigns }, onTaskOpen: () => undefined };
 const block = (type: string, alt: string, payload: string) =>
   ['```fy-render', `type: ${type}`, `alt: ${alt}`, '---', payload, '```'].join('\n');
 
@@ -81,7 +111,7 @@ const CHAT = [
   '',
   block('card', 'F412, the work this chat is about', '&F412'),
   '',
-  block('board', 'Two cards to look at next', '&F420\n&F414'),
+  block('board', 'Three cards to look at next', '&F415\n&F420\n&F414'),
 ].join('\n');
 const AGENDA = [
   'The sub-cards of &F412 by lane. Nothing needs you; this is where each piece stands.',
@@ -105,9 +135,10 @@ declare global {
   }
 }
 window.__moveCard = () => {
-  cards.set('F412', card('F412', { ...cards.get('F412'), laneId: 'review' }));
-  cards.set('F414', card('F414', { title: 'Draw the real card', parent: { id: 'F412' }, laneId: 'review' }));
-  cards.set('F415', card('F415', { title: 'Teach the prompt line', parent: { id: 'F412' }, laneId: 'implement' }));
+  cards.set('F414', child('F414', 'Draw the real card', 'review', MINUTE, NIMBUS));
+  cards.set('F415', child('F415', 'Teach the prompt line', 'implement', MINUTE, EMBER));
+  cards.set('F412', card('F412', { ...cards.get('F412'), laneId: 'review', lastTouchedAt: ago(MINUTE) }));
+  withRollup();
   store.noteEvent(laptop.daemonId, {
     type: 'board.changed',
     data: { projectId: PROJECT, taskIds: ['F412', 'F414', 'F415'] },

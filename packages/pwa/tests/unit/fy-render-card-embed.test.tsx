@@ -3,10 +3,11 @@ import type { BoardTaskView } from '@ferretry/protocol';
 
 import { FyRenderCardEmbed } from '../../src/components/fy-render-card-embed.tsx';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
-import { FY_RENDER_LIMITS } from '../../src/lib/fy-render-bounds.ts';
 import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '../../src/lib/fy-render.ts';
+import { FY_RENDER_LIMITS } from '../../src/lib/fy-render-bounds.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
+import { installManualClock } from '../support/manual-clock.ts';
 import {
   boardAnswer,
   card,
@@ -50,8 +51,19 @@ const serving = (cards: Map<string, BoardTaskView>, fail: Set<string> = new Set(
   return { store: new DaemonBoardStore(port, environment), port, environment };
 };
 
-const show = async (store: DaemonBoardStore, block: ReturnType<typeof blockOf>, onTaskOpen?: (id: string) => void) => {
-  view = await mount(<FyRenderCardEmbed block={block} host={{ store, connection: laptop }} onTaskOpen={onTaskOpen} />);
+const show = async (
+  store: DaemonBoardStore,
+  block: ReturnType<typeof blockOf>,
+  onTaskOpen?: (id: string) => void,
+  callsigns?: ReadonlyMap<string, string>,
+) => {
+  view = await mount(
+    <FyRenderCardEmbed
+      block={block}
+      host={{ store, connection: laptop, ...(callsigns === undefined ? {} : { callsigns }) }}
+      onTaskOpen={onTaskOpen}
+    />,
+  );
   await interact(() => flush());
   return view;
 };
@@ -139,19 +151,86 @@ describe('FyRenderCardEmbed: a card', () => {
   });
 });
 
+describe('FyRenderCardEmbed: how a card reads', () => {
+  const LEAD = 'mvuc7tsf-0c3d50df';
+
+  it('names the ferret by its callsign, never by the start of its session id', async () => {
+    const { store } = serving(new Map([['F1', card('F1', { owner: LEAD })]]));
+    const mounted = await show(store, blockOf('card', '&F1'), undefined, new Map([[LEAD, 'nimbus']]));
+    expect(text(mounted)).toContain('Nimbus');
+    expect(text(mounted)).not.toContain('mvuc7tsf');
+  });
+
+  it('falls back to the start of the id for a ferret with no callsign', async () => {
+    const { store } = serving(new Map([['F1', card('F1', { owner: LEAD })]]));
+    const mounted = await show(store, blockOf('card', '&F1'));
+    expect(text(mounted)).toContain('mvuc7tsf');
+  });
+
+  it('ticks its ages on a local clock, without reading the daemon again', async () => {
+    const clock = installManualClock();
+    try {
+      const touched = new Date(Date.now() - 2 * 60_000).toISOString();
+      const { store, port } = serving(new Map([['F1', card('F1', { lastTouchedAt: touched })]]));
+      const settle = async () => {
+        for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+      };
+      view = await mount(<FyRenderCardEmbed block={blockOf('card', '&F1')} host={{ store, connection: laptop }} />);
+      await interact(settle);
+      const mounted = view;
+      const reads = port.calls.length;
+      expect(text(mounted)).toContain('2m');
+      await interact(async () => {
+        clock.advance(3 * 60_000);
+        await settle();
+      });
+      expect(text(mounted)).toContain('5m');
+      expect(port.calls).toHaveLength(reads);
+    } finally {
+      clock.restore();
+    }
+  });
+});
+
 describe('FyRenderCardEmbed: a board', () => {
-  it('lists the named cards, each one the real card, and notes the one that is missing', async () => {
+  it("draws a list board as lanes in the board's lane order, with the missing card last", async () => {
     const { store } = serving(
       new Map([
-        ['F1', card('F1', { title: 'First' })],
-        ['F2', card('F2', { title: 'Second' })],
+        ['F1', card('F1', { title: 'First', laneId: 'review' })],
+        ['F2', card('F2', { title: 'Second', laneId: 'todo' })],
+        ['F3', card('F3', { title: 'Third', laneId: 'review' })],
       ]),
     );
-    const mounted = await show(store, blockOf('board', '&F1\n&F2\n&F9'));
+    const mounted = await show(store, blockOf('board', '&F1\n&F2\n&F9\n&F3'));
+    const frame = mounted.container.querySelector('.fy-card-embed-board');
+    expect(frame).not.toBeNull();
+    const heads = [...mounted.container.querySelectorAll('.fy-board-lane__name')].map(el => el.textContent);
+    expect(heads).toEqual(['Todo', 'Review/CI']);
+    const counts = [...mounted.container.querySelectorAll('.fy-board-lane__count')].map(el => el.textContent);
+    expect(counts).toEqual(['1', '2']);
     expect(text(mounted)).toContain('First');
-    expect(text(mounted)).toContain('Second');
-    expect(mounted.container.querySelectorAll('[data-fy-card-embed-card]')).toHaveLength(2);
-    expect(mounted.container.querySelector('[data-fy-card-embed-note="F9"]')).not.toBeNull();
+    expect(text(mounted)).toContain('Third');
+    const note = mounted.container.querySelector('[data-fy-card-embed-note="F9"]');
+    expect(note).not.toBeNull();
+    const last = [...(frame?.children ?? [])].at(-1);
+    expect(last).toBe(note ?? undefined);
+  });
+
+  it('moves a card between lanes of a list board on board.changed', async () => {
+    const cards = new Map([
+      ['F1', card('F1', { title: 'First' })],
+      ['F2', card('F2', { title: 'Second' })],
+    ]);
+    const { store } = serving(cards);
+    const mounted = await show(store, blockOf('board', '&F1 &F2'));
+    const heads = () => [...mounted.container.querySelectorAll('.fy-board-lane__name')].map(el => el.textContent);
+    expect(heads()).toEqual(['Implement']);
+    cards.set('F2', card('F2', { title: 'Second', laneId: 'review' }));
+    await interact(async () => {
+      store.noteEvent(laptop.daemonId, changed('F2'));
+      await flush();
+    });
+    expect(heads()).toEqual(['Implement', 'Review/CI']);
   });
 
   it('groups the children of a parent by lane and follows a lane move on board.changed', async () => {
@@ -163,11 +242,12 @@ describe('FyRenderCardEmbed: a board', () => {
     ]);
     const { store, environment } = serving(cards);
     const mounted = await show(store, blockOf('board', 'parent: &F10'));
-    const names = () => [...mounted.container.querySelectorAll('.fy-card-embed-lane-name')].map(el => el.textContent);
+    const names = () => [...mounted.container.querySelectorAll('.fy-board-lane__head')].map(el => el.textContent);
     expect(text(mounted)).toContain('Child one');
     expect(text(mounted)).toContain('Child two');
     expect(text(mounted)).not.toContain('Stranger');
     expect(names()).toHaveLength(2);
+    expect(mounted.container.querySelector('.fy-card-embed-board')).not.toBeNull();
     expect(environment.pending()).toBe(0);
 
     cards.set('F11', card('F11', { title: 'Child one', parent: { id: 'F10' }, laneId: 'review' }));
@@ -188,9 +268,45 @@ describe('FyRenderCardEmbed: a board', () => {
     );
   });
 
+  it('says there is no such card, not that it has no children, when the parent does not exist', async () => {
+    const { store } = serving(new Map());
+    const mounted = await show(store, blockOf('board', 'parent: &F999'));
+    expect(mounted.container.querySelector('[data-fy-card-embed-note="F999"]')?.textContent).toContain(
+      'No card with this id.',
+    );
+    expect(mounted.container.querySelector('.fy-card-embed-board')).toBeNull();
+  });
+
+  it('says the list may be incomplete, and links the parent, when the board was too big to read in full', async () => {
+    let pages = 0;
+    const opened: string[] = [];
+    const environment = fakeEnvironment();
+    const port = fakePort({
+      task: async () => ({ task: card('F10'), laneSet: lanes }),
+      board: async () => {
+        pages += 1;
+        return boardAnswer([card(`F${100 + pages}`, { parent: { id: 'F10' } })], {
+          projectId: PROJECT,
+          laneSet: lanes,
+          nextCursor: 'more',
+        });
+      },
+    });
+    const mounted = await show(new DaemonBoardStore(port, environment), blockOf('board', 'parent: &F10'), id =>
+      opened.push(id),
+    );
+    const note = mounted.container.querySelector('[data-fy-card-embed-truncated="F10"]');
+    expect(note?.textContent).toContain('may be incomplete');
+    const link = note?.querySelector('a');
+    expect(link).not.toBeNull();
+    await interact(() => link?.click());
+    expect(opened).toEqual(['F10']);
+  });
+
   it('says when the children cannot be read', async () => {
     const environment = fakeEnvironment();
     const port = fakePort({
+      task: async () => ({ task: card('F10'), laneSet: lanes }),
       board: async () => {
         throw new Error('down');
       },
@@ -203,7 +319,7 @@ describe('FyRenderCardEmbed: a board', () => {
 
   it('shows at most the child cap and says how many more the board holds', async () => {
     const extra = FY_RENDER_LIMITS.embedChildren + 3;
-    const cards = new Map<string, BoardTaskView>();
+    const cards = new Map<string, BoardTaskView>([['F10', card('F10')]]);
     for (let index = 1; index <= extra; index += 1)
       cards.set(`F${100 + index}`, card(`F${100 + index}`, { parent: { id: 'F10' } }));
     const { store } = serving(cards);

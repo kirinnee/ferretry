@@ -4,7 +4,7 @@
  *
  *   bun harness/live-card-screenshot.ts [outDir]   # writes <outDir>/live-<scene>-<phone|desktop>-<theme>.png
  *
- * Scenes: `chat` (a card and a mini board in a message), `agenda` (a parent's children in an agenda body),
+ * Scenes: `chat` (a card and a lane-grouped mini board in a message), `agenda` (a parent's children in an agenda body),
  * `error` (a missing and an unreadable card). `chat` and `agenda` are also drawn after a simulated lane move. It FAILS
  * (after writing every picture) when a page scrolls sideways, a block is not drawn, the move does not show, a missing or
  * unreadable card is drawn as a link, or a block is drawn in a fallback font.
@@ -121,7 +121,8 @@ const layout = async (page: Page, label: string): Promise<void> => {
 };
 
 const embeds = (page: Page) => page.locator('[data-fy-card-embed]');
-const laneNames = (page: Page) => page.locator('.fy-card-embed-lane-name').allTextContents();
+const laneNames = (page: Page, scope = '') => page.locator(`${scope} .fy-board-lane__name`.trim()).allTextContents();
+const cardIn = (page: Page, id: string) => page.locator(`[data-task="${id}"]`).first();
 
 const scenes = async (form: Form, theme: string): Promise<void> => {
   const context = await browser.newContext({
@@ -145,20 +146,40 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
 
   const chat = await open('chat');
   check((await embeds(chat).count()) === 2, `${label('chat')}: wanted a card and a board block`);
-  check((await chat.locator('[data-fy-card-embed-card]').count()) === 3, `${label('chat')}: wanted three cards`);
+  check((await chat.locator('[data-task]').count()) === 4, `${label('chat')}: wanted a card and three board cards`);
   check((await chat.locator('[data-fy-card-embed="card"] a').count()) >= 1, `${label('chat')}: the card is not a link`);
-  const before = (await chat.locator('[data-fy-card-embed-card="F412"]').textContent()) ?? '';
+  const board = chat.locator('[data-fy-card-embed="board"]');
+  check((await board.locator('[data-fy-card-embed-board]').count()) === 1, `${label('chat')}: the board has no frame`);
+  const chatLanes = await laneNames(chat, '[data-fy-card-embed="board"]');
+  check(chatLanes.join('|') === 'Todo|Implement|Review/CI', `${label('chat')}: board lanes are ${chatLanes.join('|')}`);
+  const names = (await chat.locator('[data-task]').allTextContents()).join(' ');
+  check(/Nimbus/.test(names) && !/mvuc7tsf/.test(names), `${label('chat')}: a ferret is not named by its callsign`);
+  const linkColors = await chat.evaluate(() => {
+    const main = document.querySelector('.fy-card-embed .fy-board-card__main') as HTMLElement | null;
+    if (main === null) return null;
+    const style = getComputedStyle(main);
+    return { decoration: style.textDecorationLine, color: style.color, body: getComputedStyle(document.body).color };
+  });
+  check(
+    linkColors !== null && linkColors.decoration === 'none',
+    `${label('chat')}: the card body reads as a link (${linkColors?.decoration})`,
+  );
+  const before = (await cardIn(chat, 'F412').textContent()) ?? '';
   check(before.includes('Implement'), `${label('chat')}: F412 does not start in Implement`);
   await layout(chat, label('chat'));
   await shot(chat, 'chat-before', form, theme);
   await chat.evaluate(() => window.__moveCard());
   await chat.waitForTimeout(400);
-  const after = (await chat.locator('[data-fy-card-embed-card="F412"]').textContent()) ?? '';
+  const after = (await cardIn(chat, 'F412').textContent()) ?? '';
   check(after.includes('Review/CI') && !after.includes('Implement'), `${label('chat')}: the move did not show`);
   await shot(chat, 'chat-after', form, theme);
   await chat.close();
 
   const agenda = await open('agenda');
+  check(
+    (await agenda.locator('[data-fy-card-embed-board]').count()) === 1,
+    `${label('agenda')}: the board has no frame`,
+  );
   const lanesBefore = await laneNames(agenda);
   check(lanesBefore.length === 3, `${label('agenda')}: wanted three lanes, got ${lanesBefore.join('|')}`);
   await layout(agenda, label('agenda'));

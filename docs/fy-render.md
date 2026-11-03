@@ -183,21 +183,21 @@ Two properties this feature must never change, and does not:
 
 ## Per type, in this build
 
-| Type               | Renders as                                                            | Why                                                                                                          |
-| ------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `card`, `board`    | the board's own `BoardCard`, read from the daemon, no frame at all    | A pointer, not bytes: nothing an author wrote is drawn — [Cards and boards](#cards-and-boards)               |
-| `svg`              | `<img src="data:image/svg+xml,…">`                                    | The measured boundary — see below                                                                            |
-| `image` (inline)   | `<img src="data:{mime};base64,…">`                                    | No script surface exists in a raster decode                                                                  |
-| `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify     | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
-| `html` (script)    | a live page in its own opaque frame, `/fy-render-html.html`           | The owner asked for interaction; [The interactive `html` frame](#the-interactive-html-frame) is the boundary |
-| `mermaid`          | `<img src="data:image/svg+xml,…">`                                    | Compiled to SVG in the sandbox frame in the theme's tokens, then re-admitted through the authored-SVG gate   |
-| `map`              | a Leaflet map in the message, tiles from `tile.openstreetmap.org`     | The payload is data placed with `textContent`; [Maps](#maps) says what loads and what is refused             |
-| `chart`            | a Chart.js `<canvas>` in the message, with page-text legend and steps | The payload is data in a closed language, painted by `fillText`; [Charts](#charts) says why not a frame      |
-| `lottie`           | live player inside the sandbox frame                                  | An animation has to keep running to animate, so this one stays live                                          |
-| `image` (`src:`)   | `<img src="blob:…">` of admitted bytes                                | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                    |
-| `video`            | the browser's native `<video controls>`                               | A workspace file as a `blob:`; an https URL directly, which `media-src https:` admits                        |
-| `audio`            | the browser's native `<audio controls>`                               | As `video`                                                                                                   |
-| `pdf`              | a file row: workspace Open / Download of a minted `blob:`; https link | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames     |
+| Type               | Renders as                                                                              | Why                                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `card`, `board`    | the board's own `BoardCard`, read from the daemon; a `board` is framed, grouped by lane | A pointer, not bytes: nothing an author wrote is drawn — [Cards and boards](#cards-and-boards)               |
+| `svg`              | `<img src="data:image/svg+xml,…">`                                                      | The measured boundary — see below                                                                            |
+| `image` (inline)   | `<img src="data:{mime};base64,…">`                                                      | No script surface exists in a raster decode                                                                  |
+| `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify                       | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
+| `html` (script)    | a live page in its own opaque frame, `/fy-render-html.html`                             | The owner asked for interaction; [The interactive `html` frame](#the-interactive-html-frame) is the boundary |
+| `mermaid`          | `<img src="data:image/svg+xml,…">`                                                      | Compiled to SVG in the sandbox frame in the theme's tokens, then re-admitted through the authored-SVG gate   |
+| `map`              | a Leaflet map in the message, tiles from `tile.openstreetmap.org`                       | The payload is data placed with `textContent`; [Maps](#maps) says what loads and what is refused             |
+| `chart`            | a Chart.js `<canvas>` in the message, with page-text legend and steps                   | The payload is data in a closed language, painted by `fillText`; [Charts](#charts) says why not a frame      |
+| `lottie`           | live player inside the sandbox frame                                                    | An animation has to keep running to animate, so this one stays live                                          |
+| `image` (`src:`)   | `<img src="blob:…">` of admitted bytes                                                  | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                    |
+| `video`            | the browser's native `<video controls>`                                                 | A workspace file as a `blob:`; an https URL directly, which `media-src https:` admits                        |
+| `audio`            | the browser's native `<audio controls>`                                                 | As `video`                                                                                                   |
+| `pdf`              | a file row: workspace Open / Download of a minted `blob:`; https link                   | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames     |
 
 ### Cards and boards
 
@@ -207,22 +207,31 @@ block is drawn, so a block can never say something the board does not.
 
 - `card` — exactly one reference: `&F12`.
 - `board` — either cards listed one per line or separated by spaces (an optional leading `- `), at
-  most 12, none twice; or one line, `parent: &F12`, which shows that card's children grouped by lane
-  (at most 24 shown, then "N more on the board.").
+  most 12, none twice; or one line, `parent: &F12`, which shows that card's children. Both forms draw
+  **one framed mini board**: a lane head (name and count, the Board's own) per lane with its cards under
+  it, lanes in the project's lane-set order. A list that spans projects groups by project first; a card
+  in a lane its lane set does not know goes under "Elsewhere", last. At most 24 cards are shown, then
+  "N more on the board."; cards that could not be shown (missing, unreadable) follow as notes, last.
 
 Each card is the real `BoardCard` the Board page draws, read-only: its title, lane, progress and the
-PRs it links. Clicking it opens the card exactly as a written `&F12` does (`onTaskOpen`), because
+PRs it links. Only the title is a link; the card's other text keeps the Board's colours. The ferret is
+named by its callsign (from the app's fleet, or the surface's own list), and every age ticks on a local
+clock every 30 seconds — a clock, not a daemon read. Clicking it opens the card exactly as a written `&F12` does (`onTaskOpen`), because
 the daemon's answer is the proof the reference standard asks for
 ([reference-standard.md](reference-standard.md)).
 
 - **Proof before link.** A card is a link only after the daemon has answered for it. One that does not
   exist, or cannot be read, or has not been answered yet, is never a link: the first two draw a quiet
   file row (a warning icon, the reference, one muted sentence — "No card with this id." or "This card
-  could not be read."), the last an empty placeholder. Never a broken frame.
+  could not be read."), the last an empty placeholder. Never a broken frame. For `parent: &F12` the
+  parent is proved first: if it does not exist the block says "No card with this id.", not "No cards
+  under this one.". Children are read from the whole board; when that read was cut short
+  (4 × 500 cards), the block says the list may be incomplete and links the parent.
 - **Live, with no timer.** Each card is watched with `beat: false`, so it is re-read only when the
   fleet feed delivers a `board.changed` that names it, and a parent's children come from one shared
   whole-board view that is re-read the same way. A card that moves lane or changes redraws in place.
-  Unmounting releases the watch. The block never polls.
+  Unmounting releases the watch, and a store timer that no holder wants any more is cleared. The block
+  never polls.
 - **One renderer.** It draws wherever `ChatProse` draws — chat messages, agenda bodies, a board card's
   detail — and nowhere else. Spec: `packages/pwa/src/lib/fy-render-embed.ts`; component:
   `packages/pwa/src/components/fy-render-card-embed.tsx`.
@@ -959,7 +968,7 @@ That is `image`, `video`, `audio` and `pdf` — they name bytes instead of carry
 
 ### card
 
-`card` and `board` point at cards on the board and show them live; they draw no picture and carry no bytes. `card`: the payload is one reference, `&F12`. `board`: references one per line or separated by spaces (at most 12, none twice), or a single line `parent: &F12` to show that card's children grouped by lane. The reader sees the real board card — title, lane, progress, its PRs — and it redraws by itself when the card moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A card that does not exist or cannot be read shows as a quiet note, never a link. Chat messages and agenda bodies only. Caps: 2 KiB, 12 listed cards, 24 children shown. A repeated or non-card reference, a `parent:` mixed with a list, or `parent:` on a `card` makes the block a plain code fence.
+`card` and `board` point at cards on the board and show them live; they draw no picture and carry no bytes. `card`: the payload is one reference, `&F12`. `board`: references one per line or separated by spaces (at most 12, none twice), or a single line `parent: &F12` to show that card's children. Either form draws a framed mini board grouped by lane. The reader sees the real board card — title, lane, progress, its PRs — and it redraws by itself when the card moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A card that does not exist or cannot be read shows as a quiet note, never a link. Chat messages and agenda bodies only. Caps: 2 KiB, 12 listed cards, 24 children shown. A repeated or non-card reference, a `parent:` mixed with a list, or `parent:` on a `card` makes the block a plain code fence.
 
 ### lottie
 

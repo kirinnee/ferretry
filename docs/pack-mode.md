@@ -106,6 +106,9 @@ the Agenda section's own wording (the repeated "unsure: closest", `done <id>` â†
 total 7,745 (7,759 counting the separators), leaving 105 characters under the 7,850 cap (91 counting the separators).
 Final review then restored "on it" in the chat line (the owner's words go ON the agenda item): agenda 1,230 â†’ 1,236, the measured total
 7,751 (7,765 counting the separators), 99 characters under the 7,850 cap (85 counting the separators).
+The Hypermedia line then learned `card` and `board` (live board cards): the measured total is 7,783 (7,797 counting the separators),
+67 characters under the 7,850 cap (53 counting the separators). It fits beside the other open agenda PRs' prompt lines: all three
+together measure 7,806.
 The whole-prompt cap is unchanged.
 
 ## The routing prompt
