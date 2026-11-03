@@ -1,7 +1,7 @@
 import {
   describeCompactAt,
+  displayModel,
   formatTaskRef,
-  type SessionConfig,
   type SessionState,
   type SessionView,
 } from '@ferretry/protocol';
@@ -11,21 +11,6 @@ import type { ICellColour } from './ports.ts';
 export const TERMINAL_STATUSES: readonly string[] = ['completed', 'failed', 'stalled', 'stopped'];
 
 type UsageState = Pick<SessionState, 'usage5hPercent' | 'usageWeeklyPercent' | 'usageAtLimit' | 'usageAuthOk'>;
-
-/**
- * The model a session is actually running, for display.
- *
- * Precedence: what the harness reported > the configured model > the wrapper's declared hint.
- * The source carried a hardcoded table of one operator's account names to map wrapper → served
- * model; that belongs to the fleet manifest, not the CLI, so `modelHint` (published by the daemon)
- * is the fallback here.
- */
-export function displayModel(
-  config: Pick<SessionConfig, 'model' | 'modelHint'>,
-  state: Pick<SessionState, 'observedModel'>,
-): string {
-  return state.observedModel?.trim() || config.model?.trim() || config.modelHint.trim() || 'default';
-}
 
 /** Long-form quota label for the detail view, or undefined when the daemon reported no usage. */
 export function quotaLabel(state: UsageState): string | undefined {
