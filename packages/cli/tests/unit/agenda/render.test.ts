@@ -712,3 +712,41 @@ describe('attention cards', () => {
     should(actual).containEql('"d"');
   });
 });
+
+describe('a resting item in the list', () => {
+  const RESTED = '2026-07-31T09:00:00.000Z';
+  const resting = (rest: Record<string, unknown>) =>
+    snapshot([
+      {
+        ...agentItem('A3', 'pick a region'),
+        whereWeAre: 'The two regions are priced.',
+        parked: { reason: 'replied', at: RESTED },
+        resting: { at: RESTED, ...rest },
+      } as never,
+    ]);
+
+  it('should say how long it has rested, in minutes, hours or days, and where things stand', () => {
+    // Act
+    const minutes = renderAgendaList(resting({ sub: 'waiting-on-ferret' }), '2026-07-31T09:45:00.000Z');
+    const hours = renderAgendaList(resting({ sub: 'waiting-on-ferret' }), '2026-07-31T12:00:00.000Z');
+    const days = renderAgendaList(resting({ sub: 'waiting-on-ferret' }), '2026-08-03T09:00:00.000Z');
+    const unknown = renderAgendaList(resting({ sub: 'waiting-on-ferret' }));
+
+    // Assert
+    should(minutes).containEql('resting 45m (since 2026-07-31T09:00:00.000Z), waiting on you');
+    should(hours).containEql('resting 3h (since');
+    should(days).containEql('resting 3d (since');
+    should(unknown).containEql('resting (since 2026-07-31T09:00:00.000Z)');
+    should(minutes).containEql('where we are: The two regions are priced.');
+  });
+
+  it('should say what the ferret is working on, and how to bring it back or close it', () => {
+    // Act
+    const working = renderAgendaList(resting({ sub: 'working', why: 'checking the prices' }), RESTED);
+
+    // Assert
+    should(working).containEql('resting 0m (since 2026-07-31T09:00:00.000Z), working: checking the prices');
+    should(working).containEql('`agenda answer A3 "<text>"` when you need the owner');
+    should(working).containEql('`agenda done A3` when nothing more is expected');
+  });
+});

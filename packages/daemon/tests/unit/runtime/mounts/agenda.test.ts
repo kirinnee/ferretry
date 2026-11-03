@@ -265,6 +265,21 @@ describe('attention routes', () => {
     should(unknown.status).equal(404);
   });
 
+  it('should take an item on for its ferret with rest, quiet, as working', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+
+    // Act
+    const rested = await dispatch(post({ action: 'rest', id, why: 'checking both branches' }, agentIn('s1')));
+
+    // Assert
+    should(rested.status).equal(200);
+    const items = jsonBody(rested).items as readonly { resting?: { sub: string; why?: string } }[];
+    should(items[0]?.resting).containDeep({ sub: 'working', why: 'checking both branches' });
+  });
+
   it('should record the human’s choice when a resolve carries a response', async () => {
     // kteam wrote the resolution without the answer, so an agent waiting on a choice was unblocked
     // with nothing to read.

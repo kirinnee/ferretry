@@ -1583,6 +1583,31 @@ describe('Agenda state machine undelivered', () => {
     });
   });
 
+  it('should reopen an item closed WITH an answer (the ferret’s own choice) as a resolve to retry, answer and note kept', () => {
+    // Arrange — a ferret answering its own item still closes it, so its delivery can fail like any closing
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, {
+        action: 'answer',
+        actor: AGENT,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        note: 'went ahead',
+        at: SECOND,
+      }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(closed.ledger));
+
+    // Assert
+    should(closed.addressed?.disposition).equal('done');
+    should(reopened.item?.undelivered?.reply).deepEqual({
+      action: 'resolve',
+      note: 'went ahead',
+      response: { kind: 'permission', decision: 'approve' },
+    });
+  });
+
   it('should reopen a dismissed item with a dismiss to retry, and clear the mark when the owner acts again', () => {
     // Arrange
     const dismissed = succeeded(
