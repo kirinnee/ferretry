@@ -1,3 +1,9 @@
+## [4.258.0](https://github.com/kirinnee/ferretry/compare/v4.257.3...v4.258.0) (2026-11-03)
+
+### Features
+
+* **status:** add fy status --subtree and the lead/child progress lines ([#1433](https://github.com/kirinnee/ferretry/issues/1433)) ([cb09a05](https://github.com/kirinnee/ferretry/commit/cb09a05ecfed07e75200882d1f948c2776af72d1))
+
 ## [4.257.3](https://github.com/kirinnee/ferretry/compare/v4.257.2...v4.257.3) (2026-11-03)
 
 ### Fixes
