@@ -1090,8 +1090,11 @@ even when a lead was doing the work. Now one function, `noticeRecipient`
    Such an alert is **never typed** into it: `BoardAlerts` (`packages/daemon/src/lib/board/alert-sends.ts`) reads the
    recipient's `config.mode` at the send, whichever way it was picked — this route, the fallback below, or a
    sub-ferret's lead standing in — and journals an interactive one's alert on it as `board.alert-withheld` with its
-   words. Nothing is lost that the board does not show: a red CI is the card's PR checks, a PR closed unmerged is a note
-   in its history, a stale card is its activity. An automatic session gets every alert as before. Folding them into the
+   words. A red CI or a PR closed unmerged on a **private** card is also written as a note on the card's **nearest
+   public ancestor** (`AlertSurface`, same file), so the default board shows it without a turn. Declared gap: a private
+   card with no public ancestor has no visible place for it (it is in the journal and the card's own history/PR facts),
+   and a stale nudge is journalled only, because a note would count as its parent's activity. A mode that cannot be read
+   (the send document is damaged) is not a reason to hold an alert back: it is sent as before. An automatic session gets every alert as before. Folding them into the
    owner's agenda is a declared GAP: the agenda is being redesigned, and a lead's turns are the cost this saves.
 
 A session that declared `fy signal waiting` is never nudged, and nobody is nudged in its place. An assignee that

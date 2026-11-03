@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { BoardTaskView, InteractionMode, PrLink } from '@ferretry/protocol';
+import type { BoardTask, BoardTaskId, BoardTaskView, InteractionMode, PrLink } from '@ferretry/protocol';
 import should from 'should';
 import {
+  AlertSurface,
   applyPrUpdate,
   BoardAlerts,
   BoardIndex,
@@ -10,7 +11,7 @@ import {
   planSweep,
   EMPTY_SWEEP_MEMORY,
 } from '../../../src/lib/board/index.ts';
-import { card, lanes, liveSession, NOW, PROJECT, rosterOf } from './support.ts';
+import { card, lanes, liveSession, MACHINE, NOW, PROJECT, rosterOf } from './support.ts';
 
 /**
  * A board alert never reaches the owner's own interactive chat: each producer's real alert, sent to the session the
@@ -21,11 +22,26 @@ const HOUR = 3_600_000;
 const ago = (ms: number): string => new Date(Date.parse(NOW) - ms).toISOString();
 
 /** The ports, recording what each was asked; `modes` is how each session takes messages. */
-const alertWorld = (modes: Readonly<Record<string, InteractionMode>>) => {
+const alertWorld = (
+  modes: Readonly<Record<string, InteractionMode>>,
+  options: { readonly cards?: readonly BoardTask[]; readonly modeFails?: boolean } = {},
+) => {
   const sent: string[] = [];
   const withheld: string[] = [];
+  const notes: string[] = [];
+  const surface = new AlertSurface({
+    cards: async () => options.cards ?? [],
+    note: async (id, text) => {
+      notes.push(`${id}: ${text}`);
+    },
+    machineId: () => MACHINE,
+  });
   const alerts = new BoardAlerts({
-    mode: async sessionId => modes[sessionId],
+    mode: async sessionId => {
+      if (options.modeFails === true) throw new Error('send document is malformed');
+      return modes[sessionId];
+    },
+    surface: async (id, message) => await surface.surface(id, message),
     send: async (sessionId, message) => {
       sent.push(`${sessionId}: ${message}`);
     },
@@ -33,7 +49,7 @@ const alertWorld = (modes: Readonly<Record<string, InteractionMode>>) => {
       withheld.push(`${sessionId}: ${message}`);
     },
   });
-  return { alerts, sent, withheld };
+  return { alerts, sent, withheld, notes };
 };
 
 /** The lead the owner chats with, and the sub-ferret it started for the card, which has ended. */
@@ -187,5 +203,76 @@ describe('board alerts to an interactive session', () => {
     should(outcome).equal('sent');
     should(world.sent).eql(['unknown: &F1 PR #940 CI is red.']);
     should(world.withheld).be.empty();
+  });
+
+  it('should send as before when the mode lookup rejects, to the identical target and text', async () => {
+    // Arrange
+    const world = alertWorld({ lizzette: 'interactive' }, { modeFails: true });
+
+    // Act
+    const outcome = await world.alerts.send('lizzette', '&F1 PR #940 CI is red.', 'F1' as BoardTaskId);
+
+    // Assert
+    should(outcome).equal('sent');
+    should(world.sent).eql(['lizzette: &F1 PR #940 CI is red.']);
+    should(world.withheld).be.empty();
+    should(world.notes).be.empty();
+  });
+});
+
+describe('a withheld alert about a private card', () => {
+  const parent = card({ id: 'F10', askedBy: 'person', owner: 'lizzette', parent: null });
+  const child = card({ id: 'F11', owner: 'lizzette', assignee: 'child', parent: { id: 'F10' } });
+  const grandchild = card({ id: 'F12', owner: 'lizzette', assignee: 'child', parent: { id: 'F11' } });
+  const redCi = '&F12 PR #940 CI is red. Fix it, or note on the card why it can stay red.';
+  const closed = '&F12 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.';
+
+  it.each([
+    ['a red CI', redCi],
+    ['a PR closed unmerged', closed],
+  ])(
+    'should note %s on the nearest public ancestor and type nothing to the interactive lead',
+    async (_name, message) => {
+      // Arrange
+      const world = alertWorld({ lizzette: 'interactive' }, { cards: [parent, child, grandchild] });
+
+      // Act
+      const outcome = await world.alerts.send('lizzette', message, 'F12' as BoardTaskId);
+
+      // Assert
+      should(outcome).equal('withheld');
+      should(world.sent).be.empty();
+      should(world.withheld).eql([`lizzette: ${message}`]);
+      should(world.notes).eql([`F10: sub-card alert, not typed to the interactive lead: ${message}`]);
+    },
+  );
+
+  it('should note nothing when the interactive lead gets an alert about a public card or one with no public ancestor', async () => {
+    // Arrange
+    const orphan = card({ id: 'F20', owner: 'lizzette', parent: null });
+    const world = alertWorld({ lizzette: 'interactive' }, { cards: [parent, orphan] });
+
+    // Act
+    await world.alerts.send('lizzette', '&F10 PR #1 CI is red.', 'F10' as BoardTaskId);
+    await world.alerts.send('lizzette', '&F20 PR #2 CI is red.', 'F20' as BoardTaskId);
+    await world.alerts.send('lizzette', '&F10 has had no activity for 3h.');
+
+    // Assert
+    should(world.sent).be.empty();
+    should(world.withheld).have.length(3);
+    should(world.notes).be.empty();
+  });
+
+  it('should note nothing and type as before for an automatic recipient', async () => {
+    // Arrange
+    const world = alertWorld({ lizzette: 'auto' }, { cards: [parent, child, grandchild] });
+
+    // Act
+    const outcome = await world.alerts.send('lizzette', redCi, 'F12' as BoardTaskId);
+
+    // Assert
+    should(outcome).equal('sent');
+    should(world.sent).eql([`lizzette: ${redCi}`]);
+    should(world.notes).be.empty();
   });
 });

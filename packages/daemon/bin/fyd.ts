@@ -628,6 +628,7 @@ import {
   AgendaCardLinks,
   AgendaToTestLanes,
   alertFallback,
+  AlertSurface,
   BoardAlerts,
   BOARD_SWEEP_INTERVAL_MS,
   BoardGateCheck,
@@ -10376,6 +10377,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Every board alert — stale, red CI, closed unmerged — passes here, whoever it was routed to: one for the owner's
       // own interactive chat is journalled on it instead of typed (lib/board/alert-sends.ts).
       const boardAlertJournal = new JournalBoardChecks(storage);
+      const alertSurface = new AlertSurface({
+        cards: async () => (await boardWorld.board.snapshot()).cards,
+        note: async (card, text) => {
+          await boardWorld.board.act(card, { action: 'note', text }, { kind: 'daemon' });
+        },
+        machineId: () => attachmentDaemonId,
+      });
       const boardAlerts = new BoardAlerts({
         mode: async sessionId => {
           const id = tryParseSessionId(sessionId);
@@ -10385,6 +10393,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
         },
         withheld: async (sessionId, message) => await boardAlertJournal.recordWithheldAlert(sessionId, message),
+        surface: async (card, message) => {
+          await alertSurface.surface(card, message).catch((error: unknown) => {
+            boardDiagnostics.warn(`could not surface a withheld alert on ${card}'s board: ${String(error)}`);
+          });
+        },
       });
       const boardCopies = new GitWorkingCopies();
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
@@ -10427,7 +10440,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           send: async (card, message, reason) => {
             const recipient = noticeRecipient(await boardSessions.roster(), card);
             const sessionId = recipient?.sessionId ?? (await nudgeTarget(boardSubFerrets, alertFallback(card, reason)));
-            await boardAlerts.send(sessionId, message);
+            await boardAlerts.send(sessionId, message, card.id);
           },
         },
         timers: {
