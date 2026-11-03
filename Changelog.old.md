@@ -1,3 +1,9 @@
+## [4.257.3](https://github.com/kirinnee/ferretry/compare/v4.257.2...v4.257.3) (2026-11-03)
+
+### Fixes
+
+* **board:** never type a board alert into an interactive session ([#1430](https://github.com/kirinnee/ferretry/issues/1430)) ([536f3a6](https://github.com/kirinnee/ferretry/commit/536f3a63c63759ee27a7e0ec3ca2ed74be785880))
+
 ## [4.257.2](https://github.com/kirinnee/ferretry/compare/v4.257.1...v4.257.2) (2026-11-03)
 
 ### Fixes
