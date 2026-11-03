@@ -38,6 +38,9 @@ import {
   type BoardTaskView,
   BoardTaskOriginSchema,
   BoardTaskViewSchema,
+  BoardTaskVisibilitySchema,
+  BoardTaskVisibilitySourceSchema,
+  BoardVisibilityFilterSchema,
   BoardTermSchema,
   BoardTermsSchema,
   DependencyOverrideSchema,
@@ -310,6 +313,11 @@ const VALID: readonly SchemaCase[] = [
   { name: 'activity filter', schema: BoardActivityFilterSchema, value: 'to_test' },
   { name: 'state filter', schema: BoardStateFilterSchema, value: 'dropped' },
   { name: 'query', schema: BoardQuerySchema, value: { project: PROJECT, activity: 'waiting_on_you', query: 'tunnel' } },
+  { name: 'query for private cards', schema: BoardQuerySchema, value: { visibility: 'private' } },
+  { name: 'view of a private card', schema: BoardTaskViewSchema, value: { ...VIEW, visibility: 'private' } },
+  { name: 'visibility', schema: BoardTaskVisibilitySchema, value: 'public' },
+  { name: 'visibility source', schema: BoardTaskVisibilitySourceSchema, value: 'default' },
+  { name: 'visibility filter', schema: BoardVisibilityFilterSchema, value: 'all' },
   { name: 'counts', schema: BoardCountsSchema, value: COUNTS },
   { name: 'board', schema: BoardResponseSchema, value: BOARD },
   { name: 'all projects', schema: BoardResponseSchema, value: { ...BOARD, projectId: null, laneSet: null } },
@@ -503,6 +511,9 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'stray query field', schema: BoardQuerySchema, value: { lane: 'todo' } },
   { name: 'page too big', schema: BoardQuerySchema, value: { limit: 501 } },
   { name: 'empty text query', schema: BoardQuerySchema, value: { query: '  ' } },
+  { name: 'unknown visibility filter', schema: BoardVisibilityFilterSchema, value: 'hidden' },
+  { name: 'unknown visibility', schema: BoardTaskVisibilitySchema, value: 'all' },
+  { name: 'unknown visibility source', schema: BoardTaskVisibilitySourceSchema, value: 'owner' },
   { name: 'negative count', schema: BoardCountsSchema, value: { ...COUNTS, stale: -1 } },
   { name: 'lanes across projects', schema: BoardResponseSchema, value: { ...BOARD, projectId: null } },
   {
@@ -726,10 +737,30 @@ describe('board query', () => {
       'blocked',
     ]);
   });
+
+  it('should take a visibility filter and leave it out unless asked', () => {
+    should(BoardQuerySchema.parse({ visibility: 'all' })).deepEqual({ state: 'open', limit: 100, visibility: 'all' });
+    should(BoardQuerySchema.parse({})).not.have.property('visibility');
+    should(BoardVisibilityFilterSchema.options).deepEqual(['public', 'private', 'all']);
+  });
 });
 
 describe('board mutations', () => {
   const action = (value: Record<string, unknown>) => BoardTaskActionRequestSchema.safeParse(value).success;
+
+  it('should take a visibility action of public or private and nothing else', () => {
+    should(action({ action: 'visibility', visibility: 'private' })).be.true();
+    should(action({ action: 'visibility', visibility: 'public', reason: 'the owner asked' })).be.true();
+    should(action({ action: 'visibility', visibility: 'all' })).be.false();
+    should(action({ action: 'visibility' })).be.false();
+    should(action({ action: 'visibility', visibility: 'private', extra: 1 })).be.false();
+  });
+
+  it('should take a visibility on a new card, and default to none', () => {
+    const base = { kind: 'feature', title: 'X', ask: CARD.ask };
+    should(BoardTaskCreateRequestSchema.parse({ ...base, visibility: 'private' }).visibility).equal('private');
+    should(BoardTaskCreateRequestSchema.parse(base)).not.have.property('visibility');
+  });
 
   it('should fill a new card’s defaults', () => {
     should(BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'Board page', ask: CARD.ask })).deepEqual({
@@ -777,6 +808,8 @@ describe('board mutations', () => {
       { action: 'assign', assignee: null },
       { action: 'note', text: 'checked' },
       { action: 'edit', title: 'Board page' },
+      { action: 'edit', visibility: 'private' },
+      { action: 'edit', title: 'Board page', visibility: 'public' },
       { action: 'edit', terms: [{ term: 'Lane', meaning: 'a column' }] },
       { action: 'edit', howToTest: '1. Open the Board' },
       { action: 'file', path: 'a.ts', release: true, reason: 'done' },
@@ -803,6 +836,7 @@ describe('board mutations', () => {
       { action: 'link', pr: PR_URL, branch: 'feat/x' },
       { action: 'link', pr: 'https://example.com/pr/1' },
       { action: 'edit' },
+      { action: 'edit', visibility: 'all' },
       { action: 'edit', owner: LEAD },
       { action: 'drop' },
       { action: 'block', reason: '' },

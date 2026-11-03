@@ -378,12 +378,17 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
         : null,
   });
 });
-/** What a newer daemon says about each card: every fourth big card was made by a ferret for the one before it. */
+/** What a newer daemon says about each card: every fourth big card was made by a ferret for the one before it, and is private. */
 const withOrigin = (cards: readonly BoardTaskView[], firstId: number): BoardTaskView[] =>
   cards.map((item, index) =>
     (index % 4 === 1 || (SUBS_ON && index % 4 === 2)) && firstId >= 300
-      ? Object.assign(item, { origin: 'agent', askedBy: 'agent', humanParent: { id: `F${firstId + index - 1}` } })
-      : Object.assign(item, { origin: 'human', askedBy: 'person', humanParent: null }),
+      ? Object.assign(item, {
+          origin: 'agent',
+          askedBy: 'agent',
+          visibility: 'private',
+          humanParent: { id: `F${firstId + index - 1}` },
+        })
+      : Object.assign(item, { origin: 'human', askedBy: 'person', visibility: 'public', humanParent: null }),
   );
 const BIG_ON = new URLSearchParams(window.location.search).get('big') !== null;
 

@@ -10,7 +10,7 @@
  *    hold as a mini tree.
  *
  * The tab has two sizes, one renderer: `side` in the Info panel, and `page` when the host lets it fill the chat
- * (`onExpand`), where the same cards and lanes are drawn at the Board page's density. "Ferret cards" is the
+ * (`onExpand`), where the same cards and lanes are drawn at the Board page's density. "Show private" is the
  * Board page's own toggle and filter: off, only the owner's cards are drawn; on, an agent card sits under the
  * human card it serves.
  *
@@ -60,7 +60,7 @@ export interface BoardSideTabProps {
   readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
   /** `side` in the Info panel; `page` when the tab fills the chat. */
   readonly density?: BoardDensity;
-  /** "Ferret cards" on or off. */
+  /** "Show private" on or off. */
   readonly onAgents: (agents: boolean) => void;
   /** Expands the tab to the whole chat (at `side`) or collapses it back to the panel (at `page`); absent: no button. */
   readonly onExpand?: () => void;

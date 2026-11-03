@@ -90,6 +90,8 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--doc <path>', 'a document link (repeatable)', collect, [])
     .option('--related <id>', 'a card this belongs to: add it there as a note and create nothing')
     .option('--new', 'create even if a card on the same thing exists')
+    .option('--private', "a ferret's own bookkeeping: off the default board (default for a card an agent asked for)")
+    .option('--public', 'a card the owner sees on the default board (default for a card a person asked for)')
     .action(async (titleWords: string[], options: TaskCreateFlags) => {
       await board.create(titleWords, options);
     });
@@ -273,7 +275,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('edit'))
-    .description("change a card's title, summary, premise, context, glossary, brief or How to test")
+    .description("change a card's title, summary, premise, context, glossary, brief, How to test or visibility")
     .argument('<id>', ID_HELP)
     .option('--title <title>', TASK_TITLE_GUIDANCE)
     .option('--summary <line>', 'one line for the card face')
@@ -294,6 +296,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--brief-file <path>', 'read the brief from a file instead')
     .option('--how-to-test <md>', HOW_TO_TEST_HELP)
     .option('--how-to-test-file <path>', 'read How to test from a file instead')
+    .option('--visibility <public|private>', "who sees it on the default board; only the owner hides the owner's ask")
     .action(async (id: string, options: TaskEditFlags) => {
       await board.edit(id, options);
     });

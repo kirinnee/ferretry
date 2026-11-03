@@ -96,6 +96,13 @@ export const DAEMON_FEATURES = {
    */
   boardGateItems: 'board.gate-items.1',
   /**
+   * Cards are public or private (docs/board.md § Public and private cards): every card the daemon sends carries
+   * `visibility`, `GET /v1/board` takes `?visibility=public|private|all`, `fy task create` takes `--private|--public`
+   * and a card's visibility changes with the `visibility` action. A daemon without this name ignores the query
+   * parameter and sends no field, so the app keeps the older "Ferret cards" rule and the Board shows every card.
+   */
+  boardVisibility: 'board.visibility.1',
+  /**
    * `GET /v1/sessions/:id/messages` reads backward: `?tail=1` and `?through=<cursor>`, answered with `previousCursor`.
    * A daemon without this name ignores both and serves the FIRST page forward, so the app asks only where the
    * machine reports it and otherwise walks the conversation forward as before.
