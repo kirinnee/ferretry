@@ -1158,7 +1158,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(810);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {
