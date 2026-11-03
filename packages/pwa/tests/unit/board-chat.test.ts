@@ -309,6 +309,19 @@ describe('chatCards and "Internal"', () => {
     ]);
   });
 
+  it('hides a sub-card the owner’s lead made for itself (origin human, askedBy agent) like the Board does, and keeps its top-level sibling', async () => {
+    const both = (id: string, extra: Record<string, unknown> = {}) =>
+      card(id, { owner: SELF, laneId: 'todo', origin: 'human', askedBy: 'agent', ...extra });
+    const model = await everyCard([both('F1'), both('F2', { parent: { id: 'F1' } }), both('F3')]);
+    const off = chatCards(model, who({ focus: null }));
+    expect(drawn(off).sort()).toEqual(['F1', 'F3']);
+    expect(off.total).toBe(2);
+    expect(off.hiddenAgents).toBe(1);
+    const on = chatCards(model, who({ focus: null, agents: true }));
+    expect(drawn(on).sort()).toEqual(['F1', 'F2', 'F3']);
+    expect(on.hiddenAgents).toBe(0);
+  });
+
   it('shows every card of an older daemon, which says nothing of who asked', async () => {
     const cards = chatCards(await board(), who());
     expect(cards.total).toBe(6);

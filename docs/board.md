@@ -620,7 +620,7 @@ its `humanParent` where it has one. A **ferret card** is one the daemon says is 
 for stays on the board. A top-level card that is `origin: human` stays on the board even when it is stored
 `askedBy: agent`: that only says no owner message matches its ask word for word (a lead's card filed from the
 owner's own chat, with words of its own added), which is the stricter test the cards to test wait on, not a reason
-to hide the owner's card. The field and URL parameter are still `agents`, so a saved link keeps working. The app
+to hide the owner's card. The chat side panel applies the same rule (`isFerretCard`), so it hides and counts exactly what the Board hides. The field and URL parameter are still `agents`, so a saved link keeps working. The app
 reads that through one helper (`taskAsker`), which goes by `askedBy` alone only for a daemon that sends no `origin`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, ferret cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
 `packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
 
