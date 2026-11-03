@@ -63,6 +63,21 @@ describe('a notification tap that names an Inbox item', () => {
     await mounted.unmount();
   });
 
+  it('opens it AT ITS ASK: "What I need from you" has the focus, so a Needs-you push lands on what to do', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { open: target('A2', true) }));
+    const ask = mounted.container.querySelector('.fy-attn-deck__top [data-agenda-part="needs"]');
+    expect(ask).not.toBeNull();
+    expect(document.activeElement).toBe(ask);
+    await mounted.unmount();
+  });
+
+  it('opens an item the owner picked themselves at its top, not at its ask', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    expect(openView(mounted.container)).toBe('A2');
+    expect(document.activeElement?.getAttribute('data-agenda-view')).toBe('A2');
+    await mounted.unmount();
+  });
+
   it('reports not-opened once the machine has been read and the item is not among the open ones', async () => {
     const reported: boolean[] = [];
     const mounted = await mount(

@@ -383,13 +383,18 @@ export const useAgenda = ({
   const handled = useRef<number | null>(null);
   const focusTarget = focus?.target ?? null;
   const focusSeq = focus?.seq ?? null;
+  const focusOnEntry = focus?.onEntry === true;
+  // The item a link or a notification tap opened: it opens at its ask, so the owner lands on what to do.
+  const [askAt, setAskAt] = useState<AgendaId | null>(null);
   const location = focusTarget === null ? null : locateAgenda(snapshot, focusTarget);
   useEffect(() => {
     if (focusTarget === null || focusSeq === null || handled.current === focusSeq) return;
     if (location === 'pending') return;
     handled.current = focusSeq;
-    if (location !== 'unknown') update(() => ({ card: focusTarget, drawer: false }));
-  }, [focusTarget, focusSeq, location, update]);
+    if (location === 'unknown') return;
+    setAskAt(focusOnEntry ? focusTarget : null);
+    update(() => ({ card: focusTarget, drawer: false }));
+  }, [focusTarget, focusSeq, focusOnEntry, location, update]);
   const missing = focusTarget !== null && location === 'unknown';
 
   const delivering = useMemo(() => deliveringIds(snapshot), [snapshot]);
@@ -536,7 +541,9 @@ export const useAgenda = ({
           ferret={ferret}
           history={history}
           item={cardItem}
+          itemKey={inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id)}
           key={cardItem.id}
+          {...(askAt === cardItem.id ? { startAt: 'ask' as const } : {})}
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}

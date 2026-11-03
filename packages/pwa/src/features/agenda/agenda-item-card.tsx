@@ -1,27 +1,31 @@
 /**
- * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in ONE card, top to bottom:
+ * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's nine parts, top to bottom
+ * (`agenda-item-sections.ts` owns the order; the view's sticky row above holds the title):
  *
- *   top bar    the item's type, "↓ Not needed" (the ↓ swipe) and the version picker ("v2 of 2 · 3m ago")
- *   situation  PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks, each label above its points
- *   need       "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape — the ask itself first
- *              (the question, or what is approved, done or read), then each option with what it means; the steps to
- *              tick; what an approval does; what to review; or the numbered answers a reply gives — and the one plain
- *              instruction last ("Pick one option.")
- *   sections   only what the item carries, each open, none folding: why the recommendation, reasoning or more detail
- *              (Markdown with fy-render), decided, still open, impact, links, terms
- *   answers    ONE row of at most three — ← ↑ → — or the item's own form (an input request), or why it cannot be
- *              answered here (parked or resolved)
+ *   1 head          the STATE chip ("Needs you", "Resting · waiting on Zoe") and the STAGE chip ("Question", "Test"),
+ *                   then the version slot (the picker, "v2 of 2 · 3m ago") and "Not needed" (the ↓ swipe skips)
+ *   2 premise       PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks
+ *   3 detail        the context explained from zero (`detail`), FOLDED
+ *   4 references    ONE TABLE of every term and every link (PR, card, file, page), each with a plain meaning; links
+ *                   are drawn by the one reference renderer
+ *   5 where         WHERE WE ARE NOW (`whereWeAre`): the report or explainer the owner asked for, the ferret's answer
+ *                   to their question, what is decided so far and what is still open
+ *   6 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`)
+ *   7 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
+ *                   recommendation, the steps, the impact, EVERY CARD ASK with its own buttons, and the answer row
+ *   8 body          reports and details (Markdown with fy-render): More detail, or a review's Reasoning
+ *   9 activity      the grey "updated / moved / snoozed" lines, FOLDED (`agenda-activity-log.tsx`)
  *
+ * A part the item does not carry is not drawn. Nothing is cut short: a long report, reply or edit line is drawn whole.
  * Terms are dotted-underlined where the premise, the context and the options use them (`agenda-terms.tsx`). Picking
- * an earlier version redraws the card as it read then, read-only, with the way back to the latest. No left accent
- * bars, no hint lines, no menus.
+ * an earlier version redraws the card as it read then, read-only, with the way back to the latest. A one-row answer
+ * docks at the foot of the open item (`answerDock`) so it stays in reach; a card ask's buttons stay in the item.
  */
 
 import {
   AGENDA_SHAPE_LEADS,
   type AgendaCardAnswer,
   type AgendaItem,
-  type AgendaTerm,
   inputContextLines,
   singleAgendaQuestion,
 } from '@ferretry/protocol';
@@ -31,16 +35,30 @@ import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
+import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import {
+  type ItemCardAsk,
+  itemCardAsks,
+  itemStage,
+  PART_TITLES,
+  type ReferenceRow,
+  referenceRows,
+  STAGE_WORDS,
+  stateChip,
+} from '../../lib/agenda-item-sections.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
-import { attachedGateLead, attachedGateView, toGateAction } from '../../lib/gate-items.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
+import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
+import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
+import { AgendaFold } from './agenda-fold.tsx';
 import { AgendaFormFields } from './agenda-form-fields.tsx';
+import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaNeed, WantedAnswers, wantedAnswers } from './agenda-need.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
@@ -63,8 +81,6 @@ export interface AgendaItemCardProps {
   readonly onSkip?: (() => void) | undefined;
   /** The host offers Not needed itself (under the head's ⓘ), so the card does not draw its own pill. */
   readonly dismissAside?: boolean | undefined;
-  /** The host already draws the kind chip (the Inbox's who line), so the card does not say the kind twice. */
-  readonly typeShown?: boolean | undefined;
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
@@ -93,6 +109,10 @@ export interface AgendaItemCardProps {
    * form's fields are drawn to read, and the owner is told to fill them in in the Inbox.
    */
   readonly formKey?: string | undefined;
+  /** What was said about the item, and its edits (`itemHistory`): its conversation and its activity log. */
+  readonly history?: readonly HistoryEvent[] | undefined;
+  /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
+  readonly itemKey?: string | undefined;
 }
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
@@ -102,7 +122,7 @@ const forConfirmation = (item: AgendaItem): AgendaItem => {
   return rest;
 };
 
-/** One titled section of the card. Always drawn open: the owner reads everything at once, nothing folds. */
+/** One titled section inside a part: drawn open, under its own name. */
 function Section({
   name,
   title,
@@ -221,16 +241,96 @@ function LinksList({
   );
 }
 
-function TermsList({ terms, renderProse }: { readonly terms: readonly AgendaTerm[]; readonly renderProse: Prose }) {
+/** One of the view's parts that is always open, under its title. */
+function Part({
+  part,
+  title,
+  children,
+}: {
+  readonly part: 'references' | 'where' | 'body';
+  readonly title: string;
+  readonly children: ReactNode;
+}) {
   return (
-    <dl className="fy-card__terms" data-agenda-terms="">
-      {terms.map(entry => (
-        <div className="fy-card__term" key={entry.term}>
-          <dt>{entry.term}</dt>
-          <dd>{renderProse(entry.meaning)}</dd>
+    <section aria-label={title} className="fy-card__part" data-agenda-part={part}>
+      <h4 className="fy-card__label fy-card__part-title">{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * TERMS AND REFERENCES as ONE table: every term, then every link, each with what it means in plain words. A link is
+ * drawn by the one reference renderer (`AgendaLinkRow` → the chat's prose), so `&F12`, `!A3` and a PR read and open
+ * exactly as they do in a message.
+ */
+function ReferencesTable({
+  rows,
+  renderProse,
+}: {
+  readonly rows: readonly ReferenceRow[];
+  readonly renderProse: Prose;
+}) {
+  return (
+    <table className="fy-card__refs" data-agenda-references="">
+      <thead>
+        <tr>
+          <th scope="col">Term or link</th>
+          <th scope="col">What it means</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(row => (
+          <tr data-agenda-reference={row.kind} key={row.key}>
+            <th className="fy-card__ref-name" scope="row">
+              {row.kind === 'term' ? row.term : <AgendaLinkRow link={row.link} renderProse={renderProse} />}
+            </th>
+            <td className="fy-card__ref-meaning">{renderProse(row.meaning)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * ONE CARD ASK inside "What I need from you": which card and what it waits on, its How to test when the ask carries
+ * one, and ITS buttons (Done / Not good, or OK to build) — tap only, so the arrows and swipes stay the item's own.
+ */
+function CardAskBlock({
+  ask,
+  busy,
+  onAct,
+  renderProse,
+}: {
+  readonly ask: ItemCardAsk;
+  readonly busy: boolean;
+  readonly onAct: (action: InboxAction) => void;
+  readonly renderProse: Prose;
+}) {
+  return (
+    <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
+      <p className="fy-card__gate-lead">
+        <strong>&amp;{ask.gate.cardId}</strong> {attachedGateLead(ask.gate)}
+      </p>
+      {ask.howToTest === null || ask.howToTest.trim() === '' ? null : (
+        <div className="fy-card__need-part" data-agenda-card-ask-test="">
+          <h5 className="fy-card__label">How to test</h5>
+          <HowToTest renderProse={renderProse} text={ask.howToTest} />
         </div>
-      ))}
-    </dl>
+      )}
+      <AgendaQuickReplies
+        busy={busy}
+        error={null}
+        map={{}}
+        model={cardModel(ask.view)}
+        onAct={action => onAct(toGateAction(action, ask.gate))}
+        options={ask.view.ask?.kind === 'multiple-choice' ? ask.view.ask.options : []}
+        plainLabels
+        swipeable={false}
+        tapOnly
+      />
+    </div>
   );
 }
 
@@ -279,7 +379,6 @@ export function AgendaItemCard({
   swipeable,
   onSkip,
   dismissAside = false,
-  typeShown = false,
   renderProse,
   onAct,
   onProgress,
@@ -292,6 +391,8 @@ export function AgendaItemCard({
   onRequestChanges,
   answerDock,
   formKey,
+  history = [],
+  itemKey,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
@@ -303,6 +404,7 @@ export function AgendaItemCard({
   const read = forConfirmation(item);
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
+  const foldKey = itemKey ?? item.id;
   // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
   // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
   const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
@@ -360,7 +462,10 @@ export function AgendaItemCard({
   const kind = meta.kind;
   const body = item.body?.trim() ? item.body : null;
   const questionAnswer = item.questionAnswer?.trim() ? item.questionAnswer : null;
+  const whereWeAre = read.whereWeAre?.trim() ? read.whereWeAre : null;
+  const detail = read.detail?.trim() ? read.detail : null;
   const steps = item.steps ?? [];
+  const references = referenceRows(item);
   // What the segment already says is not said again below it: an approval's effect, a review's links, a to-do's steps.
   const effectInNeed = shape === 'approval' && item.impact !== undefined;
   const linksInNeed = shape === 'review' && item.links !== undefined;
@@ -369,44 +474,24 @@ export function AgendaItemCard({
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
       ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
       : undefined;
-  const attached = attachedGateView(item);
-  const gateRow =
-    attached === undefined ? null : (
-      <div className="fy-card__gate-row" data-agenda-attached-gate={attached.gate.cardId}>
-        <p className="fy-card__gate-lead">
-          <strong>&amp;{attached.gate.cardId}</strong> {attachedGateLead(attached.gate)} Answer it here too.
-        </p>
-        <AgendaQuickReplies
-          busy={busy}
-          error={null}
-          map={{}}
-          model={cardModel(attached)}
-          onAct={action => onAct(toGateAction(action, attached.gate))}
-          options={attached.ask?.kind === 'multiple-choice' ? attached.ask.options : []}
-          plainLabels
-          swipeable={false}
-          tapOnly
-        />
-      </div>
-    );
+  // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
+  // separate item. Only the latest version is answerable, so an earlier one draws none.
+  const cardAsks = latest && settled === undefined ? itemCardAsks(item) : [];
   const replies = (
-    <>
-      <AgendaQuickReplies
-        busy={busy}
-        error={error}
-        map={swipeMap(item)}
-        model={model}
-        onAct={onAct}
-        options={options}
-        plainLabels={item.gate !== undefined}
-        swipeable={swipeable}
-        {...(onSkip === undefined ? {} : { onSkip })}
-        {...(doneClose === undefined ? {} : { doneClose })}
-        {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
-        {...(requestChanges === undefined ? {} : { requestChanges })}
-      />
-      {gateRow}
-    </>
+    <AgendaQuickReplies
+      busy={busy}
+      error={error}
+      map={swipeMap(item)}
+      model={model}
+      onAct={onAct}
+      options={options}
+      plainLabels={item.gate !== undefined}
+      swipeable={swipeable}
+      {...(onSkip === undefined ? {} : { onSkip })}
+      {...(doneClose === undefined ? {} : { doneClose })}
+      {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
+      {...(requestChanges === undefined ? {} : { requestChanges })}
+    />
   );
   // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
   const docked =
@@ -415,7 +500,10 @@ export function AgendaItemCard({
     settled === undefined &&
     !isInput &&
     planForm === undefined &&
-    (model.notice || model.answers.length > 0 || requestChanges !== undefined || attached !== undefined);
+    (model.notice || model.answers.length > 0 || requestChanges !== undefined);
+  const state = stateChip(current, ferret, now);
+  const stage = itemStage(current);
+  const hasWhere = whereWeAre !== null || questionAnswer !== null || read.decided?.trim() || read.stillOpen?.trim();
 
   return (
     <article
@@ -425,104 +513,182 @@ export function AgendaItemCard({
       data-agenda-version={shown}
       data-kind={meta.tone}
     >
-      {(gated || typeShown) && count <= 1 && !canDismiss ? null : (
-        <div className="fy-card__top" data-agenda-card-top="" {...pull}>
-          {gated || typeShown ? null : (
-            <span className="fy-card__type" data-agenda-type={meta.kind} data-tone={meta.tone}>
-              {meta.label}
+      {/* 1. HEAD: where it stands and what it is now, then the version slot (a diff control joins it) and Not needed. */}
+      <div className="fy-card__top" data-agenda-card-top="" data-agenda-part="head" {...pull}>
+        <span className="fy-card__chips">
+          <span className="fy-card__state" data-agenda-state={state.state}>
+            {state.label}
+          </span>
+          {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. */}
+          {gated ? null : (
+            <span
+              className="fy-card__type"
+              data-agenda-stage={stage}
+              data-agenda-type={meta.kind}
+              data-tone={meta.tone}
+            >
+              {STAGE_WORDS[stage]}
             </span>
           )}
-          <span className="fy-card__tools">
-            {canDismiss ? (
-              <button
-                aria-label="Not needed"
-                className="fy-card__dismiss"
-                data-agenda-dismiss=""
-                disabled={busy}
-                onClick={dismiss}
-                type="button"
-              >
-                Not needed
-              </button>
-            ) : null}
+        </span>
+        <span className="fy-card__tools">
+          <span className="fy-card__version-slot" data-agenda-version-slot="">
             {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
           </span>
-        </div>
-      )}
+          {canDismiss ? (
+            <button
+              aria-label="Not needed"
+              className="fy-card__dismiss"
+              data-agenda-dismiss=""
+              disabled={busy}
+              onClick={dismiss}
+              type="button"
+            >
+              Not needed
+            </button>
+          ) : null}
+        </span>
+      </div>
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
-      {latest ? <AgendaConfigChange item={item} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
-        {gated ? null : <Situation context={context} premise={premise} renderProse={renderProse} />}
-        {questionAnswer === null ? null : (
-          <div className="fy-card__answered" data-agenda-question-answer="">
-            <h5 className="fy-card__label">Answer to your question</h5>
-            <PointForm renderProse={renderProse} text={mark(questionAnswer)} />
+        {/* 2. PREMISE AND CONTEXT (a held config change first, which stands in for the premise). */}
+        {latest ? <AgendaConfigChange item={item} /> : null}
+        {gated || (premise === null && context === null) ? null : (
+          <div className="fy-card__part" data-agenda-part="premise">
+            <Situation context={context} premise={premise} renderProse={renderProse} />
           </div>
         )}
-        {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
-        {inputDrawn ? null : (
-          <AgendaNeed
-            shape={shape}
-            {...(gated && body !== null ? { heading: 'How to test' } : {})}
-            {...(gated ? { lead: '' } : {})}
-            {...(!answerable || (shape === 'form' && formKey !== undefined)
-              ? // A form filled in here says how to send in its own pinned foot, with the count.
-                { lead: '' }
-              : shape === 'form'
-                ? { lead: FORM_ELSEWHERE }
-                : {})}
-            {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
-          >
-            {askLine === '' ||
-            cardsForm !== undefined ||
-            (gated && body !== null) ||
-            shape === 'answers' ||
-            shape === 'input' ||
-            shape === 'form' ? null : (
-              <div className="fy-card__question" data-agenda-question-line="">
-                {renderProse(mark(askLine))}
+        {/* 3. DETAILED CONTEXT, from zero: folded. */}
+        {detail === null ? null : (
+          <AgendaFold itemKey={foldKey} part="detail" title={PART_TITLES.detail}>
+            <AgendaBody renderProse={renderProse} text={mark(detail)} />
+          </AgendaFold>
+        )}
+        {/* 4. TERMS AND REFERENCES, one table. */}
+        {references.length === 0 ? null : (
+          <Part part="references" title={PART_TITLES.references}>
+            <ReferencesTable renderProse={renderProse} rows={references} />
+          </Part>
+        )}
+        {/* 5. WHERE WE ARE NOW: the report asked for, the answer to the owner's question, what is decided and open. */}
+        {hasWhere ? (
+          <Part part="where" title={PART_TITLES.where}>
+            {whereWeAre === null ? null : (
+              <div className="fy-card__where" data-agenda-where-now="">
+                <AgendaBody renderProse={renderProse} text={whereWeAre} />
               </div>
             )}
-            {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
-            {cardsForm}
-            {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
-            {choosing && showList ? (
-              <OptionsList
-                busy={busy}
-                onPick={label => {
-                  const option = options.find(entry => entry.label === label);
-                  if (option !== undefined && !busy) onAct(optionAction(option, ''));
-                }}
-                options={listed}
-                renderProse={renderProse}
-              />
-            ) : null}
-            {effectInNeed && item.impact !== undefined ? (
-              <div className="fy-card__need-part" data-agenda-need-effect="">
-                <h5 className="fy-card__label">What it does</h5>
-                <PointForm renderProse={renderProse} text={mark(item.impact)} />
+            {questionAnswer === null ? null : (
+              <div className="fy-card__answered" data-agenda-question-answer="">
+                <h5 className="fy-card__label">Answer to your question</h5>
+                <PointForm renderProse={renderProse} text={mark(questionAnswer)} />
               </div>
+            )}
+            {read.decided?.trim() ? (
+              <Section name="decided" title="Decided so far">
+                <PointForm renderProse={renderProse} text={read.decided} />
+              </Section>
             ) : null}
-            {linksInNeed && item.links !== undefined ? (
-              <div className="fy-card__need-part" data-agenda-need-review="">
-                <h5 className="fy-card__label">What to review</h5>
-                <LinksList links={item.links} renderProse={renderProse} />
-              </div>
+            {read.stillOpen?.trim() ? (
+              <Section name="still-open" title="Still open">
+                <PointForm renderProse={renderProse} text={read.stillOpen} />
+              </Section>
             ) : null}
-            {shape === 'form' ? (
-              <AgendaFormFields
-                disabled={busy || !answerable}
-                fields={formFields}
-                formKey={formKey ?? null}
-                instruction={answerable ? AGENDA_SHAPE_LEADS.form : null}
-                picks={formPicks}
-                renderProse={renderProse}
-              />
-            ) : null}
-            {shape === 'answers' ? (
-              <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />
-            ) : null}
-            {stepsInNeed && steps.length > 0 ? (
+          </Part>
+        ) : null}
+        {/* 6. CONVERSATION, oldest first. */}
+        <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
+        {/* 7. WHAT I NEED FROM YOU: the ask, then every card ask with its own buttons, then the answer row. */}
+        <div className="fy-card__part" data-agenda-part="needs" tabIndex={-1}>
+          {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
+          {inputDrawn ? null : (
+            <AgendaNeed
+              shape={shape}
+              {...(gated && body !== null ? { heading: 'How to test' } : {})}
+              {...(gated ? { lead: '' } : {})}
+              {...(!answerable || (shape === 'form' && formKey !== undefined)
+                ? // A form filled in here says how to send in its own pinned foot, with the count.
+                  { lead: '' }
+                : shape === 'form'
+                  ? { lead: FORM_ELSEWHERE }
+                  : {})}
+              {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
+            >
+              {askLine === '' ||
+              cardsForm !== undefined ||
+              (gated && body !== null) ||
+              shape === 'answers' ||
+              shape === 'input' ||
+              shape === 'form' ? null : (
+                <div className="fy-card__question" data-agenda-question-line="">
+                  {renderProse(mark(askLine))}
+                </div>
+              )}
+              {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
+              {cardsForm}
+              {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
+              {choosing && showList ? (
+                <OptionsList
+                  busy={busy}
+                  onPick={label => {
+                    const option = options.find(entry => entry.label === label);
+                    if (option !== undefined && !busy) onAct(optionAction(option, ''));
+                  }}
+                  options={listed}
+                  renderProse={renderProse}
+                />
+              ) : null}
+              {effectInNeed && item.impact !== undefined ? (
+                <div className="fy-card__need-part" data-agenda-need-effect="">
+                  <h5 className="fy-card__label">What it does</h5>
+                  <PointForm renderProse={renderProse} text={mark(item.impact)} />
+                </div>
+              ) : null}
+              {linksInNeed && item.links !== undefined ? (
+                <div className="fy-card__need-part" data-agenda-need-review="">
+                  <h5 className="fy-card__label">What to review</h5>
+                  <LinksList links={item.links} renderProse={renderProse} />
+                </div>
+              ) : null}
+              {shape === 'form' ? (
+                <AgendaFormFields
+                  disabled={busy || !answerable}
+                  fields={formFields}
+                  formKey={formKey ?? null}
+                  instruction={answerable ? AGENDA_SHAPE_LEADS.form : null}
+                  picks={formPicks}
+                  renderProse={renderProse}
+                />
+              ) : null}
+              {shape === 'answers' ? (
+                <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />
+              ) : null}
+              {stepsInNeed && steps.length > 0 ? (
+                <AgendaSteps
+                  disabled={busy || !answerable}
+                  done={item.stepsDone ?? []}
+                  renderProse={renderProse}
+                  steps={steps}
+                  {...(onProgress === undefined || !answerable ? {} : { onProgress })}
+                />
+              ) : null}
+            </AgendaNeed>
+          )}
+          {recommendation === undefined || recommendation.why === undefined ? null : (
+            <Section
+              name="recommendation"
+              title={`Why I recommend ${recommendedOption?.name ?? recommendation.decision}`}
+            >
+              {recommendedOption === undefined ? (
+                <p className="fy-card__decision">
+                  <strong>{recommendation.decision}</strong>
+                </p>
+              ) : null}
+              <PointForm renderProse={renderProse} text={recommendation.why} />
+            </Section>
+          )}
+          {steps.length === 0 || stepsInNeed ? null : (
+            <Section name="steps" title="Steps">
               <AgendaSteps
                 disabled={busy || !answerable}
                 done={item.stepsDone ?? []}
@@ -530,106 +696,68 @@ export function AgendaItemCard({
                 steps={steps}
                 {...(onProgress === undefined || !answerable ? {} : { onProgress })}
               />
-            ) : null}
-          </AgendaNeed>
-        )}
+            </Section>
+          )}
+          {(item.impact === undefined || effectInNeed) && item.urgency === undefined ? null : (
+            <Section name="impact" title={kind === 'permission' ? 'What it allows' : 'Impact'}>
+              {item.impact === undefined || effectInNeed ? null : (
+                <PointForm renderProse={renderProse} text={item.impact} />
+              )}
+              {item.urgency === undefined ? null : (
+                <p className="fy-card__decision">
+                  <strong>Urgency:</strong> {item.urgency}
+                </p>
+              )}
+            </Section>
+          )}
+          {cardAsks.length === 0 ? null : (
+            <div className="fy-card__card-asks" data-agenda-card-asks={cardAsks.length}>
+              {cardAsks.map(ask => (
+                <CardAskBlock ask={ask} busy={busy} key={ask.key} onAct={onAct} renderProse={renderProse} />
+              ))}
+            </div>
+          )}
+          {!latest ? (
+            <p className="fy-card__old" data-agenda-old-version="">
+              <span>Showing v{shown}.</span>
+              <button
+                className="kt-btn fy-card__latest"
+                data-agenda-latest=""
+                onClick={() => setShown(count)}
+                type="button"
+              >
+                <Check aria-hidden="true" size={13} />
+                Back to v{count}
+              </button>
+            </p>
+          ) : settled !== undefined ? (
+            settled
+          ) : isInput ? (
+            <div className="fy-card__input" data-agenda-input-form="">
+              {inputForm}
+            </div>
+          ) : planForm !== undefined ? (
+            <div className="fy-card__input" data-agenda-plan-form="">
+              {planForm}
+            </div>
+          ) : (
+            <>
+              {parkedNote}
+              {docked ? createPortal(replies, answerDock) : replies}
+            </>
+          )}
+        </div>
       </TermLayer>
-      {recommendation === undefined || recommendation.why === undefined ? null : (
-        <Section name="recommendation" title={`Why I recommend ${recommendedOption?.name ?? recommendation.decision}`}>
-          {recommendedOption === undefined ? (
-            <p className="fy-card__decision">
-              <strong>{recommendation.decision}</strong>
-            </p>
-          ) : null}
-          <PointForm renderProse={renderProse} text={recommendation.why} />
-        </Section>
-      )}
-      {steps.length === 0 || stepsInNeed ? null : (
-        <Section name="steps" title="Steps">
-          <AgendaSteps
-            disabled={busy || !answerable}
-            done={item.stepsDone ?? []}
-            renderProse={renderProse}
-            steps={steps}
-            {...(onProgress === undefined || !answerable ? {} : { onProgress })}
-          />
-        </Section>
-      )}
+      {/* 8. BODY: reports and details. */}
       {body === null || model.notice || gated ? null : (
-        <Section
-          name={kind === 'review' ? 'reasoning' : 'more'}
-          title={kind === 'review' ? 'Reasoning' : 'More detail'}
-        >
-          <AgendaBody renderProse={renderProse} text={body} />
-        </Section>
+        <Part part="body" title={kind === 'review' ? 'Reasoning' : PART_TITLES.body}>
+          <div data-agenda-section={kind === 'review' ? 'reasoning' : 'more'}>
+            <AgendaBody renderProse={renderProse} text={body} />
+          </div>
+        </Part>
       )}
-      {read.decided?.trim() ? (
-        <Section name="decided" title="Decided so far">
-          <PointForm renderProse={renderProse} text={read.decided} />
-        </Section>
-      ) : null}
-      {read.stillOpen?.trim() ? (
-        <Section name="still-open" title="Still open">
-          <PointForm renderProse={renderProse} text={read.stillOpen} />
-        </Section>
-      ) : null}
-      {(item.impact === undefined || effectInNeed) && item.urgency === undefined ? null : (
-        <Section name="impact" title={kind === 'permission' ? 'What it allows' : 'Impact'}>
-          {item.impact === undefined || effectInNeed ? null : (
-            <PointForm renderProse={renderProse} text={item.impact} />
-          )}
-          {item.urgency === undefined ? null : (
-            <p className="fy-card__decision">
-              <strong>Urgency:</strong> {item.urgency}
-            </p>
-          )}
-        </Section>
-      )}
-      {item.links === undefined || linksInNeed ? null : (
-        <Section name="links" title="Links">
-          <LinksList links={item.links} renderProse={renderProse} />
-        </Section>
-      )}
-      {terms.length === 0 ? null : (
-        <Section name="terms" title="Terms">
-          <TermsList renderProse={renderProse} terms={terms} />
-        </Section>
-      )}
-      {!latest ? (
-        <p className="fy-card__old" data-agenda-old-version="">
-          <span>Showing v{shown}.</span>
-          <button
-            className="kt-btn fy-card__latest"
-            data-agenda-latest=""
-            onClick={() => setShown(count)}
-            type="button"
-          >
-            <Check aria-hidden="true" size={13} />
-            Back to v{count}
-          </button>
-        </p>
-      ) : settled !== undefined ? (
-        settled
-      ) : isInput ? (
-        <div className="fy-card__input" data-agenda-input-form="">
-          {inputForm}
-        </div>
-      ) : planForm !== undefined ? (
-        <div className="fy-card__input" data-agenda-plan-form="">
-          {planForm}
-        </div>
-      ) : docked ? null : (
-        <>
-          {parkedNote}
-          {replies}
-        </>
-      )}
-      {docked ? (
-        <>
-          {parkedNote}
-          {createPortal(replies, answerDock)}
-        </>
-      ) : null}
+      {/* 9. ACTIVITY LOG: folded. */}
+      <AgendaActivityLog ferret={ferret} item={current} itemKey={foldKey} now={now} />
     </article>
   );
 }

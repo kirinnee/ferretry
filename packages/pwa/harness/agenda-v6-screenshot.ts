@@ -11,7 +11,7 @@
  * sideways; the card, the History or the title column is not the composer's width; "Why now" is drawn; anything in
  * the card has a left accent bar; the answer row holds more than three buttons or wraps; Not needed is not in the
  * card's top bar; a term's meaning does not open; or the History holds tool text, unrelated chat, a ferret bubble,
- * or no "Card updated to v2".
+ * or an edit line ("Card updated to v2" is the folded activity log's).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -251,8 +251,8 @@ const checkHistory = async (page: Page, label: string): Promise<void> => {
   check(text.includes('does pause kill a running turn?'), `${label}: the owner's question is missing`);
   check(text.includes('A running turn finishes'), `${label}: the ferret's paragraph under the !A90 heading is missing`);
   check(text.includes('It only stops new turns from starting'), `${label}: the recap pair about the item is missing`);
-  check(text.includes('Card updated to v2'), `${label}: no "Card updated to v2"`);
-  check(text.includes('Context: added'), `${label}: the edit's change summary is missing`);
+  // An edit is the folded activity log's line, never the conversation's (`agenda-parts-screenshot.ts` checks the log).
+  check(!text.includes('Card updated'), `${label}: an edit is drawn in the conversation`);
   const backgrounds = await history
     .locator('[data-history="ferret"]')
     .evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));

@@ -306,13 +306,14 @@
   text-transform: uppercase;
 }
 
-/* The top bar: the type, then "↓ Not needed" and the version picker on the right. */
+/* The top bar (part 1, the head's chips): the state and the stage, then the version slot and "Not needed" on the right. */
 .fy-card__top {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--gap-sm);
+  gap: 6px var(--gap-sm);
   touch-action: pan-y;
 }
 .fy-card__type {
@@ -323,6 +324,174 @@
   color: var(--accent);
   font-size: var(--text-sm);
   font-weight: var(--weight-strong);
+}
+/* PART 1, THE HEAD'S CHIPS: where the item stands (a coloured dot and the words — never colour alone) and its stage. */
+/* The chips keep their own row; the version slot and Not needed wrap under them on a narrow phone rather than squeeze. */
+.fy-card__chips {
+  display: flex;
+  min-width: min(100%, 15rem);
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.fy-card__state {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+.fy-card__state::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+}
+.fy-card__state[data-agenda-state='needs-you']::before {
+  background: var(--accent);
+}
+.fy-card__state[data-agenda-state='done']::before {
+  background: var(--ok);
+}
+.fy-card__state:is([data-agenda-state='resting'], [data-agenda-state='snoozed']) {
+  color: var(--muted);
+}
+/* The slot PR 8's version and diff control sits in, beside the picker it replaces. */
+.fy-card__version-slot {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.fy-card__version-slot:empty {
+  display: none;
+}
+
+/* EVERY PART after the head: its label above it, a hairline between parts so the long ones still read apart. */
+.fy-card__part {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-card__part-title {
+  color: var(--muted);
+}
+/* A part takes focus only as a landing place (a push opens the item at its ask): it is not a control, so it draws no
+   ring; its own buttons and fields keep theirs. */
+.fy-card__part:focus {
+  outline: none;
+}
+/* Part 5, where we are now: the report or explainer the owner asked for, drawn whole, on a quiet tint. */
+.fy-card__where {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2, var(--bg));
+}
+.fy-card__where .fy-attn-body,
+.fy-card__fold-body .fy-attn-body {
+  margin: 0;
+}
+/* Part 7's card asks: each one its own framed block with its own buttons, under the item's own ask. */
+.fy-card__card-asks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fy-card__card-asks .fy-card__gate-row {
+  margin-top: 0;
+  padding: 10px 12px;
+  border: var(--stroke, 1px) solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md);
+}
+.fy-card__card-asks .fy-card__gate-lead {
+  color: var(--fg);
+}
+
+/* THE FOLDED PARTS (detailed context, activity log): the heading is the button; a chevron turns as it opens. */
+.fy-card__fold {
+  gap: 0;
+  border-top: var(--stroke, 1px) solid var(--border);
+  padding-top: 4px;
+}
+.fy-card__fold-head {
+  margin: 0;
+}
+.fy-card__fold-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fy-card__fold-toggle:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+.fy-card__fold-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+.fy-card__fold[data-open] .fy-card__fold-chevron {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-card__fold-chevron {
+    transition: none;
+  }
+}
+.fy-card__fold-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-card__fold-body {
+  min-width: 0;
+  padding: 4px 0 8px;
+}
+
+/* Part 9, the activity log: small grey lines, oldest first, each with its time; what an edit changed under it. */
+.fy-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-activity__text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  overflow-wrap: anywhere;
+}
+.fy-activity__time {
+  font-variant-numeric: tabular-nums;
+}
+.fy-activity__details {
+  margin: 2px 0 0;
+  padding-left: 14px;
+  list-style: disc;
+  overflow-wrap: anywhere;
 }
 .fy-card__tools {
   display: flex;
@@ -593,20 +762,49 @@
 .fy-card__section-body .fy-attn-points {
   padding-left: 18px;
 }
-.fy-card__terms {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 12px;
+/* THE TERMS AND REFERENCES TABLE: every term and every link, each with its plain meaning. Two columns on any width;
+   a long name or URL breaks rather than pushing the page sideways. */
+.fy-card__refs {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
-.fy-card__term {
-  display: contents;
+.fy-card__refs :is(th, td) {
+  padding: 6px 8px;
+  border-bottom: var(--stroke, 1px) solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
 }
-.fy-card__term > dt {
+.fy-card__refs thead th {
+  padding-top: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
   font-weight: var(--weight-strong);
 }
-.fy-card__term > dd {
-  margin: 0;
+.fy-card__refs :is(th, td):first-child {
+  width: 38%;
+  padding-left: 0;
+}
+.fy-card__refs tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+.fy-card__ref-name {
+  font-weight: var(--weight-strong);
+}
+/* A link and its meaning sit on one baseline, at the body's size, whatever renders the reference. */
+.fy-card__ref-name .fy-attn-link {
+  align-items: baseline;
+}
+.fy-card__refs :is(.fy-attn-link, .fy-attn-link .text-muted, .md) {
+  font-size: inherit;
+  line-height: inherit;
+}
+.fy-card__ref-meaning {
   color: var(--muted);
+}
+.fy-card__ref-meaning :is(p, .md) {
+  margin: 0;
 }
 .fy-card__links {
   display: flex;
@@ -1062,14 +1260,12 @@
   line-height: inherit;
 }
 
-/* A GATE ITEM's title wraps to two lines instead of scrolling: the head row's chevrons already take the width. */
+/* A GATE ITEM's title wraps instead of scrolling (the head row's chevrons already take the width), and is drawn whole:
+   nothing on the open item is clamped. */
 .fy-item-view__title[data-wrap] {
-  display: -webkit-box;
-  overflow: hidden;
+  overflow: visible;
   white-space: normal;
   overflow-wrap: anywhere;
   text-overflow: clip;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 /* The card's summary, one line under the gate item's title. */

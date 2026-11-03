@@ -16,14 +16,15 @@
  * - THE ITEM ITSELF: one "Card updated to vN" line per edit, with what the edit changed in plain words (the points
  *   added or removed from the premise, context, decided and still-open lists, the fields reworded). Its raise is the
  *   ferret's own message citing it; nothing is made up to stand for it, so the card's words are never said twice.
+ *   The item view draws these in its folded activity log, apart from the conversation.
+ *
+ * NOTHING IS CUT: a ferret's reply about the item and every line an edit changed are kept whole (docs/agenda.md § The
+ * item view, "no size limit").
  */
 
 import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/protocol';
 import { FIELD_LABEL, POINT_FIELDS, bulletPoints, describePrevious, itemAtVersion } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
-
-/** The longest ferret message kept whole; the rest is cut and marked, the chat holds the whole. */
-export const HISTORY_FERRET_CHARS = 700;
 
 export type HistoryEvent =
   /** An edit made the card version `version`. */
@@ -49,9 +50,6 @@ export type HistoryEvent =
   | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
 
 const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
-
-const cut = (text: string): string =>
-  text.length > HISTORY_FERRET_CHARS ? `${text.slice(0, HISTORY_FERRET_CHARS).trimEnd()}…` : text;
 
 /** A plain reply without the reference the composer put in front of it: the bubble says what the owner typed. */
 const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
@@ -235,19 +233,15 @@ const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): read
     }
     if (entry.kind !== 'assistant' || entry.text.trim() === '') continue;
     const about = aboutItem(entry.text, cites, ownerWords);
-    if (about !== '') events.push({ kind: 'ferret', key: entry.id, at: clock, text: cut(about) });
+    if (about !== '') events.push({ kind: 'ferret', key: entry.id, at: clock, text: about });
   }
   return events;
 };
 
-const LONGEST_POINT = 140;
-const MOST_LINES = 6;
 const SHOWN_AS_TEXT: ReadonlySet<string> = new Set(['title', 'subject']);
 
-const brief = (text: string): string => {
-  const flat = text.replace(/\s+/gu, ' ').trim();
-  return flat.length > LONGEST_POINT ? `${flat.slice(0, LONGEST_POINT).trimEnd()}…` : flat;
-};
+/** A point on one line, whole: the activity log never cuts what an edit said. */
+const brief = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 
 const pointsOf = (text: string | null): readonly string[] =>
   text === null || text.trim() === '' ? [] : (bulletPoints(text) ?? [text.trim()]);
@@ -276,12 +270,11 @@ const summarize = (item: AgendaItem, index: number): readonly string[] => {
     else if (SHOWN_AS_TEXT.has(field)) lines.push(`${label}: now “${brief(now)}”`);
     else lines.push(`${label}: reworded`);
   }
-  return lines.length > MOST_LINES
-    ? [...lines.slice(0, MOST_LINES), `and ${String(lines.length - MOST_LINES)} more changes`]
-    : lines;
+  return lines;
 };
 
-const versions = (item: AgendaItem): readonly HistoryEvent[] =>
+/** One event per edit, oldest first, each with what it changed: the activity log reads these from the item itself. */
+export const revisionEvents = (item: AgendaItem): readonly HistoryEvent[] =>
   (item.revisions ?? []).map(
     (revision, index) =>
       ({
@@ -298,7 +291,7 @@ const versions = (item: AgendaItem): readonly HistoryEvent[] =>
  * item and it was never edited.
  */
 export const itemHistory = (item: AgendaItem, entries: readonly TranscriptEntry[]): readonly HistoryEvent[] =>
-  [...versions(item), ...spoken(item.id, entries)]
+  [...revisionEvents(item), ...spoken(item.id, entries)]
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
     .map(({ event }) => event);

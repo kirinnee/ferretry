@@ -457,9 +457,16 @@ describe('a request to show an item (`?attention=A5`)', () => {
     expect(view.root.findAll(node => node.props?.['data-agenda-missing'] !== undefined)).toHaveLength(0);
   });
 
-  test('an open item named on entry still opens its card', () => {
+  test('an open item named on entry (a link, a notification tap) opens its card AT ITS ASK', () => {
     const view = mount({ snapshot: board(MIXED), focus: { ...target('A2'), onEntry: true } });
-    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+    const card = view.root.findByType(AgendaItemView);
+    expect(card.props.item.id).toBe('A2');
+    expect(card.props.startAt).toBe('ask');
+  });
+
+  test('an item the owner opened by clicking a reference opens at its top', () => {
+    const view = mount({ snapshot: board(MIXED), focus: target('A2') });
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBeUndefined();
   });
 
   test('opens a resolved item read-only: how it ended, no quick replies, no snooze, no reply prefix', () => {

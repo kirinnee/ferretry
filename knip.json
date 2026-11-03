@@ -95,6 +95,7 @@
         "harness/agenda-v6-screenshot.ts",
         "harness/live-card-screenshot.ts",
         "harness/agenda-tab-screenshot.ts",
+        "harness/agenda-parts-screenshot.ts",
         "harness/agenda-chip-screenshot.ts",
         "harness/agenda-shapes-screenshot.ts",
         "harness/orphan-notice-screenshot.ts",

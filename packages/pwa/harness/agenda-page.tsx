@@ -13,6 +13,9 @@
  *                         A84 note, A85 reply
  *   &v6=1                 adds the v6 card items: A90 (the spend-limit decision with terms, two versions and a
  *                         conversation), A91 a to-do with steps, A92 a lettered choice of four, A93 an input request
+ *   ?parts=1              only the nine-part item view's items (`agenda-parts.ts`): A120 explainer, A121 question
+ *                         (a long report and a conversation), A122 plan to approve, A123 tracker, A124 test with a card
+ *                         ask, for `agenda-parts-screenshot.ts`
  *   ?shapes=1             only one item of each answer shape (A101 choice … A108 info), for `agenda-shapes-screenshot.ts`
  *   ?headings=1           only the A110 card: a long ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *
@@ -26,6 +29,7 @@ import { createRoot } from 'react-dom/client';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
 import { HEADING_ASK_ID, HEADING_ASK_PATCH } from './agenda-heading-ask.ts';
+import { PARTS_ENTRIES, PARTS_ITEMS } from './agenda-parts.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -843,6 +847,7 @@ const v5 = params.get('v5') === '1';
 const v6 = params.get('v6') === '1';
 const shapes = params.get('shapes') === '1';
 const headings = params.get('headings') === '1';
+const parts = params.get('parts') === '1';
 
 const items = [
   ...AGENDA,
@@ -874,11 +879,13 @@ const board: AgendaSnapshot =
         ? snapshot([], { delivery: { sending: ['A1' as AgendaId] } }, [SENT])
         : view === 'one'
           ? snapshot([A3])
-          : shapes
-            ? snapshot([...SHAPES_ITEMS])
-            : headings
-              ? snapshot([item(HEADING_ASK_ID, 5, { ...SHAPE_BRIEF, ...HEADING_ASK_PATCH })])
-              : snapshot(items);
+          : parts
+            ? snapshot([...PARTS_ITEMS])
+            : shapes
+              ? snapshot([...SHAPES_ITEMS])
+              : headings
+                ? snapshot([item(HEADING_ASK_ID, 5, { ...SHAPE_BRIEF, ...HEADING_ASK_PATCH })])
+                : snapshot(items);
 
 const live =
   params.get('live') === '1' ? (
@@ -895,7 +902,15 @@ createRoot(root).render(
       agendaMode={view !== 'none'}
       board={board}
       entries={
-        v6 ? V6_ENTRIES : v5 ? [...HISTORY_ENTRIES, ...V5_ENTRIES] : withHistory || long ? HISTORY_ENTRIES : undefined
+        parts
+          ? PARTS_ENTRIES
+          : v6
+            ? V6_ENTRIES
+            : v5
+              ? [...HISTORY_ENTRIES, ...V5_ENTRIES]
+              : withHistory || long
+                ? HISTORY_ENTRIES
+                : undefined
       }
       live={live}
       now={NOW}

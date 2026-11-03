@@ -143,8 +143,8 @@ describe('the item view snooze control', () => {
   });
 });
 
-describe('the v6 layout: title, ONE card, history — one column', () => {
-  test('is a dialog over the message list whose ONE scroller holds the head, the card and the History in order', async () => {
+describe('the v6 layout: title, ONE card — one column', () => {
+  test('is a dialog over the message list whose ONE scroller holds the head and the card (the conversation inside it)', async () => {
     const history: HistoryEvent[] = [{ kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47: noted.' }];
     await draw(richItem, {}, history);
     expect(one('section').getAttribute('role')).toBe('dialog');
@@ -152,16 +152,18 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect([...column.children].map(child => child.className.split(' ')[0])).toEqual([
       'fy-item-view__head',
       'fy-card',
-      'fy-hist',
       'fy-item-view__dock',
     ]);
+    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toContain('Re !A47: noted.');
     // The answer row is in the sticky dock at the foot of the column, not a strip of its own above the composer.
     expect(one('.fy-item-view__dock [data-agenda-quick-replies]')).toBeDefined();
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
-  test('is ONE row: the title, then the status dot, the pager, ⓘ, the clock and ✕ — nothing under it until ⓘ opens', async () => {
-    await draw(richItem, { onSnooze: () => undefined });
+  test('is ONE row: the title, then the urgency dot, the pager, ⓘ, the clock and ✕ — nothing under it until ⓘ opens', async () => {
+    await draw(agendaItem('A47', { ...richItem, blockingNow: true } as Partial<AgendaItem>), {
+      onSnooze: () => undefined,
+    });
     const head = one('.fy-item-view__head');
     expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
       'fy-item-view__bar fy-card-head',
@@ -236,14 +238,16 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(text).not.toMatch(/why now|what’s going on|what's going on|why it matters/iu);
   });
 
-  test('says the kind once: a host that draws the kind chip (the Inbox) gets no pill in the card', async () => {
+  test('says where the item stands once: the state is the card’s chip, and the head row says only urgency', async () => {
     await draw(richItem, { tools: <span data-test-tool="">tools</span> });
-    expect(root().querySelector('[data-agenda-type]')).toBeNull();
+    expect(root().querySelectorAll('[data-agenda-type]')).toHaveLength(1);
+    expect(one('[data-agenda-state]').textContent).toBe('Needs you');
+    expect(root().querySelector('.fy-item-view__bar [data-agenda-status]')).toBeNull();
   });
 
   test('teaches nothing: no hint line under the type, no ⋯ menu', async () => {
     await draw(richItem);
-    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Decision');
+    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Question');
     const text = root().textContent ?? '';
     expect(text).not.toContain('it is yours to decide');
     expect(text).not.toContain('⋯');
@@ -460,7 +464,7 @@ describe('the sections the ferret added', () => {
     expect(root().querySelectorAll('.fy-card__section')).toHaveLength(0);
   });
 
-  test('draws what else the item carries, open — decided, still open, impact, links — each under its own name', async () => {
+  test('draws what else the item carries, open, each in its part — decided and still open where we are, the rest in what it needs, links in the table', async () => {
     await draw(
       agendaItem('A7', {
         ask: { kind: 'permission' },
@@ -473,16 +477,12 @@ describe('the sections the ferret added', () => {
       } as Partial<AgendaItem>),
     );
     const titles = [...root().querySelectorAll('.fy-card__section > h4')].map(title => title.textContent);
-    expect(titles).toEqual([
-      'Why I recommend Allow it for a week',
-      'Decided so far',
-      'Still open',
-      'What it allows',
-      'Links',
-    ]);
+    expect(titles).toEqual(['Decided so far', 'Still open', 'Why I recommend Allow it for a week', 'What it allows']);
+    expect(one('[data-agenda-part="where"] [data-agenda-section="decided"]')).toBeDefined();
+    expect(one('[data-agenda-part="needs"] [data-agenda-section="impact"]')).toBeDefined();
     expect(one('[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
     expect(one('[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe('Allow it for a week');
-    expect(one<HTMLAnchorElement>('[data-agenda-section="links"] a').href).toBe('https://example.test/pr/1');
+    expect(one<HTMLAnchorElement>('[data-agenda-references] a').href).toBe('https://example.test/pr/1');
   });
 
   test('leads a to-do with its steps, tickable', async () => {
@@ -498,11 +498,12 @@ describe('the sections the ferret added', () => {
     await draw(
       agendaItem('A5', { kind: 'review', ask: { kind: 'answer-review' }, body: 'Because.' } as Partial<AgendaItem>),
     );
-    expect(one('[data-agenda-section="reasoning"] h4').textContent).toBe('Reasoning');
+    expect(one('[data-agenda-part="body"] > h4').textContent).toBe('Reasoning');
+    expect(one('[data-agenda-part="body"] [data-agenda-section="reasoning"]').textContent).toBe('Because.');
     await view?.unmount();
     view = null;
     await draw(agendaItem('A6', { ask: choices('Yes', 'No'), body: 'More.' } as Partial<AgendaItem>));
-    expect(one('[data-agenda-section="more"] h4').textContent).toBe('More detail');
+    expect(one('[data-agenda-part="body"] > h4').textContent).toBe('More detail');
     expect(root().querySelector('details')).toBeNull();
   });
 });
@@ -521,10 +522,14 @@ describe('terms', () => {
     expect(root().querySelector('[data-agenda-term-tip]')).toBeNull();
   });
 
-  test('are listed in an open Terms section', async () => {
+  test('are listed in the open Terms and references table, each with its meaning', async () => {
     await draw(richItem);
-    const terms = one('[data-agenda-section="terms"]');
-    expect([...terms.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
+    const table = one('[data-agenda-part="references"] table[data-agenda-references]');
+    expect([...table.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
+    expect([...table.querySelectorAll('tbody td')].map(cell => cell.textContent)).toEqual([
+      'write-ahead log',
+      'safe commits',
+    ]);
   });
 });
 
@@ -728,16 +733,15 @@ describe('What I need from you', () => {
     ],
   } as Partial<AgendaItem>);
 
-  test('sits directly under the premise and context, before every optional section', async () => {
-    await draw(richItem);
-    const card = one('.fy-card');
-    const order = [...card.querySelectorAll('[data-agenda-situation], [data-agenda-need], [data-agenda-section]')]
-      .map(
-        each =>
-          each.getAttribute('data-agenda-section') ?? (each.hasAttribute('data-agenda-need') ? 'need' : 'situation'),
-      )
-      .filter(name => name !== 'premise' && name !== 'context');
-    expect(order.slice(0, 2)).toEqual(['situation', 'need']);
+  test('is the seventh part: after where we are now and the conversation, before the body and the activity log', async () => {
+    await draw(agendaItem('A47', { ...richItem, body: 'A report.' } as Partial<AgendaItem>), {}, [
+      { kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47' },
+    ]);
+    const parts = [...one('.fy-card').querySelectorAll('[data-agenda-part]')].map(each =>
+      each.getAttribute('data-agenda-part'),
+    );
+    expect(parts).toEqual(['head', 'premise', 'references', 'where', 'conversation', 'needs', 'body', 'activity']);
+    expect(one('[data-agenda-part="needs"] [data-agenda-need]')).toBeDefined();
     expect(need().querySelector('h4')?.textContent).toBe('What I need from you');
   });
 
@@ -1184,11 +1188,11 @@ describe('which titles wrap', () => {
     expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(false);
   });
 
-  test('a wrapping title clamps to two lines and breaks at words', () => {
+  test('a wrapping title is drawn whole — never clamped — and breaks at words', () => {
     const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
     const rule = css.slice(css.indexOf('.fy-item-view__title[data-wrap] {'));
     const body = rule.slice(0, rule.indexOf('}'));
-    expect(body).toContain('-webkit-line-clamp: 2');
+    expect(body).not.toContain('line-clamp');
     expect(body).toContain('white-space: normal');
     expect(body).not.toContain('word-break: break-all');
   });

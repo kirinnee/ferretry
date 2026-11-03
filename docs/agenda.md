@@ -362,6 +362,9 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
 - **`detail`** (`--detail`) is the context explained from zero, for a reader new to the topic; the app draws it
   folded away.
 
+The app draws all three in the item view ([The item view](#the-item-view)): the stage on the head's chip, where we
+are as its own part, the detail folded, and every earlier stage in the folded activity log.
+
 ### Editable asks
 
 **A ferret's edit may REPLACE the ask**: its `ask`, `kind`, `answers` and `questions` (their options too). On the
@@ -408,7 +411,8 @@ ask_changed`, the new question stays open). A close that names no version — th
 There is no size limit a reader meets: **an item may weigh up to a transport bound of 1,000,000 characters of
 JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound under it — the body, where we are,
 the detail and an answer to the owner's question 200,000; the context and every reply or answer of the owner's
-64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history.
+64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history,
+and the app cuts nothing either — a long report, every reply and every line an edit changed are drawn whole.
 The wire history (20 entries) and the revisions (10) stay bounded: the full conversation and every version live in
 their own stores ([the conversation](#the-conversation), [versions](#versions)). Before an owner record leaves that history, it is durably appended to the session's
 `agenda-history.jsonl`, keyed by item id. The sidecar has no eviction policy and stays off the wire. Pruning a
@@ -1158,7 +1162,8 @@ the facts around it — so every NEW item a ferret raises must carry both:
 
 Every card wears one chip that says what the OWNER does with it, in plain words. The words live in ONE place —
 `AGENDA_KIND_LABELS` in `@ferretry/protocol` (`agenda-card.ts`, with `agendaKindLabel(item)` to read it) — and the
-app's card pill, the Inbox chip, the card header and the row's meta line all read it; the app keeps only the tone.
+Inbox chip, the card header and the row's meta line read it; the app keeps only the tone. The open item's head says
+its STAGE instead ([The item view](#the-item-view)), which is what it needs from the owner right now.
 
 | Kind (`--kind`)   | Chip     | The owner…                                      |
 | ----------------- | -------- | ----------------------------------------------- |
@@ -1174,10 +1179,45 @@ app's card pill, the Inbox chip, the card header and the row's meta line all rea
 A **gate item** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
 go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message kinds are another thing and keep their own words.
 
+## The item view
+
+**One item view everywhere** — the chat and the Inbox draw the same component (`AgendaItemView`). It
+reads top to bottom in nine parts; the order is `ITEM_VIEW_PARTS` in `packages/pwa/src/lib/agenda-item-sections.ts`,
+and a part the item does not carry is not drawn:
+
+| #   | Part                   | What it holds                                                                                                                                                                                                            |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Title, state and stage | the title row; the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done), the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done), and the version slot |
+| 2   | Premise and context    | the two tinted blocks; long is fine                                                                                                                                                                                      |
+| 3   | Detailed context       | `detail`, explained from zero — **folded**                                                                                                                                                                               |
+| 4   | Terms and references   | ONE table of every term and every link (PR, card, file, page), each with a plain meaning; links are drawn by the one reference renderer                                                                                  |
+| 5   | Where we are now       | `whereWeAre` — the report or explainer the owner asked for — then the ferret's answer to their question, what is decided and what is still open                                                                          |
+| 6   | Conversation           | the owner's and the ferret's words about the item, oldest first, each whole                                                                                                                                              |
+| 7   | What I need from you   | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build)                                   |
+| 8   | Body                   | `body`: More detail, or a review's Reasoning (Markdown with fy-render)                                                                                                                                                   |
+| 9   | Activity               | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                           |
+
+- **Folded parts remember.** The detailed context and the activity log start closed; opening one is remembered per
+  item on that device (browser storage, read and written defensively — a private window simply starts closed again).
+- **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
+  edit changed are drawn whole. Rows in a list may still be one line.
+- **The conversation** is read from the chat today (`itemHistory`: the owner's words that name the item and the
+  parts of the ferret's replies about it). A machine with the stored conversation (`agenda.conversation.1`) feeds the
+  same part from the item itself.
+- **Card asks live inside the item.** A card ready to test or approve is answered in part 7, with its own buttons,
+  never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
+  list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
+  one-row answer stays in the sticky dock at the foot, in reach however long the item runs.
+- **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
+  part 7 with it focused. An item the owner opens themselves starts at its top.
+- **The head keeps a slot** (`data-agenda-version-slot`) for the version and diff control; today it holds the
+  version picker.
+
 ## What I need from you
 
-**Every card has one answer shape, and it says it in one place.** Under the premise and the context, before any
-optional section, every open card draws a segment headed **What I need from you**. It holds exactly the ask and
+**Every card has one answer shape, and it says it in one place.** In the item view's seventh part, after where we
+are now and the conversation ([The item view](#the-item-view)), every open card draws a segment headed **What I need
+from you**. It holds exactly the ask and
 ends with one plain instruction, so the owner always knows what to do. The ask itself is a short **bold line at body size** — never heading-sized, however long it is; a long ask wraps
 and the card stays the card:
 

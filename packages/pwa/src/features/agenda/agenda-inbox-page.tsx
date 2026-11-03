@@ -353,7 +353,6 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
       }
       hooks={{ 'data-inbox-who': '' }}
     >
-      <CardKindChip kind={itemCardKind(card.item)} />
       {joinMeta(
         <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
           {who.ferret}
@@ -390,6 +389,7 @@ function OpenItem({
   skip,
   place,
   canSnooze,
+  atAsk = false,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
@@ -397,6 +397,8 @@ function OpenItem({
   readonly skip: () => void;
   readonly place: OpenItemPlace;
   readonly canSnooze: boolean;
+  /** A tapped notification opened it: it opens at its ask. */
+  readonly atAsk?: boolean;
 }) {
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
@@ -423,6 +425,8 @@ function OpenItem({
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
+          itemKey={card.key}
+          {...(atAsk ? { startAt: 'ask' as const } : {})}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
           wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
@@ -1462,6 +1466,8 @@ export function AgendaInboxPage({
   useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
+  // The card a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
+  const [askAt, setAskAt] = useState<string | null>(null);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
   const [machine, setMachine] = useState<DaemonId | null>(null);
@@ -1631,6 +1637,7 @@ export function AgendaInboxPage({
     if (openCardKey !== undefined) {
       openedFor.current = wantedKey;
       setFilter('open');
+      setAskAt(openCardKey);
       openAt(openCardKey);
       onOpenSettled?.(true);
       return;
@@ -1973,6 +1980,7 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
+                    atAsk={askAt === card.key}
                     canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}

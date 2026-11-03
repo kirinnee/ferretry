@@ -94,7 +94,7 @@ describe('every agenda segment draws the same inline Markdown, lists and line br
   test('the body and a term keep their lists', async () => {
     const root = await draw();
     expect(segment(root, '[data-agenda-section="more"]').querySelectorAll('li')).toHaveLength(2);
-    expect(segment(root, '[data-agenda-terms] dd').querySelectorAll('li')).toHaveLength(2);
+    expect(segment(root, '[data-agenda-references] td').querySelectorAll('li')).toHaveLength(2);
   });
 
   test('an option detail with a list draws its bullets; a plain one reads on after its name', async () => {
@@ -115,7 +115,7 @@ describe('every agenda segment draws the same inline Markdown, lists and line br
       '[data-agenda-section="decided"]',
       '[data-agenda-section="still-open"]',
       '[data-agenda-section="more"]',
-      '[data-agenda-terms] dd',
+      '[data-agenda-references] td',
     ]) {
       expect(segment(root, selector).querySelector('.fy-seg'), selector).not.toBeNull();
     }
