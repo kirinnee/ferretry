@@ -924,6 +924,28 @@ describe('agenda --link: target, label=target and label=target=meaning', () => {
     ]);
   });
 
+  it('should keep a query or an = in the target whole and take the meaning after it', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: [
+        'Run=https://ci.example.invalid/run?id=7=The run that failed',
+        'Docs=docs/a=b.md',
+        'Docs=docs/a=b.md=The notes on a and b',
+        'Plan=&F12=The plan',
+        'Notes=docs/a.md=',
+      ],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { label: 'Run', target: 'https://ci.example.invalid/run?id=7', meaning: 'The run that failed' },
+      { label: 'Docs', target: 'docs/a=b.md' },
+      { label: 'Docs', target: 'docs/a=b.md', meaning: 'The notes on a and b' },
+      { label: 'Plan', target: '&F12', meaning: 'The plan' },
+      { label: 'Notes', target: 'docs/a.md' },
+    ]);
+  });
+
   it('should drop an empty meaning and refuse a label with no target', () => {
     // Arrange / Act
     const request = add(['pick'], { link: ['Plan=&F12='] });

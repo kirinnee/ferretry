@@ -39,6 +39,16 @@ const CHANNEL_ONLY_FIELDS: ReadonlySet<string> = new Set(['whereWeAre', 'detail'
 /** The item keys only the channel carries: an older app ignores them, so a projection does not send them. */
 const CHANNEL_ONLY_KEYS = ['resting', 'ownerAnswer', 'stage', 'stages', 'whereWeAre', 'detail'] as const;
 
+/** Links without the `meaning` an older app's strict link schema refuses (`agenda.link-meaning.1`). */
+function withoutLinkMeanings(fields: Record<string, unknown>): void {
+  if (!Array.isArray(fields.links)) return;
+  fields.links = fields.links.map(entry => {
+    if (typeof entry !== 'object' || entry === null || !('meaning' in entry)) return entry;
+    const { meaning: _meaning, ...rest } = entry as Record<string, unknown>;
+    return rest;
+  });
+}
+
 const POINT_KEYS = ['premise', 'decided', 'stillOpen', 'impact'] as const;
 
 const clip = (text: string, limit: number): string => (text.length <= limit ? text : `${text.slice(0, limit - 1)}…`);
@@ -95,6 +105,7 @@ function clippedResponse(response: AgendaResponse): AgendaResponse {
 function projected<T extends AgendaItem>(item: T): T {
   const bag: Record<string, unknown> = { ...clippedFields(item) };
   for (const key of CHANNEL_ONLY_KEYS) delete bag[key];
+  withoutLinkMeanings(bag);
   if (item.undelivered !== undefined) {
     const reply = item.undelivered.reply;
     bag.undelivered = {
@@ -111,6 +122,7 @@ function projected<T extends AgendaItem>(item: T): T {
     if (changed.length === 0) return [];
     const previous: Record<string, unknown> = { ...clippedFields(revision.previous) };
     for (const field of CHANNEL_ONLY_FIELDS) delete previous[field];
+    withoutLinkMeanings(previous);
     return [{ ...revision, changed, previous }];
   });
   if (revisions.length === 0) delete bag.revisions;

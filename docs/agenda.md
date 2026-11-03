@@ -1032,16 +1032,20 @@ whose blocker has cleared is a bug.
 **Every link says what it is.** A link is a label, a target and a plain `meaning` (`AgendaLink`, at most
 `MAX_AGENDA_TERM_MEANING_LENGTH` characters, the bound a term's meaning has), because the item is
 self-contained: its terms-and-references table lists every term and every PR, card or link with a plain meaning,
-and an address explains nothing. `fy agenda add|edit --link "label=target=meaning"` gives one; `label=target` and a
-bare target still work, and the `--json-file` form takes `{"label", "target", "meaning"}`. Splitting is on the
-first two `=`, and only when the part before the first reads as a label (no `/`, `?`, `&` or `\`), so a bare
-target with an `=` of its own (`https://host/page?a=b`) stays a target; a target that carries a query is followed
-by a meaning only through `--json-file`. The daemon lint warns, never refuses, for a link with no meaning
-("say what it is, in plain words"). Where the item view draws the table, a link shows its meaning, and falls back
-to its label for an item raised before meanings existed. The daemon reports `agenda.link-meaning.1` on
-`GET /v1/health`; the CLI sends a meaning only to a daemon that lists it, and to an older one sends each link as
-`label=target` and says so. A card the daemon raises on a ferret's behalf (an input form) links its closest agenda
-with a meaning of its own.
+and an address explains nothing. `fy agenda add|edit --link "label=target=meaning"` gives one; `label=target` (new
+with meanings) and a bare target (the only form before) are read too, and the `--json-file` form takes
+`{"label", "target", "meaning"}`. The label is read only when it looks like one: a word or two without `/`, `?`, `&`
+or `\`, so a bare target with an `=` of its own (`https://host/page?a=b`) stays a target. A target may hold an `=`
+too (a query, `docs/a=b.md`): an address never holds a space and a meaning is a sentence, so the meaning starts
+after the last `=` whose tail holds whitespace (`Run=https://ci/run?id=7=The failing run`). A one-word meaning
+after such a target cannot be told from the target's own `=`, and a meaning with an `=` in it is cut at it, so give
+either through `--json-file`. The daemon lint warns, never refuses, for a link with no meaning ("say what it is, in
+plain words"). The item view shows the meaning in its terms-and-references table once it lands, and falls back to
+the label for an item raised before meanings existed. The daemon reports `agenda.link-meaning.1` on
+`GET /v1/health`; the CLI sends a meaning only to a daemon that lists it, and when the daemon lacks it (or its
+features cannot be read) sends each link as `label=target` and says it could not confirm the daemon takes link
+meanings. A card the daemon raises on a ferret's behalf (an input form) links its closest agenda with a meaning of
+its own.
 
 **Every segment is short points, never a paragraph.** The premise, context, decided, still-open, question
 answer, body, option details, ask, revision notes and terms all read as the same Markdown on the card: bullets
@@ -1434,7 +1438,7 @@ A daemon that rests items on an answer and takes the channel's requests reports 
 before reads every item. The request fields are refused as malformed by a daemon without their feature, so the CLI
 checks it first and says the daemon needs an update: `stage`, `whereWeAre`, `detail` and the `rest` action need
 `agenda.channel.1`; an edit's `ask`/`kind`/`answers`, `clear: ['questionAnswer']` and an answer's `askVersion` need
-`agenda.asks.1`; so does a Done or Skip's `askVersion`. An older app that sends no `askVersion` is refused only for an
+`agenda.asks.1`; so does a Done or Skip's `askVersion`; a link's `meaning` needs `agenda.link-meaning.1`. An older app that sends no `askVersion` is refused only for an
 answer to a replaced ask (see
 [Editable asks](#editable-asks)). `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
@@ -1452,7 +1456,7 @@ history entry is a key it refuses. A daemon therefore serves the items in two sh
   allowed by the daemon's CORS preflight).
 - **Without it** — the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
   every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
-  `stages`, `whereWeAre`, `detail`) and the `response` of a history entry left out, and a revision that only changed a
+  `stages`, `whereWeAre`, `detail`), a link's `meaning` (`links[].meaning`, also in a revision's `previous`) and the `response` of a history entry left out, and a revision that only changed a
   field the older app does not know dropped. The projection is a view: it is never written back, so nothing is lost on
   the machine. It covers the board, Send now, the roll-up of every conversation and the machine agenda, including
   `questionAnswer`, revision `previous` values and nested undelivered responses and notes. If an older app retries

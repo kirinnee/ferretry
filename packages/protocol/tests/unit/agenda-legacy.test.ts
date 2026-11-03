@@ -177,6 +177,33 @@ describe('the legacy agenda projection', () => {
     should(actual.revisions).deepEqual([{ at: AT, by: 'agent', changed: ['subject'], previous: { subject: 'Old' } }]);
   });
 
+  it('should leave a link meaning out, also from a revision, so the board stays readable to the pre-channel app', () => {
+    // Arrange
+    const item = AgendaItemSchema.parse({
+      ...minimal,
+      links: [{ label: 'Plan', target: '&F12', meaning: 'The plan to keep the login alive' }, { target: '#F13' }],
+      revisions: [
+        {
+          at: AT,
+          by: 'agent',
+          changed: ['links'],
+          previous: { links: [{ label: 'Plan', target: '&F12', meaning: 'The older words' }] },
+        },
+      ],
+    });
+    const board = { ...SNAPSHOT, items: [item], resolved: [] };
+
+    // Act
+    const actual = legacyAgendaItem(item);
+
+    // Assert — the item and its revision keep label and target; the stored item is untouched.
+    should(actual.links).deepEqual([{ label: 'Plan', target: '&F12' }, { target: '#F13' }]);
+    should(actual.revisions?.[0]?.previous.links).deepEqual([{ label: 'Plan', target: '&F12' }]);
+    should(item.links?.[0]?.meaning).equal('The plan to keep the login alive');
+    should(OldAgendaSnapshotSchema.safeParse(board).success).be.false();
+    should(OldAgendaSnapshotSchema.safeParse(legacyAgendaSnapshot(board)).success).be.true();
+  });
+
   it('should strip the owner response from history and clip its notes', () => {
     // Arrange
     const item = AgendaItemSchema.parse({

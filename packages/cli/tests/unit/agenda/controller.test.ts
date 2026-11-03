@@ -1354,7 +1354,9 @@ describe('agenda link meanings toward an older daemon (agenda.link-meaning.1)', 
       ]);
     }
     should(gateway.applied).have.length(2);
-    should(out.diagnostics.filter(line => line.includes('older than link meanings'))).have.length(2);
+    should(
+      out.diagnostics.filter(line => line.includes('could not confirm the daemon takes link meanings')),
+    ).have.length(2);
   });
 
   it('should say nothing, and send the links untouched, when none carries a meaning', async () => {

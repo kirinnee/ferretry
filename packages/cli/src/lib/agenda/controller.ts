@@ -809,7 +809,7 @@ export class AgendaController {
     if (request.links === undefined || !request.links.some(entry => entry.meaning !== undefined)) return request;
     if ((await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaLinkMeaning)) return request;
     this.out.diagnostic(
-      'this daemon is older than link meanings, so each link is sent as label=target without its meaning; update the daemon to keep it',
+      'could not confirm the daemon takes link meanings, so each link is sent as label=target without its meaning; update the daemon if it is older',
     );
     return {
       ...request,

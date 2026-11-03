@@ -530,8 +530,10 @@ function link(
 /**
  * `--link`: a bare target, `label=target`, or `label=target=meaning` (the meaning is the plain words the item view's
  * terms-and-references table shows). The label is read only when it looks like one: a word or two, never a URL or a path,
- * so a bare target that carries an `=` of its own (`https://host/page?a=b`) stays a target. A target that carries a
- * query cannot be followed by a meaning here (its `=` is its own); give that link through `--json-file`.
+ * so a bare target that carries an `=` of its own (`https://host/page?a=b`) stays a target. A target may carry an `=`
+ * too (a query, `docs/a=b.md`), and an address never holds a space while a meaning is a sentence: the meaning starts after
+ * the last `=` whose tail holds whitespace. A one-word meaning after an `=`-carrying path or URL cannot be told from that
+ * target's own `=`, so such a link is read whole as a target: give it through `--json-file`.
  */
 function linkFrom(raw: string): AgendaLink {
   const value = raw.trim();
@@ -539,12 +541,23 @@ function linkFrom(raw: string): AgendaLink {
   const label = first < 0 ? '' : value.slice(0, first).trim();
   if (first < 0 || label === '' || /[/?&\\]/u.test(label)) return { target: value };
   const rest = value.slice(first + 1);
-  const second = rest.indexOf('=');
-  const targetEnd = second < 0 || rest.slice(0, second).includes('?') ? rest.length : second;
-  const target = rest.slice(0, targetEnd).trim();
+  const cut = meaningStart(rest);
+  const target = rest.slice(0, cut).trim();
   if (target === '') throw new Error(`--link needs label=target or label=target=meaning, got "${raw}"`);
-  const meaning = text(rest.slice(targetEnd + 1));
+  const meaning = text(rest.slice(cut + 1));
   return { label, target, ...(meaning === undefined ? {} : { meaning }) };
+}
+
+/** Where the `=` that opens a link's meaning sits in `target[=meaning]`, or its length when there is none. */
+function meaningStart(rest: string): number {
+  for (let at = rest.lastIndexOf('='); at >= 0; at = rest.lastIndexOf('=', at - 1)) {
+    if (/\s/u.test(rest.slice(at + 1).trim())) return at;
+    if (at === 0) break;
+  }
+  const first = rest.indexOf('=');
+  if (first < 0) return rest.length;
+  const pathLike = /[/?.:\\]/u.test(rest.slice(0, first));
+  return pathLike && rest.slice(first + 1).trim() !== '' ? rest.length : first;
 }
 
 /**
