@@ -530,9 +530,7 @@ function Harness() {
         style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}
       >
         <main style={{ flex: '1 1 0', minHeight: 0, overflow: 'hidden' }}>{page}</main>
-        {phone ? (
-          <AppTabBar active="board" boardCount={3} daemon={laptop.daemonId} onOpenPalette={() => undefined} />
-        ) : null}
+        {phone ? <AppTabBar active="board" daemon={laptop.daemonId} onOpenPalette={() => undefined} /> : null}
       </div>
     );
   return (
@@ -540,7 +538,7 @@ function Harness() {
       {page}
       {phone && params.get('bar') !== null ? (
         <div style={{ position: 'fixed', insetInline: 0, bottom: 0 }}>
-          <AppTabBar active="board" boardCount={3} daemon={laptop.daemonId} onOpenPalette={() => undefined} />
+          <AppTabBar active="board" daemon={laptop.daemonId} onOpenPalette={() => undefined} />
         </div>
       ) : null}
     </div>

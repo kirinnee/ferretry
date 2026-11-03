@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  boardBadgeCount,
   keyStep,
   phoneLanes,
   SWIPE_DISTANCE,
@@ -103,12 +102,5 @@ describe('phoneLanes and shownLane', () => {
       )?.id,
     ).toBe('a');
     expect(shownLane([], null)).toBeNull();
-  });
-});
-
-describe('boardBadgeCount', () => {
-  it('adds the cards to test and the cards waiting on the owner', () => {
-    expect(boardBadgeCount({ toTest: 2, waitingOnYou: 3 })).toBe(5);
-    expect(boardBadgeCount({ toTest: 0, waitingOnYou: 0 })).toBe(0);
   });
 });

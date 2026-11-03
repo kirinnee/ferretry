@@ -114,7 +114,6 @@
         "harness/answer-quickly-cards-screenshot.ts",
         "harness/answer-quickly-desktop-screenshot.ts",
         "harness/roomier-inbox-2-screenshot.ts",
-        "harness/task-panel-cards-screenshot.ts",
         "harness/task-rich-text-screenshot.ts",
         "harness/snooze-to-test-screenshot.ts",
         "harness/agenda-forms-screenshot.ts",

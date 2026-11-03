@@ -240,7 +240,7 @@ export function useAgendaInboxModel(
     latest.current
       .map(
         ({ connection }) =>
-          `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
+          `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.cardAsksOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
       )
       .join(',');
   const gateFlags = useSyncExternalStore(client.wires.subscribe, readGateFlags, readGateFlags);
@@ -426,6 +426,12 @@ export function useAgendaInboxModel(
     (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
     [gateFlags],
   );
+  // A machine with card asks (`agenda.card-asks.1`) carries a card's ask inside its agenda: it keeps no To-test list.
+  const hasCardAsks = useCallback(
+    (daemonId: DaemonId): boolean =>
+      gateFlags.split(',').some(entry => entry.startsWith(`${daemonId}=`) && entry.split('/')[1] === 'true'),
+    [gateFlags],
+  );
   const canSnooze = useCallback(
     (daemonId: DaemonId): boolean =>
       !gateFlags.includes(`${daemonId}=`) ||
@@ -433,12 +439,12 @@ export function useAgendaInboxModel(
     [gateFlags],
   );
   const awakeRows = useMemo(
-    () => toTestBesideGates(split.awake, holders, offersGates),
-    [split.awake, holders, offersGates],
+    () => toTestBesideGates(split.awake, holders, offersGates).filter(row => !hasCardAsks(row.card.daemonId)),
+    [split.awake, holders, offersGates, hasCardAsks],
   );
   const snoozedRows = useMemo(
-    () => toTestBesideGates(split.snoozed, holders, offersGates),
-    [split.snoozed, holders, offersGates],
+    () => toTestBesideGates(split.snoozed, holders, offersGates).filter(row => !hasCardAsks(row.card.daemonId)),
+    [split.snoozed, holders, offersGates, hasCardAsks],
   );
   const toTest = useStable(awakeRows, toTestKeyOf(awakeRows));
   const toTestSnoozed = useStable(snoozedRows, toTestKeyOf(snoozedRows));

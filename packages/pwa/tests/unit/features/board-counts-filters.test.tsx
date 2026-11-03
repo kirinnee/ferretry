@@ -21,34 +21,40 @@ const change = (node: Element, value: string) => {
 describe('BoardCountsBar', () => {
   const counts = { closedHidden: 7, stale: 2, orphaned: 1, active: 5, toTest: 3, waitingOnYou: 4 };
 
-  it('shows the daemon’s numbers as pills, chips and "N closed hidden"', async () => {
+  it('shows the daemon’s numbers as chips and "N closed hidden"', async () => {
     view = await mount(
       <BoardCountsBar activity={null} counts={counts} onActivity={() => undefined} onOpenArchive={() => undefined} />,
     );
     const root = view.container;
-    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('To test3');
-    expect(root.querySelector('[data-count="waiting_on_you"]')?.textContent).toBe('Waiting on you4');
+    expect(root.querySelector('[data-count="to_test"]')).toBeNull();
+    expect(root.querySelector('[data-count="waiting_on_you"]')).toBeNull();
+    expect([...root.querySelectorAll('[data-count]')].map(node => node.getAttribute('data-count'))).toEqual([
+      'stale',
+      'orphaned',
+      'active',
+      'closed',
+    ]);
     expect(root.querySelector('[data-count="stale"]')?.getAttribute('aria-label')).toBe('2 stale');
     expect(root.querySelector('[data-count="closed"]')?.textContent).toBe('7 closed hidden');
   });
 
-  it('turns a pill into a filter and lifts it when pressed again', async () => {
+  it('turns a chip into a filter and lifts it when pressed again', async () => {
     const seen: (string | null)[] = [];
     view = await mount(
       <BoardCountsBar
-        activity="to_test"
+        activity="stale"
         counts={counts}
         onActivity={next => void seen.push(next)}
         onOpenArchive={() => undefined}
       />,
     );
-    const toTest = must(view.container.querySelector<HTMLButtonElement>('[data-count="to_test"]'), 'To test');
-    expect(toTest.getAttribute('aria-pressed')).toBe('true');
-    await interact(() => toTest.click());
+    const stale = must(view.container.querySelector<HTMLButtonElement>('[data-count="stale"]'), 'stale');
+    expect(stale.getAttribute('aria-pressed')).toBe('true');
+    await interact(() => stale.click());
     await interact(() =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-count="waiting_on_you"]'), 'Waiting').click(),
+      must(view?.container.querySelector<HTMLButtonElement>('[data-count="orphaned"]'), 'orphaned').click(),
     );
-    expect(seen).toEqual([null, 'waiting_on_you']);
+    expect(seen).toEqual([null, 'orphaned']);
   });
 
   it('marks an empty count and opens the Archive from "closed hidden"', async () => {

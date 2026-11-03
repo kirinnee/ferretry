@@ -258,7 +258,6 @@ describe('Board on a phone — the lane strip', () => {
 describe('Board on a phone — counts and filters', () => {
   it('opens the matching cards as a list when a count is tapped', async () => {
     for (const [count, activity] of [
-      ['to_test', 'to_test'],
       ['stale', 'stale'],
       ['orphaned', 'orphaned'],
     ] as const) {

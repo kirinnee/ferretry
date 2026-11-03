@@ -25,7 +25,6 @@ import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
-import { snoozeOver, toTestAnswersOver } from '../agenda/to-test-rows.tsx';
 import { useBoardAnswers } from './board-answers.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
@@ -41,8 +40,6 @@ export interface ChatTasksProps {
   readonly chat: BoardChat;
   readonly scope: DaemonSessionScope;
   readonly callsigns: ReadonlyMap<string, string>;
-  /** The task each ferret was given, by session id: a card to test names its ferret by this, never by callsign. */
-  readonly taskNames?: ReadonlyMap<string, string>;
   /** A phone shows the open card as a page of its own, over the chat. */
   readonly phone: boolean;
   readonly now: number;
@@ -79,7 +76,6 @@ export function ChatTasks({
   chat,
   scope,
   callsigns,
-  taskNames,
   phone,
   now,
   onNavigate,
@@ -103,11 +99,6 @@ export function ChatTasks({
     // The Info panel scrolls and stacks on its own; the composer goes over the whole page.
     portal: true,
   });
-
-  const toTestAnswers = useMemo(
-    () => toTestAnswersOver({ requestMove, answerFor, snooze: snoozeOver(actions, setNotice) }),
-    [requestMove, answerFor, actions],
-  );
 
   const movesFor = useCallback(
     (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
@@ -206,8 +197,6 @@ export function ChatTasks({
       <BoardSideTab
         callsigns={callsigns}
         chat={chat}
-        taskNames={taskNames}
-        projectNames={projectNames}
         answerFor={answerFor}
         density={expanded ? 'page' : 'side'}
         doneFor={doneFor}
@@ -220,7 +209,6 @@ export function ChatTasks({
         onOpenCard={openCard}
         onView={next => boardSideView.set(next)}
         scope={scope}
-        toTestAnswers={toTestAnswers}
         view={view}
       />
       {composer}

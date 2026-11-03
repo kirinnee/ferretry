@@ -14,14 +14,14 @@ const memory = (seed: Record<string, string> = {}): BoardSideViewStorage & { rea
 };
 
 describe('parseBoardSideView', () => {
-  test('reads the three views and resets anything else to the Cards', () => {
+  test('reads the two views and resets anything else, the retired Cards view included, to the List', () => {
     should(parseBoardSideView('list')).equal('list');
     should(parseBoardSideView('kanban')).equal('kanban');
-    should(parseBoardSideView('cards')).equal('cards');
-    should(parseBoardSideView('LIST')).equal('cards');
-    should(parseBoardSideView(null)).equal('cards');
-    should(parseBoardSideView(undefined)).equal('cards');
-    should(DEFAULT_BOARD_SIDE_VIEW).equal('cards');
+    should(parseBoardSideView('cards')).equal('list');
+    should(parseBoardSideView('LIST')).equal('list');
+    should(parseBoardSideView(null)).equal('list');
+    should(parseBoardSideView(undefined)).equal('list');
+    should(DEFAULT_BOARD_SIDE_VIEW).equal('list');
   });
 });
 
@@ -55,25 +55,25 @@ describe('BoardSideViewStore', () => {
       },
     };
     const store = new BoardSideViewStore(denied);
-    should(store.snapshot()).equal('cards');
+    should(store.snapshot()).equal('list');
     store.set('list');
     should(store.snapshot()).equal('list');
   });
 
-  test('a fresh device, with nothing stored, starts on the Cards and remembers a pick', () => {
+  test('a fresh device, with nothing stored, starts on the List and remembers a pick', () => {
     const storage = memory();
     const store = new BoardSideViewStore(storage);
-    should(store.snapshot()).equal('cards');
+    should(store.snapshot()).equal('list');
     store.set('kanban');
     should(storage.values.get(BOARD_SIDE_VIEW_KEY)).equal('kanban');
     should(new BoardSideViewStore(storage).snapshot()).equal('kanban');
   });
 
-  test('with no storage at all it starts on the Cards', () => {
-    const store = new BoardSideViewStore(undefined);
-    should(store.snapshot()).equal('cards');
-    store.set('list');
+  test('with no storage at all it starts on the List', () => {
+    const store = new BoardSideViewStore({ getItem: () => null, setItem: () => undefined });
     should(store.snapshot()).equal('list');
+    store.set('kanban');
+    should(store.snapshot()).equal('kanban');
   });
 });
 
@@ -105,7 +105,7 @@ describe('the device storage the store defaults to', () => {
       stub({ value });
       try {
         const store = new BoardSideViewStore();
-        should(store.snapshot()).equal('cards');
+        should(store.snapshot()).equal('list');
         store.set('list');
         should(store.snapshot()).equal('list');
       } finally {
@@ -122,7 +122,7 @@ describe('the device storage the store defaults to', () => {
     });
     try {
       const store = new BoardSideViewStore();
-      should(store.snapshot()).equal('cards');
+      should(store.snapshot()).equal('list');
       store.set('list');
       should(store.snapshot()).equal('list');
     } finally {
