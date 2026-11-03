@@ -893,13 +893,15 @@ function fitted(
   const archived = [...(mutation.ledger.archivePending ?? [])];
   const remaining = new Set(mutation.ledger.entries.map(entry => entry.item.id));
   // Closed-history pruning removes the hot view, never the owner's words: the conversation, and the closing note or
-  // answer, go to the sidecar as the item's complete last snapshot.
+  // answer, go to the sidecar as the item's complete last snapshot. An item this very change closed is archived
+  // closed, not as the open copy it was: with every closed slot held by a set-aside entry it is pruned at once.
   for (const entry of before.entries) {
     if (remaining.has(entry.item.id)) continue;
-    archived.push({ kind: 'version', id: entry.item.id, item: entry.item });
-    for (const record of entry.item.history ?? []) {
+    const last = mutation.addressed?.id === entry.item.id ? mutation.addressed : entry.item;
+    archived.push({ kind: 'version', id: last.id, item: last });
+    for (const record of last.history ?? []) {
       if (['replied', 'needs-info', 'discuss'].includes(record.kind)) {
-        archived.push({ kind: 'owner-history', id: entry.item.id, entry: record });
+        archived.push({ kind: 'owner-history', id: last.id, entry: record });
       }
     }
   }

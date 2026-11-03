@@ -4376,6 +4376,57 @@ describe('Agenda state machine: one unreadable entry', () => {
     should(parseAgendaLedger(JSON.parse(agendaLedgerDocument(ledger)), SESSION_ID)?.unreadable).have.length(1);
   });
 
+  describe('with every closed slot held by a set-aside entry', () => {
+    // Arrange — a readable open A1 beside MAX_AGENDA_RESOLUTIONS closed entries that cannot be read: the history has no room.
+    const saturated = (overrides: Partial<RaiseAgendaRequest>): AgendaLedger => {
+      const first = raised(HUMAN, overrides);
+      const board = {
+        ...first.ledger,
+        nextId: MAX_AGENDA_RESOLUTIONS + 2,
+        entries: [
+          ...first.ledger.entries,
+          ...Array.from({ length: MAX_AGENDA_RESOLUTIONS }, (_, index) => ({
+            lifecycle: 'addressed',
+            origin: HUMAN,
+            item: { id: `A${index + 2}`, invalidFutureItem: true },
+          })),
+        ],
+      };
+      return parseAgendaLedger(board, SESSION_ID)!;
+    };
+    const closing: ReadonlyArray<readonly [string, Partial<RaiseAgendaRequest>, (words: string) => AgendaCommand]> = [
+      ['resolve', {}, words => ({ action: 'resolve', actor: HUMAN, id: 'A1', note: words, at: SECOND })],
+      ['dismiss', {}, words => ({ action: 'dismiss', actor: HUMAN, id: 'A1', note: words, at: SECOND })],
+      [
+        'answer to an open question',
+        { ask: { kind: 'open-question' } },
+        words => ({
+          action: 'answer',
+          actor: HUMAN,
+          id: 'A1',
+          response: { kind: 'open-question', answer: words },
+          note: words,
+          at: SECOND,
+        }),
+      ],
+    ];
+
+    for (const [name, overrides, command] of closing) {
+      it(`should archive the closed snapshot of a ${name}, so the owner's words survive the immediate pruning`, () => {
+        // Act
+        const closed = succeeded(applyAgendaCommand(saturated(overrides), command('OWNER_FINAL_WORDS')));
+
+        // Assert — the hot history has no room, but the sidecar holds the closed item and its words
+        should(closed.ledger.entries.filter(entry => entry.lifecycle === 'addressed')).have.length(0);
+        const versions = (closed.ledger.archivePending ?? []).filter(record => record.kind === 'version');
+        should(versions).have.length(1);
+        should(versions[0]).containDeep({ id: 'A1', item: { disposition: closed.addressed!.disposition } });
+        should(JSON.stringify(versions[0])).containEql('OWNER_FINAL_WORDS');
+        should((versions[0] as { item: { resolvedAt?: string } }).item.resolvedAt).equal(SECOND);
+      });
+    }
+  });
+
   it('should refuse a board whose set-aside entry claims an id another item holds', () => {
     // Arrange
     const board = stored();
