@@ -13,6 +13,8 @@ const REMEMBERED_FOR_MS = 10 * 60_000;
 /** How many folders' answers are kept; the oldest is let go past it. */
 const REMEMBERED_FOLDERS = 512;
 const BRANCHES = 'refs/heads/';
+/** The branch a reftable repository's `HEAD` file names to keep old readers away from it. */
+const PLACEHOLDER_BRANCH = 'refs/heads/.invalid';
 
 type Question = 'repository' | 'branch';
 
@@ -44,6 +46,28 @@ async function commonDirectory(gitDirectory: string): Promise<string> {
  * Deliberately loose — a comment that mentions one is a false positive, which only costs a kept answer.
  */
 const INCLUDES = /\[\s*include(?:if)?[\s"\]]/iu;
+
+/**
+ * Whether the refs live in plain files under the git dir — the one place `HEAD` can vouch for the branch.
+ *
+ * A `reftable` repository keeps `HEAD` as a constant placeholder (`ref: refs/heads/.invalid`) and the real
+ * branch in a table: a checkout rewrites the table and leaves `HEAD` byte-identical, so a kept answer would
+ * outlive it. Only the files backend is POSITIVELY recognised — no `reftable` directory, a `HEAD` that is not
+ * the placeholder, and no `extensions.refStorage` other than `files` — so a ref storage this does not know is
+ * asked every time rather than trusted.
+ */
+async function refsAreFiles(gitDirectory: string, head: string): Promise<boolean> {
+  const common = await commonDirectory(gitDirectory);
+  const present = async (path: string): Promise<boolean> =>
+    await lstat(path).then(
+      () => true,
+      () => false,
+    );
+  if ((await present(join(gitDirectory, 'reftable'))) || (await present(join(common, 'reftable')))) return false;
+  if ((await readFile(head, 'utf8').catch(() => '')).includes(PLACEHOLDER_BRANCH)) return false;
+  const storage = /^\s*refstorage\s*=\s*(\S+)/imu.exec(await readFile(join(common, 'config'), 'utf8').catch(() => ''));
+  return storage === null || storage[1]?.toLowerCase() === 'files';
+}
 
 /**
  * The git dir `git -C <path>` would use: the nearest `.git` at or above the folder — a directory (or a
@@ -94,7 +118,8 @@ async function gitDirectoryOf(physicalFolder: string): Promise<string | undefine
  *
  * A kept answer must never outlive a change git itself would see, so these are asked every time, as before:
  * a folder that is gone or whose git dir cannot be found or is not one, a config with an `include` or
- * `includeIf` (the files it reaches are not watched), and a question git answered with nothing.
+ * `includeIf` (the files it reaches are not watched), a branch in a repository whose refs are not plain files
+ * (`reftable` leaves `HEAD` untouched by a checkout), and a question git answered with nothing.
  */
 export class GitWorkingCopies implements WorkingCopies {
   private readonly hosts = new Map<string, Promise<string | null>>();
@@ -166,7 +191,10 @@ export class GitWorkingCopies implements WorkingCopies {
     const head = join(gitDirectory, 'HEAD');
     // A git dir without a `HEAD` is not one: git walks on past it, so what this found is not what git uses.
     if ((await fileIdentity(head)) === 'none') return undefined;
-    if (question === 'branch') return `${gitDirectory}\n${await fileIdentity(head)}`;
+    if (question === 'branch') {
+      // The branch is the refs' to say, and only the files backend puts it in `HEAD`.
+      return (await refsAreFiles(gitDirectory, head)) ? `${gitDirectory}\n${await fileIdentity(head)}` : undefined;
+    }
     const configs = [join(await commonDirectory(gitDirectory), 'config'), join(gitDirectory, 'config.worktree')];
     // `includeIf "onbranch:…"` makes the remote depend on `HEAD`; an `include` makes it depend on files that
     // change without either config changing. Which files an `includeIf` reaches is git's to decide, so a

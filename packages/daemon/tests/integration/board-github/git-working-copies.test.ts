@@ -366,6 +366,89 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
           should([before, after]).deepEqual(['feat/one', null]);
         });
       });
+
+      describe('a repository whose refs are not plain files', () => {
+        const reftable = async (root: string): Promise<string | undefined> => {
+          const repo = join(root, 'repo');
+          await mkdir(repo);
+          try {
+            await git(repo, 'init', '--quiet', '--ref-format=reftable', '-b', 'main');
+          } catch {
+            return undefined;
+          }
+          await git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '--quiet', '-m', 'r');
+          return repo;
+        };
+
+        it('should follow a branch switch in a reftable repository, whose HEAD file never changes', async () => {
+          await withTempRoot(async root => {
+            // Arrange — skipped, loudly, where the installed git cannot make a reftable repository.
+            const repo = await reftable(root);
+            if (repo === undefined) {
+              console.warn('skipped: the installed git cannot init --ref-format=reftable');
+              return;
+            }
+            await git(repo, 'remote', 'add', 'origin', 'git@github.com:kirinnee/ferretry.git');
+            await git(repo, 'checkout', '--quiet', '-b', 'feat/one');
+            const { binary, asked } = await countingGit(root);
+            const copies = new GitWorkingCopies(binary);
+
+            // Act
+            const one = await copies.branchOf(repo);
+            await git(repo, 'checkout', '--quiet', '-b', 'feat/two');
+            const two = await copies.branchOf(repo);
+            const repositories = [await copies.repositoryOf(repo), await copies.repositoryOf(repo)];
+
+            // Assert — the branch is asked every time; the remote is still kept.
+            should(await readFile(join(repo, '.git', 'HEAD'), 'utf8')).containEql('.invalid');
+            should([one, two]).deepEqual(['feat/one', 'feat/two']);
+            should(repositories).deepEqual(['kirinnee/ferretry', 'kirinnee/ferretry']);
+            should((await asked()).length).equal(3);
+          });
+        });
+
+        it('should ask git every time for a HEAD placeholder or a ref storage it does not recognise', async () => {
+          await withTempRoot(async root => {
+            // Arrange — a files repository dressed as each, so the detection is covered whatever git is installed.
+            const placeholder = await repository(root);
+            await writeFile(join(placeholder, '.git', 'HEAD'), 'ref: refs/heads/.invalid\n');
+            const other = join(root, 'other');
+            await mkdir(other);
+            await git(other, 'init', '--quiet', '-b', 'main');
+            await git(other, 'config', 'core.repositoryformatversion', '1');
+            await git(other, 'config', 'extensions.refStorage', 'future');
+            const { binary, asked } = await countingGit(root);
+            const copies = new GitWorkingCopies(binary);
+
+            // Act
+            for (const folder of [placeholder, other]) {
+              await copies.branchOf(folder);
+              await copies.branchOf(folder);
+            }
+
+            // Assert
+            should((await asked()).length).equal(4);
+          });
+        });
+
+        it('should still keep a branch where the ref storage is spelled out as files', async () => {
+          await withTempRoot(async root => {
+            // Arrange
+            const repo = await repository(root);
+            await git(repo, 'config', 'core.repositoryformatversion', '1');
+            await git(repo, 'config', 'extensions.refStorage', 'files');
+            const { binary, asked } = await countingGit(root);
+            const copies = new GitWorkingCopies(binary);
+
+            // Act
+            await copies.branchOf(repo);
+            await copies.branchOf(repo);
+
+            // Assert
+            should((await asked()).length).equal(1);
+          });
+        });
+      });
     });
   });
 });
