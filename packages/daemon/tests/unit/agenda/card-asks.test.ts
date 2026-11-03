@@ -302,21 +302,44 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
     should(closedOld.kind).equal('closed');
   });
 
-  it('rests on its ferret when somebody wrote on it, sealed or from before the seal', () => {
-    // Arrange
+  it('rests on its ferret when somebody wrote on it from before the seal, and stays rested when the owner replied', () => {
+    // Arrange — a real reply rests the item as the state machine does
     const { apply } = world();
     const sealed = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
     const old = changed(apply(cardAgenda(), attach('F1'), 1));
-    const sealedTalk = { ...sealed, history: [...(sealed.history ?? []), talk] };
+    const reply = {
+      parked: { reason: 'replied' as const, at: at(2) },
+      resting: { sub: 'waiting-on-ferret' as const, at: at(2) },
+      history: [...(sealed.history ?? []), talk],
+    };
+    const sealedReply = { ...sealed, ...reply };
     const oldTalk = { ...old, history: [...(old.history ?? []), talk] };
 
     // Act
-    const restedSealed = changed(apply(sealedTalk, withdraw('F1'), 3));
+    const keptSealed = changed(apply(sealedReply, withdraw('F1'), 3));
     const restedOld = changed(apply(oldTalk, withdraw('F1'), 3));
 
     // Assert
-    should(agendaState(restedSealed).state).equal('resting');
+    should(agendaState(keptSealed).state).equal('resting');
+    should(keptSealed.resting?.at).equal(at(2));
     should(agendaState(restedOld).state).equal('resting');
+  });
+
+  it('leaves a sealed card agenda in Needs you when its ferret answered after the owner’s Not yet', () => {
+    // Arrange — F2's ask is put on, the owner says Not yet (it rests), the ferret answers (back in Needs you)
+    const { apply } = world();
+    const asked = changed(apply(sealCardAsks(cardAgenda()), attach('F2'), 1));
+    const notYet = changed(apply(asked, { kind: 'not-yet', reference: reference('F2') }, 2));
+    const { parked: _parked, resting: _resting, ...awake } = notYet;
+    const answered = { ...awake, questionAnswer: 'Fixed it, try again', waitingSince: at(3) } as AgendaItem;
+    should(agendaState(answered).state).equal('needs-you');
+
+    // Act — the card leaves the gate
+    const after = changed(apply(answered, withdraw('F2'), 4));
+
+    // Assert — the ferret's answer stays in front of the owner
+    should(agendaState(after).state).equal('needs-you');
+    should(after.questionAnswer).equal('Fixed it, try again');
   });
 
   it('rests when the owner answered, as an answer is what the agenda holds', () => {
@@ -330,6 +353,59 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
 
     // Assert
     should(agendaState(after).state).equal('resting');
+  });
+});
+
+describe('the seal across the Warden’s nudge and the stored form', () => {
+  it('still reads a thread resting on a Not yet as untouched after the Warden nudged it', () => {
+    // Arrange — F2 gets Not yet (the thread rests); the Warden nudges it; F3's ask wakes it
+    const { apply } = world();
+    const first = changed(apply(thread(), attach('F2'), 1));
+    const notYet = changed(apply(first, { kind: 'not-yet', reference: reference('F2') }, 2));
+    const nudged = {
+      ...notYet,
+      resting: { ...notYet.resting, nudgeSend: 'send-1', nudgedAt: at(40), nudges: 1 },
+    } as AgendaItem;
+    const woken = changed(apply(nudged, attach('F3'), 45));
+    should(agendaState(woken).state).equal('needs-you');
+
+    // Act — F3 leaves the gate
+    const after = changed(apply(woken, withdraw('F3'), 50));
+
+    // Assert — back to the rest it was woken out of, not stranded in Needs you
+    should(agendaState(after).state).equal('resting');
+    should(after.resting?.sub).equal('waiting-on-ferret');
+  });
+
+  it('seals the thread as it will be stored when the seal itself pushes it over the bound', () => {
+    // Arrange — a store that sheds the oldest line while the thread is heavier than its bound
+    const weigh = (item: AgendaItem): number => JSON.stringify(item).length;
+    const lines = Array.from({ length: 4 }, (_, index) => ({
+      at: at(-index - 1),
+      kind: 'updated' as const,
+      note: `line ${String(index)}`.padEnd(40, '.'),
+    }));
+    const base = thread({ history: lines });
+    const plain = changed(applyCardAsk(base, { kind: 'attach', ask: { gate: gate('F2') } }, at(1), world().effects));
+    const { cardAsksSeal: _seal, ...unsealed } = plain;
+    const bound = weigh(unsealed) + 10;
+    const store = (item: AgendaItem): AgendaItem => {
+      let kept = item;
+      while (weigh(kept) > bound && (kept.history ?? []).length > 1)
+        kept = { ...kept, history: kept.history?.slice(1) };
+      return kept;
+    };
+    const effects = { ...world().effects, tidy: store };
+
+    // Act
+    const outcome = applyCardAsk(base, { kind: 'attach', ask: { gate: gate('F2') } }, at(1), effects);
+    const item = changed(outcome);
+
+    // Assert — storing it again changes nothing, and the seal still matches
+    should(item.cardAsksSeal).be.a.String();
+    should(store(item)).eql(item);
+    should(sealCardAsks(item)).eql(item);
+    should((item.history ?? []).length).be.below(lines.length + 1);
   });
 });
 

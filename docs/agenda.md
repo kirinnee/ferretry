@@ -212,8 +212,9 @@ each answer does to the card).
   blocker: it rests waiting on its ferret, or, if it is the daemon-opened card agenda (`card-agenda:`) and holds no
   conversation, it closes. **One rule decides whether the daemon may move a thread when it withdraws an ask: only a
   thread exactly as the daemon left it.** The daemon seals the thread (`cardAsksSeal`): a digest of everything on it
-  but the card asks and their mirror, taken of the thread **as it is stored** (after the history is cut to its bound, so
-  a thread with a full history still matches). Anything else written on the thread afterwards — the owner's reply,
+  but the card asks and their mirror and the Warden's nudge clock (`resting.nudgedAt`, `nudges`, `nudgeSend`: a nudge
+  of a rest nobody touched does not make it a different thread), taken of the thread **as it is stored** (after the
+  history is cut to its bound, with the seal's own room counted, so a thread with a full history still matches). Anything else written on the thread afterwards — the owner's reply,
   answer, Needs info or snooze, the ferret's edit (its revision), hand-back, rest or new question, and the daemon's own
   other lines — makes the digest differ. The seal is renewed only by a card-ask write (put an ask on, restate it,
   answer it, Not yet, withdraw another) that finds the thread still matching it. **A thread that no longer matches is
@@ -223,10 +224,12 @@ each answer does to the card).
   When the last ask that waits on the owner goes from a thread that matches, it rests, as any answer rests it, if the
   owner answered or said Not yet to ANY ask on it since the withdrawn one was put on — in whichever order the answer
   and the withdrawal came — and otherwise goes back to the turn the ask woke it out of (the owner's, with the question
-  it had, or the park, rest or wait it was in). A thread that does not match stays as it is, in Needs you: a
+  it had, or the park, rest or wait it was in). A thread that does not match stays as it is, in Needs you — the
+  daemon-opened card agenda too, once it is sealed (an owner's reply already rested it; a ferret's answer is in front
+  of them): a
   leftover question the owner can read costs nothing, a ferret's answer hidden behind a "waiting on ferret" costs the
   answer. A thread from before the seal (none is stored) is never moved, and the daemon-opened card agenda from before
-  it keeps the older rule (a conversation line, or an owner's answer on it, is talk). The stage the ask moved the
+  it keeps the older rule (a conversation line, or an owner's answer on it, is talk, and it rests). The stage the ask moved the
   agenda to is not undone: the stage is a log of what changed.
 - **It buzzes once**, when the ask is put on. An agenda is left out of a stop's push only while its sole open items are
   card asks; a question the ferret asks on the same agenda is counted ([notifications.md](notifications.md)).

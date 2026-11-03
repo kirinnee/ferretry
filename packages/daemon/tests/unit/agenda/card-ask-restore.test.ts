@@ -137,9 +137,9 @@ const play = (steps: readonly Step[], fill = 0): AgendaItem => {
             action: 'reply',
             actor: { kind: 'human' },
             id: 'A1',
-            text: 'what is this?',
+            note: 'what is this?',
             at,
-          } as never);
+          });
       }
     })();
     ledger = ok(next).ledger;

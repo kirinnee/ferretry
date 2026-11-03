@@ -10,7 +10,8 @@
  *   An agenda left with nothing to answer does not sit in Needs you. A ferret's own thread goes back to the turn the
  *   ask woke it out of (`woke`): the owner's, with the question it had, or the park, rest or wait it was in — unless
  *   something moved it since, which stays. The card agenda the daemon opened (`card-agenda:`) goes back to resting
- *   on its ferret when it holds answered asks or talk, and closes when it holds neither.
+ *   on its ferret when it holds answered asks or talk, and closes when it holds neither; one sealed and written on
+ *   since stays where it is.
  * - **Answer.** The owner's answer is kept on the ask, with its receipt; the agenda RESTS, waiting on its ferret,
  *   unless another card ask on it is still open. It is never closed by the answer: the ferret marks it Done.
  * - **Not yet.** The ask stays open, marked, and the agenda rests the same way.
@@ -133,13 +134,25 @@ const backTo = (item: AgendaItem, turn: AgendaCardAskWoke): AgendaItem => ({
 
 /**
  * The digest of everything on the thread but what the card-ask writer owns (the asks, their mirror and the seal
- * itself): its words, turn, park, stage and edits. `undefined` when it has no canonical spelling.
+ * itself) and the Warden's nudge clock (a nudge writes it on a rest nobody has touched): its words, turn, park,
+ * stage and edits. `undefined` when it has no canonical spelling.
  */
 const fingerprint = (item: AgendaItem): string | undefined => {
-  const { cardAsks: _asks, cardAsksSeal: _seal, gateAttached: _shown, gateAttachedChangedAt: _stamp, ...rest } = item;
-  const spelled = canonicalJson(rest);
+  const {
+    cardAsks: _asks,
+    cardAsksSeal: _seal,
+    gateAttached: _shown,
+    gateAttachedChangedAt: _stamp,
+    resting,
+    ...rest
+  } = item;
+  const { nudgeSend: _send, nudgedAt: _nudgedAt, nudges: _nudges, ...stable } = resting ?? {};
+  const spelled = canonicalJson(resting === undefined ? rest : { ...rest, resting: stable });
   return spelled.ok ? createHash('sha256').update(spelled.text, 'utf8').digest('hex').slice(0, 32) : undefined;
 };
+
+/** A seal's length: the digest is sliced to it, and the fit leaves room for it before the real one is known. */
+const PLACEHOLDER_SEAL = '0'.repeat(32);
 
 /** The item with the seal of the thread as it now stands. */
 export const sealCardAsks = (item: AgendaItem): AgendaItem => {
@@ -280,6 +293,11 @@ const operate = (
     }
     // An ask from before `woke` was kept has no turn to go back to; on a ferret's thread it rests the thread only when
     // the thread is still as the daemon left it.
+    // A sealed card agenda somebody wrote on since stays where it is, as a ferret's thread does: the owner's reply
+    // already rested it, and a ferret's answer is in front of the owner.
+    if (isCardAgenda(left) && item.cardAsksSeal !== undefined && !asLeft) {
+      return { kind: 'changed', item: told, change: 'refreshed' };
+    }
     const holdsAnswers = (left.cardAsks ?? []).length > 0 && (isCardAgenda(left) || asLeft);
     if (holdsAnswers || (isCardAgenda(left) && talkedOn(item))) {
       return { kind: 'changed', item: restedOnAnswer(told, at), change: 'refreshed' };
@@ -350,5 +368,8 @@ export const applyCardAsk = (
   const outcome = operate(item, operation, at, effects);
   if (outcome.kind !== 'changed') return outcome;
   const begins = outcome.change === 'woke' && !isCardAgenda(item) && openCardAsks(item).length === 0;
-  return untouched(item) || begins ? { ...outcome, item: sealCardAsks(effects.tidy(outcome.item)) } : outcome;
+  // The seal is part of the stored thread, so `tidy` fits it with a seal of the same length in place.
+  return untouched(item) || begins
+    ? { ...outcome, item: sealCardAsks(effects.tidy({ ...outcome.item, cardAsksSeal: PLACEHOLDER_SEAL })) }
+    : outcome;
 };
