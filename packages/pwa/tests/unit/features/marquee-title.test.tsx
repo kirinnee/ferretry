@@ -207,4 +207,38 @@ describe('the two-line title (the open agenda item)', () => {
     await interact(() => must(observers[0], 'observer').fire());
     expect(seen.at(-1)).toBe(true);
   });
+
+  test('says it again once the page’s fonts are in and when a later face loads, and stops listening when it goes', async () => {
+    const listeners = new Set<() => void>();
+    let fontsIn: () => void = () => undefined;
+    const fonts = {
+      ready: new Promise<void>(resolve => {
+        fontsIn = resolve;
+      }),
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    };
+    const own = Object.getOwnPropertyDescriptor(document, 'fonts');
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    try {
+      const seen: boolean[] = [];
+      await drawTwo('A title the web face wraps onto a third line', seen);
+      expect(seen).toEqual([false]);
+      // The face is wider than the fallback: the same box now holds three lines, and nothing resized.
+      contentHeight = 60;
+      await interact(() => fontsIn());
+      expect(seen.at(-1)).toBe(true);
+      contentHeight = 40;
+      await interact(() => {
+        for (const listener of listeners) listener();
+      });
+      expect(seen.at(-1)).toBe(false);
+      await view?.unmount();
+      view = null;
+      expect(listeners.size).toBe(0);
+    } finally {
+      if (own === undefined) Reflect.deleteProperty(document, 'fonts');
+      else Object.defineProperty(document, 'fonts', own);
+    }
+  });
 });

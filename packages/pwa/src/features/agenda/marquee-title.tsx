@@ -27,7 +27,7 @@ const CLAMP_SLACK_PX = 1;
  *
  * `twoLines` (the open agenda item's head) never moves and is never cut at a side: it wraps onto at most two lines
  * (`fy-item-view__title[data-wrap]`), and `onClamped` says whether even two lines could not hold it, so the host
- * can draw it whole as well.
+ * can draw it whole as well. Every title is measured again when its box resizes and when a web font finishes loading.
  */
 export function MarqueeTitle({
   title,
@@ -79,10 +79,22 @@ export function MarqueeTitle({
       );
     };
     measure();
-    if (typeof ResizeObserver === 'undefined') return undefined;
-    const watch = new ResizeObserver(measure);
-    watch.observe(outer);
-    return () => watch.disconnect();
+    // A web face that arrives after the first paint can re-wrap the words without the clamped box changing size, so
+    // no resize would say so: measure again once the page's fonts are in, and whenever another face loads.
+    let live = true;
+    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+    const remeasure = (): void => {
+      if (live) measure();
+    };
+    fonts?.ready.then(remeasure, () => undefined);
+    fonts?.addEventListener('loadingdone', remeasure);
+    const watch = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    watch?.observe(outer);
+    return () => {
+      live = false;
+      fonts?.removeEventListener('loadingdone', remeasure);
+      watch?.disconnect();
+    };
   }, [title, reduced, twoLines, onClamped]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new title starts folded
