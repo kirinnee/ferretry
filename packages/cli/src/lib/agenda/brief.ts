@@ -551,14 +551,15 @@ function linkFrom(raw: string): AgendaLink {
 }
 
 /**
- * What the person is told when a labelled `--link` keeps an `=` in its target: the part after the last `=` may have
- * been a one-word meaning that cannot be told from the address's own `=`, and `--json-file` says it unambiguously.
+ * What the person is told when a labelled `--link` keeps an `=` in its target and no meaning was read: the part after
+ * the last `=` may have been a one-word meaning that cannot be told from the address's own `=`, and `--json-file` says it unambiguously.
  */
 export function linkFlagNotices(flags: readonly string[] | undefined): string[] {
   return (flags ?? []).flatMap(raw => {
-    const { label, target } = linkFrom(raw);
-    if (label === undefined || !target.includes('=')) return [];
+    const { label, target, meaning } = linkFrom(raw);
+    if (label === undefined || meaning !== undefined || !target.includes('=')) return [];
     const tail = target.slice(target.lastIndexOf('=') + 1);
+    if (tail === '') return [];
     return [
       `read "${target}" as the whole target of "${label}"; if "${tail}" is its meaning, give the link through --json-file`,
     ];

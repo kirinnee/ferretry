@@ -1043,7 +1043,7 @@ With no sentence, the first `=` opens the meaning (`Docs=docs/a.md=Notes`, `PR=<
 belongs to the target: a `?` comes before it (`Run=https://ci/run?id=7`) or an address comes after it
 (`Docs=docs/a=b.md`); one trailing `=` is an empty meaning. A one-word meaning after a query target
 (`Run=https://ci/run?id=7=Failing`) is the case no rule can settle: it is read whole as the target. So whenever a
-labelled link keeps an `=` in its target, the CLI says so on standard error ("read … as the whole target of …; if
+labelled link keeps an `=` in its target and no meaning was read, the CLI says so on standard error ("read … as the whole target of …; if
 "Failing" is its meaning, give the link through --json-file"), and `--json-file` gives it unambiguously. The daemon lint warns, never refuses, for a link with no meaning ("say what it is, in
 plain words"). The item view shows the meaning in its terms-and-references table once it lands, and falls back to
 the label for an item raised before meanings existed. The daemon reports `agenda.link-meaning.1` on

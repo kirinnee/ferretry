@@ -1018,6 +1018,8 @@ describe('agenda --link: target, label=target and label=target=meaning', () => {
       'Run=https://ci.example.invalid/run?id=7=Failing',
       'Docs=docs/a=b.md',
       'Docs=docs/a.md=Notes',
+      'Run=https://ci.example.invalid/run?id=7=The failing run',
+      'Run=https://ci.example.invalid/run?id==The run',
       'https://host/page?a=b',
       '#F12',
     ]);
