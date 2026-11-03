@@ -275,6 +275,25 @@ describe('isDirectSend', () => {
     ).be.false();
   });
 
+  it('honours an explicit session ceiling on an interactive Claude session for a multi-line paste', () => {
+    const message = `${banner}a\nb`;
+    should(
+      isDirectSend(claude({ mode: 'interactive', directSendMaxChars: 0 }), message, defaultSessionSendSettings),
+    ).be.false();
+    should(
+      isDirectSend(claude({ mode: 'interactive', directSendMaxChars: 10 }), message, defaultSessionSendSettings),
+    ).be.false();
+    should(
+      isDirectSend(claude({ mode: 'interactive', directSendMaxChars: 4_096 }), message, defaultSessionSendSettings),
+    ).be.true();
+  });
+
+  it('keeps an interactive session on the single-line rule that has no ceiling', () => {
+    should(
+      isDirectSend(claude({ mode: 'interactive', directSendMaxChars: 10 }), 'x'.repeat(50), defaultSessionSendSettings),
+    ).be.true();
+  });
+
   it('turns a tab or control character in a multi-line message into a turn file', () => {
     should(isDirectSend(claude(), `${banner}col1\tcol2\nrow2`, defaultSessionSendSettings)).be.false();
     should(isDirectSend(claude(), `${banner}a\r\nb`, defaultSessionSendSettings)).be.false();

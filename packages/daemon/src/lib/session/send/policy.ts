@@ -226,10 +226,19 @@ const PASTE_SAFE_HARNESS = 'claude';
  * in its composer and being submitted; its fixtures show typed text only.
  */
 export function isDirectSend(target: SendTarget, payload: string, settings: SessionSendSettings): boolean {
-  const limit = directLimitFor(target, settings);
-  if (isDirectPayload(payload, limit)) return true;
+  if (isDirectPayload(payload, directLimitFor(target, settings))) return true;
   if (target.harness !== PASTE_SAFE_HARNESS) return false;
-  return isDirectPaste(payload, Math.min(limit, settings.directPasteMaxChars));
+  return isDirectPaste(payload, Math.min(pasteCeilingFor(target, settings), settings.directPasteMaxChars));
+}
+
+/**
+ * The ceiling a multi-line paste is held to: the session's own `directSendMaxChars` when it set one,
+ * zero included, even on an interactive session (whose single-line rule has no ceiling). Without one,
+ * `directLimitFor` decides, so an interactive session stays unbounded here and only
+ * `directPasteMaxChars` applies.
+ */
+function pasteCeilingFor(target: SendTarget, settings: SessionSendSettings): number {
+  return target.directSendMaxChars ?? directLimitFor(target, settings);
 }
 
 /** What is typed into a pane so the agent picks up a tracked turn. The wording is the protocol's, because the app reads it back out of the transcript (`turn-handoff.ts`). */
