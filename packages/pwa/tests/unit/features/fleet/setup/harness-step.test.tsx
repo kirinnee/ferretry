@@ -1384,6 +1384,16 @@ describe('OnboardingHarnessStep — also bring my conversations', () => {
     }
   });
 
+  it('says there was no runtime to put them in when the machine lists none after the import', async () => {
+    const s = await start(daemon({ [APPLY_PATH]: EXECUTED }), { answers: { conversations: true } });
+    try {
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(s.finished[0]?.conversations).toContain('no runtime to put them in');
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
   it('says how many could not be brought in, and still moves on', async () => {
     const s = await start(
       daemon({
