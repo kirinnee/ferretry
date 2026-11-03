@@ -438,7 +438,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Merging the agenda model tightened the agenda's own wording (agenda 1,319 → 1,230; pack stays 1,046): 7,745 measured, 105 under the 7,850 cap.
     // Final review restored "on it" in the agenda's chat line (agenda 1,230 → 1,236): 7,751 measured.
     // PR 3's conversation verbs (`log`, `split`, `merge`) took agenda to 1,266; main's `card` and `board` on the Hypermedia line took it to 1,320. Together: 7,813 measured, 37 under the cap.
-    // Fix round 1 of the card-asks PR said "Before it's ready to try:" for "Before To test:" and gave back the words it needed (board 638 → 636): 7,749 measured, 101 under the 7,850 cap.
+    // Fix rounds of the card-asks PR said "Before it's ready to try:" for "Before To test:", kept "show progress only" and tightened "add to one" (board 638 → 631): 7,806 measured, 44 under the 7,850 cap.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
     should(sizes.pack).be.below(1_050);

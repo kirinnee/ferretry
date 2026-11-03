@@ -881,8 +881,8 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert
-    should(text).containEql("Cards (&F412) show progress; every human ask goes in the card's agenda.");
-    should(text).containEql('No umbrella cards; check related cards first; prefer adding to one.');
+    should(text).containEql("Cards (&F412) show progress only; every human ask goes in the card's agenda.");
+    should(text).containEql('No umbrella cards; check related cards first; add to one.');
     // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
     should(text).not.containEql('raise nothing');
