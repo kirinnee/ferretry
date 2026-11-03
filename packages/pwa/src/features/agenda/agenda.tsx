@@ -49,6 +49,7 @@ import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
+import { RecipeProposalHost } from '../secrets/recipe-proposal-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
@@ -108,11 +109,11 @@ const NO_ITEMS: readonly AgendaItem[] = [];
 const SENT_FORM_MS = 12_000;
 
 /**
- * An item the daemon closes the moment its request ends: an input card (typed, sent, cancelled or expired) and an
- * approve-on-phone card. Its view closes with it rather than sit on a closed record (#B147).
+ * An item the daemon closes the moment its request ends: an input card (typed, sent, cancelled or expired), an
+ * approve-on-phone card and a suggested sign-in recipe. Its view closes with it rather than sit on a closed record (#B147).
  */
 const endsItself = (item: AgendaItem | ResolvedAgendaItem): boolean =>
-  item.kind === 'input' || item.phoneApproval !== undefined;
+  item.kind === 'input' || item.phoneApproval !== undefined || item.recipeProposal !== undefined;
 
 /** What the line above the composer says when such an item closed under its open view. */
 const endedWords = (item: ResolvedAgendaItem): string =>
@@ -575,6 +576,18 @@ export const useAgenda = ({
                     approvalId={cardItem.phoneApproval.id}
                     connection={connection}
                     sessionId={scope.sessionId}
+                  />
+                ),
+              }
+            : {})}
+          {...(cardItem.recipeProposal !== undefined
+            ? {
+                planForm: (
+                  <RecipeProposalHost
+                    agentName={ferret}
+                    connection={connection}
+                    item={cardItem}
+                    onHold={holdFor(cardItem.id)}
                   />
                 ),
               }

@@ -27,6 +27,7 @@ import {
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+import { type PlanFormClaim, PlanFormClaimContext } from './plan-form-claim.ts';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
@@ -296,6 +297,9 @@ export function AgendaItemCard({
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
   const [picked, setPicked] = useState<number | null>(null);
+  // A plan form that draws the whole ask says so; the card then leaves out its own ask, "Not needed" and context.
+  const [claim, setClaim] = useState<PlanFormClaim | null>(null);
+  const owned = planForm !== undefined && claim === 'owns';
   const shown = Math.min(picked ?? count, count);
   const setShown = (version: number): void => setPicked(version >= count ? null : version);
   const latest = shown >= count;
@@ -317,13 +321,14 @@ export function AgendaItemCard({
   // just the daemon's own lines: a settled record and an older version draw no card, and keep the prompt as written.
   const inputDrawn = isInput && answerable;
   const contextText = inputDrawn ? inputContextLines(read.context) : read.context;
-  const context = cardsForm === undefined && contextText?.trim() ? mark(contextText) : null;
+  const context = cardsForm === undefined && !owned && contextText?.trim() ? mark(contextText) : null;
 
   const formFields = item.fields ?? [];
   const formPicks = useFormPicks(formKey ?? item.id, formFields);
   // A gate item is a card to try or approve: its steps are the card's How to test, and Not needed is a button under it.
   const gated = item.gate !== undefined;
-  const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated && !dismissAside;
+  const canDismiss =
+    answerable && !isInput && !owned && model.dismissInMenu && !model.notice && !gated && !dismissAside;
   const dismiss = (): void => {
     if (!busy) onAct(DISMISS_ACTION);
   };
@@ -460,7 +465,7 @@ export function AgendaItemCard({
           </div>
         )}
         {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
-        {inputDrawn ? null : (
+        {inputDrawn || owned ? null : (
           <AgendaNeed
             shape={shape}
             {...(gated && body !== null ? { heading: 'How to test' } : {})}
@@ -615,9 +620,17 @@ export function AgendaItemCard({
           {inputForm}
         </div>
       ) : planForm !== undefined ? (
-        <div className="fy-card__input" data-agenda-plan-form="">
-          {planForm}
-        </div>
+        <>
+          <div className="fy-card__input" data-agenda-plan-form="" hidden={claim === 'fallback'}>
+            <PlanFormClaimContext.Provider value={setClaim}>{planForm}</PlanFormClaimContext.Provider>
+          </div>
+          {claim === 'fallback' ? (
+            <>
+              {parkedNote}
+              {replies}
+            </>
+          ) : null}
+        </>
       ) : docked ? null : (
         <>
           {parkedNote}

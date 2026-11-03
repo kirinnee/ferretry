@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgendaItem } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView, type AgendaItemViewProps } from '../../../src/features/agenda/agenda-item-view.tsx';
+import { type PlanFormClaim, useClaimPlanForm } from '../../../src/features/agenda/plan-form-claim.ts';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
 import { DISMISS_ACTION, type InboxAction } from '../../../src/lib/agenda-inbox.ts';
 import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
@@ -1029,6 +1030,34 @@ describe('a paste plan', () => {
 
     await draw(notice, { planForm: <form data-fake-plan="" />, settled: <p>Resolved.</p> });
     expect(root().querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});
+
+describe('a plan form that says whether it took the card over', () => {
+  const Claims = ({ claim }: { readonly claim: PlanFormClaim }) => {
+    useClaimPlanForm(claim);
+    return <form data-fake-plan="" />;
+  };
+
+  test('owning the card leaves out its ask, its context and “Not needed”', async () => {
+    await draw(richItem, { planForm: <Claims claim="owns" /> });
+    expect(one('.fy-card [data-agenda-plan-form] [data-fake-plan]')).toBeDefined();
+    expect(root().querySelector('[data-agenda-need]')).toBeNull();
+    expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
+    expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
+  });
+
+  test('falling back draws the card as it always was, with the form drawing nothing', async () => {
+    await draw(richItem, { planForm: <Claims claim="fallback" /> });
+    expect(one('[data-agenda-need]')).toBeDefined();
+    expect(one('[data-agenda-section="context"]')).toBeDefined();
+    expect(one('[data-agenda-plan-form]').hasAttribute('hidden')).toBe(true);
+  });
+
+  test('a form that says nothing leaves the card as it is', async () => {
+    await draw(richItem, { planForm: <form data-fake-plan="" /> });
+    expect(one('[data-agenda-need]')).toBeDefined();
+    expect(one('[data-agenda-section="context"]')).toBeDefined();
   });
 });
 

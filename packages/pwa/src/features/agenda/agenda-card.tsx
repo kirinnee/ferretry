@@ -22,7 +22,8 @@
 
 import type { AgendaItem, AgendaRevisableField } from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import { type ReactNode, useId, useState } from 'react';
+import { type PlanFormClaim, PlanFormClaimContext } from './plan-form-claim.ts';
 import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, historyLine, type InboxAction, updatedSinceAsked } from '../../lib/agenda-inbox.ts';
@@ -124,6 +125,7 @@ export function AgendaCard({
   cardsForm,
 }: AgendaCardProps) {
   const titleId = useId();
+  const [claim, setClaim] = useState<PlanFormClaim | null>(null);
   const kind = agendaKindMeta(item);
   const KindIcon = kind.icon;
   const model = cardModel(item);
@@ -138,6 +140,32 @@ export function AgendaCard({
     if (busy) return;
     onAct(action);
   };
+
+  const actions = (
+    <AgendaActions
+      answers={answers}
+      arrows={!flat && (swipeHints || pinned)}
+      busy={busy}
+      dismissInMenu={model.dismissInMenu && !model.notice}
+      extraOptions={extras}
+      onAnswer={answer => {
+        const action = answerAction(answer, '');
+        if (action !== null) give(action);
+      }}
+      onDismiss={() => give(DISMISS_ACTION)}
+      onOption={option => give(optionAction(option, ''))}
+      recommendationLine={model.recommendationLine}
+      recommended={recommended}
+      swipeHints={swipeHints && !flat}
+      {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
+      {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
+      {...(onSkip === undefined ? {} : { onSkip })}
+      {...(onOpenDetail !== undefined && !model.notice && agendaHasDetail(item) ? { onOpenDetail } : {})}
+      {...(item.waitingOn === 'ferret' && !model.notice
+        ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
+        : {})}
+    />
+  );
 
   return (
     <article
@@ -233,37 +261,18 @@ export function AgendaCard({
         </p>
       )}
       {planForm !== undefined ? (
-        <div className="fy-attn-card__input" data-agenda-plan-form="">
-          {planForm}
-        </div>
+        <>
+          <div className="fy-attn-card__input" data-agenda-plan-form="" hidden={claim === 'fallback'}>
+            <PlanFormClaimContext.Provider value={setClaim}>{planForm}</PlanFormClaimContext.Provider>
+          </div>
+          {claim === 'fallback' ? actions : null}
+        </>
       ) : inputForm !== undefined && item.kind === 'input' ? (
         <div className="fy-attn-card__input" data-agenda-input-form="">
           {inputForm}
         </div>
       ) : (
-        <AgendaActions
-          answers={answers}
-          arrows={!flat && (swipeHints || pinned)}
-          busy={busy}
-          dismissInMenu={model.dismissInMenu && !model.notice}
-          extraOptions={extras}
-          onAnswer={answer => {
-            const action = answerAction(answer, '');
-            if (action !== null) give(action);
-          }}
-          onDismiss={() => give(DISMISS_ACTION)}
-          onOption={option => give(optionAction(option, ''))}
-          recommendationLine={model.recommendationLine}
-          recommended={recommended}
-          swipeHints={swipeHints && !flat}
-          {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
-          {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
-          {...(onSkip === undefined ? {} : { onSkip })}
-          {...(onOpenDetail !== undefined && !model.notice && agendaHasDetail(item) ? { onOpenDetail } : {})}
-          {...(item.waitingOn === 'ferret' && !model.notice
-            ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
-            : {})}
-        />
+        actions
       )}
       {origin === undefined || pinned ? null : (
         <RouteLink className="fy-attn-card__open" data-agenda-open="" onNavigate={origin.onNavigate} to={origin.href}>

@@ -59,6 +59,7 @@
         "harness/save-as-screenshot.tsx",
         "harness/other-site-accounts-screenshot.tsx",
         "harness/sign-in-rules-screenshot.tsx",
+        "harness/recipe-card-screenshot.tsx",
         "harness/accounts-screenshot.tsx",
         "harness/agenda-question-answer-screenshot.tsx",
         "harness/agenda-segments-screenshot.tsx",

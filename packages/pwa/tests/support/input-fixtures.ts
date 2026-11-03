@@ -173,7 +173,7 @@ export const fakeClient = (answer: (call: Call) => unknown = () => ({})) => {
         body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined,
       };
       calls.push(call);
-      return schema.parse(answer(call));
+      return schema.parse(await answer(call));
     },
   };
   return { client: client as never, calls };

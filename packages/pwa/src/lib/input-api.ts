@@ -20,6 +20,8 @@ import {
   InputRequestSchema,
   type InputShot,
   InputShotSchema,
+  type LoginRecipeDecision,
+  LoginRecipeDecisionSchema,
   type PhoneApproval,
   type PhoneApprovalList,
   PhoneApprovalListSchema,
@@ -27,6 +29,9 @@ import {
   PutAccountDefaultRequestSchema,
   type PutAccountDefaultResult,
   PutAccountDefaultResultSchema,
+  type SignInId,
+  type SignInSummary,
+  SignInSummarySchema,
   type StageTwoFactorSeedRequest,
   StageTwoFactorSeedRequestSchema,
   type TwoFactorSeedSaved,
@@ -135,6 +140,27 @@ export async function refusePhoneApproval(
 /** `GET /v1/accounts`: the owner's accounts, for the places a pasted 2FA key is checked against. */
 export async function readAccounts(client: InputClient): Promise<AccountList> {
   return await client.request('/v1/accounts', AccountListSchema, { method: 'GET' });
+}
+
+/**
+ * The owner's answer to one ferret recipe proposal, right from its agenda card. `approve` may carry the owner's own
+ * version of the recipe. A paired device's approval is answered with a passkey by the routed client, which sends it again.
+ */
+export async function decideRecipeProposal(
+  client: InputClient,
+  signIn: SignInId,
+  proposalId: string,
+  decision: LoginRecipeDecision,
+): Promise<SignInSummary> {
+  return await client.request(
+    `/v1/accounts/sign-ins/${encodeURIComponent(signIn)}/recipe/proposals/${encodeURIComponent(proposalId)}`,
+    SignInSummarySchema,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(LoginRecipeDecisionSchema.parse(decision)),
+    },
+  );
 }
 
 const seedPath = (account: AccountId): string => `/v1/accounts/${encodeURIComponent(account)}/factors/seed`;

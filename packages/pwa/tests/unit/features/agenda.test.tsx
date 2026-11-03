@@ -1077,6 +1077,112 @@ describe('a sign-in rule suggestion card', () => {
   });
 });
 
+describe('a suggested sign-in recipe card', () => {
+  const REF = { signIn: 'si_0000000000000001', id: 'rp_0123456789abcdef' } as const;
+  const recipeItem = (id: string): AgendaItem => item(id, { kind: 'task', recipeProposal: REF } as Partial<AgendaItem>);
+
+  test('is offered the recipe host only for the daemon’s own proposal reference', () => {
+    const open = (extra: Partial<AgendaItem>) => {
+      const view = mount({
+        snapshot: board([item('A1', { kind: 'task', ...extra } as Partial<AgendaItem>)]),
+        focus: { target: 'A1' as AgendaId, seq: 1 },
+      });
+      const form = view.root.findByType(AgendaItemView).props.planForm;
+      run(() => view.unmount());
+      return form;
+    };
+    expect(open({ recipeProposal: REF } as Partial<AgendaItem>)).toBeDefined();
+    expect(open({})).toBeUndefined();
+  });
+
+  test('closes its view when the daemon closes it, as an input card does', () => {
+    const card = recipeItem('A9');
+    const view = mount({ snapshot: board([card]), focus: { target: 'A9' as AgendaId, seq: 1 } });
+    expect(live().covered).toBe(true);
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [
+            {
+              ...card,
+              resolvedAt: '2026-07-31T12:00:05.000Z',
+              resolvedBy: 'daemon',
+              resolvedBySession: null,
+              resolvedByName: null,
+              resolutionNote: 'Recipe approved.',
+              disposition: 'done',
+            },
+          ])}
+          focus={{ target: 'A9' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(false);
+  });
+
+  test('stays open while the owner edits, then closes with the host’s own words', () => {
+    const card = recipeItem('A9');
+    const view = mount({ snapshot: board([card]), focus: { target: 'A9' as AgendaId, seq: 1 } });
+    const host = () => view.root.findByType(AgendaItemView).props.planForm;
+    run(() => host().props.onHold(true));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [
+            {
+              ...card,
+              resolvedAt: '2026-07-31T12:00:05.000Z',
+              resolvedBy: 'daemon',
+              resolvedBySession: null,
+              resolvedByName: null,
+              resolutionNote: 'Recipe approved.',
+              disposition: 'done',
+            },
+          ])}
+          focus={{ target: 'A9' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    run(() => host().props.onHold(false, 'Recipe for github.com approved.'));
+    expect(live().covered).toBe(false);
+    const said = view.root.findAll(node => node.type === 'p' && node.props['data-agenda-sent'] !== undefined);
+    expect(said[0]?.props['data-tone']).toBe('ok');
+    expect(textOf(said[0])).toContain('Recipe for github.com approved.');
+  });
+
+  test('closes with the daemon’s words once the host lets go without any, as it does when the proposal is gone', () => {
+    const card = recipeItem('A9');
+    const view = mount({ snapshot: board([card]), focus: { target: 'A9' as AgendaId, seq: 1 } });
+    const host = () => view.root.findByType(AgendaItemView).props.planForm;
+    run(() => host().props.onHold(true));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [
+            {
+              ...card,
+              resolvedAt: '2026-07-31T12:00:05.000Z',
+              resolvedBy: 'daemon',
+              resolvedBySession: null,
+              resolvedByName: null,
+              resolutionNote: 'Recipe approved elsewhere.',
+              disposition: 'done',
+            },
+          ])}
+          focus={{ target: 'A9' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    run(() => host().props.onHold(false));
+    expect(live().covered).toBe(false);
+    const said = view.root.findAll(node => node.type === 'p' && node.props['data-agenda-sent'] !== undefined);
+    expect(said[0]?.props['data-tone']).toBe('info');
+    expect(textOf(said[0])).toContain('Recipe approved elsewhere.');
+  });
+});
+
 describe('a form opened in the chat (#B143)', () => {
   // The Inbox's form, filled in from the chat: the same card, the same picks, and the composer's Send is its answer.
   const formItem = (id: string, extra: Record<string, unknown> = {}): AgendaItem =>
