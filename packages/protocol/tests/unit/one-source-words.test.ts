@@ -70,9 +70,9 @@ describe('one source per fact: durations and counts in words', () => {
 
   it('should say the history a rule needs from the number of taps', () => {
     should(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']).equal(
-      `Sign in yourself ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} from the app first`,
+      `Fill this sign-in yourself from the app ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} in a row first`,
     );
-    should(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']).equal('Sign in yourself twice from the app first');
+    should(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']).equal('Fill this sign-in yourself from the app twice in a row first');
   });
 });
 

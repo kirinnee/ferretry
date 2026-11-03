@@ -318,7 +318,7 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     should([untapped.status, untapped.code, untapped.message]).eql([
       409,
       'no_history',
-      'Sign in yourself twice from the app first',
+      'Fill this sign-in yourself from the app twice in a row first',
     ]);
     should(eligible).eql({ signIn: SSH, eligible: false, because: 'tool-not-covered' });
     should(w.service.challengeOf(`srs_${'0'.repeat(24)}` as SignInRuleStageId, DEVICE)).be.undefined();

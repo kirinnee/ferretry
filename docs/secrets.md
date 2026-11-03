@@ -632,7 +632,7 @@ stage answers `409` with the reason:
 | `tool_not_covered` | A terminal sign-in for any program but sudo, su or doas (ssh, npm, …): no rule ever covers it. |
 | `via_provider`     | The sign-in goes through another account ("via Google").                                       |
 | `not_password`     | The sign-in does not use a password.                                                           |
-| `no_history`       | "Sign in yourself twice from the app first".                                                   |
+| `no_history`       | "Fill this sign-in yourself from the app twice in a row first".                              |
 | `passkey_required` | No passkey has been added on a paired device yet.                                              |
 | `no_code_key`      | The code was ticked, but no 2FA key on the account has a seed Ferretry holds.                  |
 | `terminal_off`     | sudo, su or doas, on a machine that does not offer terminal rules.                             |

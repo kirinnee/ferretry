@@ -1127,7 +1127,7 @@ export const SIGN_IN_RULE_ERROR_CODES = {
   stageNotFound: 'stage_not_found',
   /** No device has a passkey yet, so no rule can be approved: "Add a passkey in Settings › Security first". */
   passkeyRequired: 'passkey_required',
-  /** The owner has not signed in to it from the app twice yet: "Sign in yourself twice from the app first". */
+  /** The owner has not filled it from the app twice in a row yet ({@link SIGN_IN_RULE_INELIGIBLE_WORDS}). */
   noHistory: 'no_history',
   /** A provider sign-in ("ClickUp via Google"): there is no password of its own to fill. */
   viaProvider: 'via_provider',
@@ -1204,7 +1204,7 @@ export const SIGN_IN_RULE_INELIGIBLE_CODES = {
 
 /** The owner's sentence for each. */
 export const SIGN_IN_RULE_INELIGIBLE_WORDS = {
-  'no-history': `Sign in yourself ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} from the app first`,
+  'no-history': `Fill this sign-in yourself from the app ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} in a row first`,
   'via-provider': "This sign-in goes through another account, so it can't be pre-approved",
   'not-password': 'Only a password sign-in can be pre-approved',
   'tool-not-covered': 'A standing rule covers a page sign-in, or sudo, su or doas in a terminal; not this program',
@@ -1230,6 +1230,20 @@ export const SignInRuleEligibilitySchema = z.discriminatedUnion('eligible', [
     eligible: z.literal(false),
     because: SignInRuleIneligibleSchema,
     rule: SignInRuleIdSchema.optional(),
+    /**
+     * For `no-history` only, and only when asked (`&progress=1`, so an older app's strict read never meets it): how many
+     * of the {@link SIGN_IN_RULE_HISTORY_TAPS} fills in a row the owner has made so far, for "1 of 2 sign-ins done".
+     */
+    history: z
+      .number()
+      .int()
+      .min(0)
+      .max(SIGN_IN_RULE_HISTORY_TAPS - 1)
+      .optional(),
   }),
 ]);
+
+/** "1 of 2 sign-ins done": the owner's progress toward a standing rule, from `history` (#F640). */
+export const signInRuleProgressWords = (history: number): string =>
+  `${Math.min(history, SIGN_IN_RULE_HISTORY_TAPS)} of ${SIGN_IN_RULE_HISTORY_TAPS} sign-ins done`;
 export type SignInRuleEligibility = z.infer<typeof SignInRuleEligibilitySchema>;

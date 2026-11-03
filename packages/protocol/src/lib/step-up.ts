@@ -83,6 +83,7 @@ export const StepUpActSchema = z.enum([
   'approve-sign-in-rule',
   'resume-cut-off',
   'approve-paste-rule',
+  'approve-recipe',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
@@ -466,6 +467,13 @@ export const STEP_UP_ACTS = {
    * The passkey prompt lists the daemon's rows of what the rule allows. Removing a rule never asks.
    */
   approvePasteRule: 'approve-paste-rule',
+  /**
+   * Approving a ferret's suggested SIGN-IN RECIPE, as it stands or in the owner's own words (login-recipes.ts, owner
+   * decision !A320): every ferret then signs in to that place by those steps. From a paired device it wants a passkey
+   * proved for this act alone, spent on the one approval; the machine itself (loopback, `fy account site recipe
+   * approve`) is ungoverned (docs/grants.md). Declining never asks.
+   */
+  approveRecipe: 'approve-recipe',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**
