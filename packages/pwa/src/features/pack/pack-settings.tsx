@@ -25,6 +25,7 @@ import type { PackConfigPatch } from '../../lib/pack/pack-files.ts';
 import { type IdeaLimit, ideaLimitFor } from '../../lib/pack/routing-prompt.ts';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { SettingGroup, SettingRow } from '../settings/setting-row.tsx';
 import { RoutingPromptCard } from './routing-prompt-card.tsx';
 import { type MachinePack, type PackSave, useMachinePack } from './use-machine-pack.ts';
 
@@ -147,51 +148,46 @@ function NumbersForm({
     onSave(patch);
   };
   return (
-    <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
-      <legend className="mb-2 p-0 text-ui font-semibold">{title}</legend>
+    <SettingGroup label={title}>
       {settings.map(setting => {
         const id = `${base}-${setting.key}`;
         const bad = draft[setting.key] !== undefined && !valid(setting, Number(text(setting)));
         return (
-          <div key={setting.key} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <div className="min-w-0 flex-1 basis-[220px]">
-              <label htmlFor={id} className="block text-ui">
-                {setting.label}
-              </label>
-              <span id={`${id}-hint`} className="block text-meta leading-base text-muted">
-                {setting.hint}
-                {bad ? ` Between ${setting.min} and ${setting.max}.` : ''}
-              </span>
-            </div>
-            <input
-              id={id}
-              type="number"
-              inputMode={setting.step === undefined ? 'numeric' : 'decimal'}
-              className={cn('kt-input min-h-[44px] w-28', bad && '!border-err')}
-              min={setting.min}
-              max={setting.max}
-              step={setting.step ?? 1}
-              aria-describedby={`${id}-hint`}
-              aria-invalid={bad || undefined}
-              disabled={busy}
-              value={text(setting)}
-              data-pack-number={setting.key}
-              onChange={event => setDraft({ ...draft, [setting.key]: event.currentTarget.value })}
-            />
-          </div>
+          <SettingRow
+            key={setting.key}
+            name={setting.label}
+            hint={`${setting.hint}${bad ? ` Between ${setting.min} and ${setting.max}.` : ''}`}
+            control={labelId => (
+              <input
+                id={id}
+                type="number"
+                inputMode={setting.step === undefined ? 'numeric' : 'decimal'}
+                className={cn('kt-input min-h-[var(--control-h-sm)] w-24', bad && '!border-err')}
+                min={setting.min}
+                max={setting.max}
+                step={setting.step ?? 1}
+                aria-labelledby={labelId}
+                aria-invalid={bad || undefined}
+                disabled={busy}
+                value={text(setting)}
+                data-pack-number={setting.key}
+                onChange={event => setDraft({ ...draft, [setting.key]: event.currentTarget.value })}
+              />
+            )}
+          />
         );
       })}
-      <div className="flex flex-wrap gap-2">
-        <Button className="min-h-[44px]" disabled={busy || edited.length === 0 || !allValid} onClick={save}>
+      <li className="flex min-w-0 flex-wrap gap-2 px-panel py-2">
+        <Button size="sm" disabled={busy || edited.length === 0 || !allValid} onClick={save}>
           Save {title.toLocaleLowerCase()}
         </Button>
         {edited.length > 0 ? (
-          <Button variant="ghost" className="min-h-[44px]" disabled={busy} onClick={() => setDraft({})}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft({})}>
             Discard
           </Button>
         ) : null}
-      </div>
-    </fieldset>
+      </li>
+    </SettingGroup>
   );
 }
 
@@ -209,8 +205,6 @@ function PackPanel({
   const { config } = view;
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<PackSave | null>(null);
-  const switchTitle = useId();
-  const decisionTitle = useId();
   const commit = (patch: PackConfigPatch): void => {
     setBusy(true);
     setOutcome(null);
@@ -222,93 +216,83 @@ function PackPanel({
   const on = config.enabled;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-pack-settings="">
-      <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={switchTitle}>
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <h3 id={switchTitle} className="m-0 text-ui font-semibold">
-              Pack mode on this machine
-            </h3>
-            <p className="m-0 mt-1 text-meta leading-base text-muted">
+      <SettingGroup label="Pack mode">
+        <SettingRow
+          name="Pack mode on this machine"
+          hint="Each ferret also has its own switch in Actions › Pack mode; a change there takes effect at its next launch."
+          explanation={
+            <>
               Ferrets may start sub-ferrets for parts of their work and pick the model each one runs on. Off: no ferret
               is told about it, and <span className="mono">fy new</span> refuses.
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={on}
-            aria-labelledby={switchTitle}
-            disabled={busy}
-            onClick={() => commit({ enabled: !on })}
-            data-pack-switch=""
-            className={cn(
-              SWITCH_CLASS,
-              on ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-3')}
-            >
-              <span
-                className={cn(
-                  'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
-                  on ? 'left-[18px]' : 'left-0.5',
-                )}
-              />
-            </span>
-            {on ? 'On' : 'Off'}
-          </button>
-        </div>
-        <p className="m-0 text-meta text-faint">
-          Each ferret also has its own switch in Actions › Pack mode; a change there takes effect at its next launch.
-        </p>
-      </section>
-
-      <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={decisionTitle}>
-        <h3 id={decisionTitle} className="m-0 text-ui font-semibold">
-          Who picks the model
-        </h3>
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="sr-only">Who picks the model</legend>
-          {DECISIONS.map(option => (
-            <label
-              key={option.id}
+            </>
+          }
+          control={labelId => (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={on}
+              aria-labelledby={labelId}
+              disabled={busy}
+              onClick={() => commit({ enabled: !on })}
+              data-pack-switch=""
               className={cn(
-                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-                config.decision === option.id ? 'border-accent bg-accent-soft' : 'border-border-strong bg-surface-2',
+                SWITCH_CLASS,
+                on ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
               )}
             >
-              <input
-                type="radio"
-                name="pack-decision"
-                className="mt-1"
-                checked={config.decision === option.id}
-                disabled={busy}
-                onChange={() => commit({ decision: option.id })}
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-ui font-semibold">{option.label}</span>
-                <span className="text-meta leading-base text-muted">{option.hint}</span>
-                {option.id === 'jev' ? (
-                  <span className="text-meta leading-base text-warn" data-pack-jev-cap="">
-                    Daily cap: ${config.jev.usdPerDay.toFixed(2)} (default $
-                    {DEFAULT_PACK_CONFIG.jev.usdPerDay.toFixed(2)})
-                  </span>
-                ) : null}
+              <span
+                aria-hidden="true"
+                className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-3')}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
+                    on ? 'left-[18px]' : 'left-0.5',
+                  )}
+                />
               </span>
-            </label>
-          ))}
-        </fieldset>
-        {config.decision === 'jev' ? (
-          <NumbersForm config={config} settings={[JEV_CAP]} title="Jev cap" busy={busy} onSave={commit} />
-        ) : null}
-      </section>
+              {on ? 'On' : 'Off'}
+            </button>
+          )}
+        />
+      </SettingGroup>
 
-      <section className="kt-panel flex flex-col gap-4 p-4">
-        <NumbersForm config={config} settings={LIMITS} title="Limits" busy={busy} onSave={commit} />
-        <NumbersForm config={config} settings={PROBE} title="Probe" busy={busy} onSave={commit} />
-      </section>
+      <SettingGroup label="Who picks the model">
+        {DECISIONS.map(option => (
+          <SettingRow
+            key={option.id}
+            name={option.label}
+            explanation={option.hint}
+            hint={
+              option.id === 'jev' ? (
+                <span className="text-warn" data-pack-jev-cap="">
+                  Daily cap: ${config.jev.usdPerDay.toFixed(2)} (default ${DEFAULT_PACK_CONFIG.jev.usdPerDay.toFixed(2)}
+                  )
+                </span>
+              ) : undefined
+            }
+            control={labelId => (
+              <label className="inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center">
+                <input
+                  type="radio"
+                  name="pack-decision"
+                  aria-labelledby={labelId}
+                  className="h-5 w-5 accent-[var(--accent)]"
+                  checked={config.decision === option.id}
+                  disabled={busy}
+                  onChange={() => commit({ decision: option.id })}
+                />
+              </label>
+            )}
+          />
+        ))}
+      </SettingGroup>
+      {config.decision === 'jev' ? (
+        <NumbersForm config={config} settings={[JEV_CAP]} title="Jev cap" busy={busy} onSave={commit} />
+      ) : null}
+
+      <NumbersForm config={config} settings={LIMITS} title="Limits" busy={busy} onSave={commit} />
+      <NumbersForm config={config} settings={PROBE} title="Probe" busy={busy} onSave={commit} />
 
       {outcome !== null && outcome.kind !== 'applied' ? (
         <p
