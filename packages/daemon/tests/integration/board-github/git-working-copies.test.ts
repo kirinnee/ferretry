@@ -367,6 +367,156 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
         });
       });
 
+      describe('a repository that is not the plain shape the files vouch for', () => {
+        /** The environment a daemon would hand git when none of it steers git. */
+        const plain = (): Record<string, string | undefined> =>
+          Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')));
+
+        it("should follow a linked worktree whose .git is a symlink to the worktree's directory in the main repository", async () => {
+          await withTempRoot(async root => {
+            // Arrange — git follows the link, then `commondir` (`../..`) from the directory it reached.
+            const repo = await repository(root);
+            await git(repo, 'remote', 'add', 'origin', 'git@github.com:owner/one.git');
+            const tree = join(root, 'tree');
+            await git(repo, 'worktree', 'add', '--quiet', '-b', 'feat/tree', tree);
+            await rm(join(tree, '.git'));
+            await symlink(join(repo, '.git', 'worktrees', 'tree'), join(tree, '.git'));
+            const copies = new GitWorkingCopies();
+
+            // Act
+            const primed = await copies.repositoryOf(tree);
+            await git(repo, 'remote', 'set-url', 'origin', 'git@github.com:owner/two.git');
+            const kept = await copies.repositoryOf(tree);
+            const fresh = await new GitWorkingCopies().repositoryOf(tree);
+
+            // Assert
+            should([primed, kept, fresh]).deepEqual(['owner/one', 'owner/two', 'owner/two']);
+          });
+        });
+
+        it('should ignore a nested .git that git itself ignores for lacking objects and refs', async () => {
+          await withTempRoot(async root => {
+            // Arrange — `sub/.git` holds only a HEAD: git walks on past it to the outer repository.
+            const outer = await repository(root);
+            await git(outer, 'checkout', '--quiet', '-b', 'feat/outer');
+            const sub = join(outer, 'sub');
+            await mkdir(join(sub, '.git'), { recursive: true });
+            await writeFile(join(sub, '.git', 'HEAD'), 'ref: refs/heads/phantom\n');
+            const copies = new GitWorkingCopies();
+
+            // Act
+            const primed = await copies.branchOf(sub);
+            await git(outer, 'checkout', '--quiet', '-b', 'feat/outer-two');
+            const kept = await copies.branchOf(sub);
+            const fresh = await new GitWorkingCopies().branchOf(sub);
+
+            // Assert
+            should([primed, kept, fresh]).deepEqual(['feat/outer', 'feat/outer-two', 'feat/outer-two']);
+          });
+        });
+
+        it("should follow a bare repository's own head, not that of the repository enclosing it", async () => {
+          await withTempRoot(async root => {
+            // Arrange — `git -C nested.git` uses the bare repository it stands in.
+            const outer = await repository(root);
+            const nested = join(outer, 'nested.git');
+            await mkdir(nested);
+            await git(nested, 'init', '--bare', '--quiet', '-b', 'main');
+            const copies = new GitWorkingCopies();
+
+            // Act
+            const primed = await copies.branchOf(nested);
+            await git(nested, 'symbolic-ref', 'HEAD', 'refs/heads/other');
+            const kept = await copies.branchOf(nested);
+            const fresh = await new GitWorkingCopies().branchOf(nested);
+
+            // Assert
+            should([primed, kept, fresh]).deepEqual(['main', 'other', 'other']);
+          });
+        });
+
+        it('should follow a repository an inherited GIT_DIR points at, and keep answers where nothing steers git', async () => {
+          await withTempRoot(async root => {
+            // Arrange — the folder's own `.git` is not what git reads once `GIT_DIR` is set.
+            const folder = await repository(root);
+            const elsewhere = join(root, 'elsewhere');
+            await mkdir(elsewhere);
+            await git(elsewhere, 'init', '--quiet', '-b', 'main');
+            await git(
+              elsewhere,
+              '-c',
+              'user.name=t',
+              '-c',
+              'user.email=t@t',
+              'commit',
+              '--allow-empty',
+              '--quiet',
+              '-m',
+              'r',
+            );
+            await git(elsewhere, 'checkout', '--quiet', '-b', 'feat/there-one');
+            const steered = new GitWorkingCopies('git', 'ssh', Date.now, 512, {
+              ...plain(),
+              GIT_DIR: join(elsewhere, '.git'),
+            });
+            const { binary, asked } = await countingGit(root);
+            const ceiling = new GitWorkingCopies(binary, 'ssh', Date.now, 512, {
+              ...plain(),
+              GIT_CEILING_DIRECTORIES: root,
+            });
+            const harmless = new GitWorkingCopies(binary, 'ssh', Date.now, 512, {
+              ...plain(),
+              GIT_TERMINAL_PROMPT: '0',
+            });
+
+            // Act
+            const primed = await steered.branchOf(folder);
+            await git(elsewhere, 'checkout', '--quiet', '-b', 'feat/there-two');
+            const kept = await steered.branchOf(folder);
+            await ceiling.branchOf(folder);
+            await ceiling.branchOf(folder);
+            const ceilingCalls = (await asked()).length;
+            await harmless.branchOf(folder);
+            await harmless.branchOf(folder);
+
+            // Assert
+            should([primed, kept]).deepEqual(['feat/there-one', 'feat/there-two']);
+            should(ceilingCalls).equal(2);
+            should((await asked()).length - ceilingCalls).equal(1);
+          });
+        });
+
+        it('should follow a legacy remotes/ or branches/ file, which git reads as an origin and the config does not', async () => {
+          await withTempRoot(async root => {
+            // Arrange
+            const kinds = [
+              ['remotes', (name: string) => `URL: git@github.com:owner/${name}.git\n`],
+              ['branches', (name: string) => `git@github.com:owner/${name}.git\n`],
+            ] as const;
+            const outcomes: (readonly [string | null, string | null, string | null])[] = [];
+
+            // Act
+            for (const [directory, contents] of kinds) {
+              const repo = join(root, directory);
+              await mkdir(repo);
+              await git(repo, 'init', '--quiet', '-b', 'main');
+              await mkdir(join(repo, '.git', directory));
+              await writeFile(join(repo, '.git', directory, 'origin'), contents('legacy-one'));
+              const copies = new GitWorkingCopies();
+              const primed = await copies.repositoryOf(repo);
+              await writeFile(join(repo, '.git', directory, 'origin'), contents('legacy-two'));
+              outcomes.push([primed, await copies.repositoryOf(repo), await new GitWorkingCopies().repositoryOf(repo)]);
+            }
+
+            // Assert
+            should(outcomes).deepEqual([
+              ['owner/legacy-one', 'owner/legacy-two', 'owner/legacy-two'],
+              ['owner/legacy-one', 'owner/legacy-two', 'owner/legacy-two'],
+            ]);
+          });
+        });
+      });
+
       describe('a repository whose refs are not plain files', () => {
         const reftable = async (root: string): Promise<string | undefined> => {
           const repo = join(root, 'repo');
