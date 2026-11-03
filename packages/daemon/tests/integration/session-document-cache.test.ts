@@ -64,9 +64,9 @@ class PlainStateFileSystem extends CountingStateFileSystem {
   }
 }
 
-async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem, existingHome?: string) {
-  const home = existingHome ?? (await mkdtemp(join(tmpdir(), 'fy-document-cache-')));
-  if (existingHome === undefined) homes.push(home);
+async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem) {
+  const home = await mkdtemp(join(tmpdir(), 'fy-document-cache-'));
+  homes.push(home);
   let fileSystem: CountingStateFileSystem | undefined;
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
@@ -279,12 +279,12 @@ describe('the session document cache', () => {
 
 /**
  * A fleet whose documents outnumber the fixed bound the cache once had: 1,400 sessions, three documents each,
- * written straight into a home the way a daemon finds them when it starts.
+ * written straight into the home and then indexed by a rebuild — the index is what the daemon walks, and what
+ * the cache's bound follows.
  */
 async function largeFleet(sessions: number) {
-  const first = await openStorage(paths => new CountingStateFileSystem(paths));
-  const { paths } = first;
-  await first.storage.close();
+  const opened = await openStorage(paths => new CountingStateFileSystem(paths));
+  const { paths } = opened;
   const ids = Array.from({ length: sessions }, (_, index) => parseSessionId(`fleet-${String(index).padStart(5, '0')}`));
   for (const id of ids) {
     const session = createSessionPaths(paths, id);
@@ -294,8 +294,10 @@ async function largeFleet(sessions: number) {
     await writeFile(session.state, JSON.stringify({ id, status: 'exited' }), { mode: 0o600 });
     await writeFile(session.events, '', { mode: 0o600 });
   }
-  const home = paths.home;
-  return { ...(await openStorage(made => new CountingStateFileSystem(made), home)), ids };
+  const rebuilt = await opened.storage.rebuildIndex();
+  if (rebuilt.sessionCount !== sessions)
+    throw new Error(`indexed ${String(rebuilt.sessionCount)} of ${String(sessions)} sessions`);
+  return { ...opened, ids };
 }
 
 describe('the session document cache on a large fleet', () => {
