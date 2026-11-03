@@ -429,7 +429,9 @@ export function useAgendaInboxModel(
   // A machine with card asks (`agenda.card-asks.1`) carries a card's ask inside its agenda: it keeps no To-test list.
   const hasCardAsks = useCallback(
     (daemonId: DaemonId): boolean =>
-      gateFlags.split(',').some(entry => entry.startsWith(`${daemonId}=`) && entry.split('/')[1] === 'true'),
+      gateFlags
+        .split(',')
+        .some(entry => entry.startsWith(`${daemonId}=`) && entry.slice(daemonId.length + 1).split('/')[1] === 'true'),
     [gateFlags],
   );
   const canSnooze = useCallback(
