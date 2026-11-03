@@ -565,14 +565,18 @@ would corrupt every version after it. The board file holds the item as it is now
 (20 history entries, 10 revisions); the sidecar holds how it got there, uncapped. An item from before versions is kept
 as it stood first (change `carried`) when it is next changed. A merge or a split makes a version of each item it
 touched. Before writing versions, the repository syncs the exact mutation drafts and next ledger to
-`agenda-versions.pending.json`, with `base` (a digest of the `agenda.json` it was prepared from) and `results` (the
-digests of the files its commit can leave). An archive failure rejects the request and leaves that intent for
+`agenda-versions.pending.json`, with `base` (a digest of the `agenda.json` it was prepared from, taken from the read
+the change already made), `ledger` (the exact text of the `agenda.json` it commits, with the history records to append
+and the cursor they append from) and `result` (the digest of that text). An archive failure rejects the request and leaves that intent for
 recovery; the current ledger stays unchanged until every draft is acknowledged. Reads and transactions replay an
 outstanding intent before proceeding, **but only when `agenda.json` is still its `base` or already one of its
-`results`**. Any other file was written by someone else since (a previous release, after a downgrade), and replaying
+`result`**. Replay writes that text as it is. Any other file was written by someone else since (a previous release, after a downgrade), and replaying
 would overwrite their writes and cut their sidecar lines: the intent is set aside as
-`agenda-versions.pending.json.stale`, a warning says so, and nothing is replayed. A version a set-aside intent had
-already recorded stays in the store (see the declared limits under [downgrading](#on-disk)). A retry after an uncertain acknowledgement uses the same per-item transaction identities,
+`agenda-versions.pending.json.stale` (a second one beside it as `.stale-<digest>`, never over the first), a warning
+says so, and nothing is replayed. **What the intent had recorded is voided**: for each of its drafts the store holds,
+its version is taken off the end of the item's versions, by the draft's mutation id, so it is not an item's latest
+version, never shows in its history, and the number is reused by the next change. A version that a later change
+recorded after it is left alone. A retry after an uncertain acknowledgement uses the same per-item transaction identities,
 so partial merge/split batches and commits whose replies were lost never duplicate or omit a version. The intent is
 removed only after the hot ledger commit and an idempotent copy of its original change event to
 `agenda-changes.pending.json`. That event keeps the actor, origin (`board` or `conversation`), affected items and
@@ -1481,16 +1485,22 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   `relatedTasks`, and the merge and split links (`mergedFrom`, `mergedInto`, `splitFrom`, `splitInto`). It also
   ignores `agenda-versions/` and `agenda-versions.pending.json`. What it keeps writing — owner replies in each
   item's history, owner-history lines in the sidecar under its cursor — is read back on the way up.
-- **Coming back up** loses no owner word and repeats none. Each item resumes from its **latest recorded version**
+- **Coming back up** loses no owner word and repeats none (the declared limits below say where this stops). Each item resumes from its **latest recorded version**
   in the version store, which holds the whole tagged thread (verbatim, in order, chat tags included, and chat text
   over the history bound too) and the links 2a stripped, so merges, splits and related cards return. Only what the
   item's history says was said after that version is added, once, after the thread; a word already in the thread
-  (same chat message, or same time, speaker and text) is never added again, and a second read finds nothing new. An
+  (same chat message, or same time, speaker and text) is never added again, and a second read finds nothing new.
+  The ferret's answer to the owner's question has no time of its own: it is dated by the latest edit that changed it
+  (2a keeps those edits), so an answer given on 2a comes after the owner words it answers, and never before the version. An
   item with no recorded version is seeded from its history and the sidecar only. Owner history that rejoining the
   thread makes fit under the item bound is queued to the sidecar first, so 2a dropping its copy loses nothing.
-- **Declared limits.** A version recorded by a set-aside (stale) intent can become an item's latest version and
-  bring back words 2a had no part in; an item with no versions is seeded from history only, so chat text over 64,000
-  characters is verbatim only where a version exists. A ledger that reads as version 1 with no cursor (an older
+- **Declared limits.** An item with no versions is seeded from history only, so chat text over 64,000 characters is
+  verbatim only where a version exists. A set-aside intent's versions are voided as above, but only while they are the
+  item's latest; a version a later change recorded on top of one is kept. The ferret's answer is dated by the edit that wrote it, which
+  lives among the 10 revisions an item keeps: once more than ten later edits push it out, the answer is dated by the
+  ferret's last update instead.
+  A `agenda-seen.json` that cannot be understood is set aside as `agenda-seen.json.corrupt-<id>` with a warning and the
+  marks start empty (they are display hints); one that cannot be read at all still refuses a mark. A ledger that reads as version 1 with no cursor (an older
   rewrite) is upgraded by adopting the sidecar's complete lines as committed history up to any mark ([a ledger with
   no cursor](#no-size-limit)). An uncommitted tail a later commit outlived (it lifted the mark, and its cursor went
   with the downgrade) is adopted too, and a crash between a commit and the lifting of its mark, followed by a

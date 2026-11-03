@@ -847,7 +847,7 @@ describe('AGENDA_INSTRUCTION', () => {
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
     // Assert — measured 1,266: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
-    // split line names both verbs), paid for in part by `answer <id> "…"`; the total keeps 69 of headroom.
+    // split line names both verbs), paid for in part by `answer <id> "…"`; the total keeps 37 of headroom.
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
   });
 

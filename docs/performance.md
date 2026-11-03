@@ -91,6 +91,10 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
   preserves every draft across worker failure or uncertain acknowledgement; replay uses per-item idempotency keys.
   Closed threads leave the hot ledger only after cold archive acknowledgement, so unrelated edits no longer
   rewrite pruned lifetime conversations. Active conversations remain uncapped and are still rewritten with state.
+  The intent costs one more serialization of the agenda file per change (the text it commits, written to the intent
+  and then to `agenda.json` as it is) and one SHA-256 of it; the digest of the file it was prepared from is taken
+  from the read the change already made, so nothing is read or parsed again. Both run on the daemon thread, so
+  they grow with the agenda's size, thread text included.
 - **What a crash loses from analytics:** the rows of sessions that finished in the last few seconds.
   The analytics index is disposable. Every row is rebuilt from the session's own records and
   transcript, and the next start's sweep writes again each one that is missing, so a crash costs one
