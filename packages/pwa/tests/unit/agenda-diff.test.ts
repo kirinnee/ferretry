@@ -8,9 +8,11 @@ import {
   diffSummary,
   diffText,
   diffWords,
+  foldUnchanged,
   orderedPair,
   REWRITE_SIMILARITY,
   sectionText,
+  bagSimilarity,
   similarity,
   versionLabel,
   type WordRun,
@@ -255,6 +257,137 @@ describe('a long text with a small edit', () => {
     expect(runs.map(run => run.kind)).toEqual(['same', 'removed', 'added', 'same', 'removed', 'added']);
     expect(joined(runs, 'added')).toBe(before);
     expect(joined(runs, 'removed')).toBe(after);
+  });
+});
+
+describe('a very long text', () => {
+  const lines = (count: number, edit: Readonly<Record<number, string>>): string =>
+    Array.from(
+      { length: count },
+      (_, index) => `${edit[index] ?? `Step ${String(index)} of the report finished cleanly`}\n`,
+    ).join('');
+  const sentences = (count: number, edit: Readonly<Record<number, string>>): string =>
+    Array.from({ length: count }, (_, index) => `Sentence ${String(index)} ${edit[index] ?? 'holds'} steady.`).join(
+      ' ',
+    );
+  const joined = (runs: ReturnType<typeof diffText>, drop: 'added' | 'removed'): string =>
+    runs
+      .filter(run => run.kind !== drop)
+      .map(run => run.text)
+      .join('');
+
+  test('keeps two one-word edits at the two ends of 3000 lines word-level', () => {
+    const before = lines(3000, {});
+    const after = lines(3000, {
+      2: 'Step 2 of the report failed cleanly',
+      2597: 'Step 2597 of the report failed cleanly',
+    });
+    const started = performance.now();
+    const runs = diffText(before, after);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(runs.filter(run => run.kind === 'removed').map(run => run.text)).toEqual(['finished', 'finished']);
+    expect(runs.filter(run => run.kind === 'added').map(run => run.text)).toEqual(['failed', 'failed']);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+
+  test('keeps two far edits in a 3000 sentence paragraph word-level', () => {
+    const before = sentences(3000, {});
+    const after = sentences(3000, { 5: 'wobbles', 2990: 'wobbles' });
+    const started = performance.now();
+    const runs = diffText(before, after);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(runs.filter(run => run.kind === 'removed').map(run => run.text)).toEqual(['holds', 'holds']);
+    expect(runs.filter(run => run.kind === 'added').map(run => run.text)).toEqual(['wobbles', 'wobbles']);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+
+  test('keeps far edits word-level in one line of 6000 words', () => {
+    const words = (edit: Readonly<Record<number, string>>): string =>
+      Array.from({ length: 6000 }, (_, index) => edit[index] ?? `w${String(index)}`).join(' ');
+    const before = words({});
+    const after = words({ 10: 'changed', 5900: 'altered' });
+    const runs = diffWords(before, after);
+    expect(runs.filter(run => run.kind === 'removed').map(run => run.text)).toEqual(['w10', 'w5900']);
+    expect(runs.filter(run => run.kind === 'added').map(run => run.text)).toEqual(['changed', 'altered']);
+  });
+
+  test('answers a 50 by 50 block of 500-word lines, all rewritten, within a bound', () => {
+    const block = (prefix: string): string =>
+      Array.from(
+        { length: 50 },
+        (_, line) =>
+          `${Array.from({ length: 500 }, (_, word) => `${prefix}${String(line)}x${String(word)}`).join(' ')}\n`,
+      ).join('');
+    const before = block('a');
+    const after = block('b');
+    const started = performance.now();
+    const runs = diffText(before, after);
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+
+  test('still pairs alike lines once the exact scoring budget is spent', () => {
+    const block = (word: string): string =>
+      Array.from(
+        { length: 50 },
+        (_, line) =>
+          `${Array.from({ length: 500 }, (_, index) => (index === 250 ? word : `l${String(line)}w${String(index)}`)).join(' ')}\n`,
+      ).join('');
+    const before = block('old');
+    const after = block('new');
+    const started = performance.now();
+    const runs = diffText(before, after);
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(runs.filter(run => run.kind === 'removed').every(run => run.text === 'old')).toBe(true);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+
+  test('scores two texts by their bag of words', () => {
+    expect(bagSimilarity('', '')).toBe(1);
+    expect(bagSimilarity('a', '')).toBe(0);
+    expect(bagSimilarity('', 'a')).toBe(0);
+    expect(bagSimilarity('a b c', 'c b a')).toBe(1);
+    expect(bagSimilarity('a a b', 'a b b')).toBeCloseTo(4 / 6, 5);
+  });
+});
+
+describe('folding what did not change', () => {
+  const lines = (from: number, to: number): string =>
+    Array.from({ length: to - from }, (_, index) => `line ${String(from + index)}\n`).join('');
+
+  test('cuts a long unchanged stretch to the lines beside each change and says how many it hides', () => {
+    const before = `${lines(0, 100)}old word\n${lines(101, 200)}`;
+    const after = `${lines(0, 100)}new word\n${lines(101, 200)}`;
+    const folded = foldUnchanged(diffText(before, after));
+    expect(folded.map(run => (run.kind === 'folded' ? `… ${String(run.lines)}` : run.kind))).toEqual([
+      '… 97',
+      'same',
+      'removed',
+      'added',
+      'same',
+      '… 97',
+    ]);
+    expect(folded.filter(run => run.kind === 'same').map(run => (run as WordRun).text)).toEqual([
+      'line 97\nline 98\nline 99\n',
+      ' word\nline 101\nline 102\n',
+    ]);
+  });
+
+  test('folds between two far changes too, and leaves a short stretch whole', () => {
+    const before = `a one\n${lines(0, 50)}b one\n${lines(50, 54)}c one\n`;
+    const after = `a two\n${lines(0, 50)}b two\n${lines(50, 54)}c two\n`;
+    const folded = foldUnchanged(diffText(before, after));
+    expect(folded.filter(run => run.kind === 'folded').map(run => (run as { lines: number }).lines)).toEqual([46]);
+    expect(folded.some(run => run.kind === 'same' && run.text.includes('line 51'))).toBe(true);
+  });
+
+  test('leaves a text with nothing changed whole', () => {
+    const same = diffText(lines(0, 100), lines(0, 100));
+    expect(foldUnchanged(same)).toEqual(same);
   });
 });
 

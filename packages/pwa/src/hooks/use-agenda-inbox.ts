@@ -540,6 +540,21 @@ export function useAgendaInboxModel(
       ),
     [machines, client, rollup, openFlags],
   );
+  // A card that says "Merged in from !A5" names it from the resolved records of its conversation, which only a held
+  // board carries (a roll-up has the open items alone): read that one board, once, instead of showing the bare id.
+  const mergedRead = useRef(new Set<string>());
+  useEffect(() => {
+    for (const card of [...cards, ...parked, ...withFerret]) {
+      if (card.item.mergedFrom === undefined) continue;
+      const key = daemonSessionKey({ daemonId: card.daemonId, sessionId: card.view.config.id });
+      const connection = connectionFor(card.daemonId);
+      if (connection === undefined || boards.snapshots.has(key) || mergedRead.current.has(key)) continue;
+      mergedRead.current.add(key);
+      client.revalidate(connection, daemonSessionScope(connection, card.view.config.id)).catch(() => {
+        mergedRead.current.delete(key);
+      });
+    }
+  }, [cards, parked, withFerret, boards, client, connectionFor]);
   const [resolvedReading, setResolvedReading] = useState(false);
   const resolvedBusy = useRef(false);
   const loadResolved = useCallback((): void => {

@@ -105,6 +105,23 @@ describe('the comparison', () => {
     expect(root.querySelector('.fy-diff__legend')?.textContent).toContain('Underlined');
   });
 
+  test('cuts a long unchanged stretch to one line that says how many lines it hides', async () => {
+    const report = (word: string): string =>
+      Array.from({ length: 80 }, (_, index) => (index === 40 ? `Step 40 ${word}` : `Step ${String(index)} done`)).join(
+        '\n',
+      );
+    const long = {
+      1: { ...v1, detail: report('passed') },
+      2: { ...v1, detail: report('failed') },
+    } as unknown as Record<number, AgendaItem>;
+    const root = await draw({ list: listOf(2, 1), load: async version => long[version] as AgendaItem });
+    const detail = must(root.querySelector('[data-agenda-diff-section="detail"]'), 'detail');
+    const folds = [...detail.querySelectorAll('[data-agenda-diff-fold]')].map(fold => fold.textContent);
+    expect(folds).toEqual(['… 38 unchanged lines …', '… 37 unchanged lines …']);
+    expect(detail.textContent).not.toContain('Step 10 done');
+    expect(detail.querySelector('del')?.textContent).toBe('passed');
+  });
+
   test('keeps a struck word apart from the word that replaces it', async () => {
     const root = await draw(viewOf(listOf(3, 1)));
     const where = must(root.querySelector('[data-agenda-diff-section="whereWeAre"]'), 'where we are');

@@ -15,6 +15,7 @@ import {
   defaultComparison,
   diffItems,
   diffSummary,
+  foldUnchanged,
   orderedPair,
   type SectionDiff,
   type VersionPair,
@@ -81,6 +82,7 @@ const STATUS_WORDS: Readonly<Record<SectionDiff['status'], string>> = {
 };
 
 function SectionChange({ section }: { readonly section: SectionDiff }) {
+  const shown = useMemo(() => foldUnchanged(section.runs), [section.runs]);
   return (
     <section className="fy-diff__section" data-agenda-diff-section={section.key} data-status={section.status}>
       <h5 className="fy-diff__section-head">
@@ -98,12 +100,18 @@ function SectionChange({ section }: { readonly section: SectionDiff }) {
         </span>
       </h5>
       <p className="fy-diff__text m-0">
-        {section.runs.flatMap((run, index) => {
+        {shown.flatMap((run, index) => {
           const at = `${String(index)}:${run.kind}`;
+          if (run.kind === 'folded')
+            return [
+              <span className="fy-diff__fold" data-agenda-diff-fold="" key={at}>
+                {`… ${String(run.lines)} unchanged line${run.lines === 1 ? '' : 's'} …`}
+              </span>,
+            ];
           if (run.kind === 'added') return [<ins key={at}>{run.text}</ins>];
           if (run.kind === 'same') return [<span key={at}>{run.text}</span>];
           // A struck word and the word that replaces it are kept apart, so neither reads as one glued word.
-          const next = section.runs[index + 1];
+          const next = shown[index + 1];
           const glued = next?.kind === 'added' && !/\s$/u.test(run.text) && !/^\s/u.test(next.text);
           return glued ? [<del key={at}>{run.text}</del>, ' '] : [<del key={at}>{run.text}</del>];
         })}

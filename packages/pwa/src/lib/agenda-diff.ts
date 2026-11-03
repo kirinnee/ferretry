@@ -63,9 +63,31 @@ const merged = (runs: readonly WordRun[]): readonly WordRun[] => {
   return out;
 };
 
-/** The longest common run of two token lists, as a table read from the end (null: too large to compare). */
-const lcsTable = (a: readonly string[], b: readonly string[]): Uint32Array | null => {
-  if (a.length * b.length > MAX_CELLS) return null;
+/** The most word-pair cells one whole diff spends on likeness scores and word matches; past it, cheaper methods stand in. */
+const WORK_BUDGET = 12_000_000;
+
+/** The most piece-pair cells one anchoring of lines or sentences spends on exact matches. */
+const PIECE_BUDGET = 16_000_000;
+
+/** The deepest the anchoring digs into the gaps between anchors; a gap past it is shown as a block. */
+const MAX_DEPTH = 48;
+
+/** What is left to spend; one is made for each whole diff, so a large rewrite cannot freeze the page. */
+interface Work {
+  left: number;
+}
+
+const freshWork = (): Work => ({ left: WORK_BUDGET });
+
+/** Spends `cells` of the work when that is allowed (and, under `cap`, small enough for one table). */
+const spend = (work: Work, cells: number, cap = MAX_CELLS): boolean => {
+  if (cells > cap || cells > work.left) return false;
+  work.left -= cells;
+  return true;
+};
+
+/** The longest common run of two token lists, as a table read from the end. The caller keeps the product small. */
+const lcsTable = (a: readonly string[], b: readonly string[]): Uint32Array => {
   const width = b.length + 1;
   const table = new Uint32Array((a.length + 1) * width);
   for (let i = a.length - 1; i >= 0; i -= 1) {
@@ -89,21 +111,135 @@ const sharedEnds = (a: readonly string[], b: readonly string[]): { readonly head
   return { head, tail };
 };
 
+/** One kept piece: its place in the old list and in the new one. */
+type Match = readonly [number, number];
+
+/** The places a longest increasing run of `pairs` (by new place) passes through; `pairs` is in old-place order. */
+const increasingRun = (pairs: readonly Match[]): readonly Match[] => {
+  const tails: number[] = [];
+  const before = new Array<number>(pairs.length).fill(-1);
+  pairs.forEach(([, j], index) => {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (((pairs[tails[mid] as number] as Match)[1] as number) < j) lo = mid + 1;
+      else hi = mid;
+    }
+    before[index] = lo > 0 ? (tails[lo - 1] as number) : -1;
+    tails[lo] = index;
+  });
+  const run: Match[] = [];
+  for (let at = tails.length > 0 ? (tails.at(-1) as number) : -1; at >= 0; at = before[at] as number)
+    run.push(pairs[at] as Match);
+  return run.reverse();
+};
+
+/**
+ * The pieces two lists keep, in order, as the places they sit in each. Equal pieces at both ends are kept; a middle
+ * small enough is matched exactly (a longest common run) and paid for from `work`; a larger one is anchored in linear
+ * time on the pieces that occur once on each side (kept in order, the longest such run), and each gap between anchors is
+ * matched again the same way. So two far-apart edits in a long text stay two small edits however long the text is.
+ */
+const matching = (a: readonly string[], b: readonly string[], work: Work): readonly Match[] => {
+  const out: Match[] = [];
+  const span = (aLo: number, aHi: number, bLo: number, bHi: number, depth: number): void => {
+    while (aLo < aHi && bLo < bHi && a[aLo] === b[bLo]) {
+      out.push([aLo, bLo]);
+      aLo += 1;
+      bLo += 1;
+    }
+    const tail: Match[] = [];
+    while (aLo < aHi && bLo < bHi && a[aHi - 1] === b[bHi - 1]) {
+      aHi -= 1;
+      bHi -= 1;
+      tail.push([aHi, bHi]);
+    }
+    if (aLo < aHi && bLo < bHi) middle(aLo, aHi, bLo, bHi, depth);
+    for (let k = tail.length - 1; k >= 0; k -= 1) out.push(tail[k] as Match);
+  };
+  const middle = (aLo: number, aHi: number, bLo: number, bHi: number, depth: number): void => {
+    const n = aHi - aLo;
+    const m = bHi - bLo;
+    if (spend(work, n * m)) {
+      const sliceA = a.slice(aLo, aHi);
+      const sliceB = b.slice(bLo, bHi);
+      const table = lcsTable(sliceA, sliceB);
+      const width = m + 1;
+      let i = 0;
+      let j = 0;
+      while (i < n && j < m) {
+        if (sliceA[i] === sliceB[j]) {
+          out.push([aLo + i, bLo + j]);
+          i += 1;
+          j += 1;
+        } else if ((table[(i + 1) * width + j] as number) >= (table[i * width + j + 1] as number)) i += 1;
+        else j += 1;
+      }
+      return;
+    }
+    if (depth >= MAX_DEPTH) return;
+    const onceInB = new Map<string, number>();
+    for (let j = bLo; j < bHi; j += 1) onceInB.set(b[j] as string, onceInB.has(b[j] as string) ? -1 : j);
+    const onceInA = new Map<string, number>();
+    for (let i = aLo; i < aHi; i += 1) onceInA.set(a[i] as string, onceInA.has(a[i] as string) ? -1 : i);
+    const shared: Match[] = [];
+    for (let i = aLo; i < aHi; i += 1) {
+      const j = onceInB.get(a[i] as string);
+      if (onceInA.get(a[i] as string) === i && j !== undefined && j >= 0) shared.push([i, j]);
+    }
+    const anchors = increasingRun(shared);
+    let i = aLo;
+    let j = bLo;
+    for (const anchor of anchors) {
+      span(i, anchor[0], j, anchor[1], depth + 1);
+      out.push(anchor);
+      i = anchor[0] + 1;
+      j = anchor[1] + 1;
+    }
+    if (anchors.length > 0) span(i, aHi, j, bHi, depth + 1);
+  };
+  span(0, a.length, 0, b.length, 0);
+  return out;
+};
+
+/** The words of a text, spaces left out. */
+const wordsOf = (text: string): readonly string[] => tokens(text).filter(token => !spaces(token));
+
 /**
  * How alike two texts are, 0 to 1: twice the words they share, in order, over the words they have. Spaces never count,
  * so two texts are not alike for sharing "the". Two empty texts are the same; a text too large to compare reads as the
  * words it shares at its two ends.
  */
 export const similarity = (before: string, after: string): number => {
-  const a = tokens(before).filter(token => !spaces(token));
-  const b = tokens(after).filter(token => !spaces(token));
+  const a = wordsOf(before);
+  const b = wordsOf(after);
   if (a.length === 0 && b.length === 0) return 1;
   if (a.length === 0 || b.length === 0) return 0;
   const { head, tail } = sharedEnds(a, b);
   const middleA = a.slice(head, a.length - tail);
   const middleB = b.slice(head, b.length - tail);
-  const table = middleA.length === 0 || middleB.length === 0 ? null : lcsTable(middleA, middleB);
-  const common = head + tail + (table === null ? 0 : (table[0] as number));
+  const cells = middleA.length * middleB.length;
+  const middle = cells === 0 || cells > MAX_CELLS ? 0 : (lcsTable(middleA, middleB)[0] as number);
+  return (2 * (head + tail + middle)) / (a.length + b.length);
+};
+
+/** A cheap likeness, 0 to 1: the words two texts share as a bag, out of both, in no order. Linear, not quadratic. */
+export const bagSimilarity = (before: string, after: string): number => {
+  const a = wordsOf(before);
+  const b = wordsOf(after);
+  if (a.length === 0 && b.length === 0) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const word of a) counts.set(word, (counts.get(word) ?? 0) + 1);
+  let common = 0;
+  for (const word of b) {
+    const left = counts.get(word) ?? 0;
+    if (left > 0) {
+      common += 1;
+      counts.set(word, left - 1);
+    }
+  }
   return (2 * common) / (a.length + b.length);
 };
 
@@ -147,44 +283,35 @@ const tidy = (runs: readonly WordRun[]): readonly WordRun[] => {
   return merged(out);
 };
 
-/** The words of `before` and `after` as runs, in reading order: removed words come before the words that replace them. */
-export const diffWords = (before: string, after: string): readonly WordRun[] => {
-  const a = tokens(before);
-  const b = tokens(after);
-  const { head, tail } = sharedEnds(a, b);
-  const middleA = a.slice(head, a.length - tail);
-  const middleB = b.slice(head, b.length - tail);
-  const front: WordRun[] = [{ kind: 'same', text: a.slice(0, head).join('') }];
-  const back: WordRun[] = [{ kind: 'same', text: a.slice(a.length - tail).join('') }];
-  const table = middleA.length === 0 || middleB.length === 0 ? null : lcsTable(middleA, middleB);
-  if (table === null) {
-    return merged([
-      ...front,
-      { kind: 'removed', text: middleA.join('') },
-      { kind: 'added', text: middleB.join('') },
-      ...back,
-    ]);
-  }
-  const width = middleB.length + 1;
-  const walk: WordRun[] = [];
+/** The runs of two lists from the pieces they keep; `between` says what became of the stretch between two kept pieces. */
+const runsFrom = (
+  a: readonly string[],
+  b: readonly string[],
+  kept: readonly Match[],
+  between: (from: readonly string[], to: readonly string[]) => readonly WordRun[],
+): readonly WordRun[] => {
+  const runs: WordRun[] = [];
   let i = 0;
   let j = 0;
-  while (i < middleA.length && j < middleB.length) {
-    if (middleA[i] === middleB[j]) {
-      walk.push({ kind: 'same', text: middleA[i] as string });
-      i += 1;
-      j += 1;
-    } else if ((table[(i + 1) * width + j] as number) >= (table[i * width + j + 1] as number)) {
-      walk.push({ kind: 'removed', text: middleA[i] as string });
-      i += 1;
-    } else {
-      walk.push({ kind: 'added', text: middleB[j] as string });
-      j += 1;
-    }
+  for (const [pi, pj] of kept) {
+    runs.push(...between(a.slice(i, pi), b.slice(j, pj)), { kind: 'same', text: a[pi] as string });
+    i = pi + 1;
+    j = pj + 1;
   }
-  for (; i < middleA.length; i += 1) walk.push({ kind: 'removed', text: middleA[i] as string });
-  for (; j < middleB.length; j += 1) walk.push({ kind: 'added', text: middleB[j] as string });
-  return merged([...front, ...tidy(merged(walk)), ...back]);
+  runs.push(...between(a.slice(i), b.slice(j)));
+  return merged(runs);
+};
+
+const gapRuns = (from: readonly string[], to: readonly string[]): readonly WordRun[] => [
+  { kind: 'removed', text: from.join('') },
+  { kind: 'added', text: to.join('') },
+];
+
+/** The words of `before` and `after` as runs, in reading order: removed words come before the words that replace them. */
+export const diffWords = (before: string, after: string, work: Work = freshWork()): readonly WordRun[] => {
+  const a = tokens(before);
+  const b = tokens(after);
+  return tidy(runsFrom(a, b, matching(a, b, work), gapRuns));
 };
 
 /** The pieces of a text that end where a sentence or a line does, spaces kept, so they join back into the text. */
@@ -192,42 +319,49 @@ const LINES = /(?<=\n)/u;
 const SENTENCES = /(?<=[.!?]\s+)(?=\S)/u;
 const piecesOf = (text: string, splitter: RegExp): readonly string[] => text.split(splitter).filter(p => p !== '');
 
+/** How two pieces are scored for pairing: exactly, or, when the work budget is spent, by a cheap bag of words. */
+interface Likeness {
+  readonly exact: (a: string, b: string) => number;
+  readonly rough: (a: string, b: string) => number;
+}
+
 /**
  * Pairs the pieces of two texts in order and says what became of each: kept (equal), paired with one alike enough to
  * be compared inside, or removed or added whole. The pairing is the order-keeping one that keeps the most likeness.
+ * Scoring every pair costs the product of the two texts' words, taken from `work`; when that is more than is left, the
+ * cheap likeness scores instead, so a large rewrite still comes back at once.
  */
 const pair = (
   before: readonly string[],
   after: readonly string[],
   inner: (a: string, b: string) => readonly WordRun[],
-  alike: (a: string, b: string) => number,
+  like: Likeness,
+  work: Work,
 ): readonly WordRun[] => {
   const n = before.length;
   const m = after.length;
-  if (n * m > MAX_LINE_PAIRS) {
-    return merged([
-      { kind: 'removed', text: before.join('') },
-      { kind: 'added', text: after.join('') },
-    ]);
-  }
+  if (n * m > MAX_LINE_PAIRS) return merged(gapRuns(before, after));
+  const alike = spend(work, wordCount(before.join('')) * wordCount(after.join('')), Number.POSITIVE_INFINITY)
+    ? like.exact
+    : like.rough;
   const width = m + 1;
   const likeness = new Float64Array(n * m);
   for (let i = 0; i < n; i += 1) {
     for (let j = 0; j < m; j += 1) {
       const a = before[i] as string;
       const b = after[j] as string;
-      const like = a === b ? 2 : alike(a, b);
-      likeness[i * m + j] = like >= REWRITE_SIMILARITY ? like : 0;
+      const score = a === b ? 2 : alike(a, b);
+      likeness[i * m + j] = score >= REWRITE_SIMILARITY ? score : 0;
     }
   }
   const best = new Float64Array((n + 1) * width);
   for (let i = n - 1; i >= 0; i -= 1) {
     for (let j = m - 1; j >= 0; j -= 1) {
-      const like = likeness[i * m + j] as number;
+      const score = likeness[i * m + j] as number;
       best[i * width + j] = Math.max(
         best[(i + 1) * width + j] as number,
         best[i * width + j + 1] as number,
-        like > 0 ? like + (best[(i + 1) * width + j + 1] as number) : 0,
+        score > 0 ? score + (best[(i + 1) * width + j + 1] as number) : 0,
       );
     }
   }
@@ -235,8 +369,8 @@ const pair = (
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
-    const like = likeness[i * m + j] as number;
-    if (like > 0 && (best[i * width + j] as number) === like + (best[(i + 1) * width + j + 1] as number)) {
+    const score = likeness[i * m + j] as number;
+    if (score > 0 && (best[i * width + j] as number) === score + (best[(i + 1) * width + j + 1] as number)) {
       const a = before[i] as string;
       const b = after[j] as string;
       if (a === b) runs.push({ kind: 'same', text: a });
@@ -258,61 +392,35 @@ const pair = (
 
 /**
  * Pairs the pieces of two texts. Equal pieces at both ends are kept first; when what lies between is still too large to
- * pair at once, the pieces that stay equal anchor it, and only the gaps between anchors are paired (each under its own
- * cap), so one changed word in a long report never turns the whole report into a block out and a block in.
+ * pair at once, the pieces that stay equal anchor it (exactly when small, in linear time when large), and only the gaps
+ * between anchors are paired (each under its own cap), so one changed word in a long report never turns the whole report
+ * into a block out and a block in.
  */
 const align = (
   before: readonly string[],
   after: readonly string[],
   inner: (a: string, b: string) => readonly WordRun[],
-  alike: (a: string, b: string) => number = similarity,
+  like: Likeness,
+  work: Work,
 ): readonly WordRun[] => {
   const { head, tail } = sharedEnds(before, after);
   const middleA = before.slice(head, before.length - tail);
   const middleB = after.slice(head, after.length - tail);
   const front: WordRun = { kind: 'same', text: before.slice(0, head).join('') };
   const back: WordRun = { kind: 'same', text: before.slice(before.length - tail).join('') };
-  const table = middleA.length * middleB.length > MAX_LINE_PAIRS ? lcsTable(middleA, middleB) : null;
-  if (table === null) return merged([front, ...pair(middleA, middleB, inner, alike), back]);
-  const width = middleB.length + 1;
-  const runs: WordRun[] = [front];
-  let i = 0;
-  let j = 0;
-  let gapA = 0;
-  let gapB = 0;
-  const closeGap = (): void => {
-    runs.push(...pair(middleA.slice(gapA, i), middleB.slice(gapB, j), inner, alike));
-  };
-  while (i < middleA.length && j < middleB.length) {
-    if (middleA[i] === middleB[j]) {
-      closeGap();
-      runs.push({ kind: 'same', text: middleA[i] as string });
-      i += 1;
-      j += 1;
-      gapA = i;
-      gapB = j;
-    } else if ((table[(i + 1) * width + j] as number) >= (table[i * width + j + 1] as number)) i += 1;
-    else j += 1;
+  if (middleA.length * middleB.length <= MAX_LINE_PAIRS) {
+    return merged([front, ...pair(middleA, middleB, inner, like, work), back]);
   }
-  i = middleA.length;
-  j = middleB.length;
-  closeGap();
-  runs.push(back);
-  return merged(runs);
+  const kept = matching(middleA, middleB, { left: PIECE_BUDGET });
+  return merged([front, ...runsFrom(middleA, middleB, kept, (a, b) => pair(a, b, inner, like, work)), back]);
 };
-
-const bySentence = (a: string, b: string): readonly WordRun[] =>
-  align(piecesOf(a, SENTENCES), piecesOf(b, SENTENCES), diffWords);
 
 /** The fewest words a sentence has for keeping it word for word to make two lines a pair. */
 const KEPT_SENTENCE_WORDS = 3;
 
-/**
- * How alike two lines are for pairing: by their words, or, when they share a whole sentence, at least as alike as a
- * rewrite is allowed to be, so a paragraph that kept one sentence and rewrote another shows the one kept.
- */
-const lineLikeness = (a: string, b: string): number => {
-  const words = similarity(a, b);
+/** Scores two lines: by `score`, or, when they share a whole sentence, at least as alike as a rewrite may be. */
+const lineLikeness = (score: (a: string, b: string) => number) => (a: string, b: string) => {
+  const words = score(a, b);
   if (words >= REWRITE_SIMILARITY) return words;
   const kept = new Set(
     piecesOf(a, SENTENCES)
@@ -322,15 +430,52 @@ const lineLikeness = (a: string, b: string): number => {
   return piecesOf(b, SENTENCES).some(sentence => kept.has(sentence.trim())) ? REWRITE_SIMILARITY : words;
 };
 
+const SENTENCE_LIKENESS: Likeness = { exact: similarity, rough: bagSimilarity };
+const LINE_LIKENESS: Likeness = { exact: lineLikeness(similarity), rough: lineLikeness(bagSimilarity) };
+
 /**
  * What changed between two texts, as runs in reading order. Equal lines stay; alike lines are compared sentence by
  * sentence and word by word; a line with no like partner, and a pair that is a rewrite, are a whole block out and a
- * whole block in. Joining the runs that are not added gives `before` exactly; those not removed give `after`.
+ * whole block in. Joining the runs that are not added gives `before` exactly; those not removed give `after`. The work
+ * is bounded (see {@link WORK_BUDGET}), so a very large rewrite is answered at once, a little less finely.
  */
-export const diffText = (before: string, after: string): readonly WordRun[] =>
-  before === after
-    ? merged([{ kind: 'same', text: after }])
-    : align(piecesOf(before, LINES), piecesOf(after, LINES), bySentence, lineLikeness);
+export const diffText = (before: string, after: string): readonly WordRun[] => {
+  if (before === after) return merged([{ kind: 'same', text: after }]);
+  const work = freshWork();
+  const bySentence = (a: string, b: string): readonly WordRun[] =>
+    align(piecesOf(a, SENTENCES), piecesOf(b, SENTENCES), (x, y) => diffWords(x, y, work), SENTENCE_LIKENESS, work);
+  return align(piecesOf(before, LINES), piecesOf(after, LINES), bySentence, LINE_LIKENESS, work);
+};
+
+/** The lines a long unchanged run keeps beside a change. */
+const FOLD_CONTEXT = 3;
+
+/** A long unchanged stretch, shown as how many lines it hides. */
+export interface FoldedRun {
+  readonly kind: 'folded';
+  readonly lines: number;
+}
+
+/**
+ * The runs of a changed text with every long unchanged stretch cut to the lines beside a change ("… 240 unchanged lines
+ * …"), so one word edited in a long report is not pages of scrolling. Joining the other runs still reads as the text
+ * around the change. A text with no change at all is left whole.
+ */
+export const foldUnchanged = (runs: readonly WordRun[]): readonly (WordRun | FoldedRun)[] => {
+  if (!runs.some(run => run.kind !== 'same')) return runs;
+  return runs.flatMap((run, index): (WordRun | FoldedRun)[] => {
+    const pieces = run.kind === 'same' ? piecesOf(run.text, LINES) : [];
+    const before = index === 0 ? 0 : FOLD_CONTEXT;
+    const after = index === runs.length - 1 ? 0 : FOLD_CONTEXT;
+    if (run.kind !== 'same' || pieces.length <= before + after + 2) return [run];
+    const hidden = pieces.slice(before, pieces.length - after);
+    return [
+      { kind: 'same', text: pieces.slice(0, before).join('') },
+      { kind: 'folded', lines: hidden.length },
+      { kind: 'same', text: pieces.slice(pieces.length - after).join('') },
+    ].filter(part => part.kind !== 'same' || part.text !== '') as (WordRun | FoldedRun)[];
+  });
+};
 
 // ---------------------------------------------------------------------------------------------------
 // Sections

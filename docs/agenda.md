@@ -727,7 +727,10 @@ reads "Merge into !A2 "Pick the queue""). A long title is cut at a word with "�
 only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
 **Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so
-its title is read from the board's resolved records as well as its open items. A machine with no merge never shows the
+its title is read from the board's resolved records as well as its open items. An Inbox card that says it merged
+another in, whose conversation board this device does not yet hold (only the machine's roll-up, which lists open items
+alone), reads that one board once, so the title appears; until it lands, or if that read fails (it is tried again), the
+line names the bare id. A machine with no merge never shows the
 button, and the machine's own agenda (`machine-agenda`) offers none.
 
 ### Split
@@ -1262,8 +1265,16 @@ and a part the item does not carry is not drawn:
   woven word by word, while a small edit stays a word diff. A long text with a small edit stays word-level too: equal
   lines (and sentences) at both ends are kept first, and when the lines between are still too many to pair at once, the
   lines that stayed equal anchor the rest, and only the gaps between anchors are paired, each under its own cap of
-  2,500 line pairs. Only a gap larger than that (about fifty lines changed against fifty others with nothing equal
-  between them) is shown as the old lines out and the new lines in. Additions are underlined, removals struck through, with a
+  2,500 line pairs. The anchoring has no size limit: a middle small enough is matched exactly, and a larger one is
+  anchored in linear time on the lines (or sentences, or words) that occur once on each side, then each gap between
+  anchors is matched the same way, so two one-word edits at the two ends of a 3,000-line report, or of a 3,000-sentence
+  paragraph, stay two small edits. Only a gap larger than the pairing cap with nothing equal in it (about fifty lines
+  changed against fifty others) is shown as the old lines out and the new lines in. The work is bounded so a large
+  rewrite never freezes the page: one comparison has a budget of about twelve million word pairs to score how alike
+  lines are and to match words exactly, and once it is spent, likeness is a cheap bag-of-words count and the matching
+  uses anchors only, so fifty lines of 500 words each, all rewritten, come back in well under a second. A long
+  unchanged stretch inside a changed section is cut to the three lines beside each change with one line saying
+  "… 240 unchanged lines …". Additions are underlined, removals struck through, with a
   status word (New, Changed, Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. The
   sections compared are the title, the type, the question, the premise, the context, the detail, the terms, the
   references, where we are now, what is decided and still open, the ask, a multi-decision ask's questions, each
