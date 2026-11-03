@@ -184,7 +184,7 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
 "Ferretry · Warden" as the queue item's `by`; the resume turns below are still `[ferretry] ` notices (a GAP).
 
 - **An orphaned card.** A card in an active or review lane whose ferret is finished, with nothing alive
-  under it, is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The
+  under it and no lead above the finished ferret alive to take it back ([board.md](board.md#a-finished-helpers-card-goes-back-to-its-lead)), is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The
   board decides "orphaned"; the Warden reads its word. The card's **owner ferret**, when it is alive and
   is not the finished ferret, gets one queued message naming the card and the three ways out:
   `fy resume <ferret>`, `fy task assign F412 <ferret>` or `fy task drop F412 --reason "<why>"`.

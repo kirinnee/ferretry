@@ -166,14 +166,18 @@ problem, and what a sub-ferret does is mostly report back to its lead. The daemo
 session identity — in `BoardService` (`create`, `act`) and on the lane route — so a prompt cannot talk past it
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)).
 
-| A sub-ferret may                                          | A sub-ferret is refused                                                                           |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| read the board, `fy task note` on a card                  | `fy task create`, `move`, `drop`, `reopen`, `assign`, `depend` / `undepend`, `block` / `unblock`, |
-| `fy task link --pr <url>` / `--branch <branch>` on a card | `reparent`, `focus`, `edit`, `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc`      |
-| `fy task trigger` (`deploy.done`) on its card             |                                                                                                   |
-| `fy send` its lead (and peers the lead names)             | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                            |
+| A sub-ferret may                                           | A sub-ferret is refused                                                                      |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| read the board, `fy task note` on a card                   | `fy task create`, `move`, `reopen`, `depend` / `undepend`, `block` / `unblock`,              |
+| `fy task link --pr <url>` / `--branch <branch>` on a card  | `reparent`, `focus`, `edit`, `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc` |
+| `fy task drop` / `assign` on a card **in its own subtree** | `drop` / `assign` on any card outside it (see [Authority](#authority))                       |
+| `fy task trigger` (`deploy.done`) on its card              |                                                                                              |
+| `fy send` its lead (and peers the lead names)              | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                       |
 
-The refusal is `forbidden` and names the way out, e.g. `Sub-ferrets don't move cards; tell your lead: fy send <lead-callsign> "…"`.
+The refusal is `forbidden` and speaks to the caller, never of "sub-ferrets" at large: it says what it can't do, what it MAY do, and who can do the rest, e.g.
+`You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send <lead-callsign> "…"`.
+A drop or assign outside the caller's subtree reads "…you can't drop a card outside your own subtree…". A sub-ferret that leads a subtree of its own
+is therefore never told it can't manage that subtree ([Authority](#authority)); the agenda and the lanes route say what they allow the same way.
 The daemon still makes the sub-ferret's card when `fy new` starts it (that is the lead's act), enters its working lane
 for it when the session starts (`work.started`, below), and a PR or release still moves it. A directory that cannot place a caller refuses nothing: the limit narrows a ferret known to be a
 sub-ferret, it never locks one out it cannot find.
@@ -712,21 +716,56 @@ or an activity shows them, because a sub-ferret's own card is a sub-card. While 
 Waiting on you, Stale, Orphaned), so a count and its cards agree. They are always in the **parent's detail**, under
 "Sub-cards", open or closed. The Archive follows the same filter; the ferret's own Tasks tab always lists its cards.
 
+## A finished helper's card goes back to its lead
+
+When the ferret a card is assigned to **ends** (it signalled done, was stopped, or completed) and the card is still open work, the daemon assigns the card back
+to the nearest **live** ancestor of that ferret: the lead that started it, else that lead's lead, an ended one skipped. It happens as the daemon, on the board
+sweep once the ferret has been gone the same two minutes a helper needs ([above](#sub-cards-close-themselves)), and the card's history reads
+`returned to <lead>: <ferret> finished` (the `assigned` event carries `returnedFrom`). It is journalled and pushed like every other automatic move; nobody is
+asked and nobody is messaged. The card stays in its lane: only its assignee changes, so the lead sees it on its own cards and decides.
+
+The sub-card closes win, and the return takes what they leave:
+
+| The card, when its ferret has ended                                  | What the daemon does                                         |
+| -------------------------------------------------------------------- | ------------------------------------------------------------ |
+| a sub-card handed to the ferret, no PR open or merged                | closes it: `helper finished` (the sweep, `closeEndedHelper`) |
+| a sub-card whose PR merged or released                               | closes it: `sub-card shipped; the parent carries the test`   |
+| a sub-card with a PR still **open**, in an active or review lane     | returns it to the nearest live lead                          |
+| a top-level card a sub-ferret owns or was assigned, active or review | returns it to the nearest live lead                          |
+| any card in a backlog, shipped, verify or closed lane, or dropped    | nothing: not work in flight                                  |
+| no ancestor of the ferret is alive                                   | nothing: the card is **orphaned** and the Warden says so     |
+
+A lead's own bookkeeping sub-card (assigned to its owner) is never closed or returned by this, and neither is a sub-card whose helper has no PR (it closes instead). The check runs again inside the card's write, against the stored card and a fresh read of the sessions the return rests on: if the ended ferret came back, the chosen lead ended or a nearer one is alive, the card moved, was reassigned, dropped or closed, or its PR closed so that the helper-finished close now applies, the return is declined and the next sweep plans or closes it afresh. The orphan alert ([Activity](#activity-and-staleness),
+[who a board alert is for](#who-a-board-alert-is-for)) therefore fires only when nobody above the ended ferret is alive to take the card back.
+
+**The return is atomic with the sessions it rests on.** A return rests on three facts about sessions: the ferret has ended, each ended session between it and the lead is still ended, and the lead is alive. The sweep names that line of sessions (the ferret, the ones above it, the lead; `lineageThrough`) and the commit takes the serial lane of every one of them at once (`DaemonStorage.holdSessions`, one claim of all the keys, so two holds cannot wait on each other and a queued exclusive pass cannot wait on a hold that waits on it). Only after the hold is taken are those sessions read again, from the files, and only those, never the fleet; the decision is made on that read and the card is written while the hold is still taken. The lane is the one every write of a session's status goes through (a stop, a completion, a resume, the pane's exit, a turn change), so such a write either landed before the read, and the return declines or follows the lead up, or it waits for the card to land and the return is ordered BEFORE it. Nothing is handed to an ended or unrelated session on any interleaving of those. The journal and the notices of the move run after the hold is released. The sweep's earlier whole-fleet roster only plans; it never decides.
+
+Declared GAPs of the return's atomicity:
+
+- **A transition decided but not yet written is ordered after the return.** A stop that has killed the pane and not yet recorded `stopped` still reads as alive, so the card can reach a lead a moment before its end lands. The lead's end then makes the card the lead's ended card, and the next sweep returns it one lead further up; the card is never lost, and never handed to somebody that had already ended when it was written.
+- **Only writes through the daemon take the lane.** A hand edit of a session's state document, or a session ended by the host outside the daemon's knowledge, is seen by the next read and not held back.
+- **A card written by something other than the sweep is not covered.** A lead's own `fy task assign` runs under the card's lock only; whether the person it names is alive is a fact of that request, not of this guarantee.
+
 ## Authority
 
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to
 grant. This replaced the old `task-boards` access list. The code is `packages/daemon/src/lib/board/authority.ts`.
 
-| Standing      | Who                                                        | May                                                                               |
-| ------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `owner-human` | the owner: loopback, or a device the `fleet` grant let in  | everything, including owner gates and dependency overrides                        |
-|               | (on the admin token it is recorded as `admin-token`)       |                                                                                   |
-| `owner`       | the card's owner ferret                                    | the assignee's writes, plus re-plan                                               |
-|               |                                                            | and, on an INTERNAL card, passing its gates                                       |
-| `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                                             |
-| `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen, report an external trigger  |
-| `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile, relocate a removed lane's cards (never closed) |
-| `reader`      | any other ferret                                           | read; depend, but only from its own card                                          |
+| Standing        | Who                                                               | May                                                                               |
+| --------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `owner-human`   | the owner: loopback, or a device the `fleet` grant let in         | everything, including owner gates and dependency overrides                        |
+|                 | (on the admin token it is recorded as `admin-token`)              |                                                                                   |
+| `owner`         | the card's owner ferret                                           | the assignee's writes, plus re-plan                                               |
+|                 |                                                                   | and, on an INTERNAL card, passing its gates                                       |
+| `ancestor`      | a ferret above the card's OWNER in the `parent` chain of sessions | the same as the owner                                                             |
+| `assignee-lead` | a ferret above the card's ASSIGNEE, but not above its owner       | drop and reassign the card, nothing else: never a gate, a close or a re-plan      |
+| `assignee`      | the ferret doing it                                               | move, note, link, block, edit files, clarify, reopen, report an external trigger  |
+| `daemon`        | the daemon's own automation                                       | trigger moves, link cache, refile, relocate a removed lane's cards (never closed) |
+| `reader`        | any other ferret                                                  | read; depend, but only from its own card                                          |
+
+**A lead plans its whole subtree.** A card is in a ferret's subtree when the ferret asking owns it, or started, directly or through a chain of leads, the card's owner or its assignee (a returned card, owned and held by a middle lead, is still in that lead's subtree). So a lead may drop or assign a card owned by its grandchild, and one assigned to a descendant but owned by another party (a card its subtree was
+handed), as an `assignee-lead`. That reach stops at drop and reassign: the owner ferret's gates and its re-plan belong to the owner's own lineage (`ancestor`), so a lead that only reaches a card through its assignee cannot pass or close an internal card owned by somebody else. A card outside the subtree is a `reader`'s: a sideways sibling, a cousin or a stranger can plan nothing there. This holds for a sub-ferret that leads a
+subtree of its own too: the sub-ferret limit refuses its `drop` and `assign` only outside its subtree.
 
 Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate
 or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
@@ -917,19 +956,19 @@ A gate does not ask the owner a second time about a card the owner is already be
 Activity is attributed to a session's focus card (`config.focusTask`, set by `fy task focus` and by creating a
 card). The first state that applies wins:
 
-| State      | When                                                                 |
-| ---------- | -------------------------------------------------------------------- |
-| `active`   | an attributed session is working now                                 |
-| `orphaned` | its ferrets are gone while the card sits in an active or review lane |
-| `waiting`  | on the owner, an external block or another card; never stale         |
-| `stale`    | idle past its lane's `staleAfter`                                    |
-| `idle`     | none of the above                                                    |
+| State      | When                                                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `active`   | an attributed session is working now                                                                                                                                           |
+| `orphaned` | its ferrets are gone while the card sits in an active or review lane, and no lead above them is alive ([returned to its lead](#a-finished-helpers-card-goes-back-to-its-lead)) |
+| `waiting`  | on the owner, an external block or another card; never stale                                                                                                                   |
+| `stale`    | idle past its lane's `staleAfter`                                                                                                                                              |
+| `idle`     | none of the above                                                                                                                                                              |
 
 A lane without its own `staleAfter` uses the category default: backlog 3 days, active 2 hours, review 24 hours,
 shipped 3 days. Verify and closed never go stale. An unassigned child card still in a backlog lane is nobody's work yet, so it
 never keeps its parent from being `orphaned`; an assigned or started child does.
 
-The **sweep** (`packages/daemon/src/lib/board/sweep.ts`) ticks on its own and does two things. It nudges the ferret
+The **sweep** (`packages/daemon/src/lib/board/sweep.ts`) ticks on its own and does three things. It closes a helper whose ferret ended and hands any other card of an ended ferret back to its lead ([above](#a-finished-helpers-card-goes-back-to-its-lead)). It nudges the ferret
 of a stale card ([who a board alert is for](#who-a-board-alert-is-for)), at most once per card per `staleAfter`
 however the recipient changes, never one that declared a wait, never for a waiting card.
 It also queues quiet events: a child's move, block, drop or new blocking ask goes to its lead, and `&F20 unblocked`

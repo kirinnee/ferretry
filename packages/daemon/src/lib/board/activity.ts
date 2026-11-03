@@ -30,6 +30,7 @@ import {
 import { isTerminalStatus } from '../warden/types.ts';
 import { effectiveAssignee } from './authority.ts';
 import { blockedBy, cardCategory } from './graph.ts';
+import { MAX_LINEAGE_DEPTH } from './lineage.ts';
 import type { ActivityDeriver, ActivityInputs, BoardClock, CardActivity } from './ports.ts';
 
 /** A strong signal this recent makes its card `active` even between turns. */
@@ -80,6 +81,16 @@ export interface SessionLivenessSource {
   roster(): Promise<SessionRoster>;
 }
 
+/**
+ * Holds some sessions' standing still while a decision resting on it is committed. `work` is handed a roster of
+ * exactly `ids`, read fresh AFTER the hold was taken, and no write to those sessions lands until it settles: a
+ * session that was seen alive cannot end, and one seen ended cannot resume, between the read and the commit.
+ * `work` must not write the sessions it holds.
+ */
+export interface SessionLivenessGuard {
+  settled<T>(ids: readonly string[], work: (fresh: SessionRoster) => Promise<T>): Promise<T>;
+}
+
 /** Whether a session is there to do work: `dead` is gone or finished; `unknown` could not be read. */
 export type SessionPresence = 'alive' | 'dead' | 'unknown';
 
@@ -88,6 +99,23 @@ export const presenceOf = (roster: SessionRoster, sessionId: string): SessionPre
   const session = roster.sessions.get(sessionId);
   if (session === undefined) return 'unknown';
   return isTerminalStatus(session.status) ? 'dead' : 'alive';
+};
+
+/**
+ * The nearest session above `sessionId` that is alive (its lead, else the lead's lead, an ended one skipped), walked
+ * up the roster's `lead`; `null` when none is. A loop or a chain past {@link MAX_LINEAGE_DEPTH} ends the walk.
+ */
+export const nearestLiveLead = (roster: SessionRoster, sessionId: string): string | null => {
+  const seen = new Set<string>([sessionId]);
+  let current = sessionId;
+  while (seen.size <= MAX_LINEAGE_DEPTH) {
+    const lead = roster.sessions.get(current)?.lead;
+    if (lead === undefined || lead === '' || seen.has(lead)) return null;
+    if (presenceOf(roster, lead) === 'alive') return lead;
+    seen.add(lead);
+    current = lead;
+  }
+  return null;
 };
 
 /** Thinking, or running a tool, right now. */
@@ -247,6 +275,7 @@ const stateOf = (
   if (
     (category === 'active' || category === 'review') &&
     presenceOf(roster, effectiveAssignee(card)) === 'dead' &&
+    nearestLiveLead(roster, effectiveAssignee(card)) === null &&
     !inputs.index.children(card.id).some(child => child.dropped === null && walk(child).live)
   ) {
     return 'orphaned';

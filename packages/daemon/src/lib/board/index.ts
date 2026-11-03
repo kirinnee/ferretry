@@ -19,6 +19,7 @@ export * from './service.ts';
 export * from './session-cards.ts';
 export * from './signal-done.ts';
 export * from './start-on-card.ts';
+export * from './return-to-lead.ts';
 export * from './sub-card-close.ts';
 export * from './sweep.ts';
 export * from './gate-check.ts';

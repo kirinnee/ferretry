@@ -24,9 +24,23 @@ export const NO_SUB_FERRETS: SubFerretDirectory = {
   addressOf: async sessionId => sessionId,
 };
 
-/** The sentence a refused sub-ferret reads: what it may not do, and the command that reaches who may. */
-const subFerretRefusalMessage = (doing: string, leadAddress: string): string =>
-  `Sub-ferrets don't ${doing}; tell your lead: fy send ${leadAddress} "…"`;
+/** What a sub-ferret may still do on the board: its own card, and every card in its own subtree. */
+const SUB_FERRET_MAY_ON_BOARD =
+  'note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree';
+
+/** What a sub-ferret may still do on the agenda: read it and report to its lead. */
+export const SUB_FERRET_MAY_ON_AGENDA = 'read the agenda and report to your lead';
+
+/** What a sub-ferret may still do to a project's lanes: read them. */
+export const SUB_FERRET_MAY_ON_LANES = 'read the board and its lanes';
+
+/**
+ * The sentence a refused sub-ferret reads: what it may not do, what it MAY do instead, and the command that reaches
+ * who can do the rest. It speaks to the caller, never of "sub-ferrets" at large: a sub-ferret that leads a subtree of
+ * its own is told what its subtree allows.
+ */
+const subFerretRefusalMessage = (doing: string, may: string, leadAddress: string): string =>
+  `You are a sub-ferret, so you can't ${doing}. You may ${may}. For anything else ask your lead: fy send ${leadAddress} "…"`;
 
 /**
  * The refusal for `sessionId` doing `doing`, or `null` when it is a lead (or nobody the daemon knows has
@@ -37,11 +51,12 @@ export const subFerretRefusal = async (
   directory: SubFerretDirectory,
   sessionId: string,
   doing: string,
+  may: string = SUB_FERRET_MAY_ON_BOARD,
 ): Promise<string | null> => {
   const lead = await directory.leadOf(sessionId).catch(() => undefined);
   if (lead === undefined) return null;
   const address = await directory.addressOf(lead).catch(() => lead);
-  return subFerretRefusalMessage(doing, address);
+  return subFerretRefusalMessage(doing, may, address);
 };
 
 /** Whether `sessionId` was started by another session. */

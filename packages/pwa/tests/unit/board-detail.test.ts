@@ -289,6 +289,9 @@ describe('history', () => {
     expect(rowOf('assigned', { from: null, to: 'x' }).text).toBe('assigned it to ferret x');
     expect(rowOf('assigned', { from: 'y', to: 'x' }).text).toBe('assigned it to ferret x (was ferret y)');
     expect(rowOf('assigned', { from: 'y', to: null }).text).toBe('took the assignee off');
+    expect(rowOf('assigned', { from: 'y', to: 'x', returnedFrom: 'y' }).text).toBe(
+      'returned to ferret x: ferret y finished',
+    );
   });
 
   it('says a dependency, with an override when it had one', () => {

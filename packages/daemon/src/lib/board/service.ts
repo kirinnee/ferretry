@@ -61,6 +61,7 @@ import {
   triggerMove,
   withEvent,
 } from './card-actions.ts';
+import type { SessionRoster } from './activity.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
@@ -93,6 +94,7 @@ import type {
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
+import { returnCard, returnLead } from './return-to-lead.ts';
 import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
 
 export interface BoardServiceDependencies {
@@ -235,11 +237,11 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   unblock: 'unblock cards',
   depend: 'add dependencies to cards',
   undepend: 'remove dependencies from cards',
-  drop: 'drop cards',
+  drop: 'drop a card outside your own subtree',
   reopen: 'reopen cards',
   clarify: 'clarify cards',
   link: 'link a commit or doc to cards',
-  assign: 'reassign cards',
+  assign: 'reassign a card outside your own subtree',
   note: 'note on cards',
   edit: 'edit cards',
   file: 'claim files on cards',
@@ -319,6 +321,41 @@ export class BoardService {
     });
     if (closed === null) return false;
     await this.afterWrite(caller, closed, [closed.projectId]);
+    return true;
+  }
+
+  /**
+   * Hands a card whose ferret (`from`) ended to `lead`, the nearest live lead above that ferret (the board sweep found
+   * it): assigned as the daemon, with `returned to <lead>: <ferret> finished` in its history. The decision is made
+   * again INSIDE the card's write, against the card as it is now AND the sessions as they are now: `settle` holds the
+   * standing of the sessions the return rests on (the ferret, the ended ones above it, the lead) and hands the write a
+   * roster of exactly those, read after the hold was taken, so none of them can end or resume between that read and
+   * the card landing on disk. A card that moved, was reassigned, dropped or closed, whose ferret is back, or whose
+   * nearest live lead is no longer `lead`, is left alone; the next sweep plans it afresh. The journal and the notices
+   * run after the hold is released. `true` when it moved.
+   */
+  async returnToLead(
+    id: BoardTaskId,
+    plan: { readonly lead: string; readonly from: string },
+    settle: <T>(work: (fresh: SessionRoster) => Promise<T>) => Promise<T>,
+  ): Promise<boolean> {
+    const caller: BoardCaller = { kind: 'daemon' };
+    const returned = await settle(
+      async fresh =>
+        await this.ports.store.write(id, async current => {
+          if (current === undefined || current.dropped !== null || effectiveAssignee(current) !== plan.from) {
+            return { task: null, result: null };
+          }
+          const context = await this.context(current, caller);
+          const category = categoryOf(context.laneSet, current.laneId);
+          const lead = returnLead(current, category.ok ? category.value : undefined, fresh);
+          if (lead !== plan.lead) return { task: null, result: null };
+          const task = requireValidCard(returnCard(current, plan.lead, plan.from, context));
+          return { task, result: task };
+        }),
+    );
+    if (returned === null) return false;
+    await this.afterWrite(caller, returned, [returned.projectId]);
     return true;
   }
 
@@ -622,7 +659,8 @@ export class BoardService {
     expect?: { readonly laneId: string; readonly entry: number },
   ): Promise<BoardTaskResponse> {
     // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
-    if (!subFerretMay(request) && request.action !== 'assign') {
+    // A drop and an assign are judged inside the write (`decide`): a sub-ferret that leads a subtree may plan it.
+    if (!subFerretMay(request) && request.action !== 'assign' && request.action !== 'drop') {
       await this.refuseSubFerret(caller, subFerretDoing(request));
     }
     if (request.action === 'focus' && caller.kind !== 'ferret') {
@@ -843,9 +881,8 @@ export class BoardService {
       await this.refuseSubFerret(caller, 'report events on a card they are not doing');
     }
     const context = await this.context(card, caller, request.action === 'assign' ? request.assignee : undefined);
-    if (request.action === 'assign' && context.handsDown !== true) {
-      await this.refuseSubFerret(caller, subFerretDoing(request));
-    }
+    const plans = request.action === 'drop' || (request.action === 'assign' && context.handsDown !== true);
+    if (plans && !(await this.inSubtree(caller, card))) await this.refuseSubFerret(caller, subFerretDoing(request));
     const refiled = request.action === 'refile' && request.projectId !== card.projectId ? request.projectId : null;
     if (refiled !== null) await this.requireRefileLicence(card, refiled, caller, context.index);
     const target = refiled === null ? null : await this.ports.lanes.laneSet(refiled);
@@ -945,13 +982,39 @@ export class BoardService {
     return cardAudience(card, parent !== undefined);
   }
 
-  /** The caller's standing on a card; the owner's lineage is walked only for a ferret that is not it. */
+  /**
+   * The caller's standing on a card; the lineages of its owner and of its assignee are walked only for a ferret that
+   * is neither.
+   */
   private async standing(caller: BoardCaller, card: BoardTask) {
-    const ancestors =
-      caller.kind === 'ferret' && caller.sessionId !== card.owner
-        ? await ancestorsOf(card.owner, this.ports.parents)
-        : [];
-    return standingOf(caller, card, ancestors);
+    if (caller.kind === 'ferret' && caller.sessionId === card.owner) return standingOf(caller, card, [], []);
+    const [owners, assignees] = await this.lineages(caller, card);
+    return standingOf(caller, card, owners, assignees);
+  }
+
+  /**
+   * Whether the card is in the caller's subtree: the caller owns it, or its owner or its assignee is a descendant of
+   * the caller. A lead that owns a card is the root of its own subtree, so a card returned to it (assignee = owner)
+   * can still be dropped or handed to a replacement.
+   */
+  private async inSubtree(caller: BoardCaller, card: BoardTask): Promise<boolean> {
+    if (caller.kind !== 'ferret') return false;
+    if (caller.sessionId === card.owner) return true;
+    const [owners, assignees] = await this.lineages(caller, card);
+    return owners.includes(caller.sessionId) || assignees.includes(caller.sessionId);
+  }
+
+  /** The leads above the card's owner and above its assignee; empty for the caller that is that very ferret. */
+  private async lineages(
+    caller: BoardCaller,
+    card: BoardTask,
+  ): Promise<readonly [readonly string[], readonly string[]]> {
+    if (caller.kind !== 'ferret') return [[], []];
+    const assignee = effectiveAssignee(card);
+    return [
+      caller.sessionId === card.owner ? [] : await ancestorsOf(card.owner, this.ports.parents),
+      caller.sessionId === assignee || assignee === card.owner ? [] : await ancestorsOf(assignee, this.ports.parents),
+    ];
   }
 
   private requireCard(current: BoardTask | undefined, id: BoardTaskId): BoardTask {

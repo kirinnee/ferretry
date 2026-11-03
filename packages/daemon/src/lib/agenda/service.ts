@@ -24,6 +24,7 @@ import {
   isSubFerret,
   NO_SUB_FERRETS,
   type SubFerretDirectory,
+  SUB_FERRET_MAY_ON_AGENDA,
   subFerretRefusal,
 } from '../sub-ferret/index.ts';
 import {
@@ -604,6 +605,7 @@ export class AgendaService {
       this.subFerrets,
       actor.sessionId,
       SUB_FERRET_DOING[action] ?? 'change the agenda',
+      SUB_FERRET_MAY_ON_AGENDA,
     );
     return refusal === null ? null : { code: 'forbidden', message: refusal };
   }

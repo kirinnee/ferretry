@@ -11,6 +11,7 @@
  * | `owner`       | the card's owner ferret                                | the assignee's writes, plus re-plan   |
  * | `ancestor`    | a ferret above the card's owner                        | the same as the owner                |
  * | `assignee`    | the ferret doing it (`assignee`, else the owner)       | move, note, link, report, files, …   |
+ * | `assignee-lead` | a ferret above the card's assignee, not its owner    | drop and reassign, nothing else      |
  * | `daemon`      | the daemon's own automation                            | trigger moves, link cache, refile    |
  * | `reader`      | any other ferret                                       | read; depend from ITS OWN card only   |
  *
@@ -33,7 +34,7 @@ export type BoardCaller =
   | { readonly kind: 'ferret'; readonly sessionId: string }
   | { readonly kind: 'daemon'; readonly sessionId?: string };
 
-export type BoardStanding = 'owner-human' | 'owner' | 'ancestor' | 'assignee' | 'daemon' | 'reader';
+export type BoardStanding = 'owner-human' | 'owner' | 'ancestor' | 'assignee-lead' | 'assignee' | 'daemon' | 'reader';
 
 /** Everything a caller can ask of a card, as authority sees it. */
 export type BoardOperation =
@@ -64,6 +65,8 @@ export type BoardOperation =
 
 const WORKERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor', 'assignee'];
 const PLANNERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];
+/** A lead may also drop or reassign a card its subtree was handed, whoever owns it: nothing else about the card. */
+const SUBTREE_PLANNERS: readonly BoardStanding[] = [...PLANNERS, 'assignee-lead'];
 const HUMAN: readonly BoardStanding[] = ['owner-human'];
 
 /**
@@ -85,8 +88,8 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
   edit: WORKERS,
   file: WORKERS,
   refile: [...WORKERS, 'daemon'],
-  drop: PLANNERS,
-  assign: PLANNERS,
+  drop: SUBTREE_PLANNERS,
+  assign: SUBTREE_PLANNERS,
   order: PLANNERS,
   snooze: HUMAN,
   replan: PLANNERS,
@@ -102,19 +105,24 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
 export const effectiveAssignee = (card: Pick<BoardTask, 'owner' | 'assignee'>): string => card.assignee ?? card.owner;
 
 /**
- * A caller's standing on one card. `ownerAncestors` is the card owner's lineage, nearest first; only a
- * ferret that is neither the owner nor the assignee needs it, so a caller may pass `[]` otherwise.
+ * A caller's standing on one card. `ownerAncestors` is the card owner's lineage and `assigneeAncestors` the assignee's,
+ * nearest first; only a ferret that is neither the owner nor the assignee needs them, so a caller may pass `[]`
+ * otherwise. A lead above the OWNER is an `ancestor`: the owner lineage alone holds the card's gates and its plan. A
+ * lead above only the ASSIGNEE is an `assignee-lead`: the card was handed to its subtree, so it may drop or reassign it,
+ * and nothing more (never an owner ferret's gate, never a re-plan).
  */
 export const standingOf = (
   caller: BoardCaller,
   card: Pick<BoardTask, 'owner' | 'assignee'>,
   ownerAncestors: readonly string[],
+  assigneeAncestors: readonly string[] = [],
 ): BoardStanding => {
   if (caller.kind === 'owner') return 'owner-human';
   if (caller.kind === 'daemon') return 'daemon';
   if (caller.sessionId === card.owner) return 'owner';
   if (ownerAncestors.includes(caller.sessionId)) return 'ancestor';
   if (caller.sessionId === effectiveAssignee(card)) return 'assignee';
+  if (assigneeAncestors.includes(caller.sessionId)) return 'assignee-lead';
   return 'reader';
 };
 
@@ -160,6 +168,7 @@ const STANDING_WORDS: Readonly<Record<BoardStanding, string>> = {
   'owner-human': 'the owner',
   owner: 'its owner ferret',
   ancestor: "the owner ferret's leads",
+  'assignee-lead': "the assignee's leads",
   assignee: 'its assignee',
   daemon: 'the daemon',
   reader: 'any ferret',

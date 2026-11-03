@@ -5,8 +5,8 @@ import {
   BoardTaskCreateRequestSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { type BoardCaller, BoardError, BoardService } from '../../../src/lib/board/index.ts';
-import { card, FakeParents, MemoryBoardStore, world } from '../board/support.ts';
+import { type BoardCaller, BoardError, BoardService, type SessionRoster } from '../../../src/lib/board/index.ts';
+import { card, FakeParents, liveSession, MemoryBoardStore, rosterOf, world } from '../board/support.ts';
 import { DIRECTORY, REFUSED } from './support.ts';
 
 const ferret = (sessionId: string): BoardCaller => ({ kind: 'ferret', sessionId });
@@ -139,7 +139,9 @@ describe('a sub-ferret on the board', () => {
     const error = await refusal(service.act('F1', action({ action: 'drop', reason: 'done' }), ferret('grandchild')));
 
     // Assert
-    should(error?.message).equal('Sub-ferrets don\'t drop cards; tell your lead: fy send child "…"');
+    should(error?.message).equal(
+      `You are a sub-ferret, so you can't drop a card outside your own subtree. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send child "…"`,
+    );
   });
 
   it('should not limit the owner', async () => {
@@ -153,3 +155,149 @@ describe('a sub-ferret on the board', () => {
     should(owner).be.undefined();
   });
 });
+
+describe('planning inside a subtree', () => {
+  // lead > child > grandchild; lead > sibling > cousin; `stranger` is nobody's descendant.
+  const PARENTS = { child: 'lead', grandchild: 'child', sibling: 'lead', cousin: 'sibling' };
+  const TREE = {
+    leadOf: async (sessionId: string) => (PARENTS as Record<string, string | undefined>)[sessionId],
+    addressOf: async (sessionId: string) => (sessionId === 'lead' ? 'lizzette' : sessionId),
+  };
+  const treeWith = (cards: Parameters<typeof card>[0][]) => {
+    const ports = world({
+      store: new MemoryBoardStore(cards.map(overrides => card(overrides))),
+      parents: new FakeParents(PARENTS),
+      subFerrets: TREE,
+    });
+    return { ports, service: new BoardService(ports) };
+  };
+  const drop = action({ action: 'drop', reason: 'no longer needed' });
+  const assignTo = (assignee: string | null) => action({ action: 'assign', assignee });
+
+  it('should let a lead drop and assign a card owned by its grandchild', async () => {
+    // Arrange
+    const { service } = treeWith([{ owner: 'grandchild' }, { id: 'F2', owner: 'grandchild' }]);
+
+    // Act
+    const assigned = await refusal(service.act('F1', assignTo('child'), lead));
+    const dropped = await refusal(service.act('F2', drop, lead));
+
+    // Assert
+    should([assigned, dropped]).eql([undefined, undefined]);
+  });
+
+  it('should let a lead drop and assign a card assigned to a descendant but owned by another party', async () => {
+    // Arrange
+    const { service, ports } = treeWith([
+      { owner: 'stranger', assignee: 'grandchild' },
+      { id: 'F2', owner: 'stranger', assignee: 'grandchild' },
+    ]);
+
+    // Act
+    const assigned = await refusal(service.act('F1', assignTo('child'), lead));
+    const dropped = await refusal(service.act('F2', drop, lead));
+
+    // Assert
+    should([assigned, dropped]).eql([undefined, undefined]);
+    should(ports.store.cards.get('F1')?.assignee).equal('child');
+    should(ports.store.cards.get('F2')?.dropped).not.be.null();
+  });
+
+  it('should let a sub-ferret that leads a subtree drop and assign cards anywhere in it', async () => {
+    // Arrange
+    const { service } = treeWith([
+      { owner: 'grandchild' },
+      { id: 'F2', owner: 'stranger', assignee: 'grandchild' },
+      { id: 'F3', owner: 'child', assignee: 'grandchild' },
+    ]);
+
+    // Act
+    const results = await Promise.all([
+      refusal(service.act('F1', assignTo('grandchild'), child)),
+      refusal(service.act('F2', drop, child)),
+      refusal(service.act('F3', drop, child)),
+    ]);
+
+    // Assert
+    should(results).eql([undefined, undefined, undefined]);
+  });
+
+  it('should refuse a sub-ferret a card outside its subtree, and say what its subtree allows', async () => {
+    // Arrange
+    const { service, ports } = treeWith([
+      { owner: 'cousin' },
+      { id: 'F2', owner: 'stranger', assignee: 'cousin' },
+      { id: 'F3', owner: 'sibling' },
+    ]);
+
+    // Act
+    const sideways = await refusal(service.act('F1', drop, child));
+    const assigned = await refusal(service.act('F2', assignTo('grandchild'), child));
+    const sibling = await refusal(service.act('F3', assignTo('child'), child));
+
+    // Assert
+    for (const error of [sideways, assigned, sibling]) {
+      should(error?.code).equal('forbidden');
+      should(error?.message).match(
+        /^You are a sub-ferret, so you can't .+ outside your own subtree\. You may .+ in your own subtree\./,
+      );
+      should(error?.message).endWith('For anything else ask your lead: fy send lizzette "…"');
+    }
+    should(sideways?.message).containEql("you can't drop a card outside your own subtree");
+    should(sibling?.message).containEql("you can't reassign a card outside your own subtree");
+    should([...ports.store.cards.values()].map(each => each.dropped)).eql([null, null, null]);
+  });
+
+  it('should refuse a sub-ferret that only holds a card, and a stranger the lead of nothing', async () => {
+    // Arrange
+    const { service } = treeWith([{ owner: 'lead', assignee: 'grandchild' }]);
+
+    // Act
+    const grandchild = await refusal(service.act('F1', drop, ferret('grandchild')));
+    const stranger = await refusal(service.act('F1', drop, ferret('stranger')));
+
+    // Assert
+    should(grandchild?.message).match(REFUSED_SUBTREE);
+    should(stranger?.code).equal('forbidden');
+    should(stranger?.message).not.match(/sub-ferret/);
+  });
+
+  it('should let a middle lead drop or hand on a card the daemon returned to it', async () => {
+    // Arrange — owned by `child`, worked by `grandchild`, who ended: the card comes back to `child`
+    const { service, ports } = treeWith([
+      { id: 'F2', owner: 'child', assignee: 'grandchild', laneId: 'review' },
+      { id: 'F3', owner: 'child', assignee: 'grandchild', laneId: 'review' },
+    ]);
+    const ended: SessionRoster = rosterOf([
+      liveSession('lead'),
+      liveSession('child', { lead: 'lead' }),
+      liveSession('grandchild', { lead: 'child', status: 'completed' }),
+    ]);
+    const returnAll = async (id: string) =>
+      await service.returnToLead(id, { lead: 'child', from: 'grandchild' }, async work => await work(ended));
+
+    // Act
+    const returned = [await returnAll('F2'), await returnAll('F3')];
+    const handed = await refusal(service.act('F2', assignTo('sibling'), child));
+    const dropped = await refusal(service.act('F3', drop, child));
+
+    // Assert
+    should(returned).eql([true, true]);
+    should([handed, dropped]).eql([undefined, undefined]);
+    should(ports.store.cards.get('F2')?.assignee).equal('sibling');
+    should(ports.store.cards.get('F3')?.dropped).not.be.null();
+  });
+
+  it('should still refuse a middle lead the board moves that are not drop or assign', async () => {
+    // Arrange
+    const { service } = treeWith([{ owner: 'grandchild' }]);
+
+    // Act
+    const moved = await refusal(service.act('F1', action({ action: 'move', to: 'plan' }), child));
+
+    // Assert
+    should(moved?.message).containEql("you can't move cards");
+  });
+});
+
+const REFUSED_SUBTREE = /^You are a sub-ferret, so you can't .+ outside your own subtree\./;

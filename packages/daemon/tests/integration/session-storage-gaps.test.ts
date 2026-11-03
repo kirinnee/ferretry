@@ -530,3 +530,69 @@ describe('session storage — replay and fleet tail', () => {
     should(String(error)).containEql(`session ${id} has durable directory evidence but could not be indexed`);
   });
 });
+
+describe('session storage — holding several sessions still', () => {
+  it('should hold the lanes of every named session while the work reads them, then release them', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const { storage } = await openStorage(home);
+    const one = parseSessionId('held-one');
+    const two = parseSessionId('held-two');
+    const other = parseSessionId('not-held');
+    await storage.writeState(one, { status: 'running' });
+    await storage.writeState(two, { status: 'running' });
+    await storage.writeState(other, { status: 'running' });
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const finish = new Promise<void>(done => {
+      release = done;
+    });
+    let proceed = (): void => undefined;
+    const started = new Promise<void>(resolve => {
+      proceed = resolve;
+    });
+
+    // Act — a write to a held session queued while the hold is open lands only after the work.
+    const held = storage.holdSessions([one, two], async () => {
+      proceed();
+      await finish;
+      order.push('work');
+      return await storage.readState(one);
+    });
+    await started;
+    const later = storage.writeState(two, { status: 'completed' }).then(() => void order.push('later write'));
+    await storage.writeState(other, { status: 'completed' });
+    order.push('other write');
+    release();
+    const seen = await held;
+    await later;
+
+    // Assert
+    should(seen).eql({ status: 'running' });
+    should(order).eql(['other write', 'work', 'later write']);
+    should(await storage.readState(two)).eql({ status: 'completed' });
+  });
+
+  it('should release the lanes when the work throws, and refuse a hold on a closed storage', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const { storage } = await openStorage(home);
+    const id = parseSessionId('held-and-failed');
+    await storage.writeState(id, { status: 'running' });
+
+    // Act
+    const failed = await capturedError(
+      async () =>
+        await storage.holdSessions([id], async () => {
+          throw new Error('boom');
+        }),
+    );
+    await storage.writeState(id, { status: 'completed' });
+    await storage.close();
+    const refused = await capturedError(async () => await storage.holdSessions([id], async () => 'never'));
+
+    // Assert
+    should((failed as Error).message).equal('boom');
+    should(refused).be.an.Error();
+  });
+});
