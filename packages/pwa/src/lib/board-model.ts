@@ -299,7 +299,7 @@ export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'a
 
 /** Whether the owner has a stake in the card: they raised it, or it waits on their answer. */
 export const isMine = (task: Pick<BoardTaskView, 'createdBy' | 'waitingOnOwner'>): boolean =>
-  task.createdBy.kind === 'owner' || task.waitingOnOwner.length > 0;
+  task.createdBy.kind === 'owner' || (task.waitingOnOwner ?? []).length > 0;
 
 const categoryIn = (laneSet: LaneSet | null, task: BoardTaskView): LaneCategory | null =>
   laneSet?.lanes.find(lane => lane.id === task.laneId)?.category ?? null;
@@ -309,7 +309,7 @@ const matchesActivity = (filter: BoardActivityFilter, task: BoardTaskView, categ
     case 'to_test':
       return category === 'verify';
     case 'waiting_on_you':
-      return task.waitingOnOwner.length > 0;
+      return (task.waitingOnOwner ?? []).length > 0;
     case 'blocked':
       return task.blockedBy.length > 0;
     default:
@@ -461,8 +461,8 @@ const addCounts = (left: BoardCounts, right: BoardCounts): BoardCounts => ({
   stale: left.stale + right.stale,
   orphaned: left.orphaned + right.orphaned,
   active: left.active + right.active,
-  toTest: left.toTest + right.toTest,
-  waitingOnYou: left.waitingOnYou + right.waitingOnYou,
+  toTest: (left.toTest ?? 0) + (right.toTest ?? 0),
+  waitingOnYou: (left.waitingOnYou ?? 0) + (right.waitingOnYou ?? 0),
 });
 
 /** The header pills and the activity each one counts: the same rule the pill applies as a filter. */
@@ -487,7 +487,7 @@ const withoutCards = (
       ...left,
       [key]: Math.max(
         0,
-        left[key] - hidden.filter(({ task, category }) => matchesActivity(filter, task, category)).length,
+        (left[key] ?? 0) - hidden.filter(({ task, category }) => matchesActivity(filter, task, category)).length,
       ),
     }),
     counts,

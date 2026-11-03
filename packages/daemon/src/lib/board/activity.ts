@@ -280,13 +280,15 @@ const stateOf = (
   ) {
     return 'orphaned';
   }
+  // Someone else's clock is never stale: a card blocked, waiting on another card, or whose agenda carries its open ask
+  // (docs/agenda.md § Card asks). It is idle, never `waiting`: a card does not wait on the owner itself.
   const asks = inputs.asks.get(card.id);
   if (
     card.blocked !== null ||
-    (asks !== undefined && asks.blocking.length > 0) ||
+    (asks !== undefined && asks.asking.length > 0) ||
     blockedBy(card, inputs.index, inputs.laneSets).length > 0
   ) {
-    return 'waiting';
+    return 'idle';
   }
   const staleAfter = cardStaleAfterMs(card, inputs);
   const since = instant(own.touch?.at ?? card.createdAt);

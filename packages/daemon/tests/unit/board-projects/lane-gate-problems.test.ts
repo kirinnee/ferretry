@@ -11,7 +11,7 @@ import {
 import { lanes, PROJECT } from '../board/support.ts';
 
 /**
- * A GATE IS THE OWNER'S, ON THE LANES TOO (docs/board.md § Gates ask the owner): what a lane change would do to a gate
+ * A GATE IS THE OWNER'S, ON THE LANES TOO (docs/board.md § Cards show progress): what a lane change would do to a gate
  * — remove, disarm, move or skip it, or send cards into a closed lane or past it. A ferret's change of lanes that exist
  * waits for the owner, who is told exactly this. The classic lanes: Todo, Plan/Design*, Implement, Review/CI, Merged,
  * Released, To test*, Closed (* a gate).

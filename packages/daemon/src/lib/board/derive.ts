@@ -4,7 +4,7 @@
  *
  * - `blockedBy`, `blocks`, `rollup`, `suggestedLane` and `shippedIn` are computed here, from the cards.
  * - `lastTouchedAt`, `touchedBy` and `activity` come from the {@link ActivityDeriver} port.
- * - `waitingOnOwner` and `openAsks` come from the {@link AgendaLinkSource} port (U7).
+ * - `openAsks` comes from the {@link AgendaLinkSource} port (U7); `waitingOnOwner` is deprecated and always empty.
  * - `askedBy` is the one the card was stored with, else (a card from before it was stored) read from its ask's source (`origin.ts`).
  * - `origin` and `humanParent` come from the card and its ancestors (`origin.ts`), with the lineage of the
  *   sessions a card was recorded from read through the {@link SessionParents} port.
@@ -34,7 +34,7 @@ export interface DerivationInputs {
 
 /** A card the deriver said nothing about has had no activity anyone measured. */
 export const UNOBSERVED: CardActivity = { lastTouchedAt: null, touchedBy: null, activity: 'idle' };
-const NO_ASKS: CardAsks = { open: [], blocking: [] };
+const NO_ASKS: CardAsks = { open: [], asking: [] };
 const OWNER_STARTED: OriginFacts = { startedByFerret: () => false };
 
 const rank = (category: LaneCategory): number => LANE_CATEGORIES.indexOf(category);
@@ -117,7 +117,8 @@ export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTask
     activity: activity.activity,
     rollup: rollupOf(card, inputs),
     suggestedLane: suggestedLaneOf(card, inputs),
-    waitingOnOwner: [...asks.blocking],
+    // Deprecated and never filled (docs/agenda.md § Card asks): an app that predates card asks still reads it.
+    waitingOnOwner: [],
     openAsks: [...asks.open],
     blockedBy: [...blockedBy(card, inputs.index, inputs.laneSets)],
     blocks: inputs.index
@@ -155,7 +156,7 @@ export const neighbourhoodOf = (card: BoardTask, index: BoardIndex): readonly Bo
 
 /**
  * Asks the two ports about a set of cards at once, so a page costs one call to each. The agenda
- * answers first: a blocking ask is part of what makes a card `waiting`.
+ * answers first: an open card ask on its agenda keeps a card from going stale.
  *
  * `board` is every card whose ferrets' agendas are read: an item about one card may sit in the agenda of
  * another card's ferret, so a subset still reads the whole board's ferrets and keeps only its own asks.

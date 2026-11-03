@@ -1,4 +1,6 @@
 import {
+  formatTaskRef,
+  mirroredCardAsk,
   AGENDA_PUSH_BODY_LENGTH,
   AGENDA_PUSH_TITLE_LENGTH,
   agendaItemPushTag,
@@ -99,8 +101,9 @@ export function pingNotificationPayload(
 }
 
 /**
- * THE PUSH A CARD'S GATE MAKES (docs/board.md § Gates ask the owner): once, when its item is raised. The card's
- * title, and the lane's ask with what to try; a tap opens the item, where the owner answers it.
+ * THE PUSH A CARD'S ASK MAKES (docs/board.md § Cards show progress): once, when it is put on its agenda. The agenda's
+ * title, and what the card asks ("&F12 Badge colour is at Released: Done or Not good"); a tap opens the agenda, where
+ * the owner answers it. A gate item from before card asks says its own ask line.
  */
 export function gateNotificationPayload(
   sessionId: string,
@@ -113,7 +116,7 @@ export function gateNotificationPayload(
     sessionId,
     kind: 'attention',
     title: agendaNotificationTitle(agendaTitle(item)),
-    body: clipAtWord(oneLine(item.subject), AGENDA_PUSH_BODY_LENGTH),
+    body: clipAtWord(oneLine(cardAskLine(item)), AGENDA_PUSH_BODY_LENGTH),
     tag: agendaItemPushTag(sessionId, item.id),
     url: agendaNotificationPath(sessionId, item.id),
     count: agendaBadgeCount(snapshot),
@@ -446,3 +449,13 @@ export function agendaNotificationTitle(title: string): string {
  * and the newer push is never covered by it.
  */
 export const agendaAlertLane = (sessionId: string): string => `agenda-alerts:${sessionId}`;
+
+/** What an agenda's first open card ask asks, in one line; the item's own ask line when it carries none. */
+const cardAskLine = (item: AgendaItem): string => {
+  const ask = mirroredCardAsk(item);
+  if (ask === undefined) return item.subject;
+  const card = [formatTaskRef({ id: ask.gate.cardId }), ask.gate.cardTitle]
+    .filter(part => part !== undefined)
+    .join(' ');
+  return `${card} is at ${ask.gate.laneName}: ${ask.gate.options.map(option => option.label).join(' or ')}`;
+};

@@ -115,6 +115,7 @@ import {
   type GateItem,
   gateAnswerAction,
   gateAsksWords,
+  gateWhySubject,
   gateWordsFor,
   isGateItem,
 } from '../../lib/gate-items.ts';
@@ -583,11 +584,14 @@ function GateWhy({
   daemon,
   error,
   optional,
+  subject,
   ports,
   onSend,
   onCancel,
 }: {
   readonly card: InboxCard;
+  /** What the answer is about, as the heading names it: the card being tried (`gateWhySubject`). */
+  readonly subject: string;
   /** The card's machine; a machine that has gone has nowhere to send the answer, so no box is drawn for it. */
   readonly daemon: DaemonConnection | undefined;
   readonly error: string | null;
@@ -614,11 +618,7 @@ function GateWhy({
         error={error}
         // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
         files={optional ? null : files}
-        heading={
-          optional
-            ? `Not yet: anything to add about ${card.item.subject ?? card.item.id}?`
-            : `Not good: what went wrong with ${card.item.subject ?? card.item.id}?`
-        }
+        heading={optional ? `Not yet: anything to add about ${subject}?` : `Not good: what went wrong with ${subject}?`}
         submitLabel={optional ? 'Not yet' : 'Send back'}
         wordsOptional={optional}
         placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
@@ -1996,6 +1996,7 @@ export function AgendaInboxPage({
                   card={deck[0]}
                   daemon={inbox.connectionFor(deck[0].daemonId)}
                   optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
+                  subject={gateWhySubject(deck[0].item, gateWhy.action)}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
                   ports={toTestHost?.ports}
                   onCancel={() => setGateWhy(null)}
@@ -2008,7 +2009,9 @@ export function AgendaInboxPage({
                       gateAnswerAction(
                         label,
                         sent.reason,
-                        gateWhy.action.kind === 'respond' && gateWhy.action.gate === true,
+                        gateWhy.action.kind === 'respond' && gateWhy.action.gate === true
+                          ? (gateWhy.action.cardAsk ?? deck[0].item.gateAttached ?? true)
+                          : false,
                         from === null || sent.attachmentIds.length === 0
                           ? undefined
                           : { from, ids: [...sent.attachmentIds] },

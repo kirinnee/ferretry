@@ -280,7 +280,7 @@ describe('NotificationService woke push', () => {
   });
 });
 
-/** A card's gate item (docs/board.md § Gates ask the owner): raised by the daemon, answered only by the owner. */
+/** A card's gate item (docs/board.md § Cards show progress): raised by the daemon, answered only by the owner. */
 const gated = AgendaItemSchema.parse({
   id: 'A5',
   source: 'task',
@@ -937,5 +937,93 @@ describe('NotificationService tells the clearer a push landed (review round 1: a
     // Assert
     should(landed).deepEqual([]);
     should(throwing.push.calls).equal(1);
+  });
+});
+
+/** A card's agenda carrying its ask (docs/agenda.md § Card asks): opened by the daemon on its ferret's behalf. */
+const carrying = AgendaItemSchema.parse({
+  id: 'A6',
+  source: 'task',
+  sourceRef: 'card-agenda:F412',
+  subject: 'Try it: open the Board',
+  why: '&F412 reached Released.',
+  waitingSince: AT,
+  howToResolve:
+    "Answer the card's ask here (its buttons move the card); reply to talk it over. The ferret marks this done.",
+  kind: 'reply',
+  ask: { kind: 'open-question' },
+  task: { id: 'F412' },
+  cardAsks: [{ gate: { ...gated.gate, laneName: 'Released', cardTitle: 'Badge fix' }, at: AT }],
+  raisedBy: 'daemon',
+  raisedBySession: null,
+  raisedByName: null,
+});
+
+describe('NotificationService card-ask push', () => {
+  it('should say which card waits where, and what the owner can answer, at its raise and when it wakes the agenda', async () => {
+    // Arrange
+    const world = fixture();
+    const woken = AgendaItemSchema.parse({ ...carrying, waitingSince: '2026-08-07T09:00:00.000Z' });
+
+    // Act
+    await world.service.raised(SESSION, carrying, snapshot);
+    await world.service.woke(SESSION, woken, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(2);
+    for (const dispatch of world.push.dispatches) {
+      should(dispatch.payload).match({
+        body: '&F412 Badge fix is at Released: Done or Not good',
+        eventKey: 'agenda-gate:A6',
+      });
+    }
+  });
+
+  it('should leave an agenda whose sole open items are card asks out of a stop: alone it is no stop, beside another it is not counted', async () => {
+    // Arrange
+    const alone = fixture();
+    const beside = fixture();
+    const onlyAsk = AgendaSnapshotSchema.parse({ ...snapshot, items: [carrying], count: 1 });
+    const both = AgendaSnapshotSchema.parse({ ...snapshot, items: [carrying, item], count: 2 });
+
+    // Act
+    await alone.service.stopped(SESSION, AT, onlyAsk);
+    await beside.service.stopped(SESSION, AT, both);
+
+    // Assert
+    should(alone.push.calls).equal(0);
+    should(beside.push.calls).equal(1);
+    should(beside.push.dispatches[0]?.payload.url).containEql('A1');
+  });
+
+  it('should count a ferret’s own thread that carries an ask once the ferret asked something after it', async () => {
+    // Arrange — the ask was put on the thread at AT; the ferret asked its question later
+    const asked = { ...carrying.cardAsks?.[0], at: AT };
+    const askedOnly = AgendaItemSchema.parse({
+      ...item,
+      id: 'A7',
+      task: { id: 'F412' },
+      cardAsks: [asked],
+      waitingSince: '2026-08-06T10:30:00.000Z',
+    });
+    const quiet = AgendaItemSchema.parse({ ...askedOnly, waitingSince: '2026-08-06T09:00:00.000Z' });
+    const talked = fixture();
+    const silent = fixture();
+
+    // Act
+    await talked.service.stopped(
+      SESSION,
+      '2026-08-06T11:00:00.000Z',
+      AgendaSnapshotSchema.parse({ ...snapshot, items: [askedOnly], count: 1 }),
+    );
+    await silent.service.stopped(
+      SESSION,
+      '2026-08-06T11:00:00.000Z',
+      AgendaSnapshotSchema.parse({ ...snapshot, items: [quiet], count: 1 }),
+    );
+
+    // Assert
+    should(talked.push.calls).equal(1);
+    should(silent.push.calls).equal(0);
   });
 });

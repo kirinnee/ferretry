@@ -626,7 +626,7 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
       ok: false,
       error: {
         code: 'invalid',
-        message: `&F12 is already asking the owner (!A3 on lead's agenda); add what you need to it instead: fy task note F12 "<text>"`,
+        message: `&F12 already asks the owner on !A3 (lead's agenda), which carries the card; add what the card needs to it: fy task note F12 "<text>"`,
       },
     });
     should(raisedOn(repository)).equal(0);
@@ -653,7 +653,7 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
     if (!crowded.ok) return;
     should(crowded.item?.task).be.undefined();
     should(crowded.notes).deepEqual([
-      `&F18 is already asking the owner (!A3 on lead's agenda), so this was raised without the card; add what the card needs to it instead: fy task note F18 "<text>"`,
+      `this was raised without the card: &F18 already asks the owner on !A3 (lead's agenda), which carries the card; add what the card needs to it: fy task note F18 "<text>"`,
     ]);
   });
 
@@ -681,42 +681,44 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
     should(byName.ok && byName.notes?.[0]).match(/&F12's gate could not be read/);
   });
 
-  it('attaches a gate to a thread, and clears it, as the daemon', async () => {
+  it('puts a card ask on a thread, and withdraws it, as the daemon', async () => {
     const { service } = withGates(async () => undefined);
     const gate = {
       cardId: 'F1',
       laneId: 'tested',
-      laneName: 'Try it',
+      laneName: 'Ready to try',
       entry: 1,
       projectId: 'p1',
       options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
     };
     await service.raise(SESSION, request, AGENT);
 
-    const attached = await service.attachGate(SESSION, 'A1', gate);
-    const cleared = await service.attachGate(SESSION, 'A1', null);
+    const attached = await service.cardAsk(SESSION, 'A1', { kind: 'attach', ask: { gate } });
+    const withdrawn = await service.cardAsk(SESSION, 'A1', { kind: 'withdraw', reference: gateReference(gate) });
 
+    should(attached.ok && attached.item?.cardAsks?.map(ask => ask.gate)).deepEqual([gate]);
     should(attached.ok && attached.item?.gateAttached).deepEqual(gate);
-    should(cleared.ok && cleared.item?.gateAttached).be.undefined();
+    should(withdrawn.ok && withdrawn.item?.cardAsks).be.undefined();
+    should(withdrawn.ok && withdrawn.item?.gateAttached).be.undefined();
   });
 
-  it('records the owner answering a gate on a thread, as history the thread keeps', async () => {
+  it('records the owner’s Not yet on a card ask, as history the thread keeps', async () => {
     const { service } = withGates(async () => undefined);
     const gate = {
       cardId: 'F1',
       laneId: 'tested',
-      laneName: 'Try it',
+      laneName: 'Ready to try',
       entry: 1,
       projectId: 'p1',
       options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
     };
     await service.raise(SESSION, request, AGENT);
-    await service.attachGate(SESSION, 'A1', gate);
+    await service.cardAsk(SESSION, 'A1', { kind: 'attach', ask: { gate } });
 
-    const answered = await service.attachGate(SESSION, 'A1', gate, gate);
+    const notYet = await service.cardAsk(SESSION, 'A1', { kind: 'not-yet', reference: gateReference(gate) });
 
-    should(answered.ok && answered.item?.gateAttached).deepEqual(gate);
-    should(answered.ok && gatesAnsweredOn(answered.item!)).deepEqual([gateReference(gate)]);
+    should(notYet.ok && notYet.item?.cardAsks?.[0]?.notYet).not.be.undefined();
+    should(notYet.ok && gatesAnsweredOn(notYet.item!)).deepEqual([gateReference(gate)]);
   });
 
   it('links a thread to a card as the daemon, and refuses a thread another card already holds', async () => {

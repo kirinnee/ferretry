@@ -18,6 +18,7 @@ export const DAEMON_SOURCE_REF_PREFIXES = [
   'lanes:',
   'gate:',
   'gate-followup:',
+  'card-agenda:',
   'warden:',
   'warden-orphan:',
   'handover:',

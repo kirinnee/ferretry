@@ -143,7 +143,7 @@ export const decideAskedBy = async (
 };
 
 /**
- * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Gates ask the owner), and the CONSERVATIVE
+ * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Cards show progress), and the CONSERVATIVE
  * one, because it decides who may pass them. A card is INTERNAL — its owner ferret and leads pass its gates, and the
  * owner is never asked — only when it is positively a ferret's own errand: the daemon made it, or the session that
  * REALLY wrote it (`createdBy`, never the ask's source, which the ferret writes) was started by a ferret; AND no

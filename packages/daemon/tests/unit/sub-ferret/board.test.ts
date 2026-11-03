@@ -162,7 +162,7 @@ describe('a sub-ferret on the board', () => {
     // Arrange
     const service = serviceWith();
 
-    // Act — into Plan: a design-first card never jumps over that gate to Implement (docs/board.md § Gates ask the owner)
+    // Act — into Plan: a design-first card never jumps over that gate to Implement (docs/board.md § Cards show progress)
     const moved = await refusal(service.act('F1', action({ action: 'move', to: 'plan' }), lead));
 
     // Assert

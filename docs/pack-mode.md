@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Tools (terminals, browser pages)         | 1,299      | 325      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
-| Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
+| Board (opt-in; `fy task`, cards)         | 631        | 158      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,266      | 317      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
@@ -110,7 +110,10 @@ PR 3's conversation verbs then joined it — `log <id> --reply|--rest` in the ch
 in the splitting sentence — partly paid for by `answer <id> "<text>"` → `answer <id> "…"`: agenda 1,236 → 1,266 (cap
 1,270), the total then 7,781.
 The Hypermedia line then learned `card` and `board` (live board cards) on main, 1,288 → 1,320. Together with PR 3's agenda the measured total is
-7,813 (7,827 counting the separators), 37 characters under the 7,850 cap (23 counting the separators). The whole-prompt cap is unchanged.
+7,813 (7,827 counting the separators), 37 characters under the 7,850 cap (23 counting the separators). The card-asks PR then
+reworded the Board section ("Before it's ready to try:", "lane by work", "add to one") and kept "show progress only": board 638 → 631, the
+measured total 7,806 (7,820 counting the separators), 44 characters under the 7,850 cap (30 counting the separators).
+The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

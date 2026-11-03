@@ -381,7 +381,7 @@ export function AgendaItemCard({
           error={null}
           map={{}}
           model={cardModel(attached)}
-          onAct={action => onAct(toGateAction(action))}
+          onAct={action => onAct(toGateAction(action, attached.gate))}
           options={attached.ask?.kind === 'multiple-choice' ? attached.ask.options : []}
           plainLabels
           swipeable={false}

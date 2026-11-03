@@ -38,17 +38,17 @@ verbatim; `fy` is the binary name):
 Only these five. Everything else — a new item while the ferret works, an edit, a change of whose turn it
 is, a notice without `--ping`, the owner's own moves — moves the Inbox badge and nothing more.
 
-| #   | Moment                                                                                     | Push                                                              | How often                               |
-| --- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------- |
-| 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
-| 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)      | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
-| 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
-| 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
-| 5   | A card the owner asked for **reaches a gate** ([board.md](board.md#gates-ask-the-owner))   | The card's title; the lane's ask ("Try it: …", "OK to build? …")  | Once per gate item, at its raise        |
+| #   | Moment                                                                                                                                            | Push                                                              | How often                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------- |
+| 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn                                                        | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
+| 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)                                                             | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
+| 3   | A notice with **`--ping`**                                                                                                                        | The notice's summary                                              | Once per notice                         |
+| 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**                                                                     | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
+| 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
 
-A gate item is the gate's one signal: it pushes at its raise (row 5) and never again inside a stop, so a ferret that
-stops with only a gate item waiting makes no stop push, and one with other items too counts only those. An internal
-card (a ferret's own errand) raises no gate item, so it never buzzes.
+A card ask is the card's one signal: it pushes when it is put on its agenda (row 5) and that agenda is left out
+of a stop only while its sole open items are card asks, so a ferret that stops with only such an agenda waiting makes
+no stop push, and a question it asked on the same agenda is counted. An internal card (a ferret's own errand) never asks, so it never buzzes.
 
 An input card always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
 **quiet** (below). An

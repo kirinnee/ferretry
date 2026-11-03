@@ -377,6 +377,50 @@ describe('AgendaBuzz gates', () => {
   });
 });
 
+describe('AgendaBuzz card asks', () => {
+  const DAEMON = { kind: 'daemon' as const, cause: 'system' as const };
+  const cardAgenda = {
+    source: 'task' as const,
+    sourceRef: 'card-agenda:F412',
+    subject: 'Try it: open the Board',
+    why: '&F412 reached Released.',
+    howToResolve: 'Answer the card’s ask here.',
+    kind: 'reply' as const,
+    ask: { kind: 'open-question' as const },
+    task: { id: 'F412' },
+    cardAsks: [
+      {
+        gate: {
+          cardId: 'F412',
+          laneId: 'released',
+          laneName: 'Released',
+          entry: 7,
+          projectId: 'p-1',
+          options: [{ id: 'done', label: 'Done', outcome: 'close' as const }],
+        },
+        at: NOW,
+      },
+    ],
+  };
+
+  it('should make no stop of an agenda whose sole open items are card asks, and still stop for the ferret’s own beside it', async () => {
+    // Arrange — the ferret is idle
+    const alone = world({ idleSince: NOW });
+    await alone.attention.raise(SESSION, cardAgenda, DAEMON);
+    const beside = world({ idleSince: NOW });
+    await beside.attention.raise(SESSION, cardAgenda, DAEMON);
+    await beside.attention.raise(SESSION, ASK, AGENT);
+
+    // Act
+    await alone.buzz.turnChanged(SESSION);
+    await beside.buzz.turnChanged(SESSION);
+
+    // Assert
+    should(alone.sink.stops).deepEqual([]);
+    should(beside.sink.stops).have.length(1);
+  });
+});
+
 describe('AgendaBuzz wake', () => {
   const SYSTEM = { kind: 'daemon', cause: 'system' } as const;
   const woken = (extra: Record<string, unknown> = {}): AgendaItem =>

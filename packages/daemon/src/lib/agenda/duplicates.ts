@@ -92,6 +92,8 @@ const sameWords = (one: AgendaItem, other: AgendaItem): boolean =>
 const protectedBecause = (entry: Entry, facts: DuplicateFacts): string | undefined => {
   const { item } = entry;
   if (handsOnItem(item)) return 'a hands-on card';
+  // An agenda that carries a card's ask is the card's one ask: closing it as a duplicate would drop the ask.
+  if ((item.cardAsks ?? []).length > 0) return "it carries a card's ask";
   if (item.gate !== undefined && facts.answeredGates.has(facts.gateReference(item.gate)))
     return 'a gate the owner answered';
   if (item.history !== undefined || item.infoRequests !== undefined || item.undelivered !== undefined)

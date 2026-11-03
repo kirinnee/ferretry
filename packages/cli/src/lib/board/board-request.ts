@@ -468,6 +468,14 @@ function boardVisibilityOf(options: BoardViewOptions, resolved: BoardViewResolve
   return 'public';
 }
 
+/**
+ * The `--activity` choices: the board's filters but the deprecated ones (`waiting`, `to_test`, `waiting_on_you`), which
+ * match no card since a card's asks ride its agenda (docs/agenda.md § Card asks).
+ */
+export const BOARD_ACTIVITY_CHOICES: readonly BoardActivityFilter[] = BoardActivityFilterSchema.options.filter(
+  option => option !== 'waiting' && option !== 'to_test' && option !== 'waiting_on_you',
+);
+
 export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewResolved): BoardQueryInput {
   const kind = present(options.kind);
   const prState = present(options.pr);
@@ -493,7 +501,7 @@ export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewRe
       : { prState: requireChoice<BoardPrStateFilter>(prState, BoardPrStateFilterSchema.options, '--pr') }),
     ...(activity === undefined
       ? {}
-      : { activity: requireChoice<BoardActivityFilter>(activity, BoardActivityFilterSchema.options, '--activity') }),
+      : { activity: requireChoice<BoardActivityFilter>(activity, BOARD_ACTIVITY_CHOICES, '--activity') }),
     ...(state === undefined ? {} : { state }),
     ...(query === undefined ? {} : { query }),
     ...(visibility === undefined ? {} : { visibility }),

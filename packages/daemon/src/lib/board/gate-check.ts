@@ -1,33 +1,37 @@
-import { type BoardTaskResponse, type Lane, type TaskRef, laneStage } from '@ferretry/protocol';
+import {
+  type AgendaCardAsk,
+  type BoardTaskResponse,
+  type Lane,
+  type TaskRef,
+  laneStage,
+  openCardAsks,
+} from '@ferretry/protocol';
 import { raisesAgendaItem } from '../agenda/turn-nudge.ts';
 import type { TranscriptEvent } from '../transcript/types.ts';
 import { BoardError } from './errors.ts';
 import { BOARD_CHECK_TAIL, lastTurn } from './turn-check.ts';
 
 /**
- * THE BACKSTOP UNDER "NEVER RAISE AN AGENDA ITEM FOR A GATE" (docs/board.md, "Gates").
+ * THE BACKSTOP UNDER "ONE ASK PER THING" (docs/board.md § Cards show progress; docs/agenda.md § Card asks).
  *
- * A card that reaches a gate stage raises ONE agenda item for the owner itself — the daemon does, so there is
- * never a task notice and an agenda notice for the same thing. A ferret that also raises its own item on the
- * card ("please test this") makes the owner answer twice. When a turn ends, the daemon reads it: if the turn
- * raised an agenda item that is now open on a card sitting in a gate lane, and the daemon's own gate item for
- * that card is open too, the ferret gets ONE queued message naming both and the command that drops its own.
+ * A card at a gate stage asks the owner through ONE agenda: the daemon puts its card ask on the agenda that carries
+ * the card. A ferret that also raises its own item on the card ("please test this") makes the owner answer twice.
+ * When a turn ends, the daemon reads it: if the turn raised an agenda item that is now open on a card sitting in a
+ * gate lane, and ANOTHER open item on this agenda carries that card's open ask, the ferret gets ONE queued message
+ * naming both: add yours to the one that carries the card, and drop your own.
  *
  * - **Only where the board is on**, and never for a sub-ferret (it raises nothing).
  * - **Evidence, not inference.** The turn's own tool calls say it raised something; the ferret's own open
  *   items on a gate card, raised since the turn began, say what.
  * - **Once per item.** The send id carries the item, so a turn end observed twice is one send.
  * - **A turn the check started is never checked**, so a reply to it cannot start a loop.
- * - **Silence when unsure.** No gate item to point to, a card or session that cannot be read, a turn whose
+ * - **Silence when unsure.** No carrying agenda to point to, a card or session that cannot be read, a turn whose
  *   start time is unknown: nothing is said.
  *
  * Pure except {@link BoardGateCheck}, which reads and sends through its ports.
  */
 
-const GATE_CHECK_OPENING = /^&\S+ is at a gate; the daemon already asked the owner/u;
-
-/** The prefix of the `sourceRef` of every gate item the daemon raises: `gate:<card>:<lane>:<entry>`. */
-const GATE_SOURCE_PREFIX = 'gate:';
+const GATE_CHECK_OPENING = /^&\S+ already asks the owner on !/u;
 
 /** The part of an open agenda item the check reads. */
 export interface GateCheckItem {
@@ -37,6 +41,7 @@ export interface GateCheckItem {
   readonly task?: TaskRef | null | undefined;
   readonly waitingSince: string;
   readonly notice?: boolean | undefined;
+  readonly cardAsks?: readonly AgendaCardAsk[] | undefined;
 }
 
 /** What the check reads and how it sends. */
@@ -66,9 +71,10 @@ const atGate = (response: BoardTaskResponse): boolean => {
   return lane !== undefined && isGateLane(lane);
 };
 
-/** One ferret item to drop, with the card it sits on and the daemon's gate item for that card. */
+/** One ferret item to drop, with the card it sits on and the agenda that carries that card's ask. */
 export interface DuplicateGateItem {
   readonly card: string;
+  /** The agenda that carries the card's ask. */
   readonly gateItem: string;
   readonly item: string;
 }
@@ -78,7 +84,7 @@ export const gateCheckMessage = (duplicates: readonly DuplicateGateItem[], binar
   duplicates
     .map(
       ({ card, gateItem, item }) =>
-        `&${card} is at a gate; the daemon already asked the owner (!${gateItem}). Drop yours: ${binary} agenda dismiss !${item}`,
+        `&${card} already asks the owner on !${gateItem}, which carries the card: put yours on it (${binary} agenda edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !${item}: ${binary} agenda dismiss !${item}`,
     )
     .join('\n');
 
@@ -117,9 +123,7 @@ export class BoardGateCheck {
     for (const item of raised) {
       const ref = item.task as TaskRef;
       const gateItem = open.find(
-        candidate =>
-          candidate.raisedBy === 'daemon' &&
-          candidate.sourceRef?.startsWith(`${GATE_SOURCE_PREFIX}${ref.id}:`) === true,
+        candidate => candidate.id !== item.id && openCardAsks(candidate).some(ask => ask.gate.cardId === ref.id),
       );
       if (gateItem === undefined) continue;
       if (!(await this.atGate(ref))) continue;

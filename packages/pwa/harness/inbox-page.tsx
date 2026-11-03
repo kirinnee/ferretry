@@ -12,6 +12,7 @@
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
  *   ?view=gate            a GATE item open ("Try it", the card's How to test as its body, Done / Not good)
  *   ?view=gate-list       the list with that gate item first among the question items (one stream)
+ *   ?view=ask-gate        a QUESTION item (blue or green?) that also carries a card ask for &F61 (`not-good-ask-screenshot.ts`)
  *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
  *   ?view=gate-noproject  a gate item with NO project open: its header opens on the ferret, no stray dot
  *   ?view=open-longtitle  an item with a LONG title open: it folds onto two lines, never cut mid-word
@@ -305,6 +306,35 @@ const GATE_NO_PROJECT = item('G63', 3, 'daemon', {
   gate: { ...GATE.gate, cardId: 'F63', projectName: '' },
 } as Partial<AgendaItem>);
 const GATE_NO_PROJECT_CARD = card(GATE_NO_PROJECT, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+/** A QUESTION item that also carries a card ask for &F61: its Not good words box must name the CARD, not the question. */
+const ASK_GATE_ASK = {
+  cardId: 'F61',
+  cardTitle: 'Pairing a second phone',
+  laneId: 'tested',
+  laneName: 'To test',
+  entry: 1,
+  projectId: 'p1',
+  projectName: 'ferretry',
+  options: [
+    { id: 'o0', label: 'Done', outcome: 'close' },
+    { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+  ],
+} as const;
+const ASK_GATE = item('A71', 6, 'judson', {
+  title: 'Which colour should the unread badge be?',
+  subject: 'Which colour should the unread badge be, blue or green?',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Blue' }, { label: 'Green' }] },
+  gateAttached: ASK_GATE_ASK,
+  cardAsks: [
+    {
+      gate: ASK_GATE_ASK,
+      at: ago(5),
+      howToTest:
+        '1. Open Settings and choose **Pair a device**.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+    },
+  ],
+} as unknown as Partial<AgendaItem>);
+const ASK_GATE_CARD = card(ASK_GATE, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
 const LONG_TITLE = item('A111', 6, 'ottilie', {
   title:
     'Three answers for the catalog before I can finish the relay setup tonight, and the three layouts I would keep if you can spare one more minute',
@@ -380,6 +410,7 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-longtitle': card(LONG_TITLE, LEDGER, 'studio'),
   input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
+  'ask-gate': ASK_GATE_CARD,
   'orphan-one': ORPHAN_ONE,
   'orphan-three': ORPHAN_THREE,
   'orphan-list': ORPHAN_ONE,

@@ -882,7 +882,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert
     should(text).containEql("Cards (&F412) show progress only; every human ask goes in the card's agenda.");
-    should(text).containEql('No umbrella cards; check related cards first and prefer adding to one.');
+    should(text).containEql('No umbrella cards; check related cards first; add to one.');
     // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
     should(text).not.containEql('raise nothing');
@@ -895,8 +895,8 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
-    should(text).containEql('Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see>"`');
-    should(text).containEql('lane by the work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql(`Before it's ready to try: \`zz task edit <id> --how-to-test "<1. where 2. do 3. see>"\``);
+    should(text).containEql('lane by work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
     should(text).containEql('`zz task depend` (card)');
     should(text).containEql('`zz task block`');

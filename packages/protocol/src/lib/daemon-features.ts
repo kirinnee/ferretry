@@ -120,9 +120,17 @@ export const DAEMON_FEATURES = {
    */
   agendaConversation: 'agenda.conversation.1',
   /**
-   * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
-   * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
-   * machine that reports it, because there the gate item is the card's one ask.
+   * CARD ASKS (docs/agenda.md § Card asks): a card never asks the owner itself. Its ask (OK to build, or Done / Not
+   * good with the card's How to test) rides the agenda that carries the card as `AgendaItem.cardAsks`, the first open
+   * one mirrored as `gateAttached`; an answer names its ask by `cardAsk`, and the agenda RESTS after it. Cards carry
+   * no "waiting on you" any more: `waitingOnOwner`, the `toTest` and `waitingOnYou` counts and their filters come
+   * back empty. A daemon without this name raises standalone gate items (`AgendaItem.gate`) instead.
+   */
+  agendaCardAsks: 'agenda.card-asks.1',
+  /**
+   * The owner's answer to a card's gate moves the card (docs/board.md § Cards show progress). The app hides its own
+   * to-test rows only for a machine that reports it. A daemon that also reports {@link agendaCardAsks} asks on the
+   * card's agenda instead of raising a gate item, and has no to-test rows to hide.
    */
   boardGateItems: 'board.gate-items.1',
   /**

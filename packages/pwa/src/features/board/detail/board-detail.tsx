@@ -544,7 +544,7 @@ function DetailBody({
                 name={
                   category === 'verify'
                     ? 'to-test'
-                    : task.waitingOnOwner.length > 0
+                    : (task.waitingOnOwner ?? []).length > 0
                       ? 'waiting-on-you'
                       : task.activity === 'active'
                         ? 'active'
@@ -692,7 +692,7 @@ function DetailBody({
           />
         </DetailSection>
 
-        {task.waitingOnOwner.length + asks.open.length + asks.resolved.length === 0 ? null : (
+        {(task.waitingOnOwner ?? []).length + asks.open.length + asks.resolved.length === 0 ? null : (
           <DetailSection count={asks.open.length + asks.resolved.length} id="asks" title="Agenda asks">
             <AsksList
               asks={asks}

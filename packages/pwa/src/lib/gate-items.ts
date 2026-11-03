@@ -16,12 +16,14 @@ import {
   type AgendaGate,
   type AgendaItem,
   type BoardReopenAttachments,
+  cardAskOf,
   gateAnswers,
   gateAskOptions,
+  gateReference,
   TEST_KIND_LABEL,
 } from '@ferretry/protocol';
-import type { DaemonId } from './daemon-connection.ts';
 import type { InboxAction } from './agenda-answers.ts';
+import type { DaemonId } from './daemon-connection.ts';
 import type { ToTestCard } from './to-test-inbox.ts';
 
 /** An item that is a gate: it carries the card, lane and options. */
@@ -39,9 +41,29 @@ export const choiceLabel = (action: InboxAction): string | null =>
 
 export type GateWords = 'required' | 'optional' | 'none';
 
-/** The gate an answer is to: the item's own, or — for an answer marked `gate` — the one attached to its thread. */
-const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined =>
-  action.kind === 'respond' && action.gate === true ? item.gateAttached : item.gate;
+/**
+ * The gate an answer is to: the item's own, or — for an answer marked `gate` — the card ask it names (`cardAsk`),
+ * else the one attached to its thread.
+ */
+const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined => {
+  if (action.kind !== 'respond' || action.gate !== true) return item.gate;
+  const named = action.cardAsk === undefined ? undefined : cardAskOf(item, action.cardAsk)?.gate;
+  return named ?? item.gateAttached;
+};
+
+/**
+ * What the words box after "Not good" / "Not yet" names: the CARD being tried — its title and id ("Pairing a second
+ * phone (&F61)") — never the agenda's own question, which the answer is not about. Falls back to the item's subject,
+ * without its closing "?" so the heading does not end in two.
+ */
+export const gateWhySubject = (item: AgendaItem, action: InboxAction): string => {
+  const gate = answeredGate(item, action);
+  if (gate !== undefined) {
+    const title = gate.cardTitle ?? (item.gate === gate ? item.title : undefined);
+    return title === undefined ? `&${gate.cardId}` : `${title} (&${gate.cardId})`;
+  }
+  return (item.subject ?? item.id).trim().replace(/\?+$/u, '');
+};
 
 /**
  * The gate attached to a thread, drawn as the gate item it would be: the same options in the same directions, so the
@@ -71,8 +93,10 @@ export const attachedGateLead = (gate: AgendaGate): string => {
 };
 
 /** An answer from the attached gate's row: marked so the daemon answers the gate, never the thread. */
-export const toGateAction = (action: InboxAction): InboxAction =>
-  action.kind === 'respond' ? { ...action, gate: true } : action;
+export const toGateAction = (action: InboxAction, gate?: AgendaGate): InboxAction =>
+  action.kind === 'respond'
+    ? { ...action, gate: true, ...(gate === undefined ? {} : { cardAsk: gateReference(gate) }) }
+    : action;
 
 /** Whether this answer to the item takes words: "Not good" needs them, "Not yet" may carry them, the rest take none. */
 export const gateWordsFor = (item: AgendaItem, action: InboxAction): GateWords => {
@@ -97,11 +121,14 @@ export const gateAsksWords = (item: AgendaItem, action: InboxAction): boolean =>
 export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] | undefined =>
   item.gate.options.find(option => option.outcome === 'reopen-with-agenda');
 
-/** The gate's answer as the action to send: the choice, and the owner's words as its note. */
+/**
+ * The gate's answer as the action to send: the choice, and the owner's words as its note. `attached` marks it as the
+ * answer to the card ask an older app is shown; an ask's gate or its reference names which one the owner was looking at.
+ */
 export const gateAnswerAction = (
   label: string,
   words: string,
-  attached = false,
+  attached: boolean | string | AgendaGate = false,
   attachments?: BoardReopenAttachments,
 ): InboxAction => {
   const note = words.trim();
@@ -110,7 +137,9 @@ export const gateAnswerAction = (
     label,
     response: { kind: 'multiple-choice', choice: label },
     ...(note === '' ? {} : { note }),
-    ...(attached ? { gate: true as const } : {}),
+    ...(attached === false ? {} : { gate: true as const }),
+    ...(typeof attached === 'object' ? { cardAsk: gateReference(attached) } : {}),
+    ...(typeof attached === 'string' ? { cardAsk: attached } : {}),
     ...(attachments === undefined ? {} : { attachments }),
   };
 };

@@ -49,6 +49,8 @@ export type InboxAction =
       readonly note?: string;
       /** The answer is to the gate attached to this thread (`gateAttached`), not to the thread: the daemon moves the card. */
       readonly gate?: true;
+      /** WHICH card ask the gate answer is to (its reference), so a retry or a second tap is never spent on the next ask. */
+      readonly cardAsk?: string;
       /** The ask the owner was shown (`AgendaItem.askVersion`, 1 when absent), so the daemon refuses it once the ferret replaced the ask. */
       readonly askVersion?: number;
       /** Files already uploaded to the item's session, sent with a Not good: the daemon carries them to the card's ferret. */

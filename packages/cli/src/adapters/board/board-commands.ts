@@ -1,11 +1,7 @@
-import {
-  BoardActivityFilterSchema,
-  BoardPrStateFilterSchema,
-  BoardStateFilterSchema,
-  TaskKindSchema,
-} from '@ferretry/protocol';
+import { BoardPrStateFilterSchema, BoardStateFilterSchema, TaskKindSchema } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type { BoardController, BoardViewFlags } from '../../lib/board/board-controllers';
+import { BOARD_ACTIVITY_CHOICES } from '../../lib/board/board-request';
 
 const choices = (values: readonly string[]): string => values.join(' | ');
 
@@ -22,7 +18,7 @@ export function registerBoardCommands(program: Command, controller: BoardControl
     .option('--mine', 'only cards the calling session owns or is assigned')
     .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
     .option('--pr <state>', `only cards whose PR is ${choices(BoardPrStateFilterSchema.options)}`)
-    .option('--activity <activity>', `only ${choices(BoardActivityFilterSchema.options)}`)
+    .option('--activity <activity>', `only ${choices(BOARD_ACTIVITY_CHOICES)}`)
     .option('--state <state>', `${choices(BoardStateFilterSchema.options)} (default open)`)
     .option('--closed', 'show the closed cards, which are hidden by default')
     .option('--private', "show the private cards (the ferrets' own bookkeeping) instead of the public ones")

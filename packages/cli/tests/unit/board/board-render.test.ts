@@ -42,7 +42,7 @@ const ferret = (sessionId: string) => ({ kind: 'ferret' as const, sessionId });
 const event = (fields: Record<string, unknown>): BoardTaskEvent =>
   BoardTaskEventSchema.parse({ seq: 2, at: AT, actor: ferret(DENISHA), ...fields });
 
-const header = 'Ferretry — 3 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active · 0 to test · 0 waiting on you';
+const header = 'Ferretry — 3 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active';
 
 describe('prLabel', () => {
   it('should say there is no PR when none is linked', () => {
@@ -86,7 +86,7 @@ describe('activityLabel', () => {
     should(activityLabel(card({ activity: 'stale' }))).equal('stale');
   });
 
-  it('should rank dropped over waiting on you over blocked over blocked by deps', () => {
+  it('should rank dropped over blocked over blocked by deps, and never say a card waits on the owner', () => {
     // Arrange
     const dropped = { reason: 'superseded', at: AT };
     const blocked = { on: 'external' as const, reason: 'vendor', since: AT };
@@ -96,7 +96,7 @@ describe('activityLabel', () => {
       activityLabel(card({ dropped, blocked, openAsks: ask, waitingOnOwner: ask, blockedBy: [{ id: 'F2' }] })),
     ).equal('dropped');
     should(activityLabel(card({ blocked, openAsks: ask, waitingOnOwner: ask, blockedBy: [{ id: 'F2' }] }))).equal(
-      'waiting on you',
+      'blocked',
     );
     should(activityLabel(card({ blocked, blockedBy: [{ id: 'F2' }] }))).equal('blocked');
     should(activityLabel(card({ blockedBy: [{ id: 'F2' }], activity: 'active' }))).equal('blocked by deps');
@@ -233,9 +233,7 @@ describe('renderBoard', () => {
     const text = renderBoard(response(), [project()], names, 'Ferretry');
 
     // Assert
-    should(text).equal(
-      'Ferretry — 0 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active · 0 to test · 0 waiting on you\n\nno cards match',
-    );
+    should(text).equal('Ferretry — 0 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active\n\nno cards match');
   });
 
   it('should show the counts the daemon sent', () => {
@@ -248,9 +246,7 @@ describe('renderBoard', () => {
     );
 
     // Assert
-    should(text.split('\n')[0]).equal(
-      'Ferretry — 0 cards · 7 closed hidden · 1 stale · 2 orphaned · 3 active · 4 to test · 5 waiting on you',
-    );
+    should(text.split('\n')[0]).equal('Ferretry — 0 cards · 7 closed hidden · 1 stale · 2 orphaned · 3 active');
   });
 
   it('should note that more cards exist than the page holds', () => {
@@ -335,7 +331,7 @@ describe('renderBoardMarkdown', () => {
 
     // Assert
     should(text.split('\n')).eql([
-      '# Ferretry — 2 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active · 0 to test · 0 waiting on you',
+      '# Ferretry — 2 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active',
       '',
       '## Todo (1)',
       '',
@@ -474,7 +470,7 @@ describe('renderCard', () => {
     const lines = text.split('\n');
     should(lines.slice(0, 9)).eql([
       '&F7  Rename the widget  [feature]',
-      'lane      Implement  ·  waiting on you  ·  workflow design-first',
+      'lane      Implement  ·  blocked  ·  workflow design-first',
       'who       denisha→kirin',
       `project   ${FERRETRY_ID}`,
       'summary   make the widget name clearer',
@@ -549,7 +545,7 @@ describe('renderCard', () => {
     should(lines).containEql('Blocks').and.containEql('  &F8, &F9');
   });
 
-  it('should list the links, the files and the asks, saying which wait on the owner', () => {
+  it('should list the links, the files and the agendas that carry the card', () => {
     // Act
     const lines = renderCard(full(), lanes, [], names).split('\n');
 
@@ -561,15 +557,16 @@ describe('renderCard', () => {
       .and.containEql('  commit  abc123')
       .and.containEql('  doc     docs/a.md');
     should(lines).containEql('Files').and.containEql('  src/a.ts').and.containEql('  src/b.ts');
-    should(lines).containEql('Asks').and.containEql('  open: !A1, !A2').and.containEql('  waiting on you: !A2');
+    should(lines).containEql('Agenda').and.containEql('  !A1, !A2');
+    should(lines.some(line => line.includes('waiting on you'))).be.false();
   });
 
-  it('should list open asks without a waiting line when none blocks', () => {
+  it('should list the open agendas without a waiting line', () => {
     // Act
     const lines = renderCard(card({ openAsks: [{ sessionId: DENISHA, id: 'A1' }] }), lanes, [], names).split('\n');
 
     // Assert
-    should(lines).containEql('  open: !A1');
+    should(lines).containEql('  !A1');
     should(lines.some(line => line.includes('waiting on you:'))).be.false();
   });
 
@@ -650,7 +647,7 @@ describe('renderCard', () => {
       'Brief',
       'Links',
       'Files',
-      'Asks',
+      'Agenda',
       'Clarified',
       'Depends on',
       'Blocks',
@@ -715,7 +712,7 @@ describe('renderActed', () => {
     });
   }
 
-  it('should show the lane id when the lane set is unknown, and the waiting state', () => {
+  it('should show the lane id when the lane set is unknown, and never a waiting state', () => {
     // Arrange
     const ask = [{ sessionId: DENISHA, id: 'A1' }];
 
@@ -723,6 +720,6 @@ describe('renderActed', () => {
     const line = renderActed('note', card({ openAsks: ask, waitingOnOwner: ask }), null, names);
 
     // Assert
-    should(line).equal('&F1 noted — todo, denisha, waiting on you');
+    should(line).equal('&F1 noted — todo, denisha, idle');
   });
 });

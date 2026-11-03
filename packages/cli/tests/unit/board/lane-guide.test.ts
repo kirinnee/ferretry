@@ -20,7 +20,10 @@ describe('the lane guide under `task move --help`', () => {
 
     // Assert
     should(text).containEql('`fy board lanes show` lists this project\'s lanes with "use when"');
-    should(text).containEql('the owner approves leaving it');
+    should(text).containEql(
+      "Lanes show progress. The owner's OK to build, and Done / Not good, ride the card's agenda",
+    );
+    should(text).not.containEql('the owner approves leaving it');
     should(text).containEql('A start, a PR, a merge, a release and `fy signal done` move a card by themselves');
     should(text).containEql('Blocked is not a lane: `fy task block`, `fy task depend` or `fy agenda add --task <id>`.');
   });

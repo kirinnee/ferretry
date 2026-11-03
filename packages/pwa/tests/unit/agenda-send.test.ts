@@ -60,6 +60,13 @@ describe('sendAgendaAction', () => {
     ]);
   });
 
+  it('carries the card ask an answer was given to, to the one client call', async () => {
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Done' };
+    expect(
+      await sent({ kind: 'respond', label: 'Done', response: choice, gate: true, cardAsk: 'gate:F1:tested:2' }),
+    ).toEqual([['respond', 'A1', choice, undefined, true, undefined, undefined, 'gate:F1:tested:2']]);
+  });
+
   it('carries the ask version an answer was given to, to the one client call', async () => {
     const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'EU' };
     expect(await sent({ kind: 'respond', label: 'EU', response: choice, askVersion: 2 })).toEqual([

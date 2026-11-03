@@ -1,7 +1,6 @@
 import type {
   AgendaConfirms,
   AgendaConversationPage,
-  AgendaGate,
   AgendaId,
   AgendaItem,
   AgendaKind,
@@ -21,6 +20,7 @@ import {
   MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
 } from '@ferretry/protocol';
+import type { CardAskOperation } from './card-asks.ts';
 import {
   isAncestorOf,
   isSubFerret,
@@ -193,19 +193,28 @@ export interface AgendaGateAsking {
 const UNREADABLE = 'unreadable' as const;
 
 /**
- * An agent's ask that NAMES a card whose gate is asking the owner already is refused: two asks about one card are
- * two things in the owner's Inbox. What it has to say goes on the card.
+ * Where to put what an agent wanted to ask about a card whose ask is already open on an agenda (docs/agenda.md § Card
+ * asks): that agenda carries the card, so the words go there — by `agenda edit` when it is on the asker's own agenda,
+ * else on the card.
+ */
+const carriedBy = (
+  task: TaskRef,
+  asking: { readonly sessionId: string; readonly id: AgendaId },
+  from: string,
+): string =>
+  asking.sessionId === from
+    ? `${formatTaskRef(task)} already asks the owner on !${asking.id}, which carries the card; put yours on it: fy agenda edit ${asking.id} --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`
+    : `${formatTaskRef(task)} already asks the owner on !${asking.id} (${asking.sessionId}'s agenda), which carries the card; add what the card needs to it: fy task note ${task.id} "<text>"`;
+
+/**
+ * An agent's ask that NAMES a card whose ask is open already is refused: two asks about one card are two things in the
+ * owner's Inbox. It points to the agenda that carries the card.
  */
 const refusedForGate = (
   task: TaskRef,
   asking: { readonly sessionId: string; readonly id: AgendaId },
-): AgendaMutation => ({
-  ok: false,
-  error: {
-    code: 'invalid',
-    message: `${formatTaskRef(task)} is already asking the owner (!${asking.id} on ${asking.sessionId}'s agenda); add what you need to it instead: fy task note ${task.id} "<text>"`,
-  },
-});
+  from: string,
+): AgendaMutation => ({ ok: false, error: { code: 'invalid', message: carriedBy(task, asking, from) } });
 
 /** No card is known to be asking: every ask keeps the card it names. */
 export const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined };
@@ -287,7 +296,7 @@ export class AgendaService {
     const focused = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
     const asking = await this.gateAsking(focused, actor);
     if (asking !== undefined && asking !== UNREADABLE && named.task !== undefined)
-      return refusedForGate(named.task, asking);
+      return refusedForGate(named.task, asking, home);
     const carded = asking === undefined ? focused : { ...focused, task: undefined };
     const offered = await this.withOfferClose(carded);
     const mutation = await this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
@@ -296,7 +305,7 @@ export class AgendaService {
     const warning =
       asking === UNREADABLE
         ? `${ref}'s gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`
-        : `${ref} is already asking the owner (!${asking.id} on ${asking.sessionId}'s agenda), so this was raised without the card; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`;
+        : `this was raised without the card: ${carriedBy(focused.task, asking, home)}`;
     return { ...mutation, notes: [...(mutation.notes ?? []), warning] };
   }
 
@@ -749,21 +758,15 @@ export class AgendaService {
   }
 
   /**
-   * A card's gate is asked on this thread, or no longer is (`gate: null`; docs/agenda.md § One ask per thing).
-   * Daemon-only: the card's lane is the witness.
+   * A card ask on this agenda (docs/agenda.md § Card asks): put on it, restated, withdrawn, or the owner's answer
+   * recorded (`CardAskOperation`). Daemon-only: the card's lane is the witness.
    */
-  async attachGate(
-    sessionId: string,
-    id: AgendaId,
-    gate: AgendaGate | null,
-    answered?: AgendaGate,
-  ): Promise<AgendaMutation> {
+  async cardAsk(sessionId: string, id: AgendaId, operation: CardAskOperation): Promise<AgendaMutation> {
     return this.apply(sessionId, {
-      action: 'attach-gate',
+      action: 'card-ask',
       actor: { kind: 'daemon', cause: 'system' },
       id,
-      gate,
-      ...(answered === undefined ? {} : { answered }),
+      operation,
       at: this.clock.now(),
     });
   }

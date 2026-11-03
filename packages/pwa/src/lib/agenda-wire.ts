@@ -47,6 +47,8 @@ export class AgendaWireDirectory {
   readonly #open = new Map<DaemonId, boolean>();
   /** Whether each read machine checks an answer's `askVersion` (`agenda.asks.1`); absent until its health answered. */
   readonly #asks = new Map<DaemonId, boolean>();
+  /** Whether each read machine takes the card ask an answer names (`agenda.card-asks.1`); absent until its health answered. */
+  readonly #cardAsks = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -108,8 +110,17 @@ export class AgendaWireDirectory {
     return this.#asks.get(daemonId);
   }
 
+  /**
+   * Whether the machine takes the card ask an answer names (`agenda.card-asks.1`): `undefined` until its health
+   * answered, and `false` for a machine that would refuse the field as malformed.
+   */
+  cardAsksOf(daemonId: DaemonId): boolean | undefined {
+    return this.#cardAsks.get(daemonId);
+  }
+
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
+    this.#cardAsks.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaCardAsks));
     this.#asks.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaAsks));
     this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
     const offers = machineOffers(read, DAEMON_FEATURES.agendaOfferClose);
@@ -132,6 +143,7 @@ export class AgendaWireDirectory {
 
   clearDaemon(daemonId: DaemonId): void {
     this.#snooze.delete(daemonId);
+    this.#cardAsks.delete(daemonId);
     this.#asks.delete(daemonId);
     const had = this.#offerClose.delete(daemonId);
     const hadSearch = this.#workSearch.delete(daemonId);
