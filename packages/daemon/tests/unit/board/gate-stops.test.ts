@@ -575,7 +575,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
         askedBy: 'person',
       }),
     ]);
-    await world.service.handOver('F1', 'lead', 'child');
+    await world.service.handOver('F1', 'lead', 'child', { owner: 'lead', assignee: null });
     await world.service.act(
       'F1',
       BoardTaskActionRequestSchema.parse({ action: 'refile', projectId: OTHER_PROJECT }),

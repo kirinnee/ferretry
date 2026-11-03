@@ -155,6 +155,13 @@ describe('describeBoardEvent', () => {
     );
   });
 
+  it('should say a card was claimed, and from whom', () => {
+    // Act + Assert
+    should(say({ type: 'assigned', from: DENISHA, to: KIRIN, claimedFrom: DENISHA })).equal(
+      'claimed by kirin from denisha',
+    );
+  });
+
   it("should say a finished ferret's card went back to its lead", () => {
     // Act + Assert
     should(say({ type: 'assigned', from: DENISHA, to: KIRIN, returnedFrom: DENISHA })).equal(

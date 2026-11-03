@@ -1,5 +1,6 @@
 import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import { type Command, Option } from 'commander';
+import { requireCardRef } from '../board/board-request.ts';
 import type { AnswerQuestionController } from './answer-controller.ts';
 import { SessionCommandError } from './errors.ts';
 import type { InterruptSessionController, ResumeSessionController } from './lifecycle-controllers.ts';
@@ -91,6 +92,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .option('--teammate-fallback', 'with --teammate: auto-assign a free callsign instead of failing on a collision')
     .option('--label <label>', 'ownership label; filter later with `ps --label`')
     .option('--parent <id>', 'parent session; an auto session started inside a pane inherits that pane by default')
+    .option('--card <id>', 'an existing card it takes over (assigned to it; no second card is made); needs a prompt')
     .option('--prompt-file <file>', 'read the prompt from a file instead of the command line')
     .option('--model <model>', 'override the model (alias or full id)')
     .option(
@@ -132,6 +134,9 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
           ...(flag(options, 'teammateFallback') === undefined ? {} : { teammateFallback: true }),
           ...(text(options, 'label') === undefined ? {} : { label: text(options, 'label') }),
           ...(text(options, 'parent') === undefined ? {} : { parent: text(options, 'parent') }),
+          ...(text(options, 'card') === undefined
+            ? {}
+            : { card: requireCardRef(text(options, 'card') ?? '', 'card id').id }),
           ...(text(options, 'model') === undefined ? {} : { model: text(options, 'model') }),
           // Only state a remote-control decision when one was actually typed; otherwise the daemon
           // applies its mode-dependent default.

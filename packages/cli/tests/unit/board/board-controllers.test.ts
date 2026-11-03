@@ -972,6 +972,17 @@ describe('the action verbs', () => {
     ]);
   });
 
+  it('should claim a card without naming anyone', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    await controller.claim('F1', {});
+
+    // Assert
+    should(sent(gateway)).eql([{ action: 'claim' }]);
+  });
+
   it('should refuse an assign that names both a session and --none, or neither, or a stranger', async () => {
     // Arrange
     const { controller, gateway } = harness();

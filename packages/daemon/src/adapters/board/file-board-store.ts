@@ -234,12 +234,21 @@ export class FileBoardStore implements BoardStore {
   /**
    * Records the identity of the file this store just wrote — read back with its bytes, so an edit that landed
    * between the rename and this read is never taken for ours: it stays unremembered, and the next scan or
-   * write reads it.
+   * write reads it. Best effort: the card is already on disk and in memory when this runs, so a read that
+   * fails (EIO, EMFILE) must not turn a committed write into a failed one; the card is left unremembered
+   * and the next scan or write reads it.
    */
   private async remember(id: BoardTaskId, written: string): Promise<void> {
-    const read = await this.files.readTextIdentified?.(this.fileOf(id));
-    if (read !== undefined && read.text === written) this.identities.set(id, read.identity);
-    else this.identities.delete(id);
+    try {
+      const read = await this.files.readTextIdentified?.(this.fileOf(id));
+      if (read !== undefined && read.text === written) this.identities.set(id, read.identity);
+      else this.identities.delete(id);
+    } catch (error) {
+      this.identities.delete(id);
+      this.diagnostics.warn(
+        `board card ${id} was saved, but its file could not be read back: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private fileOf(id: BoardTaskId): string {

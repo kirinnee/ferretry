@@ -48,6 +48,7 @@ import {
   type BoardCaller,
   type BoardStanding,
   type CardAudience,
+  claimableFrom,
   effectiveAssignee,
   mayDo,
   mayHandDown,
@@ -140,6 +141,12 @@ export interface BoardServiceDependencies {
 }
 
 /** What follows a card's lane after each write: the gate items (`GateItems`). */
+/** Who held a card when a start judged it: what the assignment write must still find, or nothing is assigned. */
+export interface CardHolders {
+  readonly owner: string;
+  readonly assignee: string | null;
+}
+
 export interface CardWriteObserver {
   written(id: BoardTaskId): Promise<void>;
 }
@@ -228,8 +235,19 @@ const requireValidCard = (task: BoardTask): BoardTask => {
  */
 const subFerretMay = (request: BoardTaskActionRequest): boolean =>
   request.action === 'note' ||
+  request.action === 'claim' ||
   request.action === 'trigger' ||
   (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
+
+/**
+ * What a sub-ferret may do on a card it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
+ * it, link a commit or doc to it. Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
+ * lead holds is what makes it the holder, so these are also the only refusals that point at `claim`.
+ */
+const holderOnly = (request: BoardTaskActionRequest): boolean =>
+  request.action === 'move' ||
+  request.action === 'focus' ||
+  (request.action === 'link' && request.pr === undefined && request.branch === undefined);
 
 const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string>> = {
   move: 'move cards',
@@ -243,6 +261,7 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   clarify: 'clarify cards',
   link: 'link a commit or doc to cards',
   assign: 'reassign a card outside your own subtree',
+  claim: 'claim cards',
   note: 'note on cards',
   edit: 'edit cards',
   file: 'claim files on cards',
@@ -603,8 +622,14 @@ export class BoardService {
    * and parent stay — and becomes the session's focus and delegation anchor. Never makes a second card. The
    * assignment is recorded as the lead's; the lead's own focus is not touched.
    */
-  async handOver(id: BoardTaskId, lead: string, session: string): Promise<BoardTask> {
-    const outcome = await this.assignTo(id, { kind: 'ferret', sessionId: lead }, session, 'hand it to a sub-ferret');
+  async handOver(id: BoardTaskId, lead: string, session: string, held: CardHolders): Promise<BoardTask> {
+    const outcome = await this.assignTo(
+      id,
+      { kind: 'ferret', sessionId: lead },
+      session,
+      'hand it to a sub-ferret',
+      held,
+    );
     await this.afterWrite({ kind: 'daemon', sessionId: lead }, outcome, [outcome.projectId]);
     return await this.focusOn(outcome, session);
   }
@@ -614,15 +639,29 @@ export class BoardService {
    * as the owner's act and becomes the session's focus and anchor. Refused, with nothing changed, when the card
    * was dropped in the meantime — the same write that assigns it reads that, so a drop and this cannot both win.
    */
-  async assignForOwner(id: BoardTaskId, session: string): Promise<BoardTask> {
-    const outcome = await this.assignTo(id, { kind: 'owner' }, session, 'start a ferret on it');
+  async assignForOwner(id: BoardTaskId, session: string, held: CardHolders): Promise<BoardTask> {
+    const outcome = await this.assignTo(id, { kind: 'owner' }, session, 'start a ferret on it', held);
     await this.afterWrite({ kind: 'owner' }, outcome, [outcome.projectId]);
     return await this.focusOn(outcome, session);
   }
 
-  private async assignTo(id: BoardTaskId, caller: BoardCaller, session: string, doing: string): Promise<BoardTask> {
+  private async assignTo(
+    id: BoardTaskId,
+    caller: BoardCaller,
+    session: string,
+    doing: string,
+    held: CardHolders,
+  ): Promise<BoardTask> {
     return await this.ports.store.write(id, async current => {
       const card = this.requireCard(current, id);
+      // The caller's authority survives a change of assignee (a lead keeps the card it owns, the owner has it always), so
+      // authority alone cannot tell a second start from the first: the card must still be held as the start judged it.
+      if (card.owner !== held.owner || card.assignee !== held.assignee) {
+        throw new BoardError(
+          'version-conflict',
+          `${formatTaskRef(card)} changed hands since you chose it (now held by ${effectiveAssignee(card)}); nothing was assigned`,
+        );
+      }
       if (card.dropped !== null)
         throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing}`);
       const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
@@ -702,7 +741,8 @@ export class BoardService {
   ): Promise<BoardTaskResponse> {
     // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
     // A drop and an assign are judged inside the write (`decide`): a sub-ferret that leads a subtree may plan it.
-    if (!subFerretMay(request) && request.action !== 'assign' && request.action !== 'drop') {
+    // A holder-only action is judged in the write against the card's current holder (`decide`).
+    if (!subFerretMay(request) && !holderOnly(request) && request.action !== 'assign' && request.action !== 'drop') {
       await this.refuseSubFerret(caller, subFerretDoing(request));
     }
     if (request.action === 'focus' && caller.kind !== 'ferret') {
@@ -945,11 +985,29 @@ export class BoardService {
   private async decide(card: BoardTask, request: BoardTaskActionRequest, caller: BoardCaller): Promise<CardOutcome> {
     // A sub-ferret reports what it saw on the card it is doing, not on others its standing reaches.
     if (request.action === 'trigger' && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
-      await this.refuseSubFerret(caller, 'report events on a card they are not doing');
+      await this.refuseSubFerret(
+        caller,
+        'report events on a card they are not doing',
+        async () => await this.claimCommand(caller, card),
+      );
+    }
+    // The card's current holder may move it, focus on it and link a commit or doc to it; claiming a card is how a
+    // sub-ferret becomes the holder of one its lead holds, so the refusal says that and nothing else is offered.
+    if (holderOnly(request) && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
+      await this.refuseSubFerret(caller, subFerretDoing(request), async () => await this.claimCommand(caller, card));
     }
     const context = await this.context(card, caller, request.action === 'assign' ? request.assignee : undefined);
     const plans = request.action === 'drop' || (request.action === 'assign' && context.handsDown !== true);
-    if (plans && !(await this.inSubtree(caller, card))) await this.refuseSubFerret(caller, subFerretDoing(request));
+    if (plans && !(await this.inSubtree(caller, card))) {
+      await this.refuseSubFerret(
+        caller,
+        subFerretDoing(request),
+        request.action === 'assign'
+          ? async () => await this.claimThenAssign(caller, card, request.assignee)
+          : undefined,
+      );
+    }
+    const claimedFrom = await this.claimedFrom(caller, card, request, context.standing);
     const refiled = request.action === 'refile' && request.projectId !== card.projectId ? request.projectId : null;
     if (refiled !== null) await this.requireRefileLicence(card, refiled, caller, context.index);
     const target = refiled === null ? null : await this.ports.lanes.laneSet(refiled);
@@ -962,13 +1020,72 @@ export class BoardService {
         ? await this.attachmentsFor(card, request.attachments, context.standing)
         : undefined;
     const hidden = await this.settledForHiding(card, request, context.standing);
-    return applyAction(
-      hidden,
-      request,
-      attachments === undefined ? context : { ...context, attachments },
-      target,
-      parentStanding,
-    );
+    try {
+      return applyAction(
+        hidden,
+        request,
+        {
+          ...context,
+          ...(attachments === undefined ? {} : { attachments }),
+          ...(claimedFrom === undefined ? {} : { claimedFrom }),
+        },
+        target,
+        parentStanding,
+      );
+    } catch (error) {
+      // A refusal to a ferret that could take the card first says so: claim it, rather than ask the lead that holds it.
+      // An assign is not offered this here: whether a claim would let it through is judged above (`claimThenAssign`).
+      if (
+        claimedFrom !== undefined &&
+        request.action !== 'claim' &&
+        request.action !== 'assign' &&
+        error instanceof BoardError &&
+        error.code === 'forbidden'
+      ) {
+        throw new BoardError(
+          error.code,
+          `${error.message}; your lead holds it: claim it first: fy task claim ${formatTaskRef(card)}`,
+          error.allowed,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * The lead the caller may claim the card from (`claimableFrom`), read from the session registry's lineage: asked only
+   * for a claim, and for a ferret with no standing on the card, whose refusal can then name the claim.
+   */
+  private async claimedFrom(
+    caller: BoardCaller,
+    card: BoardTask,
+    request: BoardTaskActionRequest,
+    standing: BoardStanding,
+  ): Promise<string | undefined> {
+    if (caller.kind !== 'ferret' || (request.action !== 'claim' && standing !== 'reader')) return undefined;
+    return claimableFrom(caller, card, await ancestorsOf(caller.sessionId, this.ports.parents));
+  }
+
+  /**
+   * The claim to offer a refused assign: only when claiming the card WOULD let it through, which is a hand-down to a
+   * descendant the daemon's lineage proves. An assign to nobody, upward or sideways stays forbidden to the card's holder
+   * too, so it is the lead's to do.
+   */
+  private async claimThenAssign(
+    caller: BoardCaller,
+    card: BoardTask,
+    assignee: string | null,
+  ): Promise<string | undefined> {
+    if (caller.kind !== 'ferret' || assignee === null || assignee === caller.sessionId) return undefined;
+    if (!(await ancestorsOf(assignee, this.ports.parents)).includes(caller.sessionId)) return undefined;
+    return await this.claimCommand(caller, card);
+  }
+
+  /** `fy task claim &F12` when the caller may claim the card; `undefined` when it may not. */
+  private async claimCommand(caller: BoardCaller, card: BoardTask): Promise<string | undefined> {
+    if (caller.kind !== 'ferret') return undefined;
+    const from = claimableFrom(caller, card, await ancestorsOf(caller.sessionId, this.ports.parents));
+    return from === undefined ? undefined : `fy task claim ${formatTaskRef(card)}`;
   }
 
   /**
@@ -1224,10 +1341,20 @@ export class BoardService {
   }
 
   /** A sub-ferret reports to its lead instead of writing the board: the refusal says whom to tell. */
-  private async refuseSubFerret(caller: BoardCaller, doing: string): Promise<void> {
+  private async refuseSubFerret(
+    caller: BoardCaller,
+    doing: string,
+    claim?: () => Promise<string | undefined>,
+  ): Promise<void> {
     if (caller.kind !== 'ferret') return;
-    const refusal = await subFerretRefusal(this.ports.subFerrets ?? NO_SUB_FERRETS, caller.sessionId, doing);
-    if (refusal !== null) throw new BoardError('forbidden', refusal);
+    const directory = this.ports.subFerrets ?? NO_SUB_FERRETS;
+    const refusal = await subFerretRefusal(directory, caller.sessionId, doing);
+    if (refusal === null) return;
+    // A card its lead holds is the sub-ferret's to claim: say that instead of sending it back to the lead.
+    const command = await claim?.().catch(() => undefined);
+    const claimable =
+      command === undefined ? null : await subFerretRefusal(directory, caller.sessionId, doing, undefined, command);
+    throw new BoardError('forbidden', claimable ?? refusal);
   }
 
   private requireMachine(): string {

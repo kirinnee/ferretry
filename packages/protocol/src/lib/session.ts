@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { SessionAgendaSummarySchema } from './agenda.ts';
 import { PEER_MESSAGE_LABELS } from './agent-messages.ts';
-import { BoardProjectIdSchema, BoardSkipSchema, TaskRefSchema } from './board-refs.ts';
+import { BoardProjectIdSchema, BoardSkipSchema, BoardTaskIdSchema, TaskRefSchema } from './board-refs.ts';
 import {
   ApiErrorResponseSchema,
   InstantSchema,
@@ -1106,6 +1106,8 @@ const StartSessionBaseSchema = z.strictObject({
   label: z.string().min(1).optional(),
   parent: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
+  /** An EXISTING card the new session works on (`start --card`): assigned to it, no second card made. Judged like `new --card`. */
+  card: BoardTaskIdSchema.optional(),
   remoteControl: z.boolean().optional(),
   harnessFlags: z.array(HarnessFlagSchema).max(MAX_HARNESS_FLAGS).optional(),
   model: z.string().min(1).optional(),

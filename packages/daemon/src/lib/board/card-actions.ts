@@ -49,9 +49,11 @@ import {
   variantLanes,
 } from '@ferretry/protocol';
 import {
+  type BoardCaller,
   type BoardOperation,
   type BoardStanding,
   type CardAudience,
+  claimRefusalMessage,
   mayDo,
   mayPassGate,
   OPERATION_STANDINGS,
@@ -84,6 +86,8 @@ export interface CardContext {
   readonly standing: BoardStanding;
   /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
   readonly handsDown?: boolean;
+  /** The lead of the caller's own that holds the card, when the caller may CLAIM it (`claimableFrom`). */
+  readonly claimedFrom?: string;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
@@ -1106,6 +1110,25 @@ export const applyAction = (
           assignee: action.assignee,
         },
       };
+    case 'claim': {
+      const actor = context.actor;
+      if (context.claimedFrom === undefined || actor.kind !== 'ferret') {
+        const caller: BoardCaller =
+          actor.kind === 'ferret' ? { kind: 'ferret', sessionId: actor.sessionId } : { kind: 'owner' };
+        throw new BoardError('forbidden', claimRefusalMessage(card, caller));
+      }
+      const claimer = actor.sessionId;
+      return {
+        task: {
+          ...withEvent(
+            card,
+            { type: 'assigned', from: card.assignee, to: claimer, claimedFrom: context.claimedFrom },
+            context,
+          ),
+          assignee: claimer,
+        },
+      };
+    }
     case 'note':
       requireStanding('note', context.standing, card);
       return { task: withEvent(card, { type: 'note', text: action.text }, context) };
