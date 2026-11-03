@@ -1,3 +1,9 @@
+## [4.257.1](https://github.com/kirinnee/ferretry/compare/v4.257.0...v4.257.1) (2026-11-03)
+
+### Fixes
+
+* **send:** carry the session's harness into the send target ([#1431](https://github.com/kirinnee/ferretry/issues/1431)) ([c5bea75](https://github.com/kirinnee/ferretry/commit/c5bea75be224b2d16fa89fc00510a8a9ed0fea49)), closes [#1398](https://github.com/kirinnee/ferretry/issues/1398)
+
 ## [4.257.0](https://github.com/kirinnee/ferretry/compare/v4.256.1...v4.257.0) (2026-11-03)
 
 ### Features
