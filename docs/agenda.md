@@ -8,7 +8,7 @@ nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 opens one only for what the owner alone can give — information, a decision or an action — and only when no open
 agenda passes the three-part test; otherwise it adds to the closest. It never opens one just to track or check its
 own work: no "please test X", "please verify Y" or "try it after the release". Testing a card is the board's job
-today: a finished card reaches its "To test" lane and the owner presses **Done** or **Not good**
+today: a finished card reaches its Released or Ready to try lane, its agenda asks the owner, and they press **Done** or **Not good**
 ([board.md](board.md)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
 [notifications.md](notifications.md#agenda-mode)).
 
@@ -137,8 +137,9 @@ loosening, so it needs no `fy config confirm`. The whole contract is
 An item names the board card it is about (`task`, board-design.md §2.6). `fy agenda add --task F18` names it;
 an add that names none takes the raising session's **focus card** (`config.focusTask`) — the CLI's, a harness
 question's and a Warden escalation's alike. A session with no focus card raises an item with no card. The card
-only derives from the agenda: its open items are its asks, and an open **blocking** one makes it "Waiting on
-you" until the item is answered — nothing is written to the card. A notice is context, never an ask.
+only derives from the agenda: the open agendas that carry it are its asks, and while one carries its open
+[card ask](#card-asks) the card is never stale — nothing is written to the card. A card never shows "waiting on
+you": its ask is on the agenda. A notice is context, never an ask.
 
 The CLI sends `task` only to a daemon that reports `agenda.task.1`; an older one refuses the whole add over the
 field, so the item is raised without it and the CLI says so. For one release a bare `--task` (or a value that
@@ -154,7 +155,7 @@ plain message to its ferret — nothing here is a second path).
 
 - **Opt in**: `fy agenda add --task F12 --offer-close` (the flag `offerClose` on the item). It is **on by default**
   for a to-do (`--kind todo`) or a review on a card that is in the board's to-test lane when the item is raised —
-  the lane `release.published` enters ("Released · to test"), the one notion the board's lane facts already use. A
+  the lane `release.published` enters ("Released"), the one notion the board's lane facts already use. A
   notice never offers it, and an add that names no card (and the session has no focus card) is refused the flag.
 - **Where it sits**: one more answer in the one A/B/C row, in the → slot while the card gave fewer than three
   answers and in the full-width row otherwise. It is tap only: no swipe and no arrow reaches it, so a swipe
@@ -172,78 +173,78 @@ plain message to its ferret — nothing here is a second path).
   only for a machine that lists it AND an item with a linked card of that machine that asked for it. The CLI sends
   `offerClose` only to a daemon that lists it; to an older one it raises the item without and says so.
 
-## Gate items
+## Card asks
 
-A card the owner asked for that reaches a gate lane asks them here: ONE item the daemon raises and only the owner
-answers ([board.md](board.md#gates-ask-the-owner) owns the rules). It is an ordinary choice item, so an app that
-predates gates answers it by label, plus:
+**Cards show progress; their asks ride the card's agenda.** A card never asks the owner itself. When a card the owner
+asked for reaches a stage that needs them — a plan to approve (**OK to build**) or a release to try (**Done / Not
+good**) — the daemon puts a **card ask** on the agenda that carries the card, and the owner answers it there
+([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda) owns the rules: which agenda, who passes, what
+each answer does to the card).
 
-- **`gate`** (`AgendaGateSchema`): `cardId`, `laneId`, `laneName`, `entry` (the card history's `seq` that put it
-  there), `projectId`, `projectName?`, and `options` (`id`, `label`, `outcome`: `next`, `lane`,
-  `reopen-with-agenda`, `close`), in the lane's own order. Only the daemon writes it; an add that carries one is
-  refused.
-- **`sourceRef`** `gate:<card>:<lane>:<entry>`; the title is the card's, the ask the lane's ("Try it: <first step of
-  How to test>", "OK to build? <summary>"), the premise its summary and the body its How to test, verbatim (never `steps`, which make a choice a mix).
-- **Swipes.** → the first option that moves the card on (Done), ← the reopen-with-agenda option (Not good), ↑ a third (the owner's decision !A205). A gate with one
-  option gets a second answer, **Not yet** (← ; the card stays). The ask lists its options in that order, ← · ↑ · →,
-  because a choice card lays them out by it (`gateAskOptions`, `gateAnswers` in `@ferretry/protocol`). ↓ is Skip, and
-  **Not needed** (the button) dismisses it: the owner's choice, the card stays where it is, quietly, and a device needs
-  the `fleet` grant for it as for an answer. A bare done (`resolve` with no answer) is refused.
-- **Answering** is `resolve` with `{kind: 'multiple-choice', choice: <label>}` and the owner's words as `note`; Not good
-  needs words (the note, or `{kind: 'other', answer}`). The card moves first; a refusal leaves the item open
-  (`400 invalid`, `403 forbidden`, `409 gate_moved_on`, `409 gate_not_moved`).
-- **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board. A ferret, its lead
-  (the sub-ferret rule below does not reach a gate item) and the daemon are refused every verb that would close or
-  reword one. The daemon resolves one quietly when its card moves on. Clearing the agent ferrets' backlog skips gate
-  items, and a chat message that names one does not park it.
-- **Its follow-up.** Not good opens one `reply` item about the card, `gate-followup:<card>:<entry>`, raised by the
-  daemon on behalf of the card's ferret once the card went back, starting on the ferret's turn (in discussion); the ferret edits,
-  surfaces and closes it as its own, and the owner's answer reaches it as on its own item.
-- **It buzzes once**, at its raise, and is never part of a stop's push ([notifications.md](notifications.md)).
+- **`cardAsks`** (`AgendaCardAskSchema`, oldest first, at most 16): each one carries its `gate` (`cardId`, `laneId`,
+  `laneName`, `entry` — the card history's `seq` that put it there —, `projectId`, `projectName?`, `cardTitle?`, and
+  the lane's `options`: `id`, `label`, `outcome` of `next`, `lane`, `reopen-with-agenda` or `close`), `at` (when it
+  was put on this agenda), the card's **How to test** (`howToTest`, Markdown as written), and once answered its
+  `answer` (`at`, `response`, `note?`, `receipt` — a SHA-256 of everything the answer said —, `askVersion?`). A "Not
+  yet" leaves it open with `notYet`. Only the daemon writes one; an add or edit that carries one is refused. Its name is
+  its gate's reference, `gate:<card>:<lane>:<entry>`.
+- **Which agenda.** The open agenda that carries the card (it is about the card, or carries one of its asks), else the
+  one that carries its parent card, else ONE new agenda the daemon opens on the card's ferret's home, named after the
+  card, raised on that ferret's behalf (`sourceRef` `card-agenda:<card>`), stage `test` or `plan`. That agenda's own ask
+  is only a reply; the ferret works and closes it as its own.
+- **It needs you.** A new card ask puts its agenda in Needs you, fresh — even out of a snooze, because it is a blocker
+  of its card — and it stays one entry in the unique queue, blockers first. Its stage moves to `test` (its gate can send
+  the card back with words) or `plan`. While it is open, its ferret cannot rest the agenda, and nobody but the owner
+  closes it: their bare done is refused (answer the ask, or Not needed).
+- **Swipes and labels.** → the first option that moves the card on (Done), ← the reopen-with-agenda option (Not good),
+  ↑ a third (the owner's decision !A205). A gate with one option gets a second answer, **Not yet**: the card stays, and
+  the ask stays open (`gateAskOptions`, `gateAnswers`, `gateChoice` in `@ferretry/protocol`).
+- **Answering** is `resolve` with `{kind: 'multiple-choice', choice: <label>}`, `cardAsk: <its gate reference>` and
+  the owner's words as `note`; Not good needs words (the note, or `{kind: 'other', answer}`) and may carry files. The
+  card moves FIRST; a refusal leaves the ask open (`400 invalid`, `403 forbidden`, `409 gate_moved_on`,
+  `409 gate_not_moved`). An exact repeat comes back unchanged and moves nothing; the same choice with other words or
+  files is refused. **After the answer the agenda RESTS, waiting on its ferret**, which is told; the answer never closes
+  it, and the ferret marks it done once nothing more is expected.
+- **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board (the same grant guards
+  Not needed on an agenda with an open card ask). A ferret, its lead and the daemon's other producers are refused.
+- **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly; the agenda stays.
+- **It buzzes once**, when the ask is put on, and that agenda is never part of a stop's push ([notifications.md](notifications.md)).
+- **An older app** reads `gateAttached`: the daemon mirrors the FIRST open card ask's gate there on every write, so an
+  app that predates card asks still draws Done / Not good on the agenda, and answers it with `gate: true` and no
+  `cardAsk`. Such an answer is to the ask the mirror shows; a repeat of an answer given in the last two minutes that
+  reaches an agenda whose shown ask has changed since is refused `409 gate_moved_on`, never spent on the new ask. A
+  daemon that puts card asks lists `agenda.card-asks.1` on `GET /v1/health`; an older one raised standalone gate items
+  (`gate`, deprecated), which no daemon raises any more.
+- **The migration** is read-time, total and idempotent, like the channel's: a thread's bare `gateAttached` becomes its
+  open card ask (a "Not yet" in its history becomes `notYet`); an open gate item whose card has an open thread here puts
+  its ask on that thread and closes, its note naming the thread (the thread takes the gate item's place in Needs you if
+  only the gate item was there); any other open gate item BECOMES its card's agenda in place — the same id, history,
+  snooze and turn — its gate now its card ask, raised on its ferret's behalf. Closed items stay as they were, so an
+  answered gate keeps its receipt and a replay still finds it.
 
 ## One ask per thing
 
-The owner is asked about one thing **once**. A card that waits at a gate while a ferret already has an open question
-about that same card on the owner's agenda would otherwise ask twice, so the daemon keeps the two apart
-([board.md](board.md#one-ask-per-thing) owns the rules):
+The owner is asked about one thing **once**:
 
-- **A gate attaches to a thread.** A card at a gate that has a **carrier thread** — an agent-raised item whose `task`
-  is the card, not a gate item and not a notice, that is **open**, **not parked** (not replied to, not snoozed) and
-  on the owner's turn or within the 24 h grace — raises **no gate item**. The daemon puts the gate on the
-  thread instead: `gateAttached` (an `AgendaGate`, written only by the daemon; an add or edit that carries one is
-  refused). With several threads it attaches to the one on the owner's turn, else the newest. A gate item already open
-  when a thread appears is resolved by the daemon, its note naming the thread that now asks — unless the owner has
-  begun to talk about it (needs-info, discuss, reply): then it stays, and the thread raises unlinked.
-- **Answering it.** The thread shows the gate's options as a second answer row, the same labels as a gate
-  item, naming the card by its title ("&F12 Badge colour is ready to test. Answer it here too."; `cardTitle` on the gate).
-  Only the thread's **own** options carry the ←/→ arrows and the swipe; the gate's row is tap only (no swipes, no arrows), Not good on the left and Done on the right like every swipe surface. `resolve` with `gate: true` answers the **gate**, not the thread:
-  it goes through the same path as a gate item (owner only, the card moves first, the same refusals). The thread stays
-  open for its own question; the gate leaves it once the card moves on. A `resolve` without `gate: true` is the thread's
-  own answer, as ever.
-- **It stops counting** when the thread is closed, parked, the card leaves the gate, or the thread sits on the
-  **ferret's** turn for more than 24 hours: a ferret cannot mute a gate by opening a thread and leaving it. The daemon
-  looks again every Warden sweep and the gate item is raised if no thread stands in for it. **Only the owner's answer
-  to a gate option on the thread counts as asked** (recorded as a `gate-answered` history entry naming the gate, "Not
-  yet" included); a thread closed any other way — its own answer, Dismiss, Not needed, the ferret withdrawing — while
-  the card is still at that gate raises the gate item. A thread past the grace is also listed by the duplicate sweep.
-- **A second add is refused.** `fy agenda add --task <card>` by an agent, for a card that is already asking the owner,
-  answers `invalid`: `&F12 is already asking the owner (!A3 on <home>'s agenda); add what you need to it instead: fy
-task note F12 "<text>"`. An add with no `--task` that would take the focus card while that card is asking is raised
-  **without** the card link, and the response carries `notes` (the CLI prints each as `Note: …`). If the card's gate
-  cannot be read, the add is not refused and not trusted either: it is raised without the card, with a note saying so.
-  Notices are never refused.
+- **One agenda carries a card's ask.** The daemon puts it on the agenda that already carries the card rather than
+  opening another (above), and a second open copy of the same ask is withdrawn.
+- **A second add is refused.** `fy agenda add --task <card>` by an agent, for a card whose ask is open, answers
+  `invalid`, pointing to the agenda that carries the card: on the agent's own agenda `&F12 already asks the owner on !A3,
+which carries the card; add yours to it: fy agenda edit A3 --where "<what you need>"`, else naming that agenda and
+  `fy task note F12 "<text>"`. An add with no `--task` that would take the focus card while that card is asking is
+  raised **without** the card link, and the response carries `notes` (the CLI prints each as `Note: …`). If the card's
+  ask cannot be read, the add is raised without the card, with a note saying so. Notices are never refused.
 - **`--thread` only links.** `fy task create --thread !A12` sets the `task` of the caller's own open thread to the
-  new card (refused when that thread is already linked to another card). The card stays as external as any other: its
-  gate rides on the thread through attach, and is raised when the thread closes.
+  new card (refused when that thread is already linked to another card): that thread then carries the card's asks.
 - **The duplicate sweep.** At boot and on every Warden sweep the daemon reads every agenda (pure `findDuplicates`) and
   closes only what is provably the same ask. Every rule is scoped to **one lineage** (one home): one card with more than
   one open owner item; one `source` + `sourceRef`; identical normalized titles. It keeps the **oldest** (the first
   ask) unless a newer one is on the owner's turn, and closes the rest with the note `duplicate of !A<n>` — only when
   both were raised by the **same session**, and for identical titles only when the ask and body match too (else it
-  reports). It never closes an item the owner has begun to talk about, a hands-on card, or a gate the owner answered,
-  and closes nothing while any agenda is unreadable. What it leaves is listed by `fy doctor` ("N possible duplicate
-  asks left open"). `GET /v1/health` gives an unauthenticated caller only the **count** (`duplicateAskCount`); the
-  list (`duplicateAsks`) is for the privileged loopback path.
+  reports). It never closes an item the owner has begun to talk about, a hands-on card, a gate the owner answered, or
+  an agenda that carries a card ask, and closes nothing while any agenda is unreadable. What it leaves is listed by
+  `fy doctor` ("N possible duplicate asks left open"). `GET /v1/health` gives an unauthenticated caller only the
+  **count** (`duplicateAskCount`); the list (`duplicateAsks`) is for the privileged loopback path.
 
 ## States
 
@@ -294,9 +295,9 @@ fields every item already carries, so an item from any daemon reads as exactly o
 says what that field cannot: the sub-state, what the ferret is doing, and the nudge clock. `parked` is what says
 the item rests; a `resting` with nothing parked is dropped on the next write.
 
-**Who is exempt (until card asks move into agendas).** An answer still CLOSES what the daemon acts on: a card's
-gate item, a held configuration change (`--confirms`), an input card, and every item the daemon raised for itself
-(`restsOnAnswer`). Gate items keep working end to end as before.
+**Who is exempt.** An answer still CLOSES what the daemon acts on: a held configuration change (`--confirms`), an
+input card, an old gate item read before the migration, and every item the daemon raised for itself
+(`restsOnAnswer`). A card ask is no exception to resting: its agenda rests on the answer ([Card asks](#card-asks)).
 
 ### The Needs-you queue
 
@@ -1010,7 +1011,7 @@ after a move is logged with the session and the item and holds the marker back; 
 (`forbidden`, `invalid`, `too-long`) is logged, stays, and does not. The boot log says how many moved.
 
 **A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
-items on the board of a session it started (never a [gate item](#gate-items)): `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
+items on the board of a session it started (never an open [card ask](#card-asks)): `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
 lineage from `config.parent` and marks the actor for the state machine (`overSubFerret`; a request cannot set it);
 anyone else keeps `forbidden: an agent may change the agenda only in its own session`. The change is recorded as the
 lead's. Warden escalations are not the lead's to close.
@@ -1320,9 +1321,12 @@ gesture: under every open card are plain buttons — **Skip** and **Not needed**
 tomorrow / custom) snoozes; the arrow keys are unchanged. Snooze is offered only where the machine advertises it
 (`agenda.snooze.1`), in the compass and in the clock alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
 
-### Gate items
+### Card asks in the Inbox
 
-A **gate item** is a board card waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-card: the owner tests its parent, and a sub-card [closes itself](board.md#sub-cards-close-themselves) instead of waiting in a verify lane) (`item.gate`: the card, its lane and what each option does):
+Today's app draws a card ask from its mirror, `gateAttached`, as the agenda's second answer row (`attachedGateView`):
+the same labels and directions as below, naming the card by its title, tap only, and every answer sent with `gate: true`.
+What follows is how it draws a card at a gate. A **gate item** (read from a daemon older than card asks) is a board card
+waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-card: the owner tests its parent, and a sub-card [closes itself](board.md#sub-cards-close-themselves) instead of waiting in a verify lane) (`item.gate`: the card, its lane and what each option does):
 the owner meets one stream, not a question list and a separate to-test list. It is
 the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — the **Test** chip
 (a card in a verify lane; its ask reads "Try it: …") or the **Approve** chip (a plan awaiting approval; its ask reads "OK to build?") — the project, the ferret and "Open chat ›". It repeats
@@ -1341,7 +1345,9 @@ options are the gate's own, laid out as every choice is (the first ←, the seco
 - **Question items keep their sticky options and composer exactly as they were.**
 
 **The app ships before the daemon.** A machine that advertises `board.gate-items.1` on its health sends gate items, and the
-Inbox then drops the _synthesized_ to-test rows those items replace. A machine that does not keeps today's rows. A person-asked
+Inbox then drops the _synthesized_ to-test rows those items replace. A machine that also advertises `agenda.card-asks.1`
+sends card asks instead, which today's app does not count as covering a card: it keeps the to-test row beside the
+agenda's card ask. Either answers through the owner's authority and moves the card once; the other is withdrawn. A machine that does not keeps today's rows. A person-asked
 card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates, so no card
 waiting on the owner is ever lost between the two lists.
 
@@ -1357,6 +1363,7 @@ takes them; the app draws the "+" only there, and an older machine keeps Not goo
 
 ### What the side panel's Cards view shows
 
+This view is the app's own, read from the board; the card's ask itself is on its agenda ([Card asks](#card-asks)).
 The task panel's **Cards** view and the Inbox ask the same question of a card — _is it waiting on the owner?_ — through one
 pure selector (`awaitingOwner`, `lib/awaiting-owner.ts`): a card shows only if it is **not dropped, asked of a person (not an
 internal agent), and sitting in a gate lane**. A gate lane is a verify lane ("Try it") or an owner-gate lane that is not
