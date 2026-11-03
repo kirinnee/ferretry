@@ -355,7 +355,11 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) Â
    a mint's. `DELETE` on the same path only narrows, so it takes no step-up. The mint, the mark and every route that
    only takes access away (ending a share, revoking a person, removing a browser or a catalog) ask the grant and the
    unlock at the door as a [narrowing](#narrowing-never-asks-again) demand; the mint and the mark then claim their
-   `share-catalog` proof themselves, so a zero-minute step-up window cannot spend it first. The mint accepts an optional
+   `share-catalog` proof themselves, so a zero-minute step-up window cannot spend it first. **One known exception:**
+   removing a member's last passkey-bearing browser (`DELETE /v1/catalog-members/:memberId/keys/:keyId`) is not purely a removal while
+   another browser of theirs still has its registration window open, because a spare invite minted before the person
+   joined then stops needing their passkey and admits its holder as a first browser. The join rule predates this
+   change ([catalogs.md](catalogs.md#the-decisions-behind-it)); hardening it is a tracked follow-up. The mint accepts an optional
    `newPasskey` under the same step-up it already needs, and its answer carries an optional `noPasskeyLeft` that
    only pre-ticks the app's box; no route sets the mark by itself. A later join of an existing person proves one of
    their passkeys over the sealed `join-options`/`join` records, which are no route and carry no grant
