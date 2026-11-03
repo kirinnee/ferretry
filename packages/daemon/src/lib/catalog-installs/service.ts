@@ -18,14 +18,12 @@
  * is a conflict, and so is a file we wrote that has been changed since: replacing or removing never
  * overwrites a local edit ("keep my edits" is a later phase).
  */
-import { posix } from 'node:path';
 import {
   CATALOG_INSTALL_PREVIEW_TTL_SECONDS,
   type CatalogInstall,
   type CatalogInstalled,
   type CatalogInstallList,
   type CatalogChanges,
-  type CatalogMcpSetup,
   type CatalogInstallPreview,
   type CatalogInstallPreviewRequest,
   type CatalogInstallPrefsRequest,
@@ -34,6 +32,7 @@ import {
   type CatalogInstallScope,
   type CatalogInstallTarget,
   type CatalogInstallWarning,
+  type CatalogMcpSetup,
   type CatalogProvenance,
   type CatalogSecretBindings,
   catalogItemReview,
@@ -55,13 +54,19 @@ import {
 import type { CallerGovernance } from '../api/capability.ts';
 import { type McpComponentRecord, mcpSetupOf } from '../shared-catalogs/mcp-source.ts';
 import type { FleetCatalogService, FreshStepUpContext } from '../fleet/catalog-service.ts';
-import { type McpProjectFiles, McpProjectFileChanged, projectRootFor } from '../session-mcp/service.ts';
+import { type McpProjectFiles, projectRootFor } from '../session-mcp/service.ts';
 import {
-  McpProjectFileError,
-  parseMcpProjectFile,
-  projectEntry,
-  renderMcpProjectFile,
-} from '../session-mcp/project-file.ts';
+  bindingsRefusal,
+  checkProjectMcp,
+  readProjectMcp,
+  type McpWriteContext,
+  PROJECT_MCP_FILE,
+  projectServerOf,
+  removeProjectMcp,
+  runtimeComponentOf,
+  withoutTrailingSlash,
+  writeProjectMcp,
+} from './mcp-writes.ts';
 import { type EditedHashes, editedView, editedWords, hasEdits, NO_EDITS, sameEdits } from './edited.ts';
 import { conservativeChanges } from './conservative-changes.ts';
 import {
@@ -116,10 +121,6 @@ export interface CatalogInstallServiceDeps {
   mint(prefix: 'cip' | 'cin'): string;
 }
 
-const SECRET_PLACEHOLDER = /^\$\{secret:([A-Za-z0-9_.-]+)\}$/u;
-const ENV_VARIABLE = /^[A-Z_][A-Z0-9_]*$/u;
-const PROJECT_MCP_FILE = '.mcp.json';
-
 /** The caller of a preview or an apply, as the mount identified it. */
 export interface CatalogCaller {
   /** Who asked: a preview can only be applied by the same one. */
@@ -150,8 +151,6 @@ const sameTarget = (left: CatalogInstallTarget, right: CatalogInstallTarget): bo
   left.scope === 'project'
     ? right.scope === 'project' && left.projectRoot === right.projectRoot && left.harness === right.harness
     : right.scope === 'runtime' && left.runtime === right.runtime && left.profile === right.profile;
-
-const withoutTrailingSlash = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
 
 /** Where an item lands: a stable key (two installs sharing it would overwrite each other) and the words for it. */
 interface Destination {
@@ -191,9 +190,6 @@ interface Written {
   readonly notes: string[];
   readonly componentSha256?: string;
 }
-
-const UNBOUND_NOTE = (placeholder: string): string =>
-  `${placeholder} is not set by this install. The program runs without it unless its own environment already has a variable of that name.`;
 
 interface Judged {
   readonly replaces: CatalogInstallRecord | undefined;
@@ -561,7 +557,7 @@ export class CatalogInstallService {
     if (item.kind !== 'mcp') return undefined;
     let setup: CatalogMcpSetup | undefined;
     if (scope === 'project') {
-      const { document } = await this.#readProjectMcp(replaces.root as string);
+      const { document } = await readProjectMcp(this.deps.mcpFiles, replaces.root as string, this.#mcpContext());
       const servers = document.mcpServers as Record<string, unknown> | undefined;
       setup =
         servers !== undefined && Object.hasOwn(servers, item.name)
@@ -776,18 +772,7 @@ export class CatalogInstallService {
     name: string,
     replaces: CatalogInstallRecord | undefined,
   ): Promise<{ seen: string | null; entry?: string }> {
-    const { document } = await this.#readProjectMcp(root);
-    const servers = document.mcpServers as Record<string, unknown> | undefined;
-    const present = servers !== undefined && Object.hasOwn(servers, name);
-    if (!present) return { seen: null };
-    const recorded = replaces?.files[0]?.sha256;
-    if (recorded === undefined)
-      refuse(
-        'catalog_install_conflict',
-        `${PROJECT_MCP_FILE} already has a server called ${name} that no install of ours put there.`,
-      );
-    const now = await this.#hash(JSON.stringify(servers[name]));
-    return now === recorded ? { seen: now } : { seen: now, entry: now };
+    return await checkProjectMcp(this.deps.mcpFiles, root, name, replaces?.files[0]?.sha256, this.#mcpContext());
   }
 
   /** The runtime side of step 8. Answers the skill folder as it was READ, so the write is guarded by that very reading. */
@@ -852,31 +837,8 @@ export class CatalogInstallService {
   }
 
   #bindingsAreValid(held: HeldPreview, bindings: CatalogSecretBindings, own: ReadonlySet<string>): void {
-    const given = Object.keys(bindings);
-    const missing = held.placeholders.filter(name => !given.includes(name));
-    if (missing.length > 0)
-      refuse(
-        'catalog_bindings_invalid',
-        `Say what to do with ${missing.join(', ')}: bind each one to a secret of yours, or leave it unbound.`,
-      );
-    const extra = given.filter(name => !held.placeholders.includes(name));
-    if (extra.length > 0)
-      refuse(
-        'catalog_bindings_invalid',
-        `${extra.join(', ')} ${extra.length === 1 ? 'is' : 'are'} not something this item asks for.`,
-      );
-    for (const [placeholder, secret] of Object.entries(bindings)) {
-      if (secret === null) continue;
-      if (!own.has(secret))
-        refuse('catalog_bindings_invalid', `You have no secret called ${secret}, so ${placeholder} cannot use it.`);
-    }
-    if (held.target.scope !== 'project') return;
-    for (const secret of Object.values(bindings))
-      if (secret !== null && !ENV_VARIABLE.test(secret))
-        refuse(
-          'catalog_bindings_invalid',
-          `A project's ${PROJECT_MCP_FILE} can only read an environment variable, and ${secret} is not a name one can have (upper-case letters, digits and _). Install it into a runtime, or pick a secret with such a name.`,
-        );
+    const refusal = bindingsRefusal(held.placeholders, bindings, own, held.target.scope, 'this item');
+    if (refusal !== undefined) refuse('catalog_bindings_invalid', refusal);
   }
 
   // ── Project writes ──────────────────────────────────────────────────────────────────────────────
@@ -936,63 +898,25 @@ export class CatalogInstallService {
     verifiedEntry: string | null,
   ): Promise<Written> {
     const notes: string[] = [];
-    const server = this.#server(item, value => {
-      const placeholder = SECRET_PLACEHOLDER.exec(value)?.[1];
-      if (placeholder === undefined) return value;
-      const variable = bindings[placeholder];
-      if (!variable) {
-        notes.push(UNBOUND_NOTE(placeholder));
-        return undefined;
-      }
-      notes.push(
-        `${item.name} reads \${${variable}} from its environment. A project's ${PROJECT_MCP_FILE} cannot use Ferretry's secrets, so give the ferret a variable called ${variable}.`,
-      );
-      return `\${${variable}}`;
-    });
+    const server = projectServerOf(item.name, item.mcp, bindings, notes);
     const refusal = mcpServerRefusal('project', server);
     if (refusal !== null) refuse('catalog_not_installable', refusal);
-    const { path, reading, document } = await this.#readProjectMcp(root);
-    const entry = projectEntry(server);
-    const servers = (document.mcpServers ?? {}) as Record<string, unknown>;
-    // The entry checked at step 8 must still be the one in the file just read (the etag only guards after this read).
-    const now = Object.hasOwn(servers, item.name) ? await this.#hash(JSON.stringify(servers[item.name])) : null;
-    if (now !== verifiedEntry)
-      refuse(
-        'catalog_install_conflict',
-        `${PROJECT_MCP_FILE} changed while the install was being applied, so nothing was written. Preview it again.`,
-      );
-    const text = renderMcpProjectFile({ ...document, mcpServers: { ...servers, [item.name]: entry } });
-    try {
-      await this.deps.mcpFiles.replace(path, text, reading.etag);
-    } catch (error) {
-      if (error instanceof McpProjectFileChanged) refuse('catalog_install_conflict', error.message);
-      throw error;
-    }
-    return {
-      files: [{ path: PROJECT_MCP_FILE, sha256: await this.#hash(JSON.stringify(entry)), entry: item.name }],
-      notes: [...new Set(notes)],
-    };
+    const { sha256 } = await writeProjectMcp(
+      this.deps.mcpFiles,
+      root,
+      item.name,
+      server,
+      verifiedEntry,
+      this.#mcpContext(),
+    );
+    return { files: [{ path: PROJECT_MCP_FILE, sha256, entry: item.name }], notes: [...new Set(notes)] };
   }
 
   async #removeProject(record: CatalogInstallRecord): Promise<void> {
     const root = record.root as string;
     const first = record.files[0];
     if (first?.entry !== undefined) {
-      const { path, reading, document } = await this.#readProjectMcp(root);
-      const servers = (document.mcpServers ?? {}) as Record<string, unknown>;
-      if (!Object.hasOwn(servers, first.entry)) return;
-      if ((await this.#hash(JSON.stringify(servers[first.entry]))) !== first.sha256)
-        refuse(
-          'catalog_install_conflict',
-          `The server ${first.entry} in ${PROJECT_MCP_FILE} was edited on this machine since it was installed, so it was not removed.`,
-        );
-      const { [first.entry]: _removed, ...rest } = servers;
-      try {
-        await this.deps.mcpFiles.replace(path, renderMcpProjectFile({ ...document, mcpServers: rest }), reading.etag);
-      } catch (error) {
-        if (error instanceof McpProjectFileChanged) refuse('catalog_install_conflict', error.message);
-        throw error;
-      }
+      await removeProjectMcp(this.deps.mcpFiles, root, first.entry, first.sha256, this.#mcpContext());
       return;
     }
     const folder = record.folder as string;
@@ -1002,17 +926,6 @@ export class CatalogInstallService {
       await this.deps.skillFiles.apply(root, folder, { write: [], remove, expected });
     } catch (error) {
       throw this.#folderRefusal(error);
-    }
-  }
-
-  async #readProjectMcp(root: string) {
-    const path = posix.join(withoutTrailingSlash(root), PROJECT_MCP_FILE);
-    try {
-      const reading = await this.deps.mcpFiles.read(path);
-      return { path, reading, document: parseMcpProjectFile(reading.text) };
-    } catch (error) {
-      if (error instanceof McpProjectFileError) return refuse('catalog_install_conflict', error.message);
-      throw error;
     }
   }
 
@@ -1070,27 +983,9 @@ export class CatalogInstallService {
     const notes: string[] = [];
     if (item.kind === 'artifact') return refuse('catalog_not_installable', `${item.name} cannot be installed.`);
     if (item.kind === 'mcp') {
-      const server = this.#server(item, value => {
-        const placeholder = SECRET_PLACEHOLDER.exec(value)?.[1];
-        if (placeholder === undefined) return value;
-        const secret = bindings[placeholder];
-        if (!secret) {
-          notes.push(UNBOUND_NOTE(placeholder));
-          return undefined;
-        }
-        return `\${secret:${secret}}`;
-      });
-      const refusal = mcpServerRefusal('login', server);
-      if (refusal !== null) refuse('catalog_not_installable', refusal);
-      component =
-        server.transport === 'url'
-          ? { kind: 'mcp', url: server.url, ...(server.oauth ? { auth: 'oauth' as const } : {}) }
-          : {
-              kind: 'mcp',
-              command: server.command,
-              args: [...server.args],
-              ...(Object.keys(server.env).length === 0 ? {} : { env: { ...server.env } }),
-            };
+      const made = runtimeComponentOf(item.mcp, bindings, notes);
+      if ('refusal' in made) return refuse('catalog_not_installable', made.refusal);
+      component = made.component;
     } else {
       component = { kind: 'skills', items: [item.name] };
       files = item.skill.files.map(file => ({ path: file.path, content: file.content }));
@@ -1178,23 +1073,13 @@ export class CatalogInstallService {
 
   // ── Small things ────────────────────────────────────────────────────────────────────────────────
 
-  /** The item's server with every environment value passed through `value`; one that answers `undefined` is left out. */
-  #server(
-    item: Extract<SharedCatalogItem, { kind: 'mcp' }>,
-    value: (text: string) => string | undefined,
-  ): SessionMcpServer {
-    const setup = item.mcp;
-    if (setup.transport === 'url') return { transport: 'url', url: setup.url, oauth: setup.auth === 'oauth' };
+  /** The words and the refusal this installer hands the shared MCP writes. */
+  #mcpContext(): McpWriteContext {
     return {
-      transport: 'command',
-      command: setup.command,
-      args: [...setup.args],
-      env: Object.fromEntries(
-        Object.entries(setup.env).flatMap(([name, text]) => {
-          const written = value(text);
-          return written === undefined ? [] : [[name, written]];
-        }),
-      ),
+      noun: 'install',
+      past: 'installed',
+      conflict: message => refuse('catalog_install_conflict', message),
+      hash: text => this.#hash(text),
     };
   }
 

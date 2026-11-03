@@ -2373,6 +2373,65 @@ describe('auditing a skill copied from this machine', () => {
   }
 });
 
+describe('auditing an MCP server copied from this machine', () => {
+  const LOCAL_ID = `lmi_${'i'.repeat(22)}`;
+  const send = async (api: ApiDispatcher, method: string, path: string) =>
+    await api.dispatch(request({ method, path, headers: ADMIN, loopback: true }));
+
+  for (const scope of ['project', 'runtime'] as const) {
+    it(`should record a copy on the ${scope} route by the server's NAME, never a command, variable or binding`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        [`POST /v1/mcp-installs/local/${scope}`]: async () =>
+          jsonResponse({
+            install: { name: 'search', secretBindings: { API_TOKEN: 'MY_TOKEN' } },
+            notes: [],
+          }),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'POST', `/v1/mcp-installs/local/${scope}`);
+
+      // Assert
+      should(records(journal)).deepEqual([
+        {
+          at: AT,
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          outcome: 'succeeded',
+          detail: { action: 'local-mcp-install', scope, name: 'search', status: 200 },
+        },
+      ]);
+      should(journal.lines.join('\n')).not.match(/MY_TOKEN|API_TOKEN/u);
+    });
+
+    it(`should record a removal on the ${scope} route against the install id`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        [`DELETE /v1/mcp-installs/local/${scope}/:installId`]: async () =>
+          jsonResponse({ installId: LOCAL_ID, name: 'search', destination: '/srv/app' }),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'DELETE', `/v1/mcp-installs/local/${scope}/${LOCAL_ID}`);
+
+      // Assert
+      should(records(journal)).deepEqual([
+        {
+          at: AT,
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          subject: LOCAL_ID,
+          outcome: 'succeeded',
+          detail: { action: 'local-mcp-remove', scope, name: 'search', status: 200 },
+        },
+      ]);
+    });
+  }
+});
+
 describe('auditing an install from a catalog', () => {
   const INSTALL_ID = `cin_${'i'.repeat(22)}`;
   const send = async (api: ApiDispatcher, method: string, path: string) =>

@@ -1,0 +1,173 @@
+/**
+ * An MCP server the machine inventory lists, turned into the setup a local copy previews and applies. Pure.
+ *
+ * It is `shared-catalogs/mcp-source.ts`'s conversion with ONE difference that matters: NO VALUE IS CARRIED.
+ * That conversion refuses a server whose environment value uses `${…}` or looks like a key; a copy from this
+ * machine instead turns EVERY environment value into a whole `${secret:NAME}` placeholder (NAME is the variable's own
+ * name), because nothing in an inventory says which values are secret and a value is never worth the risk. The
+ * person binds each placeholder to one of their own secrets at apply, or leaves it unbound. An address's
+ * credentials (a user name or password, a query parameter that is or announces a key) are left out of it and
+ * said, never turned into a placeholder, because the contract's address field cannot hold one.
+ *
+ * The contract is still the last word: the finished setup is parsed through `CatalogMcpSetupSchema`, whose
+ * messages are static, so a refusal never echoes a value.
+ */
+import {
+  announcesKey,
+  type CatalogMcpSetup,
+  CatalogMcpSetupSchema,
+  type CatalogSourceProblem,
+  holdsRawKey,
+  type LocalMcpOrigin,
+  SecretNameSchema,
+  SessionMcpEnvNameSchema,
+  CATALOG_MCP_MAX_ENV,
+} from '@ferretry/protocol';
+import { type McpComponentRecord, mcpSetupOf, type McpSourceServer } from '../shared-catalogs/mcp-source.ts';
+
+/** A server the inventory lists, with where it was found. */
+export interface LocalMcpInventoryServer extends McpSourceServer {
+  /** The registered project whose file declares it. */
+  readonly project?: { readonly root: string } | undefined;
+  /** The runtimes (account homes) that load it. */
+  readonly runtimes: readonly string[];
+}
+
+export type CopiableMcp =
+  | {
+      readonly ok: true;
+      readonly name: string;
+      /** The setup, every environment value a whole `${secret:NAME}` placeholder. */
+      readonly setup: CatalogMcpSetup;
+      readonly placeholders: readonly string[];
+      readonly skipped: readonly CatalogSourceProblem[];
+      readonly origin: LocalMcpOrigin;
+    }
+  | { readonly ok: false; readonly reason: string };
+
+const PLAIN_NAME = /^[A-Za-z0-9_.-]{1,128}$/u;
+
+/** A name worth showing: plain characters only, so a hostile one cannot reach a screen. */
+const shown = (name: string): string => (PLAIN_NAME.test(name) ? name : 'a variable with an unusual name');
+
+/** The address without its credentials, and what was left out. A query piece that announces or holds a key goes. */
+function cleanAddress(url: string): { readonly url: string; readonly problems: readonly CatalogSourceProblem[] } {
+  const match = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/u.exec(url);
+  if (match === null) return { url, problems: [] };
+  const [, scheme = '', authority = '', rest = ''] = match;
+  const problems: CatalogSourceProblem[] = [];
+  const at = authority.lastIndexOf('@');
+  if (at !== -1)
+    problems.push({ subject: 'url', reason: 'a user name or password in the address was left out, not copied' });
+  const host = at === -1 ? authority : authority.slice(at + 1);
+  const queryAt = rest.search(/[?#]/u);
+  const path = queryAt === -1 ? rest : rest.slice(0, queryAt);
+  const tail = queryAt === -1 ? '' : rest.slice(queryAt);
+  const hashAt = tail.indexOf('#');
+  const query = tail.startsWith('?') ? tail.slice(1, hashAt === -1 ? undefined : hashAt) : '';
+  const fragment = hashAt === -1 ? '' : tail.slice(hashAt);
+  const pairs = query === '' ? [] : query.split('&');
+  const kept = pairs.filter(pair => {
+    const [name = '', value = ''] = pair.split('=');
+    return !(announcesKey(name) || holdsRawKey(`${name} ${value}`));
+  });
+  if (kept.length !== pairs.length)
+    problems.push({
+      subject: 'url',
+      reason: `${pairs.length - kept.length} query parameter${pairs.length - kept.length === 1 ? '' : 's'} that look like keys ${pairs.length - kept.length === 1 ? 'was' : 'were'} left out of the address, not copied`,
+    });
+  const keptFragment = fragment !== '' && holdsRawKey(fragment) ? '' : fragment;
+  if (keptFragment !== fragment)
+    problems.push({
+      subject: 'url',
+      reason: 'a fragment that looks like a key was left out of the address, not copied',
+    });
+  return {
+    url: `${scheme}${host}${path}${kept.length === 0 ? '' : `?${kept.join('&')}`}${keptFragment}`,
+    problems,
+  };
+}
+
+/** The server with its environment taken out and its address cleaned, plus the names the environment had. */
+function stripped(server: LocalMcpInventoryServer): {
+  readonly bare: McpSourceServer;
+  readonly envNames: readonly string[];
+  readonly addressProblems: readonly CatalogSourceProblem[];
+} {
+  const { project: _project, runtimes: _runtimes, ...source } = server;
+  const declaration = server.declaration;
+  const component = server.component;
+  let envNames: string[] = [];
+  let addressProblems: readonly CatalogSourceProblem[] = [];
+  let bareDeclaration = declaration;
+  if (declaration !== null) {
+    if (declaration.transport === 'stdio') {
+      envNames = Object.keys(declaration.env);
+      bareDeclaration = { ...declaration, env: {} };
+    } else {
+      const cleaned = cleanAddress(declaration.url);
+      addressProblems = cleaned.problems;
+      bareDeclaration = { ...declaration, url: cleaned.url };
+    }
+  }
+  let bareComponent: McpComponentRecord | undefined = component;
+  if (component !== undefined) {
+    if (component.url !== undefined) {
+      const cleaned = cleanAddress(component.url);
+      addressProblems = [...addressProblems, ...cleaned.problems];
+      bareComponent = { ...component, url: cleaned.url };
+    } else {
+      envNames = Object.keys(component.env ?? {});
+      bareComponent = { ...component, env: {} };
+    }
+  }
+  return {
+    bare: { ...source, declaration: bareDeclaration, component: bareComponent },
+    envNames: envNames.toSorted(),
+    addressProblems,
+  };
+}
+
+const originOf = (server: LocalMcpInventoryServer): LocalMcpOrigin => ({
+  kind: server.project === undefined ? 'account' : 'project',
+  owner: server.project?.root ?? server.runtimes[0] ?? 'this machine',
+  harness: server.harness,
+  scope: server.scope,
+  id: server.id,
+});
+
+/** What can be copied of `server`, or the sentence for why none of it can. */
+export function copiableMcp(server: LocalMcpInventoryServer): CopiableMcp {
+  const { bare, envNames, addressProblems } = stripped(server);
+  const converted = mcpSetupOf(bare);
+  if (!converted.ok) return { ok: false, reason: converted.reason };
+  const skipped: CatalogSourceProblem[] = [...converted.problems, ...addressProblems];
+  let setup: CatalogMcpSetup = converted.setup;
+  const placeholders: string[] = [];
+  if (setup.transport === 'command') {
+    const env: Record<string, string> = {};
+    for (const name of envNames) {
+      if (!SessionMcpEnvNameSchema.safeParse(name).success || !SecretNameSchema.safeParse(name).success) {
+        skipped.push({
+          subject: `environment ${shown(name)}`,
+          reason:
+            'not copied: its name is not one a secret placeholder can have (upper-case letters, digits and _, starting with a letter)',
+        });
+        continue;
+      }
+      if (placeholders.length >= CATALOG_MCP_MAX_ENV) {
+        skipped.push({
+          subject: `environment ${shown(name)}`,
+          reason: `not copied: a server here holds at most ${CATALOG_MCP_MAX_ENV} environment variables`,
+        });
+        continue;
+      }
+      env[name] = `\${secret:${name}}`;
+      placeholders.push(name);
+    }
+    setup = { ...setup, env };
+  }
+  // Only the environment differs from what `mcpSetupOf` already parsed, and a whole placeholder is always valid.
+  const checked = CatalogMcpSetupSchema.parse(setup);
+  return { ok: true, name: server.name, setup: checked, placeholders, skipped, origin: originOf(server) };
+}

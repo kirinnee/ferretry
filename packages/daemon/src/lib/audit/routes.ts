@@ -357,6 +357,42 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     refusalCode: true,
     detail: { action: 'local-skill-remove', scope: 'runtime' },
   },
+  // Copying an MCP server from elsewhere on this machine (`mounts/local-mcp-installs.ts`): the server's NAME, never a
+  // command, address, variable or secret binding. `code` says why a refusal was one.
+  {
+    method: 'POST',
+    path: '/v1/mcp-installs/local/project',
+    event: 'fleet.configured',
+    responseNames: 'install.name',
+    refusalCode: true,
+    detail: { action: 'local-mcp-install', scope: 'project' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/mcp-installs/local/project/:installId',
+    event: 'fleet.configured',
+    subject: 'installId',
+    responseNames: 'name',
+    refusalCode: true,
+    detail: { action: 'local-mcp-remove', scope: 'project' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/mcp-installs/local/runtime',
+    event: 'fleet.configured',
+    responseNames: 'install.name',
+    refusalCode: true,
+    detail: { action: 'local-mcp-install', scope: 'runtime' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/mcp-installs/local/runtime/:installId',
+    event: 'fleet.configured',
+    subject: 'installId',
+    responseNames: 'name',
+    refusalCode: true,
+    detail: { action: 'local-mcp-remove', scope: 'runtime' },
+  },
   { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
   // Typing into the session's own pane from the Console: counted on the session and folded per window,
   // exactly as a terminal socket's keystrokes are — the request body is never read.

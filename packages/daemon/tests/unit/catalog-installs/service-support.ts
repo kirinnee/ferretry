@@ -118,11 +118,12 @@ class MemoryPrefs implements CatalogInstallPrefsStore {
   }
 }
 
-class FakeMcpFiles implements McpProjectFiles {
+export class FakeMcpFiles implements McpProjectFiles {
   text: string | null = null;
   version = 0;
   failRead: Error | undefined;
   racing = false;
+  failReplace: Error | undefined;
   reads = 0;
   /** Runs at the start of each read, with how many there have been: a file that moves between two reads. */
   onRead: ((reads: number) => void) | undefined;
@@ -135,6 +136,7 @@ class FakeMcpFiles implements McpProjectFiles {
 
   async replace(_path: string, text: string, expected: string | null): Promise<string> {
     const current = this.text === null ? null : `e${this.version}`;
+    if (this.failReplace !== undefined) throw this.failReplace;
     if (this.racing || expected !== current) throw new McpProjectFileChanged();
     this.text = text;
     this.version += 1;

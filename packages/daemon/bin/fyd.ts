@@ -715,6 +715,7 @@ interface AutoResumeBoot {
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
 import { FileCatalogInstallPrefsStore } from '../src/adapters/catalog-installs/prefs-file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
+import { FileLocalMcpInstallStore } from '../src/adapters/local-mcp-installs/file-store.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
 import { FileLocalSkillInstallStore } from '../src/adapters/local-skill-installs/file-store.ts';
 import {
@@ -724,6 +725,7 @@ import {
 } from '../src/adapters/runtime/performance-instruments.ts';
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
+import { LocalMcpInstallService } from '../src/lib/local-mcp-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -13008,6 +13010,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         | 'sessionMcp'
         | 'catalogInstalls'
         | 'localSkillInstalls'
+        | 'localMcpInstalls'
         | 'mcpInventory'
         | 'sharedCatalogs'
         | 'catalogMembers'
@@ -14243,6 +14246,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           skillFiles: new FileProjectSkillFiles(),
           runtimeSkills: new FileRuntimeSkillAssets(join(paths.fleet, 'assets', 'skills')),
           fleet: fleetCatalog,
+          now: () => millisecondClock.now(),
+          mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
+        }),
+        localMcpInstalls: new LocalMcpInstallService({
+          crypto: new WebCryptoRelayCrypto(),
+          store: new FileLocalMcpInstallStore(paths, stateFiles),
+          servers: async () => {
+            const model = (await fleetCatalogDeps.document()).model;
+            return (await mcpInventory.inventory.servers()).map(server => {
+              const name = server.declaration?.name ?? '';
+              return {
+                id: server.id,
+                name,
+                scope: server.scope,
+                harness: server.harness,
+                source: server.source,
+                declaration: server.declaration,
+                component: server.scope === 'component' ? model.components.mcp[name] : undefined,
+                project: server.project === undefined ? undefined : { root: server.project.root },
+                runtimes: server.runtimes.map(use => use.runtime),
+              };
+            });
+          },
+          projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
+          mcpFiles: new FileMcpProjectFiles(),
+          fleet: fleetCatalog,
+          secretNames: async () => new Set((await secretDirectory.list()).map(secret => secret.name)),
           now: () => millisecondClock.now(),
           mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
         }),

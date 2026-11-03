@@ -13,6 +13,14 @@ import type {
   CatalogInstallScope,
 } from './catalog-install.ts';
 import type {
+  LocalMcpInstalled,
+  LocalMcpInstallList,
+  LocalMcpInstallRequest,
+  LocalMcpPreview,
+  LocalMcpPreviewRequest,
+  LocalMcpRemoved,
+} from './local-mcp-install.ts';
+import type {
   LocalSkillInstalled,
   LocalSkillInstallList,
   LocalSkillInstallRequest,
@@ -155,6 +163,14 @@ export interface IFyApiClient {
   localSkillInstalls(): Promise<LocalSkillInstallList>;
   /** Remove exactly the files one local copy wrote. */
   removeLocalSkillInstall(scope: CatalogInstallScope, installId: string): Promise<LocalSkillRemoved>;
+  /** Review copying one MCP server from another account or project on this machine. Writes nothing, and shows no secret value. */
+  previewLocalMcpInstall(scope: CatalogInstallScope, request: LocalMcpPreviewRequest): Promise<LocalMcpPreview>;
+  /** Copy exactly one reviewed local MCP preview, binding each placeholder to one of the caller's own secrets or to nothing. */
+  applyLocalMcpInstall(scope: CatalogInstallScope, request: LocalMcpInstallRequest): Promise<LocalMcpInstalled>;
+  /** The MCP servers this machine copied from itself. */
+  localMcpInstalls(): Promise<LocalMcpInstallList>;
+  /** Remove exactly the server entry one local copy wrote. */
+  removeLocalMcpInstall(scope: CatalogInstallScope, installId: string): Promise<LocalMcpRemoved>;
   daemonUpdate(): Promise<DaemonUpdateView>;
   /** Start, or schedule for idle, the update to `request.target`; the daemon restarts after answering. */
   startDaemonUpdate(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView>;

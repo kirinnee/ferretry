@@ -872,7 +872,7 @@ A skill you already have on this machine can be copied into a project or a runti
 another account's home (`~/.claude/skills`, a runtime's skills folder) or a registered project's
 `.claude/skills` / `.agents/skills`. It is the file installer's twin and keeps its rules
 (`packages/daemon/src/lib/local-skill-installs/`, wire in `packages/protocol/src/lib/local-skill-install.ts`).
-**Skills only**: an MCP server is never copied this way.
+**Skills only**: an MCP server is copied by [its own routes](#copying-an-mcp-server-from-this-machine).
 
 | Route                                                | Capability             | What it does                                                                |
 | ---------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
@@ -949,6 +949,67 @@ fy skill uninstall <installId> [--yes] [--json]
 
 `install` previews, prints the whole review, asks y/N unless `--yes`, then applies. When the daemon wants
 a passkey it says so and changes nothing.
+
+## Copying an MCP server from this machine
+
+An MCP server you already have configured on this machine can be copied into a project's `.mcp.json` or into a
+runtime without a catalog: another account's home, a fleet component, or a registered project. It is
+["Copying a skill from this machine"](#copying-a-skill-from-this-machine)'s twin for servers and keeps its
+conditions (`packages/daemon/src/lib/local-mcp-installs/`, wire in `packages/protocol/src/lib/local-mcp-install.ts`).
+It writes through the same paths a catalog MCP install does, and the writing itself is the one shared module
+(`catalog-installs/mcp-writes.ts`), so there is exactly one of it.
+
+| Route                                              | Capability             | What it does                                                                |
+| -------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
+| `POST /v1/mcp-installs/local/project/preview`      | `filesystem.use`       | reads the source, answers the review and a `previewId`; writes nothing      |
+| `POST /v1/mcp-installs/local/project`              | `filesystem.configure` | writes exactly that preview into the project's `.mcp.json`                  |
+| `POST /v1/mcp-installs/local/runtime/preview`      | `filesystem.use`       | the same, for a runtime and profile (it still reads another account's file) |
+| `POST /v1/mcp-installs/local/runtime`              | `fleet.configure`      | adds it as one fleet change                                                 |
+| `GET /v1/mcp-installs/local`                       | `fleet.use`            | what was copied, and where (project copies need `filesystem.use` too)       |
+| `DELETE /v1/mcp-installs/local/project/:installId` | `filesystem.configure` | removes exactly the entry that copy wrote                                   |
+| `DELETE /v1/mcp-installs/local/runtime/:installId` | `fleet.configure`      | the same, for a runtime copy                                                |
+
+- **Person only.** Every route is `caller: 'person'`: a ferret is refused on all seven (`403 forbidden`), because
+  a server definition is a program a ferret will be started with.
+- **The source is looked up, never opened on the caller's word.** The request names the id `GET /v1/mcp` lists for
+  the server. The daemon finds it again in the machine's MCP inventory; an id the inventory does not list is
+  `local_mcp_source_unknown`, and no file is opened on the caller's say-so. A name that is not a catalog name,
+  Ferretry's own tools server, a raw key or a `${…}` substitution in the command or arguments, or a shape the
+  target cannot hold is `local_mcp_source_invalid`, said at the **preview**.
+- **No secret value is copied or shown.** Nothing in an inventory says which environment value is a secret, so
+  **every environment variable of the source becomes a placeholder** (`${secret:NAME}`, the variable's own
+  name) and its value is dropped. An address's user name and password, and query parameters or a fragment that
+  look like keys, are left out of the address and listed in `skipped`. Headers are never copied. The preview
+  lists the placeholders; the person binds each to one of **their own** secrets at apply (`secretBindings`,
+  names only) or leaves it unbound, which omits the variable and says so. The preview says whether a secret is
+  held only to a caller who may list secret names (`secrets.use`).
+- **The review is a catalog MCP review.** The command and arguments (or the address) in full, the environment
+  names, hidden characters marked, and the same warnings. `origin` says which account or project it is from, as
+  this machine found it.
+- **A preview writes nothing**, lives 600 seconds, is bound to its caller and applies exactly what was reviewed.
+  The destination is judged again at apply.
+- **A copy, never a link.** A project target gets an entry in `.mcp.json`, through the session-MCP file port with
+  compare-and-swap; a bound secret becomes `${VARIABLE}` (the secret must be named like an environment
+  variable, since `.mcp.json` cannot read Ferretry's secrets). A runtime target is a fleet `mcp` component
+  installed through `installCatalogItem` with a **synthetic provenance** (publisher "This machine", catalog
+  "MCP servers on this machine"), a bound secret becoming `${secret:NAME}`. Removing a runtime copy goes
+  through the fleet's own remove proposal.
+- **Refused targets.** A Codex project (`target_unknown`: Codex does not read `.mcp.json`), and a runtime
+  copy of a URL server that uses an OAuth client (`source_invalid`).
+- **One passkey per apply**, for the existing act `catalog-install`, claimed at admission; removing never asks.
+- **The record.** `<FY_HOME>/state/local-mcp-installs.json`, mode `0600`: each copy with the SHA-256 of the entry
+  or component it wrote. Remove and update touch only what a record wrote, and an entry edited since is
+  `local_mcp_conflict`. The record is a file on disk, so its target is validated before anything is changed
+  (a known project, the key this name and root give, a hash), otherwise `local_mcp_target_unknown`. An entry at
+  the destination that no record of ours wrote is a conflict, so a server written by hand is never overwritten.
+- **Refusals** (`LOCAL_MCP_REFUSALS`): `local_mcp_source_unknown` (404), `local_mcp_source_invalid` (422),
+  `local_mcp_target_unknown` (404), `local_mcp_bindings_invalid` (422), `local_mcp_preview_unknown` (404),
+  `local_mcp_preview_expired` (410), `local_mcp_conflict` (409), `local_mcp_install_unknown` (404). An
+  unreadable record is `500`, never a fresh start.
+- **Audit.** `fleet.configured` with `detail.action` `local-mcp-install` or `local-mcp-remove` and the scope: the
+  server's name, never a command, an address or an environment name ([audit.md](audit.md)).
+
+There is no CLI or app surface for it yet; the routes and the `FyApiClient` methods are the contract.
 
 ## Members (phase 2)
 

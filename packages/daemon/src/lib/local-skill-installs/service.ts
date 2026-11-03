@@ -63,9 +63,17 @@ import { skillOf } from '../shared-catalogs/freeze.ts';
 import { readSkillFolder, type SkillTreePort } from '../shared-catalogs/skill-source.ts';
 import { LocalSkillRefusalError } from './ports.ts';
 import { mayHoldSecret } from '../catalog-installs/conservative-changes.ts';
+import {
+  base64Url,
+  canonical,
+  hexOf,
+  LOCAL_CATALOG_ID,
+  LOCAL_PUBLISHER,
+  LOCAL_PUBLISHER_NAME,
+} from '../local-copies/synthetic.ts';
 import { firstCredentialLine } from './credentials.ts';
 import { type HeldLocalSkill, LocalSkillPreviews } from './previews.ts';
-import { type LocalSkillInstalledFile, type LocalSkillInstallRecord, type LocalSkillInstallStore } from './store.ts';
+import type { LocalSkillInstalledFile, LocalSkillInstallRecord, LocalSkillInstallStore } from './store.ts';
 
 export interface LocalSkillInstallServiceDeps {
   readonly crypto: Pick<RelayCrypto, 'sha256'>;
@@ -94,36 +102,11 @@ export interface LocalSkillCaller {
   readonly id: string;
 }
 
-/** The synthetic publisher of a local copy: not a daemon, and not shaped like a real one's key. */
-const LOCAL_SKILL_PUBLISHER = `fy_daemon_${'0'.repeat(43)}`;
-const LOCAL_SKILL_PUBLISHER_NAME = 'This machine';
-const LOCAL_SKILL_CATALOG_ID = `cat_${'0'.repeat(22)}`;
 const LOCAL_SKILL_CATALOG_NAME = 'Skills on this machine';
-
-/** JSON with every object's keys sorted, so the same value always has the same text. */
-const canonical = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (typeof value === 'object' && value !== null)
-    return `{${Object.entries(value)
-      .filter(([, entry]) => entry !== undefined)
-      .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
-      .join(',')}}`;
-  return JSON.stringify(value);
-};
-
-const hexOf = (bytes: Uint8Array): string => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 
 const refuse = (code: LocalSkillRefusalError['code'], message: string): never => {
   throw new LocalSkillRefusalError(code, message);
 };
-
-/** 16 bytes as 22 base64url characters. */
-const base64Url = (bytes: Uint8Array): string =>
-  btoa(String.fromCharCode(...bytes))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/u, '');
 
 const withoutTrailingSlash = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
 
@@ -351,9 +334,9 @@ export class LocalSkillInstallService {
     const item = await this.#bytes(`local-skill-item:${name}`);
     const digest = await this.#hash(canonical({ name, files: files.toSorted((a, b) => (a.path < b.path ? -1 : 1)) }));
     return {
-      publisher: LOCAL_SKILL_PUBLISHER,
-      publisherName: LOCAL_SKILL_PUBLISHER_NAME,
-      catalogId: LOCAL_SKILL_CATALOG_ID,
+      publisher: LOCAL_PUBLISHER,
+      publisherName: LOCAL_PUBLISHER_NAME,
+      catalogId: LOCAL_CATALOG_ID,
       catalogName: LOCAL_SKILL_CATALOG_NAME,
       itemId: `itm_${base64Url(item.subarray(0, 16))}`,
       kind: 'skill',
