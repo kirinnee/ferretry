@@ -25,10 +25,12 @@ this page, which is still how a message reaches the pane.
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
   one message (or one combined delivery, [below](#labels-and-combined-delivery)) typing at a time
   (`planDelivery`). The daemon's notice may pass a ferret message that is still being HELD for combining —
-  a Warden alert never waits behind a ferret's note — but never one that is due. A daemon notice to an interactive session is never in the
-  delivery order (`boardOnly`): that session is the owner's own chat, so it takes the direct path. The board's
-  alerts therefore avoid it: they go to the card's working ferret and its leads first, and reach an interactive
-  session only when none is alive ([board.md](board.md#who-a-board-alert-is-for)).
+  a Warden alert never waits behind a ferret's note — but never one that is due. A daemon notice to an interactive
+  session is never in the delivery order (`boardOnly`): that session is the owner's own chat. Being out of the order
+  does NOT keep it out of the pane — the queue hands it to the direct path, which types it — so a producer that must
+  not type into that chat holds it back itself. The board's alerts do: they go to the card's working ferret and its
+  leads first, and one whose recipient is interactive is journalled on it, never typed
+  ([board.md](board.md#who-a-board-alert-is-for)).
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
   included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
   permission form on screen, a session still launching, or a pane it cannot read, and says which as the
@@ -59,16 +61,24 @@ this page, which is still how a message reaches the pane.
   hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
   answered it; one held for a draft or a question is answered `queued` at once, with the message id as
   `sendId`. `--now` (stop the running turn first) is a flag on the queued message (`interrupt`), not a separate path: it keeps its place, and when its turn comes AND the input box is empty the deliverer hands it over with the send path's own stop-then-type.
-- **No daemon notice is typed into the owner's own chat** (an interactive session): there is no exception
-  for board news, which is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
+- **No board news and no board alert is typed into the owner's own chat** (an interactive session): board news
+  is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)), and a board
+  alert is journalled instead (below). The other daemon notices still are typed there; see **Every producer**.
 - **Board alerts reach the card's working ferret first.** A stale card, a red CI or a PR closed unmerged is addressed to
-  the card's assignee, else its nearest live lead, and to an interactive session only as the last resort
-  ([board.md](board.md#who-a-board-alert-is-for)); that last resort still takes the direct path above.
+  the card's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
+  NOT sent: `BoardAlerts` (`lib/board/alert-sends.ts`) journals it on that session as `board.alert-withheld`
+  and a red CI or closed-unmerged PR on a private card is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
+  journalled only), so the board shows it ([board.md](board.md#who-a-board-alert-is-for)); a mode that cannot be read is sent to as before. Before this, a lead
+  the owner chats with had 177 alerts typed into it as turns in three days (2026-10-31 to 2026-11-03) — 158 "CI is red",
+  17 stale, 2 closed unmerged — 134 on the `direct` path and 43 on `native-inline`, every one `senderKind: daemon`.
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
   re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
   own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
-  agenda answers, the owner's. A daemon message to an INTERACTIVE session still takes the direct path:
-  the queue never types into the owner's own chat, and those producers do not post to its board yet. The
+  agenda answers, the owner's. A daemon message to an INTERACTIVE session still takes the direct path, and so is
+  still typed, for every producer but the board's alerts above: the Warden, the declared-wait watcher, the learning
+  re-instruction, the agenda's attention check, and the board's go-ahead, turn-end and gate checks and reopen
+  words. Holding those back too is a declared GAP — each tells the session something about its own turn or the
+  owner's own words, so it needs its own home before it can stop being typed. The
   owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
   does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
   failure told back to a ferret, and a held message released after a revive, keep the direct path.

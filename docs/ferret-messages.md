@@ -179,10 +179,11 @@ the app shows as a "Ferretry · Board" sender chip — never as text in the mess
 | Reopen (`lib/board/reopen-delivery.ts`)      | the card's assignee, else its owner ferret                 | `&F412 was reopened by the owner: <reason>`                                                                        |
 
 **The alert route.** A stale nudge, a red CI and a closed-unmerged PR go to the card's assignee while it is alive, else
-the nearest live lead above it, else the card's owner (its creator) and the owner's leads — and an interactive session
-only when nobody automatic is left. They are never sent to the session that merely made a card another lead is working.
-The route is `noticeRecipient` (`lib/board/notice-route.ts`); [board.md](board.md#who-a-board-alert-is-for) has the
-rules.
+the nearest live lead above it, else the card's owner (its creator) and the owner's leads. They are never sent to the
+session that merely made a card another lead is working. The route is `noticeRecipient` (`lib/board/notice-route.ts`);
+when it can only name an interactive session, the alert is **not typed** there at all: `BoardAlerts`
+(`lib/board/alert-sends.ts`) journals it on that session (`board.alert-withheld`) and the card shows the fact.
+[board.md](board.md#who-a-board-alert-is-for) has the rules.
 
 The stale nudge goes at most once per card per its lane's stale threshold, whoever receives it, and never to a ferret that
 declared `fy signal waiting`. A go-ahead that could not be sent is said again on the next sweep. The
@@ -193,8 +194,8 @@ because each names its card and says what to do, so nothing needs a "not from th
 
 Declared gaps:
 
-- **An interactive session's daemon messages skip the queue**, because the queue never types a daemon message
-  into the owner's own chat. The direct send path carries the sender itself: the ledger record has
+- **An interactive session's daemon messages skip the queue**, and every one but the three alerts above is still
+  typed, by the direct send path. The direct send path carries the sender itself: the ledger record has
   `senderKind: daemon` and the same `by` the queue item would have held (`SendRecord.by`), so the app draws it
   the way it draws a queued one.
 

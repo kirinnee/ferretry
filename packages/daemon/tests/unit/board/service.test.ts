@@ -3,6 +3,7 @@ import {
   type AgendaItem,
   BoardQuerySchema,
   type BoardTask,
+  type BoardTaskId,
   type BoardTaskActionRequestInput,
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
@@ -13,6 +14,7 @@ import {
 import should from 'should';
 import {
   AgendaCardLinks,
+  AlertSurface,
   actorOf,
   type BoardCaller,
   BoardError,
@@ -1346,6 +1348,30 @@ describe('refiling a card', () => {
 
     // Assert
     should(stored(ports).laneId).equal('todo');
+  });
+
+  it('should let the daemon note a card, as the board alert surface does for a withheld alert', async () => {
+    // Arrange: the real BoardService authority, an open public parent and a private child alerted about.
+    const parent = card({ id: 'F10', askedBy: 'person', owner: 'lead', parent: null });
+    const leaf = card({ id: 'F11', owner: 'lead', assignee: 'child', parent: { id: 'F10' } });
+    const { ports, service } = serviceWith([parent, leaf]);
+    const surface = new AlertSurface({
+      snapshot: async () => await service.snapshot(),
+      note: async (id, text) => {
+        await service.act(id, action({ action: 'note', text }), daemon);
+      },
+      machineId: () => 'machine-1',
+    });
+
+    // Act
+    await surface.surface('F11' as BoardTaskId, '&F11 PR #1 CI is red.');
+
+    // Assert
+    should(lastEvent(ports, 'F10')).match({
+      type: 'note',
+      text: 'sub-card alert, not typed to the interactive lead: &F11 PR #1 CI is red.',
+      actor: { kind: 'daemon' },
+    });
   });
 
   it('should take a named lane, and let the daemon refile too', async () => {

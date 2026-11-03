@@ -851,17 +851,17 @@ Declared GAPs of the return's atomicity:
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to
 grant. This replaced the old `task-boards` access list. The code is `packages/daemon/src/lib/board/authority.ts`.
 
-| Standing        | Who                                                               | May                                                                               |
-| --------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `owner-human`   | the owner: loopback, or a device the `fleet` grant let in         | everything, including owner gates and dependency overrides                        |
-|                 | (on the admin token it is recorded as `admin-token`)              |                                                                                   |
-| `owner`         | the card's owner ferret                                           | the assignee's writes, plus re-plan                                               |
-|                 |                                                                   | and, on an INTERNAL card, passing its gates                                       |
-| `ancestor`      | a ferret above the card's OWNER in the `parent` chain of sessions | the same as the owner                                                             |
-| `assignee-lead` | a ferret above the card's ASSIGNEE, but not above its owner       | drop and reassign the card, nothing else: never a gate, a close or a re-plan      |
-| `assignee`      | the ferret doing it                                               | move, note, link, block, edit files, clarify, reopen, report an external trigger  |
-| `daemon`        | the daemon's own automation                                       | trigger moves, link cache, refile, relocate a removed lane's cards (never closed) |
-| `reader`        | any other ferret                                                  | read; depend, but only from its own card                                          |
+| Standing        | Who                                                               | May                                                                                                                             |
+| --------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `owner-human`   | the owner: loopback, or a device the `fleet` grant let in         | everything, including owner gates and dependency overrides                                                                      |
+|                 | (on the admin token it is recorded as `admin-token`)              |                                                                                                                                 |
+| `owner`         | the card's owner ferret                                           | the assignee's writes, plus re-plan                                                                                             |
+|                 |                                                                   | and, on an INTERNAL card, passing its gates                                                                                     |
+| `ancestor`      | a ferret above the card's OWNER in the `parent` chain of sessions | the same as the owner                                                                                                           |
+| `assignee-lead` | a ferret above the card's ASSIGNEE, but not above its owner       | drop and reassign the card, nothing else: never a gate, a close or a re-plan                                                    |
+| `assignee`      | the ferret doing it                                               | move, note, link, block, edit files, clarify, reopen, report an external trigger                                                |
+| `daemon`        | the daemon's own automation                                       | trigger moves, link cache, refile, note (a withheld alert on a public ancestor), relocate a removed lane's cards (never closed) |
+| `reader`        | any other ferret                                                  | read; depend, but only from its own card                                                                                        |
 
 **A lead plans its whole subtree.** A card is in a ferret's subtree when the ferret asking owns it, or started, directly or through a chain of leads, the card's owner or its assignee (a returned card, owned and held by a middle lead, is still in that lead's subtree). So a lead may drop or assign a card owned by its grandchild, and one assigned to a descendant but owned by another party (a card its subtree was
 handed), as an `assignee-lead`. That reach stops at drop and reassign: the owner ferret's gates and its re-plan belong to the owner's own lineage (`ancestor`), so a lead that only reaches a card through its assignee cannot pass or close an internal card owned by somebody else. A card outside the subtree is a `reader`'s: a sideways sibling, a cousin or a stranger can plan nothing there. This holds for a sub-ferret that leads a
@@ -1087,9 +1087,17 @@ even when a lead was doing the work. Now one function, `noticeRecipient`
 2. else the **nearest live lead above the assignee** (`config.parent`, walked up);
 3. else the card's **owner** (its creator by default), and then the owner's leads, ONLY when nobody in that line is alive;
 4. an **interactive** session (the owner's own chat) only when no automatic session is alive anywhere in that order.
-   Such an alert is sent as it was before: it takes the direct path and never enters the chat's queue
-   ([message-delivery.md](message-delivery.md)). Folding it into the owner's agenda instead is a declared GAP: the agenda is
-   being redesigned and a daemon-written notice there has no home yet.
+   Such an alert is **never typed** into it: `BoardAlerts` (`packages/daemon/src/lib/board/alert-sends.ts`) reads the
+   recipient's `config.mode` at the send, whichever way it was picked — this route, the fallback below, or a
+   sub-ferret's lead standing in — and journals an interactive one's alert on it as `board.alert-withheld` with its
+   words. A red CI or a PR closed unmerged on a **private** card is also written as a note on the card's **nearest
+   public ancestor that is open on the default board** (`AlertSurface`, same file; "open" is the board's own
+   `isOpenOnBoard`, so a dropped ancestor or one in a closed lane is walked past), so the default board shows it without
+   a turn. Declared gap: a private card with no such ancestor — none public, or every public one archived — has no
+   visible place for it (it is in the journal and the card's own history/PR facts),
+   and a stale nudge is journalled only, because a note would count as its parent's activity. A mode that cannot be read
+   (the send document is damaged) is not a reason to hold an alert back: it is sent as before. An automatic session gets every alert as before. Folding them into the
+   owner's agenda is a declared GAP: the agenda is being redesigned, and a lead's turns are the cost this saves.
 
 A session that declared `fy signal waiting` is never nudged, and nobody is nudged in its place. An assignee that
 cannot be read (neither alive nor ended) gets the stale nudge withheld rather than passed to someone else. What is
