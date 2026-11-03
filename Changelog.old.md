@@ -1,3 +1,9 @@
+## [4.254.1](https://github.com/kirinnee/ferretry/compare/v4.254.0...v4.254.1) (2026-11-03)
+
+### Fixes
+
+* **pwa:** keep the owner's cards a lead filed in its own words ([#1402](https://github.com/kirinnee/ferretry/issues/1402)) ([007cde0](https://github.com/kirinnee/ferretry/commit/007cde0df9a2b0145afea46bacd402a80038800a))
+
 ## [4.254.0](https://github.com/kirinnee/ferretry/compare/v4.253.0...v4.254.0) (2026-11-03)
 
 ### Features
