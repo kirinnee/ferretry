@@ -14,6 +14,7 @@ import {
   FY_RENDER_LIMITS,
   type FyRenderWorkspaceReader,
   type FyRenderBlock as ParsedBlock,
+  isFyRenderEmbedBlock,
   parseFyRender,
 } from '../../src/lib/fy-render.ts';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
@@ -40,6 +41,7 @@ import { render as mountTree, run, runAsync } from '../support/react.ts';
 const parsed = (...lines: readonly string[]): ParsedBlock => {
   const result = parseFyRender(lines.join('\n'));
   if (!result.ok) throw new Error(`fixture did not parse: ${result.reason}`);
+  if (isFyRenderEmbedBlock(result.block)) throw new Error('fixture is an embed block');
   return result.block;
 };
 

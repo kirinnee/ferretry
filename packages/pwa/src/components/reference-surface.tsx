@@ -27,6 +27,7 @@ import type { AgendaId, BrowserStatus, SessionView, TerminalListView } from '@fe
 import { createContext, type ReactNode, useContext } from 'react';
 
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
+import type { DaemonBoardStore } from '../lib/board-store.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../lib/pages/routes.ts';
@@ -119,6 +120,11 @@ export interface SessionReferenceSurfaceOptions {
   /** False when this machine has no board route (an older daemon): `&F12` then keeps the Tasks destination. */
   readonly cardRoute?: boolean;
   /**
+   * The board store a `card` or `board` block reads and stays live through. Without it, or on a machine with
+   * no card route, those blocks stay ordinary code fences.
+   */
+  readonly boardStore?: DaemonBoardStore | undefined;
+  /**
    * Where the session page shows what a reference opens — the split workspace's tabs and the context
    * rail. Each one absent falls back to this scope's side pane, which is what a host with no
    * workspace (a test, a harness card) still has. The CLICK is the same either way: Markdown calls
@@ -164,6 +170,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     browser,
     onNavigate,
     cardRoute = true,
+    boardStore,
     destinations = {},
   } = options;
   const agenda = agendaIds === undefined ? undefined : new Set<string>(agendaIds);
@@ -189,6 +196,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     // "closed" as opposed to "unknown", and it answers nothing when it has no
     // listing to answer from.
     surfaceReferenceResolver: createSurfaceReferenceResolver(scope, terminals, browser),
+    ...(boardStore === undefined || !cardRoute ? {} : { cardEmbed: { store: boardStore, connection } }),
     resolveFilePaths: async (candidates, signal) =>
       await resolveFsFilePaths(connection, scope, candidates, cwd, fetcher, signal),
     // A `fy-render` media block's `src: @path`, read through the same route and the same grants an

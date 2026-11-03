@@ -153,6 +153,7 @@ import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './ho
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
+import { useFerretCallsigns } from './hooks/use-ferret-callsigns.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
@@ -277,7 +278,6 @@ import { joinOutbox, joinQueue, queueActions, readSessionQueue, withdrawReplyVia
 import type { CachedTranscript } from './lib/session-cache.ts';
 import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import {
-  type AppStore,
   createAppStore,
   StoreProvider,
   useAppStore,
@@ -2392,23 +2392,6 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       }}
     />
   );
-}
-
-/** Every ferret's callsign by session id, from the sessions every paired machine reports. */
-function useFerretCallsigns(store: AppStore): ReadonlyMap<string, string> {
-  const fleet = useSyncExternalStore(
-    listener => store.fleet.subscribe(listener),
-    () => store.fleet.getSnapshot(),
-  );
-  return useMemo(() => {
-    const names = new Map<string, string>();
-    for (const slice of fleet.daemons.values()) {
-      for (const session of slice.sessions ?? []) {
-        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
-      }
-    }
-    return names;
-  }, [fleet]);
 }
 
 /**
