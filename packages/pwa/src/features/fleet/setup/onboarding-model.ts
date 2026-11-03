@@ -225,8 +225,11 @@ export const onboardingLaterHref = (daemonId: DaemonId, machineName: string, id:
 
 // ── Done ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** The machine default speech engine as the Defaults page names it: `off` is no default at all. */
-export type DefaultVoice = 'browser' | 'parakeet' | 'off';
+/**
+ * The machine default speech engine as the Defaults page names it. `device` is NO machine default, not
+ * "voice off": a device with no choice of its own still dictates with its own default (Parakeet).
+ */
+export type DefaultVoice = 'browser' | 'parakeet' | 'device';
 
 /** Facts the steps learned on the way, so Done can say WHAT was set and not only that it was. */
 export interface OnboardingDoneFacts {
@@ -303,7 +306,7 @@ export const onboardingDoneRows = (
 const VOICE_WORDS: Readonly<Record<DefaultVoice, string>> = {
   browser: 'browser voice',
   parakeet: 'Parakeet voice',
-  off: 'no default voice',
+  device: 'each device’s default voice',
 };
 
 const CONTROL_WORDS: readonly (readonly [keyof FleetAgentControl, string])[] = [

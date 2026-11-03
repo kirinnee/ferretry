@@ -240,7 +240,7 @@ describe('OnboardingDefaultsStep', () => {
       ...(options.machine === undefined ? {} : { machine: options.machine }),
       ...(options.checking === undefined ? {} : { checking: options.checking }),
     });
-    const finished = { count: 0 };
+    const finished = { count: 0, here: [] as boolean[] };
     return {
       ...made,
       finished,
@@ -248,8 +248,9 @@ describe('OnboardingDefaultsStep', () => {
         <OnboardingDefaultsStep
           tab={made.tab}
           voice={options.voice === undefined ? null : options.voice}
-          onFinished={() => {
+          onFinished={stillHere => {
             finished.count += 1;
+            finished.here.push(stillHere);
           }}
         />
       ),
@@ -283,7 +284,7 @@ describe('OnboardingDefaultsStep', () => {
     expect(Array.from(select().options).map(option => option.textContent)).toEqual([
       'Browser voice',
       'Parakeet (683 MB, on device)',
-      'Off',
+      'Each device’s default',
     ]);
     expect(learningBox()?.checked).toBe(true);
     expect(control('terminals')?.checked).toBe(true);
@@ -292,10 +293,13 @@ describe('OnboardingDefaultsStep', () => {
     expect(view?.container.querySelectorAll('[data-agent-control-kind]')).toHaveLength(5);
   });
 
-  it('shows Off when voice.yaml names no default', async () => {
+  it('shows the device default, not Off, when voice.yaml names no default — and says voice stays on', async () => {
     const { element } = defaults({ ...READS, [VOICE_FILE_PATH]: voiceFile('# mine\n') });
     await show(element);
-    expect(select().value).toBe('off');
+    expect(select().value).toBe('device');
+    expect(Array.from(select().options).map(option => option.textContent)).not.toContain('Off');
+    expect(text('[data-default-row="voice"]')).toContain('Voice stays on');
+    expect(text('[data-default-row="voice"]')).toContain('Parakeet on that device');
   });
 
   it('holds the one primary back while it is still reading', async () => {
@@ -321,6 +325,7 @@ describe('OnboardingDefaultsStep', () => {
     expect(calls.slice(before)).toEqual([]);
     expect(finished.count).toBe(1);
     expect(retried.count).toBe(0);
+    expect(finished.here).toEqual([true]);
   });
 
   it('saves only what changed: learning alone is one PATCH, and nothing else', async () => {
@@ -346,10 +351,10 @@ describe('OnboardingDefaultsStep', () => {
     expect(finished.count).toBe(1);
   });
 
-  it('turns the default voice off by removing the line, keeping the rest', async () => {
+  it('clears the machine default by removing the line, keeping the rest', async () => {
     const { element, calls } = defaults();
     await show(element);
-    await pick('off');
+    await pick('device');
     await click(useThese(), 'Use these');
     expect(writes(calls)[0]?.body).toMatchObject({ text: '# mine\n' });
   });
@@ -360,8 +365,8 @@ describe('OnboardingDefaultsStep', () => {
     await show(element);
     await click(useThese(), 'Use these with nothing changed');
     expect(picked.installs.count).toBe(0);
-    await pick('off');
-    await click(useThese(), 'Use these with Off');
+    await pick('device');
+    await click(useThese(), 'Use these with the device default');
     expect(picked.installs.count).toBe(0);
     await pick('parakeet');
     await click(useThese(), 'Use these with Parakeet');
@@ -413,7 +418,7 @@ describe('OnboardingDefaultsStep', () => {
     await show(element);
     await click(control('terminals'), 'Terminals');
     await click(learningBox(), 'the learning box');
-    await pick('off');
+    await pick('device');
     await click(useThese(), 'Use these');
     expect(text('[data-change-refusal]')).toBe('The machine refused.');
     expect(q('[data-change-refusal]')?.getAttribute('role')).toBe('alert');
@@ -438,7 +443,7 @@ describe('OnboardingDefaultsStep', () => {
       [LEARNING]: (call: Call) => (call.body === undefined ? learning(true) : learningUp ? learning(false) : refusal()),
     });
     await show(element);
-    await pick('off');
+    await pick('device');
     await click(learningBox(), 'the learning box');
     await click(useThese(), 'Use these');
     expect(finished.count).toBe(0);

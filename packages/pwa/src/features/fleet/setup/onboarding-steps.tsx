@@ -13,7 +13,7 @@
  */
 
 import { type FleetAgentControl, LearningConfigSchema, type VoiceEngine } from '@ferretry/protocol';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useParakeetInstall } from '../../../hooks/use-parakeet-install.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useParakeetVoice } from '../../../lib/store.tsx';
@@ -122,16 +122,18 @@ export function OnboardingStartStep({
 const VOICE_OPTIONS: readonly { readonly id: DefaultVoice; readonly label: string }[] = [
   { id: 'browser', label: 'Browser voice' },
   { id: 'parakeet', label: `Parakeet (${PARAKEET_DOWNLOAD_SIZE}, on device)` },
-  { id: 'off', label: 'Off' },
+  { id: 'device', label: 'Each device’s default' },
 ];
 
 const VOICE_DETAIL: Readonly<Record<DefaultVoice, string>> = {
-  browser: 'Your browser’s speech recognition. It sends what you say to your browser vendor.',
-  parakeet: `Speech turns into text on this device and never leaves it. ${PARAKEET_DOWNLOAD_SIZE} downloads when you use these.`,
-  off: 'No default voice. Each device chooses its own in Settings › Dictation.',
+  browser:
+    'Your browser’s speech recognition. It sends what you say to your browser vendor. A device that picked its own engine keeps it.',
+  parakeet: `Speech turns into text on this device and never leaves it. ${PARAKEET_DOWNLOAD_SIZE} downloads when you use these. A device that picked its own engine keeps it.`,
+  device:
+    'Nothing is set for this machine. Voice stays on: until a device picks one in Settings › Dictation, it dictates with Parakeet on that device.',
 };
 
-const voiceOf = (engine: VoiceEngine | null): DefaultVoice => engine ?? 'off';
+const voiceOf = (engine: VoiceEngine | null): DefaultVoice => engine ?? 'device';
 
 /** What a row's read left it as: still reading, read, or could not be read (its row is left out of the save). */
 type Read<T> =
@@ -187,8 +189,8 @@ export function OnboardingDefaultsStep({
   readonly tab: MachineTabProps;
   /** Parakeet on this device; the app's own unless a test or the harness hands one in. */
   readonly voice?: ParakeetVoice | null;
-  /** Everything that changed was saved: the page moves on. */
-  readonly onFinished: () => void;
+  /** Everything that changed was saved. `stillHere` is false when the person left the page while it saved: it is set, but they keep the page they chose. */
+  readonly onFinished: (stillHere: boolean) => void;
 }) {
   const { connection, createClient, machine, machineName, checking, onRetry } = tab;
   const access = useSetupAccess({ connection, createClient });
@@ -206,6 +208,14 @@ export function OnboardingDefaultsStep({
   const [baseControl, setBaseControl] = useState<FleetAgentControl | null>(null);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // One mount is one visit: leaving the page (Back, Skip, the rail) ends it, even if a save is still running.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -272,7 +282,7 @@ export function OnboardingDefaultsStep({
         const client = await createClient(connection);
         const file = await readConfigFile(client, VOICE_FILE);
         const next =
-          voiceNow === 'off' ? withoutMachineVoiceEngine(file.text) : withMachineVoiceEngine(file.text, voiceNow);
+          voiceNow === 'device' ? withoutMachineVoiceEngine(file.text) : withMachineVoiceEngine(file.text, voiceNow);
         await writeConfigFile(client, VOICE_FILE, next, file.etag);
         setBaseVoice({ kind: 'read', value: voiceNow });
         setPickedVoice(null);
@@ -280,7 +290,7 @@ export function OnboardingDefaultsStep({
         if (voiceNow === 'parakeet' && (install.phase === 'absent' || install.phase === 'partial'))
           void parakeet?.install();
       }
-      onFinished();
+      onFinished(here.current);
     } catch (cause) {
       setProblem(changeRefusalSentence(cause));
     } finally {

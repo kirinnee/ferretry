@@ -310,7 +310,7 @@ describe('the defaults sentence', () => {
         agentControl: { ...allOn, terminals: false, browsers: false, files: false },
       }),
     ).toBe('Defaults: Parakeet voice, learning off, agents may use nothing.');
-    expect(onboardingDefaultsSentence({ voice: 'off' })).toBe('Defaults: no default voice.');
+    expect(onboardingDefaultsSentence({ voice: 'device' })).toBe('Defaults: each device’s default voice.');
   });
 
   it('claims nothing it did not read', () => {

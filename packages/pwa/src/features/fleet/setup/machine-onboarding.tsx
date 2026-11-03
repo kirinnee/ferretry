@@ -130,7 +130,7 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
         ...(speedups === null
           ? {}
           : { keys: Object.fromEntries(speedups.providers.map(provider => [provider.label, provider.set])) }),
-        ...(voiceFile === null ? {} : { voice: machineVoiceEngine(voiceFile.text) ?? ('off' as const) }),
+        ...(voiceFile === null ? {} : { voice: machineVoiceEngine(voiceFile.text) ?? ('device' as const) }),
         ...(learning === null ? {} : { passiveDefault: learning.passiveDefault }),
         ...(runtimes === null
           ? {}
@@ -264,7 +264,7 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
           <OnboardingDefaultsStep
             tab={tab}
             {...(voice === undefined ? {} : { voice })}
-            onFinished={() => move(current => next(markOnboardingStep(current, 'defaults')))}
+            onFinished={stillHere => move(current => completeOnboardingStep(current, 'defaults', stillHere, steps))}
           />
         );
       case 'done':

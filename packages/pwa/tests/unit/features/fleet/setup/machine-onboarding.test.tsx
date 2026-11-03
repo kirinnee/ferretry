@@ -576,6 +576,53 @@ describe('MachineOnboarding · Defaults', () => {
     await screen.rail('defaults');
     expect(screen.q('[data-default-unread="agents"]')).not.toBeNull();
   });
+
+  describe('a save that finishes after the person has gone Back', () => {
+    const railState = (screen: Screen, id: string) =>
+      screen.all(`[data-onboarding-rail="column"] [data-onboarding-go="${id}"]`)[0]?.getAttribute('data-state');
+
+    const heldSave = async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const target = daemon({
+        ...SET_UP_READS,
+        'PATCH /v1/learning/config': () => learningConfig({ passiveDefault: false }),
+      });
+      const client: FleetClient = {
+        request: async (path, schema, init) => {
+          if (path === '/v1/learning/config' && init?.method === 'PATCH') await gate;
+          return await target.request(path, schema, init);
+        },
+      };
+      const screen = await render({ props: { ...ALONE, voice: installedVoice() }, createClient: async () => client });
+      await screen.rail('defaults');
+      await screen.click('input[aria-label="Learn from my corrections"]');
+      await screen.click('[data-onboarding-primary="use-defaults"]');
+      return { screen, release };
+    };
+
+    it('keeps the page the person went back to, and does not mark the page it came from', async () => {
+      const { screen, release } = await heldSave();
+      await screen.click('[data-onboarding-back]');
+      expect(screen.at()).toBe('speedups');
+      release();
+      await settle();
+      expect(screen.at()).toBe('speedups');
+      expect(railState(screen, 'speedups')).toBe('todo');
+      expect(railState(screen, 'defaults')).toBe('done');
+    });
+
+    it('still moves on when the person stayed on Defaults', async () => {
+      const { screen, release } = await heldSave();
+      expect(screen.at()).toBe('defaults');
+      release();
+      await settle();
+      expect(screen.at()).toBe('done');
+      expect(railState(screen, 'defaults')).toBe('done');
+    });
+  });
 });
 
 // ── Claude Code and Codex ────────────────────────────────────────────────────────────────────────
