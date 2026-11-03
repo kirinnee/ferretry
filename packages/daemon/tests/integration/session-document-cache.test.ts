@@ -7,7 +7,7 @@
  * saves, and every way a document can change that must still be seen.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -64,9 +64,9 @@ class PlainStateFileSystem extends CountingStateFileSystem {
   }
 }
 
-async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem) {
-  const home = await mkdtemp(join(tmpdir(), 'fy-document-cache-'));
-  homes.push(home);
+async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem, existingHome?: string) {
+  const home = existingHome ?? (await mkdtemp(join(tmpdir(), 'fy-document-cache-')));
+  if (existingHome === undefined) homes.push(home);
   let fileSystem: CountingStateFileSystem | undefined;
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
@@ -275,6 +275,59 @@ describe('the session document cache', () => {
     should(fileSystem.identifiedReads).deepEqual([]);
     should(surveyed.map(session => session.id)).deepEqual([ID]);
   });
+});
+
+/**
+ * A fleet whose documents outnumber the fixed bound the cache once had: 1,400 sessions, three documents each,
+ * written straight into a home the way a daemon finds them when it starts.
+ */
+async function largeFleet(sessions: number) {
+  const first = await openStorage(paths => new CountingStateFileSystem(paths));
+  const { paths } = first;
+  await first.storage.close();
+  const ids = Array.from({ length: sessions }, (_, index) => parseSessionId(`fleet-${String(index).padStart(5, '0')}`));
+  for (const id of ids) {
+    const session = createSessionPaths(paths, id);
+    await mkdir(session.directory, { recursive: true, mode: 0o700 });
+    await writeFile(session.marker, '2\n', { mode: 0o600 });
+    await writeFile(session.config, JSON.stringify({ id, name: id }), { mode: 0o600 });
+    await writeFile(session.state, JSON.stringify({ id, status: 'exited' }), { mode: 0o600 });
+    await writeFile(session.events, '', { mode: 0o600 });
+  }
+  const home = paths.home;
+  return { ...(await openStorage(made => new CountingStateFileSystem(made), home)), ids };
+}
+
+describe('the session document cache on a large fleet', () => {
+  it('should hold every document of a fleet past 1,365 sessions, so a second walk reads none of them', async () => {
+    // Arrange — 1,400 sessions put 4,200 documents in the cache, past the 4,096 a fixed bound held: every walk
+    // emptied it part-way, and every read after that was a walked read and a parse.
+    const { storage, fileSystem, ids } = await largeFleet(1_400);
+    const walk = async () => {
+      for (const id of ids) await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    };
+    await walk();
+    fileSystem.identifiedReads = [];
+
+    // Act
+    await walk();
+
+    // Assert
+    should(fileSystem.identifiedReads).deepEqual([]);
+  }, 60_000);
+
+  it('should still read a document that changed in a fleet that large', async () => {
+    // Arrange
+    const { storage, paths, ids } = await largeFleet(1_400);
+    for (const id of ids) await storage.readState(id);
+    const changed = ids[0] as (typeof ids)[number];
+
+    // Act
+    await writeFile(createSessionPaths(paths, changed).state, JSON.stringify({ id: changed, status: 'running' }));
+
+    // Assert
+    should(((await storage.readState(changed)) as Record<string, unknown>).status).equal('running');
+  }, 60_000);
 });
 
 describe('StateFileSystem identities', () => {
