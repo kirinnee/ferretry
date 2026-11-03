@@ -144,6 +144,8 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
   const carried: Array<readonly [string, string, readonly string[]]> = [];
   /** An item the gates' reads stop seeing after this many reads: one pruned, or closed and gone, mid-answer. */
   let vanishing: { id: string; after: number } | undefined;
+  /** An item whose asks the gates' reads stop seeing after this many reads: one that lost them mid-answer. */
+  let unasking: { id: string; after: number } | undefined;
   let gates: GateItems | undefined;
   const board = new BoardService(
     world({
@@ -156,6 +158,25 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       },
     }),
   );
+  const unasked = (listed: Awaited<ReturnType<AgendaService['list']>>) => {
+    if (unasking === undefined || !listed.ok) return listed;
+    if (unasking.after > 0) {
+      unasking.after -= 1;
+      return listed;
+    }
+    const bare = unasking.id;
+    return {
+      ...listed,
+      value: {
+        ...listed.value,
+        items: listed.value.items.map(each => {
+          if (each.id !== bare) return each;
+          const { cardAsks: _asks, gateAttached: _mirror, ...rest } = each;
+          return rest;
+        }),
+      },
+    };
+  };
   const homes = {
     of: async (sessionId: string) => {
       const home = faults.homes?.[sessionId];
@@ -182,7 +203,8 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       agenda: {
         list: async sessionId => {
           if (faults.unreadable?.includes(sessionId) === true) throw new Error('the agenda is unreadable');
-          const listed = await agenda.list(sessionId);
+          const read = await agenda.list(sessionId);
+          const listed = unasked(read);
           if (vanishing === undefined || !listed.ok) return listed;
           if (vanishing.after > 0) {
             vanishing.after -= 1;
@@ -312,6 +334,9 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     store,
     vanish: (id: string, after: number) => {
       vanishing = { id, after };
+    },
+    unask: (id: string, after: number) => {
+      unasking = { id, after };
     },
     reopen,
     done,
@@ -582,6 +607,34 @@ describe('a card at a gate asks on its agenda, never on its own', () => {
 
     // Assert — the snooze stands
     should(agendaState(openOf(world, 'lead', id)).state).equal('snoozed');
+  });
+
+  it('leaves a thread as it is when the ask it carried was put before asks remembered their turn', async () => {
+    // Arrange — the lead's thread carries an ask written without the turn it woke the thread out of
+    const world = fixture([leads()]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    await world.board.trigger('F1', 'release.running');
+    const ledger = world.ledgers.ledgers.get('lead');
+    if (ledger === undefined) throw new Error('expected the lead’s ledger');
+    world.ledgers.ledgers.set('lead', {
+      ...ledger,
+      entries: ledger.entries.map(entry => {
+        if (entry.lifecycle !== 'active' || entry.item.id !== id) return entry;
+        const cardAsks = entry.item.cardAsks?.map(({ woke: _woke, ...ask }) => ask);
+        return { ...entry, item: { ...entry.item, ...(cardAsks === undefined ? {} : { cardAsks }) } };
+      }),
+    });
+    should(openOf(world, 'lead', id).cardAsks?.[0]?.woke).be.undefined();
+
+    // Act
+    await world.move('closed');
+
+    // Assert — still open, with no ask left
+    const after = openOf(world, 'lead', id);
+    should(after.cardAsks).be.undefined();
+    should(after.gateAttached).be.undefined();
   });
 
   it('asks the next entry on a fresh agenda when the card comes back to the gate', async () => {
@@ -942,6 +995,50 @@ describe('answering a card ask', () => {
 
     // Assert — the repeat of A's answer comes back unchanged
     should(retried).match({ handled: true, mutation: { ok: true, changed: false } });
+  });
+
+  it('reads an older app’s answer that repeats neither of two recent answers against the newest one, and refuses it', async () => {
+    // Arrange — A (F1) and B (F2) both answered Done on one thread, within two minutes
+    const world = fixture([leads(), leads({ id: 'F2' })]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    await world.board.trigger('F1', 'release.running');
+    const lead = { sessionId: 'lead' };
+    await world.answer(id, choose('Done'), { ...lead, cardAsk: 'gate:F1:tested:2' });
+    await world.board.trigger('F2', 'release.running');
+    const f2 = gateOf({ task: world.stored('F2'), laneSet: lanes(), audience: 'external' }, stageGateLanes);
+    if (f2 === undefined) throw new Error('expected F2 at its gate');
+    await world.agenda.cardAsk('lead', id, { kind: 'attach', ask: { gate: f2 } });
+    await world.answer(id, choose('Done'), { ...lead, cardAsk: 'gate:F2:tested:2' });
+    should(openOf(world, 'lead', id).cardAsks?.filter(ask => ask.answer !== undefined)).have.length(2);
+    should(openOf(world, 'lead', id).gateAttached).be.undefined();
+
+    // Act — an old app's Not good with words: neither answer said that
+    const other = await world.answer(id, choose('Not good'), { ...lead, gate: true, note: 'it broke' });
+
+    // Assert — read against B, the newest, as a different answer to it
+    should(other).match({
+      handled: true,
+      refused: { code: 'moved-on', message: `${id}'s card ask was already answered, differently: nothing was sent` },
+    });
+    should(world.reopen.notices).be.empty();
+  });
+
+  it('refuses an older app’s answer when the ask it shows is gone by the time the answer runs', async () => {
+    // Arrange — the agenda shows an ask when the answer is looked up, and none when its turn comes
+    const { world, item } = await atTest();
+    world.unask(item.id, 1);
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Done'), { gate: true });
+
+    // Assert
+    should(outcome).match({
+      handled: true,
+      refused: { code: 'moved-on', message: `${item.id} no longer carries that card ask, so nothing was moved` },
+    });
+    should(world.stored().laneId).equal('tested');
   });
 
   it('takes an older app’s exact repeat once nothing is left to show, open agenda or closed', async () => {
