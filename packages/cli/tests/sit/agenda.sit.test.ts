@@ -70,6 +70,11 @@ class FakeAgendaDaemon {
     this.#server.stop(true);
   }
 
+  /** An item the daemon itself opened, as it would on a card's behalf: the CLI never raises one. */
+  seed(item: AgendaItem): void {
+    this.#items.push(item);
+  }
+
   #snapshot(): AgendaSnapshot {
     return {
       v: AGENDA_SCHEMA_VERSION,
@@ -486,6 +491,54 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(listed.out).containEql('notice: read, not answered (pinged)');
     should(retired.code).not.equal(0);
     should(retired.err).containEql("unknown option '--title'");
+  });
+
+  it('lists a card agenda that carries a card ask as one agenda, read through the wire contract (docs/agenda.md § Card asks)', async () => {
+    // Arrange — the daemon opened ONE agenda for a card at its gate, carrying the ask with its How to test
+    daemon.seed(
+      AgendaItemSchema.parse({
+        id: 'A90',
+        source: 'task',
+        sourceRef: 'card-agenda:F412',
+        subject: 'Try it: open the Board',
+        why: '&F412 reached Released.',
+        waitingSince: EPOCH,
+        howToResolve: 'Answer the card’s ask here (its buttons move the card); reply to talk it over.',
+        ask: { kind: 'open-question' },
+        kind: 'reply',
+        title: 'Badge fix',
+        task: { id: 'F412' },
+        stage: 'test',
+        cardAsks: [
+          {
+            gate: {
+              cardId: 'F412',
+              laneId: 'released',
+              laneName: 'Released',
+              entry: 2,
+              projectId: 'p-1',
+              options: [
+                { id: 'done', label: 'Done', outcome: 'close' },
+                { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+              ],
+            },
+            at: EPOCH,
+            howToTest: '1. Open the Board\n2. Look for the badge',
+          },
+        ],
+        raisedBy: 'daemon',
+        raisedBySession: null,
+        raisedByName: null,
+      }),
+    );
+
+    // Act
+    const listed = await cli(['ls']);
+
+    // Assert — the real CLI parsed the card ask and lists the agenda, never a separate gate item
+    should(listed.code).equal(0, listed.err);
+    should(listed.out).containEql('!A90');
+    should(listed.out).containEql('Badge fix');
   });
 });
 
