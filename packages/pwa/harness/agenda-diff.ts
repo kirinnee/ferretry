@@ -29,12 +29,12 @@ const item = (id: string, minutes: number, patch: Partial<AgendaItem>): AgendaIt
 const BADGE_V1 = 'The number on the Inbox tab: how many items wait on you.';
 const BADGE_V3 = 'The number on the Inbox tab: how many open items wait on you.';
 
-/** A sixty-sentence rollout report in one paragraph: far more pieces than one block of lines is paired over. */
+/** A sixty-line rollout report: one word edited in the middle, so the unchanged lines either side fold. */
 const rollout = (word: string): string =>
   Array.from(
     { length: 60 },
     (_, index) => `Stage ${String(index + 1)} of the rollout ${index === 30 ? word : 'finished'} cleanly.`,
-  ).join(' ');
+  ).join('\n');
 
 const BASE = {
   title: 'Should the badge count snoozed items?',

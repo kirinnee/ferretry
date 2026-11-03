@@ -232,7 +232,12 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     );
     await scrollToSelector(page, '[data-agenda-diff]');
     await shot(page, 'changes', form, theme);
-    // The one changed word sits in the middle of sixty sentences: the picture centres on it.
+    const folds = await page.locator('[data-agenda-diff-section="detail"] [data-agenda-diff-fold]').allTextContents();
+    check(
+      folds.length === 2 && folds.every(text => /unchanged lines/.test(text)),
+      `${label('diff')}: the long report does not fold its unchanged lines either side of the change (${folds.join(' | ')})`,
+    );
+    // The one changed word sits in the middle of sixty lines: the picture centres on it.
     await page.evaluate(() =>
       document.querySelector('[data-agenda-diff-section="detail"] del')?.scrollIntoView({ block: 'center' }),
     );
