@@ -913,7 +913,7 @@ browser retries continue forever. Slower paths exist: a daemon dial can itself w
 stranded until the 10-minute lease, because an admission without live evidence cannot reclaim them at once
 (`hosted-control.ts`, `hosted.ts`) — a `4432` then makes the daemon wait 60–120 s before its next try
 (`bun-relay-carrier.ts`, `carrier.ts`). **Durable daemon work is preserved**, because the relay holds no
-durable state: a session is a pair of sockets and the work lives on the daemon. **Transport state is not:**
+durable daemon application data: a session is a pair of sockets and the work lives on the daemon. **Transport state is not:**
 frames in flight are lost, and terminal bytes in flight can be lost — the browser sends them as stream
 records (`web-terminals.ts`), and a new attach redraws the screen without replaying input; per §9, writes are
 never blindly retried. These figures are derived from the constants above, not measured on the live
