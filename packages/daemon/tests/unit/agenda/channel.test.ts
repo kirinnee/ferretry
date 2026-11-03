@@ -298,6 +298,18 @@ describe('a replaced ask', () => {
     should(cleared.item?.askVersion).be.undefined();
   });
 
+  const raised = (request: Partial<RaiseAgendaRequest>) =>
+    ok(
+      applyAgendaCommandToSession(null, SESSION_ID, {
+        action: 'raise',
+        actor: AGENT,
+        request: { ...REGION, ...request },
+        at: T0,
+      }),
+    ).ledger;
+  const recompose = (ledger: AgendaLedger, patch: Extract<AgendaCommand, { action: 'edit' }>['patch']) =>
+    ok(apply(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: T3 }));
+
   const reoptioned = (ledger: AgendaLedger, at = T3) =>
     apply(ledger, {
       action: 'edit',
@@ -368,18 +380,6 @@ describe('a replaced ask', () => {
   });
 
   describe('a kind that moves takes none of the old shape', () => {
-    const raised = (request: Partial<RaiseAgendaRequest>) =>
-      ok(
-        applyAgendaCommandToSession(null, SESSION_ID, {
-          action: 'raise',
-          actor: AGENT,
-          request: { ...REGION, ...request },
-          at: T0,
-        }),
-      ).ledger;
-    const recompose = (ledger: AgendaLedger, patch: Extract<AgendaCommand, { action: 'edit' }>['patch']) =>
-      ok(apply(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: T3 }));
-
     it('should turn a reply with questions into an info, and record the questions it dropped', () => {
       // Arrange
       const asks = raised({
@@ -426,6 +426,235 @@ describe('a replaced ask', () => {
       should(edited.item?.fields).be.undefined();
       should(edited.item?.kind).equal('reply');
       should(edited.item?.revisions?.at(-1)?.changed).containDeep(['kind', 'fields']);
+    });
+  });
+
+  describe('a close given from the ask', () => {
+    const todo = () => raised({ kind: 'task', ask: { kind: 'task' }, steps: ['Build', 'Ship'] });
+    const replacedTodo = () =>
+      recompose(todo(), {
+        kind: 'choice',
+        ask: { kind: 'multiple-choice', options: [{ label: 'EU' }, { label: 'Asia' }] },
+      }).ledger;
+    const close = (ledger: AgendaLedger, action: 'resolve' | 'dismiss', askVersion?: number) =>
+      apply(ledger, {
+        action,
+        actor: HUMAN,
+        id: 'A1',
+        at: T4,
+        ...(askVersion === undefined ? {} : { askVersion }),
+      });
+
+    it('should refuse a held Done or Skip given from the old ask 409 ask_changed, and leave the new question open', () => {
+      // Arrange — the owner tapped Mark as done on the to-do; the ferret replaced it with a choice before it was sent
+      const replaced = replacedTodo();
+
+      // Act
+      const done = refused(close(replaced, 'resolve', 1));
+      const skipped = refused(close(replaced, 'dismiss', 1));
+
+      // Assert
+      should(done.error.code).equal('ask_changed');
+      should(skipped.error.code).equal('ask_changed');
+      should(item(replaced)).containDeep({ askVersion: 2, kind: 'choice' });
+      should(queue(replaced)).deepEqual(['A1']);
+    });
+
+    it('should close the item on a Done or Skip given from the ask it shows', () => {
+      // Arrange
+      const replaced = replacedTodo();
+
+      // Act
+      const done = ok(close(replaced, 'resolve', 2));
+      const skipped = ok(close(replaced, 'dismiss', 2));
+      const unreplaced = ok(close(todo(), 'resolve', 1));
+
+      // Assert
+      should(done.change).equal('resolved');
+      should(skipped.change).equal('dismissed');
+      should(unreplaced.change).equal('resolved');
+    });
+
+    it('should still close the item as it stands on a close that names no ask, the owner’s own explicit closing', () => {
+      // Act
+      const done = ok(close(replacedTodo(), 'resolve'));
+      const skipped = ok(close(replacedTodo(), 'dismiss'));
+
+      // Assert
+      should(done.change).equal('resolved');
+      should(skipped.change).equal('dismissed');
+      should(done.snapshot.count).equal(0);
+    });
+  });
+
+  describe('a form whose fields change', () => {
+    const FIELDS: NonNullable<RaiseAgendaRequest['fields']> = [
+      { id: 'region', type: 'one', label: 'Region?', options: [{ label: 'EU' }, { label: 'US' }] },
+      { id: 'note', type: 'text', label: 'Anything else?' },
+    ];
+    const form = () => raised({ kind: 'form', ask: { kind: 'open-question' }, fields: FIELDS });
+    const stale = (ledger: AgendaLedger, askVersion?: number) =>
+      apply(ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'form', answers: [{ id: 'region', picked: 'EU' }] },
+        at: T4,
+        ...(askVersion === undefined ? {} : { askVersion }),
+      });
+
+    it('should take other options on a field as a new ask, and refuse the stale form answer that still fits', () => {
+      // Arrange — the tab showed EU/US and chose EU; the ferret replaces the region field's options with EU/Asia
+      const fields = FIELDS.map(field =>
+        field.id === 'region' ? { ...field, options: [{ label: 'EU' }, { label: 'Asia' }] } : field,
+      );
+
+      // Act
+      const replaced = recompose(form(), { fields });
+      const old = refused(stale(replaced.ledger, 1));
+      const current = ok(stale(replaced.ledger, 2));
+
+      // Assert
+      should(replaced.item).containDeep({ askVersion: 2, waitingSince: T3 });
+      should(replaced.item?.revisions?.at(-1)?.changed).containDeep(['fields']);
+      should(old.error.code).equal('ask_changed');
+      should(refused(stale(replaced.ledger)).error.code).equal('ask_changed');
+      should(current.item?.ownerAnswer).not.be.undefined();
+    });
+
+    it('should take an added, removed or retyped field as a new ask too', () => {
+      // Act
+      const added = recompose(form(), { fields: [...FIELDS, { id: 'when', type: 'yesno', label: 'Tonight?' }] });
+      const removed = recompose(form(), { fields: [FIELDS[0] as (typeof FIELDS)[number]] });
+      const retyped = recompose(form(), {
+        fields: [
+          { id: 'region', type: 'many', label: 'Region?', options: [{ label: 'EU' }, { label: 'US' }] },
+          FIELDS[1] as (typeof FIELDS)[number],
+        ],
+      });
+
+      // Assert
+      should(added.item?.askVersion).equal(2);
+      should(removed.item?.askVersion).equal(2);
+      should(retyped.item?.askVersion).equal(2);
+    });
+
+    it('should leave a reworded field alone, resting, and answerable under its version', () => {
+      // Arrange — the owner replied, so the form rests
+      const resting = reply(form());
+      const reworded = FIELDS.map(field => (field.id === 'region' ? { ...field, label: 'Which region?' } : field));
+
+      // Act
+      const edited = recompose(resting, { fields: reworded });
+
+      // Assert
+      should(edited.item?.askVersion).be.undefined();
+      should(agendaState(edited.item ?? item(edited.ledger)).state).equal('resting');
+    });
+
+    it('should bring a resting form back fresh when its field options change', () => {
+      // Arrange
+      const resting = reply(form());
+      const fields = FIELDS.map(field =>
+        field.id === 'region' ? { ...field, options: [{ label: 'EU' }, { label: 'Asia' }] } : field,
+      );
+
+      // Act
+      const edited = recompose(resting, { fields });
+
+      // Assert
+      should(agendaState(edited.item ?? item(edited.ledger)).state).equal('needs-you');
+      should(edited.item?.waitingSince).equal(T3);
+    });
+  });
+
+  describe('an explicit replacement of the same kind composes the whole new ask', () => {
+    const OPTIONS: NonNullable<RaiseAgendaRequest['ask']> = {
+      kind: 'multiple-choice',
+      options: [{ label: 'EU' }, { label: 'Asia' }],
+    };
+
+    it('should drop the option details of the old ask, which named an option the new one lacks, and record them', () => {
+      // Arrange — a choice explains US, which the replacement no longer offers
+      const choice = raised({ optionDetails: [{ label: 'US', detail: 'Cheapest.' }] });
+
+      // Act
+      const edited = recompose(choice, { kind: 'choice', ask: OPTIONS });
+
+      // Assert
+      should(edited.item?.optionDetails).be.undefined();
+      should(edited.item?.ask).deepEqual(OPTIONS);
+      should(edited.item?.revisions?.at(-1)?.changed).containDeep(['ask', 'optionDetails']);
+      should(edited.item?.revisions?.at(-1)?.previous.optionDetails).deepEqual([{ label: 'US', detail: 'Cheapest.' }]);
+    });
+
+    it('should drop the old question list, which would render beside the new ask, and record it', () => {
+      // Arrange
+      const choice = raised({
+        questions: [{ question: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] }],
+      });
+
+      // Act
+      const edited = recompose(choice, { kind: 'choice', ask: OPTIONS });
+
+      // Assert
+      should(edited.item?.questions).be.undefined();
+      should(edited.item?.revisions?.at(-1)?.changed).containDeep(['ask', 'questions']);
+      should(edited.item?.askVersion).equal(2);
+    });
+
+    it('should drop the old questions of a reply the new summary replaces', () => {
+      // Arrange
+      const asks = raised({
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'Which region?' }],
+      });
+
+      // Act
+      const edited = recompose(asks, { kind: 'reply', subject: 'Should we delete the backups?' });
+
+      // Assert
+      should(edited.item?.questions).be.undefined();
+      should(edited.item?.askVersion).equal(2);
+    });
+
+    it('should keep the questions and details the replacement gives again', () => {
+      // Arrange
+      const choice = raised({
+        questions: [{ question: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] }],
+        optionDetails: [{ label: 'US', detail: 'Cheapest.' }],
+      });
+      const questions = [{ question: 'Which region now?', options: [{ label: 'EU' }, { label: 'Asia' }] }];
+
+      // Act
+      const edited = recompose(choice, {
+        kind: 'choice',
+        ask: OPTIONS,
+        questions,
+        optionDetails: [{ label: 'Asia', detail: 'Closest.' }],
+      });
+
+      // Assert
+      should(edited.item?.questions).deepEqual(questions);
+      should(edited.item?.optionDetails).deepEqual([{ label: 'Asia', detail: 'Closest.' }]);
+    });
+
+    it('should keep the details of an ask a replacement of the questions alone leaves in place', () => {
+      // Arrange
+      const choice = raised({
+        questions: [{ question: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] }],
+        optionDetails: [{ label: 'US', detail: 'Cheapest.' }],
+      });
+
+      // Act
+      const edited = recompose(choice, {
+        questions: [{ question: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }, { label: 'Asia' }] }],
+      });
+
+      // Assert
+      should(edited.item?.optionDetails).deepEqual([{ label: 'US', detail: 'Cheapest.' }]);
+      should(edited.item?.askVersion).equal(2);
     });
   });
 

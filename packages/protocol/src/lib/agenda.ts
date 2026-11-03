@@ -1606,8 +1606,9 @@ export const AgendaActionRequestSchema = z
       /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
       gate: z.literal(true).optional(),
       /**
-       * The `askVersion` of the item the answer was given to (`agenda.asks.1`): when the ferret has replaced the
-       * ask since, the answer is refused `ask_changed` instead of being applied to the new one. Absent: not checked.
+       * The `askVersion` of the item the answer — or the Done given from its ask — was given to (`agenda.asks.1`):
+       * when the ferret has replaced the ask since, it is refused `ask_changed` instead of being applied to the new
+       * one. Absent: not checked, which is how the owner closes the item as it stands now.
        */
       askVersion: PositiveIntegerSchema.optional(),
       /**
@@ -1677,6 +1678,8 @@ export const AgendaActionRequestSchema = z
       action: z.literal('dismiss'),
       id: AgendaIdSchema,
       note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+      /** The `askVersion` of the ask this Skip was given from (`agenda.asks.1`); see `resolve`. Absent: not checked. */
+      askVersion: PositiveIntegerSchema.optional(),
     }),
   ])
   .superRefine((value, context) => {

@@ -273,6 +273,40 @@ describe('DaemonAgendaClient', () => {
     ]);
   });
 
+  it('names the ask version a Done or a Skip was given from under the same rule as an answer', async () => {
+    const actions: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+
+    // An older machine refuses the field as malformed: version 1 is left out, and so is a close that names none
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    await client.resolve(daemonA, scopeA, 'A1', undefined, 1);
+    await client.dismiss(daemonA, scopeA, 'A1', 'no', 1);
+    await client.resolve(daemonA, scopeA, 'A1', 'ok');
+    // A machine that reports `agenda.asks.1` checks it
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaAsks]),
+    });
+    await client.resolve(daemonA, scopeA, 'A1', undefined, 1);
+    await client.dismiss(daemonA, scopeA, 'A1', undefined, 2);
+
+    should(actions).deepEqual([
+      { action: 'resolve', id: 'A1' },
+      { action: 'dismiss', id: 'A1', note: 'no' },
+      { action: 'resolve', id: 'A1', note: 'ok' },
+      { action: 'resolve', id: 'A1', askVersion: 1 },
+      { action: 'dismiss', id: 'A1', askVersion: 2 },
+    ]);
+  });
+
   it('sends the files of a Not good with its answer, and none when there are none', async () => {
     const actions: unknown[] = [];
     const client = new DaemonAgendaClient(undefined, async (_input, init) => {

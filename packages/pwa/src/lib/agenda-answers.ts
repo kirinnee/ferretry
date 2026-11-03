@@ -54,8 +54,8 @@ export type InboxAction =
       /** Files already uploaded to the item's session, sent with a Not good: the daemon carries them to the card's ferret. */
       readonly attachments?: BoardReopenAttachments;
     }
-  | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }
+  | { readonly kind: 'resolve'; readonly label: string; readonly note?: string; readonly askVersion?: number }
+  | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string; readonly askVersion?: number }
   | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string }
   | { readonly kind: 'discuss'; readonly label: string; readonly note?: string }
   | { readonly kind: 'snooze'; readonly label: string; readonly until: string }
@@ -126,11 +126,14 @@ export const answerAction = (answer: AgendaCardAnswer, reply: string): InboxActi
 
 /**
  * The action with the ask version the owner was SHOWN: stamped when the answer is given (and so kept through the undo
- * window and any retry), never read again at send time, when the ferret may have replaced the ask. Only an answer to
- * the item's own ask carries it; a gate answer, a version already on the action and every other kind pass through.
+ * window and any retry), never read again at send time, when the ferret may have replaced the ask. An answer to the
+ * item's own ask carries it, and so do the Done and Skip given from that ask; a gate answer, a version already on the
+ * action and every other kind pass through.
  */
 export const withAskVersion = (action: InboxAction, item: Pick<AgendaItem, 'askVersion'>): InboxAction =>
-  action.kind !== 'respond' || action.gate !== undefined || action.askVersion !== undefined
+  (action.kind !== 'respond' && action.kind !== 'resolve' && action.kind !== 'dismiss') ||
+  (action.kind === 'respond' && action.gate !== undefined) ||
+  action.askVersion !== undefined
     ? action
     : { ...action, askVersion: item.askVersion ?? 1 };
 

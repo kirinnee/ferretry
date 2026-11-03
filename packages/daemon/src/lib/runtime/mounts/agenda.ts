@@ -251,9 +251,9 @@ async function apply(
                     : request.action === 'unsnooze'
                       ? agenda.unsnooze(sessionId, request.id, actor)
                       : request.action === 'dismiss'
-                        ? agenda.dismiss(sessionId, request.id, actor, request.note)
+                        ? agenda.dismiss(sessionId, request.id, actor, request.note, request.askVersion)
                         : request.response === undefined
-                          ? agenda.resolve(sessionId, request.id, actor, request.note)
+                          ? agenda.resolve(sessionId, request.id, actor, request.note, 'board', request.askVersion)
                           : agenda.answer(
                               sessionId,
                               request.id,

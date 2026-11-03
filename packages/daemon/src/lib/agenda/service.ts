@@ -449,12 +449,39 @@ export class AgendaService {
     actor: AgendaActor,
     note?: string | null,
     via: AgendaVia = 'board',
+    /** The ask the close was given from: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
   ): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'resolve', actor, id, note, at: this.clock.now() }, via);
+    return this.apply(
+      sessionId,
+      {
+        action: 'resolve',
+        actor,
+        id,
+        note,
+        at: this.clock.now(),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      },
+      via,
+    );
   }
 
-  async dismiss(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'dismiss', actor, id, note, at: this.clock.now() });
+  async dismiss(
+    sessionId: string,
+    id: AgendaId,
+    actor: AgendaActor,
+    note?: string | null,
+    /** The ask the close was given from: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'dismiss',
+      actor,
+      id,
+      note,
+      at: this.clock.now(),
+      ...(askVersion === undefined ? {} : { askVersion }),
+    });
   }
 
   /**

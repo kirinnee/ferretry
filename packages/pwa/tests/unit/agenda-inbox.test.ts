@@ -506,13 +506,26 @@ describe('the undo window', () => {
     deferred.schedule(card('A3'), DONE_ACTION);
     advance(UNDO_WINDOW_MS);
 
-    // Assert — an unreplaced ask is version 1, a replaced one names its own, and only an answer to the ask carries it
+    // Assert — an unreplaced ask is version 1, a replaced one names its own, and a Done given from the ask carries it too
     expect(posted).toMatchObject([
       { kind: 'respond', askVersion: 1 },
       { kind: 'respond', askVersion: 3 },
-      { kind: 'resolve' },
+      { kind: 'resolve', askVersion: 1 },
     ]);
-    expect(posted[2]).not.toHaveProperty('askVersion');
+  });
+
+  test('stamps a held Mark as done and Skip with the version shown, so a replaced ask is never closed by it', () => {
+    // Arrange — the to-do shows ask version 2 when the owner taps Done, and Skip on another card
+    const done: InboxAction = { kind: 'resolve', label: 'Mark as done' };
+    const skip: InboxAction = { kind: 'dismiss', label: 'Skip' };
+
+    // Assert — both carry the shown version; one that already names a version keeps it; the rest pass through
+    expect(withAskVersion(done, { askVersion: 2 })).toEqual({ ...done, askVersion: 2 });
+    expect(withAskVersion(skip, { askVersion: undefined })).toEqual({ ...skip, askVersion: 1 });
+    const named: InboxAction = { ...done, askVersion: 4 };
+    expect(withAskVersion(named, { askVersion: 5 })).toBe(named);
+    const needsInfo: InboxAction = { kind: 'needs-info', label: 'More' };
+    expect(withAskVersion(needsInfo, { askVersion: 5 })).toBe(needsInfo);
   });
 
   test('keeps the version an action already names, and leaves a gate answer unstamped', () => {

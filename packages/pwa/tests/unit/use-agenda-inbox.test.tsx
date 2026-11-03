@@ -457,8 +457,8 @@ describe('useAgendaInboxModel', () => {
     await settle();
     expect(calls.filter(call => call.method !== 'revalidate').map(call => [call.method, call.detail])).toEqual([
       ['respond', ['A1', { kind: 'permission', decision: 'approve' }, undefined, undefined, undefined, 1]],
-      ['dismiss', ['A2', undefined]],
-      ['resolve', ['A3', 'shipped']],
+      ['dismiss', ['A2', undefined, 1]],
+      ['resolve', ['A3', 'shipped', 1]],
       ['discuss', ['A4', 'why?']],
     ]);
   });
@@ -544,7 +544,7 @@ describe('useAgendaInboxModel', () => {
     await settle();
     expect(second?.item.id).toBe('A1');
     expect(calls.filter(call => call.method === 'resolve').map(call => call.detail)).toEqual([
-      [second?.item.id, undefined],
+      [second?.item.id, undefined, 1],
     ]);
   });
 

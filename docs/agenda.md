@@ -328,19 +328,22 @@ command line `fy agenda edit A5 --kind <kind> --option … --question …` compo
 
 - **What is a replacement.** An edit that names a `kind` (even the one the item already has: `--kind reply
 --summary "…"` is the ferret saying "this is a different question"), or that changes the options (`ask`,
-  `answers`, or `questions` with other options or another shape), replaces the ask. Rewording alone — the
-  summary, body, context, `questions` text over the same options, `--blocking` — is an ordinary edit: the ask, its
-  version and the item's place in the queue stay.
+  `answers`, `questions` with other options or another shape, or a form's `fields` added, removed, retyped or given
+  other options), replaces the ask. Rewording alone — the summary, body, context, `questions` text over the same
+  options, a field's label, `--blocking` — is an ordinary edit: the ask, its version and the item's place in the
+  queue stay.
 - **A replaced ask is a new ask.** The item re-enters the queue as its one entry, fresh; `askVersion` moves on (1
   when absent); the edit is recorded as a revision (and a stage change when the kind moves). The owner's answer to
   the old ask (`ownerAnswer`) goes, and so does the ferret's old answer to their question unless the edit gives a
   new one. An answer that failed to deliver (`undelivered`, which the app offers as Retry) goes too: its payload
   answers the old ask and must never be blessed with the new version. A new kind with no ask of its own drops the
   old one (an explainer has no options).
-- **A kind change drops the shape of the old kind.** The old `ask`, `answers`, `questions`,
-  `optionDetails`, `fields` and `steps` do not carry over (a question becomes an info card, a todo a reply, a
-  form anything else); the replacement is validated as the composed item, and the revision records what was
-  removed. The edit may give the new kind its own.
+- **A replacement drops the shape of the ask it replaces.** A kind change drops the old `ask`, `answers`,
+  `questions`, `optionDetails`, `fields` and `steps` (a question becomes an info card, a todo a reply, a form
+  anything else). A new ask of the same kind (an explicit `--kind`, or a new `ask` or `answers`) drops the old
+  `questions` and `optionDetails`, which described the ask it replaces and would otherwise sit beside the new one
+  or name an option it no longer offers. The replacement is validated as the composed item, and the revision records
+  what was removed. The edit may give the new ask its own.
 - **An answer to the old ask is refused `409 ask_changed`**, never applied to the new options: an answer request
   names the `askVersion` it was given to, and one that names an older version is refused (a stale tab, the undo
   window, a held send). **The app always names it**: it stamps the version of the ask on screen when the answer
@@ -350,6 +353,11 @@ command line `fy agenda edit A5 --kind <kind> --option … --question …` compo
   refused `409 ask_changed` once the ask has been replaced, so an older app is locked out of a replaced ask
   until it reloads; the answer of a ferret's own `done --choice`, and any answer to an ask never replaced, are
   taken as before.
+- **A Done or a Skip given from the ask is checked the same way.** A to-do's Mark as done, and any answer that closes
+  the item, is an answer to the ask on screen: the app names its `askVersion` on the `resolve` or `dismiss`
+  request, so a Done held in the undo window never closes the question that replaced the to-do (`409
+ask_changed`, the new question stays open). A close that names no version — the owner's own explicit closing of
+  the item as it stands, an older app, the ferret's `done` — closes whatever the item asks now.
 - **A stale "Answer to your question" clears**: `fy agenda edit A5 --clear-question-answer`.
 - A configuration change's ask is fixed (Allow, Deny, Discard change), and a notice or input card has none: those
   are refused.
@@ -1226,7 +1234,8 @@ A daemon that rests items on an answer and takes the channel's requests reports 
 before reads every item. The request fields are refused as malformed by a daemon without their feature, so the CLI
 checks it first and says the daemon needs an update: `stage`, `whereWeAre`, `detail` and the `rest` action need
 `agenda.channel.1`; an edit's `ask`/`kind`/`answers`, `clear: ['questionAnswer']` and an answer's `askVersion` need
-`agenda.asks.1`. An older app that sends no `askVersion` is refused only for a replaced ask (see
+`agenda.asks.1`; so does a Done or Skip's `askVersion`. An older app that sends no `askVersion` is refused only for an
+answer to a replaced ask (see
 [Editable asks](#editable-asks)). `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
 

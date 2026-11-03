@@ -296,6 +296,8 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      /** The ask this close was given from (a to-do's Done); refused `ask_changed` once the ask moved on. */
+      readonly askVersion?: number;
       readonly at: string;
     }
   | {
@@ -303,6 +305,8 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      /** The ask this close was given from; refused `ask_changed` once the ask moved on. */
+      readonly askVersion?: number;
       readonly at: string;
     }
   | {
@@ -1337,14 +1341,16 @@ function addressById(
       );
     }
   }
+  // An answer — or a Done or Skip given from the ask — to an ask the ferret has since REPLACED is never applied to the
+  // new one (a stale tab, the undo window). A close that names no version is the owner's deliberate closing of the item
+  // as it stands now (the CLI, an older app): it closes whatever the item asks.
+  if (command.askVersion !== undefined && command.askVersion !== (target.item.askVersion ?? 1)) {
+    return failure(
+      'ask_changed',
+      `${command.id} asks something else now: the ferret replaced the ask you answered, so nothing was sent; read it again and answer the new ask`,
+    );
+  }
   if (command.action === 'answer') {
-    // An answer to an ask the ferret has since REPLACED is never applied to the new one (a stale tab, the undo window).
-    if (command.askVersion !== undefined && command.askVersion !== (target.item.askVersion ?? 1)) {
-      return failure(
-        'ask_changed',
-        `${command.id} asks something else now: the ferret replaced the ask you answered, so nothing was sent; read it again and answer the new ask`,
-      );
-    }
     // An answer that names no version cannot say which ask it answered: once the ferret has replaced the ask it may be
     // the old one (a stale tab, an older app, the undo window), so the owner re-reads it. A ferret's own answer is its own.
     if (command.askVersion === undefined && command.actor.kind === 'human' && (target.item.askVersion ?? 1) > 1) {
@@ -1794,6 +1800,13 @@ function questionShape(questions: AgendaBrief['questions']): string {
   );
 }
 
+/** The identity, type and option labels of each form field, in order — what an edit that rewords a field leaves alone. */
+function fieldShape(fields: AgendaItem['fields']): string {
+  return JSON.stringify(
+    (fields ?? []).map(field => [field.id, field.type, field.options?.map(option => option.label.trim()) ?? null]),
+  );
+}
+
 /** Whether a patch value says what the item already says; an absent context and a null one are the same. */
 function sameField(left: unknown, right: unknown): boolean {
   return sortedJson(left ?? null) === sortedJson(right ?? null);
@@ -1801,7 +1814,7 @@ function sameField(left: unknown, right: unknown): boolean {
 
 /**
  * Whether an edit REPLACES THE ASK (docs/agenda.md § Editable asks): a new ask or answers, questions that are added,
- * removed or given other options, or an explicit `kind` — even the kind the item already has, which is how a ferret
+ * removed or given other options, form fields that are added, removed, retyped or given other options, or an explicit `kind` — even the kind the item already has, which is how a ferret
  * says "this is a different question". Rewording a question, or restating what the item says, is no new ask.
  */
 function askReplaced(item: AgendaItem, patch: EditAgendaPatch): boolean {
@@ -1809,7 +1822,8 @@ function askReplaced(item: AgendaItem, patch: EditAgendaPatch): boolean {
     (patch.ask !== undefined && !sameField(patch.ask, item.ask)) ||
     patch.kind !== undefined ||
     (patch.answers !== undefined && !sameField(patch.answers, item.answers)) ||
-    (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(item.questions))
+    (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(item.questions)) ||
+    (patch.fields !== undefined && fieldShape(patch.fields) !== fieldShape(item.fields))
   );
 }
 
@@ -1840,12 +1854,33 @@ function placeOnReturn(command: EditCommand, item: AgendaItem): 'old' | 'fresh' 
 /** The shape fields an item of one kind cannot carry over to another: a new kind takes only what its edit gives. */
 const REPLACED_SHAPE = ['ask', 'answers', 'questions', 'optionDetails', 'fields', 'steps'] as const;
 
-/** The item an edit that REPLACES the ask leaves: a moved kind drops the old shape, and the edit's own fields land. */
+/**
+ * The old shape an edit that REPLACES the ask leaves behind, which the edit does not give again: a moved kind takes
+ * none of it; a new ask of the same kind (an explicit `kind`, or an ask or answers given) takes none of the old
+ * questions or option details, which described the ask it replaces.
+ */
+function droppedShape(item: AgendaItem, patch: EditAgendaPatch): readonly (typeof REPLACED_SHAPE)[number][] {
+  const newAsk = patch.kind !== undefined || patch.ask !== undefined || patch.answers !== undefined;
+  const dropped: readonly (typeof REPLACED_SHAPE)[number][] = kindMoved(item, patch)
+    ? REPLACED_SHAPE
+    : newAsk
+      ? ['questions', 'optionDetails']
+      : [];
+  return dropped.filter(field => patch[field] === undefined);
+}
+
+/** The item an edit that REPLACES the ask leaves: the old shape it drops goes, and the edit's own fields land. */
 function composeReplacement(item: AgendaItem, patch: EditAgendaPatch): AgendaItem {
-  const moved = kindMoved(item, patch);
-  const { ask: _ask, answers: _answers, questions: _q, optionDetails: _o, fields: _f, steps: _s, ...rest } = item;
+  const gone = new Set(droppedShape(item, patch));
+  const { ask, answers, questions, optionDetails, fields, steps, ...rest } = item;
   return {
-    ...(moved ? rest : item),
+    ...rest,
+    ...(ask === undefined || gone.has('ask') ? {} : { ask }),
+    ...(answers === undefined || gone.has('answers') ? {} : { answers }),
+    ...(questions === undefined || gone.has('questions') ? {} : { questions }),
+    ...(optionDetails === undefined || gone.has('optionDetails') ? {} : { optionDetails }),
+    ...(fields === undefined || gone.has('fields') ? {} : { fields }),
+    ...(steps === undefined || gone.has('steps') ? {} : { steps }),
     ...(patch.ask === undefined ? {} : { ask: patch.ask }),
     ...(patch.kind === undefined ? {} : { kind: patch.kind }),
     ...(patch.answers === undefined ? {} : { answers: patch.answers }),
@@ -1957,12 +1992,11 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   const patch = command.patch;
   // A replaced ask takes the ferret's old answer to the owner's question with it, unless the edit gives a new one.
   const dropsAnswer = replaces && patch.questionAnswer === undefined && item.questionAnswer !== undefined;
-  // A new kind brings its own ask and shape: the old fields it does not re-give go, and the revision records them.
-  const moved = replaces && kindMoved(item, patch);
+  // A new ask brings its own shape: the old fields it does not re-give go, and the revision records them.
   const clearing: (typeof EDITABLE_FIELDS)[number][] = [
     ...(patch.clear ?? []),
     ...(dropsAnswer ? (['questionAnswer'] as const) : []),
-    ...(moved ? REPLACED_SHAPE.filter(field => patch[field] === undefined) : []),
+    ...(replaces ? droppedShape(item, patch) : []),
   ];
   const clears = clearing.filter(field => item[field] !== undefined);
   if (

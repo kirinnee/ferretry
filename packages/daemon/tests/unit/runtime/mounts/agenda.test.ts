@@ -426,6 +426,51 @@ describe('attention routes', () => {
     should(current.status).equal(200);
   });
 
+  it('should refuse a Done or Skip given from an ask the ferret has since replaced, 409 ask_changed', async () => {
+    // Arrange — the owner's Mark as done is held in the undo window while the ferret replaces the ask
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    await dispatch(
+      post(
+        { action: 'edit', id, ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'dev' }] } },
+        agentIn('s1'),
+      ),
+    );
+
+    // Act
+    const staleDone = await dispatch(post({ action: 'resolve', id, askVersion: 1 }));
+    const staleSkip = await dispatch(post({ action: 'dismiss', id, askVersion: 1 }));
+    const current = await dispatch(post({ action: 'dismiss', id, askVersion: 2 }));
+
+    // Assert — the stale closes leave the new question open; one that names the current ask closes it
+    should(staleDone.status).equal(409);
+    should(jsonBody(staleDone)).have.property('code', 'ask_changed');
+    should(staleSkip.status).equal(409);
+    should(current.status).equal(200);
+    should(jsonBody(current).items as readonly unknown[]).be.empty();
+  });
+
+  it('should close the item as it stands on a Done that names no ask, after the ferret replaced it', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    await dispatch(
+      post(
+        { action: 'edit', id, ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'dev' }] } },
+        agentIn('s1'),
+      ),
+    );
+
+    // Act
+    const explicit = await dispatch(post({ action: 'resolve', id }));
+
+    // Assert
+    should(explicit.status).equal(200);
+    should(jsonBody(explicit).items as readonly unknown[]).be.empty();
+  });
+
   it('should refuse an agent raise that declares no structured ask', async () => {
     // An open-ended "look at this" gives the human nothing to answer, so the domain refuses it.
     // Arrange
