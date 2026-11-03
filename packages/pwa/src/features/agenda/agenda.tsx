@@ -106,6 +106,19 @@ const stepTicker =
 const NO_ITEMS: readonly AgendaItem[] = [];
 /** How long the "Sent to …" line of a form answered here stays above the composer. */
 const SENT_FORM_MS = 12_000;
+
+/**
+ * An item the daemon closes the moment its request ends: an input card (typed, sent, cancelled or expired) and an
+ * approve-on-phone card. Its view closes with it rather than sit on a closed record (#B147).
+ */
+const endsItself = (item: AgendaItem | ResolvedAgendaItem): boolean =>
+  item.kind === 'input' || item.phoneApproval !== undefined;
+
+/** What the line above the composer says when such an item closed under its open view. */
+const endedWords = (item: ResolvedAgendaItem): string =>
+  item.resolutionNote === null || item.resolutionNote.trim() === ''
+    ? `${agendaReference(item.id)} is closed.`
+    : `${agendaReference(item.id)} is closed. ${item.resolutionNote}`;
 const NO_RECORDS: readonly ResolvedAgendaItem[] = [];
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
@@ -244,7 +257,11 @@ export const useAgenda = ({
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
   // A form answered from here, said above the composer once it has landed: the view closing is not the confirmation.
-  const [sentForm, setSentForm] = useState<{ readonly id: AgendaId; readonly text: string } | null>(null);
+  const [sentForm, setSentForm] = useState<{
+    readonly id: AgendaId;
+    readonly text: string;
+    readonly tone?: 'ok' | 'info';
+  } | null>(null);
   useEffect(() => {
     if (sentForm === null) return undefined;
     const timer = setTimeout(() => setSentForm(null), SENT_FORM_MS);
@@ -293,6 +310,44 @@ export const useAgenda = ({
       (reason: unknown) => setCard(item.id, failure(reason)),
     );
   };
+
+  // An input card holds its view while a Send from it is on its way or a follow-up offer is on screen (`onHold`).
+  const [holding, setHolding] = useState<ReadonlySet<AgendaId>>(new Set());
+  // The ids this view showed while they were still open: only those close by themselves when they end, never a closed
+  // record the owner opened from the history to read.
+  const seenOpen = useRef(new Set<AgendaId>());
+  if (shownItem !== undefined && !closed) seenOpen.current.add(shownItem.id);
+  const closeEnded = (id: AgendaId, text: string, tone: 'ok' | 'info'): void => {
+    update(current => (current.card === id ? { card: null } : {}));
+    setSentForm({ id, text, tone });
+    setAnnouncement(text);
+    onAnswered?.();
+  };
+  const holdFor =
+    (id: AgendaId) =>
+    (held: boolean, settled?: string): void => {
+      setHolding(current => {
+        if (current.has(id) === held) return current;
+        const next = new Set(current);
+        if (held) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      // Sent from here with nothing more to show: the card's own words, at once, before any board says so.
+      if (!held && settled !== undefined) closeEnded(id, settled, 'ok');
+    };
+  const ended =
+    shownItem !== undefined &&
+    isResolved(shownItem) &&
+    endsItself(shownItem) &&
+    seenOpen.current.has(shownItem.id) &&
+    !holding.has(shownItem.id)
+      ? shownItem
+      : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the item that ended under the view is the one trigger
+  useEffect(() => {
+    if (ended !== undefined) closeEnded(ended.id, endedWords(ended), 'info');
+  }, [ended?.id]);
 
   const openCard = (item: AgendaItem | ResolvedAgendaItem): void => {
     setSentForm(null);
@@ -348,8 +403,12 @@ export const useAgenda = ({
         <AgendaDrawer counts={counts} id={drawerId} items={agenda} onClose={closeDrawer} {...rows} />
       ) : null}
       {sentForm === null ? null : (
-        <p className="fy-agenda-note" data-agenda-sent={sentForm.id} data-tone="ok">
-          <CircleCheck aria-hidden="true" size={14} />
+        <p className="fy-agenda-note" data-agenda-sent={sentForm.id} data-tone={sentForm.tone ?? 'ok'}>
+          {sentForm.tone === 'info' ? (
+            <CircleAlert aria-hidden="true" size={14} />
+          ) : (
+            <CircleCheck aria-hidden="true" size={14} />
+          )}
           <span className="fy-agenda-note__text">{sentForm.text}</span>
           <button
             aria-label="Dismiss"
@@ -407,8 +466,10 @@ export const useAgenda = ({
     cardItem.parked?.reason === 'replied' &&
     cardModel(cardItem).shape !== 'info' &&
     cardModel(cardItem).shape !== 'input';
+  // An input card that holds the view keeps its form on screen, closed or not: what it says after a Send is in there.
+  const held = cardItem !== undefined && holding.has(cardItem.id);
   const standing =
-    cardItem === undefined || (!closed && cardItem.parked === undefined) ? undefined : (
+    cardItem === undefined || held || (!closed && cardItem.parked === undefined) ? undefined : (
       <AgendaSettled
         busy={busyIds.has(cardItem.id)}
         error={typeof cardError === 'string' ? cardError : null}
@@ -511,6 +572,7 @@ export const useAgenda = ({
                     agentName={ferret}
                     connection={connection}
                     item={cardItem}
+                    onHold={holdFor(cardItem.id)}
                     sessionId={scope.sessionId}
                   />
                 ),

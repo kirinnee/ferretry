@@ -11,7 +11,7 @@ import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
 import { healthOf } from '../../support/health.ts';
 import { type Call, fakeClient, NOW, offer, primaryOffer, saved, withSaved } from '../../support/input-fixtures.ts';
-import { ruleClient } from '../../support/sign-in-rule-client.ts';
+import { type RuleWorld, ruleClient } from '../../support/sign-in-rule-client.ts';
 import { SITE_SIGN_IN } from '../../support/sign-in-rule-fixtures.ts';
 
 const mounted: Mounted[] = [];
@@ -31,9 +31,15 @@ const delivered = (call: Call) => ({
   submitted: true,
 });
 
-const card = async (value: InputRequest, ruleOffer: boolean) => {
+type Hold = readonly [boolean, string | undefined];
+
+const card = async (
+  value: InputRequest,
+  ruleOffer: boolean,
+  options: { readonly holds?: Hold[]; readonly world?: RuleWorld } = {},
+) => {
   const fake = fakeClient(delivered);
-  const rules = ruleClient();
+  const rules = ruleClient(options.world);
   const route = (path: string): RuleClient => (path.startsWith('/v1/sign-in-rules') ? rules.client : fake.client);
   const client = {
     request: async (path: string, schema: never, init?: RequestInit) => await route(path).request(path, schema, init),
@@ -47,6 +53,9 @@ const card = async (value: InputRequest, ruleOffer: boolean) => {
       onDone={() => undefined}
       request={value}
       {...(ruleOffer ? { ruleOffer: { askPasskey: async () => true } } : {})}
+      {...(options.holds === undefined
+        ? {}
+        : { onHold: (holding: boolean, settled?: string) => options.holds?.push([holding, settled]) })}
     />,
   );
   mounted.push(view);
@@ -147,5 +156,68 @@ describe('the input card host', () => {
     expect(store.stepUp.snapshot()?.words?.rows.some(row => row.label === 'Until')).toBe(true);
     store.stepUp.dismiss();
     for (let tries = 0; tries < 4; tries += 1) await settle();
+  });
+});
+
+describe('the card’s hold on the view it is drawn in (#B147)', () => {
+  it('holds while the Send is on its way, then lets go with its words when nothing follows', async () => {
+    const holds: Hold[] = [];
+    const view = await card(withSaved(saved({ offers: [primaryOffer({ why: 'site' })] })), true, { holds });
+    expect(holds).toEqual([]);
+    await click(view.container.querySelector('[data-variant="primary"][data-input-offer]'));
+    await settle();
+
+    expect(holds[0]).toEqual([true, undefined]);
+    expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
+  });
+
+  it('keeps holding while the standing-rule offer is on screen', async () => {
+    const holds: Hold[] = [];
+    const view = await card(withSaved(saved({ offers: two() })), true, { holds });
+    await click(view.container.querySelector('[data-input-offer="HOME"]'));
+    await settle();
+
+    expect(view.container.querySelector('[data-rule-offer-button]')).not.toBeNull();
+    expect(holds.at(-1)).toEqual([true, undefined]);
+  });
+
+  it('lets go once the daemon says this sign-in has no rule to offer yet', async () => {
+    const holds: Hold[] = [];
+    const view = await card(withSaved(saved({ offers: two() })), true, {
+      holds,
+      world: { eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } },
+    });
+    await click(view.container.querySelector('[data-input-offer="HOME"]'));
+    await settle();
+
+    expect(view.container.querySelector('[data-rule-offer-button]')).toBeNull();
+    expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
+  });
+
+  it('lets go without words when the Send failed, so the view is not closed on a sentence that is not true', async () => {
+    const holds: Hold[] = [];
+    const fake = fakeClient(() => {
+      throw Object.assign(new Error('the request ended'), { status: 410, code: 'gone' });
+    });
+    const value = withSaved(saved({ offers: [primaryOffer({ why: 'site' })] }));
+    const view = await mount(
+      <InputCard
+        agentName="Hadi"
+        client={fake.client}
+        fields={fieldsOf(value)}
+        now={NOW}
+        onDone={() => undefined}
+        onHold={(holding, settled) => holds.push([holding, settled])}
+        request={value}
+      />,
+    );
+    mounted.push(view);
+    await click(view.container.querySelector('[data-variant="primary"][data-input-offer]'));
+    await settle();
+
+    expect(holds).toEqual([
+      [true, undefined],
+      [false, undefined],
+    ]);
   });
 });
