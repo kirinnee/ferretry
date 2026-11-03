@@ -1,3 +1,9 @@
+## [4.260.0](https://github.com/kirinnee/ferretry/compare/v4.259.0...v4.260.0) (2026-11-03)
+
+### Features
+
+* **push:** clear a handled agenda item's alerts on every device ([#1434](https://github.com/kirinnee/ferretry/issues/1434)) ([8f868b3](https://github.com/kirinnee/ferretry/commit/8f868b3069a3d325aaa3da4b156ada321e089242))
+
 ## [4.259.0](https://github.com/kirinnee/ferretry/compare/v4.258.0...v4.259.0) (2026-11-03)
 
 ### Features
