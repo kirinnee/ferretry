@@ -2082,23 +2082,35 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
     should(world.told.some(each => each.message.includes(`!${absorbed}`))).be.false();
   });
 
-  /** The lead's thread about F1 carries F1's ask at To test and its sub-card F2's at Plan. */
-  const parentAndSub = async () => {
-    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })]);
+  /** The lead's thread about F1 carries F1's ask at To test and its sub-card F2's at Plan; F3 is a card of no gate. */
+  const parentAndSubBeforeSplit = async (faults: Faults = {}) => {
+    const world = fixture(
+      [leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }), leads({ id: 'F3', laneId: 'todo' })],
+      faults,
+    );
     const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
     if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const parent = raised.item.id;
     await world.board.act('F2', BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
     await world.board.trigger('F1', 'release.running');
-    const { task: _task, ...plain } = threadAbout('F2');
-    const split = await world.agenda.split(
-      'lead',
-      raised.item.id,
-      { ...plain, subject: 'Is the sub-card right on its own?' },
-      AGENT,
-      [{ id: 'F2' }],
-    );
-    if (!split.ok || split.item === undefined) throw new Error('expected a split');
-    return { world, parent: raised.item.id, child: split.item.id };
+    const splitOff = async () => {
+      const { task: _task, ...plain } = threadAbout('F2');
+      const split = await world.agenda.split(
+        'lead',
+        parent,
+        { ...plain, subject: 'Is the sub-card right on its own?' },
+        AGENT,
+        [{ id: 'F2' }],
+      );
+      if (!split.ok || split.item === undefined) throw new Error('expected a split');
+      return split.item.id;
+    };
+    return { world, parent, splitOff };
+  };
+
+  const parentAndSub = async () => {
+    const { world, parent, splitOff } = await parentAndSubBeforeSplit();
+    return { world, parent, child: await splitOff() };
   };
 
   it('a split with the card takes its ask along, and the gates ask it nowhere else', async () => {
@@ -2157,5 +2169,72 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
     should(outcome).match({ handled: true, mutation: { ok: true } });
     should(world.stored('F2').laneId).equal('implement');
     should(openOf(world, 'lead', again.item.id).cardAsks?.[0]?.answer).match({ response: choose('OK to build') });
+  });
+
+  it('records an answer on the new item when a split came between the card moving and the record', async () => {
+    // Arrange — the split lands right after the board moved F2: the parent stays open, without F2's ask
+    let between: (() => Promise<unknown>) | undefined;
+    const { world, parent, splitOff } = await parentAndSubBeforeSplit({
+      afterAct: async () => void (await between?.()),
+    });
+    let child: string | undefined;
+    between = async () => {
+      between = undefined;
+      child = await splitOff();
+    };
+
+    // Act — the owner answers F2's ask from the original thread
+    const outcome = await world.answer(parent, choose('OK to build'), { sessionId: 'lead', cardAsk: 'gate:F2:plan:2' });
+
+    // Assert — the card moved, the answer and its receipt are on the new item, the ferret is told of that one, and
+    // the ask was not withdrawn as moved on
+    if (child === undefined) throw new Error('expected the split to have run');
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F2').laneId).equal('implement');
+    const f2 = openOf(world, 'lead', child).cardAsks?.find(ask => ask.gate.cardId === 'F2');
+    should(f2?.answer).match({ response: choose('OK to build'), receipt: /^[0-9a-f]{64}$/u });
+    should(openOf(world, 'lead', parent).cardAsks?.some(ask => ask.gate.cardId === 'F2')).not.be.true();
+    should(world.told.some(each => each.message.includes(`!${child}`))).be.true();
+  });
+
+  it('answers a split-off ask by the id of an item that was split and then merged into another', async () => {
+    // Arrange — F2's ask went to the child; the original was then merged into the lead's thread about F3
+    const { world, parent, splitOff } = await parentAndSubBeforeSplit();
+    const child = await splitOff();
+    const other = await world.agenda.raise('lead', { ...threadAbout('F3'), subject: 'And the footer?' }, AGENT);
+    if (!other.ok || other.item === undefined) throw new Error('expected a thread');
+    const merged = await world.agenda.merge('lead', other.item.id, parent, HUMAN);
+    if (!merged.ok) throw new Error(merged.error.message);
+
+    // Act — a screen still showing the original answers F2's ask
+    const outcome = await world.answer(parent, choose('OK to build'), { sessionId: 'lead', cardAsk: 'gate:F2:plan:2' });
+
+    // Assert — it reached the child, which carries the ask, not only the item the original was merged into
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F2').laneId).equal('implement');
+    should(openOf(world, 'lead', child).cardAsks?.[0]?.answer).match({ response: choose('OK to build') });
+  });
+
+  it('puts the ask again when Not yet was said on a thread that was merged away, and the thread it joined is set aside', async () => {
+    // Arrange — F1's ask rides thread X, the owner says Not yet there, and X is merged into the lead's thread Y
+    const world = fixture([leads({ laneId: 'todo' }), leads({ id: 'F2', laneId: 'todo' })]);
+    const x = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    const y = await world.agenda.raise('lead', { ...threadAbout('F2'), subject: 'And the menu?' }, AGENT);
+    if (!x.ok || !y.ok || x.item === undefined || y.item === undefined) throw new Error('expected two threads');
+    await world.move('plan');
+    await world.answer(x.item.id, choose('Not yet'), { sessionId: 'lead', cardAsk: 'gate:F1:plan:2' });
+    const merged = await world.agenda.merge('lead', y.item.id, x.item.id, HUMAN);
+    if (!merged.ok) throw new Error(merged.error.message);
+
+    // Act — Not needed on Y drops that thread, and the Not yet on X was never an answer
+    await world.agenda.dismiss('lead', y.item.id, HUMAN);
+    await world.gates.written('F1');
+
+    // Assert — the card's own agenda carries the ask, open
+    const items = world.open('lead');
+    should(items).have.length(1);
+    should(items[0]?.sourceRef).equal('card-agenda:F1');
+    should(items[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:plan:2']);
+    should(items[0]?.cardAsks?.[0]?.answer).be.undefined();
   });
 });

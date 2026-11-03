@@ -323,7 +323,8 @@ const followed = (answer: GateAnswer, items: readonly (AgendaItem | ResolvedAgen
   const queue: AgendaId[] = [answer.id];
   for (const from of queue) {
     const item = items.find(each => each.id === from);
-    for (const next of item?.mergedInto !== undefined ? [item.mergedInto] : (item?.splitInto ?? [])) {
+    // Both ways on: an item split earlier and merged since keeps the path to the child its card went to.
+    for (const next of [...(item?.mergedInto === undefined ? [] : [item.mergedInto]), ...(item?.splitInto ?? [])]) {
       if (seen.has(next)) continue;
       seen.add(next);
       if (carries(next)) return { ...answer, id: next };
@@ -518,15 +519,17 @@ export class GateItems implements CardWriteObserver {
 
   /**
    * Records the operation on the item the answer reached. The card has moved by now, so an item merged or split since
-   * (the ask went with it) is not a reason to lose the answer: its carrier is looked for again, and the operation goes
-   * there. Returns the answer as addressed to where it was recorded.
+   * (the ask went with it) is not a reason to lose the answer: after any refusal its carrier is looked for again, and
+   * the operation goes there. A merge closes the item (not found); a split leaves it open without the ask (invalid): the
+   * refusal's code is not what tells them apart, {@link followed} is. Returns the answer as addressed to where it was
+   * recorded.
    */
   private async record(
     answer: GateAnswer,
     operation: CardAskOperation,
   ): Promise<{ readonly mutation: AgendaMutation; readonly carrier: GateAnswer }> {
     const mutation = await this.ports.agenda.cardAsk(answer.sessionId, answer.id, operation);
-    if (mutation.ok || mutation.error.code !== 'not-found') return { mutation, carrier: answer };
+    if (mutation.ok) return { mutation, carrier: answer };
     const listed = await this.ports.agenda.list(answer.sessionId).catch(() => undefined);
     if (listed === undefined || !listed.ok) return { mutation, carrier: answer };
     const carrier = followed(answer, [...listed.value.items, ...listed.value.resolved]);
@@ -757,6 +760,10 @@ export class GateItems implements CardWriteObserver {
     const parents: OpenItem[] = [];
     const followups: OpenItem[] = [];
     const asked = new Set<string>();
+    // The references of this card's asks that some scanned item (open or closed) carries: that item's own ask state is
+    // the word on them, so a gate-answered line, which only speaks for an ask nothing carries, is left out for them.
+    const carried = new Set<string>();
+    const lines = new Set<string>();
     const sessions = new Set([
       ...home,
       ...(this.holders.get(cardId) ?? []),
@@ -772,7 +779,9 @@ export class GateItems implements CardWriteObserver {
       }
       for (const item of listed.value.items) {
         for (const ask of item.cardAsks ?? []) {
-          if (ask.gate.cardId === cardId && ask.answer !== undefined) asked.add(cardAskReference(ask));
+          if (ask.gate.cardId !== cardId) continue;
+          carried.add(cardAskReference(ask));
+          if (ask.answer !== undefined) asked.add(cardAskReference(ask));
         }
         if (!canCarryCardAsk(item)) continue;
         if (carriesCard(item, cardId, task.machineId)) carriers.push({ sessionId, item });
@@ -785,6 +794,7 @@ export class GateItems implements CardWriteObserver {
       for (const item of listed.value.resolved) {
         for (const ask of item.cardAsks ?? []) {
           if (ask.gate.cardId !== cardId) continue;
+          carried.add(cardAskReference(ask));
           // Answered, or still open when the OWNER closed the card's OWN agenda: either way, asked. Their Not needed on
           // a ferret's thread that happened to carry the ask drops that thread, not the ask: it is put again.
           if (
@@ -793,17 +803,18 @@ export class GateItems implements CardWriteObserver {
           )
             asked.add(cardAskReference(ask));
         }
-        // Not yet is written as an answer too, but leaves its ask open: when the thread is then set aside the ask is put
-        // again, so a line for an ask the item itself still shows open is not an answer.
-        const stillOpen = new Set((item.cardAsks ?? []).filter(isOpenCardAsk).map(cardAskReference));
         for (const reference of gatesAnsweredOn(item)) {
-          if (parseGateReference(reference)?.cardId === cardId && !stillOpen.has(reference)) asked.add(reference);
+          if (parseGateReference(reference)?.cardId === cardId) lines.add(reference);
         }
         if (item.resolvedBy === 'human' && item.gate !== undefined && item.gate.cardId === cardId) {
           asked.add(gateReference(item.gate));
         }
       }
     }
+    // Not yet is written as an answer too, but leaves its ask open: the ask is put again when the thread that carried it
+    // is set aside, even after the thread was merged into another (the line stays behind, the ask went along). A line
+    // counts only for an ask no item carries any more: a legacy gate item, or an answered ask the agenda dropped.
+    for (const reference of lines) if (!carried.has(reference)) asked.add(reference);
     return { carriers, parents, followups, asked };
   }
 
