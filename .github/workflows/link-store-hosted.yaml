@@ -3,6 +3,9 @@ name: Deploy Hosted Link Store
 # MANUAL ONLY. The hosted link store is the Worker that holds sealed catalog-link envelopes
 # (docs/relay-protocol.md §17). Nothing here runs on a push, a schedule or another workflow: a deploy
 # restarts the Worker and its Durable Objects, and the operator who starts one is the whole approval.
+# ORDER: deploy this store BEFORE the relay that binds it (relay-protocol.md §13, "The link-store binding"); once
+# the relay is published with the binding, LINK_STORE_ORIGIN is the RELAY's origin, because the store has no
+# address of its own.
 # Running a link store of your own is docs/cloudflare-relay-self-hosting.md, "Your own link store".
 on:
   workflow_dispatch:

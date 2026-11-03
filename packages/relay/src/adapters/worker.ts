@@ -67,6 +67,7 @@ import {
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from './hosted-control.ts';
+import { type LinkStoreBinding, hostedLinkStoreFetch, isHostedLinkStorePath } from './hosted-link-store-routes.ts';
 import { hostedTunnelFetch, isHostedTunnelPath } from './hosted-tunnel-routes.ts';
 import { operatorRefusal } from './operator-auth.ts';
 import { WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
@@ -136,6 +137,12 @@ export interface RelayEnvironment {
    * tunnel control object reads it; it is listed here so the shape of the environment is stated once.
    */
   readonly TUNNEL_ACCOUNTS?: string;
+  /**
+   * The hosted link store (§17): a service binding to the separate `ferretry-hosted-link-store` Worker.
+   * Absent, the store's advertisement says `available: false` and its other paths are a 404. Self-hosted
+   * relays never read it.
+   */
+  readonly LINK_STORE?: LinkStoreBinding;
 }
 
 /** The platform pieces that cannot be reached without the Workers runtime, so they are injected. */
@@ -226,6 +233,7 @@ export async function relayFetch(
     return hostedOperatorRequest(request, environment);
   }
   if (mode === 'hosted' && isHostedTunnelPath(url.pathname)) return hostedTunnelFetch(request, environment);
+  if (mode === 'hosted' && isHostedLinkStorePath(url.pathname)) return hostedLinkStoreFetch(request, environment);
 
   const route = parseRendezvousPath(url.pathname);
   if (route === null) return new Response(NOT_FOUND, { status: 404 });
