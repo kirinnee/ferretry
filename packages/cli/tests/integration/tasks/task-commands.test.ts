@@ -309,6 +309,7 @@ describe('every remaining task verb', () => {
     ['edit', ['edit', 'F412', '--summary', 'a line', '--term', 'x=y'], 'edit'],
     ['refile', ['refile', 'F412', '--project', 'Ferretry'], 'refile'],
     ['feedback', ['feedback', 'F412', 'nice'], 'note'],
+    ['claim', ['claim', 'F412'], 'claim'],
   ];
 
   for (const [name, argv, action] of verbs) {
