@@ -1,3 +1,9 @@
+## [4.259.0](https://github.com/kirinnee/ferretry/compare/v4.258.0...v4.259.0) (2026-11-03)
+
+### Features
+
+* **board:** claim a card your lead holds; fy start --card ([#1435](https://github.com/kirinnee/ferretry/issues/1435)) ([c8bbaac](https://github.com/kirinnee/ferretry/commit/c8bbaaceb1a82b4016b74cc2f9c7adf2eda1abaa))
+
 ## [4.258.0](https://github.com/kirinnee/ferretry/compare/v4.257.3...v4.258.0) (2026-11-03)
 
 ### Features
