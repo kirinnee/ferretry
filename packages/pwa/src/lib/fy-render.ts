@@ -53,6 +53,7 @@
 
 import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from './fy-render-bounds.ts';
 import { PALETTE_KEY } from './fy-render-palette.ts';
+import { type FyRenderEmbedSpec, parseFyRenderEmbed } from './fy-render-embed.ts';
 import { parseReferenceToken } from './references.ts';
 
 export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
@@ -111,6 +112,8 @@ export const FY_RENDER_TYPES = [
   'mermaid',
   'map',
   'chart',
+  'card',
+  'board',
   'image',
   'video',
   'audio',
@@ -188,12 +191,26 @@ export type FyRenderBlock =
   | (FyRenderBaseBlock<'image'> & { readonly mime: FyRenderImageMime; readonly src?: undefined })
   | FyRenderMediaBlock;
 
+/**
+ * A `card` or `board` block: not an illustration but a pointer at something that lives on the board.
+ * `embed` is the payload read into references (`fy-render-embed.ts`); the block carries no title, lane or
+ * status, because what it shows is read from the board when it is drawn. It is drawn by
+ * `fy-render-card-embed.tsx`, never by `FyRenderBlock`, which is why it is a separate type.
+ */
+export type FyRenderEmbedBlock = (FyRenderBaseBlock<'card'> | FyRenderBaseBlock<'board'>) & {
+  readonly embed: FyRenderEmbedSpec;
+};
+
+export type FyRenderParsedBlock = FyRenderBlock | FyRenderEmbedBlock;
+
+export const isFyRenderEmbedBlock = (block: FyRenderParsedBlock): block is FyRenderEmbedBlock => 'embed' in block;
+
 export type FyRenderParseResult =
-  | { readonly ok: true; readonly block: FyRenderBlock }
+  | { readonly ok: true; readonly block: FyRenderParsedBlock }
   | { readonly ok: false; readonly reason: string };
 
 /** True for a block that names its bytes with `src:` rather than carrying them. */
-export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMediaBlock =>
+export const isFyRenderMediaBlock = (block: FyRenderParsedBlock): block is FyRenderMediaBlock =>
   'src' in block && block.src !== undefined;
 
 /**
@@ -1277,6 +1294,13 @@ export function parseFyRender(source: string): FyRenderParseResult {
       if (byteLength(payload) > FY_RENDER_LIMITS.chartBytes) return fail('Chart payload exceeds 64 KiB');
       if (payload.trim() === '') return fail('A chart block needs a payload describing it');
       return { ok: true, block: { type: kind, alt, payload, source } };
+    }
+    case 'card':
+    case 'board': {
+      const parsed = parseFyRenderEmbed(kind, payload);
+      return parsed.ok
+        ? { ok: true, block: { type: kind, alt, payload, source, embed: parsed.spec } }
+        : fail(parsed.reason);
     }
     case 'lottie': {
       const reason = validateLottie(payload);

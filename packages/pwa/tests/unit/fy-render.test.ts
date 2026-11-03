@@ -17,6 +17,7 @@ import {
   fyRenderReadBoundedBytes,
   fyRenderReadBoundedText,
   isFyRenderMediaBlock,
+  isFyRenderEmbedBlock,
   parseFyRender,
   remarkFyRenderFences,
 } from '../../src/lib/fy-render.ts';
@@ -225,7 +226,7 @@ describe('fy-render fence language', () => {
     should(FY_RENDER_FENCE_LANGUAGE).equal('fy-render');
   });
 
-  test('should declare the ten types the block grammar accepts', () => {
+  test('should declare the twelve types the block grammar accepts', () => {
     should([...FY_RENDER_TYPES]).eql([
       'html',
       'svg',
@@ -233,6 +234,8 @@ describe('fy-render fence language', () => {
       'mermaid',
       'map',
       'chart',
+      'card',
+      'board',
       'image',
       'video',
       'audio',
@@ -310,6 +313,7 @@ describe('fy-render presentation', () => {
   const accepted = (source: string): FyRenderBlock => {
     const result = parseFyRender(source);
     if (!result.ok) throw new Error(result.reason);
+    if (isFyRenderEmbedBlock(result.block)) throw new Error('fixture is an embed block');
     return result.block;
   };
 
@@ -464,6 +468,43 @@ describe('fy-render html payloads', () => {
     should(reasonOf(parseFyRender(body('type: html', 'alt: A widget', '---', payload)))).equal(
       'HTML payload exceeds 200 KiB',
     );
+  });
+});
+
+describe('fy-render card and board blocks', () => {
+  const embedOf = (...lines: string[]) => {
+    const result = parseFyRender(body(...lines));
+    if (!result.ok || !isFyRenderEmbedBlock(result.block)) throw new Error('expected an embed block');
+    return result.block;
+  };
+
+  test('should read a card block as a pointer to one card', () => {
+    const block = embedOf('type: card', 'alt: The lane move', '---', '&F12');
+    should(block.embed).eql({ kind: 'card', id: 'F12' });
+    should(block.type).equal('card');
+  });
+
+  test('should read a board block as a list, or as a parent', () => {
+    should(embedOf('type: board', 'alt: Open work', '---', '&F1 &F2').embed).eql({ kind: 'cards', ids: ['F1', 'F2'] });
+    should(embedOf('type: board', 'alt: Open work', '---', 'parent: &F9').embed).eql({
+      kind: 'children',
+      parent: 'F9',
+    });
+  });
+
+  test('should refuse a bad payload with the reason, so the fence stays an ordinary code fence', () => {
+    should(reasonOf(parseFyRender(body('type: card', 'alt: A card', '---', 'nope')))).equal(
+      '"nope" is not a card reference',
+    );
+    should(reasonOf(parseFyRender(body('type: board', 'alt: A board', '---', '')))).containEql('needs a payload');
+  });
+
+  test('should still demand an alt', () => {
+    should(parseFyRender(body('type: card', '---', '&F12')).ok).be.false();
+  });
+
+  test('should not count an embed block as a media block', () => {
+    should(isFyRenderMediaBlock(embedOf('type: card', 'alt: A card', '---', '&F12'))).be.false();
   });
 });
 
@@ -1376,6 +1417,7 @@ describe('fy-render media blocks', () => {
   const block = (source: string): FyRenderBlock => {
     const result = parseFyRender(source);
     if (!result.ok) throw new Error(result.reason);
+    if (isFyRenderEmbedBlock(result.block)) throw new Error('fixture is an embed block');
     return result.block;
   };
 

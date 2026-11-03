@@ -1,3 +1,9 @@
+## [4.262.0](https://github.com/kirinnee/ferretry/compare/v4.261.0...v4.262.0) (2026-11-03)
+
+### Features
+
+* **agenda:** editable asks, one Needs-you queue and the silence nudge ([#1413](https://github.com/kirinnee/ferretry/issues/1413)) ([79d273d](https://github.com/kirinnee/ferretry/commit/79d273de4438bdee67a08ac8ec8c253cf0267f82))
+
 ## [4.261.0](https://github.com/kirinnee/ferretry/compare/v4.260.0...v4.261.0) (2026-11-03)
 
 ### Features

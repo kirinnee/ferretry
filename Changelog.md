@@ -1,3 +1,9 @@
+## [4.263.0](https://github.com/kirinnee/ferretry/compare/v4.262.0...v4.263.0) (2026-11-03)
+
+### Features
+
+* **pwa:** show a live card or mini board inline with fy-render ([#1438](https://github.com/kirinnee/ferretry/issues/1438)) ([2621f62](https://github.com/kirinnee/ferretry/commit/2621f62fb88a10401be76b18d59a850d07a53677))
+
 ## [4.262.0](https://github.com/kirinnee/ferretry/compare/v4.261.0...v4.262.0) (2026-11-03)
 
 ### Features

@@ -21,6 +21,11 @@ export const FY_RENDER_LIMITS = {
   mermaidCharacters: 20_000,
   /** A `map` payload: JSON or YAML, a few markers and routes. Larger is a data dump, not an illustration. */
   mapBytes: 32 * 1024,
+  /** A `card` or `board` payload: card references, nothing else. A board lists at most `embedCards` of them. */
+  embedBytes: 2 * 1024,
+  embedCards: 12,
+  /** A board built from a parent card draws at most this many of its children; the rest are counted, not drawn. */
+  embedChildren: 24,
   /** A map draws at most this many pins, shapes (lines plus polygons) and vertices across all of them. */
   mapMarkers: 100,
   mapShapes: 50,

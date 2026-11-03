@@ -15,7 +15,12 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
 import type { FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
-import { FY_RENDER_SANDBOX_LIMITS, type FyRenderBlock as ParsedBlock, parseFyRender } from '../../src/lib/fy-render.ts';
+import {
+  FY_RENDER_SANDBOX_LIMITS,
+  type FyRenderBlock as ParsedBlock,
+  isFyRenderEmbedBlock,
+  parseFyRender,
+} from '../../src/lib/fy-render.ts';
 // Registers happy-dom, which is what gives this file a `window` to dispatch on.
 import '../support/dom.ts';
 import { installManualClock, type ManualClock } from '../support/manual-clock.ts';
@@ -24,6 +29,7 @@ import { render as mountTree, run, runAsync } from '../support/react.ts';
 const parsed = (...lines: readonly string[]): ParsedBlock => {
   const result = parseFyRender(lines.join('\n'));
   if (!result.ok) throw new Error(`fixture did not parse: ${result.reason}`);
+  if (isFyRenderEmbedBlock(result.block)) throw new Error('fixture is an embed block');
   return result.block;
 };
 

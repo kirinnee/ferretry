@@ -72,7 +72,7 @@ and the longest routing prompt:
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,266      | 317      | `FY_AGENDA=1`               |
-| Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
+| Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
 | Lessons                                  | 238        | 60       | `FY_LEARNING_PASSIVE=1`     |
@@ -108,8 +108,9 @@ Final review then restored "on it" in the chat line (the owner's words go ON the
 7,751 (7,765 counting the separators), 99 characters under the 7,850 cap (85 counting the separators).
 PR 3's conversation verbs then joined it — `log <id> --reply|--rest` in the chat line, and `split` and `merge`
 in the splitting sentence — partly paid for by `answer <id> "<text>"` → `answer <id> "…"`: agenda 1,236 → 1,266 (cap
-1,270), the measured total 7,781 (7,795 counting the separators), 69 characters under the 7,850 cap (55 counting the
-separators). The whole-prompt cap is unchanged.
+1,270), the total then 7,781.
+The Hypermedia line then learned `card` and `board` (live board cards) on main, 1,288 → 1,320. Together with PR 3's agenda the measured total is
+7,813 (7,827 counting the separators), 37 characters under the 7,850 cap (23 counting the separators). The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

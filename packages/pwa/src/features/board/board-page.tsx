@@ -20,6 +20,7 @@ import {
   useBoardProjects,
   type BoardMachine,
 } from '../../hooks/use-board.ts';
+import { useNow } from '../../hooks/use-now.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch, NO_BOARD_FILTERS } from '../../lib/board-model.ts';
@@ -88,16 +89,6 @@ export interface BoardPageProps {
    */
   readonly origin?: DaemonSessionScope | null;
 }
-
-const useNow = (fixed: number | undefined): number => {
-  const [now, setNow] = useState(() => fixed ?? Date.now());
-  useEffect(() => {
-    if (fixed !== undefined) return undefined;
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, [fixed]);
-  return fixed ?? now;
-};
 
 const NO_MACHINES: readonly BoardMachine[] = [];
 

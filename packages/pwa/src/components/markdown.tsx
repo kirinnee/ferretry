@@ -66,6 +66,7 @@ import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.t
 import {
   FY_RENDER_FENCE_ATTRIBUTE,
   type FyRenderWorkspaceReader,
+  isFyRenderEmbedBlock,
   parseFyRender,
   remarkFyRenderFences,
 } from '../lib/fy-render.ts';
@@ -94,6 +95,7 @@ import {
 import { remarkTableLabels } from '../lib/remark-table-labels.ts';
 import { trustedHighlight } from '../lib/trusted-types.ts';
 import { FyRenderBlock } from './fy-render-block.tsx';
+import { FyRenderCardEmbed, type FyRenderCardEmbedHost } from './fy-render-card-embed.tsx';
 import { LocationChip } from './location-chip.tsx';
 import { CopyableFence, CopyableSpan } from './markdown-copy.tsx';
 import { MarkdownTable } from './markdown-table.tsx';
@@ -233,6 +235,12 @@ export interface MarkdownProps {
    * connection, URL or token (`fy-render-block.tsx`).
    */
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader;
+  /**
+   * The board a `card` or `board` block reads: the store and the machine it belongs to. Only meaningful
+   * where `enableFyRender` is set. Without it those two blocks stay ordinary code fences — a host with no
+   * board to read has nothing true to draw — and a card opens with `onTaskOpen`, as `&F12` does.
+   */
+  readonly cardEmbed?: FyRenderCardEmbedHost;
   /** Proves `:callsign` against one daemon's live fleet. Without it, prose. */
   readonly agentReferenceResolver?: AgentReferenceResolver;
   /** Proves `&task` against the daemon's board. Syntax alone never links. */
@@ -268,6 +276,8 @@ interface MarkdownRendering {
   readonly enableFyRender: boolean;
   readonly copyable: ClipboardWriter | undefined;
   readonly readWorkspaceMedia: FyRenderWorkspaceReader | undefined;
+  readonly cardEmbed: FyRenderCardEmbedHost | undefined;
+  readonly onTaskOpen: ((id: string, opener?: HTMLElement | null) => void) | undefined;
   readonly trustedResolvers: ReferenceResolvers;
   readonly hasOpener: (target: ResolvedReference) => boolean;
   readonly destination: (target: ResolvedReference) => string;
@@ -407,10 +417,13 @@ function MarkdownCode({ node: _node, className: fenceClassName, children, ...res
  * fence, which is the same rule an unknown fence language already has.
  */
 function MarkdownPre({ node, children, ...rest }: ElementProps<'pre'>) {
-  const { enableFyRender, readWorkspaceMedia, copyable } = useMarkdownRendering();
+  const { enableFyRender, readWorkspaceMedia, copyable, cardEmbed, onTaskOpen } = useMarkdownRendering();
   const body = enableFyRender ? fyRenderFenceBody(node as MarkdownAstFenceNode | undefined) : null;
   const parsed = body === null ? null : parseFyRender(body);
-  if (parsed?.ok === true) return <FyRenderBlock block={parsed.block} readWorkspaceMedia={readWorkspaceMedia} />;
+  if (parsed?.ok === true && !isFyRenderEmbedBlock(parsed.block))
+    return <FyRenderBlock block={parsed.block} readWorkspaceMedia={readWorkspaceMedia} />;
+  if (parsed?.ok === true && cardEmbed !== undefined && isFyRenderEmbedBlock(parsed.block))
+    return <FyRenderCardEmbed block={parsed.block} host={cardEmbed} onTaskOpen={onTaskOpen} />;
   const locationBody = locationFenceBody(node as MarkdownAstFenceNode | undefined);
   const fix = locationBody === null ? null : parseLocationBlock(locationBody);
   if (fix !== null) return <LocationChip fix={fix} />;
@@ -471,6 +484,7 @@ export const Markdown = memo(function Markdown({
   demoteHeadings = false,
   copyable,
   readWorkspaceMedia,
+  cardEmbed,
   agentReferenceResolver,
   taskReferenceResolver,
   agendaReferenceResolver,
@@ -611,6 +625,8 @@ export const Markdown = memo(function Markdown({
     enableFyRender,
     hasOpener,
     readWorkspaceMedia,
+    cardEmbed,
+    onTaskOpen,
     referenceClick,
     trustedResolvers,
   };

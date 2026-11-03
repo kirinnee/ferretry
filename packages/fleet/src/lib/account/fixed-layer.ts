@@ -322,7 +322,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
     '- html: a fragment with inline CSS and <script> for interaction (runs isolated); no network loads.',
     `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
-    `- map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
+    `- card, board (live board cards), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
     '```fy-render',
     'type: mermaid',
     'alt: How a request flows',

@@ -654,7 +654,7 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'chart', 'map, image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'chart', 'card, board (live board cards), map, image, video, audio, pdf'];
     const teaching = HYPERMEDIA_INSTRUCTION('zz');
 
     // Act
@@ -676,7 +676,9 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
     // Map, media and chart's full spec are one command away, named with the binary.
     should(teaching).containEql('full spec: `zz render guide chart`');
-    should(teaching).containEql('- map, image, video, audio, pdf: `zz render guide <type>`');
+    should(teaching).containEql(
+      '- card, board (live board cards), map, image, video, audio, pdf: `zz render guide <type>`',
+    );
     should(teaching).not.containEql('`fy ');
     should(teaching).containEql('auto-themed, so no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
