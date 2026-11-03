@@ -12,6 +12,7 @@ import { githubRepositoryOf, parseGitRemote, type WorkingCopies } from '../../li
 const REMEMBERED_FOR_MS = 10 * 60_000;
 /** How many folders' answers are kept; the oldest is let go past it. */
 const REMEMBERED_FOLDERS = 512;
+const BRANCHES = 'refs/heads/';
 
 type Question = 'repository' | 'branch';
 
@@ -39,16 +40,31 @@ async function commonDirectory(gitDirectory: string): Promise<string> {
 }
 
 /**
- * The git dir `git -C <path>` would use: the nearest `.git` at or above the folder — a directory, or a
- * linked worktree's `gitdir:` file — or `undefined` where there is none to find.
+ * Whether a config file hands part of itself to another: an `[include]` or `[includeIf "…"]` section.
+ * Deliberately loose — a comment that mentions one is a false positive, which only costs a kept answer.
+ */
+const INCLUDES = /\[\s*include(?:if)?[\s"\]]/iu;
+
+/**
+ * The git dir `git -C <path>` would use: the nearest `.git` at or above the folder — a directory (or a
+ * symlink to one), or a linked worktree's `gitdir:` file — or `undefined` where there is none to find.
+ *
+ * A `.git` entry of ANY kind ends the search: one that is neither (a dangling link, a socket) is a
+ * boundary this cannot read, and walking past it would answer from the enclosing repository's files.
  */
 async function gitDirectoryOf(path: string): Promise<string | undefined> {
   let folder = resolve(path);
   for (;;) {
     const dotGit = join(folder, '.git');
-    const information = await lstat(dotGit).catch(() => undefined);
-    if (information?.isDirectory() === true) return dotGit;
-    if (information?.isFile() === true) {
+    if (
+      await lstat(dotGit).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      const information = await stat(dotGit).catch(() => undefined);
+      if (information?.isDirectory() === true) return dotGit;
+      if (information?.isFile() !== true) return undefined;
       const pointer = /^gitdir: (.+)$/mu.exec(await readFile(dotGit, 'utf8').catch(() => ''));
       return pointer?.[1] === undefined ? undefined : resolve(folder, pointer[1].trim());
     }
@@ -69,10 +85,13 @@ async function gitDirectoryOf(path: string): Promise<string | undefined> {
  * questions for every linked card on every tick, and each was a `git` process: on a host with eighteen such
  * cards, seventy-two a minute, every one forked from the event loop — and under memory pressure one fork
  * blocked the loop for seconds. The branch is the checkout's `HEAD`, the remote is its config (the common
- * dir's `config`, and a linked worktree's `config.worktree`); git rewrites each by renaming a new file over
- * it, so a checkout, a `remote set-url` or a hand edit is a new identity and the next question asks git
- * again. A folder whose git dir cannot be found, and a question git answered with nothing, are asked every
- * time, as before.
+ * dir's `config`, and a linked worktree's `config.worktree`) read with that `HEAD` — an `includeIf
+ * "onbranch:…"` makes one depend on the other; git rewrites each by renaming a new file over it, so a
+ * checkout, a `remote set-url` or a hand edit is a new identity and the next question asks git again.
+ *
+ * A kept answer must never outlive a change git itself would see, so these are asked every time, as before:
+ * a folder that is gone or whose git dir cannot be found or is not one, a config with an `include` or
+ * `includeIf` (the files it reaches are not watched), and a question git answered with nothing.
  */
 export class GitWorkingCopies implements WorkingCopies {
   private readonly hosts = new Map<string, Promise<string | null>>();
@@ -89,11 +108,17 @@ export class GitWorkingCopies implements WorkingCopies {
   }
 
   async branchOf(path: string): Promise<string | null> {
-    return await this.answer(
-      'branch',
-      path,
-      async () => await this.git(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
-    );
+    return await this.answer('branch', path, async () => await this.askBranch(path));
+  }
+
+  /**
+   * The branch `HEAD` names. Read from the FULL ref, not `--short`: git shortens it against every other ref,
+   * so a tag of the same name makes `--short` print `heads/<name>` — an answer that depends on files other than
+   * `HEAD`, and one `HEAD` alone cannot vouch for.
+   */
+  private async askBranch(path: string): Promise<string | null> {
+    const ref = await this.git(path, ['symbolic-ref', '--quiet', 'HEAD']);
+    return ref?.startsWith(BRANCHES) === true ? ref.slice(BRANCHES.length) : null;
   }
 
   /** The kept answer while the files behind it are unchanged and it is young enough, else a fresh one. */
@@ -121,15 +146,27 @@ export class GitWorkingCopies implements WorkingCopies {
     return answered;
   }
 
-  /** The identity of the files git reads to answer `question` for `path`; `undefined` when they cannot be found. */
+  /**
+   * The identity of the files git reads to answer `question` for `path`; `undefined` when they cannot be
+   * trusted to vouch for it — the folder is gone, the git dir is not one, or the config reaches into files
+   * this does not watch.
+   */
   private async filesBehind(question: Question, path: string): Promise<string | undefined> {
+    // `git -C` fails in a folder that is gone, however unchanged the repository above it.
+    const folder = await stat(path).catch(() => undefined);
+    if (folder?.isDirectory() !== true) return undefined;
     const gitDirectory = await gitDirectoryOf(path);
     if (gitDirectory === undefined) return undefined;
-    const read =
-      question === 'branch'
-        ? [join(gitDirectory, 'HEAD')]
-        : [join(await commonDirectory(gitDirectory), 'config'), join(gitDirectory, 'config.worktree')];
-    return `${gitDirectory}\n${(await Promise.all(read.map(fileIdentity))).join('\n')}`;
+    const head = join(gitDirectory, 'HEAD');
+    // A git dir without a `HEAD` is not one: git walks on past it, so what this found is not what git uses.
+    if ((await fileIdentity(head)) === 'none') return undefined;
+    if (question === 'branch') return `${gitDirectory}\n${await fileIdentity(head)}`;
+    const configs = [join(await commonDirectory(gitDirectory), 'config'), join(gitDirectory, 'config.worktree')];
+    // `includeIf "onbranch:…"` makes the remote depend on `HEAD`; an `include` makes it depend on files that
+    // change without either config changing. Which files an `includeIf` reaches is git's to decide, so a
+    // config with one is asked every time rather than guessed at.
+    for (const config of configs) if (INCLUDES.test(await readFile(config, 'utf8').catch(() => ''))) return undefined;
+    return `${gitDirectory}\n${(await Promise.all([head, ...configs].map(fileIdentity))).join('\n')}`;
   }
 
   private async askRepository(path: string): Promise<string | null> {

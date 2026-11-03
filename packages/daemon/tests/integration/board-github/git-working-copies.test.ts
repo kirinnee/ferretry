@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GitWorkingCopies } from '../../../src/adapters/board-github/git-working-copies.ts';
@@ -169,6 +169,124 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
         should(young).equal(1);
         should(aged).equal(2);
         should((await asked()).length).equal(4);
+      });
+    });
+
+    describe('an answer never outlives a change git makes', () => {
+      it("should follow an included config's remote across a branch switch and an edit to the included file", async () => {
+        await withTempRoot(async root => {
+          // Arrange
+          const repo = await repository(root);
+          const gitDirectory = join(repo, '.git');
+          const remote = (name: string) => `[remote "origin"]\n\turl = git@github.com:owner/${name}.git\n`;
+          await writeFile(join(gitDirectory, 'one.path'), remote('one'));
+          await writeFile(join(gitDirectory, 'two.path'), remote('two'));
+          await git(repo, 'config', 'includeIf.onbranch:feat/one.path', 'one.path');
+          await git(repo, 'config', 'includeIf.onbranch:feat/two.path', 'two.path');
+          await git(repo, 'checkout', '--quiet', '-b', 'feat/one');
+          const copies = new GitWorkingCopies();
+
+          // Act
+          const one = await copies.repositoryOf(repo);
+          await git(repo, 'checkout', '--quiet', '-b', 'feat/two');
+          const two = await copies.repositoryOf(repo);
+          await git(repo, 'config', 'include.path', 'remote.config');
+          await git(
+            repo,
+            'config',
+            '--file',
+            join(gitDirectory, 'remote.config'),
+            'remote.origin.url',
+            'git@github.com:owner/third.git',
+          );
+          await git(repo, 'config', '--unset', 'includeIf.onbranch:feat/two.path');
+          const third = await copies.repositoryOf(repo);
+          await git(
+            repo,
+            'config',
+            '--file',
+            join(gitDirectory, 'remote.config'),
+            'remote.origin.url',
+            'git@github.com:owner/fourth.git',
+          );
+          const fourth = await copies.repositoryOf(repo);
+
+          // Assert
+          should([one, two, third, fourth]).deepEqual(['owner/one', 'owner/two', 'owner/third', 'owner/fourth']);
+        });
+      });
+
+      it('should name the branch when a tag of the same name comes and goes', async () => {
+        await withTempRoot(async root => {
+          // Arrange
+          const repo = await repository(root);
+          await git(repo, 'checkout', '--quiet', '-b', 'renamed');
+          await git(repo, 'tag', 'renamed');
+          await git(repo, 'pack-refs', '--all');
+          const copies = new GitWorkingCopies();
+
+          // Act
+          const withTag = await copies.branchOf(repo);
+          await git(repo, 'tag', '-d', 'renamed');
+          const withoutTag = await copies.branchOf(repo);
+
+          // Assert
+          should([withTag, withoutTag]).deepEqual(['renamed', 'renamed']);
+        });
+      });
+
+      it("should not mistake an enclosing repository's head for a checkout whose .git is a symlink", async () => {
+        await withTempRoot(async root => {
+          // Arrange
+          const outer = await repository(root);
+          const store = join(root, 'inner-store');
+          await mkdir(store);
+          await git(store, 'init', '--quiet', '-b', 'main');
+          await git(
+            store,
+            '-c',
+            'user.name=t',
+            '-c',
+            'user.email=t@t',
+            'commit',
+            '--allow-empty',
+            '--quiet',
+            '-m',
+            'root',
+          );
+          const inner = join(outer, 'inner');
+          await mkdir(inner);
+          await symlink(join(store, '.git'), join(inner, '.git'));
+          await git(inner, 'checkout', '--quiet', '-b', 'inner/one');
+          const copies = new GitWorkingCopies();
+
+          // Act
+          const one = await copies.branchOf(inner);
+          await git(inner, 'checkout', '--quiet', '-b', 'inner/two');
+          const two = await copies.branchOf(inner);
+
+          // Assert
+          should([one, two]).deepEqual(['inner/one', 'inner/two']);
+        });
+      });
+
+      it('should name nothing for a folder that has been removed, whatever repository encloses it', async () => {
+        await withTempRoot(async root => {
+          // Arrange
+          const repo = await repository(root);
+          await git(repo, 'checkout', '--quiet', '-b', 'feat/one');
+          const folder = join(repo, 'subdir');
+          await mkdir(folder);
+          const copies = new GitWorkingCopies();
+
+          // Act
+          const before = await copies.branchOf(folder);
+          await rm(folder, { recursive: true });
+          const after = await copies.branchOf(folder);
+
+          // Assert
+          should([before, after]).deepEqual(['feat/one', null]);
+        });
       });
     });
   });
