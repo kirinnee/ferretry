@@ -152,6 +152,17 @@ describe('SendPathQueueTransport', () => {
     for (const key of ['replyExpected', 'now', 'attachmentIds']) should(requests[0]).not.have.property(key);
   });
 
+  it('should leave an unattributed member out of a combined send’s parts, its text still in the turn', async () => {
+    const { subject, requests } = transport('delivered');
+    const first = message({ id: 'q-1', sender: 'agent', text: 'one' });
+    const second = message({ id: 'q-2', sender: 'agent', from: 'session-3', text: 'two' });
+
+    await subject.handOver(ID, { sendId: 'q-1', members: [first, second] });
+
+    should(requests[0]).containEql({ message: 'one\n\ntwo', senderReference: 'session-3' });
+    should(requests[0]?.parts?.map(part => part.queueId)).deepEqual(['q-2']);
+  });
+
   it('should refuse a delivery that carries no message at all', async () => {
     const { subject } = transport('delivered');
 
