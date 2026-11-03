@@ -186,7 +186,8 @@ describe('the open item’s head', () => {
                   wrap: box.getAttribute('data-wrap') !== null,
                   marquee: box.getAttribute('data-marquee') !== null,
                   cut: box.getAttribute('data-cut') !== null,
-                  moving: text.getAnimations().length,
+                  // A CSS animation (the marquee): a theme's colour transition is not the title moving.
+                  moving: text.getAnimations().filter(each => each instanceof CSSAnimation).length,
                   shownLines: Math.round(box.clientHeight / lineHeight),
                   lineTops: new Set(lines).size,
                   clamped: box.scrollHeight > box.clientHeight + 1,

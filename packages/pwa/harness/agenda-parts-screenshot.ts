@@ -155,7 +155,7 @@ const checkCommon = async (page: Page, label: string): Promise<void> => {
         if (box === null || box === undefined || text === null || text === undefined) return null;
         const first = text.getClientRects()[0];
         return {
-          moves: box.hasAttribute('data-marquee') || text.getAnimations().length > 0,
+          moves: box.hasAttribute('data-marquee') || text.getAnimations().some(each => each instanceof CSSAnimation),
           cut: box.hasAttribute('data-cut'),
           lines: Math.round(box.clientHeight / Number.parseFloat(getComputedStyle(box).lineHeight)),
           leftClip: first === undefined || first.left < box.getBoundingClientRect().left - 1,

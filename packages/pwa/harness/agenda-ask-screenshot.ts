@@ -259,7 +259,11 @@ const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[numbe
         clamped: node.scrollHeight > node.clientHeight + 1,
         whole: document.querySelector('[data-agenda-full-title]')?.textContent ?? null,
         full,
-        moving: node.querySelector('.fy-item-view__title-text')?.getAnimations().length ?? 0,
+        moving:
+          node
+            .querySelector('.fy-item-view__title-text')
+            ?.getAnimations()
+            .filter(each => each instanceof CSSAnimation).length ?? 0,
       };
     });
     check(found.wrap, `${label}: the title does not wrap`);
