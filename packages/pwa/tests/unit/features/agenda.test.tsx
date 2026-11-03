@@ -1263,6 +1263,20 @@ describe('an input card that ends while it is open (#B147)', () => {
     expect(textOf(said[0])).toContain('closed');
   });
 
+  test('says only that it is closed when the daemon closed it without a note', () => {
+    const view = openInput();
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', null)])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(false);
+    expect(textOf(sentLine(view)[0])).toContain('!A7 is closed.');
+  });
+
   test('closes its view once the card sent from here has nothing more to show, in the card’s own words', () => {
     const view = openInput();
     run(() => inputHost(view).props.onHold(true));
