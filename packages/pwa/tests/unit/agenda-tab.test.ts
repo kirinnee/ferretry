@@ -106,6 +106,37 @@ describe('agendaTabModel', () => {
     expect(built.rows.resolved[0]?.stage).not.toBe('Done');
   });
 
+  test('names a closed item by the last stage it had before the daemon wrote done', () => {
+    const closed = (id: string, extra: Record<string, unknown>): ResolvedAgendaItem =>
+      ({ ...make(id), resolvedAt: at(5), ...extra }) as unknown as ResolvedAgendaItem;
+    const built = model(
+      [],
+      [
+        closed('A1', {
+          stage: 'done',
+          stages: [
+            { stage: 'plan', at: at(300) },
+            { stage: 'tracker', at: at(200) },
+            { stage: 'test', at: at(100) },
+            { stage: 'done', at: at(5) },
+          ],
+        }),
+        closed('A2', {
+          stage: 'done',
+          stages: [
+            { stage: 'plan', at: at(200) },
+            { stage: 'done', at: at(6) },
+          ],
+        }),
+        closed('A3', { stage: 'done', stages: [{ stage: 'done', at: at(7) }] }),
+        closed('A4', { stage: 'tracker' }),
+      ],
+    );
+    const stages = Object.fromEntries(built.rows.resolved.map(row => [row.id, row.stage]));
+    expect(stages).toEqual({ A1: 'Test', A2: 'Plan to approve', A3: 'Plan to approve', A4: 'Tracker' });
+    expect(built.rows.resolved.map(row => row.state)).toEqual(['Done', 'Done', 'Done', 'Done']);
+  });
+
   test('is empty and total on an empty board', () => {
     const built = model([]);
     expect(built.chips.map(chip => chip.count)).toEqual([0, 0, 0, 0]);

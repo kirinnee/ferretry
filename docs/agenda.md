@@ -1405,13 +1405,14 @@ options are the gate's own, laid out as every choice is (the first ←, the seco
   refusal (the card moved on, or the gate was not reached) shows beside the buttons, as for every answer.
 - **Question items keep their sticky options and composer exactly as they were.**
 
-**The app ships before the daemon.** A machine that advertises `board.gate-items.1` on its health sends gate items, and the
-Inbox then drops the _synthesized_ to-test rows those items replace. A machine that also advertises `agenda.card-asks.1`
-sends card asks instead, which today's app does not count as covering a card: it keeps the to-test row beside the
-agenda's card ask. Either answers through the owner's authority and moves the card once; the other is withdrawn. A machine that does not keeps today's rows.
+**The app ships before the daemon.** A machine that advertises `board.gate-items.1` sends gate items, and the
+Inbox then drops the _synthesized_ to-test rows those items replace. A machine that advertises `agenda.card-asks.1` sends the
+card's ask on the card's own agenda instead, and the Inbox keeps no to-test row for that machine at all (next paragraph).
+Either way the owner answers through their authority and the card moves once; the other path is withdrawn. A machine that
+advertises neither keeps today's rows.
 
 **The Inbox has no To test list on a card-asks machine.** Once a machine advertises `agenda.card-asks.1` its cards leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-test rows, and out of the Inbox's count: the card's ask is an item on an agenda, and that is the one place the owner meets it. The check is per machine (`AgendaWireDirectory.cardAsksOf`), so a machine that does not advertise it keeps every row it has today, and no card waiting on the owner is lost while machines are on different versions. A person-asked
-card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates, so no card
+card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates but not card asks, so no card
 waiting on the owner is ever lost between the two lists.
 
 **Not good takes pictures and files.** The resolve request carries optional `attachments: { from, ids }` — the same shape as

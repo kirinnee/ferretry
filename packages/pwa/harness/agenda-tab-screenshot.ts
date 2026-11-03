@@ -1,5 +1,5 @@
 /**
- * Screenshots of the side panel's Agenda tab on each of its four filters, at a 390px phone and a 1440px desktop,
+ * Screenshots of the side panel's Agenda tab on each of its four filters and of Overview's one-line summary, at a 390px phone and a 1440px desktop,
  * light and dark, in the app's own typefaces:
  *
  *   bun harness/agenda-tab-screenshot.ts [outDir]   # default /tmp/claude-1000/shots/f559-pr6, agenda-tab-*.png
@@ -80,6 +80,9 @@ const PHONE = {
 const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 const FILTERS = ['needs-you', 'resting', 'snoozed', 'resolved'] as const;
 
+const STAGES_SEEN = new Set<string>();
+const SUMMARY = '3 need you · 2 resting · 2 snoozed · 3 resolved';
+
 const shoot = async (context: BrowserContext, theme: string, filter: string, name: string): Promise<void> => {
   const page = await context.newPage();
   page.on('pageerror', error => console.error('pageerror', error.message));
@@ -98,7 +101,29 @@ const shoot = async (context: BrowserContext, theme: string, filter: string, nam
   await page.locator(`[data-context-chip="${filter}"]`).evaluate(chip => {
     if (chip.getAttribute('aria-pressed') !== 'true') throw new Error('the filter is not the one shown');
   });
+  for (const stage of await page.locator('[data-agenda-tab-stage]').allTextContents()) STAGES_SEEN.add(stage);
   const path = join(shotsDir, `agenda-tab-${name}.png`);
+  await page.screenshot({ path });
+  process.stdout.write(`📸 ${path}\n`);
+  await page.close();
+};
+
+const shootOverview = async (context: BrowserContext, theme: string, name: string): Promise<void> => {
+  const page = await context.newPage();
+  page.on('pageerror', error => console.error('pageerror', error.message));
+  await page.route('**/*', route =>
+    route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
+  );
+  await page.goto(`${server.url}?theme=${theme}&state=card&tab=overview`);
+  await page.locator('[data-info-agenda]').waitFor({ state: 'visible' });
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(200);
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (wide > 0) fail(`${name} scrolls sideways by ${wide}px`);
+  const said = (await page.locator('[data-info-agenda]').textContent()) ?? '';
+  if (!said.includes(SUMMARY)) fail(`${name}: the Overview line says "${said}", not "${SUMMARY}"`);
+  if ((await page.locator('[data-agenda-tab-row]').count()) !== 0) fail(`${name}: Overview still lists rows`);
+  const path = join(shotsDir, `agenda-overview-${name}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
   await page.close();
@@ -113,11 +138,15 @@ try {
       const context = await browser.newContext({ ...device, colorScheme: scheme });
       try {
         for (const filter of FILTERS) await shoot(context, `studio-${scheme}`, filter, `${filter}-${scheme}-${label}`);
+        await shootOverview(context, `studio-${scheme}`, `${scheme}-${label}`);
       } finally {
         await context.close();
       }
     }
   }
+  for (const stage of ['Plan to approve', 'Tracker', 'Test', 'Explainer', 'Question'])
+    if (!STAGES_SEEN.has(stage)) fail(`no row shows the "${stage}" stage chip`);
+  if (STAGES_SEEN.has('Done')) fail('a closed row shows "Done" as its stage, not the last stage it had');
   process.stdout.write('✅ the Agenda tab captured; nothing scrolls sideways; every count is its list\n');
 } finally {
   await browser.close();

@@ -128,6 +128,22 @@ describe('BoardFilterBar', () => {
     ]);
   });
 
+  const activityOptions = (root: HTMLElement): string[] =>
+    [...must(root.querySelector('[data-filter="activity"]'), 'activity').querySelectorAll('option')].map(
+      option => (option as HTMLOptionElement).value,
+    );
+
+  it('does not offer the retired activities, since no card matches them', async () => {
+    const { root } = await drawn();
+    expect(activityOptions(root)).toEqual(['', 'active', 'idle', 'stale', 'orphaned', 'blocked']);
+  });
+
+  it('still shows a retired activity an old link already chose, so the menu is not blank', async () => {
+    const { root } = await drawn({ ...NO_BOARD_FILTERS, activity: 'to_test' });
+    expect(activityOptions(root)).toContain('to_test');
+    expect(activityOptions(root)).not.toContain('waiting_on_you');
+  });
+
   it('writes each choice to the filter set', async () => {
     const { root, seen } = await drawn();
     await pick(root, 'project', PROJECT);

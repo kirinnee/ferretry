@@ -263,8 +263,13 @@ describe('useAgendaInboxModel', () => {
   });
 
   describe('the health switch for card asks', () => {
-    const run = async (advertising: readonly (typeof boardLaptop)[]) => {
+    const run = async (advertising: readonly (typeof boardLaptop)[], upgrade = false) => {
       const { client } = fakeClient(new Map());
+      upgraded = () =>
+        client.wires.note(boardLaptop.daemonId, {
+          kind: 'read',
+          health: healthOf('4.120.0', [DAEMON_FEATURES.agendaCardAsks]),
+        });
       client.wires.note(boardLaptop.daemonId, { kind: 'read', health: healthOf('4.110.0') });
       for (const machine of advertising)
         client.wires.note(machine.daemonId, {
@@ -289,8 +294,20 @@ describe('useAgendaInboxModel', () => {
         />,
       );
       await settle();
+      if (upgrade) {
+        await interact(() => upgraded());
+        await settle();
+      }
       return inbox as unknown as AgendaInbox;
     };
+    let upgraded: () => void = () => undefined;
+
+    test('a machine that starts advertising card asks after the page is open drops its To-test list at once', async () => {
+      const read = await run([], true);
+      expect(read.toTest).toEqual([]);
+      expect(read.toTestSnoozed).toEqual([]);
+      expect(read.total).toBe(0);
+    });
 
     test('on a machine that advertises card asks there is no To-test list: awake, snoozed or counted', async () => {
       const read = await run([boardLaptop]);

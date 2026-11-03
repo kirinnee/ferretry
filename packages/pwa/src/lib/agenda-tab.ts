@@ -82,6 +82,16 @@ export interface AgendaTabInput {
   readonly now: number;
 }
 
+/**
+ * The stage an item had before it closed. The daemon writes `stage: done` on a close and keeps every earlier stage in
+ * `stages`, so a closed item names its last stage that was not `done`; one that never named a stage reads from its kind.
+ */
+const lastUsefulStage = (item: AgendaItem | ResolvedAgendaItem): AgendaStage => {
+  if (item.stage !== undefined && item.stage !== 'done') return item.stage;
+  const earlier = [...(item.stages ?? [])].reverse().find(entry => entry.stage !== 'done');
+  return earlier?.stage ?? agendaStage({ kind: item.kind, ask: item.ask });
+};
+
 const isBlocker = (item: AgendaItem): boolean => item.blockingNow === true || hasOpenCardAsk(item);
 
 const sinceWords = (instant: string | undefined, now: number): string | null => {
@@ -92,9 +102,7 @@ const sinceWords = (instant: string | undefined, now: number): string | null => 
 
 export const agendaTabModel = ({ items, resolved, ferret, now }: AgendaTabInput): AgendaTabModel => {
   const open = items.filter(item => item.notice !== true);
-  const stageOf = (item: AgendaItem | ResolvedAgendaItem): string =>
-    // A closed item reads `done`; what it was before it closed is the more useful word beside "Done".
-    STAGE_LABEL[agendaStage({ ...item, resolvedAt: undefined })];
+  const stageOf = (item: AgendaItem | ResolvedAgendaItem): string => STAGE_LABEL[lastUsefulStage(item)];
   const row = (
     filter: AgendaTabFilter,
     item: AgendaItem | ResolvedAgendaItem,

@@ -22,6 +22,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
 import { AgendaTab } from '../src/features/agenda/agenda-tab.tsx';
 import { ChatTasks } from '../src/features/board/chat-tasks.tsx';
+import { InfoAbout } from '../src/features/session-info/info-about.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
 import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
@@ -277,32 +278,60 @@ const agendaItem = (id: string, subject: string, extra: Record<string, unknown> 
     ...extra,
   }) as unknown as AgendaItem;
 
+/** The stage fields a daemon writes: the stage the item is at, as the last of its stages. */
+const staged = (stage: string, minutes: number): Record<string, unknown> => ({
+  stage,
+  stages: [{ stage, at: ago(minutes) }],
+});
+/** A closed item as the daemon leaves it: `stage: done`, every earlier stage kept in `stages`. */
+const closed = (id: string, subject: string, resolvedAt: string, history: readonly string[]): ResolvedAgendaItem => {
+  const steps = history.map((stage, index) => ({ stage, at: ago(60 * 24 * 4 - index * 90) }));
+  return {
+    ...agendaItem(id, subject),
+    stage: 'done',
+    stages: [...steps, { stage: 'done', at: resolvedAt }],
+    resolvedAt,
+    disposition: 'done',
+  } as unknown as ResolvedAgendaItem;
+};
+
 const AGENDA_ITEMS: readonly AgendaItem[] = [
-  agendaItem('A12', 'Approve the release notes for 4.121?', { waitingSince: ago(190), blockingNow: true }),
-  agendaItem('A14', 'Which relay region should the hosted default use?', { waitingSince: ago(35) }),
-  agendaItem('A15', 'Rotate the relay signing key this week?', { waitingSince: ago(8) }),
+  agendaItem('A12', 'Approve the release notes for 4.121?', {
+    waitingSince: ago(190),
+    blockingNow: true,
+    ...staged('question', 190),
+  }),
+  agendaItem('A14', 'Which relay region should the hosted default use?', {
+    waitingSince: ago(35),
+    ...staged('question', 35),
+  }),
+  agendaItem('A15', 'Rotate the relay signing key this week?', { waitingSince: ago(8), ...staged('explainer', 8) }),
   agendaItem('A9', 'Plan: split the daemon route spine', {
     waitingOn: 'ferret',
     askedAt: ago(75),
     resting: { sub: 'waiting-on-ferret', at: ago(75) },
+    ...staged('plan', 75),
   }),
   agendaItem('A10', 'Tracker: card asks rollout', {
     waitingOn: 'ferret',
     askedAt: ago(300),
     resting: { sub: 'working', at: ago(300) },
+    ...staged('tracker', 300),
   }),
   agendaItem('A7', 'Re-run the flaky SIT suite?', {
     parked: { reason: 'snoozed', at: ago(60), until: new Date(NOW + 20 * 3_600_000).toISOString() },
+    ...staged('test', 60),
   }),
   agendaItem('A8', 'Move the Pages deploy to Friday?', {
     parked: { reason: 'snoozed', at: ago(600), until: new Date(NOW + 3 * 3_600_000).toISOString() },
+    ...staged('question', 600),
   }),
 ];
 const AGENDA_RESOLVED: readonly ResolvedAgendaItem[] = [
-  { ...agendaItem('A3', 'Ship the pairing QR change?'), resolvedAt: ago(45) },
-  { ...agendaItem('A2', 'Use the operator password for relays?'), resolvedAt: ago(26 * 60) },
-  { ...agendaItem('A1', 'Name the new lane “Ready to try”?'), resolvedAt: ago(3 * 24 * 60) },
-] as unknown as readonly ResolvedAgendaItem[];
+  closed('A3', 'Plan: ship the pairing QR change', ago(45), ['plan', 'tracker', 'test']),
+  closed('A2', 'Use the operator password for relays?', ago(26 * 60), ['question']),
+  closed('A1', 'What changed in the relay directory?', ago(3 * 24 * 60), ['explainer']),
+];
 
 const agendaStore = new DaemonAgendaStore();
 const agenda = {
@@ -339,7 +368,7 @@ function Harness() {
   const compact = window.innerWidth < 640;
   const scope = { daemonId: laptop.daemonId, sessionId: LEAD };
   const tabParam = params.get('tab');
-  const tab = tabParam === 'surfaces' || tabParam === 'agenda' ? tabParam : 'tasks';
+  const tab = tabParam === 'surfaces' || tabParam === 'agenda' || tabParam === 'overview' ? tabParam : 'tasks';
   const filterParam = params.get('filter');
   const initial = AGENDA_TAB_FILTERS.find((each): each is AgendaTabFilter => each === filterParam);
   const agendaModel = agendaTabModel({ items: AGENDA_ITEMS, resolved: AGENDA_RESOLVED, ferret: 'Denisha', now: NOW });
@@ -366,7 +395,22 @@ function Harness() {
       onClose={() => undefined}
       onTabChange={() => undefined}
       render={{
-        overview: () => null,
+        overview: () => (
+          <InfoAbout
+            agenda={{
+              counts: {
+                'needs-you': agendaModel.rows['needs-you'].length,
+                resting: agendaModel.rows.resting.length,
+                snoozed: agendaModel.rows.snoozed.length,
+                resolved: agendaModel.rows.resolved.length,
+              },
+              onOpen: () => undefined,
+            }}
+            onOpenSession={() => undefined}
+            subFerrets={[]}
+            view={lead}
+          />
+        ),
         agenda: () => (
           <AgendaTab model={agendaModel} onOpen={() => undefined} {...(initial === undefined ? {} : { initial })} />
         ),

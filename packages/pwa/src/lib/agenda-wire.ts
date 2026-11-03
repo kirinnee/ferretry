@@ -120,9 +120,13 @@ export class AgendaWireDirectory {
 
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
-    this.#cardAsks.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaCardAsks));
+    const cardAsks = machineOffers(read, DAEMON_FEATURES.agendaCardAsks);
+    const cardAsksChanged = this.#cardAsks.get(daemonId) !== cardAsks;
+    this.#cardAsks.set(daemonId, cardAsks);
     this.#asks.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaAsks));
-    this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
+    const snoozes = machineOffers(read, DAEMON_FEATURES.agendaSnooze);
+    const snoozeChanged = this.#snooze.get(daemonId) !== snoozes;
+    this.#snooze.set(daemonId, snoozes);
     const offers = machineOffers(read, DAEMON_FEATURES.agendaOfferClose);
     const changed = this.#offerClose.get(daemonId) !== offers;
     this.#offerClose.set(daemonId, offers);
@@ -138,18 +142,20 @@ export class AgendaWireDirectory {
     const wire = agendaWireOf(read);
     const spelled = this.#wires.get(daemonId) !== wire;
     this.#wires.set(daemonId, wire);
-    if (changed || spelled || searchChanged || gatesChanged || openChanged) this.#notify();
+    if (changed || spelled || searchChanged || gatesChanged || openChanged || cardAsksChanged || snoozeChanged)
+      this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
-    this.#snooze.delete(daemonId);
-    this.#cardAsks.delete(daemonId);
+    const hadSnooze = this.#snooze.delete(daemonId);
+    const hadCardAsks = this.#cardAsks.delete(daemonId);
     this.#asks.delete(daemonId);
     const had = this.#offerClose.delete(daemonId);
     const hadSearch = this.#workSearch.delete(daemonId);
     const hadGates = this.#gateItems.delete(daemonId);
     const hadOpen = this.#open.delete(daemonId);
-    if (this.#wires.delete(daemonId) || had || hadSearch || hadGates || hadOpen) this.#notify();
+    if (this.#wires.delete(daemonId) || had || hadSearch || hadGates || hadOpen || hadSnooze || hadCardAsks)
+      this.#notify();
   }
 
   #notify(): void {
