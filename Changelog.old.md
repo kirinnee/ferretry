@@ -1,3 +1,10 @@
+## [4.254.0](https://github.com/kirinnee/ferretry/compare/v4.253.0...v4.254.0) (2026-11-03)
+
+### Features
+
+* **board:** finished helper cards go back to their lead ([#1399](https://github.com/kirinnee/ferretry/issues/1399)) ([1f833ec](https://github.com/kirinnee/ferretry/commit/1f833ec9b62d92fea349256a75005cbd1a84909a))
+* **daemon:** move, change, refresh and revive download links (catalogs 3f-5) ([#1403](https://github.com/kirinnee/ferretry/issues/1403)) ([2957cad](https://github.com/kirinnee/ferretry/commit/2957cad991b0d59c7eb5cb1e15eb9b0a0954df66))
+
 ## [4.253.0](https://github.com/kirinnee/ferretry/compare/v4.252.1...v4.253.0) (2026-11-03)
 
 ### Features
