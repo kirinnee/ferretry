@@ -864,7 +864,9 @@ Old closed work is left out unless `all` is true; when it was, a last line says 
 to search before it files (the board and agenda sections end their opening with the same rule), and
 `fy task create` / `fy agenda add` run the daemon's related check themselves
 (`POST /v1/search/related`): a strong match refuses the create unless `--new` (or `--related <id>`) says what to
-do instead. A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
+do instead. `fy agenda add` also lists the caller's own open agendas first and opens a new one only with
+`--new "<why none fits>"` ([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)); `fy task create` also
+lists weaker related cards and refuses an umbrella card ([board.md § One card, one outcome](board.md#one-card-one-outcome)). A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
 
 MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
 the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the

@@ -75,6 +75,18 @@ describe('a sub-ferret on the agenda', () => {
     });
   }
 
+  it('should be refused opening an agenda on its lead board too (DoD 11: no agenda without permission)', async () => {
+    // Arrange
+    const repository = new MemoryRepository();
+
+    // Act
+    const raised = await service(repository).raise('lead', request, asChild);
+
+    // Assert — refused before the sub-ferret check: an agent writes only its own session's agenda.
+    should(raised).containDeep({ ok: false, error: { code: 'forbidden' } });
+    should(repository.ledgers.size).equal(0);
+  });
+
   it('should leave its lead free to raise', async () => {
     // Act
     const raised = await service().raise('lead', request, asLead);

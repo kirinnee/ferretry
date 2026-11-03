@@ -103,6 +103,24 @@ describe('a sub-ferret on the board', () => {
     should(error?.message).match(REFUSED);
   });
 
+  it('should be refused a card even under the card it holds (DoD 11: no card without permission)', async () => {
+    // Arrange — a sub-card of its own card is still a new card; only its lead or the owner makes one.
+    const service = serviceWith();
+    const request = BoardTaskCreateRequestSchema.parse({
+      kind: 'feature',
+      title: 'A part of F1',
+      ask: { text: 'x', source: 'owner' },
+      parent: { id: 'F1' },
+    });
+
+    // Act
+    const error = await refusal(service.create(request, child));
+
+    // Assert
+    should(error?.code).equal('forbidden');
+    should(error?.message).match(REFUSED);
+  });
+
   it('should still note on its own card and link its PR and branch', async () => {
     // Arrange
     const service = serviceWith();

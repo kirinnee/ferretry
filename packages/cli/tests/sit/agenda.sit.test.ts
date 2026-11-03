@@ -348,9 +348,35 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(refused.err).containEql('give the card a title: --title');
   });
 
+  it('lists the open agenda before opening another, then opens it with --new "<why none fits>"', async () => {
+    // Act — !A5 is still open: search, check, then open.
+    const refused = await cli(['add', 'Ship the release now?', '--title', 'Release', '--kind', 'yesno']);
+    const listed = await cli(['ls']);
+
+    // Assert — a ferret (nobody at the terminal) is refused with the candidates and the way out; a yes or no cannot be
+    // squeezed into !A5, so no edit is offered and nothing is opened.
+    should(refused.code).not.equal(0);
+    should(refused.err).containEql('Search, check, then open: these agendas are open, closest first.');
+    should(refused.err).containEql('!A5  needs you  Work login plan');
+    should(refused.err).containEql('Should this join !A5?');
+    should(refused.err).containEql('which an agenda edit cannot add');
+    should(refused.err).not.containEql('fy agenda edit A5');
+    should(refused.err).containEql('--new "<why none fits; closest is !A5>"');
+    should(listed.out).not.containEql('!A6');
+  });
+
   it('lists a titled yes or no card as a heading, the ask and its swipe answers, and answers it with --yes', async () => {
     // Act
-    const added = await cli(['add', 'Ship the release now?', '--title', 'Release', '--kind', 'yesno']);
+    const added = await cli([
+      'add',
+      'Ship the release now?',
+      '--title',
+      'Release',
+      '--kind',
+      'yesno',
+      '--new',
+      'the release is its own decision',
+    ]);
     const listed = await cli(['ls']);
     const answered = await cli(['done', '!A6', '--yes']);
     const history = await cli(['history']);

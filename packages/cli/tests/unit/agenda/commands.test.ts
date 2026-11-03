@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerAgendaCommands } from '../../../src/lib/agenda/commands';
 import { AgendaController } from '../../../src/lib/agenda/controller';
+import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
 import { DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import {
   agentItem,
@@ -792,6 +793,37 @@ describe('attention needs-info command', () => {
     should(bare.out.diagnostics).be.empty();
   });
 
+  it('should keep the legacy `add --title … --new "Choose region"` working: the swallowed words are the ask', async () => {
+    // Arrange + Act — the old boolean --new came last, with the ask after it; Commander hands the ask to --new.
+    const legacy = run(
+      ['agenda', 'add', '--title', 'Deploy', '--premise', 'x', '--context', 'y', '--new', 'Choose region'],
+      afterAdd,
+      [],
+      true,
+    );
+    await legacy.parsed;
+
+    // Assert
+    should(legacy.gateway.applied).have.length(1);
+    should(legacy.gateway.applied[0]?.request).match({ action: 'add', subject: 'Choose region', title: 'Deploy' });
+    should(legacy.out.diagnostics.join('\n')).containEql('--new now takes the reason');
+    should(legacy.out.diagnostics.join('\n')).containEql('was read as your ask');
+  });
+
+  it('should take --new as the reason when the ask is given as words, before or after it', async () => {
+    // Arrange + Act
+    const after = run(['agenda', 'add', 'Choose region', '--title', 'Deploy', '--new', 'its own decision'], afterAdd);
+    await after.parsed;
+    const before = run(['agenda', 'add', '--new', 'its own decision', 'Choose region', '--title', 'Deploy'], afterAdd);
+    await before.parsed;
+
+    // Assert
+    for (const each of [after, before]) {
+      should(each.gateway.applied[0]?.request).match({ subject: 'Choose region' });
+      should(each.out.diagnostics.join('\n')).not.containEql('was read as your ask');
+    }
+  });
+
   it('should raise the item without its card on an older daemon, and say so', async () => {
     // Arrange + Act
     const { parsed, gateway, out } = run(
@@ -1078,6 +1110,54 @@ describe('agenda clear', () => {
     // Assert
     should(gateway.clears).deepEqual([true, false]);
     should(out.messages).deepEqual(['cleared 2 open agenda items on 1 agent ferret']);
+  });
+
+  describe('--offer-close beside an open agenda carrying the same card', () => {
+    const offered = [DAEMON_FEATURES.agendaTask, DAEMON_FEATURES.agendaOfferClose];
+    const runAgainst = (item: ReturnType<typeof agentItem>, argv: string[]) => {
+      const gateway = new RecordingAgendaGateway(snapshot([item]), afterAdd);
+      gateway.offered = offered;
+      const program = new Command().name('fy').exitOverride();
+      program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+      registerAgendaCommands(program, new AgendaController(gateway, new CapturingOutput(), SESSION), async () => {});
+      return { gateway, parsed: program.parseAsync(['node', 'fy', ...withBrief(argv)]) };
+    };
+    const add = ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12'];
+    const base = { howToResolve: DEFAULT_HOW_TO_RESOLVE, ask: { kind: 'open-question' as const }, task: { id: 'F12' } };
+    const carrying = agentItem('A1', 'Try the build', base as never);
+
+    it('should not offer an edit that would drop the Done button, and point to --new', async () => {
+      // Arrange + Act
+      const { parsed, gateway } = runAgainst(carrying, [...add, '--offer-close']);
+      const failure = await parsed.then(
+        () => '',
+        (error: unknown) => (error as Error).message,
+      );
+
+      // Assert
+      should(failure).containEql('the Done button (--offer-close)');
+      should(failure).containEql('--new "<why none fits; closest is !A1>"');
+      should(failure).not.containEql('fy agenda edit A1');
+      should(gateway.applied).be.empty();
+    });
+
+    it('should still offer the edit when the agenda already offers the Done button, or it is not asked for', async () => {
+      // Arrange
+      const offering = agentItem('A1', 'Try the build', { ...base, offerClose: true } as never);
+
+      // Act + Assert
+      await should(runAgainst(offering, [...add, '--offer-close']).parsed).be.rejectedWith(/fy agenda edit A1/u);
+      await should(runAgainst(carrying, add).parsed).be.rejectedWith(/fy agenda edit A1/u);
+    });
+
+    it('should open the add with --new, sending the Done button', async () => {
+      // Arrange + Act
+      const { parsed, gateway } = runAgainst(carrying, [...add, '--offer-close', '--new', 'its own sign-off']);
+      await parsed;
+
+      // Assert
+      should(gateway.applied[0]?.request).match({ task: { id: 'F12' }, offerClose: true });
+    });
   });
 });
 
