@@ -203,6 +203,27 @@ describe('the recipe card', () => {
       expect(root.querySelector('[data-recipe-actions]')).toBeNull();
     });
   });
+
+  it('closes the card the same way when the steps cannot be read again after a stale refusal', async () => {
+    let reads = 0;
+    const { element } = host({
+      accounts: () => {
+        reads += 1;
+        if (reads === 1) return list();
+        throw refused('The machine is not answering.', { status: 503 });
+      },
+      decide: () => {
+        throw refused('refused', { status: 409, code: 'stale_proposal' });
+      },
+    });
+    await withMounted(element, async root => {
+      await click(q(root, '[data-recipe-approve]'));
+      await settle();
+
+      expect(text(root, '[data-recipe-stale]')).toBe(RECIPE_STALE_WORDS);
+      expect(root.querySelector('[data-recipe-actions]')).toBeNull();
+    });
+  });
 });
 
 describe('when the card cannot be drawn', () => {
