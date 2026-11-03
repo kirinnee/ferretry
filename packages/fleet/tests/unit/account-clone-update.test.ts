@@ -18,7 +18,7 @@ import {
   cloneOriginKeys,
   EMPTY_CLONE_BASE,
 } from '../../src/lib/account/clone-base.ts';
-import { CloneRefusal, movedFile, movedFolder } from '../../src/lib/account/clone-parts.ts';
+import { assetReference, CloneRefusal, movedFile, movedFolder } from '../../src/lib/account/clone-parts.ts';
 import { COMPONENT_KINDS, parseAccountModel } from '../../src/lib/account/schema.ts';
 
 const KEY_MAIN = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -102,6 +102,8 @@ const targetOf = (side: Side, link: Record<string, unknown> = { clonedFromKey: K
   return { model, targetFiles };
 };
 
+const ROOTS = { userHome: '/person', assetsDirectory: '/state/fleet/assets' };
+
 const baseOf = (side: Side): CloneBase => {
   const bundle = bundleOf(side);
   return applyCloneToBase(EMPTY_CLONE_BASE, {
@@ -133,6 +135,7 @@ const inputOf = (
     installed: ['claude', 'codex'],
     existingSkillItems: [],
     existingSecrets: [],
+    roots: ROOTS,
     sourceDaemon: SOURCE.id,
     ...patch,
   };
@@ -1125,6 +1128,7 @@ const bareInput = (
   installed: ['claude', 'codex'],
   existingSkillItems: [],
   existingSecrets: [],
+  roots: ROOTS,
   sourceDaemon: SOURCE.id,
   ...patch,
 });
@@ -1419,6 +1423,126 @@ describe('movedFile and movedFolder choose a destination no owned path touches',
   it('should number a folder that would cover an owned document', () => {
     const used = new Set(['components/shared/README.md']);
     should(movedFolder('components/shared', 'shared', 'shared', used)).equal('components/shared-2');
+  });
+});
+
+describe('an owner reached through an alias is the same owner (#F544 finding 1, aliases)', () => {
+  const shared = 'components/hooks/shared';
+  // b lives outside the setup folder on both machines, so the source cannot carry it and says so.
+  const twoHooks = (alias: string) =>
+    sourceBundle({
+      keys: { 'hooks/a': KEY_A, 'hooks/b': KEY_B },
+      components: {
+        hooks: {
+          a: { harness: 'claude', directory: 'components/hooks/a' },
+          b: { harness: 'claude', directory: alias },
+        },
+      },
+      files: [{ path: 'components/hooks/a/run.sh', content: 'new' }],
+      notCopied: [{ path: alias, reason: 'outside the setup folder' }],
+    });
+  const withAlias = (alias: string) =>
+    parseAccountModel({
+      version: 2,
+      components: { hooks: { a: hooksAt(shared, KEY_A), b: hooksAt(alias, KEY_B) } },
+    });
+  const filesAt = (...spellings: string[]) => [
+    ...spellings.map(spelling => ({ path: `${spelling}/run.sh`, content: 'old' })),
+    { path: `${shared}/gone.sh`, content: 'b still runs this' },
+  ];
+
+  it.each([
+    ['an absolute alias', '/state/fleet/assets/components/hooks/shared', ROOTS],
+    [
+      'a ~/ alias',
+      '~/fleet/assets/components/hooks/shared',
+      { userHome: '/state', assetsDirectory: '/state/fleet/assets' },
+    ],
+    [
+      'a $HOME/ alias',
+      '$HOME/fleet/assets/components/hooks/shared',
+      { userHome: '/state', assetsDirectory: '/state/fleet/assets' },
+    ],
+  ])('should not write the folder an item here owns through %s', (_name, alias, roots) => {
+    // Arrange: b names the folder a also uses, only by another spelling; b is the same and so hidden.
+    const analysis = analyseCloneUpdate(
+      bareInput(twoHooks(alias), withAlias(alias), filesAt(shared, alias), { roots }),
+    );
+
+    // Act
+    const review = reviewCloneUpdate(analysis);
+    const plan = planCloneUpdate(analysis, { decisions: { 'hooks/a': 'take' } });
+
+    // Assert: a lands in a folder of its own; the owner's bytes, files and declaration are as they were.
+    should(review.items.map(item => item.ref)).eql(['hooks/a']);
+    should(plan.files.map(file => file.path)).eql(['components/hooks/a/run.sh']);
+    should(plan.removals).eql([]);
+    should(plan.model.components.hooks.b?.directory).equal(alias);
+    should(plan.model.components.hooks.a?.directory).equal('components/hooks/a');
+    should(review.items[0]?.note).containEql('is also used by hooks/b here');
+  });
+
+  it('should bind the review to the alias, so a changed spelling is a different review', () => {
+    const absolute = '/state/fleet/assets/components/hooks/shared';
+    const reviewed = analyseCloneUpdate(bareInput(twoHooks(absolute), withAlias(absolute), filesAt(shared, absolute)));
+    const changed = analyseCloneUpdate(
+      bareInput(twoHooks(absolute), withAlias('components/hooks/other'), [
+        { path: 'components/hooks/shared/run.sh', content: 'old' },
+        { path: 'components/hooks/other/run.sh', content: 'old' },
+      ]),
+    );
+    should(changed.fingerprint).not.equal(reviewed.fingerprint);
+    should(() => checkCloneReviewed(changed, reviewed.fingerprint)).throw();
+  });
+
+  it('should keep an alias outside the asset tree out of the ownership', () => {
+    should(assetReference('/elsewhere/components/hooks/shared', ROOTS)).be.undefined();
+    should(assetReference('/state/fleet/assets', ROOTS)).be.undefined();
+    should(assetReference('/state/fleet/assets/../secret', ROOTS)).be.undefined();
+    should(assetReference('~other/components/x', ROOTS)).be.undefined();
+    should(assetReference('/state/fleet/assets/components/x/', ROOTS)).equal('components/x');
+    should(assetReference('./components/x', ROOTS)).equal('components/x');
+  });
+});
+
+describe('an omitted subtree protects what is beneath it (#F544 finding 6, subtrees)', () => {
+  const bundle = sourceBundle({
+    keys: { 'hooks/a': KEY_A },
+    components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+    files: [{ path: 'components/hooks/a/keep.sh', content: 'keep' }],
+    notCopied: [{ path: 'components/hooks/a/sub', reason: 'it is a link or a special file' }],
+  });
+  const target = parseAccountModel({
+    version: 2,
+    components: { hooks: { a: hooksAt('components/hooks/a', KEY_A) } },
+  });
+  const files = (...extra: { path: string; content: string }[]) => [
+    { path: 'components/hooks/a/keep.sh', content: 'keep' },
+    { path: 'components/hooks/a/sub/run.sh', content: 'local script must remain' },
+    ...extra,
+  ];
+
+  it('should neither list nor remove a file beneath a folder the source left out', () => {
+    // Arrange
+    const analysis = analyseCloneUpdate(
+      bareInput(bundle, target, files({ path: 'components/hooks/a/gone.sh', content: 'x' })),
+    );
+
+    // Act
+    const review = reviewCloneUpdate(analysis);
+    const plan = planCloneUpdate(analysis, { decisions: { 'hooks/a': 'take' } });
+
+    // Assert: gone.sh is the source's to drop; sub/run.sh is not named anywhere.
+    const named = review.items.flatMap(item => item.files.map(file => file.path));
+    should(named).not.containEql('components/hooks/a/sub/run.sh');
+    should(plan.removals).eql(['components/hooks/a/gone.sh']);
+    should(plan.files.map(file => file.path)).not.containEql('components/hooks/a/sub/run.sh');
+  });
+
+  it('should leave the folder out of the comparison, so what is beneath it is never a change', () => {
+    const analysis = analyseCloneUpdate(bareInput(bundle, target, files()));
+    should(reviewCloneUpdate(analysis).items.flatMap(item => item.files)).eql([]);
+    should(planCloneUpdate(analysis, { decisions: {} }).removals).eql([]);
   });
 });
 

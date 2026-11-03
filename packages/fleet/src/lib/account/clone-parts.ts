@@ -2,7 +2,9 @@
  * The parts of a copy the first copy ({@link ./clone.ts}) and a repeat copy ({@link ./clone-update.ts})
  * share: reading a bundle as a model, where a renamed document lands, and what a path is.
  */
+import { isAbsolute, normalize, relative } from 'node:path';
 import type { FleetCloneBundle, FleetCloneCredential } from '@ferretry/protocol';
+import { canonicalAssetReference, expandAssetPath } from '../paths.ts';
 import { freeName } from './import.ts';
 import { type AccountModel, type ComponentKind, type Credential, parseAccountModel } from './schema.ts';
 
@@ -17,6 +19,29 @@ export class CloneRefusal extends Error {
 /** Whether a configured path is inside the asset tree, and so can travel as a document. */
 export const isAssetRelative = (file: string): boolean =>
   !file.startsWith('/') && !file.startsWith('~') && !file.startsWith('$') && !file.split('/').includes('..');
+
+/** Where this machine's asset tree and the person's home are, so an alias can be read as the asset path it is. */
+export interface AssetRoots {
+  readonly userHome: string;
+  readonly assetsDirectory: string;
+}
+
+const ALIAS_PREFIX = /^(?:\/|~\/|\$HOME\/)/u;
+
+/**
+ * One canonical asset-relative spelling of a configured path, or `undefined` when it is not inside the
+ * asset tree. `components/x`, `/state/fleet/assets/components/x` and `~/…/components/x` (when the home
+ * is the assets directory's ancestor) are one folder, and ownership is decided on that one spelling.
+ */
+export function assetReference(path: string, roots: AssetRoots): string | undefined {
+  const plain = (value: string): string => canonicalAssetReference(value).replace(/\/+$/u, '');
+  if (isAssetRelative(path)) return plain(path);
+  if (!ALIAS_PREFIX.test(path)) return undefined;
+  const absolute = expandAssetPath(path, roots.userHome, roots.assetsDirectory);
+  const inside = relative(normalize(roots.assetsDirectory), absolute);
+  if (inside === '' || inside === '..' || inside.startsWith('../') || isAbsolute(inside)) return undefined;
+  return plain(inside);
+}
 
 /** A path under a person's home on macOS or Linux, as it appears in text. */
 export const HOME_PATH = /\/(?:Users|home)\/[^\s"'`,;)}\]]+/u;

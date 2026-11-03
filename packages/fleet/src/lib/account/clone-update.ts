@@ -73,6 +73,8 @@ import {
   cloneOriginKeys,
 } from './clone-base.ts';
 import {
+  type AssetRoots,
+  assetReference,
   bundleModel,
   CloneRefusal,
   HOME_PATH,
@@ -150,6 +152,8 @@ export interface CloneUpdateInput {
   readonly existingSkillItems: readonly string[];
   /** Secret names the store here holds. */
   readonly existingSecrets: readonly string[];
+  /** Where the asset tree and the home are here: a document reached by an absolute or `~/` spelling is the same document. */
+  readonly roots: AssetRoots;
   /** The instant the review is made, for `source.lastCopiedAt`-style sentences. Never in the fingerprint. */
   readonly sourceDaemon?: string;
 }
@@ -354,7 +358,9 @@ interface Owned {
   readonly directory: boolean;
 }
 
-const ownedOf = (source: Entry, target: Entry | undefined): Owned[] => {
+type Resolve = (path: string) => string | undefined;
+
+const ownedOf = (source: Entry, target: Entry | undefined, resolve: Resolve): Owned[] => {
   const owned: Owned[] = [];
   for (const [field, directory] of [
     ['file', false],
@@ -365,7 +371,7 @@ const ownedOf = (source: Entry, target: Entry | undefined): Owned[] => {
     const there = target?.value[field];
     owned.push({
       source: plain(path),
-      target: typeof there === 'string' && isAssetRelative(there) ? plain(there) : undefined,
+      target: typeof there === 'string' ? resolve(there) : undefined,
       directory,
     });
   }
@@ -383,11 +389,12 @@ const ownedOf = (source: Entry, target: Entry | undefined): Owned[] => {
 };
 
 /** Every path an item here owns: its document, its folder, and each skill item's folder in the store. */
-const ownedHere = (entry: Entry): { readonly path: string }[] => {
+const ownedHere = (entry: Entry, resolve: Resolve): { readonly path: string }[] => {
   const owned: { path: string }[] = [];
   for (const field of ['file', 'directory'] as const) {
     const path = entry.value[field];
-    if (typeof path === 'string' && isAssetRelative(path)) owned.push({ path: plain(path) });
+    const canonical = typeof path === 'string' ? resolve(path) : undefined;
+    if (canonical !== undefined) owned.push({ path: canonical });
   }
   if (entry.kind === 'skills') {
     for (const item of strings(entry.value.items)) owned.push({ path: `${CLONE_SKILLS_DIRECTORY}/${item}` });
@@ -406,6 +413,19 @@ const mapOf = (files: readonly FleetCloneFile[]): Map<string, string> => {
     if (!map.has(path)) map.set(path, file.content);
   }
   return map;
+};
+
+/** The documents here at their canonical asset path, so a folder reached through an alias reads as the one folder. */
+const canonicalFiles = (files: readonly FleetCloneFile[], roots: AssetRoots): FleetCloneFile[] => {
+  const seen = new Set<string>();
+  const result: FleetCloneFile[] = [];
+  for (const file of files) {
+    const path = assetReference(file.path, roots) ?? plain(file.path);
+    if (seen.has(path)) continue;
+    seen.add(path);
+    result.push({ path, content: file.content });
+  }
+  return result;
 };
 
 /** Every document under a folder (or the one file) as `relative path → content`. */
@@ -530,14 +550,16 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   const identity = { source: sourceIdentity, target: targetIdentity };
 
   const theirFiles = mapOf(bundle.files);
-  const myFiles = mapOf(input.targetFiles);
+  const targetFiles = canonicalFiles(input.targetFiles, input.roots);
+  const myFiles = mapOf(targetFiles);
   // A carried file is compared by its bytes, always: an omission marker never stands in for one (the bundle
   // boundary refuses a file marked both, and this holds even for a bundle that never crossed it).
   const notCarried = bundle.notCopied.map(entry => plain(entry.path)).filter(path => !theirFiles.has(path));
 
   // Who owns which path here: every document, folder and skill item of every item here. A path two items
   // share is never written for one of them, since that would change the other one as well.
-  const ownership = targets.flatMap(entry => ownedHere(entry).map(owned => ({ ref: entry.ref, ...owned })));
+  const resolve: Resolve = path => assetReference(path, input.roots);
+  const ownership = targets.flatMap(entry => ownedHere(entry, resolve).map(owned => ({ ref: entry.ref, ...owned })));
   const othersOn = (ref: string, path: string): string[] => [
     ...new Set(ownership.filter(owned => owned.ref !== ref && pathsOverlap(owned.path, path)).map(owned => owned.ref)),
   ];
@@ -551,7 +573,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     const relocated = new Map<string, string>();
     const sharedItems: string[] = [];
     const sentences: string[] = [];
-    for (const owned of ownedOf(entry, found)) {
+    for (const owned of ownedOf(entry, found, resolve)) {
       const item = entry.kind === 'skills' ? skillItemOf(owned.source) : undefined;
       if (item !== undefined) {
         const others = othersOn(found.ref, owned.source);
@@ -587,7 +609,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     const extraSource: FleetCloneFile[] = [];
     const extraTarget: FleetCloneFile[] = [];
     let left = 0;
-    for (const owned of ownedOf(entry, found)) {
+    for (const owned of ownedOf(entry, found, resolve)) {
       for (const path of notCarried) {
         if (path !== owned.source && !path.startsWith(`${owned.source}/`)) continue;
         const rest = path.slice(owned.source.length + 1);
@@ -598,9 +620,14 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
         }
       }
     }
+    // An omitted folder stands for everything beneath it, on both sides: nothing under it is compared.
+    const beneath = (markers: readonly FleetCloneFile[]) => (file: FleetCloneFile) =>
+      !markers.some(marker => plain(file.path).startsWith(`${plain(marker.path)}/`));
+    const sourceFiles = extraSource.length === 0 ? bundle.files : bundle.files.filter(beneath(extraSource));
+    const targetDocuments = extraTarget.length === 0 ? targetFiles : targetFiles.filter(beneath(extraTarget));
     return {
-      source: extraSource.length === 0 ? bundle.files : [...extraSource, ...bundle.files],
-      target: extraTarget.length === 0 ? input.targetFiles : [...extraTarget, ...input.targetFiles],
+      source: extraSource.length === 0 ? sourceFiles : [...extraSource, ...sourceFiles],
+      target: extraTarget.length === 0 ? targetDocuments : [...extraTarget, ...targetDocuments],
       left,
     };
   };
@@ -620,7 +647,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   ): { changes: CloneReviewItem['files'][number][]; removals: string[] } => {
     const changes: CloneReviewItem['files'][number][] = [];
     const removals: string[] = [];
-    for (const owned of ownedOf(entry, found)) {
+    for (const owned of ownedOf(entry, found, resolve)) {
       const item = entry.kind === 'skills' ? skillItemOf(owned.source) : undefined;
       if (item !== undefined && moved.sharedItems.includes(item)) continue;
       const relocated = moved.relocated.get(owned.source);
@@ -629,14 +656,15 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
         owned.target === undefined || relocated !== undefined
           ? new Map<string, string>()
           : under(myFiles, owned.target, owned.directory);
-      const hidden = new Set(
-        notCarried
-          .filter(path => path === owned.source || path.startsWith(`${owned.source}/`))
-          .map(path => path.slice(owned.source.length + 1)),
-      );
+      const hidden = notCarried
+        .filter(path => path === owned.source || path.startsWith(`${owned.source}/`))
+        .map(path => path.slice(owned.source.length + 1));
+      // A folder the source left out protects everything beneath it, not only the folder itself.
+      const isHidden = (rest: string): boolean =>
+        hidden.some(omitted => omitted === '' || rest === omitted || rest.startsWith(`${omitted}/`));
       const where = relocated ?? owned.target ?? owned.source;
       for (const rest of new Set([...theirs.keys(), ...mine.keys()])) {
-        if (hidden.has(rest)) continue;
+        if (isHidden(rest)) continue;
         const path = rest === '' ? where : `${where}/${rest}`;
         const next = theirs.get(rest);
         const previous = mine.get(rest);
@@ -1168,12 +1196,14 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   const profiles: Record<string, LayeredProfile> = { ...target.profiles };
   const runtimes: Record<string, Runtime> = { ...target.runtimes };
   const credentials: Record<string, Credential> = { ...target.credentials };
+  const resolveOwner: Resolve = path => assetReference(path, input.roots);
   const usedFiles = referencedFiles(target);
-  for (const entry of itemsOfModel(target)) for (const owned of ownedHere(entry)) usedFiles.add(owned.path);
+  for (const entry of itemsOfModel(target))
+    for (const owned of ownedHere(entry, resolveOwner)) usedFiles.add(owned.path);
   // Where the review moved a taken item off a shared path is spoken for before anything new is placed.
   for (const item of analysis.items) for (const moved of item.relocated?.values() ?? []) usedFiles.add(moved);
   const theirContents = new Map(bundle.files.map(file => [plain(file.path), file.content]));
-  const myContents = mapOf(input.targetFiles);
+  const myContents = mapOf(canonicalFiles(input.targetFiles, input.roots));
   const fileMoves = new Map<string, string>();
   const folderMoves = new Map<string, string>();
   const checkPaths: { reference: string; path: string }[] = [];

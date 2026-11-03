@@ -790,6 +790,7 @@ export class FleetSetupService {
       installed: HARNESSES.filter(harness => catalog.locate(harness) !== undefined),
       existingSkillItems: await this.deps.skillItems(),
       existingSecrets: await this.deps.secrets.names().catch(() => []),
+      roots: { userHome: catalog.layout.userHome, assetsDirectory: catalog.layout.assetsDirectory },
       ...(request.source === undefined ? {} : { sourceDaemon: request.source.daemonId }),
     });
     return { analysis, bundle, machine, source, record, known: base !== undefined };
