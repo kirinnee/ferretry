@@ -102,6 +102,13 @@ describe('what of an MCP server on this machine can be copied', () => {
     should(JSON.stringify(copied)).not.match(/api%5Fkey|sk%2Dlive|zzz|dbl%255F/u);
   });
 
+  it('should read a name encoded as many times as the reader will decode it', () => {
+    const copied = copiableMcp(http('https://mcp.example.com/mcp?keep=1&deep%25255Fkey=zzz'));
+
+    should(copied.ok && copied.setup).deepEqual({ transport: 'url', url: 'https://mcp.example.com/mcp?keep=1' });
+    should(JSON.stringify(copied)).not.match(/deep|zzz/u);
+  });
+
   it('should leave out a query parameter whose encoding is malformed, and say so', () => {
     const one = copiableMcp(http('https://mcp.example.com/mcp?keep=1&bad%ZZ=zzz'));
     const two = copiableMcp(http('https://mcp.example.com/mcp?a=%E0%A4%A&b=%&keep=1'));
