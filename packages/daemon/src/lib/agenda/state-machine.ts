@@ -41,6 +41,7 @@ import {
   agendaOptionDetailProblems,
   agendaReplyEnvelopeLength,
   agendaShape,
+  agendaAnswerProblems,
   agendaShapeProblems,
   agendaStage,
   agendaStageOfKind,

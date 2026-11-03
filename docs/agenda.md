@@ -749,24 +749,24 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 
 `fy agenda add | edit | answer | rest | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
-| Verb                                | Does                                                                                                         |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `add` | Open an item with `--title` and its ask; `--stage`, `--where`, `--detail`. Lists open candidates; `--new "<why none fits>"` opens another. |
-| `add --offer-close`                 | With `--task`: the owner may close the card with the same tap that resolves it.                              |
-| `add --task <card>`                 | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).    |
-| `edit <id>`                         | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays. |
-| `edit <id> --kind <kind>`           | Replace the ask (with `--option` / `--question`): it asks again, fresh ([Editable asks](#editable-asks)).    |
-| `edit <id> --clear-question-answer` | Take a stale answer to the owner's question off the item.                                                    |
-| `answer <id> "<text>"`              | Answer the owner on it; a resting item goes back to their list in its old place.                             |
-| `rest <id> --why "<what>"`          | Take it on without asking anything: Resting, working, quiet, never nudged.                                   |
-| `edit <id> --back`                  | Retired: refused, naming `answer` and `edit --kind`.                                                         |
-| `surface <id>`                      | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                   |
-| `snooze <id>`                       | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                 |
-| `unsnooze <id>`                     | The owner's: bring a snoozed or resting item back to the list now.                                           |
-| `done <id>`                         | Close it, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a resting item.           |
-| `dismiss <id>`                      | Close without answering; agents only their own. Quiet on a resting item.                                     |
-| `ls` / `show`                       | Open items with their stage, turn, how long each has rested, and blocking fields / one item in full.         |
-| `needs-info`, `discuss`             | The owner's side, kept for old clients. They make it the ferret's turn.                                      |
+| Verb                                | Does                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `add`                               | Open an item with `--title` and its ask; `--stage`, `--where`, `--detail`. Lists open candidates; `--new "<why none fits>"` opens another. |
+| `add --offer-close`                 | With `--task`: the owner may close the card with the same tap that resolves it.                                                            |
+| `add --task <card>`                 | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
+| `edit <id>`                         | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
+| `edit <id> --kind <kind>`           | Replace the ask (with `--option` / `--question`): it asks again, fresh ([Editable asks](#editable-asks)).                                  |
+| `edit <id> --clear-question-answer` | Take a stale answer to the owner's question off the item.                                                                                  |
+| `answer <id> "<text>"`              | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
+| `rest <id> --why "<what>"`          | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
+| `edit <id> --back`                  | Retired: refused, naming `answer` and `edit --kind`.                                                                                       |
+| `surface <id>`                      | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
+| `snooze <id>`                       | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
+| `unsnooze <id>`                     | The owner's: bring a snoozed or resting item back to the list now.                                                                         |
+| `done <id>`                         | Close it, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a resting item.                                         |
+| `dismiss <id>`                      | Close without answering; agents only their own. Quiet on a resting item.                                                                   |
+| `ls` / `show`                       | Open items with their stage, turn, how long each has rested, and blocking fields / one item in full.                                       |
+| `needs-info`, `discuss`             | The owner's side, kept for old clients. They make it the ferret's turn.                                                                    |
 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
 
