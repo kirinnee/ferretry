@@ -1,18 +1,24 @@
 import { describe, it } from 'bun:test';
 import { type BoardTask, type PrLink, SubtreeRowSchema, SubtreeViewSchema } from '@ferretry/protocol';
 import should from 'should';
+import { mapBounded } from '../../../../src/lib/session/pack/bounded.ts';
+import { newestMessageScanning, scanOutbox } from '../../../../src/lib/session/pack/outbox-scan.ts';
 import {
-  lastLineOf,
+  EXCERPT_WITHHELD,
+  excerptEligible,
+  excerptOf,
+  newestLine,
   newestMessageTo,
   oneLine,
   prOf,
   type SentMessage,
+  SUBTREE_LIMITS,
+  type SubtreeLimits,
   type SubtreePorts,
   SubtreeService,
   subtreeMembers,
   subtreeStateOf,
 } from '../../../../src/lib/session/pack/subtree.ts';
-import { newestMessageScanning } from '../../../../src/lib/session/pack/outbox-scan.ts';
 import { card, lanes, PROJECT } from '../../board/support.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 
@@ -170,6 +176,11 @@ describe('oneLine', () => {
     }
   });
 });
+
+const lastLineOf = (card: BoardTask | undefined, message: SentMessage | undefined) => {
+  const newest = newestLine(card, message);
+  return newest === undefined ? undefined : excerptOf(newest, newest.text);
+};
 
 describe('lastLineOf', () => {
   const withNotes = card({ history: [note(1, minutesAgo(30), 'older note'), note(2, minutesAgo(10), 'newest note')] });
@@ -347,9 +358,10 @@ describe('SubtreeService', () => {
   const service = (
     sessions: ReturnType<typeof sessionView>[],
     messages: Record<string, SentMessage> = {},
-    overrides: Partial<SubtreePorts> = {},
+    overrides: Partial<SubtreePorts> & { limits?: SubtreeLimits } = {},
   ) => {
     const reads = { board: 0, messages: [] as Array<readonly [string, string]> };
+    const limits = overrides.limits ?? SUBTREE_LIMITS;
     const ports: SubtreePorts = {
       sessions: async () => sessions,
       board: async () => {
@@ -358,12 +370,13 @@ describe('SubtreeService', () => {
       },
       lastMessage: async (id, to) => {
         reads.messages.push([id, to]);
-        return messages[id];
+        return { message: messages[id], scanned: 0 };
       },
+      redact: async texts => texts,
       nowMs: () => NOW,
       ...overrides,
     };
-    return { reads, subject: new SubtreeService(ports) };
+    return { reads, subject: new SubtreeService(ports, limits) };
   };
 
   it('should build one row per descendant with card, lane, PR, CI and the newest last line', async () => {
@@ -418,8 +431,10 @@ describe('SubtreeService', () => {
       [sessionView('a'), child('b', 'a'), child('kid', 'b')],
       {},
       {
-        lastMessage: async (id, to) =>
-          id === 'kid' ? { at: minutesAgo(1), text: to === 'a' ? 'result for A' : 'status for B' } : undefined,
+        lastMessage: async (id, to) => ({
+          message: id === 'kid' ? { at: minutesAgo(1), text: to === 'a' ? 'result for A' : 'status for B' } : undefined,
+          scanned: 0,
+        }),
       },
     );
 
@@ -478,5 +493,367 @@ describe('SubtreeService', () => {
 
     // Act / Assert
     should(await subject.view('ghost')).be.undefined();
+  });
+});
+
+describe('SubtreeService redaction', () => {
+  const SECRET = 'hunter2-s3cr3t-value';
+  const mask = (text: string): string => text.replaceAll(SECRET, '[secret]');
+  const redacting = async (texts: readonly string[]) => texts.map(mask);
+  const ports = (sessions: ReturnType<typeof sessionView>[], overrides: Partial<SubtreePorts> = {}): SubtreePorts => ({
+    sessions: async () => sessions,
+    board: async () => ({
+      cards: [card({ id: 'F1', history: [note(1, minutesAgo(5), `token is ${SECRET} ok`)] })],
+      laneSets: new Map([[PROJECT, lanes()]]),
+    }),
+    lastMessage: async () => ({ message: undefined, scanned: 0 }),
+    redact: redacting,
+    nowMs: () => NOW,
+    ...overrides,
+  });
+  const noteSessions = [sessionView('root'), child('ada', 'root', { focusTask: { id: 'F1' } })];
+
+  it('should mask a secret quoted in a card note', async () => {
+    // Act
+    const view = await new SubtreeService(ports(noteSessions)).view('root');
+
+    // Assert
+    should(view?.rows[0]?.last?.text).equal('token is [secret] ok');
+  });
+
+  it('should mask a secret quoted in an outbox message', async () => {
+    // Arrange
+    const message = { at: minutesAgo(1), text: `the password is ${SECRET}` };
+    const subject = new SubtreeService(
+      ports([sessionView('root'), child('ada', 'root')], { lastMessage: async () => ({ message, scanned: 10 }) }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(view?.rows[0]?.last).deepEqual({ at: message.at, source: 'message', text: 'the password is [secret]' });
+  });
+
+  it('should redact before it cuts, so a secret straddling the cut-off is masked whole', async () => {
+    // Arrange: the secret starts at character 90 and runs past the 100-character cut
+    const text = `${'a'.repeat(90)}${SECRET} trailing`;
+    const seen: string[] = [];
+    const subject = new SubtreeService(
+      ports([sessionView('root'), child('ada', 'root')], {
+        lastMessage: async () => ({ message: { at: minutesAgo(1), text }, scanned: 1 }),
+        redact: async texts => {
+          seen.push(...texts);
+          return texts.map(mask);
+        },
+      }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(seen).deepEqual([text]);
+    should(view?.rows[0]?.last?.text).equal(`${'a'.repeat(90)}[secret]…`);
+    should(view?.rows[0]?.last?.text).not.containEql(SECRET.slice(0, 8));
+  });
+
+  it('should redact every candidate of the table in one batch', async () => {
+    // Arrange
+    let batches = 0;
+    const sessions = [sessionView('root'), child('ada', 'root', { focusTask: { id: 'F1' } }), child('bo', 'root')];
+    const subject = new SubtreeService(
+      ports(sessions, {
+        lastMessage: async () => ({ message: { at: minutesAgo(1), text: 'hello' }, scanned: 1 }),
+        redact: async texts => {
+          batches += 1;
+          return texts;
+        },
+      }),
+    );
+
+    // Act
+    await subject.view('root');
+
+    // Assert
+    should(batches).equal(1);
+  });
+
+  it('should withhold the excerpt, never the raw text, when the redactor fails', async () => {
+    // Arrange
+    const subject = new SubtreeService(
+      ports(noteSessions, {
+        redact: async () => {
+          throw new Error('vault locked');
+        },
+      }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(view?.rows[0]?.last).deepEqual({ at: minutesAgo(5), source: 'note', text: EXCERPT_WITHHELD });
+    should(JSON.stringify(view)).not.containEql(SECRET);
+    should(SubtreeViewSchema.parse(view)).deepEqual(view);
+  });
+
+  it('should withhold the excerpt when the redactor answers the wrong number of texts', async () => {
+    // Act
+    const view = await new SubtreeService(ports(noteSessions, { redact: async () => [] })).view('root');
+
+    // Assert
+    should(view?.rows[0]?.last?.text).equal(EXCERPT_WITHHELD);
+  });
+
+  it('should not call the redactor when no row has anything to say', async () => {
+    // Arrange
+    let calls = 0;
+    const subject = new SubtreeService(
+      ports([sessionView('root'), child('ada', 'root')], {
+        redact: async texts => {
+          calls += 1;
+          return texts;
+        },
+      }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(calls).equal(0);
+    should(view?.rows[0]?.last).be.undefined();
+  });
+});
+
+describe('SubtreeService outbox bounds', () => {
+  const many = (count: number, state: Record<string, unknown> = {}) => [
+    sessionView('root'),
+    ...Array.from({ length: count }, (_, index) => child(`c${String(index).padStart(3, '0')}`, 'root', {}, state)),
+  ];
+  const limits = (overrides: Partial<SubtreeLimits> = {}): SubtreeLimits => ({ ...SUBTREE_LIMITS, ...overrides });
+  const portsFor = (sessions: ReturnType<typeof sessionView>[], lastMessage: SubtreePorts['lastMessage']) => ({
+    sessions: async () => sessions,
+    board: async () => ({ cards: [], laneSets: new Map() }),
+    lastMessage,
+    redact: async (texts: readonly string[]) => texts,
+    nowMs: () => NOW,
+  });
+  const said = { at: minutesAgo(1), text: 'hi' };
+
+  it('should never have more outbox reads in flight than the concurrency limit', async () => {
+    // Arrange
+    let inFlight = 0;
+    let peak = 0;
+    const subject = new SubtreeService(
+      portsFor(many(40), async () => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise(resolve => setTimeout(resolve, 1));
+        inFlight -= 1;
+        return { message: said, scanned: 1 };
+      }),
+      limits({ concurrency: 3, excerptRows: 100 }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(peak).equal(3);
+    should(view?.rows.every(row => row.last?.text === 'hi')).be.true();
+  });
+
+  it('should read no more rows than the row budget and list the rest without an excerpt', async () => {
+    // Arrange
+    const reads: string[] = [];
+    const subject = new SubtreeService(
+      portsFor(many(10), async id => {
+        reads.push(id);
+        return { message: said, scanned: 1 };
+      }),
+      limits({ excerptRows: 4 }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(reads).have.length(4);
+    should(view?.rows).have.length(10);
+    should(view?.rows.filter(row => row.last !== undefined)).have.length(4);
+    should(view?.rows.slice(0, 4).every(row => row.last !== undefined)).be.true();
+  });
+
+  it('should cap recently ended rows and serve live rows first', async () => {
+    // Arrange: the ended ones sort first by callsign, yet live rows must keep their budget
+    const sessions = [
+      sessionView('root'),
+      ...Array.from({ length: 6 }, (_, index) =>
+        child(`a-ended-${index}`, 'root', {}, { status: 'completed', finishedAt: minutesAgo(10) }),
+      ),
+      ...Array.from({ length: 3 }, (_, index) => child(`z-live-${index}`, 'root')),
+    ];
+    const reads: string[] = [];
+    const subject = new SubtreeService(
+      portsFor(sessions, async id => {
+        reads.push(id);
+        return { message: said, scanned: 1 };
+      }),
+      limits({ excerptRows: 4, endedRows: 2 }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(reads.filter(id => id.startsWith('z-live'))).have.length(3);
+    should(reads.filter(id => id.startsWith('a-ended'))).have.length(1);
+    should(view?.rows.filter(row => row.state === 'ended' && row.last !== undefined)).have.length(1);
+    should(view?.rows).have.length(9);
+  });
+
+  it('should stop reading when the table byte budget is spent, and hand unused bytes back', async () => {
+    // Arrange: 8 rows, budget for 3 full reads; each lookup reports it used all it was allowed
+    const granted: number[] = [];
+    const subject = new SubtreeService(
+      portsFor(many(8), async (_id, _to, maxBytes) => {
+        granted.push(maxBytes);
+        return { message: said, scanned: maxBytes };
+      }),
+      limits({ concurrency: 1, outboxBytes: 300, rowBytes: 100 }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(granted).deepEqual([100, 100, 100]);
+    should(view?.rows.filter(row => row.last !== undefined)).have.length(3);
+
+    // Arrange: lookups that use only 10 bytes leave room for every row
+    const cheap: number[] = [];
+    const frugal = new SubtreeService(
+      portsFor(many(8), async (_id, _to, maxBytes) => {
+        cheap.push(maxBytes);
+        return { message: said, scanned: 10 };
+      }),
+      limits({ concurrency: 1, outboxBytes: 300, rowBytes: 100 }),
+    );
+
+    // Act
+    const all = await frugal.view('root');
+
+    // Assert
+    should(cheap).have.length(8);
+    should(all?.rows.every(row => row.last !== undefined)).be.true();
+  });
+
+  it('should never grant more than the table budget in total, even with reads in flight', async () => {
+    // Arrange
+    let granted = 0;
+    const subject = new SubtreeService(
+      portsFor(many(30), async (_id, _to, maxBytes) => {
+        granted += maxBytes;
+        await new Promise(resolve => setTimeout(resolve, 1));
+        return { message: undefined, scanned: maxBytes };
+      }),
+      limits({ concurrency: 5, outboxBytes: 1000, rowBytes: 300, excerptRows: 100 }),
+    );
+
+    // Act
+    await subject.view('root');
+
+    // Assert
+    should(granted).equal(1000);
+  });
+
+  it('should list a row whose outbox read fails, without an excerpt, rather than fail the table', async () => {
+    // Arrange
+    const subject = new SubtreeService(
+      portsFor(many(3), async id => {
+        if (id === 'c001') throw new Error('EMFILE');
+        return { message: said, scanned: 1 };
+      }),
+    );
+
+    // Act
+    const view = await subject.view('root');
+
+    // Assert
+    should(view?.rows.map(row => row.last?.text)).deepEqual(['hi', undefined, 'hi']);
+  });
+
+  it('should keep the default budget generous for a lead with fifty live descendants', () => {
+    // Arrange
+    const members = subtreeMembers(many(50), 'root', NOW);
+
+    // Act / Assert
+    should(excerptEligible(members, SUBTREE_LIMITS).size).equal(50);
+  });
+});
+
+describe('mapBounded', () => {
+  it('should keep results in item order and never exceed the limit', async () => {
+    // Arrange
+    let inFlight = 0;
+    let peak = 0;
+
+    // Act
+    const results = await mapBounded([5, 1, 4, 2, 3, 0], 2, async item => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise(resolve => setTimeout(resolve, item));
+      inFlight -= 1;
+      return item * 10;
+    });
+
+    // Assert
+    should(results).deepEqual([50, 10, 40, 20, 30, 0]);
+    should(peak).equal(2);
+  });
+
+  it('should treat a non-positive limit as one and an empty list as empty', async () => {
+    should(await mapBounded([1, 2], 0, async item => item)).deepEqual([1, 2]);
+    should(await mapBounded([], 4, async item => item)).deepEqual([]);
+  });
+});
+
+describe('scanOutbox', () => {
+  const entry = (to: string, text: string) =>
+    JSON.stringify({ at: '2026-11-03T10:00:00.000Z', type: 'message', from: 'c', to, message: text });
+
+  it('should report the bytes it read, and never read past its budget even when a chunk is larger', async () => {
+    // Arrange: 300 bytes of messages to someone else, none to the lead
+    const bytes = Buffer.from(`${Array.from({ length: 4 }, () => entry('other', 'x'.repeat(40))).join('\n')}\n`);
+    const reads: Array<readonly [number, number]> = [];
+    const source = {
+      size: bytes.length,
+      read: async (offset: number, length: number) => {
+        reads.push([offset, length]);
+        return bytes.subarray(offset, offset + length);
+      },
+    };
+
+    // Act
+    const result = await scanOutbox(source, 'lead', 64 * 1024, 100);
+
+    // Assert
+    should(result.message).be.undefined();
+    should(result.scanned).equal(100);
+    should(reads.reduce((total, [, length]) => total + length, 0)).equal(100);
+  });
+
+  it('should report only what it read when it finds the message early', async () => {
+    // Arrange
+    const bytes = Buffer.from(`${entry('other', 'old')}\n${entry('lead', 'new')}\n`);
+
+    // Act
+    const result = await scanOutbox({ size: bytes.length, read: async (o, l) => bytes.subarray(o, o + l) }, 'lead');
+
+    // Assert
+    should(result.message?.text).equal('new');
+    should(result.scanned).be.belowOrEqual(bytes.length);
   });
 });

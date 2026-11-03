@@ -5,6 +5,16 @@
  * carry the PR cache the watcher keeps; nothing here calls GitHub) and each ferret's outbox — in ONE pass, so a
  * lead with fifty descendants costs one request, one board read and one small file read per descendant.
  *
+ * THE EXCERPTS ARE REDACTED BEFORE THEY ARE CUT. A note or a message is arbitrary text a ferret wrote, so it can
+ * quote a vault secret or a just-typed value; the whole candidate goes through the injected redactor (one batch
+ * for the table) and only then to one line, because masking after the cut misses a secret that straddles it. If
+ * the redactor fails, no excerpt is shown at all ({@link EXCERPT_WITHHELD}), never the raw text.
+ *
+ * THE OUTBOX READS ARE BOUNDED. At most {@link SubtreeLimits.concurrency} files are open at once, at most
+ * {@link SubtreeLimits.excerptRows} rows (of which {@link SubtreeLimits.endedRows} may be ended ones) get an
+ * excerpt and no more than {@link SubtreeLimits.outboxBytes} bytes are read in all. A row past a budget is
+ * listed without an excerpt; the table never fails for being large.
+ *
  * Lineage comes from the registry's `parent` links and nothing else: the request names only the root. The
  * messages shown are those sent to the AUTHENTICATED CALLER (derived by the route, never read from the
  * request), which is the root itself only when no ferret is asking — the owner at the machine.
@@ -26,6 +36,7 @@ import {
   subtreeDepths,
 } from '@ferretry/protocol';
 import type { LaneSets } from '../../board/graph.ts';
+import { mapBounded } from './bounded.ts';
 
 /** One member of the subtree, in tree order. */
 export interface SubtreeMember {
@@ -39,12 +50,48 @@ export interface SentMessage {
   readonly text: string;
 }
 
+/** What one outbox lookup found, and how many bytes it had to read to find it (charged to the table's budget). */
+export interface OutboxLookup {
+  readonly message: SentMessage | undefined;
+  readonly scanned: number;
+}
+
+/** The text shown in place of an excerpt that could not be redacted. */
+export const EXCERPT_WITHHELD = '[excerpt withheld]';
+
+/** The bounds on one table's excerpt work. */
+export interface SubtreeLimits {
+  /** Outbox files read at the same time. */
+  readonly concurrency: number;
+  /** Rows that get an excerpt at all; the rest are listed without one. Live rows are served before ended ones. */
+  readonly excerptRows: number;
+  /** Of those rows, how many may be recently ended ones. */
+  readonly endedRows: number;
+  /** Outbox bytes read across the whole table. */
+  readonly outboxBytes: number;
+  /** Outbox bytes read for any one row. */
+  readonly rowBytes: number;
+}
+
+export const SUBTREE_LIMITS: SubtreeLimits = {
+  concurrency: 4,
+  excerptRows: 64,
+  endedRows: 8,
+  outboxBytes: 8 * 1024 * 1024,
+  rowBytes: 1024 * 1024,
+};
+
 export interface SubtreePorts {
   sessions(): Promise<readonly SessionView[]>;
   /** Every card as stored, with each board's lanes: one store read. */
   board(): Promise<{ readonly cards: readonly BoardTask[]; readonly laneSets: LaneSets }>;
-  /** The newest message `sessionId` sent to `to`, or `undefined` when it sent none. */
-  lastMessage(sessionId: string, to: string): Promise<SentMessage | undefined>;
+  /** The newest message `sessionId` sent to `to` (if any), reading at most `maxBytes` of its outbox. */
+  lastMessage(sessionId: string, to: string, maxBytes: number): Promise<OutboxLookup>;
+  /**
+   * Masks every secret in each text, in order, under ONE vault open. It rejects when it cannot be sure (the
+   * vault will not open), and the table then withholds its excerpts rather than show text it did not scrub.
+   */
+  redact(texts: readonly string[]): Promise<readonly string[]>;
   nowMs(): number;
 }
 
@@ -161,28 +208,38 @@ function lastNote(card: BoardTask): { readonly at: string; readonly text: string
   return undefined;
 }
 
-/** The newer of the card's last note and the last message to the lead; a tie goes to the note. */
-export function lastLineOf(card: BoardTask | undefined, message: SentMessage | undefined): SubtreeRow['last'] {
+/** What a row last said, before it is redacted or cut. */
+export interface LastCandidate {
+  readonly at: string;
+  readonly source: 'note' | 'message';
+  readonly text: string;
+}
+
+/** The newer of the card's last note and the last message to the lead, in full; a tie goes to the note. */
+export function newestLine(card: BoardTask | undefined, message: SentMessage | undefined): LastCandidate | undefined {
   const note = card === undefined ? undefined : lastNote(card);
   const candidates = [
     ...(note === undefined ? [] : [{ ...note, source: 'note' as const }]),
     ...(message === undefined ? [] : [{ at: message.at, text: message.text, source: 'message' as const }]),
   ];
-  const newest = candidates.reduce<(typeof candidates)[number] | undefined>(
+  return candidates.reduce<LastCandidate | undefined>(
     (best, next) => (best === undefined || Date.parse(next.at) > Date.parse(best.at) ? next : best),
     undefined,
   );
-  if (newest === undefined) return undefined;
-  const text = oneLine(newest.text);
-  return text === '' ? undefined : { at: newest.at, source: newest.source, text };
 }
 
-/** One member's row, from the card it works on (when the board holds it) and what it last said to the lead. */
+/** A candidate as the row's last line: ALREADY-REDACTED `text` cut to one line; nothing when it is blank. */
+export function excerptOf(candidate: LastCandidate, redacted: string): SubtreeRow['last'] {
+  const text = oneLine(redacted);
+  return text === '' ? undefined : { at: candidate.at, source: candidate.source, text };
+}
+
+/** One member's row, from the card it works on (when the board holds it) and its already-redacted last line. */
 export function rowOf(
   member: SubtreeMember,
   card: BoardTask | undefined,
   laneName: string | undefined,
-  message: SentMessage | undefined,
+  last: SubtreeRow['last'],
 ): SubtreeRow {
   const { view, depth } = member;
   const focus = view.config.focusTask;
@@ -190,7 +247,6 @@ export function rowOf(
   const state = subtreeStateOf(view);
   const endedAt = state === 'ended' ? endedAtOf(view) : undefined;
   const pr = card === undefined ? undefined : prOf(card);
-  const last = lastLineOf(card, message);
   return {
     id: view.config.id,
     callsign: callsignOf(view),
@@ -208,8 +264,24 @@ export function rowOf(
   };
 }
 
+/**
+ * The members that get an excerpt: live ones in tree order up to `excerptRows`, then recently ended ones up to
+ * `endedRows` and whatever room is left. Returns their positions in `members`.
+ */
+export function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimits): ReadonlySet<number> {
+  const positions = members.map((_, index) => index);
+  const live = positions.filter(index => !isEnded(members[index]!.view));
+  const ended = positions.filter(index => isEnded(members[index]!.view));
+  const liveChosen = live.slice(0, limits.excerptRows);
+  const endedChosen = ended.slice(0, Math.min(limits.endedRows, Math.max(0, limits.excerptRows - liveChosen.length)));
+  return new Set([...liveChosen, ...endedChosen]);
+}
+
 export class SubtreeService {
-  constructor(private readonly ports: SubtreePorts) {}
+  constructor(
+    private readonly ports: SubtreePorts,
+    private readonly limits: SubtreeLimits = SUBTREE_LIMITS,
+  ) {}
 
   /**
    * The table for `rootId` (a session id), or `undefined` when no such session is in the registry. A row's
@@ -227,18 +299,25 @@ export class SubtreeService {
       ? await this.ports.board()
       : { cards: [] as readonly BoardTask[], laneSets: new Map() as LaneSets };
     const cards = new Map(board.cards.map(card => [card.id, card]));
-    const messages = await Promise.all(
-      members.map(async member => await this.ports.lastMessage(member.view.config.id, callerId)),
+    const cardOf = (member: SubtreeMember): BoardTask | undefined => {
+      const focus = member.view.config.focusTask;
+      return focus === undefined ? undefined : cards.get(focus.id);
+    };
+
+    const eligible = excerptEligible(members, this.limits);
+    const messages = await this.messagesFor(members, eligible, callerId);
+    const candidates = members.map((member, index) =>
+      eligible.has(index) ? newestLine(cardOf(member), messages[index]) : undefined,
     );
+    const lasts = await this.excerpts(candidates);
 
     const rows = members.map((member, index) => {
-      const focus = member.view.config.focusTask;
-      const card = focus === undefined ? undefined : cards.get(focus.id);
+      const card = cardOf(member);
       const lane =
         card === undefined
           ? undefined
           : board.laneSets.get(card.projectId)?.lanes.find(candidate => candidate.id === card.laneId)?.name;
-      return rowOf(member, card, lane, messages[index]);
+      return rowOf(member, card, lane, lasts[index]);
     });
     return {
       root: { id: root.config.id, callsign: callsignOf(root) },
@@ -246,6 +325,49 @@ export class SubtreeService {
       endedWindowMs: SUBTREE_ENDED_WINDOW_MS,
       rows,
     };
+  }
+
+  /**
+   * The newest message to `callerId` of each eligible member, read `concurrency` at a time. Each read reserves
+   * its bytes from the table's budget before it starts and hands back what it did not use; one that finds the
+   * budget spent reads nothing. A member that is not eligible, or whose read finds nothing, has no message.
+   */
+  private async messagesFor(
+    members: readonly SubtreeMember[],
+    eligible: ReadonlySet<number>,
+    callerId: string,
+  ): Promise<readonly (SentMessage | undefined)[]> {
+    const { concurrency, outboxBytes, rowBytes } = this.limits;
+    let remaining = outboxBytes;
+    return await mapBounded(members, concurrency, async (member, index) => {
+      if (!eligible.has(index) || remaining <= 0) return undefined;
+      const reserved = Math.min(rowBytes, remaining);
+      remaining -= reserved;
+      try {
+        const { message, scanned } = await this.ports.lastMessage(member.view.config.id, callerId, reserved);
+        remaining += Math.max(0, reserved - scanned);
+        return message;
+      } catch {
+        remaining += reserved;
+        return undefined;
+      }
+    });
+  }
+
+  /** Every candidate redacted whole in ONE batch, then cut to a line; a redactor that fails withholds them all. */
+  private async excerpts(candidates: readonly (LastCandidate | undefined)[]): Promise<SubtreeRow['last'][]> {
+    const present = candidates.flatMap((candidate, index) => (candidate === undefined ? [] : [{ candidate, index }]));
+    if (present.length === 0) return candidates.map(() => undefined);
+    const redacted = await this.ports.redact(present.map(({ candidate }) => candidate.text)).catch(() => undefined);
+    const safe = redacted?.length === present.length ? redacted : undefined;
+    const lasts: SubtreeRow['last'][] = candidates.map(() => undefined);
+    present.forEach(({ candidate, index }, position) => {
+      lasts[index] =
+        safe === undefined
+          ? { at: candidate.at, source: candidate.source, text: EXCERPT_WITHHELD }
+          : excerptOf(candidate, safe[position]!);
+    });
+    return lasts;
   }
 }
 

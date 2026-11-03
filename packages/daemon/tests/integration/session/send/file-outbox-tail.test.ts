@@ -125,4 +125,25 @@ describe('FileOutboxTail', () => {
         (error: NodeJS.ErrnoException) => should(error.code).equal('EISDIR'),
       );
   });
+
+  it('scan reads no more of the outbox than its byte budget and reports what it read', async () => {
+    const root = await sessionsRoot();
+    const content =
+      message('lead', 'buried', '2026-08-01T10:00:00.000Z') +
+      message('other', 'x'.repeat(2_000), '2026-08-01T11:00:00.000Z');
+    await writeOutbox(root, 'session-1', content);
+
+    const capped = await tailOver(root).scan('session-1', 'lead', 500);
+    const full = await tailOver(root).scan('session-1', 'lead');
+
+    should(capped.message).be.undefined();
+    should(capped.scanned).equal(500);
+    should(full.message?.text).equal('buried');
+    should(full.scanned).equal(Buffer.byteLength(content));
+  });
+
+  it('scan reports nothing read for a missing outbox', async () => {
+    const root = await sessionsRoot();
+    should(await tailOver(root).scan('session-1', 'lead', 500)).deepEqual({ message: undefined, scanned: 0 });
+  });
 });

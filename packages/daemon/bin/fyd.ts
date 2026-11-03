@@ -627,10 +627,10 @@ import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
-  alertFallback,
   AlertSurface,
-  BoardAlerts,
+  alertFallback,
   BOARD_SWEEP_INTERVAL_MS,
+  BoardAlerts,
   BoardGateCheck,
   BoardService,
   BoardSweep,
@@ -12872,7 +12872,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const subtreeService = new SubtreeService({
         sessions: async () => await sessions.list(),
         board: async () => await boardWorld.board.snapshot(),
-        lastMessage: async (sessionId, to) => await subtreeOutbox.newestMessageTo(sessionId, to),
+        lastMessage: async (sessionId, to, maxBytes) => await subtreeOutbox.scan(sessionId, to, maxBytes),
+        redact: async texts => await secretRedactor.batch(scrub => texts.map(text => scrub.text(text))),
         nowMs: () => Date.parse(clock.now()),
       });
       const mounted: Omit<

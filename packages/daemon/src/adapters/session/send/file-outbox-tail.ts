@@ -1,7 +1,7 @@
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { newestMessageScanning } from '../../../lib/session/pack/outbox-scan.ts';
-import type { SentMessage } from '../../../lib/session/pack/subtree.ts';
+import { OUTBOX_SCAN_BYTES, scanOutbox } from '../../../lib/session/pack/outbox-scan.ts';
+import type { OutboxLookup, SentMessage } from '../../../lib/session/pack/subtree.ts';
 import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
 
 /**
@@ -12,18 +12,24 @@ export class FileOutboxTail {
   constructor(private readonly sessionDirectory: (id: SessionId) => string) {}
 
   async newestMessageTo(sessionId: string, to: string): Promise<SentMessage | undefined> {
+    return (await this.scan(sessionId, to)).message;
+  }
+
+  /** {@link newestMessageTo} reading at most `maxBytes` of the outbox, and saying how many it read. */
+  async scan(sessionId: string, to: string, maxBytes: number = OUTBOX_SCAN_BYTES): Promise<OutboxLookup> {
+    const none: OutboxLookup = { message: undefined, scanned: 0 };
     const id = tryParseSessionId(sessionId);
-    if (id === undefined) return undefined;
+    if (id === undefined) return none;
     const handle = await open(join(this.sessionDirectory(id), 'channel', 'outbox.jsonl'), 'r').catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return undefined;
         throw error;
       },
     );
-    if (handle === undefined) return undefined;
+    if (handle === undefined) return none;
     try {
       const { size } = await handle.stat();
-      return await newestMessageScanning(
+      return await scanOutbox(
         {
           size,
           read: async (offset, length) => {
@@ -33,6 +39,8 @@ export class FileOutboxTail {
           },
         },
         to,
+        undefined,
+        maxBytes,
       );
     } finally {
       await handle.close();

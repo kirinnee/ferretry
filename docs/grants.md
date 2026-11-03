@@ -128,7 +128,7 @@ act alone (turning automatic install off never needs one). See [updating.md](upd
 [pack-mode.md](pack-mode.md#checking-on-your-sub-ferrets)) reads the sessions registry, the board's cards and PR
 cache and each descendant's outbox, so a remote caller whose `fleet.use` is narrowed is refused with
 `grant_not_granted` before anything is read. Plain session reads are ungoverned; this one is not, because it
-surfaces card notes, PR state and messages for a whole subtree in one answer rather than one session's own record.
+surfaces card notes, PR state and messages for a whole subtree in one answer rather than one session's own record. Its excerpts pass the same fail-closed secret redactor as an operator transcript read (before the cut to one line; `[excerpt withheld]` if it cannot run), and its per-table outbox work is bounded ([pack-mode.md](pack-mode.md)).
 It writes nothing and takes no lineage from the request: the descendants are the registry's `parent` links.
 Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
 /v1/harnesses/update` is `configure` plus the step-up, and a ferret may never start one.

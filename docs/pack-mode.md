@@ -351,6 +351,15 @@ cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged;
   sent to A shows, not only what was sent to B. The owner outside a pane has no such caller, so it sees messages sent to the
   named root. The outbox is read backwards in 64 KiB chunks, whole records at a time, up to 1 MiB: a long report never
   hides the message under it, and only a message older than the last megabyte falls back to the card's note.
+- **Secrets never reach the line.** The whole note or message is run through the same fail-closed redactor the
+  operator transcript reads use (the vault, logins and just-typed values) **before** it is cut to a line, in one batch
+  per table, so a secret that straddles the 100-character cut is masked whole. If the redactor cannot run, every
+  excerpt reads `[excerpt withheld]` — the raw text is never shown.
+- **Bounded work.** A large tree cannot make the daemon scan without limit: at most 4 outbox files are open at once,
+  at most 64 rows get an excerpt (live rows first; at most 8 of them recently ended), and at most 8 MiB of outbox is
+  read for the table (1 MiB per row). A row past a budget is still listed — state, card and PR intact — with no
+  last line, so `-` in that column on a very large table means "not read", not "silent". A failed outbox read does
+  the same for its row.
 - **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `card`, `pr`,
   `last`, `endedAt`).
 

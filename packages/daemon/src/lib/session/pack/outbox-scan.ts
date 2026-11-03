@@ -1,4 +1,4 @@
-import { newestMessageTo, type SentMessage } from './subtree.ts';
+import { newestMessageTo, type OutboxLookup, type SentMessage } from './subtree.ts';
 
 /** How much of an outbox's end is read per step. */
 export const OUTBOX_CHUNK_BYTES = 64 * 1024;
@@ -24,12 +24,22 @@ export async function newestMessageScanning(
   chunkBytes: number = OUTBOX_CHUNK_BYTES,
   maxBytes: number = OUTBOX_SCAN_BYTES,
 ): Promise<SentMessage | undefined> {
+  return (await scanOutbox(source, to, chunkBytes, maxBytes)).message;
+}
+
+/** {@link newestMessageScanning}, also saying how many bytes it read, so a caller can charge them to a budget. */
+export async function scanOutbox(
+  source: ByteSource,
+  to: string,
+  chunkBytes: number = OUTBOX_CHUNK_BYTES,
+  maxBytes: number = OUTBOX_SCAN_BYTES,
+): Promise<OutboxLookup> {
   let position = source.size;
   let scanned = 0;
   // The start of a line whose beginning is still earlier in the file; always the front of the next window.
   let partial: Buffer = Buffer.alloc(0);
   while (position > 0 && scanned < maxBytes) {
-    const length = Math.min(chunkBytes, position);
+    const length = Math.min(chunkBytes, position, maxBytes - scanned);
     position -= length;
     scanned += length;
     const window = Buffer.concat([await source.read(position, length), partial]);
@@ -42,7 +52,7 @@ export async function newestMessageScanning(
     partial = position === 0 ? Buffer.alloc(0) : window.subarray(0, firstBreak);
     const complete = window.subarray(firstBreak + 1);
     const found = newestMessageTo(complete.toString('utf8'), to);
-    if (found !== undefined) return found;
+    if (found !== undefined) return { message: found, scanned };
   }
-  return undefined;
+  return { message: undefined, scanned };
 }
