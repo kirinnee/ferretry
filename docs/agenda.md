@@ -583,8 +583,8 @@ pure, lossless and idempotent; the next atomic write persists both the thread an
 displaces bounded history or revisions at the transport limit, `carriedEntries` retains the original valid snapshot
 in the ledger, and it becomes the first carried version on the next change. History already dropped
 by an earlier daemon cannot be recovered. The existing PWA `item-conversation.ts` continues reading session transcripts;
-rendering the stored thread is deferred to PR 7. `agenda.conversation.1` remains the health feature, and the new fields
-are optional for older apps.
+the item view draws the stored thread on a machine that reports `agenda.conversation.1` (see [The item view](#the-item-view)).
+That feature stays the health flag, and the new fields are optional for older apps.
 
 ### `fy agenda log`
 
@@ -716,6 +716,15 @@ only items in the same agenda home (one lineage) can be merged. Refused: an item
 a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
 address.
 
+In the app, an open plain conversation shows **Merge with…** beside its lineage lines. It lists the other open plain
+conversations on the same board, and a confirm step says what will happen before anything is sent: "!A5 closes as merged
+into !A2. Both conversations and all cards are kept, and nothing is cut." The viewed item survives by default, and
+"Keep !A5 instead" flips it. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
+only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
+conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
+**Merged into !A2** as a link, and the survivor shows **Merged in from !A5**. A machine with no merge never shows the
+button, and the machine's own agenda (`machine-agenda`) offers none.
+
 ### Split
 
 `fy agenda split A5 --title … --premise … --context … "<ask>" [--move-cards F12,…] [--stage …]` raises a new item for
@@ -734,6 +743,10 @@ A card A5 carries only through its [card ask](#card-asks) can be moved too. A mo
   the card's agenda, so moving its card is refused; merge the two instead.
 - **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
   on the new item.
+
+The app shows both links as references through the one reference renderer: **Split from !A3** on the new item and
+**Split into !A7, !A8** on the original, each `!A…` opening as it does in a message. The app has no split button: a
+split is a ferret's act, and a plain "Split off…" can follow once the owner may split by route.
 
 ## Parked items
 
@@ -1205,9 +1218,13 @@ and a part the item does not carry is not drawn:
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
   edit changed are drawn whole. The title wraps onto two lines in the head, and one longer than that is drawn whole at
   the top of the body too. Rows in a list may still be one line.
-- **The conversation** is read from the chat today (`itemHistory`: the owner's words that name the item and the
-  parts of the ferret's replies about it). A machine with the stored conversation (`agenda.conversation.1`) feeds the
-  same part from the item itself.
+- **The conversation** is read from the chat for an item that has no stored thread (`itemHistory`: the owner's words
+  that name the item and the parts of the ferret's replies about it). A machine with the stored conversation
+  (`agenda.conversation.1`) feeds the same part from the item itself: the item's own tail when it is whole, else every
+  entry read through `GET …/conversation`, in stored order, falling back to the rebuilt thread while it loads or if it
+  cannot be read. An owner entry is the owner's bubble (an `answer`, `needs-info` or `discuss` keeps its form), a ferret
+  entry is the ferret's, a daemon entry is drawn under "Ferretry", and an entry the ferret copied from the owner's chat
+  (`fromChat`) carries a **from chat** tag.
 - **Card asks live inside the item.** A card ready to test or approve is answered in part 7, with its own buttons,
   never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
@@ -1219,8 +1236,15 @@ and a part the item does not carry is not drawn:
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 7 with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
-- **The head keeps a slot** (`data-agenda-version-slot`) for the version and diff control; today it holds the
-  version picker.
+- **The head keeps a slot** (`data-agenda-version-slot`) for the version picker and the diff control.
+- **Changes (the diff).** With two or more versions on a machine that keeps them, the slot gains a **Changes** button.
+  It opens a panel under the head that compares "since you last looked" by default (this device's last-seen mark
+  against the newest version) and lets the owner pick any two versions from **From** and **To**. Each changed section
+  shows its words per word: additions are underlined, removals struck through, with a status word (New, Changed,
+  Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. Sections that did not change fold
+  under one line. Opening an item writes the seen mark (`PUT …/seen`) for its newest version, after the baseline is
+  read, so "since you last looked" is the previous visit. A machine without the version routes shows no control.
+- **The terms table** shows a link's own `meaning` (`agenda.link-meaning.1`), else its label.
 
 ## What I need from you
 
@@ -1621,8 +1645,8 @@ A daemon that stores the conversation, takes `log`, `merge` and `split`, and kee
 `agenda.conversation.1` on `GET /v1/health`. Every new item field (`conversation`, `mergedFrom`, `mergedInto`,
 `splitFrom`, `splitInto`, `relatedTasks`) is optional, and the version routes are new, so an app or CLI from before
 reads every item; the CLI checks the feature first and says the daemon needs an update. The app ships before the daemon:
-the current app still reconstructs conversation from session transcripts (`item-conversation.ts`). Stored conversation
-rendering is deferred to PR 7; there is no history fallback in that reader.
+an app talking to a daemon without the feature still reconstructs the conversation from session transcripts
+(`item-conversation.ts`) and shows no diff or merge control.
 
 ### Both spellings, one window
 
