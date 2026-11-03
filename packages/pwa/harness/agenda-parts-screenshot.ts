@@ -14,12 +14,14 @@
  * beside a card ask; the activity log does not list each stage; a push does not open the item at its ask; the head's
  * title scrolls, is cut at a side or takes more than two lines, or is longer than them and not drawn whole in the
  * body; a Yes / No row is not No ← · Yes →; or a choice whose options are explained has buttons that do not say its
- * options' short labels (a bare letter, a description, an empty or cut-off button).
+ * options' short labels (a bare letter, a description, an empty or cut-off button), or a label of a choice of three
+ * that is cut, broken inside a word or longer than two lines on a phone.
  */
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { agendaAnswerText } from '@ferretry/protocol';
 import { chromium, type Page } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
@@ -201,6 +203,13 @@ const checkCommon = async (page: Page, label: string): Promise<void> => {
   );
 };
 
+/** Long labels for a row of three, each cut as its buttons cut it (`agendaAnswerText(label, 3)`). */
+const THREE_WAY_STRESS = [
+  ['Lock the whole session row', 'Retry it with exponential backoff', 'Do absolutely nothing at all'],
+  ['Rebuild every cached index', 'Ask the owner again tomorrow', 'Move it to the next release'],
+  ['Release it to everyone', 'Keep the old behaviour', 'Reauthenticate everyone'],
+] as const;
+
 const STAGES = [
   ['A120', 'explainer', 'Explainer'],
   ['A121', 'question', 'Question'],
@@ -208,6 +217,106 @@ const STAGES = [
   ['A123', 'tracker', 'Tracker'],
   ['A124', 'test', 'Test'],
 ] as const;
+
+/** How each button of the open item's answer row is drawn: what it says, line by line, and whether anything is cut. */
+const readRow = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.fy-qr__row [data-agenda-option]')].map(button => {
+      const text = button.querySelector<HTMLElement>('.fy-qr__label');
+      const box = button.getBoundingClientRect();
+      // Each line, read from where each character is drawn: a line that starts inside a word is a split word.
+      const lines: string[] = [];
+      let midWord = false;
+      if (text?.firstChild instanceof Text) {
+        const node = text.firstChild;
+        const range = document.createRange();
+        let top = Number.NaN;
+        for (let at = 0; at < node.length; at += 1) {
+          range.setStart(node, at);
+          range.setEnd(node, at + 1);
+          const rect = range.getClientRects()[0];
+          if (rect === undefined) continue;
+          const char = node.data[at] ?? '';
+          if (Number.isNaN(top) || rect.top > top + 2) {
+            if (!Number.isNaN(top) && /\S/u.test(char) && /\S/u.test(node.data[at - 1] ?? '')) midWord = true;
+            top = rect.top;
+            lines.push('');
+          }
+          lines[lines.length - 1] += char;
+        }
+      }
+      return {
+        option: button.dataset.agendaOption ?? '',
+        said: text?.textContent ?? '',
+        lines: lines.map(line => line.trim()),
+        midWord,
+        clipped:
+          text === null ||
+          text.scrollWidth > text.clientWidth + 1 ||
+          text.scrollHeight > text.clientHeight + 1 ||
+          button.scrollWidth > button.clientWidth + 1 ||
+          button.scrollHeight > button.clientHeight + 1,
+        offWidth: box.left < 0 || box.right > window.innerWidth,
+      };
+    }),
+  );
+
+type Row = Awaited<ReturnType<typeof readRow>>;
+
+/** Each label is at most two lines, breaks only between words, is not clipped, and sits within the screen. */
+const checkLines = (row: Row, label: string): void => {
+  for (const each of row) {
+    const drawn = each.lines.join(' / ');
+    check(!each.clipped, `${label}: "${each.said}" is clipped (${drawn})`);
+    check(!each.midWord, `${label}: "${each.said}" breaks inside a word (${drawn})`);
+    check(each.lines.length <= 2, `${label}: "${each.said}" takes ${each.lines.length} lines (${drawn})`);
+    check(!each.offWidth, `${label}: "${each.said}" is off the screen's width`);
+  }
+};
+
+/**
+ * An answer row's buttons say `wanted`, whole and in order, each sending its option, with no ellipsis (`checkLines`).
+ * `stress`: rows of labels as long as `agendaAnswerText` lets a row of three say, drawn into the same buttons in turn,
+ * each of which must still fit in two lines.
+ */
+const checkRow = async (
+  page: Page,
+  name: string,
+  form: Form,
+  theme: string,
+  wanted: readonly string[],
+  stress: readonly (readonly string[])[] = [],
+) => {
+  await scrollTop(page);
+  const label = `${name} ${form} ${theme}`;
+  await checkCommon(page, label);
+  const row = await readRow(page);
+  const said = row.map(each => `"${each.said}"`).join(', ');
+  check(
+    row.map(each => each.said).join('|') === wanted.join('|'),
+    `${label}: the buttons say ${said}, wanted ${wanted.join(', ')}`,
+  );
+  check(
+    row.map(each => each.option).join('|') === wanted.join('|'),
+    `${label}: the buttons send ${row.map(each => each.option).join(',')}`,
+  );
+  check(!row.some(each => each.said.includes('…')), `${label}: a button is cut short: ${said}`);
+  checkLines(row, label);
+  process.stdout.write(`   ${label}: ${row.map(each => each.lines.join(' / ')).join(' | ')}\n`);
+  await shot(page, name, form, theme);
+  for (const texts of stress) {
+    await page.evaluate(words => {
+      for (const [at, text] of [
+        ...document.querySelectorAll('.fy-qr__row [data-agenda-option] .fy-qr__label'),
+      ].entries())
+        text.textContent = words[at] ?? '';
+    }, texts);
+    const stressed = await readRow(page);
+    checkLines(stressed, `${label} (as long as a row of three says)`);
+    process.stdout.write(`   ${label} stressed: ${stressed.map(each => each.lines.join(' / ')).join(' | ')}\n`);
+  }
+  await page.close();
+};
 
 const scenes = async (form: Form, theme: string): Promise<void> => {
   const browserContext = await browser.newContext({
@@ -438,35 +547,16 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await long.close();
 
   // A CHOICE WHOSE OPTIONS ARE EXPLAINED: its buttons say "No" and "Only blockers", whole, never "A" and "B".
-  const described = await open('A126');
-  await scrollTop(described);
-  await checkCommon(described, `described-options ${form} ${theme}`);
-  const row = await described.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('.fy-qr__row [data-agenda-option]')].map(button => {
-      const label = button.querySelector<HTMLElement>('.fy-qr__label');
-      const box = button.getBoundingClientRect();
-      return {
-        option: button.dataset.agendaOption ?? '',
-        said: label?.textContent ?? '',
-        cut: label === null || label.scrollWidth > label.clientWidth + 1,
-        offWidth: box.left < 0 || box.right > window.innerWidth,
-      };
-    }),
+  await checkRow(await open('A126'), 'described-options', form, theme, ['No', 'Only blockers']);
+  // A CHOICE OF THREE: a third of a phone's row each, so a label wraps at a word onto a second line, never "Retry wit…".
+  await checkRow(
+    await open('A127'),
+    'described-options-3way',
+    form,
+    theme,
+    ['Lock the session row', 'Retry with backoff', 'Do nothing at all'],
+    THREE_WAY_STRESS.map(labels => labels.map(each => agendaAnswerText(each, 3))),
   );
-  check(
-    row.map(each => each.said).join(',') === 'No,Only blockers',
-    `described-options ${form} ${theme}: the buttons say ${row.map(each => `"${each.said}"`).join(', ')}, wanted "No", "Only blockers"`,
-  );
-  check(
-    row.map(each => each.option).join(',') === 'No,Only blockers',
-    `described-options ${form} ${theme}: the buttons send ${row.map(each => each.option).join(',')}`,
-  );
-  for (const each of row) {
-    check(!each.cut, `described-options ${form} ${theme}: "${each.said}" is cut off`);
-    check(!each.offWidth, `described-options ${form} ${theme}: "${each.said}" is off the screen's width`);
-  }
-  await shot(described, 'described-options', form, theme);
-  await described.close();
 
   await browserContext.close();
 };

@@ -216,6 +216,30 @@ const DESCRIBED_OPTIONS = item('A126', 6, {
   },
 } as Partial<AgendaItem>);
 
+/**
+ * 8. A CHOICE OF THREE WHOSE OPTIONS ARE EXPLAINED (the agenda-v4 trio): on a phone each button has a third of the
+ * row, so a label wraps onto a second line at a word, never cut mid-word with an ellipsis.
+ */
+const DESCRIBED_THREE = item('A127', 7, {
+  title: 'How should a second save of the same session behave?',
+  subject: 'Two saves of one session race. Which fix should I build?',
+  kind: 'choice',
+  stage: 'question',
+  stages: [{ stage: 'question', at: ago(7) }],
+  premise: BRIEF.premise,
+  context: BRIEF.context,
+  whereWeAre: 'Two saves of one session can land together, and the second overwrites the first.',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Lock the session row', description: 'A save waits for the one before it to finish' },
+      { label: 'Retry with backoff', description: 'Cheap, but it hides the race' },
+      { label: 'Do nothing at all', description: 'Keep today’s behaviour and watch for reports' },
+    ],
+  },
+  recommendation: { decision: 'Lock the session row', why: 'It removes the race instead of hiding it.' },
+} as Partial<AgendaItem>);
+
 /** The card's How to test, as the board holds it: the card ask above its Done / Not good carries these steps. */
 export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
   F559: [
@@ -226,7 +250,16 @@ export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
   ].join('\n'),
 };
 
-export const PARTS_ITEMS = [EXPLAINER, QUESTION, PLAN, TRACKER, TEST, LONG_TITLE, DESCRIBED_OPTIONS] as const;
+export const PARTS_ITEMS = [
+  EXPLAINER,
+  QUESTION,
+  PLAN,
+  TRACKER,
+  TEST,
+  LONG_TITLE,
+  DESCRIBED_OPTIONS,
+  DESCRIBED_THREE,
+] as const;
 
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });

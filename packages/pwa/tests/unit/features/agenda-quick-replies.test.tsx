@@ -402,4 +402,29 @@ describe('options with descriptions', () => {
     expect(keys.right).toMatchObject({ response: { choice: 'Only blockers' } });
     expect(keys.left).toMatchObject({ response: { choice: 'No' } });
   });
+
+  test('a row of three says shorter words, cut at a word, while a row of two says more; each sends its whole label', async () => {
+    const long = 'Lock the whole session row';
+    await draw(agendaItem('A49', { ask: choices(long, 'Retry with backoff', 'Do nothing at all') }));
+    expect(said()).toEqual(['Lock the whole…', 'Retry with backoff', 'Do nothing at all']);
+    expect(answer(long).dataset.agendaOption).toBe(long);
+    expect(answer(long).title).toBe(long);
+    await draw(agendaItem('A50', { ask: choices(long, 'Wait') }));
+    expect(said()).toEqual(['Lock the whole session…', 'Wait']);
+  });
+
+  test('the arrow and the words sit together in one face, so a long label can wrap with its arrow on its first line', async () => {
+    await draw(described);
+    const faces = [...root().querySelectorAll('[data-agenda-option] .fy-qr__face')];
+    expect(faces).toHaveLength(2);
+    expect(faces.map(face => [...face.children].map(child => child.className))).toEqual([
+      ['fy-qr__arrow', 'fy-qr__label'],
+      ['fy-qr__arrow', 'fy-qr__label'],
+    ]);
+  });
+
+  test('a Markdown label reads as plain words on its button', async () => {
+    await draw(agendaItem('A51', { ask: choices('**Ship** it', '`Wait`') }));
+    expect(said()).toEqual(['Ship it', 'Wait']);
+  });
 });

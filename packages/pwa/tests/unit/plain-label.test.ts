@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { plainLabel, plainPreview } from '../../src/lib/plain-label.ts';
+import { answerWords, plainLabel, plainPreview } from '../../src/lib/plain-label.ts';
 
 describe('plainLabel', () => {
   test.each([
@@ -68,5 +68,14 @@ describe('plainPreview', () => {
     expect(plainPreview('  \n ')).toBe('');
     expect(plainPreview('a - b')).toBe('a - b');
     expect(plainPreview('-')).toBe('-');
+  });
+});
+
+describe('answerWords', () => {
+  test('is the label as plain words, cut at a word, shorter on a row of three', () => {
+    expect(answerWords('**Ship** it')).toBe('Ship it');
+    expect(answerWords('`Wait`', 3)).toBe('Wait');
+    expect(answerWords('**Lock** the whole session row')).toBe('Lock the whole session…');
+    expect(answerWords('**Lock** the whole session row', 3)).toBe('Lock the whole…');
   });
 });

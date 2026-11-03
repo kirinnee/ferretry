@@ -1,9 +1,10 @@
 /**
  * THE ANSWER ROW OF AN OPEN AGENDA CARD — ONE ROW, at most THREE buttons, in DIRECTION order: the ← answer, the ↑
  * (recommended) one, the → one, each the swipe that sends it. A direction with no answer draws NOTHING: the buttons
- * there share the width, never a hole. Each says its option's own short label (`agendaAnswerText`: "No", "Only
- * blockers"), never its description and never a bare letter, cut at a word only when very long, never wrapped; the
- * full label is its accessible name and its title. The recommended one is in the
+ * there share the width, never a hole. Each says its option's own short label (`answerWords`: "No", "Only
+ * blockers"), never its description and never a bare letter, cut at a word only when very long; in an open card a label
+ * too long for its third of a phone's row wraps onto a second line between words. The full label is its accessible
+ * name and its title. The recommended one is in the
  * accent. A tap answers at once. Options past the three are chosen from the card's options list, never a second row.
  * "Not needed" is the pill in the card's top bar (a button only, never a swipe), not a button here. Answering is replying, so there
  * is no text field: the composer below the card is the one box, and what is typed in it rides an answer as its note.
@@ -17,17 +18,17 @@
  */
 
 import type { AgendaCardAnswer } from '@ferretry/protocol';
-import { agendaAnswerText, GOT_IT_LABEL } from '@ferretry/protocol';
+import { GOT_IT_LABEL } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type PointerEvent, useRef } from 'react';
 import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agenda-answers.ts';
 import type { CardModel } from '../../lib/agenda-card-model.ts';
 import { type InboxAction, SWIPE_SLOP_PX, type SwipeMap, swipeIntent } from '../../lib/agenda-inbox.ts';
-import { plainLabel } from '../../lib/plain-label.ts';
+import { answerWords, plainLabel } from '../../lib/plain-label.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
-import type { DoneCloseView } from './use-done-close-flow.ts';
 import { isTouch } from './agenda-swipe-gesture.ts';
 import { useDeckReadsDown } from './deck-down-context.ts';
+import type { DoneCloseView } from './use-done-close-flow.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
 
 const SWIPE_WORD: Readonly<Record<AnswerDirection, string>> = {
@@ -87,6 +88,8 @@ interface ChipProps {
   readonly arrow?: AnswerDirection | undefined;
   readonly swipeable: boolean;
   readonly primary?: boolean;
+  /** The answers on the row: a row of three says shorter words (`agendaAnswerText`). */
+  readonly slots: number;
   readonly onTap: () => void;
 }
 
@@ -96,7 +99,7 @@ const chipName = (label: string, recommended: boolean, swipe: string | null): st
     .filter(Boolean)
     .join(', ');
 
-function Chip({ label, recommended, busy, arrow, swipeable, primary = false, onTap }: ChipProps) {
+function Chip({ label, recommended, busy, arrow, swipeable, primary = false, slots, onTap }: ChipProps) {
   return (
     <button
       aria-label={chipName(label, recommended, arrow !== undefined && swipeable ? SWIPE_WORD[arrow] : null)}
@@ -110,12 +113,14 @@ function Chip({ label, recommended, busy, arrow, swipeable, primary = false, onT
       title={plainLabel(label)}
       type="button"
     >
-      {arrow === undefined ? null : (
-        <span aria-hidden="true" className="fy-qr__arrow">
-          {ARROW[arrow]}
-        </span>
-      )}
-      <span className="fy-qr__label">{agendaAnswerText(plainLabel(label))}</span>
+      <span className="fy-qr__face">
+        {arrow === undefined ? null : (
+          <span aria-hidden="true" className="fy-qr__arrow">
+            {ARROW[arrow]}
+          </span>
+        )}
+        <span className="fy-qr__label">{answerWords(label, slots)}</span>
+      </span>
     </button>
   );
 }
@@ -273,6 +278,7 @@ export function AgendaQuickReplies({
             give={give}
             key={reply.label}
             recommended={recommended}
+            slots={replies.length}
             swipeable={swipeable}
             tapOnly={tapOnly}
             {...(reply.onTap === undefined ? {} : { onTap: reply.onTap })}
@@ -294,6 +300,7 @@ function AnswerChip({
   busy,
   give,
   recommended,
+  slots,
   swipeable,
   tapOnly,
   onTap,
@@ -302,6 +309,7 @@ function AnswerChip({
   readonly busy: boolean;
   readonly give: (action: InboxAction) => void;
   readonly recommended: string | undefined;
+  readonly slots: number;
   readonly swipeable: boolean;
   readonly tapOnly: boolean;
   /** A button with its own handling: tapped only, so it says no swipe direction. */
@@ -322,6 +330,7 @@ function AnswerChip({
       }}
       primary={sameLabel(answer.label, recommended)}
       recommended={sameLabel(answer.label, recommended)}
+      slots={slots}
       swipeable={swipeable}
     />
   );

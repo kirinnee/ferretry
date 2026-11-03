@@ -708,6 +708,26 @@ describe('attention cards', () => {
     should(actual).containEql('answers: ← Deny · ↑ Always allow · → Allow');
   });
 
+  it('should name a row of three in its buttons’ shorter words, cut at a word, and a row of two in longer ones', () => {
+    // Act
+    const printed = (labels: readonly string[]) =>
+      renderAgendaList(
+        snapshot([
+          humanItem('A1', 'Which fix?', {
+            title: 'Fix',
+            kind: 'choice',
+            ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
+          }),
+        ]),
+      );
+
+    // Assert
+    should(printed(['Lock the whole session row', 'Retry with backoff', 'Do nothing at all'])).containEql(
+      'answers: ← Lock the whole… · ↑ Retry with backoff · → Do nothing at all',
+    );
+    should(printed(['Lock the whole session row', 'Wait'])).containEql('answers: ← Lock the whole session… · → Wait');
+  });
+
   it('should keep an old item headed by its ask and still show derived answers', () => {
     // Act
     const actual = renderAgendaList(snapshot([humanItem('A1', 'approve the deploy', { ask: { kind: 'permission' } })]));

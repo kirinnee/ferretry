@@ -4,6 +4,8 @@
  * Only the label's DISPLAY goes through this; the label stays as written wherever it identifies the answer. Pure.
  */
 
+import { agendaAnswerText } from '@ferretry/protocol';
+
 const BOUNDARY = String.raw`(?<![\p{L}\p{N}])`;
 const BOUNDARY_AFTER = String.raw`(?![\p{L}\p{N}])`;
 
@@ -36,6 +38,13 @@ export const plainLabel = (label: string, letter?: string): string => {
   if (plain === '') return label;
   return letter === undefined ? plain : withoutOwnLetter(plain, letter);
 };
+
+/**
+ * WHAT AN ANSWER SAYS on its button and on the arrow key's hint beside the deck alike: the label as plain words, cut as
+ * `agendaAnswerText` cuts it for a row of `slots` answers. One function for both, so a Markdown label ("**Ship**") never reads differently on the
+ * two. Pure.
+ */
+export const answerWords = (label: string, slots = 1): string => agendaAnswerText(plainLabel(label), slots);
 
 const FENCE_LINE = /^\s*(?:```|~~~)/u;
 const HEADING_MARK = /^\s{0,3}#{1,6}\s+/u;

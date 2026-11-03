@@ -15,8 +15,8 @@
  *                         conversation), A91 a to-do with steps, A92 a lettered choice of four, A93 an input request
  *   ?parts=1              only the nine-part item view's items (`agenda-parts.ts`): A120 explainer, A121 question
  *                         (a long report and a conversation), A122 plan to approve, A123 tracker, A124 test with a card
- *                         ask, A125 a long title, A126 a choice whose options are explained, for
- *                         `agenda-parts-screenshot.ts`
+ *                         ask, A125 a long title, A126 a choice whose options are explained, A127 a choice of three
+ *                         explained ones, for `agenda-parts-screenshot.ts`
  *   ?shapes=1             only one item of each answer shape (A101 choice … A108 info), for `agenda-shapes-screenshot.ts`
  *   ?headings=1           only the A110 card: a long ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *
@@ -27,10 +27,10 @@
 import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
 import { agendaReMessage } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
+import { type AgendaInbox, AgendaInboxContext } from '../src/hooks/use-agenda-inbox.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
 import { HEADING_ASK_ID, HEADING_ASK_PATCH } from './agenda-heading-ask.ts';
-import { AgendaInboxContext, type AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import { PARTS_ENTRIES, PARTS_HOW_TO_TEST, PARTS_ITEMS } from './agenda-parts.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');

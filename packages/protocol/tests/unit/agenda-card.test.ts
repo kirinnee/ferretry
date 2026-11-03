@@ -7,8 +7,9 @@ import {
   agendaAnswerProblems,
 } from '../../src/lib/agenda.ts';
 import {
-  AGENDA_KIND_LABELS,
   AGENDA_ANSWER_TEXT_CHARS,
+  AGENDA_ANSWER_TEXT_CHARS_OF_THREE,
+  AGENDA_KIND_LABELS,
   agendaAnswerText,
   agendaCanDiscuss,
   agendaCardAnswers,
@@ -363,6 +364,16 @@ describe('attention card', () => {
       should(agendaAnswerText('Supercalifragilisticexpialidocious')).equal('Supercalifragilisticexp…');
       should(agendaAnswerText('.'.repeat(40))).not.equal('');
       should(agendaAnswerText('.'.repeat(40))).not.equal('…');
+    });
+
+    it('is cut sooner on a row of three, where each button has a third of a phone, and at a word all the same', () => {
+      should(agendaAnswerText('Lock the session row', 3)).equal('Lock the session row');
+      should(agendaAnswerText('Lock the whole session row', 3)).equal('Lock the whole…');
+      should(agendaAnswerText('Lock the whole session row', 2)).equal('Lock the whole session…');
+      should(agendaAnswerText('Lock the whole session row', 3).length).be.belowOrEqual(
+        AGENDA_ANSWER_TEXT_CHARS_OF_THREE,
+      );
+      should(agendaAnswerText('Supercalifragilisticexpialidocious', 3)).equal('Supercalifragilisti…');
     });
   });
 });

@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -121,6 +121,7 @@ import {
 } from '../../lib/gate-items.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
+import { answerWords } from '../../lib/plain-label.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
@@ -1383,13 +1384,14 @@ const RUN_MOVES: readonly RunKey[] = [
   { key: 'Esc', word: 'Close' },
 ];
 
-/** The arrows an agenda card answers by, in its buttons' words (`agendaAnswerText`), then Skip. */
+/** The arrows an agenda card answers by, in its buttons' own words (`answerWords`), then Skip. */
 const agendaRunKeys = (card: InboxCard): readonly RunKey[] => {
   const targets = swipeTargets(card.item);
+  const slots = [targets.left, targets.up, targets.right].filter(target => target !== undefined).length;
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label) }]),
-    ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label) }]),
-    ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label) }]),
+    ...(targets.left === undefined ? [] : [{ key: '←', word: answerWords(targets.left.label, slots) }]),
+    ...(targets.up === undefined ? [] : [{ key: '↑', word: answerWords(targets.up.label, slots) }]),
+    ...(targets.right === undefined ? [] : [{ key: '→', word: answerWords(targets.right.label, slots) }]),
     ...RUN_MOVES,
   ];
 };

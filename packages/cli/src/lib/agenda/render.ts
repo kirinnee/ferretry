@@ -53,7 +53,7 @@ function answersLine(item: AgendaItem): string {
   if (answers.length === 0) {
     return agendaShape(item) === 'answers' ? 'answer: one reply, each answer numbered' : 'answer: write a full answer';
   }
-  const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${agendaAnswerText(answer.label)}`);
+  const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${agendaAnswerText(answer.label, answers.length)}`);
   const rest = unswipedChoices(item).map(option => `"${compact(option.label, OPTION_WIDTH)}"`);
   return `answers: ${swipes.join(' · ')}${rest.length === 0 ? '' : ` · also ${rest.join(' | ')}`}`;
 }

@@ -450,16 +450,23 @@ export const clipAtWord = (text: string, limit: number): string => {
   return `${cut.trimEnd().replace(/[\s,;:.\-–—]+$/u, '')}…`;
 };
 
-/** The most characters an answer's button says: a longer label is cut at a word, so a phone's row stays one line. */
+/** The most characters an answer's button says on a row of one or two: a longer label is cut at a word. */
 export const AGENDA_ANSWER_TEXT_CHARS = 24;
 
 /**
- * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a card ask, the deck's arrow keys and the
- * CLI's answers line alike: the option's own short label ("No", "Only blockers"), one line, cut at a word only when it
- * is very long. Never its description, never a bare letter, never empty. The answer it sends is its label, untouched.
+ * The most characters each button of a row of THREE says: a phone gives each a third of its width, where a label wraps
+ * onto a second line at a word, and this many always fits in two.
  */
-export const agendaAnswerText = (label: string): string => {
-  const text = clipAtWord(label, AGENDA_ANSWER_TEXT_CHARS);
+export const AGENDA_ANSWER_TEXT_CHARS_OF_THREE = 20;
+
+/**
+ * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a card ask, the deck's arrow keys and the
+ * CLI's answers line alike: the option's own short label ("No", "Only blockers"), cut at a word only when it is very
+ * long — past 24 characters, or 20 on a row of three (`slots`, the answers on the row). Never its description, never a
+ * bare letter, never empty. The answer it sends is its label, untouched.
+ */
+export const agendaAnswerText = (label: string, slots = 1): string => {
+  const text = clipAtWord(label, slots >= 3 ? AGENDA_ANSWER_TEXT_CHARS_OF_THREE : AGENDA_ANSWER_TEXT_CHARS);
   return text.replaceAll('…', '').trim() === '' ? label : text;
 };
 
