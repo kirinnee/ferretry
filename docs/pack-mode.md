@@ -40,13 +40,13 @@ far above a server's text. The runtime wrapper composes it per ferret at exec ti
 called `fy`:
 
 ```text
-Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits it. Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line below.
-1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
-2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
-3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.
-4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself. Label sends: `--kind blocker|action|fyi` (fyi rarely).
+Pack mode: hand self-contained parts of your task to sub-ferrets (agents, each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.
+1. `fy recommend` lists usable models, most quota first, with start commands.
+2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"`: Ferretry chooses). Always pass `--name` (2–5 Title Case words). The brief is all it knows: what to do, where, what to report.
+3. If refused (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, try the next. limit_reached or depth_exceeded: do it yourself.
+4. `fy wait <id>` prints its result; check it, then combine. Label sends: `--kind blocker|action|fyi` (fyi rarely).
 Check your children with `fy status --subtree` instead of asking them. Delegate screenshot review to a sub-agent and keep only its verdict.
-Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
+Stop unneeded sub-ferrets: `fy stop children <your id> --yes`.
 ```
 
 The Pack section then ends with the **whole routing prompt** ([The routing prompt](#the-routing-prompt)) as
@@ -67,15 +67,15 @@ and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
-| Tools (terminals, browser pages)         | 1,154      | 289      | every agent runtime         |
-| Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
+| Tools (terminals, browser pages)         | 1,299      | 325      | every agent runtime         |
+| Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,319      | 330      | `FY_AGENDA=1`               |
-| Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
-| Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
+| Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
+| Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
-| Lessons                                  | 262        | 66       | `FY_LEARNING_PASSIVE=1`     |
+| Lessons                                  | 238        | 60       | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
@@ -98,7 +98,9 @@ paid for by tightening the Agenda section's other lines: agenda 1,285 → 1,276,
 separators). The agenda body rule (keep the body a one-screen summary; link the full report) then took the agenda
 section 1,276 → 1,319 (cap 1,290 → 1,330). With the send-label rule that took Pack to 1,026, the measured total is 7,814
 (7,828 counting the separators), leaving 36 characters under the 7,850 cap (22 counting the separators). The
-whole-prompt cap is unchanged.
+pack-status rule (`fy status --subtree`, screenshot review by a sub-agent) then took Pack to 1,166 and the total to 7,954, over both
+caps; the Pack wording was tightened (1,166 → 1,046, no rule dropped), so the measured total is 7,834 (7,848 counting the
+separators), leaving 16 characters under the 7,850 cap (2 counting the separators). The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

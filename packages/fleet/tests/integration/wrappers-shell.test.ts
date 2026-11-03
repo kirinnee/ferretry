@@ -434,6 +434,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Review round 1 restored the owner's bug-batch and owner-question rules, tightening the agenda's other lines
     // (agenda 1,285 → 1,276): 7,716 measured by this test, 134 under the 7,850 cap (120 counting the section separators).
     // The send-label rule (message labels) took pack to 1,026; the body rule (43) took agenda to 1,319. Together the total is 7,814: 36 under the 7,850 cap.
+    // The pack-status rule (`fy status --subtree`, screenshot review) took pack to 1,166 and the total to 7,954; Pack was tightened (1,166 → 1,046): 7,834 measured, 16 under the cap.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
     should(sizes.pack).be.below(1_050);
