@@ -36,6 +36,13 @@ describe('who asked for a card', () => {
     expect(isAgentTask({ origin: 'agent' })).toBe(true);
   });
 
+  it('keeps a card the daemon says is for the owner, though no owner message proved its ask', () => {
+    // `askedBy: agent` is the stricter "no owner message matches the ask", which only the cards to test wait on.
+    expect(taskAsker({ askedBy: 'agent', origin: 'human' })).toBe('person');
+    expect(isAgentTask({ askedBy: 'agent', origin: 'human' })).toBe(false);
+    expect(isAgentTask({ askedBy: 'agent', origin: 'agent' })).toBe(true);
+  });
+
   it('offers the split only when some card says who asked', () => {
     expect(splitAvailable(unasked([card('F1'), card('F2')]))).toBe(false);
     expect(splitAvailable([card('F1'), originCard('F2', 'agent')])).toBe(true);

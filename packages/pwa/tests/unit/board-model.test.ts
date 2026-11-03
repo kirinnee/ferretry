@@ -170,6 +170,18 @@ describe('mergeBoard', () => {
     expect(read(true).cards.map(entry => entry.task.id)).toEqual(['F1', 'F2', 'F3']);
   });
 
+  it('keeps a top-level card the daemon says is for the owner, though its stored askedBy is agent', () => {
+    const cards = [
+      card('F1', { origin: 'human', askedBy: 'agent' }),
+      card('F2', { origin: 'agent', askedBy: 'agent' }),
+      card('F3', { origin: 'human', askedBy: 'agent', parent: { id: 'F1' } }),
+    ];
+    const ids = (filters: BoardFilters) =>
+      mergeBoard([data(laptop, 'laptop', cards)], filters).cards.map(entry => entry.task.id);
+    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1']);
+    expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3']);
+  });
+
   it('counts a sub-card as a ferret card unless a person asked for it', () => {
     const machines = [
       data(laptop, 'laptop', [

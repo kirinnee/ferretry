@@ -6,8 +6,9 @@
  * card it serves. Internal cards never reach an overview count while it is off.
  *
  * THE DAEMON OWNS THE FACT: it sends `askedBy` (person | agent), `origin` (human | agent) and `humanParent`
- * on a card, all optional on the wire. {@link taskAsker} is the ONE place the first two are read: `askedBy`
- * is the answer, and `origin` is what an older daemon that sends no `askedBy` still says. A daemon that
+ * on a card, all optional on the wire. {@link taskAsker} is the ONE place the first two are read for the split:
+ * a card is the owner's when `askedBy` is `person` or `origin` is `human`, so a card the daemon shows the owner
+ * is never hidden because its ask could not be matched to the owner's words. A daemon that
  * sends neither is older still, and the app does not guess: it shows every card and hides the filter
  * ({@link splitAvailable}). {@link askedByPerson} is the stricter "a person asked" the cards to test are
  * limited to; there, silence reads as no.
@@ -20,13 +21,19 @@ type TaskAsker = 'person' | 'agent';
 /** A field a newer daemon sends on a card; an older one sends nothing. */
 const declared = (task: object, name: string): unknown => (name in task ? Reflect.get(task, name) : undefined);
 
-/** Who asked for this card, as the daemon said (`askedBy`, else its older `origin`); `null` when it said nothing. */
+/**
+ * Who this card is for, as the daemon said; `null` when it said nothing. `askedBy: person` is the owner's, and
+ * otherwise `origin` decides: a top-level ferret's card from the owner's own chat is `origin: human` yet may be
+ * stored `askedBy: agent` because no owner message matches its ask word for word, and it is still the owner's
+ * card. `askedBy` alone decides only for a daemon that sends no `origin`.
+ */
 export const taskAsker = (task: object): TaskAsker | null => {
   const asked = declared(task, 'askedBy');
-  if (asked === 'person' || asked === 'agent') return asked;
+  if (asked === 'person') return 'person';
   const origin = declared(task, 'origin');
   if (origin === 'human') return 'person';
-  return origin === 'agent' ? 'agent' : null;
+  if (origin === 'agent') return 'agent';
+  return asked === 'agent' ? 'agent' : null;
 };
 
 /** An INTERNAL card: one a ferret asked for, not a person. */

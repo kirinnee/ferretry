@@ -280,6 +280,35 @@ describe('chatCards and "Internal"', () => {
     expect(cards.shownFocus?.task.id).toBe('F18');
   });
 
+  it('draws a top-level ferret’s cards the owner asked for in its chat, though no owner message proves the ask', async () => {
+    // Shaped like the owner's report: a top-level lead's cards are `origin: human` (only the owner talks in its
+    // chat), but the daemon stored `askedBy: agent` where the ask's words did not match an owner message.
+    const filed = (id: string, laneId: string, extra: Record<string, unknown> = {}) =>
+      card(id, { owner: SELF, laneId, origin: 'human', askedBy: 'agent', ...extra });
+    const model = await everyCard([
+      filed('F137', 'todo', { askedBy: 'person' }),
+      filed('F246', 'todo', { askedBy: 'person', parent: { id: 'F240' } }),
+      filed('I7', 'todo', { kind: 'infra' }),
+      filed('F240', 'implement'),
+      filed('F568', 'implement'),
+      filed('F559', 'implement', { askedBy: 'person' }),
+      filed('F304', 'merged'),
+      filed('F283', 'released'),
+      filed('F291', 'released', { askedBy: 'person' }),
+      originCard('F144', 'agent', null, { owner: SELF, laneId: 'released' }),
+    ]);
+    const cards = chatCards(model, who({ focus: null }));
+    expect(drawn(cards).sort()).toEqual(['F137', 'F240', 'F246', 'F283', 'F291', 'F304', 'F559', 'F568', 'I7']);
+    expect(cards.total).toBe(9);
+    expect(cards.hiddenAgents).toBe(1);
+    expect(cards.lanes.map(lane => [lane.name, lane.cards.map(c => c.task.id).sort()])).toEqual([
+      ['Todo', ['F137', 'F246', 'I7']],
+      ['Implement', ['F240', 'F559', 'F568']],
+      ['Merged', ['F304']],
+      ['Released', ['F283', 'F291']],
+    ]);
+  });
+
   it('shows every card of an older daemon, which says nothing of who asked', async () => {
     const cards = chatCards(await board(), who());
     expect(cards.total).toBe(6);
