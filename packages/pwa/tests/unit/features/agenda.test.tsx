@@ -18,6 +18,7 @@ import {
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
+import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -1219,5 +1220,142 @@ describe('a form opened in the chat (#B143)', () => {
     expect(view.root.findByType(AgendaItemView).props.formKey).toBeUndefined();
     expect(inputs(view, 'radio')).toHaveLength(0);
     expect(live().composer.answerForm).toBeUndefined();
+  });
+});
+
+describe('an input card that ends while it is open (#B147)', () => {
+  // The owner typed the value or tapped Send: the daemon closes the item, and the view must not sit on it.
+  const REQUEST = { requestId: 'ab'.repeat(16) };
+  const inputItem = (id: string): AgendaItem => item(id, { kind: 'input', ask: undefined, input: REQUEST });
+  const closedRecord = (id: string, note: string | null, extra: Record<string, unknown> = {}) => ({
+    ...inputItem(id),
+    resolvedAt: '2026-07-31T12:00:05.000Z',
+    resolvedBy: 'daemon',
+    resolvedBySession: null,
+    resolvedByName: null,
+    resolutionNote: note,
+    disposition: 'done',
+    ...extra,
+  });
+  const openInput = (id = 'A7') =>
+    mount({ snapshot: board([inputItem(id), item('A2')]), focus: { target: id as AgendaId, seq: 1 } });
+  const inputHost = (view: ReturnType<typeof render>) => view.root.findByType(InputCardHost);
+  const sentLine = (view: ReturnType<typeof render>) =>
+    view.root.findAll(node => node.type === 'p' && node.props['data-agenda-sent'] !== undefined);
+
+  test('closes its view the moment the daemon closes the item, and says how it ended above the composer', () => {
+    const view = openInput();
+    expect(live().covered).toBe(true);
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', 'Input request expired: expired.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
+    expect(live().covered).toBe(false);
+    const said = sentLine(view);
+    expect(said).toHaveLength(1);
+    expect(said[0]?.props['data-agenda-sent']).toBe('A7');
+    expect(said[0]?.props['data-tone']).toBe('info');
+    expect(textOf(said[0])).toContain('closed');
+  });
+
+  test('closes its view once the card sent from here has nothing more to show, in the card’s own words', () => {
+    const view = openInput();
+    run(() => inputHost(view).props.onHold(true));
+    expect(live().covered).toBe(true);
+    run(() => inputHost(view).props.onHold(false, 'Sent to %terminal:dev.'));
+    expect(live().covered).toBe(false);
+    const said = sentLine(view);
+    expect(said[0]?.props['data-tone']).toBe('ok');
+    expect(textOf(said[0])).toContain('Sent to %terminal:dev.');
+  });
+
+  test('stays open while the card holds it (a Send in flight, or a follow-up offer), even once the item closed', () => {
+    const view = openInput();
+    run(() => inputHost(view).props.onHold(true));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', 'Input request delivered.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+    // The owner is done with the offer: the card lets go, and the view closes.
+    run(() => inputHost(view).props.onHold(false, 'Sent to %terminal:dev.'));
+    expect(live().covered).toBe(false);
+  });
+
+  test('a send that failed lets go, so a request that ended meanwhile still closes', () => {
+    const view = openInput();
+    run(() => inputHost(view).props.onHold(true));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', 'Input request cancelled: interrupted.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    run(() => inputHost(view).props.onHold(false));
+    expect(live().covered).toBe(false);
+    expect(sentLine(view)[0]?.props['data-tone']).toBe('info');
+  });
+
+  test('an approve-on-phone card closes its view when the daemon closes it', () => {
+    const REF = { id: `pa_${'0'.repeat(23)}1` };
+    const phone = item('A8', { kind: 'info', ask: undefined, phoneApproval: REF } as Partial<AgendaItem>);
+    const view = mount({ snapshot: board([phone]), focus: { target: 'A8' as AgendaId, seq: 1 } });
+    expect(live().covered).toBe(true);
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [
+            {
+              ...phone,
+              resolvedAt: '2026-07-31T12:00:05.000Z',
+              resolvedBy: 'daemon',
+              resolvedBySession: null,
+              resolvedByName: null,
+              resolutionNote: 'Approved on your phone.',
+              disposition: 'done',
+            },
+          ])}
+          focus={{ target: 'A8' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(false);
+  });
+
+  test('a closed input card opened from the history stays open to be read', () => {
+    const view = mount({
+      snapshot: board([item('A2')], {}, [closedRecord('A7', 'Input request delivered.')]),
+      focus: { target: 'A7' as AgendaId, seq: 1 },
+    });
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+    run(() => view.update(<Host snapshot={board([], {}, [closedRecord('A7', 'Input request delivered.')])} focus={{ target: 'A7' as AgendaId, seq: 1 }} />));
+    expect(live().covered).toBe(true);
+  });
+
+  test('any other item the ferret closes while it is open stays on screen as before', () => {
+    const view = mount({ snapshot: board([item('A3')]), focus: { target: 'A3' as AgendaId, seq: 1 } });
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [{ ...resolvedItem('A3'), resolvedBy: 'agent', resolutionNote: 'withdrawn' }])}
+          focus={{ target: 'A3' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
   });
 });
