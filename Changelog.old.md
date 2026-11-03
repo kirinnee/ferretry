@@ -1,3 +1,9 @@
+## [4.256.0](https://github.com/kirinnee/ferretry/compare/v4.255.1...v4.256.0) (2026-11-03)
+
+### Features
+
+* **agenda:** teach the agenda-first model; search, check, then open ([#1404](https://github.com/kirinnee/ferretry/issues/1404)) ([fe23c54](https://github.com/kirinnee/ferretry/commit/fe23c54360c471871a2fd1b7437d8a01842cc89e))
+
 ## [4.255.1](https://github.com/kirinnee/ferretry/compare/v4.255.0...v4.255.1) (2026-11-03)
 
 ### Fixes
