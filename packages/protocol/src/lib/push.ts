@@ -34,6 +34,29 @@ export const PUSH_SERVICE_HOSTS = ['fcm.googleapis.com', 'updates.push.services.
 /** Push services that shard by subdomain: Apple's (Safari) and Microsoft's WNS (Edge). */
 export const PUSH_SERVICE_HOST_SUFFIXES = ['.push.apple.com', '.notify.windows.com'] as const;
 
+/**
+ * Whether each push service above lets a site's push show nothing (docs/notifications.md § When an alert is cleared).
+ * FCM and WNS do; Apple's revokes a subscription whose push shows nothing, and Mozilla's does once a small quota of
+ * such pushes is spent. Keyed by the allowlist itself, so a service added there must be classified here.
+ */
+export const PUSH_SERVICE_ALLOWS_SILENT: Readonly<
+  Record<(typeof PUSH_SERVICE_HOSTS)[number] | (typeof PUSH_SERVICE_HOST_SUFFIXES)[number], boolean>
+> = {
+  'fcm.googleapis.com': true,
+  'updates.push.services.mozilla.com': false,
+  '.push.apple.com': false,
+  '.notify.windows.com': true,
+};
+
+/** Whether a push service's host lets a push show nothing (`PUSH_SERVICE_ALLOWS_SILENT`); a host not listed does not. */
+export function pushServiceAllowsSilent(host: string): boolean {
+  const name = host.toLowerCase();
+  if ((PUSH_SERVICE_HOSTS as readonly string[]).includes(name))
+    return PUSH_SERVICE_ALLOWS_SILENT[name as (typeof PUSH_SERVICE_HOSTS)[number]];
+  const suffix = PUSH_SERVICE_HOST_SUFFIXES.find(each => name.endsWith(each) && name.length > each.length);
+  return suffix === undefined ? false : PUSH_SERVICE_ALLOWS_SILENT[suffix];
+}
+
 /** Whether a host is one of the push services above. Exact, lowercased, and never an IP literal. */
 export function isPushServiceHost(host: string): boolean {
   const name = host.toLowerCase();

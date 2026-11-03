@@ -47,7 +47,7 @@ class FakeRegistration implements ClearRegistration {
   readonly pushManager?: ClearRegistration['pushManager'];
 
   constructor(
-    private readonly showing: Readonly<Record<string, number>>,
+    readonly showing: Record<string, number>,
     endpoint: string | null | 'throws' | 'absent' = FCM,
   ) {
     if (endpoint === 'absent') return;
@@ -64,7 +64,9 @@ class FakeRegistration implements ClearRegistration {
 
   async getNotifications(options: { tag: string }): Promise<readonly ShownNotification[]> {
     const stamp = options.tag in this.stamps ? this.stamps[options.tag] : 0;
-    return Array.from({ length: this.showing[options.tag] ?? 0 }, () => ({
+    // A line closed is gone: closing the same tag again finds nothing more.
+    const left = (this.showing[options.tag] ?? 0) - this.closed.filter(tag => tag === options.tag).length;
+    return Array.from({ length: left }, () => ({
       close: () => void this.closed.push(options.tag),
       ...(stamp === undefined ? {} : { timestamp: stamp }),
     }));
@@ -298,6 +300,28 @@ describe('opening an item here (the owner opened it in the app)', () => {
     // Assert
     expect(result).toEqual({ closed: 1, told: true });
     expect(registration.closed).toEqual([itemTag]);
+  });
+
+  it('should close the item’s own line however new once the machine answers: it is about the item open here (review round 8)', async () => {
+    // Arrange — one of the item's pushes lands here while the machine is asked, which the machine's clear skips.
+    let landed = (): void => undefined;
+    const { registration, opened } = world({
+      seen: async () => {
+        landed();
+        return { cleared: true, tags: ['attention-session-1:A3'] };
+      },
+    });
+    landed = () => {
+      registration.showing[itemTag] = 2;
+      registration.stamps[itemTag] = OPENED_AT + 1;
+    };
+
+    // Act
+    const result = await opened(connection, 'session-1', 'A3');
+
+    // Assert — the old line at the open, and the new one after the answer; the stop line was never named.
+    expect(result).toEqual({ closed: 2, told: true });
+    expect(registration.closed).toEqual([itemTag, itemTag]);
   });
 
   it('should leave a line the browser gives no time for up when the answer names its tag', async () => {

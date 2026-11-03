@@ -220,7 +220,9 @@ the open, read when the item was opened rather than when the answer came. A line
 browser the stop's or approval's line the answer names stays up on the opening device until it is handled again or
 swiped away. **GAP:** a push that already reached the opening device but is still being shown when the owner opens its
 item there (its worker is reading the filter) is not caught by either half, and that one stale line stays on that
-device; the other devices are cleared as usual.
+device; the other devices are cleared as usual. Once the machine answers, the app also closes the item's OWN lines
+however new — any is about the item open in front of the owner — which takes down one of its pushes that landed
+here after the open; one that lands after that close stays (the same push-ordering GAP as below).
 
 **What a clear says.** Nothing about the item. A clear push is `{ version, kind: "clear", eventKey, sessionId, tags }`
 and the parser refuses anything more (`PushClearPayloadSchema`): no title, no body, no link, no item words. The
@@ -228,7 +230,7 @@ worker turns each tag into its own machine's namespace (`fy-push:<daemonId>:<tag
 down another's lines.
 
 **What each device does with it** (owner decision !A324). Which push service delivers it is read from the
-registration's own subscription endpoint (`mustShowForEveryPush`): only FCM (`fcm.googleapis.com`) and WNS
+registration's own subscription endpoint (`mustShowForEveryPush`, from the protocol's `PUSH_SERVICE_ALLOWS_SILENT`): only FCM (`fcm.googleapis.com`) and WNS
 (`*.notify.windows.com`) are known to let a push show nothing; every other service — Apple's, Mozilla's, one not
 known — and an endpoint the worker cannot read need every push to show something.
 
@@ -264,10 +266,11 @@ and an open made while it was on its way is honoured then too (that memory is no
 clear reaches EVERY device, the one that opened the item included: its page closed only what was showing when it
 asked, so an iPhone there may show the quiet note for that one line. The same holds for a push being sent when the
 owner opens its item: the open notes it before it waits its turn in the ferret's lane, and clears it on every device
-if it landed meanwhile — as it does for one that landed in the 30 s before the open reached the machine, which the
-page asking could not yet see (an iPhone there may show the quiet note). A push recorded with no outcome counts as on
-its way for 10 minutes at most. At start the daemon looks once at every ferret
-with a line still up, for a board that changed while it was down.
+if it landed meanwhile. One that had already landed when the open reached the machine (the owner most likely just
+tapped it) is the ordinary clear's, which skips the opener, so the phone in the owner's hand never says "Handled on
+another device" about its own tap. A push recorded with no outcome counts as on its way for 10 minutes at most. At
+start the daemon looks once at every ferret with a line this release pushed still up, for a board that changed while
+it was down.
 
 **A push and its clear at once.** A service worker can handle a push and the clear after it at the same time, and a
 push reads this device's filter before it shows anything. So the worker numbers pushes in the order they arrive, runs
@@ -280,9 +283,14 @@ the push it clears is not caught: nothing on the wire tells that push from a new
 failed push. A clear the push service refused leaves that line up.
 
 **Pushes from before this release.** No daemon before this one wrote a clear, so on the first start every push it
-ever made counts as uncovered. A push recorded before tags were is therefore cleared only while it is under two days
-old; older ones are left as they are, so an upgrade never sends a burst of clears for lines dismissed long ago. A push
-this release made has no such bound: its item may be answered days later.
+ever made counts as uncovered. The start-up look therefore skips a push recorded before tags were: it is cleared only
+by its own ferret's next board change or open, one ferret at a time as the owner works, and only while it is under
+two days old. A finished ferret's old lines stay up as they did before this release, and an upgrade sends no burst of
+clears. A push this release made has no age bound: its item may be answered days later.
+
+**Rolling back.** A daemon older than this release reads the new ledger records (a push's `tag`, a clear) as lines
+it cannot read and skips them: `fy doctor` counts them, and it may repeat a deadline, stop or wake push for an item
+still open, at most once each (the ledger's own rule).
 
 **Older apps.** A service worker older than this release cannot read a clear and shows its plain "Something is
 waiting in your Inbox." line instead. The hosted app ships before a daemon release does and a worker refreshes the

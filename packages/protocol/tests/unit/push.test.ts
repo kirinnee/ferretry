@@ -558,6 +558,21 @@ describe('the seen request', () => {
   });
 });
 
+describe('which push services let a push show nothing (review round 8)', () => {
+  it('should classify every allowlisted service, and let only FCM and WNS show nothing', () => {
+    // Act / Assert
+    should(Object.keys(push.PUSH_SERVICE_ALLOWS_SILENT).sort()).deepEqual(
+      [...push.PUSH_SERVICE_HOSTS, ...push.PUSH_SERVICE_HOST_SUFFIXES].sort(),
+    );
+    should(push.pushServiceAllowsSilent('FCM.googleapis.com')).be.true();
+    should(push.pushServiceAllowsSilent('wns2-db5p.notify.windows.com')).be.true();
+    should(push.pushServiceAllowsSilent('updates.push.services.mozilla.com')).be.false();
+    should(push.pushServiceAllowsSilent('web.push.apple.com')).be.false();
+    should(push.pushServiceAllowsSilent('notify.windows.com')).be.false();
+    should(push.pushServiceAllowsSilent('push.example.test')).be.false();
+  });
+});
+
 describe('agenda push tags', () => {
   it('should give an item its own tag and a stop the ferret’s', () => {
     // Act / Assert

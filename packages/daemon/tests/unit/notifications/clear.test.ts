@@ -930,16 +930,16 @@ describe('pushes from before an open, and from before this release (review round
   const DAYS_AGO = '2026-11-01T09:00:00.000Z';
   const JUST_NOW = '2026-11-03T09:59:45.000Z';
 
-  it('should clear a push that landed just before the open on every device: the page that asked could not see it', async () => {
-    // Arrange — A1's push landed 15 s before the open was admitted; another, an hour ago, the page could close.
+  it('should leave a push that had landed before the open to the clear that skips the opener (review round 8)', async () => {
+    // Arrange — A1's push landed 15 s before the open: the owner most likely just tapped it on this phone.
     const test = world([...pushed('A1', { ping: true }, { at: JUST_NOW }), ...pushed('A1', { deadline: true })]);
     test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
 
     // Act
     const answer = await test.clearer.seen(SESSION, 'A1', 'device-1');
 
-    // Assert — the late one went to every device first; the opener is told of the rest, which it closes itself.
-    should(test.sent.map(dispatch => 'exceptDevice' in dispatch)).deepEqual([false, true]);
+    // Assert — one clear, never on the phone in the owner's hand; its page closes the item's own line itself.
+    should(test.sent.map(dispatch => dispatch.exceptDevice)).deepEqual(['device-1']);
     should(answer).deepEqual({ found: true, tags: ['attention-session-1:A1'] });
   });
 
@@ -955,6 +955,27 @@ describe('pushes from before an open, and from before this release (review round
 
     // Assert
     should(test.sent).deepEqual([]);
+  });
+
+  it('should send nothing at start for pushes from before tags were, however recent, and clear them on a change (review round 8)', async () => {
+    // Arrange — the first start after upgrade: sixty finished ferrets, each with an untagged push under two days old.
+    const others = Array.from({ length: 60 }, (_, index) => `session-old-${index}`);
+    const test = world([
+      ...others.flatMap(sessionId => pushed('A1', { ping: true }, { tag: null, sessionId })),
+      ...pushed('A1', { ping: true }, { tag: null }),
+    ]);
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1'))]));
+
+    // Act
+    await test.clearer.sweep();
+    const atStart = test.sent.length;
+    await test.clearer.changed(SESSION, CHANGE);
+
+    // Assert — its own ferret's next change clears it, under every tag it may have used.
+    should(atStart).equal(0);
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1', 'attention-session-1:A1'],
+    ]);
   });
 
   it('should leave a push from before tags were up once it is two days old, but clear a tagged one of any age', async () => {

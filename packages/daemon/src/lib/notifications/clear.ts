@@ -94,7 +94,8 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
   }
 
   /**
-   * At start: every session with an alert no clear has covered is looked at once, for a board that changed while this
+   * At start: every session with an alert this release pushed and no clear has covered is looked at once, for a board
+   * that changed while this
    * daemon was down or before an observer ran. Total.
    */
   async sweep(): Promise<void> {
@@ -102,15 +103,20 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
     const sessions = new Set(
       entries.flatMap(entry => (entry.requested.origin === 'direct' ? [] : [entry.requested.sessionId])),
     );
-    for (const sessionId of sessions)
-      if (uncoveredAlerts(sessionId, entries, this.legacySince()).length > 0) await this.recheck(sessionId);
+    // Only a push this release made wakes a look (review round 8): one recorded before tags were is left for its own
+    // ferret's next change, so the first start after upgrade sends no burst of clears for lines long dismissed.
+    const tagged = entries.filter(
+      ({ requested }) => requested.origin === 'agenda-clear' || ('tag' in requested && requested.tag !== undefined),
+    );
+    for (const sessionId of sessions) if (uncoveredAlerts(sessionId, tagged).length > 0) await this.recheck(sessionId);
   }
 
   /** The owner opened `agendaId` on the device `exceptDevice` names: its alerts come down everywhere else. */
   async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
-    // Read BEFORE waiting for the lane (review rounds 6–7): a push of the item's that was on its way when the owner
-    // opened it — still being sent, or landed in the moments the page took to ask — reached no page that could close
-    // it, so it comes down on every device. A push recorded after this read is newer than the open and stays.
+    // Read BEFORE waiting for the lane (review rounds 6–8): a push of the item's still being sent when the owner
+    // opened it reached no page that could close it, so once it lands it comes down on every device. One that had
+    // already landed is the ordinary clear's, which skips the opener: its page closes the item's own lines itself,
+    // so the phone just tapped never says "Handled on another device".
     const admitted = Date.parse(this.options.clock.now());
     const before = await this.options.ledger.entries();
     return await this.run(sessionId, async (snapshot, entries) => {
@@ -254,8 +260,8 @@ const pushKeyOf = (alert: DeliveredAlert): string =>
 /**
  * The keys of one item's pushes that were on their way when the owner opened it, as `entries` read then (at
  * `admitted`): recorded and not landed yet — for at most `IN_FLIGHT_FOR_MS`, past which a push that never got an
- * outcome is not coming — or landed in the last `LANDED_DURING_OPEN_MS`, while the page was asking. With `stopsToo`,
- * the session's stops as well, whichever item a stop's record names (a stop is about the group).
+ * outcome is not coming. With `stopsToo`, the session's stops as well, whichever item a stop's record names (a stop is
+ * about the group).
  */
 function onItsWayAtOpen(
   sessionId: string,
@@ -268,9 +274,8 @@ function onItsWayAtOpen(
     (requested.origin === 'agenda' || requested.origin === 'attention') &&
     requested.sessionId === sessionId &&
     (requested.agendaId === agendaId || (stopsToo && requested.stoppedAt !== undefined)) &&
-    (outcome === undefined
-      ? admitted - Date.parse(requested.at) <= IN_FLIGHT_FOR_MS
-      : admitted - Date.parse(outcome.at) <= LANDED_DURING_OPEN_MS)
+    outcome === undefined &&
+    admitted - Date.parse(requested.at) <= IN_FLIGHT_FOR_MS
       ? [normalizedNotificationKey(requested.key)]
       : [],
   );
@@ -278,9 +283,6 @@ function onItsWayAtOpen(
 
 /** How long a recorded push with no outcome counts as on its way: longer than any push transport takes. */
 const IN_FLIGHT_FOR_MS = 10 * 60_000;
-
-/** How recently a push may have landed and still have been on its way when the owner opened its item. */
-const LANDED_DURING_OPEN_MS = 30_000;
 
 /**
  * The pushes for one session a device accepted and no clear has covered yet. A push that reached nothing, or

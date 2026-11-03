@@ -54,6 +54,9 @@ export const agendaItemOpenedHandler = (
       if (!hasFeature(await ports.health(daemon), DAEMON_FEATURES.pushClear)) return { closed, told: false };
       const answer = await ports.seen(daemon, sessionId, agendaId);
       closed += await close(answer.tags, openedAt);
+      // The item's OWN lines go however new: any is about the item open in front of the owner, and one of its pushes
+      // may have landed here after the open, which the machine's clear skipped (review round 8).
+      closed += await close([agendaItemPushTag(sessionId, agendaId)]);
       return { closed, told: true };
     } catch {
       return { closed, told: false };

@@ -27,7 +27,7 @@
  * `machineNotification` shows under), so a clear can only ever take down what that same machine showed.
  */
 
-import type { PushClearPayload } from '@ferretry/protocol';
+import { type PushClearPayload, pushServiceAllowsSilent } from '@ferretry/protocol';
 import { notificationBrand } from './notify.ts';
 import { notificationUrl, type PushMachine } from './push-scope.ts';
 
@@ -38,24 +38,15 @@ export const HANDLED_TAG_PREFIX = 'fy-handled:';
 export const HANDLED_TITLE = 'Handled on another device';
 export const HANDLED_BODY = 'Nothing to do here.';
 
-/** The push services known to let a site's push show nothing (Chrome's and Android's FCM, Windows' WNS). */
-const QUIET_PUSH_HOST = 'fcm.googleapis.com';
-const QUIET_PUSH_HOST_SUFFIX = '.notify.windows.com';
-
 /**
  * Whether the push service behind this registration needs every push to show something, from its subscription
- * endpoint (see the header). Only FCM and WNS are known to let a push show nothing; Apple's and Mozilla's revoke a
- * subscription that does, and an unknown, absent or unreadable one is treated the same: a needless quiet line beats
- * a revoked subscription.
+ * endpoint (see the header; the services and their rules are `PUSH_SERVICE_ALLOWS_SILENT`'s). An unknown, absent or
+ * unreadable endpoint needs one: a needless quiet line beats a revoked subscription.
  */
 export const mustShowForEveryPush = (endpoint: string | null | undefined): boolean => {
   if (endpoint === null || endpoint === undefined) return true;
-  const host = URL.parse(endpoint)?.hostname.toLowerCase();
-  if (host === undefined) return true;
-  return !(
-    host === QUIET_PUSH_HOST ||
-    (host.endsWith(QUIET_PUSH_HOST_SUFFIX) && host.length > QUIET_PUSH_HOST_SUFFIX.length)
-  );
+  const host = URL.parse(endpoint)?.hostname;
+  return host === undefined || !pushServiceAllowsSilent(host);
 };
 
 /** A daemon's tag, as THIS registration showed it: inside its machine's namespace, or the app-wide one's. */
