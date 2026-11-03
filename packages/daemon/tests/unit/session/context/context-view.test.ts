@@ -131,4 +131,30 @@ describe('withContext', () => {
     should(list[0]?.context?.windowTokens).equal(1_000_000);
     should(list[1]?.context).be.undefined();
   });
+
+  describe('withContext identity', () => {
+    it('should answer the same view object while the view and its declared window are unchanged', async () => {
+      // Arrange
+      const held = [view('a'), view('b', { model: 'plain' })];
+      let window: number | undefined = 400_000;
+      const subject = withContext(
+        { list: async () => held, get: async () => undefined },
+        { declared: async () => () => window, overrides: {}, now: () => 0, ttlMs: 0 },
+      );
+      const first = await subject.list();
+
+      // Act
+      const second = await subject.list();
+      window = 500_000;
+      const moved = await subject.list();
+
+      // Assert
+      should(second[1]).equal(first[1]);
+      should(first[1]?.context?.windowTokens).equal(400_000);
+      should(moved[1]).not.equal(first[1]);
+      should(moved[1]?.context?.windowTokens).equal(500_000);
+      // A declared window that changes nothing about what the view resolves to is not a changed view.
+      should(moved[0]).equal(first[0]);
+    });
+  });
 });
