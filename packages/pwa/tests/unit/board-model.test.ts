@@ -155,7 +155,7 @@ describe('mergeBoard', () => {
     expect(counted([originCard('F9', 'agent', null, { laneId: 'tested' })]).toTest).toBe(2);
   });
 
-  it('keeps a card an agent asked for (askedBy alone) out of every count while Ferret cards is off', () => {
+  it('keeps a card an agent asked for (askedBy alone) out of every count while Show private is off', () => {
     const asked = (id: string, askedBy: 'person' | 'agent') => card(id, { laneId: 'tested', askedBy });
     const cards = [asked('F1', 'person'), asked('F2', 'agent'), asked('F3', 'agent')];
     const read = (agents: boolean) =>
@@ -168,6 +168,18 @@ describe('mergeBoard', () => {
     expect(read(false).cards.map(entry => entry.task.id)).toEqual(['F1']);
     expect(read(true).counts.toTest).toBe(3);
     expect(read(true).cards.map(entry => entry.task.id)).toEqual(['F1', 'F2', 'F3']);
+  });
+
+  it('keeps a top-level card the daemon says is for the owner, though its stored askedBy is agent', () => {
+    const cards = [
+      card('F1', { origin: 'human', askedBy: 'agent' }),
+      card('F2', { origin: 'agent', askedBy: 'agent' }),
+      card('F3', { origin: 'human', askedBy: 'agent', parent: { id: 'F1' } }),
+    ];
+    const ids = (filters: BoardFilters) =>
+      mergeBoard([data(laptop, 'laptop', cards)], filters).cards.map(entry => entry.task.id);
+    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1']);
+    expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3']);
   });
 
   it('counts a sub-card as a ferret card unless a person asked for it', () => {
@@ -183,6 +195,20 @@ describe('mergeBoard', () => {
     expect(ids(NO_BOARD_FILTERS)).toEqual(['F1', 'F3']);
     expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3', 'F4']);
     expect(ids({ ...NO_BOARD_FILTERS, ferret: CHILD })).toEqual(['F1', 'F2', 'F3', 'F4']);
+  });
+
+  it('hides the cards a daemon calls private and shows the ones it calls public, whoever asked', () => {
+    const machines = [
+      data(laptop, 'laptop', [
+        card('F1', { askedBy: 'person', visibility: 'public' }),
+        card('F2', { askedBy: 'person', visibility: 'private' }),
+        card('F3', { askedBy: 'agent', visibility: 'public' }),
+        card('F4', { parent: { id: 'F1' }, askedBy: 'person', visibility: 'private' }),
+      ]),
+    ];
+    const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
+    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1', 'F3']);
+    expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3', 'F4']);
   });
 
   it('treats a sub-card from a daemon that says nothing about who asked as a ferret card, and offers the filter', () => {
@@ -300,6 +326,26 @@ describe('filters and the URL', () => {
     expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, agents: true }).toString()).toBe('agents=1');
     expect(parseBoardFilters('agents=1').agents).toBe(true);
     expect(parseBoardFilters('agents=0').agents).toBe(false);
+  });
+
+  it('reads a link that says nothing about private cards as this device’s choice, and a link that says wins', () => {
+    const on = { agents: true };
+    expect(parseBoardFilters('', on).agents).toBe(true);
+    expect(parseBoardFilters('agents=0', on).agents).toBe(false);
+    expect(parseBoardFilters('agents=1', { agents: false }).agents).toBe(true);
+    expect(parseBoardFilters('agents=junk', on).agents).toBe(true);
+  });
+
+  it('writes the private choice only where it differs from the device’s, and round-trips under either default', () => {
+    for (const defaults of [{ agents: false }, { agents: true }]) {
+      for (const agents of [false, true]) {
+        const filters = { ...NO_BOARD_FILTERS, agents };
+        const search = boardFiltersToSearch(filters, defaults);
+        expect(search.has('agents')).toBe(agents !== defaults.agents);
+        expect(parseBoardFilters(search, defaults)).toEqual(filters);
+      }
+    }
+    expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, agents: false }, { agents: true }).toString()).toBe('agents=0');
   });
 
   it('writes a lane and each date range in the URL, a preset or a custom range but never both', () => {

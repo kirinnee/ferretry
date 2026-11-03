@@ -3,7 +3,8 @@
  * as a List over 70 cards, and a card's drawer over the chat — at a 390px phone and a 1440px desktop, light
  * and dark, plus a ferret with no card:
  *
- *   bun harness/board-chat-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u14-*.png
+ *   bun harness/board-chat-screenshot.ts [outDir]          # default /tmp/claude-1000, files board-u14-*.png
+ *   bun harness/board-chat-screenshot.ts [outDir] filed    # only the lead's cards stored `askedBy: agent`, board-filed-*.png
  *
  * It bundles `board-chat-page.tsx`, serves it on an ephemeral loopback port, aborts anything that leaves it,
  * and fails when the document scrolls sideways or a card's button in the side pane leaves its card.
@@ -18,6 +19,7 @@ const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const buildDir = join(harnessDir, 'out', 'board-chat');
 const shotsDir = resolve(process.argv[2] ?? '/tmp/claude-1000');
+const onlyFiled = process.argv[3] === 'filed';
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -130,7 +132,30 @@ const shot = async (page: Page, name: string, prefix = 'board-c'): Promise<void>
 };
 
 try {
+  // The lead's cards the daemon stored `askedBy: agent` though their `origin` is `human`: every one is drawn.
   for (const scheme of ['light', 'dark'] as const) {
+    for (const [label, device] of [
+      ['phone', PHONE],
+      ['desktop', DESKTOP],
+    ] as const) {
+      const context = await browser.newContext({ ...device, colorScheme: scheme });
+      try {
+        const page = await open(context, `studio-${scheme}`, 'card', 'tasks', 'kanban', '&filed=1');
+        const filed = await page.evaluate(() => (window as unknown as { __filed: string[] }).__filed);
+        if (filed.length === 0) fail('the filed fixture has no card stored askedBy: agent');
+        const missing: string[] = [];
+        for (const id of filed) {
+          if ((await page.locator(`.fy-board-card[data-task="${id}"]`).count()) === 0) missing.push(id);
+        }
+        await shot(page, `kanban-${scheme}-${label}`, 'board-filed');
+        if (missing.length > 0) fail(`the side pane leaves out the owner's cards ${missing.join(', ')}`);
+        await page.close();
+      } finally {
+        await context.close();
+      }
+    }
+  }
+  for (const scheme of onlyFiled ? [] : (['light', 'dark'] as const)) {
     const theme = `studio-${scheme}`;
     const phone = await browser.newContext({ ...PHONE, colorScheme: scheme });
     const desktop = await browser.newContext({ ...DESKTOP, colorScheme: scheme });

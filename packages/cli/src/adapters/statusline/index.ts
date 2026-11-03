@@ -22,15 +22,12 @@ export async function readBounded(stream: ReadableStream<Uint8Array>, limit = ST
 /**
  * Run the person's own statusLine command through `sh -c`, as Claude itself would, with the same
  * stdin. Its stdout and stderr are this process's, so what it prints is what the status line shows.
+ * Bun feeds the stdin itself: a command that never reads its input closes the pipe, and writing it here
+ * raised that EPIPE sometimes inside a try and sometimes after it, as an error the caller never sees.
  */
 export async function runChainedStatusline(command: string, stdin: string): Promise<number> {
-  const child = Bun.spawn({ cmd: ['sh', '-c', command], stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
-  try {
-    child.stdin.write(stdin);
-    await child.stdin.end();
-  } catch {
-    /* a command that never reads its input closed the pipe; its output still stands */
-  }
+  const input = new TextEncoder().encode(stdin);
+  const child = Bun.spawn({ cmd: ['sh', '-c', command], stdin: input, stdout: 'inherit', stderr: 'inherit' });
   return await child.exited;
 }
 

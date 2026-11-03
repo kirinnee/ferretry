@@ -697,6 +697,7 @@ describe('renderActed', () => {
     ['file', 'file recorded'],
     ['edit', 'edited'],
     ['refile', 'refiled'],
+    ['visibility', 'visibility changed'],
   ];
 
   for (const [verb, past] of verbs) {

@@ -119,6 +119,9 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'about',
   // Settings › Machine › Agent CLIs, named by the palette's Agent CLIs link.
   'agent-clis',
+  // Named by the palette's Performance and Terminals links.
+  'performance',
+  'terminals',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));
@@ -153,8 +156,6 @@ export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
 export interface SettingsSectionProps {
   readonly definition: SettingDefinition;
-  /** A browser-local setting: says so on the card itself, beside its name. */
-  readonly deviceOnly?: boolean;
   readonly children: ReactNode;
 }
 
@@ -175,7 +176,7 @@ export interface SettingsSectionProps {
  * muted prose, so the thing a reader came to check is the most legible element in the panel while the
  * sentence explaining it is the quietest — which is the opposite of how these panels read before.
  */
-export function SettingsSection({ definition, deviceOnly = false, children }: SettingsSectionProps) {
+export function SettingsSection({ definition, children }: SettingsSectionProps) {
   const headingId = `settings-${definition.id}-heading`;
   return (
     <section
@@ -185,16 +186,10 @@ export function SettingsSection({ definition, deviceOnly = false, children }: Se
       className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
       aria-labelledby={headingId}
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
-          {definition.label}
-        </h3>
-        {deviceOnly ? (
-          <span data-setting-scope="device" title="Stored in this browser only; set it on each device you use.">
-            <Badge tone="pend">This device</Badge>
-          </span>
-        ) : null}
-      </div>
+      {/* No scope badge here: the section header says "This device" once for every card under it. */}
+      <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
+        {definition.label}
+      </h3>
       <p className="mt-1 text-cell leading-base text-muted">{definition.description}</p>
       <div className="mt-3">{children}</div>
     </section>
@@ -731,10 +726,10 @@ export function SettingsPage({
         className,
       )}
     >
-      {/* WIDER, because the wrapped paths were the SAME defect as the empty gutters either side of this
-          column: the content column is what was short of room, not the page. 1320px keeps a measure that
-          is still readable — the prose inside every panel is capped by its own card. */}
-      <div className="mx-auto grid w-full max-w-[1320px] min-w-0 grid-cols-1 items-start gap-3 py-2 md:grid-cols-[15rem_minmax(0,1fr)] md:gap-6 md:py-4">
+      {/* A SET WIDTH, not the window's: the content column is at most 720px (the Compact conversation
+          measure), and the sidebar and that column are centred as one block. Wider, every row put its label
+          at one edge of a 1000px card and its switch at the other. */}
+      <div className="mx-auto grid w-full max-w-[calc(15rem+1.5rem+720px)] min-w-0 grid-cols-1 items-start gap-3 py-2 md:grid-cols-[15rem_minmax(0,720px)] md:gap-6 md:py-4">
         <div className="sticky top-2 hidden min-w-0 md:block">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h1 className="m-0 px-control-x font-display text-display font-bold tracking-display">Settings</h1>
@@ -769,7 +764,10 @@ export function SettingsPage({
             className="min-w-0"
           >
             {section.id === 'machines' ? (
-              <SettingsScope scope="machine" machineName={selectedName} />
+              // With a machine on screen, its header carries this line under the name (`MachinesSurface`).
+              createMachineClient === undefined ? (
+                <SettingsScope scope="machine" machineName={selectedName} />
+              ) : null
             ) : (
               <header className="mb-3">
                 <h2
@@ -787,7 +785,7 @@ export function SettingsPage({
               {section.settingIds.map(id => {
                 const definition = settingDefinition(id);
                 return (
-                  <SettingsSection key={definition.id} definition={definition} deviceOnly={section.id !== 'machines'}>
+                  <SettingsSection key={definition.id} definition={definition}>
                     {controlsById[definition.id]}
                   </SettingsSection>
                 );
@@ -814,6 +812,8 @@ export function SettingsPage({
                     {...(machineTabs ? { tabs: machineTabs } : {})}
                     {...(daemonPanels === undefined ? {} : { daemonPanels })}
                     {...(onRemoveDaemon === undefined ? {} : { onRemove: onRemoveDaemon })}
+                    // Under the machine's name, so the line does not say the name a second time.
+                    scope={<SettingsScope scope="machine" />}
                   />
                 )
               ) : null}
