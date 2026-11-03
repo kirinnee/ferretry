@@ -956,7 +956,10 @@ A session that declared `fy signal waiting` is never nudged, and nobody is nudge
 cannot be read (neither alive nor ended) gets the stale nudge withheld rather than passed to someone else. What is
 raised and how often does not change: the stale throttle is per card, and CI-red and closed-unmerged fire once on the
 change, so reassigning a card never repeats an alert. With nobody alive anywhere, a stale nudge is not
-sent, and a PR alert goes to the owner as before (the send path revives an ended session). The go-ahead
+sent, and a PR alert goes where it went before routing existed (`alertFallback`), the send path reviving an ended
+session: a **red CI** to the card's working ferret (its assignee, else its owner), a PR **closed unmerged** to the
+card's owner; either way a sub-ferret's lead stands in for it. An assignee that is busy (thinking or running a
+tool) is alive, so it is now nudged itself; it used to fall through to the owner. The go-ahead
 (`&F20 can go ahead`) is not an alert and keeps going to the assignee's lead.
 
 ## Lanes follow PR facts

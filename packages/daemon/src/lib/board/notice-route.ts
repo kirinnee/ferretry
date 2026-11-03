@@ -31,8 +31,9 @@ const lineOf = (roster: SessionRoster, sessionId: string): readonly string[] => 
 
 /**
  * The first live session in the assignee's line, then the owner's; an automatic one before any interactive
- * one. `null` when no session is alive in either line, or when the assignee itself could not be read (a
- * read failure never sends a nudge to somebody else).
+ * one. `null` when no session is alive in either line, or when the assignee itself could not be read: this
+ * function never picks somebody else then. What a caller does with `null` is its own call — the stale sweep
+ * sends nothing, a PR alert goes to {@link alertFallback}.
  */
 export const noticeRecipient = (
   roster: SessionRoster,
@@ -51,3 +52,14 @@ export const noticeRecipient = (
   }
   return interactive;
 };
+
+/** The alerts a PR raises about a card. */
+export type PrAlertReason = 'ci-failing' | 'closed-unmerged';
+
+/**
+ * Who a PR alert goes to when {@link noticeRecipient} found nobody: the same session it went to before routing
+ * existed — the card's working ferret for a red CI, its owner for a PR closed unmerged. The sender then lets a
+ * sub-ferret's lead stand in for it (`nudgeTarget`), and the send path revives an ended session.
+ */
+export const alertFallback = (card: Pick<BoardTask, 'owner' | 'assignee'>, reason: PrAlertReason): string =>
+  reason === 'ci-failing' ? (card.assignee ?? card.owner) : card.owner;

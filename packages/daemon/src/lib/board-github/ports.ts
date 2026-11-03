@@ -12,7 +12,7 @@ import type {
   BoardTaskId,
   BoardTaskResponse,
 } from '@ferretry/protocol';
-import type { BoardCaller, LaneSets, PrUpdate, PrUpdateOutcome } from '../board/index.ts';
+import type { BoardCaller, LaneSets, PrAlertReason, PrUpdate, PrUpdateOutcome } from '../board/index.ts';
 
 /**
  * What one `gh` run came to. `missing` and `unauthenticated` say the host cannot reach GitHub at all, so
@@ -57,7 +57,7 @@ export interface WatchedBoard {
 
 /** Queues one message about a card to the ferret that answers for it, through the ordinary send path. */
 export interface PrNudgeSender {
-  send(card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>, message: string): Promise<void>;
+  send(card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>, message: string, reason: PrAlertReason): Promise<void>;
 }
 
 /** One-shot timers. `after` returns the cancel; `run` settles when the work it started is done. */

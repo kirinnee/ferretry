@@ -632,6 +632,7 @@ import {
   BoardGateCheck,
   BoardService,
   BoardSweep,
+  alertFallback,
   noticeRecipient,
   BoardTurnCheck,
   type CardWriteObserver,
@@ -10378,15 +10379,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         projects: { projects: async () => await catalogs.projects() },
         transcripts: createSessionTranscriptTail(storage),
         // The board's nudge path (U5): the message as it is, from "Ferretry · Board" as metadata. It goes to the
-        // card's assignee, else the nearest live lead above it, else the owner (lib/board/notice-route.ts).
+        // card's assignee, else the nearest live lead above it, else the owner (lib/board/notice-route.ts). With
+        // nobody alive it falls back to who the alert went to before routing, via nudgeTarget (a sub-ferret's lead).
         nudges: {
-          send: async (card, message) => {
+          send: async (card, message, reason) => {
             const recipient = noticeRecipient(await boardSessions.roster(), card);
-            await boardSends.send({
-              id: parseSessionId(recipient?.sessionId ?? card.owner),
-              sendId: crypto.randomUUID(),
-              message,
-            });
+            const sessionId = recipient?.sessionId ?? (await nudgeTarget(boardSubFerrets, alertFallback(card, reason)));
+            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
         timers: {
