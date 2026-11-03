@@ -3,6 +3,7 @@ import should from 'should';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import { CatalogLinkRefusal } from '../../../src/lib/catalog-links/refusal.ts';
 import { LINK_RENEW_WITHIN_MS } from '../../../src/lib/catalog-links/service.ts';
+import { linkUsageOf } from '../../../src/lib/catalog-links/usage.ts';
 import { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
 import { SKILL_MD } from '../shared-catalogs/support.ts';
 import {
@@ -305,8 +306,8 @@ describe('CatalogLinkService refresh', () => {
   it('should put back a link the store let lapse, under the same id and key, and tell the log', async () => {
     const sink = new Sink();
     const r = await linkRig({ audit: sink });
-    const made = await mintPublic(r);
-    r.items.clock.ms += DAY;
+    const made = await mintPublic(r, 'never');
+    r.items.clock.ms += 31 * DAY;
     r.client.statusAnswer = bundleIds => ({
       ok: true,
       value: { version: 1, links: bundleIds.map(bundleId => ({ bundleId, state: 'lapsed' as const })) },
@@ -320,7 +321,28 @@ describe('CatalogLinkService refresh', () => {
     should(stored(r).state).equal('live');
     should(sink.entries.map(entry => entry.event)).deepEqual(['catalog.link.revived']);
     should(sink.entries[0]?.subject).equal(made.link.linkId);
+    should(sink.entries[0]?.detail).deepEqual({ linkId: made.link.linkId, sequence: 2 });
     should(JSON.stringify(sink.entries)).not.containEql(keyOf(made.url));
+  });
+
+  it('should keep a never-ending link live past its 30-day lease, listed as lapsed, until refresh puts it back', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, 'never');
+    r.items.clock.ms += 31 * DAY;
+    r.client.statusAnswer = bundleIds => ({
+      ok: true,
+      value: { version: 1, links: bundleIds.map(bundleId => ({ bundleId, state: 'lapsed' as const })) },
+    });
+    const listed = await r.service.list();
+    should(listed.links[0]?.state).equal('live');
+    should(listed.links[0]?.storeState).equal('lapsed');
+    should((await r.service.get(made.link.linkId)).state).equal('live');
+    should(r.vault.keys.has(made.link.linkId)).equal(true);
+    await r.service.refresh();
+    should(stored(r).sequence).equal(2);
+    should(stored(r).revivedAt).not.equal(undefined);
+    should(stored(r).notAfter).equal(new Date(r.items.clock.ms + 30 * DAY).toISOString());
+    should((await r.service.copy(made.link.linkId)).url).equal(made.url);
   });
 
   it('should put back a link the store no longer knows, and carry on if the log refuses', async () => {
@@ -452,6 +474,104 @@ describe('CatalogLinkService refresh', () => {
   });
 });
 
+describe('CatalogLinkService an extension the store took but never answered', () => {
+  const unanswered = async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, '1d');
+    r.client.uploadAnswer = UNREACHABLE;
+    await refusal(() => r.service.update(made.link.linkId, { expires: '7d' }, true));
+    should(stored(r).pendingUpload?.sequence).equal(2);
+    return { r, id: made.link.linkId, extended: stored(r).pendingUpload?.expiresAt };
+  };
+
+  it('should not call the link expired across its old deadline, and still turn it off at the store', async () => {
+    const { r, id } = await unanswered();
+    r.items.clock.ms += 2 * DAY;
+    const seen = await r.service.get(id);
+    should(seen.state).equal('live');
+    should(r.vault.keys.has(id)).equal(true);
+    should(stored(r).pendingUpload).not.equal(undefined);
+    const off = await r.service.revoke(id);
+    should(r.client.removes.length).equal(1);
+    should(off.state).equal('ended');
+    should(r.vault.keys.has(id)).equal(false);
+  });
+
+  it('should call the link expired, at the extended end, once that has passed too', async () => {
+    const { r, id, extended } = await unanswered();
+    r.items.clock.ms += 8 * DAY;
+    const seen = await r.service.get(id);
+    should(seen.state).equal('expired');
+    should(seen.endedAt).equal(extended);
+    should(r.vault.keys.has(id)).equal(false);
+  });
+
+  it('should say a link made under another identity may be served until the extended end', async () => {
+    const { r, id, extended } = await unanswered();
+    const mine = r.items.identity;
+    if (mine === undefined) throw new Error('the rig has an identity');
+    r.items.identity = { ...mine, daemonId: OTHER_DAEMON_ID };
+    const seen = await r.service.get(id);
+    should(seen.state).equal('ended');
+    should(seen.endReason).equal('identity-changed');
+    should(seen.stopsBy).equal(extended);
+    should(stored(r).pendingUpload).equal(undefined);
+  });
+
+  it('should not call a link made under another identity expired while the extended end is ahead', async () => {
+    const { r, id, extended } = await unanswered();
+    const mine = r.items.identity;
+    if (mine === undefined) throw new Error('the rig has an identity');
+    r.items.identity = { ...mine, daemonId: OTHER_DAEMON_ID };
+    r.client.removeAnswer = refused('link_unknown');
+    r.items.clock.ms += 2 * DAY;
+    const out = await refusal(() => r.service.revoke(id));
+    should(out.refusal).equal('signing_unavailable');
+    should(out.message).containEql(extended ?? 'no extended end');
+    should(stored(r).state).equal('ending');
+    should(stored(r).pendingUpload).equal(undefined);
+    r.items.clock.ms += DAY;
+    await r.service.reconcile();
+    should(stored(r).state).equal('ending');
+    r.items.clock.ms += 6 * DAY;
+    await r.service.revoke(id);
+    should(stored(r).state).equal('expired');
+  });
+});
+
+describe('CatalogLinkService a version retired while a change is being written down', () => {
+  it('should refuse the move when a retire in flight finishes before the final check', async () => {
+    let r!: LinkRig;
+    r = await linkRig({}, { linkUsage: { serving: () => linkUsageOf(r.documents).serving() } });
+    const made = await mintPublic(r);
+    const digest = await publishSecond(r, made.link.itemId);
+    const itemId = made.link.itemId;
+    await r.items.service.makeCurrent(itemId, { version: 1, from: 2 });
+
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    let reached!: () => void;
+    const paused = new Promise<void>(resolve => (reached = resolve));
+    const write = r.items.documents.write.bind(r.items.documents);
+    r.items.documents.write = async document => {
+      reached();
+      await gate;
+      await write(document);
+    };
+
+    const retire = r.items.service.setRetired(itemId, 2, true);
+    await paused;
+    const move = refusal(() => r.service.move(made.link.linkId, { version: 2, from: 1, digest }));
+    while (stored(r).pendingUpload === undefined) await new Promise(resolve => setTimeout(resolve, 0));
+    release();
+
+    should((await move).refusal).equal('version_retired');
+    await retire;
+    should(r.client.uploads.length).equal(1);
+    should(stored(r).pendingUpload).equal(undefined);
+  });
+});
+
 describe('CatalogLinkService identity rotation', () => {
   const rotate = (r: LinkRig) => {
     const mine = r.items.identity;
@@ -472,6 +592,24 @@ describe('CatalogLinkService identity rotation', () => {
     should(r.vault.keys.has(made.link.linkId)).equal(false);
     should(list.sentence).containEql("1 link was made under this machine's previous identity");
     should(r.client.removes.length).equal(0);
+  });
+
+  it('should end a link and sign nothing when the identity changes while the store is being asked', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, 'never');
+    const uploads = r.client.uploads.length;
+    r.client.statusAnswer = bundleIds => {
+      rotate(r);
+      return {
+        ok: true,
+        value: { version: 1, links: bundleIds.map(bundleId => ({ bundleId, state: 'lapsed' as const })) },
+      };
+    };
+    await r.service.refresh();
+    should(r.client.uploads.length).equal(uploads);
+    should(stored(r).state).equal('ended');
+    should(stored(r).endReason).equal('identity-changed');
+    should(r.vault.keys.has(made.link.linkId)).equal(false);
   });
 
   it('should end a pending link made under another identity too', async () => {

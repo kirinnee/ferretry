@@ -146,7 +146,13 @@ describe('CatalogLinkService list and get', () => {
     const never = await linkRig();
     const lasting = await mintPublic(never, 'never');
     never.items.clock.ms += 31 * 86_400_000;
-    should((await never.service.get(lasting.link.linkId)).state).equal('expired');
+    // A never-ending public link is renewed, so a lapsed 30-day lease alone is not its end; a one-time link's is.
+    should((await never.service.get(lasting.link.linkId)).state).equal('live');
+    should(never.vault.keys.has(lasting.link.linkId)).equal(true);
+    const once = await linkRig();
+    const single = await mintOneTime(once);
+    once.items.clock.ms += 2 * 3_600_000;
+    should((await once.service.get(single.link.linkId)).state).equal('expired');
   });
 
   it('should ask the store in batches of 64 per store', async () => {
@@ -408,6 +414,19 @@ describe('CatalogLinkService reconcile', () => {
     await r.service.reconcile();
     should(r.documents.document.links[0]?.state).equal('ended');
     should(r.client.removes.length).equal(1);
+  });
+
+  it('should take down a pending one-time link for an item that was already kept', async () => {
+    const r = await linkRig();
+    const kept = await mintPublic(r);
+    r.client.uploadAnswer = UNREACHABLE;
+    await refusal(() => mintOneTime(r));
+    await r.service.reconcile();
+    const once = r.documents.document.links.find(link => link.kind === 'one-time');
+    should(once?.state).equal('ended');
+    should(once?.endReason).equal('owner');
+    should(r.client.removes.length).equal(1);
+    should(r.documents.document.links.find(link => link.linkId === kept.link.linkId)?.state).equal('live');
   });
 
   it('should leave every record alone when the store cannot be reached', async () => {

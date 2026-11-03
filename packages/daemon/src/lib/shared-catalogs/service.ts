@@ -504,10 +504,13 @@ export class SharedCatalogService {
   }
 
   /** Whether this machine keeps this version of this item, unretired: what a pending public link needs before it is committed. */
-  async holdsLinkVersion(itemId: string, version: number): Promise<boolean> {
-    const item = (await this.#document()).items.find(candidate => candidate.itemId === itemId);
-    const stored = item?.versions.find(candidate => candidate.version === version);
-    return stored !== undefined && stored.retiredAt === undefined;
+  holdsLinkVersion(itemId: string, version: number): Promise<boolean> {
+    // In the queue, so a retire already in flight finishes before this reads: it then sees the retired version.
+    return this.#serially(async () => {
+      const item = (await this.#writable()).items.find(candidate => candidate.itemId === itemId);
+      const stored = item?.versions.find(candidate => candidate.version === version);
+      return stored !== undefined && stored.retiredAt === undefined;
+    });
   }
 
   // ── Catalogs ───────────────────────────────────────────────────────────────────────────────────

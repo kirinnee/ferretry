@@ -1505,8 +1505,10 @@ The Add skills page has a second group under the subscriptions, **On this machin
 
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4 and 3f-5,
 > [The daemon](#the-daemon-3f-4)) exist, and the daemon reports `catalogs.links.1`. The Worker is bound behind the
-> hosted relay in code (3f-3) but not published yet (that is a relay deploy), and no app screen exists (3f-6), so no
-> client offers links today. Where a
+> hosted relay (3f-3, merged at `f59c89df`; its relay deploy succeeded and `LINK_STORE` is bound), and no app screen
+> exists (3f-6), so no client offers links today. Whether the store answers is a separate operator runtime control (the
+> `available` and `serving` switches, [relay-protocol.md](relay-protocol.md#operator-routes-and-the-kill-switches)),
+> not a release. Where a
 > sentence says "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own
 > behind the relay by service binding.
 
@@ -1632,7 +1634,7 @@ could Copy would read a public link's key.
 relay advertisement names), `{ "url": "https://…" }` (a self-hosted store; links then carry `s=`) or
 `{ "enabled": false }`. The daemon signs only for the **host of the origin it discovered or was configured with**; the
 client uses `redirect: "error"`, `cache: "no-store"` and a 20 s timeout, and reports no store body: a closed refusal
-code, or `unreachable`. Nothing is deployed by this slice; 3f-3 binds the Worker behind the hosted relay.
+code, or `unreachable`. Nothing is deployed by this slice; 3f-3 (merged) bound the Worker behind the hosted relay.
 
 **Mint**, in this order: locate the store → daemon identity → quota (50 live) → `linkSubject` (the item frozen as a
 shared item, **kept only after the upload succeeds**) → digest check against the preview → sign and envelope → seal the
@@ -1701,11 +1703,12 @@ route answers `409 version_linked`. `usedBy.linkIds` on the item's versions list
 version whose link is still `pending`, so a Mint cannot race a retire either.
 
 **Reported.** The feature `catalogs.links.1` is reported by the daemon (`NOT_YET_REPORTED` is empty). No client offers
-links yet, because the Worker is not published (a relay deploy) and the app has no screen (3f-6).
+links yet, because the app has no screen (3f-6). The Worker is deployed and bound; the operator `available` and
+`serving` switches are a separate runtime control that can still turn the store off.
 
 **Built in 3f-4 and left to later slices:**
 
-- 3f-6 (the app), 3f-7 and 3f-8. (3f-3, the Worker binding, is built and waits for the owner's relay deploy.)
+- 3f-6 (the app), 3f-7 and 3f-8. (3f-3, the Worker binding, merged at `f59c89df` and its relay deploy succeeded with `LINK_STORE` bound.)
 - Preview returns no `matches`, and it needs no summary, so a skill that needs one is `source_refused` at preview.
   `link_kind_unsupported` is unreachable today. A stored link carries the item's name and kind.
 - **A new item whose upload answer never came is never kept**, so its `pending` public link reconciles to `ended`

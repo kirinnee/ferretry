@@ -135,6 +135,47 @@ const isEnded = (link: StoredLink): boolean =>
 const linkEnd = (link: StoredLink): number =>
   Math.min(Date.parse(link.expiresAt ?? link.notAfter), Date.parse(link.notAfter));
 
+/** The end of an upload the store may have taken though its answer never came. */
+const pendingEnd = (pending: PendingUpload): number =>
+  Math.min(Date.parse(pending.expiresAt ?? pending.notAfter), Date.parse(pending.notAfter));
+
+/** When the store may stop serving a link: the later of its committed end and an unanswered upload's. */
+const servedUntil = (link: StoredLink): number =>
+  link.pendingUpload === undefined ? linkEnd(link) : Math.max(linkEnd(link), pendingEnd(link.pendingUpload));
+
+/**
+ * When the owner's own end for a link has passed for good. A one-time link is over when the store stops serving it.
+ * A public link is renewed, so a lapsed 30-day lease alone is not its end: only an `expiresAt` is (the later of the
+ * committed one and an unanswered upload's, for the upload may be what the store serves).
+ */
+const finalEnd = (link: StoredLink): number => {
+  if (link.kind === 'one-time') return servedUntil(link);
+  const own = (expiresAt: string | undefined): number => (expiresAt === undefined ? Infinity : Date.parse(expiresAt));
+  return Math.max(
+    own(link.expiresAt),
+    link.pendingUpload === undefined ? -Infinity : own(link.pendingUpload.expiresAt),
+  );
+};
+
+/** The record without its unanswered upload, whose latest possible end is kept: dropping it never shortens how long the store may serve the link. */
+function withoutPending(link: StoredLink): StoredLink {
+  const { pendingUpload: _dropped, ...rest } = link;
+  const stops = servedUntil(link);
+  return stops > linkEnd(link)
+    ? { ...rest, notAfter: instant(stops), ...(link.expiresAt === undefined ? {} : { expiresAt: instant(stops) }) }
+    : rest;
+}
+
+/** A link made under another identity: ended, with the latest instant the store may still serve it. */
+function stranded(link: StoredLink, now: number): StoredLink {
+  return {
+    ...withoutPending(link),
+    state: 'ended',
+    endedAt: instant(now),
+    endReason: 'identity-changed',
+  };
+}
+
 interface EndAttempt {
   readonly link: StoredLink;
   /** `not-publisher`: the store refused as it does a stranger, and this machine is not the one that made the link. */
@@ -444,7 +485,7 @@ export class CatalogLinkService {
       if (attempt.outcome === 'not-publisher')
         throw new CatalogLinkRefusal(
           'signing_unavailable',
-          `${NOT_THE_PUBLISHER} It stops working by ${instant(linkEnd(link))}.`,
+          `${NOT_THE_PUBLISHER} It stops working by ${instant(servedUntil(link))}.`,
         );
       if (attempt.outcome === 'retry') throw new CatalogLinkRefusal('link_store_unavailable', REVOKE_UNREACHABLE);
       return owned(attempt.link);
@@ -575,6 +616,12 @@ export class CatalogLinkService {
   async #replace(link: StoredLink, change: Change): Promise<StoredLink> {
     const identity = await this.#identity();
     const now = this.deps.now();
+    if (identity.daemonId !== link.publisher) {
+      // The identity changed since the caller looked: a link is never signed or uploaded under another publisher.
+      await this.#write(link.linkId, current => stranded(current, now));
+      if (link.keyRef !== undefined) await this.deps.vault.forget(link.keyRef);
+      throw new CatalogLinkRefusal('signing_unavailable', NOT_THE_PUBLISHER);
+    }
     const version = change.version ?? link.version;
     const expiresAt = change.expiresAt === undefined ? link.expiresAt : (change.expiresAt ?? undefined);
     const installCap = change.installCap === undefined ? link.installCap : (change.installCap ?? undefined);
@@ -682,7 +729,7 @@ export class CatalogLinkService {
     const current = (await this.deps.identity.identity())?.daemonId;
     const forgotten: string[] = [];
     const next = links.map((link): StoredLink => {
-      const expired = link.state === 'live' && linkEnd(link) <= now;
+      const expired = link.state === 'live' && finalEnd(link) <= now;
       const changed =
         !expired &&
         current !== undefined &&
@@ -692,8 +739,8 @@ export class CatalogLinkService {
       if (link.keyRef !== undefined) forgotten.push(link.keyRef);
       const { pendingUpload: _dropped, ...rest } = link;
       return expired
-        ? { ...rest, state: 'expired', endedAt: instant(linkEnd(link)), endReason: 'expired' }
-        : { ...rest, state: 'ended', endedAt: instant(now), endReason: 'identity-changed' };
+        ? { ...rest, state: 'expired', endedAt: instant(finalEnd(link)), endReason: 'expired' }
+        : stranded(link, now);
     });
     return { links: next, forgotten };
   }
@@ -805,12 +852,12 @@ export class CatalogLinkService {
     const refusal = !answer.ok && answer.reason === 'refused' ? answer.code : undefined;
     const notPublisher =
       refusal === 'link_unknown' && (await this.deps.identity.identity())?.daemonId !== link.publisher;
-    if (notPublisher && linkEnd(link) <= now) {
+    if (notPublisher && servedUntil(link) <= now) {
       this.#retries.delete(link.linkId);
       const lapsed = await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => ({
         ...rest,
         state: 'expired',
-        endedAt: instant(linkEnd(link)),
+        endedAt: instant(servedUntil(link)),
         endReason: 'expired',
       }));
       if (link.keyRef !== undefined) await this.deps.vault.forget(link.keyRef);
@@ -830,8 +877,8 @@ export class CatalogLinkService {
     const attempts = (this.#retries.get(link.linkId)?.attempts ?? 0) + 1;
     const base = Math.min(LINK_RETRY_MIN_MS * 2 ** (attempts - 1), LINK_RETRY_MAX_MS);
     this.#retries.set(link.linkId, { attempts, nextAt: now + base / 2 + (this.deps.random() * base) / 2 });
-    const waiting = await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => ({
-      ...rest,
+    const waiting = await this.#write(link.linkId, current => ({
+      ...withoutPending(current),
       state: 'ending',
       endReason: reason,
     }));

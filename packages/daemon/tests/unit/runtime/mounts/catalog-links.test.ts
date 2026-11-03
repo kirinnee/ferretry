@@ -174,10 +174,16 @@ describe('the route table', () => {
     ]);
   });
   it("is the operator's, uncached, behind sharing.use, on every route", () => {
+    const narrowing = new Set(['PUT /version', 'PATCH /:linkId', 'POST /copy', 'DELETE /:linkId']);
     for (const route of routes) {
       should(route.minimum).equal('operator');
       should(route.noStore).equal(true);
-      should(route.capability).deepEqual({ capability: 'sharing', axis: 'use' });
+      const key = `${route.method} ${route.path.replace('/v1/catalog-links', '').replace(/^\/:linkId(?=\/)/, '')}`;
+      should(route.capability).deepEqual(
+        narrowing.has(key)
+          ? { capability: 'sharing', axis: 'use', narrowing: true }
+          : { capability: 'sharing', axis: 'use' },
+      );
     }
   });
   it('routes /store to the status, not to a link called "store"', () => {
