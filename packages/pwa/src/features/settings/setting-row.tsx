@@ -107,7 +107,7 @@ export function SettingRow({
       className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex min-h-[var(--row-min-h)] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
-        <span className={cn('flex min-w-0 flex-1 flex-col', wide ? 'max-md:basis-full' : 'basis-40')}>
+        <span className={cn('flex min-w-0 flex-1 flex-col', wide ? 'basis-40 max-md:basis-full' : 'basis-40')}>
           <span id={labelId} title={title} className="text-ui font-semibold text-fg">
             {name}
           </span>
@@ -119,7 +119,8 @@ export function SettingRow({
         </span>
         <span
           className={cn(
-            'flex min-w-0 shrink-0 items-center gap-1',
+            'flex min-w-0 items-center gap-1',
+            !wide && 'shrink-0',
             // `wide` fills the phone's width under the name; the (i) stays beside it.
             wide && 'max-md:basis-full',
           )}
@@ -254,7 +255,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
             key={option.id}
             title={option.title}
             className={cn(
-              'flex h-control-sm min-w-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-tab px-control-x text-meta font-medium transition-colors max-md:h-auto max-md:min-h-[44px] max-md:flex-1 max-md:whitespace-normal max-md:py-1 max-md:text-center max-md:leading-tight',
+              'flex h-auto min-h-[var(--control-h-sm)] min-w-0 cursor-pointer items-center justify-center whitespace-normal rounded-tab px-control-x py-1 text-center text-meta font-medium leading-tight transition-colors max-md:min-h-[44px] max-md:flex-1',
               'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
               checked
                 ? 'border border-accent bg-accent-soft text-accent'
