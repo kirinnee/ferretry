@@ -152,3 +152,121 @@ describe('the system keyed serial executor', () => {
     should(order).have.length(total + 1);
   });
 });
+
+describe('the system keyed serial executor holding several keys', () => {
+  it('serializes holds whose key sets overlap, in the order they were asked for', async () => {
+    // Arrange
+    const subject = new KeyedSerialExecutor();
+    const order: string[] = [];
+    const first = deferred();
+    const firstStarted = deferred();
+
+    // Act — the second hold names one of the first's keys, in the opposite order, and must wait for it.
+    const held = subject.runAcross(['a', 'b'], async () => {
+      firstStarted.resolve();
+      order.push('first enter');
+      await first.promise;
+      order.push('first exit');
+    });
+    await firstStarted.promise;
+    const second = subject.runAcross(['c', 'a'], async () => void order.push('second'));
+    await Promise.resolve();
+    should(order).deepEqual(['first enter']);
+    first.resolve();
+    await Promise.all([held, second]);
+
+    // Assert
+    should(order).deepEqual(['first enter', 'first exit', 'second']);
+  });
+
+  it('lets holds on disjoint keys, and keyed work on other keys, run at the same time', async () => {
+    // Arrange
+    const subject = new KeyedSerialExecutor();
+    const release = deferred();
+    const started = deferred();
+    const held = subject.runAcross(['a', 'b'], async () => {
+      started.resolve();
+      await release.promise;
+      return 'held';
+    });
+    await started.promise;
+
+    // Act
+    const disjoint = await subject.runAcross(['c', 'd'], async () => 'disjoint');
+    const keyed = await subject.run('e', async () => 'keyed');
+    release.resolve();
+
+    // Assert
+    should(disjoint).equal('disjoint');
+    should(keyed).equal('keyed');
+    should(await held).equal('held');
+  });
+
+  it('holds each key once when a key is named twice, and runs with no keys at all', async () => {
+    // Arrange
+    const subject = new KeyedSerialExecutor();
+
+    // Act
+    const doubled = await subject.runAcross(['a', 'a'], async () => 'doubled');
+    const none = await subject.runAcross([], async () => 'none');
+
+    // Assert
+    should(doubled).equal('doubled');
+    should(none).equal('none');
+    should(await subject.runIfIdle('a', async () => 'idle')).equal('idle');
+  });
+
+  it('queues keyed work behind the hold and waits for work already queued on its keys', async () => {
+    // Arrange
+    const subject = new KeyedSerialExecutor();
+    const order: string[] = [];
+    const earlier = deferred();
+    const earlierStarted = deferred();
+    const queued = subject.run('a', async () => {
+      earlierStarted.resolve();
+      await earlier.promise;
+      order.push('queued before');
+    });
+    await earlierStarted.promise;
+
+    // Act
+    const hold = subject.runAcross(['a', 'b'], async () => void order.push('hold'));
+    const after = subject.run('b', async () => void order.push('queued after'));
+    earlier.resolve();
+    await Promise.all([queued, hold, after]);
+
+    // Assert
+    should(order).deepEqual(['queued before', 'hold', 'queued after']);
+  });
+
+  it('waits for a running exclusive pass, and releases its keys when the work throws', async () => {
+    // Arrange
+    const subject = new KeyedSerialExecutor();
+    const pass = deferred();
+    const passStarted = deferred();
+    const exclusive = subject.runExclusive(async () => {
+      passStarted.resolve();
+      await pass.promise;
+    });
+    await passStarted.promise;
+    let entered = false;
+
+    // Act
+    const failed = subject
+      .runAcross(['a'], async () => {
+        entered = true;
+        throw new Error('boom');
+      })
+      .catch((error: unknown) => (error as Error).message);
+    await Promise.resolve();
+    const enteredWhileExclusive = entered;
+    pass.resolve();
+    await exclusive;
+
+    // Assert
+    should(enteredWhileExclusive).be.false();
+    should(await failed).equal('boom');
+    should(await subject.run('a', async () => 'free')).equal('free');
+    should(await subject.runIfIdle('a', async () => 'idle')).equal('idle');
+  });
+});
