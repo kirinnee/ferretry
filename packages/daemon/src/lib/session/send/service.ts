@@ -3,9 +3,8 @@ import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
   authorizeSend,
-  directLimitFor,
   endsPeerWait,
-  isDirectPayload,
+  isDirectSend,
   isFileBackedQueue,
   paneMidTurn,
   peerMessageKind,
@@ -549,7 +548,7 @@ export class SessionSendService {
   ): Promise<Extract<LockedOutcome, { kind: 'settled' }>> {
     const turn = nextTurnNumber(target, await this.ports.ledger.list(target.id));
     const turnFile = await this.ports.turns.writeTurn(target.id, turn, `${payload}\n`);
-    const direct = isDirectPayload(payload, directLimitFor(target, this.settings));
+    const direct = isDirectSend(target, payload, this.settings);
     const text = direct ? payload : turnInstruction(turnFile);
     const path: SendPath = direct ? 'direct' : 'turn-file';
     const accepted = await this.transported(target, request, sender, release, {

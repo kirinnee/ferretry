@@ -7,7 +7,9 @@ import {
   directLimitFor,
   dispositionOf,
   endsPeerWait,
+  isDirectPaste,
   isDirectPayload,
+  isDirectSend,
   isFileBackedQueue,
   parseSessionSendSettings,
   peerMessageKind,
@@ -128,7 +130,9 @@ describe('peerPreamble', () => {
     should(banner).containEql('[question from ferret loge (session session-1) — not from the owner]');
     should(banner).containEql('loge is waiting for your answer');
     should(banner).containEql('fy send loge "<reply>"');
-    should(banner.endsWith('\n\n')).be.true();
+    // ONE line then the message: a blank line or a second line would make every peer message multi-line.
+    should(banner.endsWith('\n')).be.true();
+    should(banner.trimEnd()).not.containEql('\n');
   });
 
   it('never nags a receiver about a note that wants nothing back', () => {
@@ -170,9 +174,110 @@ describe('isDirectPayload', () => {
     should(isDirectPayload('first\nsecond', 500)).be.false();
   });
 
+  it('names the paste ceiling next to the other send settings, and refuses a ceiling of zero', () => {
+    should(parseSessionSendSettings({ ...defaultSessionSendSettings }).directPasteMaxChars).equal(2_000);
+    should(() => parseSessionSendSettings({ ...defaultSessionSendSettings, directPasteMaxChars: 0 })).throw();
+  });
+
   it('refuses control characters, which a TUI composer does not take verbatim', () => {
     should(isDirectPayload(`ship${String.fromCharCode(7)}it`, 500)).be.false();
     should(isDirectPayload(`ship${String.fromCharCode(127)}it`, 500)).be.false();
+  });
+});
+
+describe('isDirectPaste', () => {
+  it('takes a multi-line message, and still refuses an empty one and a ceiling of zero', () => {
+    should(isDirectPaste('first\nsecond\n\nthird', 2_000)).be.true();
+    should(isDirectPaste('   \n  ', 2_000)).be.false();
+    should(isDirectPaste('first\nsecond', 0)).be.false();
+  });
+
+  it('keeps the 2,000 boundary inclusive, counting the trimmed message', () => {
+    should(isDirectPaste(`${'x'.repeat(999)}\n${'y'.repeat(1_000)}`, 2_000)).be.true();
+    should(isDirectPaste(`${'x'.repeat(999)}\n${'y'.repeat(1_001)}`, 2_000)).be.false();
+    should(isDirectPaste(`\n${'x'.repeat(999)}\n${'y'.repeat(1_000)}\n  `, 2_000)).be.true();
+  });
+
+  it('refuses a tab, a carriage return and every other control character, which a paste rewrites', () => {
+    should(isDirectPaste('a\tb\nc', 2_000)).be.false();
+    should(isDirectPaste('a\r\nb', 2_000)).be.false();
+    should(isDirectPaste(`a${String.fromCharCode(27)}[31mb\nc`, 2_000)).be.false();
+    should(isDirectPaste(`a${String.fromCharCode(127)}b\nc`, 2_000)).be.false();
+  });
+
+  it('takes quotes, backticks, dollar signs, unicode and shell syntax as plain text', () => {
+    const message = [
+      '[message from ferret x (session s1) — not from the owner] To reply: fy send x "<reply>"',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal `${…}` must survive as text.
+      'He said "hi", she said \'bye\'; run `fy status` then echo $HOME ${PATH} $(whoami) !! \\n',
+      'unicode: café — naïve ✓ 日本語 🦦',
+    ].join('\n');
+    should(isDirectPaste(message, 2_000)).be.true();
+  });
+});
+
+describe('isDirectSend', () => {
+  const claude = (overrides: Partial<SendTarget> = {}): SendTarget =>
+    target({ harness: 'claude', directSendMaxChars: 4_096, ...overrides });
+  const banner = '[message from ferret x (session s1) — not from the owner] To reply: fy send x "<reply>"\n';
+
+  it('types a one-line message verbatim to either harness, as before', () => {
+    should(isDirectSend(claude(), 'ship it', defaultSessionSendSettings)).be.true();
+    should(
+      isDirectSend(target({ harness: 'codex', directSendMaxChars: 4_096 }), 'ship it', defaultSessionSendSettings),
+    ).be.true();
+  });
+
+  it('pastes a peer message (banner line plus a multi-line body) straight into an idle Claude composer', () => {
+    should(isDirectSend(claude(), `${banner}line one\nline two\n\nline three`, defaultSessionSendSettings)).be.true();
+  });
+
+  it('sends the same multi-line message to Codex, or a harness nobody named, as a turn file', () => {
+    const message = `${banner}line one\nline two`;
+    should(
+      isDirectSend(target({ harness: 'codex', directSendMaxChars: 4_096 }), message, defaultSessionSendSettings),
+    ).be.false();
+    should(isDirectSend(target({ directSendMaxChars: 4_096 }), message, defaultSessionSendSettings)).be.false();
+  });
+
+  it('holds the multi-line boundary at the named setting, and sends a longer message as a turn file', () => {
+    const lines = (length: number): string => `${banner}${'x'.repeat(length - banner.length - 2)}\ny`;
+    should(defaultSessionSendSettings.directPasteMaxChars).equal(2_000);
+    should(isDirectSend(claude(), lines(2_000), defaultSessionSendSettings)).be.true();
+    should(isDirectSend(claude(), lines(2_001), defaultSessionSendSettings)).be.false();
+    should(
+      isDirectSend(claude(), lines(2_001), { ...defaultSessionSendSettings, directPasteMaxChars: 3_000 }),
+    ).be.true();
+  });
+
+  it('never lets the paste ceiling widen what a session set for itself', () => {
+    const message = `${banner}${'x'.repeat(300)}\ny`;
+    should(isDirectSend(claude({ directSendMaxChars: 200 }), message, defaultSessionSendSettings)).be.false();
+    should(isDirectSend(claude({ directSendMaxChars: 4_096 }), message, defaultSessionSendSettings)).be.true();
+  });
+
+  it('honours directSendMaxChars: 0 as an opt-out of every direct send, one line or many', () => {
+    should(isDirectSend(claude({ directSendMaxChars: 0 }), 'ship it', defaultSessionSendSettings)).be.false();
+    should(isDirectSend(claude({ directSendMaxChars: 0 }), `${banner}a\nb`, defaultSessionSendSettings)).be.false();
+  });
+
+  it('gives an interactive Claude session the paste too, bounded by the same named ceiling', () => {
+    const message = `${banner}a\nb`;
+    should(
+      isDirectSend(claude({ mode: 'interactive', directSendMaxChars: undefined }), message, defaultSessionSendSettings),
+    ).be.true();
+    should(
+      isDirectSend(
+        claude({ mode: 'interactive', directSendMaxChars: undefined }),
+        'x\n'.repeat(1_001),
+        defaultSessionSendSettings,
+      ),
+    ).be.false();
+  });
+
+  it('turns a tab or control character in a multi-line message into a turn file', () => {
+    should(isDirectSend(claude(), `${banner}col1\tcol2\nrow2`, defaultSessionSendSettings)).be.false();
+    should(isDirectSend(claude(), `${banner}a\r\nb`, defaultSessionSendSettings)).be.false();
   });
 });
 

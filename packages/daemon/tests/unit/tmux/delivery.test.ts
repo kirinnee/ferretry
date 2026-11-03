@@ -773,3 +773,40 @@ describe('startup dialogs drawn without numbers', () => {
     ).be.undefined();
   });
 });
+
+describe('a peer message pasted into a Claude composer', () => {
+  const dir = join(import.meta.dir, '../../fixtures/composer');
+  const [x, y] = readFileSync(join(dir, 'claude-2.1.281-ink-pasted.cursor'), 'utf8').trim().split('|');
+  // Real capture: Claude collapsed a 4-line paste into `[Pasted text #2 +4 lines]`.
+  const chip: DeliveryFrame = {
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible: readFileSync(join(dir, 'claude-2.1.281-ink-pasted.txt'), 'utf8'),
+    cursorX: Number(x),
+    cursorY: Number(y),
+  };
+  const peer =
+    '[message from ferret rhett (session mvgt2oz9-04e28935) — not from the owner] To reply: fy send rhett "<reply>"\n' +
+    'Build #2 is ready.\n\nTwo files changed:\n- policy.ts';
+
+  it('should send a one-line banner plus a multi-line body as a paste', () => {
+    should(composerTransport(peer)).equal('paste');
+  });
+
+  it('should accept the collapsed chip as proof the paste landed', () => {
+    // The chip hides the text, so it is accepted on its line count: four line breaks here.
+    should(peer.split('\n').length - 1).equal(4);
+    should(composerLanding(chip, peer, true)).equal('placeholder');
+  });
+
+  it('should press Enter again while the chip is still in the composer', () => {
+    should(classifySubmit(chip, peer, 'placeholder')).deepEqual({ kind: 'holding' });
+  });
+
+  it('should call the paste delivered once the composer is empty again', () => {
+    const submitted: DeliveryFrame = { ...chip, visible: '❯ \n', cursorX: 2, cursorY: 0 };
+
+    should(classifySubmit(submitted, peer, 'placeholder')).deepEqual({ kind: 'delivered', outcome: 'turn-started' });
+  });
+});

@@ -31,11 +31,17 @@ const bubble = (message: string, extra: Partial<LedgerSendRecord> = {}) => {
 const FOOTER = 'No reply needed. To reply: fy send sada "<reply>"';
 const PEER = `[message from ferret sada (session mvuzx42l-a9f7db82) — not from the owner]\n${FOOTER}\n\nthe build is green`;
 
+const ONE_LINE = '— not from the owner] To reply: fy send sada "<reply>"';
+const ONE_LINE_PEER = `[message from ferret sada (session mvuzx42l-a9f7db82) ${ONE_LINE}\nthe build is green`;
+const LABELLED_PEER = `[message · fyi from ferret sada (session mvuzx42l-a9f7db82) ${ONE_LINE}\nthe build is green`;
+
 const shapes: readonly (readonly [string, string, string | undefined, string])[] = [
   ['board', '[ferretry] [board] Task F12 moved to review', 'Ferretry · Board', 'Task F12 moved to review'],
   ['warden', '[ferretry] [warden] Blocked a push', 'Ferretry · Warden', 'Blocked a push'],
   ['agenda reply', '[re !A12 — Ship it?] yes, ship', 'Agenda', 'yes, ship'],
   ['peer', PEER, 'Sada', 'the build is green'],
+  ['one-line peer', ONE_LINE_PEER, 'Sada', 'the build is green'],
+  ['labelled peer', LABELLED_PEER, 'Sada', 'the build is green'],
 ];
 
 describe('no bubble shows framing', () => {

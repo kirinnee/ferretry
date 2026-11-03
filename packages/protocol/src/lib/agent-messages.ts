@@ -28,34 +28,59 @@
 export const PEER_MESSAGE_KINDS = ['message', 'question', 'reply'] as const;
 export type PeerMessageKind = (typeof PEER_MESSAGE_KINDS)[number];
 
+/**
+ * An optional label a sender gives a message so its receiver can triage it: `blocker` (the sender cannot
+ * go on without an answer), `action` (something for the receiver to do) or `fyi` (no action needed).
+ *
+ * THE SLOT EXISTS, NOTHING FILLS IT YET. The banner writer can carry a label and the parser reads one,
+ * but the daemon does not pass one today; message kinds (the later change that adds labels to `fy send`)
+ * only has to start passing it. Parsing it now means a transcript written by that daemon already renders
+ * correctly in an app that shipped before it.
+ */
+export const PEER_MESSAGE_LABELS = ['blocker', 'action', 'fyi'] as const;
+export type PeerMessageLabel = (typeof PEER_MESSAGE_LABELS)[number];
+
 /** What the daemon needs to say who sent a message. */
 export interface PeerEnvelopeSender {
   /** The sender's ferret name, or its session id when it has none. */
   readonly name: string;
   readonly sessionId: string;
   readonly kind: PeerMessageKind;
+  /** Optional triage label; omitted today (see `PEER_MESSAGE_LABELS`). */
+  readonly label?: PeerMessageLabel | undefined;
   /** The command-line binary the receiver answers with (`fy`). */
   readonly clientName: string;
 }
 
 /**
- * The banner prepended to a message one ferret sent another, ending in the blank line that separates
- * it from the message.
+ * The banner prepended to a message one ferret sent another: ONE line, then the message on the next.
  *
- * Two short lines, because the receiver reads them in every peer message it is ever sent: who it is
- * from and that it is not the owner, then whether an answer is owed and the one command that sends it.
- * Only a `question` asks for an answer, so a note never nags its receiver into replying — and a note
- * never says no answer is owed either: a sender that forgot `--expect-reply` may still be waiting on
- * one, and "No reply needed" over "send your verdict now" left a lead's sub-ferrets silent for hours
- * (2026-10-31).
+ *     [<kind> from ferret <name> (session <id>) — not from the owner] <note>
+ *     <message…>
+ *
+ * With a triage label (not written yet — see `PEER_MESSAGE_LABELS`) the label follows the kind after a
+ * middle dot, before `from`:
+ *
+ *     [<kind> · <label> from ferret <name> (session <id>) — not from the owner] <note>
+ *
+ * ONE LINE ON PURPOSE. A composer takes a single-line message verbatim but pastes a multi-line one, and
+ * the daemon types a short message straight into an idle agent instead of handing it a file to read
+ * (docs/message-delivery.md). A two-line banner plus a blank line made every peer message multi-line
+ * before its first word, so every one of them cost the receiver an extra model call to read a file.
+ *
+ * The note says whether an answer is owed and the one command that sends it. Only a `question` asks for
+ * an answer, so a note never nags its receiver into replying — and a note never says no answer is owed
+ * either: a sender that forgot `--expect-reply` may still be waiting on one, and "No reply needed" over
+ * "send your verdict now" left a lead's sub-ferrets silent for hours (2026-10-31).
  */
 export function peerEnvelopePreamble(sender: PeerEnvelopeSender): string {
-  const { name, sessionId, kind, clientName } = sender;
-  const attribution = `[${kind} from ferret ${name} (session ${sessionId}) — not from the owner]`;
+  const { name, sessionId, kind, label, clientName } = sender;
+  const heading = label === undefined ? kind : `${kind} · ${label}`;
+  const attribution = `[${heading} from ferret ${name} (session ${sessionId}) — not from the owner]`;
   const command = `${clientName} send ${name} "<reply>"`;
   const note =
     kind === 'question' ? `${name} is waiting for your answer. Reply with: ${command}` : `To reply: ${command}`;
-  return `${attribution}\n${note}\n\n`;
+  return `${attribution} ${note}\n`;
 }
 
 /** A peer message as read back out of a transcript. */
@@ -65,23 +90,39 @@ export interface PeerEnvelope {
   /** The sender's session id, when the banner names one. */
   readonly sessionId?: string;
   readonly kind: PeerMessageKind;
+  /** The triage label, when the banner carries one. */
+  readonly label?: PeerMessageLabel;
   /** The sender asked for an answer when it sent this — the same fact as `kind === 'question'`. */
   readonly replyExpected: boolean;
-  /** The banner's second line — delivery boilerplate addressed to the receiving agent. */
+  /** The banner's delivery boilerplate — addressed to the receiving agent, not to a person. */
   readonly note: string;
 }
 
-const PEER_BANNER = /^\[(message|question|reply) from ferret ([^\s(\]]+)([^\]]*)\]\n(.*?)\n\n/su;
+/**
+ * The one-line banner. The note must open the way `peerEnvelopePreamble` writes it, so a line that merely
+ * starts with a bracket is never half-stripped.
+ */
+const PEER_BANNER =
+  /^\[(message|question|reply)(?: · (blocker|action|fyi))? from ferret ([^\s(\]]+)([^\]]*)\] ((?:To reply: |[^\n]+ is waiting for your answer\. Reply with: )[^\n]*)\n/u;
+/** The two-line banner with a blank line after it, written until the one-line form; read, never written. */
+const TWO_LINE_PEER_BANNER = /^\[(message|question|reply) from ferret ([^\s(\]]+)([^\]]*)\]\n(.*?)\n\n/su;
 /** The wording a daemon wrote before peers were called ferrets; read, never written. */
 const OLDER_PEER_BANNER = /^\[peer message from teammate ([^\s(\]]+)([^\]]*)\]\n(.*?)\n\n/su;
 const PEER_SESSION = /\(session ([^\s)]+)\)/u;
 
-const envelopeOf = (name: string, rest: string, kind: PeerMessageKind, note: string): PeerEnvelope => {
+const envelopeOf = (
+  name: string,
+  rest: string,
+  kind: PeerMessageKind,
+  note: string,
+  label?: PeerMessageLabel,
+): PeerEnvelope => {
   const sessionId = PEER_SESSION.exec(rest)?.[1];
   return {
     name,
     ...(sessionId === undefined ? {} : { sessionId }),
     kind,
+    ...(label === undefined ? {} : { label }),
     replyExpected: kind === 'question',
     note,
   };
@@ -89,7 +130,19 @@ const envelopeOf = (name: string, rest: string, kind: PeerMessageKind, note: str
 
 /** Splits a peer message into its envelope and the message itself; `null` when it carries no banner. */
 export function parsePeerEnvelope(text: string): { readonly envelope: PeerEnvelope; readonly body: string } | null {
-  const current = PEER_BANNER.exec(text);
+  const oneLine = PEER_BANNER.exec(text);
+  if (oneLine !== null) {
+    const [banner, kind, label, name, rest, note] = oneLine as unknown as [
+      string,
+      PeerMessageKind,
+      PeerMessageLabel | undefined,
+      string,
+      string,
+      string,
+    ];
+    return { envelope: envelopeOf(name, rest, kind, note, label), body: text.slice(banner.length) };
+  }
+  const current = TWO_LINE_PEER_BANNER.exec(text);
   if (current !== null) {
     const [banner, kind, name, rest, note] = current as unknown as [string, PeerMessageKind, string, string, string];
     return { envelope: envelopeOf(name, rest, kind, note), body: text.slice(banner.length) };

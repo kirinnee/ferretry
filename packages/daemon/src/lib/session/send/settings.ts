@@ -21,6 +21,15 @@ export interface SessionSendSettings {
    * configuration does not state one.
    */
   readonly directSendMaxChars: number;
+  /**
+   * The ceiling on typing a MULTI-LINE payload into an idle composer as one bracketed paste, for a
+   * harness whose composer is proven to take one (Claude Code). A session's own `directSendMaxChars`
+   * still bounds it from above, and `0` there still opts the session out of every direct send.
+   *
+   * Sized to a peer message: a banner plus a typical report is 500–1,200 characters, and anything past
+   * this travels as a turn file the receiver reads, which costs it one more model call.
+   */
+  readonly directPasteMaxChars: number;
   /** The CLI a receiving agent is told to answer with. The daemon is not a command anyone types. */
   readonly clientName: string;
 }
@@ -29,6 +38,7 @@ export const SessionSendSettingsSchema = z.object({
   controlLaunchWaitMs: z.number().int().positive(),
   nativeQueueInlineMaxChars: z.number().int().positive(),
   directSendMaxChars: z.number().int().nonnegative(),
+  directPasteMaxChars: z.number().int().positive(),
   clientName: z.string().min(1),
 });
 
@@ -36,6 +46,7 @@ export const defaultSessionSendSettings: SessionSendSettings = {
   controlLaunchWaitMs: 60_000,
   nativeQueueInlineMaxChars: 1_000,
   directSendMaxChars: 500,
+  directPasteMaxChars: 2_000,
   clientName: 'fy',
 };
 

@@ -148,17 +148,20 @@ export function peerMessageKind(
 /** The last C0 code point, and DEL. Everything at or below the first, plus the second, is a control. */
 const LAST_CONTROL_CODE = 0x1f;
 const DELETE_CODE = 0x7f;
+const NEWLINE_CODE = 0x0a;
 
 /**
- * Whether the text carries a character a TUI composer will not take verbatim.
+ * Whether the text carries a character a TUI composer will not take verbatim. A newline is a control
+ * character too; `allowNewline` is for a payload that travels as a bracketed paste, where it is text.
  *
  * A scan rather than a regular expression on purpose: a control-character CLASS is a lint error the
  * repository is right to raise — it is nearly always a mistake — and writing one here would mean
  * suppressing that rule for a check three lines of arithmetic express exactly.
  */
-function hasControlCharacters(text: string): boolean {
+function hasControlCharacters(text: string, allowNewline: boolean): boolean {
   for (const character of text) {
     const code = character.codePointAt(0) ?? 0;
+    if (allowNewline && code === NEWLINE_CODE) continue;
     if (code <= LAST_CONTROL_CODE || code === DELETE_CODE) return true;
   }
   return false;
@@ -178,7 +181,22 @@ export function isDirectPayload(payload: string, limit: number): boolean {
   const trimmed = payload.trim();
   if (trimmed === '' || trimmed.length > limit) return false;
   if (trimmed.includes('\n')) return false;
-  return !hasControlCharacters(trimmed);
+  return !hasControlCharacters(trimmed, false);
+}
+
+/**
+ * Whether a MULTI-LINE payload may be typed into an idle composer as one bracketed paste.
+ *
+ * The same exclusions as `isDirectPayload` except the newline: a paste is one event the composer takes
+ * whole (it may collapse it to a `[Pasted text #1 +N lines]` chip, which the landing proof accepts), so
+ * a newline cannot submit half of it. A tab or any other control character is still refused — those are
+ * what a TUI's paste handling rewrites — and the payload takes the turn file instead.
+ */
+export function isDirectPaste(payload: string, limit: number): boolean {
+  if (limit <= 0) return false;
+  const trimmed = payload.trim();
+  if (trimmed === '' || trimmed.length > limit) return false;
+  return !hasControlCharacters(trimmed, true);
 }
 
 /**
@@ -191,6 +209,27 @@ export function isDirectPayload(payload: string, limit: number): boolean {
 export function directLimitFor(target: SendTarget, settings: SessionSendSettings): number {
   if (target.mode === 'interactive') return Number.POSITIVE_INFINITY;
   return target.directSendMaxChars ?? settings.directSendMaxChars;
+}
+
+/** The harness whose composer is proven to take a bracketed paste of a whole message. */
+const PASTE_SAFE_HARNESS = 'claude';
+
+/**
+ * Whether an idle send is typed into the composer verbatim rather than handed over as a turn file.
+ *
+ * A one-line payload goes direct under the session's ceiling (`directLimitFor`). A MULTI-LINE one goes
+ * direct only to Claude Code, which takes it as one bracketed paste (the busy path already types
+ * multi-line text the same way), and only up to the smaller of the session's ceiling and
+ * `directPasteMaxChars`. A session whose ceiling is zero has opted out of both.
+ *
+ * Codex keeps today's rule — one line only — because no fixture here proves a multi-line paste landing
+ * in its composer and being submitted; its fixtures show typed text only.
+ */
+export function isDirectSend(target: SendTarget, payload: string, settings: SessionSendSettings): boolean {
+  const limit = directLimitFor(target, settings);
+  if (isDirectPayload(payload, limit)) return true;
+  if (target.harness !== PASTE_SAFE_HARNESS) return false;
+  return isDirectPaste(payload, Math.min(limit, settings.directPasteMaxChars));
 }
 
 /** What is typed into a pane so the agent picks up a tracked turn. The wording is the protocol's, because the app reads it back out of the transcript (`turn-handoff.ts`). */
