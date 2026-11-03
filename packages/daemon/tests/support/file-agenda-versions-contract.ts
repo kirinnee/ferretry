@@ -246,6 +246,30 @@ export function agendaVersionStoreContract() {
       should(await seen.seen(SESSION, 'A1', 'phone')).be.undefined();
     });
 
+    it('should fail a mark whose temporary file cannot be written, leave the marks as they were and clear the temporary', async () => {
+      // Arrange
+      const seen = new FileAgendaSeenStore(
+        () => root,
+        () => 'fixed',
+      );
+      await seen.mark(SESSION, 'A1', 'phone', 2);
+      const file = join(root, 'agenda-seen.json');
+      const before = await readFile(file, 'utf8');
+      await writeFile(`${file}.fixed.tmp`, 'in the way');
+
+      // Act
+      const marked = await seen.mark(SESSION, 'A1', 'phone', 3).then(
+        () => 'marked',
+        () => 'refused',
+      );
+
+      // Assert
+      should(marked).equal('refused');
+      should(await readFile(file, 'utf8')).equal(before);
+      should(await readFile(`${file}.fixed.tmp`, 'utf8').catch(() => 'gone')).equal('gone');
+      should(await seen.mark(SESSION, 'A1', 'phone', 3)).equal(3);
+    });
+
     it('should hold up under marks made at once, and leave a readable file', async () => {
       // Arrange
       const seen = new FileAgendaSeenStore(() => root);
