@@ -634,6 +634,13 @@ is still a guess (`backfillAskedBy` could not read the owner's words) is left al
 private. A `chosen` visibility is never touched by any of this. A new card gets the default unless the caller chose,
 and is repaired the same way.
 
+**A choice equal to the default is still a choice.** `fy task edit … --visibility private` on a card that already
+reads private (nobody has chosen yet) records `chosen`, so a later repair of the default cannot turn it public; it is
+refused as "already private" only once that choice is on the card. **A ferret's choice to hide a card is judged on
+who asked for it, settled strictly:** on create (`--private`) and on edit, the daemon reads the owner's words again
+and, if it cannot, answers unavailable and writes nothing, rather than hide a card on a guess a later boot would have
+to take back. The owner is never held up by that lookup.
+
 | Who                                             | May                                                                                                             |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | The owner                                       | set any card, public or private, including a sub-card public                                                    |

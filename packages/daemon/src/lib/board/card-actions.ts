@@ -61,7 +61,7 @@ import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
 import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
-import { cardVisibility, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
+import { cardVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 /** An event's actor and, beside it, how an owner actor acted (`BoardActorVia`). */
 const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
@@ -745,7 +745,7 @@ const edit = (
   );
   if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, card);
   const visibility =
-    action.visibility === undefined || action.visibility === cardVisibility(card) ? undefined : action.visibility;
+    action.visibility === undefined || alreadyChosen(card, action.visibility) ? undefined : action.visibility;
   if (changed.length === 0 && visibility === undefined) {
     throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(card)}`);
   }
@@ -756,6 +756,13 @@ const edit = (
 };
 
 /**
+ * Whether `to` is already the card's recorded choice. The same value as the derived default is still a change when
+ * nobody chose it: recording the choice is what keeps a later repair of the default from undoing it.
+ */
+const alreadyChosen = (card: BoardTask, to: BoardTaskVisibility): boolean =>
+  visibilityChosen(card) && cardVisibility(card) === to;
+
+/**
  * Makes a card public or private ({@link visibilityVerdict} says who may). The change is stored on the card and
  * written to its history as a note, which every app already reads.
  */
@@ -764,7 +771,7 @@ const setVisibility = (
   action: Extract<BoardTaskActionRequest, { action: 'visibility' }>,
   context: CardContext,
 ): CardOutcome => {
-  if (action.visibility === cardVisibility(card)) {
+  if (alreadyChosen(card, action.visibility)) {
     throw new BoardError('invalid', `${formatTaskRef(card)} is already ${action.visibility}`);
   }
   return { task: visibilityChanged(card, card, action.visibility, action.reason, context) };
@@ -786,8 +793,10 @@ const visibilityChanged = (
     throw new BoardError('forbidden', `${formatTaskRef(original)}: ${refusal.message}`, refusal.allowed);
   }
   const why = reason === undefined ? '' : `: ${reason}`;
+  const was = cardVisibility(original);
+  const change = was === to ? `${to} (chosen)` : `${was} → ${to}`;
   return {
-    ...withEvent(card, { type: 'note', text: `visibility: ${cardVisibility(original)} → ${to}${why}` }, context),
+    ...withEvent(card, { type: 'note', text: `visibility: ${change}${why}` }, context),
     visibility: to,
     visibilitySource: 'chosen',
   };

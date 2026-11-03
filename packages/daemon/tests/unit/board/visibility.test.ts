@@ -13,6 +13,7 @@ import {
   type BoardCaller,
   BoardError,
   BoardService,
+  BoardUnavailableError,
   cardVisibility,
   defaultVisibility,
   visibilityVerdict,
@@ -188,12 +189,37 @@ describe('the visibility action', () => {
     should(stored(ports, 'F1').visibility).be.undefined();
   });
 
-  it('should refuse a change to what the card already is, naming it', async () => {
-    const { service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+  it('should record a choice equal to the default, and refuse it only once it is recorded', async () => {
+    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    await act(service, 'F1', 'private', lead);
+    should(stored(ports, 'F1')).match({ visibility: 'private', visibilitySource: 'chosen' });
+    should(stored(ports, 'F1').history.at(-1)).match({ type: 'note', text: 'visibility: private (chosen)' });
     await act(service, 'F1', 'private', lead).then(
       () => should.fail(undefined, undefined, 'a no-op was accepted'),
       (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'invalid' }),
     );
+  });
+
+  it('should refuse a ferret that records private on a card whose asker is only a guess', async () => {
+    const words = new FakeOwnerWords({ lead: [OWNER_SAID] });
+    const { ports, service } = serviceWith([lead_made('F1', { askedBy: 'agent' })], { ownerWords: words });
+    await act(service, 'F1', 'private', lead).then(
+      () => should.fail(undefined, undefined, 'a ferret hid the owner’s ask'),
+      (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
+    );
+    should(stored(ports, 'F1').visibilitySource).be.undefined();
+  });
+
+  it('should not let a ferret record private while the asker cannot be read', async () => {
+    const words = new FakeOwnerWords({ lead: new Error('queue torn') });
+    const { ports, service } = serviceWith([lead_made('F1', { askedBy: 'agent' })], { ownerWords: words });
+    await act(service, 'F1', 'private', lead).then(
+      () => should.fail(undefined, undefined, 'a ferret hid a card on a guess'),
+      (error: unknown) => should(error).be.instanceOf(BoardUnavailableError),
+    );
+    should(stored(ports, 'F1').visibilitySource).be.undefined();
+    await act(service, 'F1', 'private', owner);
+    should(stored(ports, 'F1')).match({ visibility: 'private', visibilitySource: 'chosen' });
   });
 
   it('should refuse a sub-ferret, which may only note and link', async () => {
@@ -393,6 +419,71 @@ describe('visibility follows who asked once that is settled', () => {
     should(await query(service, 'public')).eql([task.id]);
   });
 
+  it('should not hide a card on an explicit private while who asked for it cannot be read', async () => {
+    const words = new FakeOwnerWords({ lead: new Error('queue torn') });
+    const { ports, service } = serviceWith([], { ownerWords: words });
+    const request = create({
+      ask: { text: OWNER_SAID, source: 'session:lead' },
+      projectId: PROJECT,
+      visibility: 'private',
+    });
+    await service.create(request, lead).then(
+      () => should.fail(undefined, undefined, 'a ferret hid a card on a guess'),
+      (error: unknown) => should(error).be.instanceOf(BoardUnavailableError),
+    );
+    should(ports.store.cards.size).equal(0);
+
+    words.bySession.lead = [OWNER_SAID];
+    await service.create(request, lead).then(
+      () => should.fail(undefined, undefined, 'a ferret hid the owner’s ask'),
+      (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
+    );
+    should(ports.store.cards.size).equal(0);
+  });
+
+  it('should keep an owner’s explicit private through a failed lookup and its recovery', async () => {
+    const words = new FakeOwnerWords({ lead: new Error('queue torn') });
+    const { ports, service } = serviceWith([], { ownerWords: words });
+    const { task } = await service.create(
+      create({
+        ask: { text: OWNER_SAID, source: 'session:lead' },
+        assignee: 'lead',
+        projectId: PROJECT,
+        visibility: 'private',
+      }),
+      { kind: 'owner', via: 'admin-token' },
+    );
+    should(stored(ports, task.id)).match({ visibility: 'private', visibilitySource: 'chosen' });
+    words.bySession.lead = [OWNER_SAID];
+    await service.backfillAskedBy();
+    should(stored(ports, task.id)).match({ askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' });
+    should(await query(service, 'public')).eql([]);
+  });
+
+  it('should keep an owner’s same-value choice through asker recovery and reparenting', async () => {
+    const words = new FakeOwnerWords({ lead: new Error('queue torn') });
+    const { ports, service } = serviceWith([], { ownerWords: words });
+    const { task } = await service.create(
+      create({ ask: { text: OWNER_SAID, source: 'session:lead' }, projectId: PROJECT }),
+      lead,
+    );
+    should(stored(ports, task.id)).match({ askedBy: 'agent', visibility: 'private', visibilitySource: 'default' });
+    await service.act(task.id, { action: 'edit', title: 'Keep this private', visibility: 'private' } as never, owner);
+    should(stored(ports, task.id)).match({ visibility: 'private', visibilitySource: 'chosen' });
+
+    words.bySession.lead = [OWNER_SAID];
+    await service.backfillAskedBy();
+    should(stored(ports, task.id)).match({ askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' });
+    should(await query(service, 'public')).eql([]);
+
+    await service.create(create({ projectId: PROJECT }), lead).then(async parent => {
+      await service.act(task.id, { action: 'reparent', parent: { id: parent.task.id } }, owner);
+      await service.act(task.id, { action: 'reparent', parent: null }, owner);
+    });
+    should(stored(ports, task.id)).match({ visibility: 'private', visibilitySource: 'chosen' });
+    should(await query(service, 'public')).eql([]);
+  });
+
   it('should store a chosen visibility for a new card that asked for one', async () => {
     const { ports, service } = serviceWith([]);
     const { task } = await service.create(create({ visibility: 'public' }), lead);
@@ -524,11 +615,12 @@ describe('editing a card with its visibility is one mutation', () => {
     should(stored(ports, 'F1')).match({ title: 'Changed', visibility: 'private' });
   });
 
-  it('should ignore a visibility the card already has beside a text change, and refuse a no-op', async () => {
+  it('should record a visibility equal to the default beside a text change, and refuse it once recorded', async () => {
     const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
     await edit(service, 'F1', { title: 'Changed', visibility: 'private' }, lead);
-    should(stored(ports, 'F1')).match({ title: 'Changed' });
-    should(stored(ports, 'F1').visibility).be.undefined();
+    should(stored(ports, 'F1')).match({ title: 'Changed', visibility: 'private', visibilitySource: 'chosen' });
+    await edit(service, 'F1', { title: 'Changed again', visibility: 'private' }, lead);
+    should(stored(ports, 'F1').history.filter(event => event.type === 'note')).have.length(1);
     await edit(service, 'F1', { visibility: 'private' }, lead).then(
       () => should.fail(undefined, undefined, 'a no-op was accepted'),
       (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'invalid' }),

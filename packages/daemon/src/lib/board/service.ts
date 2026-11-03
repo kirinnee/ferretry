@@ -863,7 +863,11 @@ export class BoardService {
   // -------------------------------------------------------------------------------------------------
 
   /** Writes a brand-new card under a counter id; the id already holding a card is the counter's fault. */
-  /** A new card never fails for want of the owner's words; the backfill lets it, so the card waits for the next boot. */
+  /**
+   * A new card never fails for want of the owner's words; the backfill lets it, so the card waits for the next boot.
+   * A caller that needs the answer settled (a ferret's choice to hide a card) asks for it strictly: not knowing is
+   * an unavailable board, never a guess that a later boot would have to take back.
+   */
   private async askedByOf(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean, lenient = false) {
     return await decideAskedBy(card, ownerApp, async sessionId => {
       try {
@@ -904,7 +908,11 @@ export class BoardService {
       laneSet: facts.laneSet,
       index: facts.index,
     });
-    const askedBy = await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true);
+    // A ferret's explicit private is only as good as the asker it rests on: an owner's ask it cannot yet tell from
+    // an agent's must not be hidden for good, so that lookup may not fail softly here.
+    const hides = request.visibility === 'private' && facts.caller.kind !== 'owner';
+    const ownerApp = facts.caller.kind === 'owner' && facts.caller.via === undefined;
+    const askedBy = hides ? await this.settledAskedBy(made, ownerApp) : await this.askedByOf(made, ownerApp, true);
     const visibility = request.visibility ?? defaultVisibility({ ...made, askedBy });
     const visibilitySource = request.visibility === undefined ? 'default' : 'chosen';
     if (request.visibility !== undefined) {
@@ -946,13 +954,35 @@ export class BoardService {
       (request.action === 'move' || request.action === 'reopen') && request.attachments !== undefined
         ? await this.attachmentsFor(card, request.attachments, context.standing)
         : undefined;
+    const hidden = await this.settledForHiding(card, request, context.standing);
     return applyAction(
-      card,
+      hidden,
       request,
       attachments === undefined ? context : { ...context, attachments },
       target,
       parentStanding,
     );
+  }
+
+  /**
+   * The card as a ferret's choice to make it private must judge it: with who asked for it settled, because an
+   * unsettled agent-asked card may be the owner's. Any other request, and the owner, judge the card as stored.
+   */
+  private async settledForHiding(card: BoardTask, request: BoardTaskActionRequest, standing: BoardStanding) {
+    const hides = (request.action === 'edit' || request.action === 'visibility') && request.visibility === 'private';
+    if (!hides || standing === 'owner-human' || card.askedBy === 'person') return card;
+    return { ...card, askedBy: await this.settledAskedBy(card, false) };
+  }
+
+  /** Who asked for the card, or an unavailable board when that cannot be read: a guess here would hide a card for good. */
+  private async settledAskedBy(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean) {
+    try {
+      return await this.askedByOf(card, ownerApp);
+    } catch (error) {
+      throw new BoardUnavailableError(
+        `who asked for this card cannot be settled right now: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**
