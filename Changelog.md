@@ -1,3 +1,9 @@
+## [4.252.1](https://github.com/kirinnee/ferretry/compare/v4.252.0...v4.252.1) (2026-11-03)
+
+### Fixes
+
+* **board:** keep each PR alert's old fallback when nobody is alive ([#1397](https://github.com/kirinnee/ferretry/issues/1397)) ([3be9b81](https://github.com/kirinnee/ferretry/commit/3be9b81343a761beee14def75335f84091d4e2c7))
+
 ## [4.252.0](https://github.com/kirinnee/ferretry/compare/v4.251.2...v4.252.0) (2026-11-03)
 
 ### Features
