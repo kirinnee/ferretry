@@ -136,15 +136,15 @@ The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules a
   stage chain and `--stage` (the owner: _"now agenda doesn't have a "main" type any more"_; the stage stays in the
   daemon and in `--stage`'s help) by `--where-file|--body-file|--tab-file` written as one flag list. Review kept the open line's value
   placeholders, so a copied command runs.
-- **Hypermedia** (1,320 → 1,189): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
+- **Hypermedia** (1,320 → 1,209): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
   point, and interactive visuals the reader changes, never steppers (_"interactive should not be steppers -- there's no
   need for steppers"_) — paid for by tightening the section's first lines and its
   mermaid, svg and html lines. Its last line now says where fy-render draws (chat, agenda tabs and cards), which the
   old "Chat only" contradicted.
 
 The cap now **counts the blank line between sections** (14 characters), as the composed prompt has it — every earlier
-figure above left them out. The measured total is 7,973 with them, so the **whole-prompt cap is now `8_000`**: the 8 KB
-itself, 27 characters of headroom. The next rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its card line (read it, then edit its status and How
+figure above left them out. The measured total is 7,993 with them, so the **whole-prompt cap is now `8_000`**: the 8 KB
+itself, 7 characters of headroom. The next rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its card line (read it, then edit its status and How
 to test; the old "Your final report says how the owner tests it" went, since the holder now writes it); it is not in
 the lead's total, and the sub-ferret prompt (2,631) stays smaller than the lead's (2,910).
 

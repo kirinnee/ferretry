@@ -654,7 +654,7 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'chart', 'card, board (live board cards), map, image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'chart', 'card, board (live cards), map, image, video, audio, pdf'];
     const teaching = HYPERMEDIA_INSTRUCTION('zz');
 
     // Act
@@ -672,7 +672,7 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql('Inline: never publish a page or link unless asked.');
     // The owner: "interactive should not be steppers … the visualization changes based on user interaction".
     should(teaching).containEql(
-      'Make it interactive: a visual the reader changes (sliders, toggles, inputs) that redraws live, no steppers;',
+      'Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers;',
     );
     should(teaching).not.containEql('Next buttons');
     should(teaching).containEql('prefers-reduced-motion');
@@ -687,9 +687,7 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
     // Map, media and chart's full spec are one command away, named with the binary.
     should(teaching).containEql('full spec: `zz render guide chart`');
-    should(teaching).containEql(
-      '- card, board (live board cards), map, image, video, audio, pdf: `zz render guide <type>`',
-    );
+    should(teaching).containEql('- card, board (live cards), map, image, video, audio, pdf: `zz render guide <type>`');
     should(teaching).not.containEql('`fy ');
     should(teaching).containEql('auto-themed: no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
@@ -698,7 +696,7 @@ describe('hypermedia teaching', () => {
     should(teaching).not.containEql('flowchart LR');
     // In every prompt, so it is capped: 1,970 with the top-down hint, then cut to ~1,500 by moving map, media and
     // chart's full spec behind `render guide` to make room for the Board section. The explainer rule (&C48) was paid
-    // for by tightening the first lines and the mermaid, svg and html lines: 1,320 → 1,189.
+    // for by tightening the first lines and the mermaid, svg and html lines: 1,320 → 1,209; then the html line's theme-token rule (&B163).
     should(teaching.length).be.below(1_550);
   });
 });

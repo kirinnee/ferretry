@@ -71,13 +71,13 @@ points etc"_). Change it there and here together.
 
 ````text
 Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
-Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles, inputs) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
+Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
 A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.
 - mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
 - svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.
-- html: a fragment, inline CSS and <script> (isolated); no network.
+- html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
-- card, board (live board cards), map, image, video, audio, pdf: `fy render guide <type>`.
+- card, board (live cards), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
 type: mermaid
 alt: Request flow
