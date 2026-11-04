@@ -98,8 +98,13 @@ describe('how far the owner’s stored words are known to have got', () => {
     ]);
   });
 
-  test('words the ferret logged from the chat reached it', () => {
+  test('words the ferret logged from the chat reached it; a chat reply settled onto the item is only on the machine', () => {
     const fromChat = { messageId: 'm1', at: '2026-11-01T09:59:00.000Z' };
-    expect(reachOf(conversationEvent(entry({ fromChat }), 0))).toEqual({ via: 'transcript', answered: false });
+    expect(reachOf(conversationEvent(entry({ via: 'chat-log', fromChat }), 0))).toEqual({
+      via: 'transcript',
+      answered: false,
+    });
+    // The daemon stores a chat reply as soon as the queue accepts it, still queued: never "read" on that alone.
+    expect(reachOf(conversationEvent(entry({ via: 'reply', fromChat }), 0))).toEqual({ via: 'item', answered: false });
   });
 });

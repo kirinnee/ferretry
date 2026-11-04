@@ -38,8 +38,10 @@ const OWNER_FORM: Readonly<Partial<Record<AgendaConversationEntry['via'], 'answe
 
 /**
  * One stored entry as the event the part draws. `index` keeps keys unique for words said at the same instant;
- * `answered` says the ferret spoke after it. The owner's words are on the machine (stored on the item); words the
- * ferret logged from the chat it had already read, so those reached the ferret.
+ * `answered` says the ferret spoke after it. The owner's words are on the machine (stored on the item). Only words the
+ * FERRET logged from the chat (`via: chat-log`) are proof it read them; a chat reply the daemon settled onto the item
+ * also carries `fromChat`, but is stored as soon as the queue accepts it, before the ferret has it, so it claims no more
+ * than the item.
  */
 export const conversationEvent = (entry: AgendaConversationEntry, index: number, answered = false): HistoryEvent => {
   const at = Date.parse(entry.at) || 0;
@@ -47,7 +49,8 @@ export const conversationEvent = (entry: AgendaConversationEntry, index: number,
   const fromChat = entry.fromChat === undefined ? {} : { fromChat: true as const };
   if (entry.by === 'owner') {
     const form = OWNER_FORM[entry.via];
-    const reached = { via: entry.fromChat === undefined ? ('item' as const) : ('transcript' as const), answered };
+    const logged = entry.via === 'chat-log' && entry.fromChat !== undefined;
+    const reached = { via: logged ? ('transcript' as const) : ('item' as const), answered };
     return { kind: 'owner', key, at, text: entry.text, ...(form === undefined ? {} : { form }), ...fromChat, reached };
   }
   return {
