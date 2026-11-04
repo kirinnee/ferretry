@@ -182,7 +182,7 @@ describe('the teaching says the body is the live document and the chat is its lo
 
     // Assert
     should(prompt).containEql('`--where`=short status');
-    should(prompt).containEql('body=live doc (report/steps/status)');
+    should(prompt).containEql('body=live doc (report/plan/status)');
     should(prompt).containEql('rewrite it whole (`edit --body-file`)');
     should(prompt).containEql('chat points at it');
     should(prompt).not.containEql('one-screen summary');
@@ -203,6 +203,8 @@ describe('the teaching says the body is the live document and the chat is its lo
     // Assert
     should(rule).containEql('the body is the live document; the conversation is only the log');
     should(rule).containEql('--where is a short status');
+    // The owner's to-do steps stay ticked steps: the body holds the plan, never a checklist they cannot tick.
+    should(rule).containEql('steps the owner must do stay --step');
     should(rule).containEql('rewrite the body on every change (agenda edit <id> --body-file <file>)');
     should(rule).containEql('never retype it into the conversation');
     should(rule).containEql('explainer mode by default');

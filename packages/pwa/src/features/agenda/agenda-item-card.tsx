@@ -627,7 +627,7 @@ export function AgendaItemCard({
             <ReferencesTable renderProse={renderProse} rows={references} />
           </Part>
         )}
-        {/* 5. WHERE WE ARE NOW: the report asked for, the answer to the owner's question, what is decided and open. */}
+        {/* 5. WHERE WE ARE NOW: the short status, the answer to the owner's question, what is decided and open. */}
         {hasWhere ? (
           <Part part="where" title={PART_TITLES.where}>
             {whereWeAre === null ? null : (

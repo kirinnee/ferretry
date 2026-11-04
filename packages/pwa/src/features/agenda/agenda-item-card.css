@@ -411,7 +411,7 @@
 .fy-card__part:focus {
   outline: none;
 }
-/* Part 5, where we are now: the report or explainer the owner asked for, drawn whole, on a quiet tint. */
+/* Part 5, where we are now: the short status, drawn whole, on a quiet tint. */
 .fy-card__where {
   min-width: 0;
   padding: 10px 12px;
@@ -673,12 +673,11 @@
 .fy-card__need-title {
   color: var(--fg);
 }
-/* While the item NEEDS THE OWNER, its ask is the one thing marked out: an accent frame, a bar down its edge and a tint,
-   with the heading in the accent. The words still say it ("What I need from you"), so it is never colour alone. */
+/* While the item NEEDS THE OWNER, its ask is the one thing marked out: a heavier accent frame and a tint, with the
+   heading in the accent (never a left rail: the app draws none). The state is also said in words, by the head's
+   "Needs you" chip, so it is never colour alone. */
 .fy-card__part[data-agenda-needs-you] > .fy-card__need {
-  border-color: var(--accent);
-  border-left: var(--stroke-heavy) solid var(--accent);
-  padding-left: 14px;
+  border: var(--stroke-heavy) solid var(--accent);
   background: var(--accent-soft);
 }
 .fy-card__part[data-agenda-needs-you] > .fy-card__need > .fy-card__need-title {

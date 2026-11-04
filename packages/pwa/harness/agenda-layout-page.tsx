@@ -181,7 +181,7 @@ const EXPLAINER = item('A120', {
   stage: 'explainer',
   stages: [{ stage: 'explainer', at: ago(40) }],
   ...BRIEF,
-  whereWeAre: '- Built and merged\n- Nothing to decide yet: this is for you to read',
+  whereWeAre: '- Built and merged\n- This is for you to read before the snooze question',
   body: [
     '**In one line:** every count — the badge, the Inbox, push — now reads ONE list of what needs you.',
     '',

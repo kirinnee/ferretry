@@ -11,7 +11,7 @@
  *   4 references    one TABLE of every term and every PR, card or link, each with a plain meaning
  *   5 where         where we are now (`whereWeAre`): a SHORT status — where things stand, what is decided, what is open
  *   6 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
- *   7 body          the full picture: the live document — report, explainer, steps or status (Markdown with fy-render)
+ *   7 body          the full picture: the live document — report, explainer, plan or status (Markdown with fy-render)
  *   8 conversation  the owner's and the ferret's words, oldest first: the log, never a second copy of the body
  *   9 activity      the grey "updated / moved / snoozed" lines: FOLDED, kept apart from the conversation
  *

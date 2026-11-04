@@ -360,7 +360,7 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
 - **`whereWeAre`** (`--where`, point form or Markdown) is a **short status**: where things stand now, what is
   decided, what is still open — a few points, never the report.
 - **`body`** (`--body-file`, Markdown with fy-render) is the item's **live document**: the report, explainer,
-  instructions, steps or status the owner reads, holding the whole current state of everything relevant. The owner's
+  plan or status the owner reads, holding the whole current state of everything relevant. The owner's
   model: _"the chat is the stream of log, the body is the DB, like an event store."_ So:
   - **The ferret rewrites the body on every change** (`fy agenda edit <id> --body-file <file>`), so it always holds
     the whole current state; it is what the item's versions keep and what the Changes diff compares first.
@@ -1236,19 +1236,21 @@ and a part the item does not carry is not drawn:
 | 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                    |
 | 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none                                                                                                |
 | 5   | Where we are now                    | `whereWeAre` — a **short status**: where things stand — then the ferret's answer to their question, what is decided and what is still open                                                                                                                                                                    |
-| 6   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (an accent frame, a bar and a tint, the heading in the accent) while the item needs the owner          |
-| 7   | The full picture                    | `body`: the item's **live document** — the report, explainer, steps or status, rewritten on every change — drawn open and whole; a review's is its Reasoning (Markdown with fy-render)                                                                                                                        |
+| 6   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner          |
+| 7   | The full picture                    | `body`: the item's **live document** — the report, explainer, plan or status, rewritten on every change — drawn open and whole; a review's is its Reasoning (Markdown with fy-render)                                                                                                                         |
 | 8   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom                                                                                                                                                                                                           |
 | 9   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                |
 
 - **The head says what it is, whole.** The description (`data-agenda-description`) is drawn on the card under the
   title, never behind ⓘ, so ⓘ holds only a host's quiet tools (the Inbox's Skip). A gate item from before card asks,
-  which repeats nothing, keeps its summary behind ⓘ, and a machine notice drawn with its cards says its lines once, in
-  the card rows. The ask in part 6 still leads with the same words when the item has no question of its own, so that
-  part reads whole on its own.
+  which repeats nothing, keeps its summary behind ⓘ, and so does a machine notice drawn with its cards, whose rows say
+  its lines once. The ask in part 6 still leads with the same words when the item has no question of its own, on
+  purpose: the head says what the item is, and part 6 — where a push lands — reads whole on its own.
 - **The one thing that needs the owner stands out.** While the item is Needs you, part 6 is marked out
-  (`data-agenda-needs-you`): an accent frame, a bar down its edge, a tint, and its heading in the accent — never colour
-  alone, since the heading says it. A resting, snoozed or settled item draws it quiet.
+  (`data-agenda-needs-you`): a heavier accent frame, a tint and its heading in the accent — never a left rail, which the
+  app draws nowhere, and never colour alone, since the head's "Needs you" chip says it in words. A form on a phone keeps
+  no frame (three nested boxes would squeeze its fields), so there only the heading and the chip mark it. A resting,
+  snoozed or settled item draws it quiet.
 - **Folded parts remember.** The detailed context and the activity log start closed; opening one is remembered per
   item on that device (browser storage, read and written defensively — a private window simply starts closed again).
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an

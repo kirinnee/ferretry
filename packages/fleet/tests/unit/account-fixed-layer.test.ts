@@ -812,7 +812,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`answer <id> "…"` returns it.');
     should(text).containEql('`rest <id> --why …`=working; `--stage`.');
     should(text).containEql(
-      'Body=live doc (report/steps/status): rewrite it whole (`edit --body-file`); chat points at it.',
+      'Body=live doc (report/plan/status): rewrite it whole (`edit --body-file`); chat points at it.',
     );
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
@@ -852,7 +852,7 @@ describe('AGENDA_INSTRUCTION', () => {
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
     // Assert — measured 1,269: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
     // split line names both verbs), paid for in part by `answer <id> "…"`, plus the `done` verb and "say so", paid
-    // for by "logs their words verbatim" and "unsure→closest". Then 1,290: the body as the live document (F909, the
+    // for by "logs their words verbatim" and "unsure→closest". Then 1,289: the body as the live document (F909, the
     // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
     // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
     // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300).

@@ -7,7 +7,7 @@
  *
  *   head     ONE row: the title (one line; it scrolls when too long), how urgent it is (Blocking now, Needed by 17:00),
  *            ‹ n of N ›, the snooze clock, ⓘ and ✕. A host's quiet tools (the Inbox's Skip) are behind ⓘ, in a panel
- *            under the row; a gate item keeps its summary there too, since its card repeats nothing
+ *            under the row; a gate item or a notice drawn with its card rows keeps its summary there too
  *   card     the item in the spec's nine parts (`agenda-item-card.tsx`; the order is `agenda-item-sections.ts`'s): its
  *            description, state and stage chips, premise and context, the folded detailed context, the terms and
  *            references table, where we are now, what it needs from the owner (the ask and every card ask, each with
@@ -203,9 +203,9 @@ export function AgendaItemView({
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const urgent = status !== null && URGENT_TONES.has(status.tone) ? status : null;
-  // The card draws the description under the title, whole; only a gate item, whose card repeats nothing, keeps it
-  // behind ⓘ.
-  const infoDescription = item.gate === undefined ? null : head.description;
+  // The card draws the description under the title, whole. A gate item, whose card repeats nothing, and a notice drawn
+  // with its card rows, which say its lines, keep it behind ⓘ instead.
+  const infoDescription = item.gate === undefined && cardsForm === undefined ? null : head.description;
   const hasInfo = infoDescription !== null || tools !== undefined;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');

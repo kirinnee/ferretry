@@ -30,9 +30,9 @@ const JSON_HELP = 'print the protocol payload instead of the human rendering';
  */
 export const AGENDA_BODY_RULE = `THE BODY IS THE LIVE DOCUMENT; the conversation is only the log.
   --where is a SHORT status: where things stand, what is decided, what is still open, in a few points.
-  The full report, explainer, steps or status go in the BODY (--body-file). Rewrite the body on every change
-  (agenda edit <id> --body-file <file>) so it always holds the whole current state: it is what the owner
-  reads and what is versioned. Never retype it into the conversation: answer there briefly and point at it.
+  The full report, explainer, plan or status go in the BODY (--body-file); steps the owner must DO stay
+  --step, so they can be ticked. Rewrite the body on every change (agenda edit <id> --body-file <file>)
+  so it always holds the whole current state: it is what the owner reads and what is versioned. Never retype it into the conversation: answer there briefly and point at it.
   Write it in explainer mode by default, with hypermedia: fy-render charts, mermaid, a step-through html
   page, and card and board blocks for status. Plain Markdown draws no fold: fold a long part inside an
   fy-render html block (<details><summary>…</summary>…</details>).`;
@@ -67,7 +67,7 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
                  never a secret value), so the item alone is enough
   --where        a SHORT status: where things stand now, one point each (repeat) — never the report
   --body-file    the BODY, a Markdown file (- reads stdin): the live document — the whole report, explainer,
-                 steps or status (see THE BODY IS THE LIVE DOCUMENT below)
+                 plan or status (see THE BODY IS THE LIVE DOCUMENT below)
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
 THE RULE IS ISOLATION: could the owner answer with nothing else open? A card is read cold, so it
@@ -285,7 +285,7 @@ function mountVerbs(
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
       .option(
         '--body-file <path>',
-        'the body: the live document (the whole report, explainer, steps or status), a Markdown file or - for stdin',
+        'the body: the live document (the whole report, explainer, plan or status), a Markdown file or - for stdin',
       )
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--will-block <thing>', 'what this will block, in a few words (e.g. "the 14:00 deploy")')
