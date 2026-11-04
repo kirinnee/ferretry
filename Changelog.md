@@ -1,3 +1,9 @@
+## [4.272.0](https://github.com/kirinnee/ferretry/compare/v4.271.2...v4.272.0) (2026-11-04)
+
+### Features
+
+* **fleet:** teach that the owner's asks are public top-level cards ([#1451](https://github.com/kirinnee/ferretry/issues/1451)) ([71c3712](https://github.com/kirinnee/ferretry/commit/71c37125e5f47afd5cd278e626e3f1157f2f8a87))
+
 ## [4.271.2](https://github.com/kirinnee/ferretry/compare/v4.271.1...v4.271.2) (2026-11-04)
 
 ### Fixes
