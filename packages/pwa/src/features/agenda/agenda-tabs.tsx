@@ -4,8 +4,8 @@
  * review's "Reasoning"); then the ferret's own tabs (Overview, Decisions, Risks…).
  *
  *   one tab     no tab row: the part is drawn under that tab's name, exactly as one part was before
- *   phone       ONE switcher button is the part's heading — "Where we are now ▾ · 1 of 3 · 2 changed" — and opens the
- *               app's bottom sheet with the tabs as a radio list (never a horizontal strip that cuts a name off)
+ *   phone       the same ARIA tablist on ONE line, scrolling sideways; an end that hides more tabs fades, the next
+ *               name cut, so the reader sees there are tabs (&F946: never a dropdown that hides them)
  *   wider       a real ARIA tablist that WRAPS onto a second line rather than scroll or cut a name; arrows, Home, End
  *
  * A tab the last edit changed carries a dot and the word "Changed" (never colour alone). Each tab ends with "Next: … ›",
@@ -16,13 +16,11 @@
  */
 
 import { AGENDA_REVIEW_BODY_TAB_NAME, type AgendaViewTab } from '@ferretry/protocol';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, type Ref, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { ChevronRight } from 'lucide-react';
+import { type KeyboardEvent, type ReactNode, type Ref, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 import { PART_TITLES } from '../../lib/agenda-item-sections.ts';
-import { nextTab, switcherWords } from '../../lib/agenda-tab-view.ts';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { nextTab } from '../../lib/agenda-tab-view.ts';
 import { nextDetailsTab } from '../../shell/sheet-tabs.tsx';
 import { PointForm } from './agenda-brief.tsx';
 import { AgendaBody } from './agenda-steps.tsx';
@@ -118,12 +116,114 @@ export interface AgendaTabsProps {
   readonly partRef?: Ref<HTMLElement>;
 }
 
-export function AgendaTabs({ tabs, open, onOpen, changed, renderProse, mark, partRef }: AgendaTabsProps) {
+/** The room kept beside the open tab when the row scrolls to it, so the next name still peeks in. */
+const PEEK = 24;
+
+/** Which ends of a sideways-scrolling row hide more tabs. */
+interface Edges {
+  readonly start: boolean;
+  readonly end: boolean;
+}
+
+/**
+ * THE TAB ROW: one real ARIA tablist (arrows, Home, End). Wider than a phone it wraps onto a second line; on a phone it
+ * stays ONE line and scrolls sideways, an end that hides more tabs fading out with the next name cut, so a reader always
+ * sees there are tabs — never a dropdown that hides them (&F946). The open tab is kept in view.
+ */
+function TabRow({
+  tabs,
+  current,
+  changed,
+  onOpen,
+  tabId,
+  panelId,
+}: {
+  readonly tabs: readonly AgendaViewTab[];
+  readonly current: AgendaViewTab;
+  readonly changed: ReadonlySet<string>;
+  readonly onOpen: (id: string) => void;
+  readonly tabId: (id: string) => string;
+  readonly panelId: string;
+}) {
   const phone = useLayoutMode() === 'drawer';
+  const list = useRef<HTMLDivElement | null>(null);
+  const refs = useRef(new Map<string, HTMLButtonElement>());
+  const [edges, setEdges] = useState<Edges>({ start: false, end: false });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the tabs drawn are the trigger
+  useLayoutEffect(() => {
+    const row = list.current;
+    if (!phone || row === null) return undefined;
+    const measure = (): void => {
+      const hidden = row.scrollWidth - row.clientWidth;
+      const next = { start: row.scrollLeft > 1, end: hidden - row.scrollLeft > 1 };
+      setEdges(was => (was.start === next.start && was.end === next.end ? was : next));
+    };
+    measure();
+    row.addEventListener('scroll', measure, { passive: true });
+    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    watch?.observe(row);
+    return () => {
+      row.removeEventListener('scroll', measure);
+      watch?.disconnect();
+    };
+  }, [phone, tabs.length]);
+  // The open tab is scrolled into the row — sideways only, so opening an item never moves the page.
+  useLayoutEffect(() => {
+    const row = list.current;
+    const tab = refs.current.get(current.id);
+    if (!phone || row === null || tab === undefined) return;
+    if (tab.offsetLeft < row.scrollLeft) row.scrollLeft = Math.max(0, tab.offsetLeft - PEEK);
+    else if (tab.offsetLeft + tab.offsetWidth > row.scrollLeft + row.clientWidth)
+      row.scrollLeft = tab.offsetLeft + tab.offsetWidth - row.clientWidth + PEEK;
+  }, [phone, current.id]);
+  const order = tabs.map(tab => tab.id);
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const to = nextDetailsTab(event.key, current.id, order);
+    if (to === null) return;
+    event.preventDefault();
+    onOpen(to);
+    refs.current.get(to)?.focus();
+  };
+  return (
+    <div
+      className="fy-tabs__row"
+      data-agenda-tab-row={phone ? 'scroll' : 'wrap'}
+      data-more-end={edges.end || undefined}
+      data-more-start={edges.start || undefined}
+    >
+      <div aria-label="Tabs" className="fy-tabs__list" onKeyDown={onKeyDown} ref={list} role="tablist">
+        {tabs.map(tab => {
+          const selected = tab.id === current.id;
+          return (
+            <button
+              aria-controls={selected ? panelId : undefined}
+              aria-selected={selected}
+              className="fy-tabs__tab"
+              data-agenda-tab-button={tab.id}
+              id={tabId(tab.id)}
+              key={tab.id}
+              onClick={() => onOpen(tab.id)}
+              ref={element => {
+                if (element) refs.current.set(tab.id, element);
+                else refs.current.delete(tab.id);
+              }}
+              role="tab"
+              tabIndex={selected ? 0 : -1}
+              type="button"
+            >
+              {tab.name}
+              {changed.has(tab.id) ? <ChangedMark /> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function AgendaTabs({ tabs, open, onOpen, changed, renderProse, mark, partRef }: AgendaTabsProps) {
   const base = useId();
   const part = useRef<HTMLElement | null>(null);
-  const [sheet, setSheet] = useState(false);
-  const refs = useRef(new Map<string, HTMLButtonElement>());
   const current = tabs.find(tab => tab.id === open) ?? tabs[0];
   if (current === undefined) return null;
   const setPart = (element: HTMLElement | null): void => {
@@ -156,93 +256,6 @@ export function AgendaTabs({ tabs, open, onOpen, changed, renderProse, mark, par
     onOpen(next.id);
     if (typeof part.current?.scrollIntoView === 'function') part.current.scrollIntoView({ block: 'start' });
   };
-  const nextLink =
-    next === undefined ? null : (
-      <button className="fy-tabs__next" data-agenda-tab-next={next.id} onClick={goNext} type="button">
-        Next: {next.name}
-        <ChevronRight aria-hidden="true" size={14} />
-      </button>
-    );
-
-  if (phone) {
-    const host = typeof document === 'undefined' ? null : document.body;
-    const words = switcherWords(tabs, current.id, changed);
-    const titleId = `${base}-sheet-title`;
-    return (
-      <section
-        aria-label={PART_TITLES.tabs}
-        className="fy-card__part fy-tabs"
-        data-agenda-part="tabs"
-        data-agenda-tab={current.id}
-        ref={setPart}
-      >
-        <h4 className="fy-card__label fy-card__part-title fy-tabs__heading">
-          <button
-            aria-expanded={sheet}
-            aria-haspopup="dialog"
-            className="fy-tabs__switch"
-            data-agenda-tab-switch=""
-            onClick={() => setSheet(true)}
-            type="button"
-          >
-            <span className="fy-tabs__switch-name">{words.name}</span>
-            <ChevronDown aria-hidden="true" size={16} />
-            <span className="fy-tabs__switch-meta">· {words.meta}</span>
-          </button>
-        </h4>
-        <div className="fy-tabs__panel" data-agenda-tab-panel={current.id}>
-          {panel}
-        </div>
-        {nextLink}
-        {host !== null &&
-          createPortal(
-            <BottomSheet
-              closeLabel="Close the tabs"
-              id={`${base}-sheet`}
-              labelledBy={titleId}
-              onClose={() => setSheet(false)}
-              open={sheet}
-              zIndexClass="z-50"
-            >
-              <div className="fy-tabs__sheet" data-agenda-tab-sheet="">
-                <h2 className="fy-item-menu__title" id={titleId}>
-                  Tabs
-                </h2>
-                <div aria-labelledby={titleId} className="fy-tabs__choices" role="radiogroup">
-                  {tabs.map(tab => (
-                    <label className="fy-tabs__choice" data-on={tab.id === current.id || undefined} key={tab.id}>
-                      <input
-                        checked={tab.id === current.id}
-                        data-agenda-tab-choice={tab.id}
-                        name={`${base}-choice`}
-                        onChange={() => {
-                          onOpen(tab.id);
-                          setSheet(false);
-                        }}
-                        type="radio"
-                        value={tab.id}
-                      />
-                      <span className="fy-tabs__choice-name">{tab.name}</span>
-                      {changed.has(tab.id) ? <ChangedMark /> : null}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </BottomSheet>,
-            host,
-          )}
-      </section>
-    );
-  }
-
-  const order = tabs.map(tab => tab.id);
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const to = nextDetailsTab(event.key, current.id, order);
-    if (to === null) return;
-    event.preventDefault();
-    onOpen(to);
-    refs.current.get(to)?.focus();
-  };
   return (
     <section
       aria-label={PART_TITLES.tabs}
@@ -251,32 +264,7 @@ export function AgendaTabs({ tabs, open, onOpen, changed, renderProse, mark, par
       data-agenda-tab={current.id}
       ref={setPart}
     >
-      <div aria-label="Tabs" className="fy-tabs__list" onKeyDown={onKeyDown} role="tablist">
-        {tabs.map(tab => {
-          const selected = tab.id === current.id;
-          return (
-            <button
-              aria-controls={selected ? panelId : undefined}
-              aria-selected={selected}
-              className="fy-tabs__tab"
-              data-agenda-tab-button={tab.id}
-              id={tabId(tab.id)}
-              key={tab.id}
-              onClick={() => onOpen(tab.id)}
-              ref={element => {
-                if (element) refs.current.set(tab.id, element);
-                else refs.current.delete(tab.id);
-              }}
-              role="tab"
-              tabIndex={selected ? 0 : -1}
-              type="button"
-            >
-              {tab.name}
-              {changed.has(tab.id) ? <ChangedMark /> : null}
-            </button>
-          );
-        })}
-      </div>
+      <TabRow changed={changed} current={current} onOpen={onOpen} panelId={panelId} tabId={tabId} tabs={tabs} />
       <div
         aria-labelledby={tabId(current.id)}
         className="fy-tabs__panel"
@@ -286,7 +274,12 @@ export function AgendaTabs({ tabs, open, onOpen, changed, renderProse, mark, par
       >
         {panel}
       </div>
-      {nextLink}
+      {next === undefined ? null : (
+        <button className="fy-tabs__next" data-agenda-tab-next={next.id} onClick={goNext} type="button">
+          Next: {next.name}
+          <ChevronRight aria-hidden="true" size={14} />
+        </button>
+      )}
     </section>
   );
 }

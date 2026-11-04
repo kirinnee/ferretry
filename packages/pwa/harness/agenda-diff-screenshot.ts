@@ -264,18 +264,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       offered.includes('main') && offered.includes('decisions') && !offered.includes('risks'),
       `${label('open-tab')}: Changes offers to open ${offered.join(', ')}, not the main tab and Decisions`,
     );
-    const changed = await page.evaluate(
-      phone =>
-        phone
-          ? (document.querySelector('[data-agenda-tab-switch]')?.textContent ?? '')
-          : [...document.querySelectorAll('[data-agenda-tab-button]')]
-              .filter(node => node.querySelector('[data-agenda-tab-changed]') !== null)
-              .map(node => node.getAttribute('data-agenda-tab-button'))
-              .join(','),
-      form === 'phone',
+    const changed = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-agenda-tab-button]')]
+        .filter(node => node.querySelector('[data-agenda-tab-changed]') !== null)
+        .map(node => node.getAttribute('data-agenda-tab-button'))
+        .join(','),
     );
     check(
-      form === 'phone' ? /2 changed/.test(changed) : changed === 'main,decisions',
+      changed === 'main,decisions',
       `${label('open-tab')}: the tabs marked changed since v1 are "${changed}", not the main tab and Decisions`,
     );
     await press(page, '[data-agenda-diff-open-tab="decisions"]');

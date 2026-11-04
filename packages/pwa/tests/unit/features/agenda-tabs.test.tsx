@@ -102,6 +102,7 @@ describe('the tabs, wider than a phone', () => {
       'RisksChanged',
     ]);
     expect(selected()).toBe('main');
+    expect(one('[data-agenda-tab-row]').getAttribute('data-agenda-tab-row')).toBe('wrap');
     const panel = one('[role="tabpanel"]');
     expect(panel.getAttribute('aria-labelledby')).toBe(one('[role="tab"][aria-selected="true"]').id);
     expect(panel.textContent).toContain('Building the relay.');
@@ -177,40 +178,67 @@ describe('the tabs, wider than a phone', () => {
 });
 
 describe('the tabs on a phone', () => {
-  test('are one switcher that names the open tab, its place and what changed, and a sheet to pick another', async () => {
+  /** The row's measures, as a browser would lay out four tabs wider than a 390px phone. */
+  const laidOut = (row: HTMLElement, scrollWidth: number, clientWidth: number): void => {
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, value: scrollWidth });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: clientWidth });
+  };
+
+  test('are the same tablist, on one line that scrolls sideways — never a dropdown or a sheet (&F946)', async () => {
     setViewport(390);
     await draw();
-    expect(root().querySelector('[role="tablist"]')).toBeNull();
-    const switcher = one<HTMLButtonElement>('[data-agenda-tab-switch]');
-    expect(switcher.textContent).toBe('Where we are now· 1 of 4 · 2 changed');
-    expect(switcher.getAttribute('aria-expanded')).toBe('false');
-    await interact(() => switcher.click());
-    expect(switcher.getAttribute('aria-expanded')).toBe('true');
-    const sheet = one('[data-agenda-tab-sheet]', document.body);
-    expect(view?.container.contains(sheet)).toBe(false);
-    const choices = [...sheet.querySelectorAll<HTMLInputElement>('[data-agenda-tab-choice]')];
-    expect(choices.map(choice => [choice.value, choice.checked])).toEqual([
-      ['main', true],
-      ['body', false],
-      ['decisions', false],
-      ['risks', false],
-    ]);
-    expect(sheet.querySelectorAll('[data-agenda-tab-changed]')).toHaveLength(2);
-    await interact(() => choices[2]?.click());
-    expect(one('[data-agenda-tab-switch]').textContent).toBe('Decisions· 3 of 4 · 2 changed');
-    expect(one('[data-agenda-tab-panel]').textContent).toContain('We chose SQLite.');
-    // Picking one closes the sheet.
-    expect(one('[data-agenda-tab-switch]').getAttribute('aria-expanded')).toBe('false');
+    expect(one('[data-agenda-tab-row]').getAttribute('data-agenda-tab-row')).toBe('scroll');
+    const tabs = [...root().querySelectorAll('[role="tablist"] [role="tab"]')];
+    expect(tabs.map(tab => tab.getAttribute('data-agenda-tab-button'))).toEqual(['main', 'body', 'decisions', 'risks']);
+    const part = one('[data-agenda-part="tabs"]');
+    expect(part.querySelector('[aria-haspopup]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-tab-sheet], [data-agenda-tab-switch]')).toBeNull();
+    // The changed dot stays, and Next still moves on.
+    expect(root().querySelectorAll('[role="tab"] [data-agenda-tab-changed]')).toHaveLength(2);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-next]').click());
+    expect(selected()).toBe('body');
   });
 
-  test('the sheet’s close button closes it, and Next moves on without it', async () => {
+  test('fade the end that hides more tabs, and follow the scroll', async () => {
     setViewport(390);
     await draw();
-    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-switch]').click());
-    await interact(() => one<HTMLButtonElement>('button[aria-label="Close the tabs"]', document.body).click());
-    expect(one('[data-agenda-tab-switch]').getAttribute('aria-expanded')).toBe('false');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-next]').click());
-    expect(one('[data-agenda-part="tabs"]').getAttribute('data-agenda-tab')).toBe('body');
+    const row = one<HTMLElement>('[role="tablist"]');
+    const wrapper = one('[data-agenda-tab-row]');
+    expect(wrapper.hasAttribute('data-more-end')).toBe(false);
+    laidOut(row, 600, 358);
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(wrapper.hasAttribute('data-more-end')).toBe(true);
+    expect(wrapper.hasAttribute('data-more-start')).toBe(false);
+    row.scrollLeft = 120;
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(wrapper.hasAttribute('data-more-start')).toBe(true);
+    expect(wrapper.hasAttribute('data-more-end')).toBe(true);
+    row.scrollLeft = 242;
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(wrapper.hasAttribute('data-more-end')).toBe(false);
+  });
+
+  test('scroll the open tab into the row, sideways only', async () => {
+    setViewport(390);
+    await draw();
+    const row = one<HTMLElement>('[role="tablist"]');
+    laidOut(row, 600, 358);
+    const place = (id: string, left: number, width: number): void => {
+      const tab = one<HTMLElement>(`[data-agenda-tab-button="${id}"]`);
+      Object.defineProperty(tab, 'offsetLeft', { configurable: true, value: left });
+      Object.defineProperty(tab, 'offsetWidth', { configurable: true, value: width });
+    };
+    place('main', 0, 160);
+    place('body', 160, 150);
+    place('decisions', 310, 120);
+    place('risks', 430, 100);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="risks"]').click());
+    expect(row.scrollLeft).toBe(430 + 100 - 358 + 24);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="decisions"]').click());
+    // Already in view: the row stays where it is.
+    expect(row.scrollLeft).toBe(196);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="body"]').click());
+    expect(row.scrollLeft).toBe(136);
   });
 });
 

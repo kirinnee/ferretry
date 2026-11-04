@@ -442,8 +442,9 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // PR 10 added the `done` verb and "say so" to the agenda, paid for by "logs their words verbatim" and "unsure→closest" (agenda 1,266 → 1,269): 7,809 measured, 41 under the 7,850 cap.
     // F909 taught the body as the live document (`--where`=short status; rewrite the body whole with `edit --body-file`; chat points at it), paid for in part by the old body and `--where` words (agenda 1,269 → 1,289, cap 1,300): 7,829 measured, 21 under the 7,850 cap.
     // The owner's-asks-are-public-cards rule (board 631 → 757, cap 760; the whole-prompt cap 7,850 → 7,950, as the rest of the wording is pinned by tests) was paid for in part by Pack (1,046 → 1,038) and Tools (1,299 → 1,294): 7,942 measured (7,956 counting the section separators, which the cap has never counted), 8 under the 7,950 cap.
+    // The owner's split-by-content-kind rule (&F946: "tabs by content kind (serial stays one)") took agenda 1,289 → 1,311 (cap 1,320), paid for in part by the open line's placeholders; the rest of the wording is pinned, so the whole-prompt cap went 7,950 → 7,970 (`8_000 - 30`, still under 8 KB): 7,964 measured.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 50);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 30);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_300);
     should(sizes.board).be.below(760);
@@ -451,7 +452,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);
     should(sizes.notify).be.below(450);
-    should(sizes.agenda).be.below(1_300);
+    should(sizes.agenda).be.below(1_320);
   });
 
   it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {

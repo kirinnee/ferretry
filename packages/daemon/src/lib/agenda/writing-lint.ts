@@ -167,6 +167,23 @@ function hasHeading(text: string): boolean {
   return false;
 }
 
+/** A body this long, with this many top-level sections, may hold several kinds of content (&F946). */
+export const AGENDA_MIXED_BODY_LENGTH = 4_000;
+export const AGENDA_MIXED_BODY_SECTIONS = 3;
+/** A top-level section heading: `#` or `##`, the level a report splits into parts at. */
+const SECTION_LINE = /^ {0,3}#{1,2}\s+\S/u;
+
+/** How many top-level sections the text has, outside fenced code. */
+function sectionCount(text: string): number {
+  let fenced = false;
+  let count = 0;
+  for (const line of text.split(/\r?\n/u)) {
+    if (FENCE_LINE.test(line)) fenced = !fenced;
+    else if (!fenced && SECTION_LINE.test(line)) count += 1;
+  }
+  return count;
+}
+
 /** The segments the owner reads as blocks of prose, named for the warning that points at them. */
 function segmentsOf(item: AgendaWriting): Field[] {
   const segments: Field[] = [];
@@ -317,6 +334,15 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
   if (headed.length > 0) {
     warnings.push(
       `markdown headings (# …) in ${headed.join(', ')}: the card draws them as huge titles; write short points (- …) or a bold lead instead`,
+    );
+  }
+  // THE BODY MAY BE SEVERAL KINDS OF CONTENT IN ONE TAB (&F946): a hint, never a refusal — only the ferret knows
+  // whether its sections build on each other.
+  const body = item.body ?? '';
+  const sections = sectionCount(body);
+  if (body.length > AGENDA_MIXED_BODY_LENGTH && sections >= AGENDA_MIXED_BODY_SECTIONS) {
+    warnings.push(
+      `the body has ${String(sections)} sections in ${String(body.length)} characters: if they are different kinds (steps, status, results…), give each its own tab with \`agenda edit <id> --tab-file "Name=file"\`; keep a continuous report, where each part builds on the last, as one tab`,
     );
   }
   return warnings;

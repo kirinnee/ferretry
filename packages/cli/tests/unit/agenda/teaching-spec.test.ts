@@ -183,7 +183,7 @@ describe('the teaching says the tabs are the live document and the chat is its l
     const prompt = said(AGENDA_INSTRUCTION('fy'));
 
     // Assert
-    should(prompt).containEql('live doc=tabs, rewrite each whole');
+    should(prompt).containEql('live doc=tabs by content kind (serial stays one), rewrite each whole');
     should(prompt).containEql('`edit --where-file` (main), `--body-file`, `--tab-file name=f`');
     should(prompt).containEql('chat points at it');
     should(prompt).not.containEql('short status');
@@ -210,6 +210,12 @@ describe('the teaching says the tabs are the live document and the chat is its l
     should(rule).containEql('--tab-file "name=file" (6 at most)');
     should(rule).containEql('--rename-tab, --move-tab, --remove-tab');
     should(rule).not.containEql('short status');
+    // The owner's split rule (&F946): by content type, never serial content; a continuous report stays one tab.
+    should(rule).containEql('split the rest by content type, never serial content');
+    should(rule).containEql('named for what it holds');
+    should(rule).containEql('where each part builds on the last, stays one tab');
+    should(rule).containEql('one kind of content is one tab: never invent tabs');
+    should(rule).containEql('the body may stay empty');
     // The owner's to-do steps stay ticked steps: a tab holds the plan, never a checklist they cannot tick.
     should(rule).containEql('steps the owner must do stay --step');
     should(rule).containEql('rewrite a tab whole whenever it changes: one edit is one version');

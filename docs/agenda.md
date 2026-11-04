@@ -370,14 +370,25 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
   2. **"The full picture"** (a review's **"Reasoning"**) — `body` (`--body-file`): the report, explainer or plan.
      It is unchanged: the gate's How to test, a notice's card and older apps all keep reading `body`. A notice draws
      it in its ask and a card gate's body is its How to test, so for those it is not a tab.
-  3. **The ferret's own tabs** — `tabs: [{ id, name, body }]`, at most 6 (8 tabs in all): a part that changes on its
-     own (Overview, Decisions, Risks…). `--tab-file "Name=file"` makes or rewrites one; `--rename-tab "Old=New"`,
+  3. **The ferret's own tabs** — `tabs: [{ id, name, body }]`, at most 6 (8 tabs in all): one per KIND of content
+     (the rule below). `--tab-file "Name=file"` makes or rewrites one; `--rename-tab "Old=New"`,
      `--move-tab "Name=1"` (1 = first of the ferret's own) and `--remove-tab Name`. All of them, in one `edit`, are
      **one edit: one version, one revision** (`tabEdits`, at most 16, applied in order). A tab's `id` is its name's
      slug at creation and stays through renames. A name is 1–32 characters on one line, with no `=`, unique ignoring
      case, never a fixed tab's (nor `main` or `body`), and never another tab's id, so a name or an id always means one
      tab: a reference is read as a name first (ignoring case), then as an id. Their words share 200,000
      (`MAX_AGENDA_TABS_LENGTH`).
+  - **SPLIT BY CONTENT TYPE, NEVER SERIAL CONTENT (&F946).** The owner: _"the "full picture", I think should not be
+    cramped into 1 tab … ask the agenda what's the best way to breakup the topic. don't split serial stuff tho, split
+    by content type, unless there's no serial dependency. for example, a long continuous report should STILL be 1 tab.
+    but steps, tracking, status etc or different type of results or wtv etc can be different tabs"_. So: - **Where we are now stays the main tab.** - **Each kind of content is a tab of the ferret's own, named for what it holds**: the work's Steps, Status,
+    Tracking, Results, Decisions, Risks, a second kind of result. - **Serial content is never split**: a long continuous report, explainer or argument, where each part builds on
+    the last, stays ONE tab, "The full picture". Only parts with no serial dependency on each other are split. - **One kind of content is one tab**: a ferret never invents tabs to fill the row. - **With everything in tabs of its own, the body may stay empty** (an empty tab is not drawn). - **The daemon hints, never refuses**: `add` and `edit` print "the body has N sections in M characters: if they
+    are different kinds (steps, status, results…), give each its own tab with `agenda edit <id> --tab-file
+"Name=file"`; keep a continuous report, where each part builds on the last, as one tab" when the body is over
+    4,000 characters with 3 or more top-level (`#` or `##`) headings outside fenced code
+    (`AGENDA_MIXED_BODY_LENGTH`, `AGENDA_MIXED_BODY_SECTIONS`). Only the ferret knows whether its sections build on
+    each other, so the decision stays its own.
   - **A tab with nothing in it is not drawn, and one tab draws no tab row**: an item with only a body reads as before.
   - **The brief previews the main tab**: the detail panel and the board's brief draw decided so far, still open, then
     **Where we are now** (`whereWeAre`), and one line **Also in the item: Decisions, Risks** naming the ferret's own
@@ -1286,9 +1297,11 @@ and a part the item does not carry is not drawn:
   with nothing to put there draws no ⋯. The two chips sit small on the line under the title, and an earlier version on
   screen adds a third, **Showing v2**.
 - **The tabs (&F923).** With more than one tab: wider than a phone, a real ARIA tablist that **wraps onto a second
-  line** rather than scroll or cut a name (arrows, Home and End move); on a phone (under 768px), ONE switcher button is
-  the part's heading — "Where we are now ▾ · 1 of 4 · 2 changed" — opening the app's bottom sheet with the tabs as a
-  radio list, never a horizontal strip. Only the open tab is in the page. A tab that changed **since this device last
+  line** rather than scroll or cut a name (arrows, Home and End move); on a phone (under 768px) **the same tablist on
+  one line, scrolling sideways** (&F946, the owner: _"make it such that the tabs are not drop-down, but horizontally
+  tabs so ppl are aware there's tabs"_): an end that hides more tabs fades out with the next name cut, so the row
+  always shows there is more, and the open tab is scrolled into the row (sideways only, never moving the page). No
+  dropdown and no sheet. Only the open tab is in the page. A tab that changed **since this device last
   looked** carries a dot and the word "Changed" (never colour alone): when the machine keeps versions and this device
   saw an older one, that version is read and compared with the item now, so a tab edit stays marked when a later edit
   only touched the title; otherwise (no versions, never opened, or the newest already seen) the marks are what the

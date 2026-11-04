@@ -2,14 +2,15 @@
  * Screenshots and checks for an agenda item whose live document is TABS (&F923): "Where we are now" first and open
  * (the answer to the owner's question, decided so far, still open, then its own Markdown), "The full picture", then
  * the ferret's own Decisions and Risks. Phone 390 and desktop 1440, light and dark, in three states: main (the main
- * tab), picture (The full picture opened), and on a phone the switcher sheet; on desktop the Risks tab.
+ * tab), picture (The full picture opened), and the Risks tab — on a phone the row scrolled to its last tab (&F946).
  *
  *   bun harness/agenda-tabs-screenshot.ts [outDir]   # writes <outDir>/tabs-<state>-<phone|desktop>-<theme>.png
  *
  * It bundles `inbox-page.tsx` (`?view=tabs`: the real `AgendaInboxPage`, invented data) and FAILS (after writing every
  * picture) when: a page scrolls sideways; the main tab is not open first; the answer to the owner's question is not
  * the main tab's first block; "Answered: see Where we are now" is missing; the two changed tabs are not marked; a
- * phone draws a tab strip or a desktop draws a switcher; a tab name is cut short; or picking a tab does not show it.
+ * phone draws a dropdown or a sheet instead of the tab row; a phone's row wraps, or hides more tabs without fading
+ * that end; a desktop row scrolls; a tab name is cut short; or picking a tab does not show it.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -142,38 +143,38 @@ for (const scheme of ['light', 'dark'] as const) {
         'Answered: see Where we are now',
       `${label}: no "Answered: see Where we are now" line`,
     );
+    // ONE tab row everywhere (&F946): never a dropdown or a sheet.
+    check((await tabs.locator('[aria-haspopup]').count()) === 0, `${label}: the tabs open a dropdown`);
+    check((await page.locator('[data-agenda-tab-sheet]').count()) === 0, `${label}: the tabs have a sheet`);
+    const names = await tabs.locator('[role="tab"]').allInnerTexts();
+    check(names.length === 4, `${label}: ${names.length} tabs, not 4`);
+    check((await tabs.locator('[role="tab"] [data-agenda-tab-changed]').count()) === 2, `${label}: not 2 changed`);
+    const cut = await tabs.evaluate(node =>
+      [...node.querySelectorAll<HTMLElement>('[role="tab"]')].some(tab => tab.scrollWidth > tab.clientWidth + 1),
+    );
+    check(!cut, `${label}: a tab name is cut short`);
+    const row = await tabs.evaluate(node => {
+      const list = node.querySelector<HTMLElement>('[role="tablist"]');
+      const tops = new Set([...node.querySelectorAll<HTMLElement>('[role="tab"]')].map(tab => tab.offsetTop));
+      return {
+        mode: node.querySelector('[data-agenda-tab-row]')?.getAttribute('data-agenda-tab-row') ?? '',
+        lines: tops.size,
+        overflows: list !== null && list.scrollWidth > list.clientWidth + 1,
+        fadesEnd: node.querySelector('[data-agenda-tab-row]')?.hasAttribute('data-more-end') ?? false,
+      };
+    });
     if (phone) {
-      check((await tabs.locator('[role="tablist"]').count()) === 0, `${label}: a phone draws a tab strip`);
-      const words = (await tabs.locator('[data-agenda-tab-switch]').innerText()).replace(/\s+/gu, ' ').trim();
-      check(words === 'Where we are now · 1 of 4 · 2 changed', `${label}: the switcher says "${words}"`);
+      check(row.mode === 'scroll' && row.lines === 1, `${label}: the phone's row is not one line (${row.lines})`);
+      check(row.overflows, `${label}: four tabs fit a phone, so the sideways scroll is not shown`);
+      check(row.fadesEnd, `${label}: the end that hides more tabs does not fade`);
     } else {
-      check((await tabs.locator('[data-agenda-tab-switch]').count()) === 0, `${label}: a desktop draws a switcher`);
-      const names = await tabs.locator('[role="tab"]').allInnerTexts();
-      check(names.length === 4, `${label}: ${names.length} tabs, not 4`);
-      check((await tabs.locator('[role="tab"] [data-agenda-tab-changed]').count()) === 2, `${label}: not 2 changed`);
-      const cut = await tabs.evaluate(node =>
-        [...node.querySelectorAll<HTMLElement>('[role="tab"]')].some(tab => tab.scrollWidth > tab.clientWidth + 1),
-      );
-      check(!cut, `${label}: a tab name is cut short`);
+      check(row.mode === 'wrap' && !row.overflows, `${label}: the desktop row scrolls`);
     }
     await toTabs(page);
     await shoot(page, 'main', viewport.name, scheme);
 
     // picture: "The full picture" opened.
-    if (phone) {
-      await tabs.locator('[data-agenda-tab-switch]').click();
-      const sheet = page.locator('[data-agenda-tab-sheet]');
-      await sheet.waitFor({ state: 'visible' });
-      await page.waitForTimeout(300);
-      check(
-        (await sheet.locator('[data-agenda-tab-changed]').count()) === 2,
-        `${label}: the sheet does not mark 2 changed`,
-      );
-      await shoot(page, 'sheet', viewport.name, scheme);
-      await sheet.locator('[data-agenda-tab-choice="body"]').click({ force: true });
-    } else {
-      await tabs.locator('[data-agenda-tab-button="body"]').click();
-    }
+    await tabs.locator('[data-agenda-tab-button="body"]').click();
     await page.waitForTimeout(300);
     check(
       (await tabs.getAttribute('data-agenda-tab')) === 'body',
@@ -186,16 +187,30 @@ for (const scheme of ['light', 'dark'] as const) {
     await toTabs(page);
     await shoot(page, 'picture', viewport.name, scheme);
 
-    if (!phone) {
-      await tabs.locator('[data-agenda-tab-button="risks"]').click();
-      await page.waitForTimeout(200);
-      check(
-        (await tabs.locator('[data-agenda-tab-panel]').innerText()).includes('drops live sessions'),
-        `${label}: the Risks tab's words are not shown`,
-      );
-      await toTabs(page);
-      await shoot(page, 'risks', viewport.name, scheme);
+    await tabs.locator('[data-agenda-tab-button="risks"]').click();
+    await page.waitForTimeout(200);
+    check(
+      (await tabs.locator('[data-agenda-tab-panel]').innerText()).includes('drops live sessions'),
+      `${label}: the Risks tab's words are not shown`,
+    );
+    if (phone) {
+      // The last tab is scrolled into the row, and the start that now hides tabs fades instead.
+      const seen = await tabs.evaluate(node => {
+        const list = node.querySelector<HTMLElement>('[role="tablist"]');
+        const risks = node.querySelector<HTMLElement>('[data-agenda-tab-button="risks"]');
+        if (list === null || risks === null) return { whole: false, fadesStart: false };
+        const box = list.getBoundingClientRect();
+        const tab = risks.getBoundingClientRect();
+        return {
+          whole: tab.left >= box.left - 1 && tab.right <= box.right + 1,
+          fadesStart: node.querySelector('[data-agenda-tab-row]')?.hasAttribute('data-more-start') ?? false,
+        };
+      });
+      check(seen.whole, `${label}: the open last tab is not scrolled into the row`);
+      check(seen.fadesStart, `${label}: the start that hides tabs does not fade`);
     }
+    await toTabs(page);
+    await shoot(page, 'risks', viewport.name, scheme);
     await context.close();
   }
 }

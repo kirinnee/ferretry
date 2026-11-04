@@ -119,6 +119,8 @@ The owner's asks are public cards (the owner, 2026-11-04: "when user ask for tic
 
 The tabs (&F923) then made the main tab, "Where we are now", the first and default tab, as long and rich as it needs to be, and let a ferret add tabs of its own: the open line dropped ", `--where`=short status", and the state line became "Live doc=tabs, rewrite each whole: `edit --where-file` (main), `--body-file`, `--tab-file Name=f`; chat points at it.": agenda 1,289 → 1,289, the measured total unchanged.
 
+The owner then asked for the body to be split by content type (&F946: _"split by content type, unless there's no serial dependency … a long continuous report should STILL be 1 tab"_): the state line became "Live doc=tabs by content kind (serial stays one), rewrite each whole: …", paid for in part by the open line's placeholders (`--premise "<now>" --context "<facts>"`) and an unquoted `--term X=meaning`: agenda 1,289 → 1,311 (cap 1,300 → 1,320). The rest of the wording is pinned by tests, so the **whole-prompt cap was raised 7,950 → 7,970** (`8_000 - 30`), the measured total 7,964 — still under 8 KB.
+
 ## The routing prompt
 
 ONE setting says which model runs which kind of sub-task: `prompt` in `config/models-guide.yaml`, plain text of
