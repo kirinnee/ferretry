@@ -441,7 +441,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Fix rounds of the card-asks PR said "Before it's ready to try:" for "Before To test:", kept "show progress only" and tightened "add to one" (board 638 → 631): 7,806 measured, 44 under the 7,850 cap.
     // PR 10 added the `done` verb and "say so" to the agenda, paid for by "logs their words verbatim" and "unsure→closest" (agenda 1,266 → 1,269): 7,809 measured, 41 under the 7,850 cap.
     // F909 taught the body as the live document (`--where`=short status; rewrite the body whole with `edit --body-file`; chat points at it), paid for in part by the old body and `--where` words (agenda 1,269 → 1,289, cap 1,300): 7,829 measured, 21 under the 7,850 cap.
-    // The owner's-asks-are-public-cards rule (board 631 → 757, cap 760; the whole-prompt cap 7,850 → 7,950, as the rest of the wording is pinned by tests) was paid for in part by Pack (1,046 → 1,038) and Tools (1,299 → 1,294): 7,942 measured, 8 under the 7,950 cap.
+    // The owner's-asks-are-public-cards rule (board 631 → 757, cap 760; the whole-prompt cap 7,850 → 7,950, as the rest of the wording is pinned by tests) was paid for in part by Pack (1,046 → 1,038) and Tools (1,299 → 1,294): 7,942 measured (7,956 counting the section separators, which the cap has never counted), 8 under the 7,950 cap.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 50);
     should(sizes.pack).be.below(1_050);
