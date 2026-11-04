@@ -620,10 +620,12 @@ describe('Status', () => {
     should(BoardTaskActionRequestSchema.safeParse({ action: 'edit' }).success).be.false();
   });
 
-  it('should take all three parts as strings (empty allowed) and nothing else', () => {
+  it('should store all three parts, and let an edit name only the parts it replaces', () => {
     const edit = (status: unknown) => BoardTaskActionRequestSchema.safeParse({ action: 'edit', status }).success;
     should(edit({ now: '', doneSoFar: '', next: '' })).be.true();
-    should(edit({ now: 'x', doneSoFar: 'y' })).be.false();
+    // An edit names the parts it replaces; the daemon merges them in the card's own write.
+    should(edit({ now: 'x', doneSoFar: 'y' })).be.true();
+    should(BoardTaskSchema.safeParse({ ...CARD, status: { now: 'x', doneSoFar: 'y' } }).success).be.false();
     should(edit({ ...STATUS, extra: 'z' })).be.false();
     should(edit({ ...STATUS, next: 3 })).be.false();
     should(edit('**Now:** x')).be.false();

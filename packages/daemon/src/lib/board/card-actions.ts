@@ -21,6 +21,7 @@ import {
   type BoardAttachment,
   type BoardClarification,
   type BoardEditableField,
+  type BoardStatus,
   BoardEditableFieldSchema,
   type BoardTaskVisibility,
   type BoardProjectId,
@@ -738,12 +739,23 @@ const link = (
 /** The fields only the owner side may rewrite: they change what the work IS. */
 const PLAN_FIELDS: readonly BoardEditableField[] = ['title', 'brief'];
 
+/** A card's status with the parts an edit names replaced, inside the card's own write (docs/board.md § The card's Status). */
+const mergedStatus = (card: BoardTask, parts: Partial<BoardStatus> | undefined): BoardStatus | undefined =>
+  parts === undefined
+    ? undefined
+    : {
+        now: parts.now ?? card.status?.now ?? '',
+        doneSoFar: parts.doneSoFar ?? card.status?.doneSoFar ?? '',
+        next: parts.next ?? card.status?.next ?? '',
+      };
+
 const edit = (
   card: BoardTask,
-  action: Extract<BoardTaskActionRequest, { action: 'edit' }>,
+  request: Extract<BoardTaskActionRequest, { action: 'edit' }>,
   context: CardContext,
 ): CardOutcome => {
   requireStanding('edit', context.standing, card);
+  const action = { ...request, status: mergedStatus(card, request.status) };
   const changed = BoardEditableFieldSchema.options.filter(
     field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(card[field]),
   );

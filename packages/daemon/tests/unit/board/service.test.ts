@@ -953,6 +953,31 @@ describe('everything else on a card', () => {
     should(JSON.stringify(lastEvent(ports))).not.containEql('writing the route');
   });
 
+  it('should merge the parts an edit names into the card status, so two partial edits never undo each other', async () => {
+    // Arrange — the holder rewrites Now while the lead rewrites Done so far, neither having read the other's edit.
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create({ status: { now: 'a', doneSoFar: 'b', next: 'c' } }), lead);
+
+    // Act
+    await service.act(created.task.id, action({ action: 'edit', status: { now: 'testing' } }), lead);
+    await service.act(created.task.id, action({ action: 'edit', status: { doneSoFar: '- PR 1' } }), lead);
+
+    // Assert
+    should(stored(ports).status).eql({ now: 'testing', doneSoFar: '- PR 1', next: 'c' });
+  });
+
+  it('should start a card with no status from empty parts when an edit names only one', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create(), lead);
+
+    // Act
+    await service.act(created.task.id, action({ action: 'edit', status: { next: '1. CLI' } }), lead);
+
+    // Assert
+    should(stored(ports).status).eql({ now: '', doneSoFar: '', next: '1. CLI' });
+  });
+
   it('should leave a card made without a status with none, and refuse a status edit that changes nothing', async () => {
     // Arrange
     const { ports, service } = serviceWith([]);

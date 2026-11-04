@@ -393,10 +393,10 @@ export interface BoardEditOptions {
 
 /**
  * The texts `--brief-file` and `--how-to-test-file` stand for, already read, because reading a file is IO, and the
- * whole status the `--status-*` flags come to once merged over the card's current one.
+ * status parts the `--status-*` flags and `--status-file` name (the daemon merges them into the card's current status).
  */
 export interface BoardEditTexts {
-  readonly status?: BoardStatus | undefined;
+  readonly status?: Partial<BoardStatus> | undefined;
   readonly brief?: string | undefined;
   readonly howToTest?: string | undefined;
 }

@@ -70,22 +70,22 @@ one line, and every type's full spec is one `fy render guide <type>` away, print
 points etc"_). Change it there and here together.
 
 ````text
-Hypermedia: to teach, explain or compare anything not simple (a flow, architecture, change over time), show it, not just say it; simple answers stay plain. Inline: never publish a page or link unless asked.
+Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
 Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles, inputs) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
 A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.
 - mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
-- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or external links.
-- html: a fragment, inline CSS and <script> (isolated); no network loads.
+- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.
+- html: a fragment, inline CSS and <script> (isolated); no network.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
 - card, board (live board cards), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
 type: mermaid
-alt: How a request flows
+alt: Request flow
 ---
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Renders in chat, agenda tabs and cards; never in repo files, docs, commits or PRs.
+Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.
 ````
 
 ## The supported forms

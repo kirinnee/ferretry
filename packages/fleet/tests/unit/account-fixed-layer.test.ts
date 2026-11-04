@@ -666,7 +666,7 @@ describe('hypermedia teaching', () => {
     should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
     for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
     should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
-    should(teaching).containEql('simple answers stay plain');
+    should(teaching).containEql('anything not simple');
     // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
     should(teaching).startWith('Hypermedia: to teach, explain or compare anything not simple');
     should(teaching).containEql('Inline: never publish a page or link unless asked.');
@@ -681,7 +681,7 @@ describe('hypermedia teaching', () => {
       'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point.',
     );
     // fy-render draws in chat, agenda tabs and cards, so "chat only" no longer contradicts the agenda's tabs.
-    should(teaching).containEql('Renders in chat, agenda tabs and cards; never in repo files, docs, commits or PRs.');
+    should(teaching).containEql('Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.');
     should(teaching).not.containEql('Chat only');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
     should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
@@ -698,7 +698,7 @@ describe('hypermedia teaching', () => {
     should(teaching).not.containEql('flowchart LR');
     // In every prompt, so it is capped: 1,970 with the top-down hint, then cut to ~1,500 by moving map, media and
     // chart's full spec behind `render guide` to make room for the Board section. The explainer rule (&C48) was paid
-    // for by tightening the first lines and the mermaid, svg and html lines: 1,320 → 1,255.
+    // for by tightening the first lines and the mermaid, svg and html lines: 1,320 → 1,189.
     should(teaching.length).be.below(1_550);
   });
 });
@@ -798,7 +798,7 @@ describe('AGENDA_INSTRUCTION', () => {
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert — premise and context are part of the one command: every item is read cold.
-    should(text).containEql('Open: `zz agenda add --title --premise --context "<ask>"`.');
+    should(text).containEql('Open: `zz agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"`.');
     // The tabs are the live document (&F923): the main tab is no longer a short status, so the open line names none.
     should(text).containEql('Title ≤40, ask ≤80. Read cold');
     should(text).not.containEql('short status');
@@ -878,8 +878,9 @@ describe('AGENDA_INSTRUCTION', () => {
     // "tabs by content kind (serial stays one)", paid for in part by the open line's placeholders ("<now>", "<facts>")
     // and `--term X=meaning` unquoted (cap 1,300 → 1,320). Then 1,338: the owner's always-rewrite and tabs-hold-anything
     // rules (&C48), paid for in part by the stage chain and `--stage` (cap 1,320 → 1,340); then 1,352 for read → edit,
-    // paid for in part by the open line's placeholders, which `agenda add`'s refusals and help still name (cap 1,360).
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_360);
+    // paid for in part by the stage chain; review then restored the open line's value placeholders, so a copied command
+    // runs (1,380, cap 1,390).
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_390);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {
@@ -949,11 +950,11 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
-    should(text).containEql('`--how-to-test "<1. where 2. do 3. see>"` before try.');
+    should(text).containEql('`--how-to-test "<where, do, see>"` before try.');
     should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
     should(text).containEql('Blocked: `zz task depend`/`block`.');
-    should(text).containEql('`zz task reopen <id> --to <lane> --ask`');
+    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<words>"`');
     should(text).containEql("Owner's bug:");
     should(text).endWith('PRs, merges, `zz signal done` self-move.');
     should(text).not.containEql('`fy ');
@@ -963,7 +964,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    // 757 → 811 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
+    // 757 → 814 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
     // the three-part status (cap 760 → 820).
     should(BOARD_INSTRUCTION('fy').length).be.below(820);
   });

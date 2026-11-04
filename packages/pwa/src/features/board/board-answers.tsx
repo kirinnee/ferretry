@@ -1,5 +1,5 @@
 /**
- * THE OWNER'S ANSWERS, AS ONE FLOW: Done, Close, Not good, Reopen, a ⋯ pick and a drop. The agenda's cards to try
+ * THE OWNER'S ANSWERS, AS ONE FLOW: Done, Not good, Send back, a ⋯ pick and a drop. The agenda's cards to try
  * use all of it; the Board page and the ferret's own Tasks tab use it for lane moves only (a ⋯ pick and a drop):
  * a Board card has no Done, Not good or Reopen button, the owner answers in the agenda.
  *
@@ -65,13 +65,6 @@ const sendBackWords = (pending: PendingMove) => {
         heading: `Send ${title} back to ${pending.toName}`,
         placeholder: 'What should change?',
         submitLabel: 'Send back',
-      };
-    case 'reopen':
-      return {
-        heading: `Reopen ${title}: back to ${pending.toName}`,
-        placeholder: 'Why is it going back?',
-        submitLabel: 'Reopen',
-        busyLabel: 'Reopening…',
       };
     default:
       return {

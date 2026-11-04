@@ -443,9 +443,9 @@ export const BoardTaskVisibilitySourceSchema = z.enum(['default', 'chosen']);
 export type BoardTaskVisibilitySource = z.infer<typeof BoardTaskVisibilitySourceSchema>;
 
 /**
- * A card's status: its current state in three Markdown parts, written whole by the ferret that holds the card (an edit
- * replaces the whole object, so nothing in it is stale). A part with nothing to say is ''. The field itself is
- * optional on a card: absent means no status yet, and no reader invents one.
+ * A card's status: its current state in three Markdown parts, kept current by the ferret that holds the card. An edit
+ * names the parts it replaces and the daemon merges them in the card's own write. A part with nothing to say is ''.
+ * The field itself is optional on a card: absent means no status yet, and no reader invents one.
  */
 export const BoardStatusSchema = z.strictObject({
   /** What is happening on the card at this moment. */
@@ -877,7 +877,12 @@ const editFields = {
   terms: BoardTermsSchema.optional(),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).optional(),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
-  status: BoardStatusSchema.optional(),
+  /**
+   * The parts of the status to replace: each part named replaces that part, each part left out keeps the card's (an
+   * empty part for a card with no status yet). The daemon merges them in the card's own write, so two ferrets
+   * rewriting different parts at once never undo each other.
+   */
+  status: BoardStatusSchema.partial().optional(),
 };
 
 /**

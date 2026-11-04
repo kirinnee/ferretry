@@ -1,7 +1,8 @@
 /**
- * A card's status as the CLI writes it: three Markdown parts (`now`, `doneSoFar`, `next`), sent whole. The wire has no
- * partial status, so `--status-now` / `--status-done` / `--status-next` are merged here over the card's current
- * status (or over `--status-file`), and the whole object goes in one edit.
+ * A card's status as the CLI writes it: three Markdown parts (`now`, `doneSoFar`, `next`). `--status-file` gives all
+ * three (a part it leaves out is empty); `--status-now` / `--status-done` / `--status-next` replace one part each,
+ * over the file when there is one. Only the parts named are sent: the daemon merges them into the card's current
+ * status in the card's own write.
  *
  * Pure: text and values in, a status or a refusal out. Reading the file and the card is the controller's.
  */
@@ -13,8 +14,6 @@ const PARTS = ['now', 'doneSoFar', 'next'] as const;
 
 /** The parts a caller named with `--status-now`, `--status-done` and `--status-next`. */
 export type StatusParts = Partial<Record<(typeof PARTS)[number], string>>;
-
-const EMPTY: BoardStatus = { now: '', doneSoFar: '', next: '' };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -43,19 +42,12 @@ export function parseStatusFile(text: string, path: string): BoardStatus {
   return checked({ now: given('now'), doneSoFar: given('doneSoFar'), next: given('next') });
 }
 
-/** `base` (the file, else the card's current status, else nothing) with each named part replaced. */
-export function mergeStatus(base: BoardStatus | undefined, parts: StatusParts): BoardStatus {
-  const from = base ?? EMPTY;
-  return checked({
-    now: parts.now ?? from.now,
-    doneSoFar: parts.doneSoFar ?? from.doneSoFar,
-    next: parts.next ?? from.next,
-  });
+/** `base` (the file's three parts) with each named part replaced; without a file, only the named parts. */
+export function mergeStatus(base: BoardStatus | undefined, parts: StatusParts): StatusParts {
+  return checked(base === undefined ? parts : { ...base, ...parts });
 }
 
-const checked = (status: BoardStatus): BoardStatus => {
-  const parsed = BoardStatusSchema.safeParse(status);
-  return parsed.success
-    ? parsed.data
-    : refuse(`cannot set the status: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+const checked = <Status extends StatusParts>(status: Status): Status => {
+  const parsed = BoardStatusSchema.partial().safeParse(status);
+  return parsed.success ? status : refuse(`cannot set the status: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
 };

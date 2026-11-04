@@ -59,8 +59,8 @@ describe('mergeStatus', () => {
     should(mergeStatus(current, { doneSoFar: 'B', next: '' })).eql({ now: 'a', doneSoFar: 'B', next: '' });
   });
 
-  it('should start from empty parts on a card with no status', () => {
+  it('should give only the named parts when there is no file: the daemon merges them', () => {
     // Act + Assert
-    should(mergeStatus(undefined, { next: '1. CLI' })).eql({ now: '', doneSoFar: '', next: '1. CLI' });
+    should(mergeStatus(undefined, { next: '1. CLI' })).eql({ next: '1. CLI' });
   });
 });

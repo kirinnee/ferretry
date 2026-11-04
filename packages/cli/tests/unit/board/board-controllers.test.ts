@@ -1100,8 +1100,8 @@ describe('the action verbs', () => {
     ]);
   });
 
-  it('should merge --status-now over the card’s current status, so the other parts are kept', async () => {
-    // Arrange
+  it('should send only the parts --status-now/--status-done/--status-next name, without reading the card', async () => {
+    // Arrange — the daemon merges them into the card's status in its own write, so concurrent edits never undo each other.
     const gateway = new FakeGateway();
     gateway.taskView = card({ id: 'F1', status: { now: 'old', doneSoFar: '- done', next: '1. next' } });
     const { controller } = harness(gateway);
@@ -1112,21 +1112,10 @@ describe('the action verbs', () => {
 
     // Assert
     should(sent(gateway)).eql([
-      { action: 'edit', status: { now: 'new', doneSoFar: '- done', next: '1. next' } },
-      { action: 'edit', status: { now: 'old', doneSoFar: '- a\n- b', next: '' } },
+      { action: 'edit', status: { now: 'new' } },
+      { action: 'edit', status: { doneSoFar: '- a\n- b', next: '' } },
     ]);
-    should(gateway.taskCalls).eql(['F1', 'F1']);
-  });
-
-  it('should start a status from empty parts on a card that has none', async () => {
-    // Arrange
-    const { controller, gateway } = harness();
-
-    // Act
-    await controller.edit('F1', { statusNext: '1. CLI' });
-
-    // Assert
-    should(sent(gateway)).eql([{ action: 'edit', status: { now: '', doneSoFar: '', next: '1. CLI' } }]);
+    should(gateway.taskCalls).eql([]);
   });
 
   it('should send the whole status from --status-file without reading the card, and let a flag override a part', async () => {

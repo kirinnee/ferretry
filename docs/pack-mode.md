@@ -123,29 +123,30 @@ The owner then asked for the body to be split by content type (&F946: _"split by
 
 The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules and paid for them inside the 8 KB:
 
-- **Board** (757 → 811, cap 760 → 820): the board runs itself (_"TASK no longer have user interactivity anymore! agenda
+- **Board** (757 → 814, cap 760 → 820): the board runs itself (_"TASK no longer have user interactivity anymore! agenda
   tracks all those"_: a card never asks; answers, tests and Done ride its agenda, which moves it), public = the owner's
   asks and private = the ferret's sub-cards, planning is a phase, the title and summary read as a sitrep, and the card's
   status (`--status-{now,done,next}`), and **read → edit** (the owner: _"we need to read to know what needs to be
   updated, else there might be many segments that might be outdated!"_: `fy task show` whole, then edit every stale
   part). Paid for by "(`fy board lanes show`)", which the move's
   help and refusals already print, and by tighter words for the umbrella, related-card and agenda sentences.
-- **Agenda** (1,311 → 1,352, cap 1,320 → 1,360): every update reads the item whole (`show`) and edits every stale part
+- **Agenda** (1,311 → 1,380, cap 1,320 → 1,390): every update reads the item whole (`show`) and edits every stale part
   — premise, context, the ask, its options and kind (how to reply), still-open and each tab (!A358); the tabs
   hold any kind of content (to-dos, steps, explainers, results) and steps and explainers stay there. Paid for by the
   stage chain and `--stage` (the owner: _"now agenda doesn't have a "main" type any more"_; the stage stays in the
-  daemon and in `--stage`'s help) by `--where-file|--body-file|--tab-file` written as one flag list, and by the open line's placeholders, which
-  `agenda add`'s refusals and help still name.
-- **Hypermedia** (1,320 → 1,255): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
+  daemon and in `--stage`'s help) by `--where-file|--body-file|--tab-file` written as one flag list. Review kept the open line's value
+  placeholders, so a copied command runs.
+- **Hypermedia** (1,320 → 1,189): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
   point, and interactive visuals the reader changes, never steppers (_"interactive should not be steppers -- there's no
   need for steppers"_) — paid for by tightening the section's first lines and its
   mermaid, svg and html lines. Its last line now says where fy-render draws (chat, agenda tabs and cards), which the
   old "Chat only" contradicted.
 
-The measured total is 7,994, so the **whole-prompt cap is now `8_000`**: the 8 KB itself, with no headroom left. The next
-rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its card line (read it, then edit its status and How
+The cap now **counts the blank line between sections** (14 characters), as the composed prompt has it — every earlier
+figure above left them out. The measured total is 7,973 with them, so the **whole-prompt cap is now `8_000`**: the 8 KB
+itself, 27 characters of headroom. The next rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its card line (read it, then edit its status and How
 to test; the old "Your final report says how the owner tests it" went, since the holder now writes it); it is not in
-the lead's total, and the sub-ferret prompt (2,631) stays smaller than the lead's (2,907).
+the lead's total, and the sub-ferret prompt (2,631) stays smaller than the lead's (2,910).
 
 ## The routing prompt
 
@@ -441,7 +442,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); at each step it reads its card and rewrites the stale parts of its status and How to test (`fy task edit`), routine progress goes on its card (`fy task note`), and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2907 characters** (4261 with Agenda mode on), **sub-ferret 2631**.
+  out. Sizes with the default binary name: **lead 2910 characters** (4292 with Agenda mode on), **sub-ferret 2631**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

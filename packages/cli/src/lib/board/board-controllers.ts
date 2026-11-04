@@ -1,7 +1,6 @@
 import {
   type BoardProject,
   type BoardProjectsResponse,
-  type BoardStatus,
   type BoardTaskActionRequestInput,
   type BoardTaskResponse,
   formatTaskRef,
@@ -475,16 +474,16 @@ export class BoardController {
 
   async edit(idText: string, options: TaskEditFlags) {
     const ref = requireCardRef(idText);
-    const texts = { ...(await this.resolveTexts(options)), status: await this.resolveStatus(ref, options) };
+    const texts = { ...(await this.resolveTexts(options)), status: await this.resolveStatus(options) };
     await this.perform('edit', ref, options, buildEditAction(options, texts));
   }
 
   /**
-   * The whole status `--status-file` and `--status-now` / `--status-done` / `--status-next` come to: the file (else the
-   * card's current status, read here because the wire takes no partial one) with each named part replaced. None when
-   * the caller named no status.
+   * The status parts `--status-file` and `--status-now` / `--status-done` / `--status-next` come to: the file's
+   * three parts with each named flag replacing its part, or the flags' parts alone. The daemon merges what is sent into
+   * the card's current status in the card's own write, so nothing is read here. None when the caller named no status.
    */
-  private async resolveStatus(ref: TaskRef, options: BoardEditOptions): Promise<BoardStatus | undefined> {
+  private async resolveStatus(options: BoardEditOptions): Promise<StatusParts | undefined> {
     const parts: StatusParts = {
       ...(options.statusNow === undefined ? {} : { now: options.statusNow }),
       ...(options.statusDone === undefined ? {} : { doneSoFar: options.statusDone }),
@@ -493,10 +492,7 @@ export class BoardController {
     const path = options.statusFile?.trim();
     const filed = path === undefined || path === '' ? undefined : path;
     if (filed === undefined && Object.keys(parts).length === 0) return undefined;
-    const base =
-      filed === undefined
-        ? (await this.gateway.task(ref.id)).task.status
-        : parseStatusFile(await this.deps.files.readText(filed), filed);
+    const base = filed === undefined ? undefined : parseStatusFile(await this.deps.files.readText(filed), filed);
     return mergeStatus(base, parts);
   }
 

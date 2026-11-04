@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done); `--how-to-test "<1. where 2. do 3. see>"` before try. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done); `--how-to-test "<where, do, see>"` before try. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -701,14 +701,17 @@ status:
     2. PWA card view.
 ```
 
-**Read it whole, then rewrite what is stale.** It is an ordinary editable field (`BoardEditableField` `status`): an
-edit replaces the whole object. `fy task edit <id>` takes `--status-now <md>`, `--status-done <md>` and
-`--status-next <md>` — each replaces that part and keeps the others as the card has them (the CLI reads the card and
-sends the whole object) — or `--status-file <path>` with the whole object as YAML or JSON (`-` reads stdin). At each
-step the ferret reads the card (`fy task show <id>`) and rewrites every part that is out of date, the title and summary
-included, so nothing on the card is stale. The edit records a `field-edited` event naming `status`, never its text —
-the history says when it changed, and `status` says what it is. Notes stay the history: `fy task note` is still how a
-ferret records a step, a finding or a decision as it happens.
+**Read it whole, then rewrite what is stale.** It is an ordinary editable field (`BoardEditableField` `status`).
+An edit names **the parts it replaces** (`status: { now }`, or all three); each part it leaves out keeps the card's,
+and a card with no status yet starts from empty parts. **The daemon merges the parts in the card's own write**, so a
+holder rewriting Now while its lead rewrites Done so far never undoes the other. `fy task edit <id>` takes
+`--status-now <md>`, `--status-done <md>` and `--status-next <md>`, each sending that one part, and
+`--status-file <path>` with all three as YAML or JSON (`-` reads stdin; a part the file leaves out is empty, and a flag
+beside it replaces its part). At each step the ferret reads the card (`fy task show <id>`) and rewrites every part
+that is out of date, the title and summary included, so nothing on the card is stale. The edit records a
+`field-edited` event naming `status`, never its text — the history says when it changed, and `status` says what it
+is. A part is cleared by writing it empty (`--status-next ""`); the field itself is never removed. Notes stay the
+history: `fy task note` is still how a ferret records a step, a finding or a decision as it happens.
 
 **Who writes it.** The card's ferrets, at each step that changes the answer: the lead on its own cards, and **the
 card's current holder** (assignee, else owner) — a sub-ferret included — on its own card. A sub-ferret's edit may name
@@ -723,8 +726,8 @@ alone, because only the ferret knows what the work is doing; the lane already sa
   no status draws nothing.
 - `fy task show` prints it right after the header, before the ask, the same three labels.
 - The work index reads it with the brief, so `fy search` finds a card by what it is doing now.
-- A YAML or JSON patch of a card sets `status` by key (`now`, `doneSoFar`, `next`); `status: null` clears it. A
-  sub-ferret's patch follows the same holder rule.
+- A YAML or JSON patch of a card sends `status` parts by key (`now`, `doneSoFar`, `next`), merged as an edit's are;
+  a part is cleared by writing it empty. A sub-ferret's patch follows the same holder rule.
 
 ## Public and private cards
 
