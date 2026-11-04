@@ -290,10 +290,10 @@ const recordIds = (): ((signature: string) => string) => {
 };
 
 /** Whether the next record that shows anything is another picture. */
-const followedByImages = (records: readonly LogRecord[], index: number): boolean => {
+const followedByImages = (records: readonly LogRecord[], index: number, skipped: ReadonlySet<number>): boolean => {
   for (let next = index + 1; next < records.length; next += 1) {
     const record = records[next];
-    if (record === undefined || isHiddenRecord(record)) continue;
+    if (record === undefined || isHiddenRecord(record) || skipped.has(next)) continue;
     return showsImages(record);
   }
   return false;
@@ -313,8 +313,60 @@ const addImageRead = (run: ToolRun, images: readonly TranscriptImageMarker[], ke
   else run.calls[index] = call;
 };
 
+/** Claude's framing around a message it surfaced mid-turn, before and after the message itself. */
+const MID_TURN_LEAD = 'The user sent a new message while you were working:';
+const MID_TURN_TRAILER = 'This is how Claude Code surfaces messages the user sends mid-turn';
+
+/** Whitespace-insensitive, case-sensitive: the same rule the ledger matches a send's words by. */
+const normalized = (value: string): string => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+
+/** The words an untimed copy carries: the message itself, with Claude's mid-turn framing lifted off. */
+const echoedWords = (text: string): string => {
+  if (!text.startsWith(MID_TURN_LEAD)) return normalized(text);
+  const body = text.slice(MID_TURN_LEAD.length);
+  const trailer = body.lastIndexOf(MID_TURN_TRAILER);
+  return normalized(trailer === -1 ? body : body.slice(0, trailer));
+};
+
+const isUserMessage = (record: LogRecord): boolean => record.role === 'user' && record.kind === 'message';
+
+/**
+ * WHICH USER RECORDS ARE ONLY A COPY OF THE NEXT ONE, so a message is drawn once.
+ *
+ * Claude Code (seen on 2.1.317) writes a second record for each message it is given: one with NO time,
+ * before the real one — the message itself when it starts a turn, or the message inside "The user sent a
+ * new message while you were working: …" when it arrives mid-turn. The real record follows with its
+ * time. The daemon passes both on, so the chat drew a bare bubble with no time or ticks above the real,
+ * ticked one: the agent got the message once, the reader saw it twice.
+ *
+ * An untimed user record is a copy when a LATER timed user record carries the same words, before the
+ * agent next speaks. The pairing is ONE-TO-ONE and forward-only, nearest first: sending "ok" twice on
+ * purpose is two copies and two real records, so each copy folds into its own real record and both
+ * messages stay. A timed record is never folded, and an untimed one with no timed twin is kept: a
+ * message is never hidden on the strength of a copy that is not there.
+ */
+const echoRecords = (records: readonly LogRecord[]): ReadonlySet<number> => {
+  const echoes = new Set<number>();
+  const taken = new Set<number>();
+  records.forEach((record, index) => {
+    if (record.clock !== undefined || !isUserMessage(record)) return;
+    const words = echoedWords(record.lines.join('\n'));
+    for (let next = index + 1; next < records.length; next += 1) {
+      const later = records[next] as LogRecord;
+      if (later.role === 'assistant' && later.kind === 'message') return;
+      if (later.clock === undefined || !isUserMessage(later) || taken.has(next)) continue;
+      if (normalized(later.lines.join('\n')) !== words) continue;
+      echoes.add(index);
+      taken.add(next);
+      return;
+    }
+  });
+  return echoes;
+};
+
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const instants = recordInstants(records, now);
+  const echoes = echoRecords(records);
   const idFor = recordIds();
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
@@ -331,7 +383,8 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     ...(record.offset === undefined ? {} : { offset: record.offset }),
   });
   records.forEach((record, index) => {
-    if (isHiddenRecord(record)) return;
+    // A copy is left out like bookkeeping: it is not a row, and it does not end a tool run.
+    if (isHiddenRecord(record) || echoes.has(index)) return;
     const text = record.lines.join('\n');
     if (isToolRecord(record)) {
       run ??= open(record);
@@ -349,7 +402,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     }
     if (showsImages(record)) {
       // Pictures read one after another are ONE `Read N images` call in the tool run, not a card each.
-      if (run !== null || followedByImages(records, index)) {
+      if (run !== null || followedByImages(records, index, echoes)) {
         run ??= open(record);
         addImageRead(
           run,

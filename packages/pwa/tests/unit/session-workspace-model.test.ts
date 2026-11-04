@@ -1265,3 +1265,58 @@ describe('transcriptEntriesFromLog · several ferrets at once', () => {
     expect(second?.id).toBe(`${first?.id}~2`);
   });
 });
+
+describe('transcriptEntriesFromLog · the untimed copy Claude writes of a message', () => {
+  const users = (log: string) =>
+    transcriptEntriesFromLog(log, NOW)
+      .filter(entry => entry.kind === 'user')
+      .map(entry => ({ text: entry.text, at: entry.at }));
+
+  test('folds an untimed copy into the timed record that follows it', () => {
+    expect(users(['user/message: moved', '[11:00:00] user/message: moved'].join('\n'))).toEqual([
+      { text: 'moved', at: Date.UTC(2026, 9, 18, 11, 0, 0) },
+    ]);
+  });
+
+  test('folds the mid-turn copy, framed as "sent while you were working", into its timed record', () => {
+    const log = [
+      '[10:59:58] assistant/tool-call: Bash({"command":"date"})',
+      'user/message: The user sent a new message while you were working:',
+      '    look at the board',
+      '    ',
+      '    This is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.',
+      '    ',
+      '[10:59:59] tool/tool-result: Wed Nov  4 10:59:59 UTC 2026',
+      '[11:00:00] user/message: look at the board',
+    ].join('\n');
+    expect(users(log)).toEqual([{ text: 'look at the board', at: Date.UTC(2026, 9, 18, 11, 0, 0) }]);
+    // The copy is not a row, so the tool run around it stays whole.
+    expect(transcriptEntriesFromLog(log, NOW).filter(entry => entry.kind === 'tool')).toHaveLength(1);
+  });
+
+  test('keeps an untimed message no timed record repeats', () => {
+    expect(users(['user/message: moved', '[11:00:00] user/message: moved on'].join('\n'))).toEqual([
+      { text: 'moved', at: undefined },
+      { text: 'moved on', at: Date.UTC(2026, 9, 18, 11, 0, 0) },
+    ]);
+  });
+
+  test('never reaches past the agent’s reply for a twin', () => {
+    const log = ['user/message: ok', '[11:00:00] assistant/message: Done.', '[11:00:05] user/message: ok'].join('\n');
+    expect(users(log).map(entry => entry.text)).toEqual(['ok', 'ok']);
+  });
+
+  test('never folds a timed record, and pairs each copy with one record only', () => {
+    const log = [
+      '[10:59:00] user/message: ok',
+      'user/message: ok',
+      'user/message: ok',
+      '[11:00:00] user/message: ok',
+    ].join('\n');
+    expect(users(log).map(entry => entry.at)).toEqual([
+      Date.UTC(2026, 9, 18, 10, 59, 0),
+      undefined,
+      Date.UTC(2026, 9, 18, 11, 0, 0),
+    ]);
+  });
+});
