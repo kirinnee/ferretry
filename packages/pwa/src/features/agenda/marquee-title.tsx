@@ -42,11 +42,12 @@ export function MarqueeTitle({
 
   useEffect(() => {
     const outer = box.current;
-    const inner = text.current;
-    if (outer === null || inner === null) return undefined;
+    if (outer === null || text.current === null) return undefined;
     const measure = (): void => {
+      // Read the words' box each time: it moves into the toggle button once the title turns out too long.
+      const inner = text.current;
       // An expanded title wraps, so its width says nothing about the one-line row: keep what was measured.
-      if (outer.dataset.expanded !== undefined) return;
+      if (inner === null || outer.dataset.expanded !== undefined) return;
       const next = marqueeOf(inner.getBoundingClientRect().width, outer.clientWidth);
       const ruler = probe.current;
       setCut(
@@ -91,27 +92,46 @@ export function MarqueeTitle({
           '--fy-marquee-seconds': `${marquee.seconds}s`,
         } as CSSProperties);
 
+  // A title too long for its row opens to its whole words with a real button inside the heading, so a keyboard reaches
+  // it (Tab, then Enter or Space) and a screen reader hears whether it is open. A linked title (`wrap`) keeps its tap.
+  const expandable = wrap === undefined && (marquee !== null || expanded);
+  const words = (
+    <>
+      <span className="fy-item-view__title-text" ref={text}>
+        {wrap === undefined ? title : wrap(title)}
+      </span>
+      {cut === null ? null : (
+        <span aria-hidden="true" className="fy-item-view__title-cut">
+          {cut}
+        </span>
+      )}
+    </>
+  );
+
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: a tap is a convenience for a title cut short; the whole title is always in the DOM and the ⓘ panel says the rest
     <h2
       className="fy-item-view__title"
       data-agenda-title=""
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
       {...(cut === null ? {} : { 'data-cut': '' })}
-      onClick={wrap !== undefined || (marquee === null && !expanded) ? undefined : () => setExpanded(open => !open)}
       ref={box}
       style={style}
     >
-      <span className="fy-item-view__title-text" ref={text}>
-        {wrap === undefined ? title : wrap(title)}
-      </span>
-      {reduced ? <span aria-hidden="true" className="fy-item-view__title-probe" ref={probe} /> : null}
-      {cut === null ? null : (
-        <span aria-hidden="true" className="fy-item-view__title-cut">
-          {cut}
-        </span>
+      {expandable ? (
+        <button
+          aria-expanded={expanded}
+          className="fy-item-view__title-toggle"
+          data-agenda-title-toggle=""
+          onClick={() => setExpanded(open => !open)}
+          type="button"
+        >
+          {words}
+        </button>
+      ) : (
+        words
       )}
+      {reduced ? <span aria-hidden="true" className="fy-item-view__title-probe" ref={probe} /> : null}
     </h2>
   );
 }

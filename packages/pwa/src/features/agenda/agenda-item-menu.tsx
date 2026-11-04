@@ -48,6 +48,17 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
     return () => document.removeEventListener('pointerdown', onPointer);
   }, [open, sheet, onOpenChange]);
 
+  // A choice that closes the menu (a version picked, Changes, Merge with…) takes the focused control away with it: put
+  // focus back on ⋯ so a keyboard is still in the item. A press outside keeps its own target, which already has focus.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    const closed = wasOpen.current && !open;
+    wasOpen.current = open;
+    if (!closed) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body || !active.isConnected) trigger.current?.focus();
+  }, [open]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (!open || sheet || event.key !== 'Escape') return;
     // Esc closes the menu, not the item it sits on.

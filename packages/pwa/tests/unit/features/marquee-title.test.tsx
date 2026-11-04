@@ -28,7 +28,9 @@ const draw = async (title: string): Promise<void> => {
   view = await mount(<MarqueeTitle title={title} />);
 };
 const heading = (): HTMLElement => must(view?.container.querySelector<HTMLElement>('[data-agenda-title]'), 'title');
-const click = (): Promise<void> => interact(() => heading().click());
+const toggle = (): HTMLButtonElement | null => heading().querySelector<HTMLButtonElement>('[data-agenda-title-toggle]');
+/** A tap on the title: on its open-the-whole-title button when it has one, else on the heading itself. */
+const click = (): Promise<void> => interact(() => (toggle() ?? heading()).click());
 
 beforeEach(() => {
   textWidth = 300;
@@ -98,6 +100,36 @@ describe('the one-line title', () => {
     expect(heading().hasAttribute('data-marquee')).toBe(true);
     await click();
     expect(heading().hasAttribute('data-expanded')).toBe(false);
+  });
+
+  test('a title too long for its row opens with a real button in the heading, so a keyboard can open it too', async () => {
+    textWidth = 100;
+    await draw('Short');
+    expect(toggle()).toBeNull();
+    await view?.unmount();
+    textWidth = 300;
+    reduceMotion(true);
+    await draw('A title that is far too long for the row');
+    const button = must(toggle(), 'the title button');
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(heading().tagName).toBe('H2');
+    // The whole title is still the heading's words; the cut copy is only drawn.
+    expect(must(button.querySelector('.fy-item-view__title-text'), 'words').textContent).toBe(
+      'A title that is far too long for the row',
+    );
+    await interact(() => button.click());
+    expect(heading().hasAttribute('data-expanded')).toBe(true);
+    expect(must(toggle(), 'the title button').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('a linked title keeps its link: no button of its own', async () => {
+    view = await mount(
+      <MarqueeTitle title="A title that is far too long for the row" wrap={text => <a href="#x">{text}</a>} />,
+    );
+    expect(heading().hasAttribute('data-marquee')).toBe(true);
+    expect(toggle()).toBeNull();
   });
 
   test('starts folded again when the title changes, and stops watching when it goes', async () => {

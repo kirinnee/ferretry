@@ -377,6 +377,12 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const choice = await open(browserContext, theme, 'view=board&history=1');
   await openItem(choice, 'A5');
   await checkOverlay(choice, form, 'choice item', composerRest);
+  // Terms and references, and the conversation, start folded (&F920): open both before reading them.
+  for (const part of ['references', 'conversation']) {
+    const fold = choice.locator(`[data-agenda-fold="${part}"]`).first();
+    check((await fold.getAttribute('aria-expanded')) === 'false', `the ${part} fold does not start closed`);
+    await fold.click();
+  }
   check((await choice.locator('table[data-agenda-terms]').count()) === 1, 'the terms are not a table');
   const toEnd = (): Promise<void> =>
     choice.locator('.fy-item-view__body').evaluate(node => {

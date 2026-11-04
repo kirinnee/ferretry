@@ -184,12 +184,36 @@
 .fy-item-view__title[data-marquee] {
   cursor: pointer;
 }
+/* The button a too-long title opens with: it draws nothing of its own, so the heading looks the same with it. */
+.fy-item-view__title-toggle {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-overflow: inherit;
+  white-space: inherit;
+  cursor: pointer;
+}
+.fy-item-view__title-toggle:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
 .fy-item-view__title[data-expanded] {
   overflow: visible;
   white-space: normal;
   overflow-wrap: anywhere;
   align-self: flex-start;
   padding-block: 8px;
+}
+.fy-item-view__title[data-expanded] .fy-item-view__title-toggle {
+  overflow: visible;
 }
 @media (prefers-reduced-motion: no-preference) {
   .fy-item-view__title[data-marquee]:not([data-expanded]) {

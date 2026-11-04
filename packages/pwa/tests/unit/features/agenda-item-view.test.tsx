@@ -516,6 +516,8 @@ describe('the version picker', () => {
     });
     // Picking closes the menu, and the head says an earlier version is on screen.
     expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    // The picked control went with the menu: focus is back on ⋯, never dropped on the page.
+    expect(document.activeElement).toBe(one('[data-agenda-menu-toggle]'));
     expect(one('[data-agenda-shown-version]').textContent).toBe('Showing v1');
     expect(one('[data-agenda-situation]').textContent).toContain('Then: one');
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();

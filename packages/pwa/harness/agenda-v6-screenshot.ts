@@ -334,6 +334,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   // The conversation about it, at the bottom.
   await choice.mouse.click(2, 60);
   await scrollTo(choice, 'bottom');
+  // The conversation starts folded (&F920): it is opened before it is read.
+  const conversation = choice.locator('[data-agenda-fold="conversation"]').first();
+  check(
+    (await conversation.getAttribute('aria-expanded')) === 'false',
+    `history ${form} ${theme}: the conversation does not start folded`,
+  );
+  await press(conversation);
+  await scrollTo(choice, 'bottom');
   await checkHistory(choice, `history ${form} ${theme}`);
   // The reply's Markdown is laid out after the first scroll: scroll again so the last row is not under the composer.
   await choice.waitForTimeout(400);
