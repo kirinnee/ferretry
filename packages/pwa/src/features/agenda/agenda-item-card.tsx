@@ -527,8 +527,10 @@ export function AgendaItemCard({
   );
   // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
   // With card asks the item's own row is not docked: it sits inline under its ask, labelled, so two button sets never
-  // share the foot of the view and the card ask's buttons are never covered.
-  const rowInline = cardAsks.length > 0 && !isInput && planForm === undefined;
+  // share the foot of the view and the card ask's buttons are never covered. An item answered in words (a reply, its
+  // questions) has no row to label: it gets no "Your answer for this item" heading over nothing (&B156).
+  const ownRow = model.notice || model.answers.length > 0 || requestChanges !== undefined;
+  const rowInline = cardAsks.length > 0 && !isInput && planForm === undefined && ownRow;
   const docked =
     answerDock != null &&
     latest &&

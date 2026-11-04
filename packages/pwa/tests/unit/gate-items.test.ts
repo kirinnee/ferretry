@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { type AgendaItem, gateAnswers, gateAskOptions } from '@ferretry/protocol';
 import { swipeTargets } from '../../src/lib/agenda-answers.ts';
+import { cardModel } from '../../src/lib/agenda-card-model.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
   attachedGateLead,
@@ -16,7 +17,7 @@ import {
   toTestBesideGates,
 } from '../../src/lib/gate-items.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
-import { agendaItem } from '../support/agenda-inbox.tsx';
+import { agendaItem, choices } from '../support/agenda-inbox.tsx';
 import { boardModelOf, card } from './board-support.ts';
 
 const gate = (labels: readonly [string, 'next' | 'lane' | 'reopen-with-agenda' | 'close'][], cardId = 'F1') =>
@@ -172,6 +173,35 @@ describe('a gate attached to a thread', () => {
     const review = { ...twoOptions, laneName: 'Review', options: [{ ...twoOptions.options[0], outcome: 'advance' }] };
     expect(attachedGateLead({ ...review, cardTitle: 'Badge colour' } as never)).toBe('Badge colour is at Review.');
     expect(attachedGateLead(review as never)).toBe('It is at Review.');
+  });
+
+  // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and drew no button for it.
+  test('keeps none of the thread’s own answer shape, so a thread of questions, steps or a form still offers the card’s options', () => {
+    const plan = gate([['OK to build', 'next']], 'F923');
+    const hosts: Partial<AgendaItem>[] = [
+      {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'a' }, { question: 'b' }, { question: 'c' }],
+      },
+      { kind: 'task', ask: { kind: 'task' } as never, steps: ['Open it', 'Rotate it'], stepsDone: [0] },
+      { kind: 'form', ask: { kind: 'open-question' }, fields: [{ id: '1', type: 'text', question: 'Why?' }] as never },
+      {
+        kind: 'choice',
+        ask: choices('Red', 'Blue'),
+        optionDetails: [{ label: 'Red', detail: 'warm' }],
+        recommendation: { decision: 'Red', why: 'warm' },
+      } as Partial<AgendaItem>,
+    ];
+    for (const host of hosts) {
+      const view = attachedGateView(agendaItem('A304', { ...host, gateAttached: plan } as Partial<AgendaItem>));
+      expect(view?.questions).toBeUndefined();
+      expect(view?.steps).toBeUndefined();
+      expect(view?.fields).toBeUndefined();
+      expect(view?.recommendation).toBeUndefined();
+      // A one-option gate offers "Not yet" beside it, as on every gate surface.
+      expect(cardModel(view as AgendaItem).answers.map(answer => answer.label)).toEqual(['Not yet', 'OK to build']);
+    }
   });
 
   test('is nothing for an item with no attachment, a gate item or a notice', () => {

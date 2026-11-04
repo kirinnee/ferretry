@@ -13,6 +13,8 @@
  *   ?view=gate            a GATE item open ("Try it", the card's How to test as its body, Done / Not good)
  *   ?view=gate-list       the list with that gate item first among the question items (one stream)
  *   ?view=ask-gate        a QUESTION item (blue or green?) that also carries a card ask for &F61 (`not-good-ask-screenshot.ts`)
+ *   ?view=ask-plan-questions  !A304's shape (&B156): a REPLY item with three numbered questions that carries the card ask
+ *                         "OK to build" for &F923 (`card-ask-questions-screenshot.ts`)
  *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
  *   ?view=gate-noproject  a gate item with NO project open: its header opens on the ferret, no stray dot
  *   ?view=open-longtitle  an item with a LONG title open: it folds onto two lines, never cut mid-word
@@ -33,7 +35,6 @@
 import { type AgendaItem, boardOk, type SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createAppStore, StoreProvider } from '../src/lib/store.tsx';
 import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
@@ -46,6 +47,7 @@ import type { DaemonBoardStore } from '../src/lib/board-store.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
+import { createAppStore, StoreProvider } from '../src/lib/store.tsx';
 import { toTestCards, withProjectName, withTaskName } from '../src/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
@@ -335,6 +337,33 @@ const ASK_GATE = item('A71', 6, 'judson', {
   ],
 } as unknown as Partial<AgendaItem>);
 const ASK_GATE_CARD = card(ASK_GATE, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+const PLAN_ASK = {
+  cardId: 'F923',
+  cardTitle: 'Agenda body tabs',
+  laneId: 'plan',
+  laneName: 'Plan',
+  entry: 1,
+  projectId: 'p1',
+  projectName: 'ferretry',
+  options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }],
+} as const;
+const ASK_PLAN_QUESTIONS = item('A304', 8, 'lizzette', {
+  title: 'Agenda redesign: building now',
+  subject: 'Three things to settle while the agenda redesign is built',
+  kind: 'reply',
+  ask: { kind: 'open-question' },
+  stage: 'plan',
+  questions: [
+    { question: 'Should Not needed stay behind the ⋯ menu?' },
+    { question: 'Keep the conversation folded by default?' },
+    { question: 'Which tab opens first: Where we are now, or the last one you read?' },
+  ],
+  premise: '- The item view is being rebuilt in four PRs',
+  context: '- The tabs plan (&F923) waits for your OK to build',
+  gateAttached: PLAN_ASK,
+  cardAsks: [{ gate: PLAN_ASK, at: ago(7) }],
+} as unknown as Partial<AgendaItem>);
+const ASK_PLAN_QUESTIONS_CARD = card(ASK_PLAN_QUESTIONS, chat(ferret('lz', 'lizzette', 'Agenda redesign')), 'studio');
 const LONG_TITLE = item('A111', 6, 'ottilie', {
   title:
     'Three answers for the catalog before I can finish the relay setup tonight, and the three layouts I would keep if you can spare one more minute',
@@ -411,6 +440,7 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
   'ask-gate': ASK_GATE_CARD,
+  'ask-plan-questions': ASK_PLAN_QUESTIONS_CARD,
   'orphan-one': ORPHAN_ONE,
   'orphan-three': ORPHAN_THREE,
   'orphan-list': ORPHAN_ONE,

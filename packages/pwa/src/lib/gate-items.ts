@@ -71,10 +71,23 @@ export const gateWhySubject = (item: AgendaItem, action: InboxAction): string =>
 /**
  * The gate attached to a thread, drawn as the gate item it would be: the same options in the same directions, so the
  * thread's second answer row reads and swipes exactly like the card's own gate item. `undefined` for any other item.
+ *
+ * The thread's OWN answer shape is left behind (&B156): its questions, steps, form fields, option details and
+ * recommendation are the thread's ask, not the card's. Carried over, a thread with several questions made the card
+ * ask read as "several questions — answer in words", and its OK to build button was never drawn.
  */
 export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
-  const { gateAttached, waitingOn, ...rest } = item;
-  void waitingOn;
+  const {
+    gateAttached,
+    waitingOn: _waitingOn,
+    questions: _questions,
+    steps: _steps,
+    stepsDone: _stepsDone,
+    fields: _fields,
+    optionDetails: _optionDetails,
+    recommendation: _recommendation,
+    ...rest
+  } = item;
   if (gateAttached === undefined || item.gate !== undefined || item.notice === true) return undefined;
   return {
     ...rest,

@@ -354,6 +354,38 @@ describe('what it needs from you', () => {
     expect(root().querySelector('[data-agenda-reference="link"]')).toBeNull();
   });
 
+  // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and the app drew no button for it.
+  test('draws a card ask’s own buttons on a thread of questions, which is still answered in words', async () => {
+    const plan = {
+      ...gate,
+      cardId: 'F923',
+      laneId: 'plan',
+      laneName: 'Plan',
+      options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }],
+    };
+    const acted = await draw(
+      agendaItem('A304', {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        stage: 'plan',
+        questions: [{ question: 'One?' }, { question: 'Two?' }, { question: 'Three?' }],
+        premise: '- p',
+        context: '- c',
+        gateAttached: plan,
+        cardAsks: [{ gate: plan, at: '2026-08-01T11:00:00.000Z' }],
+      } as unknown as Partial<AgendaItem>),
+    );
+    const needs = one('[data-agenda-part="needs"]');
+    const ask = must(needs.querySelector('[data-agenda-card-ask="gate:F923:plan:3"]'), 'the card ask');
+    const ok = must(ask.querySelector<HTMLButtonElement>('[data-agenda-option="OK to build"]'), 'OK to build');
+    // The thread's own questions are still asked, in words, with no buttons and no empty heading of their own.
+    expect(needs.textContent).toContain('Three?');
+    expect(needs.querySelector('[data-agenda-item-answer]')).toBeNull();
+    await interact(() => ok.click());
+    expect(acted).toHaveLength(1);
+    expect(acted[0]).toMatchObject({ gate: true, cardAsk: 'gate:F923:plan:3' });
+  });
+
   test('draws no card ask on an earlier version, which only reads', async () => {
     await draw(full);
     const picker = one<HTMLSelectElement>('[data-agenda-version-picker]');
