@@ -6,11 +6,12 @@
  * ONE COLUMN, the composer's own width at every breakpoint, top to bottom:
  *
  *   head     ONE row: the title (one line; it scrolls when too long), how urgent it is (Blocking now, Needed by 17:00),
- *            ‹ n of N ›, the snooze clock, ⓘ and ✕. The item's ask is behind ⓘ, in a panel under the row
+ *            ‹ n of N ›, the snooze clock, ⓘ and ✕. A host's quiet tools (the Inbox's Skip) are behind ⓘ, in a panel
+ *            under the row; a gate item keeps its summary there too, since its card repeats nothing
  *   card     the item in the spec's nine parts (`agenda-item-card.tsx`; the order is `agenda-item-sections.ts`'s): its
- *            state and stage chips, premise and context, the folded detailed context, the terms and references table,
- *            where we are now, the conversation, what it needs from the owner (the ask and every card ask, each with
- *            its own buttons), the body, and the folded activity log
+ *            description, state and stage chips, premise and context, the folded detailed context, the terms and
+ *            references table, where we are now, what it needs from the owner (the ask and every card ask, each with
+ *            its own buttons), the body (the full picture), then the log: the conversation and the folded activity
  *
  * OPENED AT ITS ASK (`startAt: 'ask'`): a Needs-you push and a link that names the item open it scrolled to "What I need
  * from you", with that part focused, so the owner lands on what to do; the keys still answer from there. Each tap
@@ -202,7 +203,10 @@ export function AgendaItemView({
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const urgent = status !== null && URGENT_TONES.has(status.tone) ? status : null;
-  const hasInfo = head.description !== null || tools !== undefined;
+  // The card draws the description under the title, whole; only a gate item, whose card repeats nothing, keeps it
+  // behind ⓘ.
+  const infoDescription = item.gate === undefined ? null : head.description;
+  const hasInfo = infoDescription !== null || tools !== undefined;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
@@ -286,9 +290,9 @@ export function AgendaItemView({
               <div className="fy-item-view__info" data-agenda-info-panel="" hidden={!infoOpen} id={infoId}>
                 {infoOpen ? (
                   <>
-                    {head.description === null ? null : (
+                    {infoDescription === null ? null : (
                       <div className="fy-item-view__desc" data-agenda-ask="">
-                        {renderProse(head.description)}
+                        {renderProse(infoDescription)}
                       </div>
                     )}
                     {tools}

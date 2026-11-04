@@ -1,15 +1,18 @@
 /**
  * THE ITEM VIEW'S NINE PARTS, as pure decisions (docs/agenda.md § The item view). One item view everywhere — the chat,
- * the Inbox, the side panel — reads top to bottom:
+ * the Inbox, the side panel — reads top to bottom. The body is the item's LIVE DOCUMENT (the owner: "the chat is the
+ * stream of log, the body is the DB"), so the four parts that say what this is and what it needs come first, the body
+ * after them, and the log — the conversation and the activity — at the bottom:
  *
- *   1 head          the title, the STATE chip and the STAGE chip (and the slot a version control sits in)
+ *   1 head          the title, the description (the item's summary), the STATE chip and the STAGE chip (and the slot a
+ *                   version control sits in)
  *   2 premise       premise and context: may be long, and may assume what the owner already knows
  *   3 detail        the context explained from zero (`detail`): FOLDED by default
  *   4 references    one TABLE of every term and every PR, card or link, each with a plain meaning
- *   5 where         where we are now (`whereWeAre`), holding any explainer or report the owner asked for
- *   6 conversation  the owner's and the ferret's words, oldest first
- *   7 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
- *   8 body          reports and details (Markdown with fy-render)
+ *   5 where         where we are now (`whereWeAre`): a SHORT status — where things stand, what is decided, what is open
+ *   6 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
+ *   7 body          the full picture: the live document — report, explainer, steps or status (Markdown with fy-render)
+ *   8 conversation  the owner's and the ferret's words, oldest first: the log, never a second copy of the body
  *   9 activity      the grey "updated / moved / snoozed" lines: FOLDED, kept apart from the conversation
  *
  * Nothing here draws anything, and nothing here cuts text short: every line is kept whole.
@@ -35,9 +38,9 @@ export const ITEM_VIEW_PARTS = [
   'detail',
   'references',
   'where',
-  'conversation',
   'needs',
   'body',
+  'conversation',
   'activity',
 ] as const;
 export type ItemViewPart = (typeof ITEM_VIEW_PARTS)[number];
@@ -50,9 +53,9 @@ export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premis
   detail: 'Detailed context',
   references: 'Terms and references',
   where: 'Where we are now',
-  conversation: 'Conversation',
   needs: 'What I need from you',
-  body: 'More detail',
+  body: 'The full picture',
+  conversation: 'Conversation',
   activity: 'Activity',
 };
 
@@ -143,7 +146,7 @@ export const referenceRows = (item: Pick<AgendaItem, 'terms' | 'links'>): readon
 ];
 
 // ---------------------------------------------------------------------------------------------------
-// 7. Card asks
+// 6. Card asks
 // ---------------------------------------------------------------------------------------------------
 
 /**

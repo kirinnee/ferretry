@@ -496,9 +496,10 @@ describe('the sections compared', () => {
     expect(diffItems(after, before).find(section => section.key === 'body')?.status).toBe('removed');
   });
 
-  test('leaves out a section neither version has, and keeps reading order', () => {
+  test('leaves out a section neither version has, lists the body first, then keeps reading order', () => {
     const keys = diffItems(before, after).map(section => section.key);
     expect(keys).not.toContain('steps');
+    expect(keys[0]).toBe('body');
     expect(keys.indexOf('title')).toBeLessThan(keys.indexOf('whereWeAre'));
     expect(keys.indexOf('whereWeAre')).toBeLessThan(keys.indexOf('ask'));
   });
@@ -513,7 +514,8 @@ describe('the sections compared', () => {
 
   test('picks out the changed sections and says what changed in one line', () => {
     const diff = diffItems(before, after);
-    expect(changedSections(diff).map(section => section.key)).toEqual(['stage', 'terms', 'whereWeAre', 'ask', 'body']);
+    // The body leads: it is the item's live document, the thing that is versioned.
+    expect(changedSections(diff).map(section => section.key)).toEqual(['body', 'stage', 'terms', 'whereWeAre', 'ask']);
     expect(diffSummary(diff)).toMatch(/^5 sections changed · \+\d+ words · −\d+ words?$/u);
     expect(diffSummary(diffItems(before, before))).toBe('Nothing changed');
     expect(diffSummary(diffItems(item({ title: 'A' }), item({ title: 'A b' })))).toBe(

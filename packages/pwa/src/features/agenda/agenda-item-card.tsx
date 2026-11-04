@@ -2,18 +2,21 @@
  * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's nine parts, top to bottom
  * (`agenda-item-sections.ts` owns the order; the view's sticky row above holds the title):
  *
- *   1 head          the STATE chip ("Needs you", "Resting · waiting on Zoe") and the STAGE chip ("Question", "Test"),
- *                   then the version slot (the picker, "v2 of 2 · 3m ago") and "Not needed" (the ↓ swipe skips)
+ *   1 head          the DESCRIPTION (the item's summary, whole), then the STATE chip ("Needs you", "Resting · waiting
+ *                   on Zoe") and the STAGE chip ("Question", "Test"), then the version slot (the picker, "v2 of 2 ·
+ *                   3m ago") and "Not needed" (the ↓ swipe skips)
  *   2 premise       PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks
  *   3 detail        the context explained from zero (`detail`), FOLDED
  *   4 references    ONE TABLE of every term and every link (PR, card, file, page), each with a plain meaning; links
  *                   are drawn by the one reference renderer
- *   5 where         WHERE WE ARE NOW (`whereWeAre`): the report or explainer the owner asked for, the ferret's answer
- *                   to their question, what is decided so far and what is still open
- *   6 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`)
- *   7 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
- *                   recommendation, the steps, the impact, EVERY CARD ASK with its own buttons, and the answer row
- *   8 body          reports and details (Markdown with fy-render): More detail, or a review's Reasoning
+ *   5 where         WHERE WE ARE NOW (`whereWeAre`): a short status — where things stand, the ferret's answer to the
+ *                   owner's question, what is decided so far and what is still open
+ *   6 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
+ *                   recommendation, the steps, the impact, EVERY CARD ASK with its own buttons, and the answer row;
+ *                   marked out while the item needs the owner
+ *   7 body          THE FULL PICTURE: the item's live document, rewritten on every change (Markdown with fy-render),
+ *                   or a review's Reasoning
+ *   8 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`): the log
  *   9 activity      the grey "updated / moved / snoozed" lines, FOLDED (`agenda-activity-log.tsx`)
  *
  * A part the item does not carry is not drawn. Nothing is cut short: a long report, reply or edit line is drawn whole.
@@ -34,6 +37,7 @@ import { Check } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
+import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
@@ -430,6 +434,10 @@ export function AgendaItemCard({
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
   const foldKey = itemKey ?? item.id;
+  // The head's description: the item's summary under its title, drawn whole (the view's sticky row holds the title).
+  // A gate item repeats nothing, and a notice drawn with its cards lists them as rows (its summary is the same lines,
+  // for an older app): neither has one.
+  const description = cardsForm === undefined ? agendaCardHead(item).description : null;
   // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
   // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
   const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
@@ -541,52 +549,60 @@ export function AgendaItemCard({
       data-agenda-version={shown}
       data-kind={meta.tone}
     >
-      {/* 1. HEAD: where it stands and what it is now, then the version slot (a diff control joins it) and Not needed. */}
-      <div className="fy-card__top" data-agenda-card-top="" data-agenda-part="head" {...pull}>
-        <span className="fy-card__chips">
-          <span className="fy-card__state" data-agenda-state={state.state}>
-            {state.label}
-          </span>
-          {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. */}
-          {gated ? null : (
-            <span
-              className="fy-card__type"
-              data-agenda-stage={stage}
-              data-agenda-type={meta.kind}
-              data-tone={meta.tone}
-            >
-              {STAGE_WORDS[stage]}
+      {/* 1. HEAD: the description, whole; where it stands and what it is now, then the version slot (a diff control joins
+          it) and Not needed. */}
+      <div className="fy-card__head" data-agenda-part="head">
+        {gated || description === null ? null : (
+          <div className="fy-card__desc" data-agenda-description="">
+            {renderProse(description)}
+          </div>
+        )}
+        <div className="fy-card__top" data-agenda-card-top="" {...pull}>
+          <span className="fy-card__chips">
+            <span className="fy-card__state" data-agenda-state={state.state}>
+              {state.label}
             </span>
-          )}
-        </span>
-        <span className="fy-card__tools">
-          <span className="fy-card__version-slot" data-agenda-version-slot="">
-            {versions === undefined ? null : (
-              <DiffToggle controls={diffId} onToggle={() => setDiffOpen(open => !open)} open={diffOpen} />
+            {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. */}
+            {gated ? null : (
+              <span
+                className="fy-card__type"
+                data-agenda-stage={stage}
+                data-agenda-type={meta.kind}
+                data-tone={meta.tone}
+              >
+                {STAGE_WORDS[stage]}
+              </span>
             )}
-            {count > 1 ? (
-              <VersionPicker
-                asEdits={versions !== undefined}
-                item={current}
-                now={now}
-                onShow={setShown}
-                shown={shown}
-              />
+          </span>
+          <span className="fy-card__tools">
+            <span className="fy-card__version-slot" data-agenda-version-slot="">
+              {versions === undefined ? null : (
+                <DiffToggle controls={diffId} onToggle={() => setDiffOpen(open => !open)} open={diffOpen} />
+              )}
+              {count > 1 ? (
+                <VersionPicker
+                  asEdits={versions !== undefined}
+                  item={current}
+                  now={now}
+                  onShow={setShown}
+                  shown={shown}
+                />
+              ) : null}
+            </span>
+            {canDismiss ? (
+              <button
+                aria-label="Not needed"
+                className="fy-card__dismiss"
+                data-agenda-dismiss=""
+                disabled={busy}
+                onClick={dismiss}
+                type="button"
+              >
+                Not needed
+              </button>
             ) : null}
           </span>
-          {canDismiss ? (
-            <button
-              aria-label="Not needed"
-              className="fy-card__dismiss"
-              data-agenda-dismiss=""
-              disabled={busy}
-              onClick={dismiss}
-              type="button"
-            >
-              Not needed
-            </button>
-          ) : null}
-        </span>
+        </div>
       </div>
       {versions !== undefined && diffOpen ? <VersionDiffPanel id={diffId} now={now} versions={versions} /> : null}
       {latest ? <AgendaLineage item={current} merge={merge} renderProse={renderProse} titles={lineageTitles} /> : null}
@@ -637,10 +653,14 @@ export function AgendaItemCard({
             ) : null}
           </Part>
         ) : null}
-        {/* 6. CONVERSATION, oldest first. */}
-        <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
-        {/* 7. WHAT I NEED FROM YOU: the ask, then every card ask with its own buttons, then the answer row. */}
-        <div className="fy-card__part" data-agenda-part="needs" tabIndex={-1}>
+        {/* 6. WHAT I NEED FROM YOU: the ask, then every card ask with its own buttons, then the answer row. While the item
+            needs the owner it is marked out, so the one thing to do is the thing the eye lands on. */}
+        <div
+          className="fy-card__part"
+          data-agenda-part="needs"
+          {...(answerable && state.state === 'needs-you' ? { 'data-agenda-needs-you': '' } : {})}
+          tabIndex={-1}
+        >
           {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
           {inputDrawn ? null : (
             <AgendaNeed
@@ -796,7 +816,7 @@ export function AgendaItemCard({
           )}
         </div>
       </TermLayer>
-      {/* 8. BODY: reports and details. */}
+      {/* 7. BODY: the full picture, the item's live document, drawn open and whole. */}
       {body === null || model.notice || gated ? null : (
         <Part part="body" title={kind === 'review' ? 'Reasoning' : PART_TITLES.body}>
           <div data-agenda-section={kind === 'review' ? 'reasoning' : 'more'}>
@@ -804,6 +824,8 @@ export function AgendaItemCard({
           </div>
         </Part>
       )}
+      {/* 8. CONVERSATION, oldest first: the log, at the bottom. */}
+      <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
       {/* 9. ACTIVITY LOG: folded. */}
       <AgendaActivityLog ferret={ferret} item={current} itemKey={foldKey} now={now} />
     </article>

@@ -311,6 +311,24 @@
   text-transform: uppercase;
 }
 
+/* PART 1, THE HEAD: the description (the item's summary, whole, under the view's title), then the top bar. */
+.fy-card__head {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-card__desc {
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-md, 16px);
+  line-height: var(--leading-normal, 1.5);
+  overflow-wrap: anywhere;
+}
+.fy-card__desc :is(p, .md) {
+  margin: 0;
+  color: inherit;
+}
 /* The top bar (part 1, the head's chips): the state and the stage, then the version slot and "Not needed" on the right. */
 .fy-card__top {
   display: flex;
@@ -654,6 +672,17 @@
 }
 .fy-card__need-title {
   color: var(--fg);
+}
+/* While the item NEEDS THE OWNER, its ask is the one thing marked out: an accent frame, a bar down its edge and a tint,
+   with the heading in the accent. The words still say it ("What I need from you"), so it is never colour alone. */
+.fy-card__part[data-agenda-needs-you] > .fy-card__need {
+  border-color: var(--accent);
+  border-left: var(--stroke-heavy) solid var(--accent);
+  padding-left: 14px;
+  background: var(--accent-soft);
+}
+.fy-card__part[data-agenda-needs-you] > .fy-card__need > .fy-card__need-title {
+  color: var(--accent);
 }
 .fy-card__need-part {
   display: flex;
@@ -1259,7 +1288,8 @@
 /* On a phone the card is already inside the open item's frame, so a form's "What I need from you" drops its own frame:
    three nested boxes would squeeze the fields. */
 @media (max-width: 639px) {
-  .fy-card__need[data-agenda-need='form'] {
+  .fy-card__need[data-agenda-need='form'],
+  .fy-card__part[data-agenda-needs-you] > .fy-card__need[data-agenda-need='form'] {
     padding: 0;
     border: 0;
     background: transparent;
