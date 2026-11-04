@@ -105,6 +105,17 @@ describe('fy-render html kit stylesheet', () => {
       should(FY_RENDER_HTML_KIT_CSS).containEql(`var(${name}`);
   });
 
+  test('should keep a visible focus ring on the range input', () => {
+    should(FY_RENDER_HTML_KIT_CSS).match(/\.fy-range:focus-visible\{[^}]*outline:2px solid var\(--accent\)/u);
+    should(FY_RENDER_HTML_KIT_CSS).not.match(/\.fy-range:focus-visible\{outline:none\}/u);
+  });
+
+  test('should tone a chip for every numeric data-tone 1–8', () => {
+    for (let tone = 1; tone <= 8; tone += 1)
+      should(FY_RENDER_HTML_KIT_CSS).containEql(`.fy-chip[data-tone="${tone}"]{`);
+    should(FY_RENDER_HTML_KIT_CSS).containEql('.fy-chip[data-tone="good"]');
+  });
+
   test('should leave a static fragment page-level rules out', () => {
     should(FY_RENDER_HTML_COMPONENT_CSS).not.match(/(^|\})html\{/u);
     should(FY_RENDER_HTML_COMPONENT_CSS).not.match(/(^|\})body\{/u);

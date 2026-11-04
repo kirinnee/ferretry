@@ -177,9 +177,16 @@ const toneRules = (): string => {
     ...Array.from({ length: 8 }, (_, index) => [String(index + 1), `viz-${index + 1}`] as const),
     ...Object.entries(NAMED_TONES),
   ];
+  const chipRule = (tone: string, token: string): string =>
+    tone === 'muted'
+      ? `.fy-chip[data-tone="muted"]{color:var(--muted)}`
+      : /^[1-8]$/u.test(tone)
+        ? `.fy-chip[data-tone="${tone}"]{background:color-mix(in srgb,var(--${token}) 18%,transparent);color:var(--fg)}`
+        : '';
   return pairs
     .map(
       ([tone, token]) =>
+        chipRule(tone, token) +
         `.fy-bar[data-tone="${tone}"],.fy-swatch[data-tone="${tone}"],.fy-meter[data-tone="${tone}"]{--fy-tone:var(--${token})}` +
         `svg [data-tone="${tone}"]{fill:var(--${token})}svg [data-tone="${tone}"][fill="none"]{fill:none;stroke:var(--${token})}`,
     )
@@ -211,8 +218,8 @@ const COMPONENT_CSS = `
 .fy-range::-moz-range-progress{height:4px;border-radius:var(--radius-pill,999px);background:var(--accent)}
 .fy-range::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border-radius:50%;border:2px solid var(--accent);background:var(--bg,Canvas)}
 .fy-range::-moz-range-thumb{width:12px;height:12px;border-radius:50%;border:2px solid var(--accent);background:var(--bg,Canvas)}
-.fy-range:focus-visible{outline:none}
-.fy-range:focus-visible::-webkit-slider-thumb{box-shadow:var(--focus-shadow,0 0 0 2px var(--accent-soft))}
+.fy-range:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-pill,999px)}
+.fy-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 2px var(--accent-soft)}
 .fy-toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:var(--text-sm,13px)}
 .fy-toggle>input{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:30px;height:18px;margin:0;border-radius:var(--radius-pill,999px);background:var(--surface-3,var(--border));transition:background .15s;cursor:pointer}
 .fy-toggle>input::before{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--bg,Canvas);transition:transform .15s}
