@@ -848,7 +848,7 @@ describe('What I need from you', () => {
     expect(wanted[0]).toContain('Monday / Friday');
     expect(wanted[0]).toContain('Suggested: Monday');
     expect(wanted[2]).toContain('Your work email?');
-    expect(lead()).toBe('Reply with your answers below, numbered.');
+    expect(lead()).toBe('Reply with your answers below, numbered. Skip any you like.');
     expect(root().querySelector('[data-agenda-pick], [data-agenda-send-answers], [data-agenda-option]')).toBeNull();
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
     await pressKey(one('.fy-item-view'), 'ArrowRight');
@@ -1213,21 +1213,19 @@ describe('a form card', () => {
     expect(no.getAttribute('aria-pressed')).toBe('true');
   });
 
-  test('the picked row is filled, apart from the Recommended tag, and a required field with no pick says so', async () => {
+  test('the picked row is filled, apart from the Recommended tag, and no field says it needs an answer (&F922)', async () => {
     await draw(form, { formKey: 'view-test-state' });
     const rows = [...root().querySelectorAll<HTMLLabelElement>('label.fy-form__option')];
     expect(rows.map(row => row.hasAttribute('data-on'))).toEqual([true, false, false, false]);
-    const needed = [...root().querySelectorAll('[data-agenda-form-needed]')].map(node =>
-      node.closest('[data-agenda-form-field]')?.getAttribute('data-agenda-form-field'),
-    );
-    expect(needed).toEqual(['2', '3']);
+    // Every field is optional: nothing is flagged, and no field says "optional" either.
+    expect(root().querySelector('[data-agenda-form-needed]')).toBeNull();
+    expect(root().textContent).not.toContain('optional');
     const us = must(rows[1]?.querySelector('input'), 'US');
     await interact(() => us.click());
     expect(rows.map(row => row.hasAttribute('data-on'))).toEqual([false, true, false, false]);
     const no = yesNoButton('No');
     await interact(() => no.click());
     expect(no.querySelector('.fy-form__seg-check')).not.toBeNull();
-    expect(root().querySelectorAll('[data-agenda-form-needed]')).toHaveLength(1);
   });
 
   test('a foot counts what is answered on the card and says how to send, in place of the box’s own line', async () => {
@@ -1243,6 +1241,22 @@ describe('a form card', () => {
     expect(one('[data-agenda-form-foot]').hasAttribute('data-done')).toBe(true);
   });
 
+  test('a recommended pick can be taken back: Clear on a pick-one, the pressed Yes/No half again (&F922)', async () => {
+    await draw(form, { formKey: 'view-test-clear' });
+    expect(one('[data-agenda-form-progress]').textContent).toBe('1 of 3 answered');
+    const clear = one<HTMLButtonElement>('[data-agenda-form-clear]');
+    expect(clear.getAttribute('aria-label')).toBe('Clear answer 1');
+    await interact(() => clear.click());
+    const radios = [...root().querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map(radio => radio.checked)).toEqual([false, false]);
+    expect(root().querySelector('[data-agenda-form-clear]')).toBeNull();
+    expect(one('[data-agenda-form-progress]').textContent).toBe('0 of 3 answered');
+    await interact(() => yesNoButton('Yes').click());
+    expect(yesNoButton('Yes').getAttribute('aria-pressed')).toBe('true');
+    await interact(() => yesNoButton('Yes').click());
+    expect(yesNoButton('Yes').getAttribute('aria-pressed')).toBe('false');
+  });
+
   test('without a form key it only reads: no controls, and it says where to answer', async () => {
     await draw(form);
     expect(root().querySelector('input')).toBeNull();
@@ -1250,7 +1264,6 @@ describe('a form card', () => {
     expect(root().querySelector('[data-agenda-form-options]')).not.toBeNull();
     expect(root().textContent).toContain('Open this in the Inbox');
     expect(root().querySelector('[data-agenda-form-foot]')).toBeNull();
-    expect(root().querySelector('[data-agenda-form-needed]')).toBeNull();
   });
 });
 

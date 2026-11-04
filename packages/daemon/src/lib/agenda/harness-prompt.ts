@@ -144,7 +144,9 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
     context: toBullets([
       ...(failed ? ['Your last answer did not go through. The form is still open.'] : []),
       'The ferret is waiting on its own question form.',
-      several ? `It asks ${pending.questions.length} questions. Answer each one.` : 'It asks one question.',
+      several
+        ? `It asks ${pending.questions.length} questions. Answer any of them, numbered; one you skip is answered "skipped".`
+        : 'It asks one question.',
       'Your answer is typed into the form for you.',
     ]),
     howToResolve: 'Answer here and the form is filled in for you, or answer it in the Console tab.',
@@ -274,7 +276,11 @@ export type HarnessAnswerMapping =
   | { readonly ok: true; readonly answers: readonly StructuredQuestionAnswer[] }
   | { readonly ok: false; readonly reason: string };
 
-const NO_ANSWER = '(no answer)';
+/** What a question the owner skipped is answered with in the form: every question is optional (&F922). */
+export const SKIPPED_ANSWER = 'skipped';
+
+/** The words that mean "no answer" in a numbered reply: nothing, the old `(no answer)`, or skip / skipped. */
+const isSkip = (text: string): boolean => /^(?:|\(no answer\)|\(?skip(?:ped)?\)?|-|—)$/iu.test(text.trim());
 
 /** One answer in words, as the form takes it: the option it names, the options a multi-select lists, else text. */
 function answerFor(question: PendingQuestionItem, text: string): StructuredQuestionAnswer {
@@ -304,6 +310,34 @@ function numberedAnswers(text: string, count: number): readonly string[] | undef
   });
 }
 
+/**
+ * A plain numbered reply — `1. EU`, then `3. yes` on a later line — as one answer per question, in order: a number
+ * starts an answer that runs until the next number, and a question with no number is skipped (`''`). `undefined` unless
+ * the reply STARTS with a number and EVERY numbered line rises and stays within the questions: nothing is guessed from
+ * prose, and a reply in the board's own `→` shape that is out of order is never read this way instead.
+ */
+function plainNumberedAnswers(text: string, count: number): readonly string[] | undefined {
+  if (text.includes('\n→ ')) return undefined;
+  const found = new Map<number, string[]>();
+  let current: string[] | undefined;
+  let last = 0;
+  for (const line of text.split('\n')) {
+    // A number counts only with a space or the line's end after it: "1.5 GB" is prose, not answer 1.
+    const head = /^\s*(\d+)[.)](?:\s+(.*))?$/u.exec(line);
+    const number = head === null ? Number.NaN : Number(head[1]);
+    if (head !== null) {
+      if (number <= last || number > count) return undefined;
+      last = number;
+      current = [head[2] ?? ''];
+      found.set(number, current);
+    } else if (current === undefined) {
+      if (line.trim() !== '') return undefined;
+    } else current.push(line);
+  }
+  if (found.size === 0) return undefined;
+  return Array.from({ length: count }, (_, index) => (found.get(index + 1) ?? []).join('\n').trim());
+}
+
 /** The owner's answer on the board, as the answers the question form is driven with. */
 export function harnessQuestionAnswers(pending: PendingQuestion, response: AgendaResponse): HarnessAnswerMapping {
   const { questions } = pending;
@@ -318,14 +352,21 @@ export function harnessQuestionAnswers(pending: PendingQuestion, response: Agend
   const answer = response.answer.trim();
   const only = questions.length === 1 ? questions[0] : undefined;
   if (only !== undefined) return { ok: true, answers: [answerFor(only, answer)] };
-  const parts = numberedAnswers(answer, questions.length);
+  const parts = numberedAnswers(answer, questions.length) ?? plainNumberedAnswers(answer, questions.length);
   if (parts === undefined)
-    return { ok: false, reason: `the reply does not answer each of the ${questions.length} questions in turn` };
-  if (parts.some(part => part === '' || part === NO_ANSWER))
-    return { ok: false, reason: 'the form needs an answer to every question' };
+    return {
+      ok: false,
+      reason: `the reply does not number its answers to the ${questions.length} questions (1. …, 2. …)`,
+    };
+  // Every question is optional (&F922): one the owner skipped is answered "skipped", so the form still goes in one go.
   return {
     ok: true,
-    answers: parts.map((part, index) => answerFor(questions[index] as PendingQuestionItem, part)),
+    answers: parts.map((part, index) => {
+      const question = questions[index] as PendingQuestionItem;
+      // An option the question offers wins over the skip words: "1. Skip" picks an offered Skip.
+      const offered = (question.options ?? []).some(option => option.label === part);
+      return !offered && isSkip(part) ? { kind: 'other', text: SKIPPED_ANSWER } : answerFor(question, part);
+    }),
   };
 }
 

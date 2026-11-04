@@ -7,14 +7,15 @@
  *   free text     "Type it below." — the composer is its answer
  *
  * The asker's recommended value is already picked and says so with a "Recommended" tag; what is PICKED is the filled
- * row (or the pressed half with its check), so the two never read alike. A required field with nothing picked says
- * "Needs an answer", and a foot pinned to the bottom of the scroller counts what is answered and says how to send —
- * so it is never hidden under the composer. The picks live in `agendaForms`; the composer's one
+ * row (or the pressed half with its check), so the two never read alike. EVERY FIELD IS OPTIONAL (&F922): nothing
+ * says a field needs an answer, and Send goes with any subset; a pick is taken back by tapping the pressed Yes/No half
+ * again, or Clear on a pick-one (a radio cannot be unticked). A foot pinned to the bottom of the scroller counts what
+ * is answered and says how to send — so it is never hidden under the composer. The picks live in `agendaForms`; the composer's one
  * Send combines them with its text (`agenda-form-send.ts`), the Inbox's and the chat's alike. Where no composer can
  * answer it (a settled item, a chat with no agenda client), the fields are a numbered list to read, not controls.
  */
 
-import { type AgendaFormField, formFieldRequired, plainLabel, YES_NO_ORDER } from '@ferretry/protocol';
+import { type AgendaFormField, plainLabel, YES_NO_ORDER } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 import { formProgress } from '../../lib/agenda-form-send.ts';
@@ -41,10 +42,9 @@ const progressWords = ({ answered, total }: { readonly answered: number; readonl
       : `All ${String(total)} answered`
     : `${String(answered)} of ${String(total)} answered`;
 
+/** A pick-many says it takes several. Nothing says optional: every field is (&F922). */
 function Hint({ field }: { readonly field: AgendaFormField }) {
-  if (field.type === 'many')
-    return <span className="fy-form__hint">(pick any{formFieldRequired(field) ? '' : ', optional'})</span>;
-  return formFieldRequired(field) || field.type === 'text' ? null : <span className="fy-form__hint">(optional)</span>;
+  return field.type === 'many' ? <span className="fy-form__hint">(pick any)</span> : null;
 }
 
 function Choices({
@@ -136,8 +136,6 @@ export function AgendaFormFields({
         {fields.map((field, index) => {
           const group = `${base}-${field.id}`;
           const live = formKey !== null;
-          const needed =
-            live && field.type !== 'text' && formFieldRequired(field) && (picks[field.id] ?? []).length === 0;
           return (
             <li className="fy-form__field" data-agenda-form-field={field.id} data-type={field.type} key={field.id}>
               <div className="fy-form__q" id={group}>
@@ -147,12 +145,19 @@ export function AgendaFormFields({
                 <div className="fy-form__label">
                   {renderProse(field.label)}
                   <Hint field={field} />
-                  {needed ? (
-                    <span className="fy-form__needed" data-agenda-form-needed="">
-                      Needs an answer
-                    </span>
-                  ) : null}
                 </div>
+                {live && field.type === 'one' && (picks[field.id] ?? []).length > 0 ? (
+                  <button
+                    aria-label={`Clear answer ${String(index + 1)}`}
+                    className="fy-form__clear"
+                    data-agenda-form-clear=""
+                    disabled={disabled}
+                    onClick={() => agendaForms.set(formKey, fields, field.id, [])}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                ) : null}
               </div>
               {field.type === 'text' ? (
                 <p className="fy-card__wanted-choices" data-agenda-form-text="">

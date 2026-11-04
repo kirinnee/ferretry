@@ -4068,6 +4068,13 @@ describe('Agenda state machine answer shapes', () => {
       should(agendaState(actual.item ?? {})).containDeep({ state: 'resting', sub: 'waiting-on-ferret' });
     });
 
+    it('should take words with no field picked as a plain reply to the form’s ask, and refuse them as other (&F922)', () => {
+      const words = succeeded(answer(form(), { kind: 'open-question', answer: 'none of these fit' }));
+      should(words.item?.ownerAnswer).containDeep({ response: { kind: 'open-question', answer: 'none of these fit' } });
+      const other = failed(answer(form(), { kind: 'other', answer: 'none of these fit' }));
+      should(other.error.code).equal('invalid');
+    });
+
     it('should refuse an answer to a field the form does not have, or a value that is not an option', () => {
       const board = form();
 
