@@ -60,7 +60,8 @@
 /* The head: ONE row — the title (one line; it scrolls when too long), then the status dot, ‹ n of N ›, the clock, ⓘ and
    ✕. A host's tools (and a gate item's or card-row notice's summary) are behind ⓘ, in a panel under the row. It
    STICKS to the top of the scroller, on the view's own ground, and takes the body's top padding for its own so the
-   card scrolls up under it, not past it. A short fade
+   card scrolls up under it, not past it. A short fade under it softens the edge the card slides beneath (invisible
+   while the head rests in place). */
 .fy-item-view__head {
   position: sticky;
   top: 0;
