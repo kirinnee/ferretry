@@ -380,12 +380,22 @@ describe('attention writing lint: a long body that may be several kinds of conte
     const two = [part('Steps', 2_500), part('Status', 2_500)].join('\n');
     const fenced = `\`\`\`md\n${long}\n\`\`\`\n${'More words. '.repeat(10)}`;
     const deep = long.replaceAll('## ', '### ');
+    // A four-backtick example showing a three-backtick block (headings and all) is one block of code; so is a tilde
+    // fence holding backticks. An unclosed fence runs to the end.
+    const nested = `\`\`\`\`md\n\`\`\`text\n${long}\n\`\`\`\n\`\`\`\``;
+    const tilde = `~~~\n\`\`\`\n${long}\n~~~`;
+    const unclosed = `\`\`\`\n${long}`;
 
     should(AGENDA_MIXED_BODY_SECTIONS).equal(3);
     should(lintAgendaWriting({ ...clean, body: short })).deepEqual([]);
     should(lintAgendaWriting({ ...clean, body: two })).deepEqual([]);
     should(lintAgendaWriting({ ...clean, body: fenced })).deepEqual([]);
     should(lintAgendaWriting({ ...clean, body: deep })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: nested })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: tilde })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: unclosed })).deepEqual([]);
+    // After a fence closes, its sections count again; a fence line with words after it does not close it.
+    should(lintAgendaWriting({ ...clean, body: `\`\`\`\`\n\`\`\`\` not yet\n\`\`\`\`\n${long}` })).have.length(1);
     should(lintAgendaWriting({ ...clean })).deepEqual([]);
   });
 });

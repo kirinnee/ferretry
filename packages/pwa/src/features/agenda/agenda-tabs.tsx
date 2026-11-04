@@ -124,6 +124,7 @@ interface Edges {
   readonly start: boolean;
   readonly end: boolean;
 }
+const NO_EDGES: Edges = { start: false, end: false };
 
 /**
  * THE TAB ROW: one real ARIA tablist (arrows, Home, End). Wider than a phone it wraps onto a second line; on a phone it
@@ -148,34 +149,45 @@ function TabRow({
   const phone = useLayoutMode() === 'drawer';
   const list = useRef<HTMLDivElement | null>(null);
   const refs = useRef(new Map<string, HTMLButtonElement>());
-  const [edges, setEdges] = useState<Edges>({ start: false, end: false });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the tabs drawn are the trigger
+  const [edges, setEdges] = useState<Edges>(NO_EDGES);
+  // What the row draws: a rename or a new Changed dot changes its width with the same number of tabs.
+  const drawn = tabs.map(tab => `${tab.id}\u0000${tab.name}\u0000${changed.has(tab.id) ? '1' : ''}`).join('\u0001');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: what the row draws is the trigger
   useLayoutEffect(() => {
     const row = list.current;
-    if (!phone || row === null) return undefined;
+    // A wrapping row hides nothing: no fade survives a phone turning into a wider screen.
+    if (!phone || row === null) {
+      setEdges(was => (was.start || was.end ? NO_EDGES : was));
+      return undefined;
+    }
     const measure = (): void => {
       const hidden = row.scrollWidth - row.clientWidth;
       const next = { start: row.scrollLeft > 1, end: hidden - row.scrollLeft > 1 };
       setEdges(was => (was.start === next.start && was.end === next.end ? was : next));
     };
-    measure();
+    // The open tab is scrolled into the row — sideways only, so opening an item never moves the page.
+    const reveal = (): void => {
+      const tab = refs.current.get(current.id);
+      if (tab === undefined) return;
+      if (tab.offsetLeft < row.scrollLeft) row.scrollLeft = Math.max(0, tab.offsetLeft - PEEK);
+      else if (tab.offsetLeft + tab.offsetWidth > row.scrollLeft + row.clientWidth)
+        row.scrollLeft = tab.offsetLeft + tab.offsetWidth - row.clientWidth + PEEK;
+    };
+    const settle = (): void => {
+      reveal();
+      measure();
+    };
+    settle();
     row.addEventListener('scroll', measure, { passive: true });
-    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    // The row resizing (a turned phone, a wider sheet) or a tab resizing (a font loading) keeps the open tab in view.
+    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(settle);
     watch?.observe(row);
+    for (const tab of refs.current.values()) watch?.observe(tab);
     return () => {
       row.removeEventListener('scroll', measure);
       watch?.disconnect();
     };
-  }, [phone, tabs.length]);
-  // The open tab is scrolled into the row — sideways only, so opening an item never moves the page.
-  useLayoutEffect(() => {
-    const row = list.current;
-    const tab = refs.current.get(current.id);
-    if (!phone || row === null || tab === undefined) return;
-    if (tab.offsetLeft < row.scrollLeft) row.scrollLeft = Math.max(0, tab.offsetLeft - PEEK);
-    else if (tab.offsetLeft + tab.offsetWidth > row.scrollLeft + row.clientWidth)
-      row.scrollLeft = tab.offsetLeft + tab.offsetWidth - row.clientWidth + PEEK;
-  }, [phone, current.id]);
+  }, [phone, drawn, current.id]);
   const order = tabs.map(tab => tab.id);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const to = nextDetailsTab(event.key, current.id, order);
@@ -188,8 +200,8 @@ function TabRow({
     <div
       className="fy-tabs__row"
       data-agenda-tab-row={phone ? 'scroll' : 'wrap'}
-      data-more-end={edges.end || undefined}
-      data-more-start={edges.start || undefined}
+      data-more-end={(phone && edges.end) || undefined}
+      data-more-start={(phone && edges.start) || undefined}
     >
       <div aria-label="Tabs" className="fy-tabs__list" onKeyDown={onKeyDown} ref={list} role="tablist">
         {tabs.map(tab => {

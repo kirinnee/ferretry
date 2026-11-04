@@ -173,13 +173,25 @@ export const AGENDA_MIXED_BODY_SECTIONS = 3;
 /** A top-level section heading: `#` or `##`, the level a report splits into parts at. */
 const SECTION_LINE = /^ {0,3}#{1,2}\s+\S/u;
 
-/** How many top-level sections the text has, outside fenced code. */
+/** A fence's run of backticks or tildes, and what follows it. */
+const FENCE_RUN = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
+
+/**
+ * How many top-level sections the text has, outside fenced code. A fence closes only on a run of the SAME character at
+ * least as long, with nothing after it, as CommonMark has it — so a four-backtick example that shows a three-backtick
+ * block, headings and all, is one block of code.
+ */
 function sectionCount(text: string): number {
-  let fenced = false;
+  let open: string | null = null;
   let count = 0;
   for (const line of text.split(/\r?\n/u)) {
-    if (FENCE_LINE.test(line)) fenced = !fenced;
-    else if (!fenced && SECTION_LINE.test(line)) count += 1;
+    const fence = FENCE_RUN.exec(line);
+    const run = fence?.[1] ?? '';
+    if (open === null) {
+      if (fence !== null) open = run;
+      else if (SECTION_LINE.test(line)) count += 1;
+    } else if (fence !== null && run[0] === open[0] && run.length >= open.length && (fence[2] ?? '').trim() === '')
+      open = null;
   }
   return count;
 }

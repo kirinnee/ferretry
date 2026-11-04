@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
+import { AgendaTabs } from '../../../src/features/agenda/agenda-tabs.tsx';
 import type { AgendaVersionsView } from '../../../src/features/agenda/use-item-lifecycle.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
@@ -283,5 +284,95 @@ describe('the tabs and the versions this device saw', () => {
     expect(open.getAttribute('aria-label')).toBe('Open the tab Risks');
     await interact(() => open.click());
     expect(selected()).toBe('risks');
+  });
+});
+
+describe('the phone row as it changes (&F946 round 1)', () => {
+  const own = [
+    { id: 'first', kind: 'own' as const, name: 'First', body: 'a' },
+    { id: 'second', kind: 'own' as const, name: 'Second', body: 'b' },
+  ];
+  const tabsOf = (tabs: typeof own, open = 'second') => (
+    <AgendaTabs
+      changed={new Set<string>()}
+      mark={text => text}
+      onOpen={() => undefined}
+      open={open}
+      renderProse={text => text}
+      tabs={tabs}
+    />
+  );
+
+  test('remeasures a renamed tab, with the same number of tabs', async () => {
+    setViewport(390);
+    view = await mount(tabsOf(own));
+    const row = one<HTMLElement>('[role="tablist"]');
+    let wide = 300;
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => wide });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: 350 });
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(false);
+    wide = 600;
+    await view.render(
+      tabsOf([{ ...own[0], name: 'A much longer renamed first tab' } as (typeof own)[0], own[1] as (typeof own)[0]]),
+    );
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(true);
+  });
+
+  test('keeps the open tab in view when the row resizes', async () => {
+    setViewport(390);
+    const original = globalThis.ResizeObserver;
+    const watched: { readonly target: Element; readonly resize: () => void }[] = [];
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: () => void) {}
+      observe(target: Element): void {
+        watched.push({ target, resize: this.callback });
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      view = await mount(tabsOf(own));
+      const row = one<HTMLElement>('[role="tablist"]');
+      const open = one<HTMLElement>('[data-agenda-tab-button="second"]');
+      let width = 350;
+      Object.defineProperty(row, 'scrollWidth', { configurable: true, value: 500 });
+      Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => width });
+      Object.defineProperty(open, 'offsetLeft', { configurable: true, value: 250 });
+      Object.defineProperty(open, 'offsetWidth', { configurable: true, value: 100 });
+      // Each tab is watched too: a font loading resizes a tab without resizing the row.
+      expect(watched.some(entry => entry.target === open)).toBe(true);
+      width = 200;
+      await interact(() => watched.find(entry => entry.target === row)?.resize());
+      expect(row.scrollLeft).toBe(250 + 100 - 200 + 24);
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
+  });
+
+  test('drops the fade when the phone becomes a wider screen', async () => {
+    setViewport(390);
+    const crossings: (() => void)[] = [];
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: () => ({
+        matches: false,
+        addEventListener: (_type: string, callback: () => void) => crossings.push(callback),
+        removeEventListener: () => undefined,
+      }),
+    });
+    await draw();
+    const row = one<HTMLElement>('[role="tablist"]');
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, value: 600 });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: 350 });
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(true);
+    await interact(() => {
+      window.innerWidth = 1440;
+      for (const crossing of crossings) crossing();
+    });
+    expect(one('[data-agenda-tab-row]').getAttribute('data-agenda-tab-row')).toBe('wrap');
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(false);
   });
 });
