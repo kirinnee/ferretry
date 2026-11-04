@@ -317,7 +317,7 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
     'Hypermedia: to teach, explain or compare anything not simple (a flow, architecture, change over time), show it, not just say it; simple answers stay plain. Inline: never publish a page or link to explain unless asked.',
-    'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point (a real card, command, before/after). Walk them through with hypermedia they drive: Next buttons, sliders, tap to reveal; gentle motion (honour prefers-reduced-motion).',
+    'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Walk them through with hypermedia they drive: Next buttons, sliders, tap to reveal; gentle motion (honour prefers-reduced-motion).',
     'A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.',
     '- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.',
     '- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or external links.',
@@ -459,8 +459,8 @@ export const AGENDA_ENV = 'FY_AGENDA';
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
     `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest. \`split\` misfits, \`merge\` items that share.`,
-    `Open: \`${fy} agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"\`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (\`--term X=meaning\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working. ALWAYS rewrite ask, still-open and tabs whole on every update (\`edit --where-file|--body-file|--tab-file Name=f\`); chat points there. Tabs hold any kind (to-dos, steps, explainers, results), one each, serial stays one, and stay there. Only you mark it \`done\` when nothing's left. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
+    `Open: \`${fy} agenda add --title --premise --context "<ask>"\`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (\`--term X=meaning\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
+    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working. Every update: \`show <id>\` whole, then \`edit\` all that's stale: premise, context, ask, options, kind, still-open, each tab (\`--where-file|--body-file|--tab-file Name=f\`); chat points there. Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there. Only you mark it \`done\` when nothing's left. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
     'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');
 
@@ -489,7 +489,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). \`${fy} task edit <id>\`: \`--status-file f\` (Now/Done so far+PRs/Next) rewritten whole each step; \`--how-to-test "<1. where 2. do 3. see>"\` before try. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
+  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id>\` whole, then \`edit\` what's stale: title, summary, \`--status-{now,done,next}\` (PRs in done); \`--how-to-test "<1. where 2. do 3. see>"\` before try. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -506,7 +506,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: keep its status current, rewritten whole each step: \`${fy} task edit <id> --status-file f\` (Now / Done so far + PR links / Next); \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none. Your final report says how the owner tests it.`,
+    `With a card: each step, read it (\`${fy} task show <id>\`), then \`${fy} task edit <id>\` its status (\`--status-{now,done,next}\`, PR links in done) and \`--how-to-test\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

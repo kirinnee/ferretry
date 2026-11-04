@@ -43,7 +43,7 @@ const SPEC_RULES: ReadonlyArray<{
   { rule: "public cards are the owner's asks", prompt: 'board', cli: 'task create', phrase: "the owner's asks" },
   { rule: 'planning is a phase', prompt: 'board', cli: 'task create', phrase: 'planning is a phase' },
   { rule: 'the board reads as a sitrep', prompt: 'board', cli: 'task create', phrase: 'sitrep' },
-  { rule: 'the status is rewritten whole', prompt: 'board', cli: 'task create', phrase: 'rewritten whole' },
+  { rule: 'read the card whole before an edit', prompt: 'board', cli: 'task create', phrase: 'whole, then' },
 ];
 
 /** Case and line breaks do not change a rule: the help wraps its lines, the prompt does not. */
@@ -124,7 +124,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'log', taught: 'log <id> --reply|--rest' },
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
-  { verb: 'edit', taught: '`edit --where-file|--body-file|--tab-file name=f`' },
+  { verb: 'edit', taught: 'then `edit` all that' },
   { verb: 'done', taught: 'mark it `done`' },
 ];
 
@@ -156,7 +156,7 @@ describe('the teaching names every agenda verb the spec lists', () => {
     // Assert
     should(prompt).not.containEql(stages.join('→'));
     should(prompt).not.containEql('`--stage`');
-    should(prompt).containEql('`edit --where-file|');
+    should(prompt).containEql('each tab (`--where-file|');
   });
 
   it('should say a resting item is quiet, a Needs-you item buzzes, and rest --why means working', () => {
@@ -186,11 +186,9 @@ describe('the teaching says the tabs are the live document and the chat is its l
     const prompt = said(AGENDA_INSTRUCTION('fy'));
 
     // Assert
-    should(prompt).containEql('always rewrite ask, still-open and tabs whole on every update');
-    should(prompt).containEql('`edit --where-file|--body-file|--tab-file name=f`');
-    should(prompt).containEql(
-      'tabs hold any kind (to-dos, steps, explainers, results), one each, serial stays one, and stay there',
-    );
+    should(prompt).containEql("every update: `show <id>` whole, then `edit` all that's stale");
+    should(prompt).containEql('(`--where-file|--body-file|--tab-file name=f`)');
+    should(prompt).containEql('tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there');
     should(prompt).containEql('chat points there');
     should(prompt).not.containEql('short status');
     should(prompt).not.containEql('one-screen summary');
@@ -211,7 +209,12 @@ describe('the teaching says the tabs are the live document and the chat is its l
     // Assert
     should(rule).containEql('the tabs are the live document; the conversation is only the log');
     // The owner (&C48): every update rewrites the ask, still-open and the tabs; tabs hold any kind; no main type.
-    should(rule).containEql('always keep the item current: every update rewrites the ask, still-open and each tab');
+    // And READ → EDIT (the owner: "we need to read to know what needs to be updated, else there might be many segments
+    // that might be outdated!"), every part of it (!A358): premise, context, the ask, its options and how to reply, tabs.
+    should(rule).containEql('always keep the item current: before every update read it whole (agenda show <id>)');
+    should(rule).containEql(
+      'premise, context, the ask (what you need from the owner), its options and how to reply, still-open and each tab',
+    );
     should(rule).containEql('tabs hold any kind of content');
     should(rule).containEql('there is no main type: "where we are now" (--where-file, or --where points)');
     should(rule).containEql('is simply the tab that opens first');

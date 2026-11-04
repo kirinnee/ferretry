@@ -89,5 +89,6 @@ export const TASK_CREATE_RULE = `ONE CARD, ONE OUTCOME. The board runs itself: a
   top-level (no --parent, no --private); a sub-card is private. Relate it to other work in --context.
   The title and summary say what the work is doing, so reading the board is a sitrep. Planning is a phase (its own
   lane), not a reason to skip the card.
-  Keep its status current: task edit <id> --status-file <file> (Now / Done so far, with PR links / Next), rewritten
-  whole at each step; task note stays the history.`;
+  At each step read the card whole, then edit every part that is stale: title, summary, How to test and the status
+  (--status-now, --status-done, --status-next: what is happening, what is done with PR links, what comes next);
+  task note stays the history.`;

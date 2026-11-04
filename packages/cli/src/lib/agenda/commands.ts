@@ -29,8 +29,10 @@ const JSON_HELP = 'print the protocol payload instead of the human rendering';
  * the Agenda-mode prompt (`AGENDA_INSTRUCTION`) says in short.
  */
 export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversation is only the log.
-  ALWAYS KEEP THE ITEM CURRENT: every update rewrites the ask, still-open and each tab that
-  changed WHOLE, so the item always holds the whole current state.
+  ALWAYS KEEP THE ITEM CURRENT: before every update read it whole (agenda show <id>), then
+  rewrite every part that is out of date — premise, context, the ask (what you need from the
+  owner), its options and how to reply, still-open and each tab — so the item always holds the
+  whole current state.
   Tabs hold ANY kind of content — status, to-dos, steps, instructions, explainers, results,
   decisions, risks. There is no main type: "Where we are now" (--where-file, or --where points)
   is simply the tab that opens first: where things stand, what is decided, what is still open —
