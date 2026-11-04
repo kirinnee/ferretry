@@ -1318,6 +1318,16 @@ and a part the item does not carry is not drawn:
   A partial thread is never drawn as a whole one, and the rebuilt thread is never swapped in for it. An owner entry is the owner's bubble (an `answer`, `needs-info` or `discuss` keeps its form), a ferret
   entry is the ferret's, a daemon entry is drawn under "Ferretry", and an entry the ferret copied from the owner's chat
   (`fromChat`) carries a **from chat** tag.
+- **The conversation looks like the chat (&F921).** It is drawn with the chat's own rows, never bespoke ones: the
+  owner's words are the chat's bubble (`OwnMessageRow`) with its time and its receipt ticks at the foot, and the
+  ferret's are the chat's agent text (`TranscriptTextRow`), its name small above and its time below. The time is the
+  chat's clock (`14:02`, the full date and time on a tap), not an age. The ticks are the chat's marks and claim only
+  what is known (`itemWordsReceipt`): a send the chat's ledger recorded is drawn exactly as the chat draws it; words
+  that are a row of the ferret's transcript, or that the ferret itself logged from the chat (`fy agenda log`), are **read** (four ticks); words
+  stored on the item are **answered** (three accent ticks) once the ferret spoke after them, and **on the machine**
+  (two ticks) until then. A chat reply the daemon stored on the item is stored once the queue accepts it, still
+  queued, so its `fromChat` mark is no proof of reading. A stored entry records no delivery, so the item never claims
+  more than that.
 - **Card asks live inside the item.** A card ready to test or approve is answered in part 6, with its own buttons,
   never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own

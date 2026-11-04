@@ -792,7 +792,7 @@ export function AgendaItemCard({
         />
       </TermLayer>
       {/* 7. CONVERSATION, oldest first: the log, at the bottom, folded. */}
-      <AgendaItemHistory events={history} ferret={ferret} itemKey={foldKey} now={now} renderProse={renderProse} />
+      <AgendaItemHistory events={history} ferret={ferret} itemKey={foldKey} renderProse={renderProse} />
       {/* 8. ACTIVITY LOG: folded. */}
       <AgendaActivityLog ferret={ferret} item={current} itemKey={foldKey} now={now} />
     </article>

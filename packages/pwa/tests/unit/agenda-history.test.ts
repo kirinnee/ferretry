@@ -260,3 +260,27 @@ describe('the history of one agenda item', () => {
     expect(events.map(event => event.at)).toEqual([0]);
   });
 });
+
+describe('how far the owner’s words got, read from the ferret’s transcript', () => {
+  const reachOf = (events: readonly HistoryEvent[]) =>
+    events.flatMap(event => (event.kind === 'owner' ? [event.reached] : []));
+
+  test('a transcript row reached the ferret, answered once the ferret spoke after it about anything', () => {
+    const send = {
+      sendId: 's1',
+      acceptedAt: '2026-08-01T10:00:00.000Z',
+      message: 'x',
+      attachmentIds: [],
+      fate: 'delivered',
+    } as const;
+    const events = itemHistory(item(), [
+      { ...entry('u1', 'user', '!A47 first', 1), send },
+      entry('a1', 'assistant', 'something else entirely', 2),
+      entry('u2', 'user', '!A47 second', 3),
+    ]);
+    expect(reachOf(events)).toEqual([
+      { via: 'transcript', answered: true, send },
+      { via: 'transcript', answered: false },
+    ]);
+  });
+});
