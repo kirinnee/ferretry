@@ -201,6 +201,12 @@
   white-space: inherit;
   cursor: pointer;
 }
+/* The phone's 44px floor for every button (styles/index.css) would make the heading two lines tall: the title row keeps
+   its one line, and the head row it sits in is already a finger's height. Two classes, to outrank `:root button`. */
+.fy-item-view__title .fy-item-view__title-toggle {
+  min-height: 0;
+  min-width: 0;
+}
 .fy-item-view__title-toggle:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: -2px;
