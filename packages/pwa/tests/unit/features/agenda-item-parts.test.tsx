@@ -51,10 +51,10 @@ const full = agendaItem('A47', {
     { label: 'The change this item is about', target: 'https://github.com/kirinnee/ferretry/pull/1428' },
     { target: '&F12' },
   ],
-  whereWeAre: REPORT,
+  whereWeAre: '- The two colours are tested; the pick is yours',
   decided: '- The shape stays round',
   stillOpen: '- The colour',
-  body: 'More about the colours.',
+  body: REPORT,
   gateAttached: gate,
   revisions: [
     { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Which badge?' } },
@@ -108,11 +108,19 @@ describe('the item view’s parts', () => {
       'detail',
       'references',
       'where',
-      'conversation',
       'needs',
       'body',
+      'conversation',
       'activity',
     ]);
+  });
+
+  test('keep the log at the bottom: the conversation and the activity come after the body, never between the asks', async () => {
+    await draw(full, {}, conversation);
+    const order = parts();
+    expect(order.indexOf('needs')).toBeLessThan(order.indexOf('body'));
+    expect(order.indexOf('body')).toBeLessThan(order.indexOf('conversation'));
+    expect(order.slice(-2)).toEqual(['conversation', 'activity']);
   });
 
   test('draw only what the item carries: a bare question is its head, its premise and what it needs', async () => {
@@ -126,6 +134,17 @@ describe('the item view’s parts', () => {
     expect(one('[data-agenda-part="head"] [data-agenda-stage]').textContent).toBe('Question');
     // A slot for the version (and, next, the diff) control, kept in the head.
     expect(one('[data-agenda-part="head"] [data-agenda-version-slot] [data-agenda-version-picker]')).toBeDefined();
+  });
+
+  test('the head draws the description — the item’s summary — under the title, whole, before the chips', async () => {
+    const long = `Which colour for the badge? ${'It sits on every row and is the first thing the owner sees. '.repeat(20)}End.`;
+    await draw(agendaItem('A47', { ...full, subject: long } as Partial<AgendaItem>));
+    const head = one('[data-agenda-part="head"]');
+    const description = must(head.querySelector('[data-agenda-description]'), 'the description');
+    expect(description.textContent).toBe(long);
+    expect(head.firstElementChild).toBe(description);
+    // Said on the card, so the head's ⓘ does not hold it a second time.
+    expect(root().querySelector('[data-agenda-info-panel] [data-agenda-ask]')).toBeNull();
   });
 
   test('a resting item says who it waits on, and a working one says so', async () => {
@@ -225,16 +244,15 @@ describe('terms and references', () => {
 });
 
 describe('where we are now', () => {
-  test('holds the report the owner asked for, whole — no cut-off, however long', async () => {
+  test('is the short status: where things stand, what is decided and what is still open', async () => {
     await draw(full);
     const where = one('[data-agenda-part="where"]');
     expect(where.querySelector('h4')?.textContent).toBe('Where we are now');
-    const report = must(where.querySelector('[data-agenda-where-now]'), 'the report');
-    expect(report.textContent).toContain('The report you asked for');
-    expect(report.textContent).toContain('The last line of the report.');
-    expect(report.textContent?.match(/Every finding is kept/gu)).toHaveLength(600);
+    expect(where.querySelector('[data-agenda-where-now]')?.textContent).toContain('The two colours are tested');
     expect(where.querySelector('[data-agenda-section="decided"]')).not.toBeNull();
     expect(where.querySelector('[data-agenda-section="still-open"]')).not.toBeNull();
+    // The report is the body's, never repeated here.
+    expect(where.textContent).not.toContain('The report you asked for');
   });
 
   test('holds the ferret’s answer to the owner’s question too', async () => {
@@ -244,6 +262,18 @@ describe('where we are now', () => {
     expect(one('[data-agenda-part="where"] [data-agenda-question-answer]').textContent).toContain(
       'It ships on Friday.',
     );
+  });
+});
+
+describe('the full picture', () => {
+  test('holds the report the owner asked for in the body, open and whole — no cut-off, however long', async () => {
+    await draw(full);
+    const body = one('[data-agenda-part="body"]');
+    expect(body.querySelector('h4')?.textContent).toBe('The full picture');
+    expect(body.querySelector('[data-agenda-fold]')).toBeNull();
+    expect(body.textContent).toContain('The report you asked for');
+    expect(body.textContent).toContain('The last line of the report.');
+    expect(body.textContent?.match(/Every finding is kept/gu)).toHaveLength(600);
   });
 });
 
@@ -276,6 +306,19 @@ describe('what it needs from you', () => {
     const own = must(needs.querySelector('[data-agenda-item-answer]'), 'the item’s own answer');
     expect(own.textContent).toContain('Your answer for this item');
     expect(own.querySelector('[data-agenda-option="Blue"]')).not.toBeNull();
+  });
+
+  test('is marked out while the item needs the owner, and quiet once it rests', async () => {
+    await draw(full);
+    expect(one('[data-agenda-part="needs"]').hasAttribute('data-agenda-needs-you')).toBe(true);
+    await unmount();
+    await draw(
+      agendaItem('A4', {
+        ask: choices('Yes', 'No'),
+        parked: { reason: 'replied', at: '2026-08-01T11:00:00.000Z' },
+      } as Partial<AgendaItem>),
+    );
+    expect(one('[data-agenda-part="needs"]').hasAttribute('data-agenda-needs-you')).toBe(false);
   });
 
   test('gives every card ask its own heading, and the board’s How to test when the host has it', async () => {

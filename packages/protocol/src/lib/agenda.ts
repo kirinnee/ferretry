@@ -328,10 +328,11 @@ const characters = (count: number): string => count.toLocaleString('en-US');
 
 /**
  * Why a long document is refused, in words that name the count and the remedy: the body is where a ferret
- * is tempted to trim the end off, and a trimmed report loses its sections. The full report belongs behind a link.
+ * is tempted to trim the end off, and a trimmed report loses its sections. A report past the cap belongs behind a link,
+ * and the body keeps the current state.
  */
 export const agendaTooLongMessage = (field: string, length: number, maximum: number): string =>
-  `${field} is ${characters(length)} characters; the most is ${characters(maximum)}. Do not trim it: put the full report in a file or artifact, add it with --link, and keep ${field} to a one-screen summary and the choice.`;
+  `${field} is ${characters(length)} characters; the most is ${characters(maximum)}. Do not trim it: put the full report in a file or artifact, add it with --link, and keep ${field} to the current state and the choice.`;
 
 /** Prose that, over `maximum`, is refused with `agendaTooLongMessage` rather than a bare "too big". */
 const longProse = (field: string, maximum: number) =>

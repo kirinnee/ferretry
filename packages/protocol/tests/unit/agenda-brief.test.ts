@@ -63,7 +63,7 @@ describe('attention brief', () => {
     // Assert
     should(fits.success).be.true();
     should(body.error?.issues[0]?.message).equal(
-      'the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice.',
+      'the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to the current state and the choice.',
     );
     should(answer.error?.issues[0]?.message).match(
       /^the question answer is 200,001 characters; the most is 200,000\./u,

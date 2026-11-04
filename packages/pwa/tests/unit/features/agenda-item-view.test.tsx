@@ -96,6 +96,13 @@ const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = 
 
 const markdown = (text: string) => <Markdown text={text} />;
 
+/** A host's quiet tools (the Inbox's Skip): what puts ⓘ in the head now the summary is drawn on the card. */
+const TOOLS = (
+  <button data-test-tool="" type="button">
+    Skip
+  </button>
+);
+
 describe('the item view tools behind ⓘ', () => {
   test('draws ⓘ for a host that hands it tools even when the item has no description, and puts them in its panel', async () => {
     await draw(richItem, {
@@ -119,7 +126,7 @@ describe('the item view snooze control', () => {
 
   test('puts the clock in the head’s one row, after ⓘ and before ✕ — never in the ⓘ panel — and snoozes from there; off while busy', async () => {
     const snoozed: string[] = [];
-    await draw(richItem, { onSnooze: until => snoozed.push(until) });
+    await draw(richItem, { onSnooze: until => snoozed.push(until), tools: TOOLS });
     const clock = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-snooze]');
     expect(clock.className).toBe('fy-item-view__step fy-item-view__step--tight fy-card-head__snooze');
     await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
@@ -171,6 +178,7 @@ describe('the v6 layout: title, ONE card — one column', () => {
   test('is ONE row: the title, then the urgency dot, the pager, ⓘ, the clock and ✕ — nothing under it until ⓘ opens', async () => {
     await draw(agendaItem('A47', { ...richItem, blockingNow: true } as Partial<AgendaItem>), {
       onSnooze: () => undefined,
+      tools: TOOLS,
     });
     const head = one('.fy-item-view__head');
     expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
@@ -198,30 +206,52 @@ describe('the v6 layout: title, ONE card — one column', () => {
     expect(root().querySelector('[data-agenda-ask]')).toBeNull();
   });
 
-  test('says the item’s ask behind ⓘ: a tap opens its panel under the row, another closes it', async () => {
+  test('says the item’s summary on the card under the title, whole — not behind ⓘ, which a bare chat view does not draw', async () => {
     await draw(richItem);
+    expect(one('.fy-card [data-agenda-part="head"] [data-agenda-description]').textContent).toBe(
+      'Which database should keep the board’s finished items?',
+    );
+    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-info-panel]')).toBeNull();
+  });
+
+  test('keeps a gate item’s summary behind ⓘ, since its card repeats nothing: a tap opens the panel, another closes it', async () => {
+    await draw(
+      agendaItem('A50', {
+        title: 'Badge colour',
+        subject: 'Try it: the badge is blue now',
+        gate: {
+          cardId: 'F12',
+          laneId: 'tested',
+          laneName: 'Try it',
+          entry: 3,
+          projectId: 'p1',
+          options: [
+            { id: 'o0', label: 'Done', outcome: 'close' },
+            { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+          ],
+        },
+      } as unknown as Partial<AgendaItem>),
+    );
+    expect(root().querySelector('[data-agenda-description]')).toBeNull();
     const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-info-toggle]');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(toggle.getAttribute('aria-controls')).toBe(one('[data-agenda-info-panel]').id);
     expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
     await interact(() => toggle.click());
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    const panel = one<HTMLElement>('.fy-item-view__head > [data-agenda-info-panel]');
-    expect(panel.hidden).toBe(false);
-    expect(one('.fy-item-view__head [data-agenda-ask]').textContent).toBe(
-      'Which database should keep the board’s finished items?',
-    );
+    expect(one<HTMLElement>('.fy-item-view__head > [data-agenda-info-panel]').hidden).toBe(false);
+    expect(one('.fy-item-view__head [data-agenda-ask]').textContent).toBe('Try it: the badge is blue now');
     await interact(() => toggle.click());
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
   });
 
   test('a new item opens with its ⓘ closed', async () => {
-    await draw(richItem);
+    await draw(richItem, { tools: TOOLS });
     await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
     await view?.unmount();
     view = null;
-    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>));
+    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>), { tools: TOOLS });
     expect(one('[data-agenda-info-toggle]').getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -521,7 +551,7 @@ describe('the sections the ferret added', () => {
     expect(spy.progress).toEqual([[1, true]]);
   });
 
-  test('draws a review’s body as its Reasoning and any other body as More detail, both open', async () => {
+  test('draws a review’s body as its Reasoning and any other body as The full picture, both open', async () => {
     await draw(
       agendaItem('A5', { kind: 'review', ask: { kind: 'answer-review' }, body: 'Because.' } as Partial<AgendaItem>),
     );
@@ -530,7 +560,7 @@ describe('the sections the ferret added', () => {
     await view?.unmount();
     view = null;
     await draw(agendaItem('A6', { ask: choices('Yes', 'No'), body: 'More.' } as Partial<AgendaItem>));
-    expect(one('[data-agenda-part="body"] > h4').textContent).toBe('More detail');
+    expect(one('[data-agenda-part="body"] > h4').textContent).toBe('The full picture');
     expect(root().querySelector('details')).toBeNull();
   });
 });
@@ -776,14 +806,14 @@ describe('What I need from you', () => {
     ],
   } as Partial<AgendaItem>);
 
-  test('is the seventh part: after where we are now and the conversation, before the body and the activity log', async () => {
+  test('is the sixth part: after where we are now, before the body, the conversation and the activity log', async () => {
     await draw(agendaItem('A47', { ...richItem, body: 'A report.' } as Partial<AgendaItem>), {}, [
       { kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47' },
     ]);
     const parts = [...one('.fy-card').querySelectorAll('[data-agenda-part]')].map(each =>
       each.getAttribute('data-agenda-part'),
     );
-    expect(parts).toEqual(['head', 'premise', 'references', 'where', 'conversation', 'needs', 'body', 'activity']);
+    expect(parts).toEqual(['head', 'premise', 'references', 'where', 'needs', 'body', 'conversation', 'activity']);
     expect(one('[data-agenda-part="needs"] [data-agenda-need]')).toBeDefined();
     expect(need().querySelector('h4')?.textContent).toBe('What I need from you');
   });

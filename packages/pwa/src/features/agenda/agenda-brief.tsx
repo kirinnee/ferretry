@@ -1,7 +1,7 @@
 /**
  * THE STRUCTURED PART OF AN AGENDA ITEM, as sections in ONE fixed order, each only when the item has it:
  * Premise · Context · the questions · Decided so far · Still open · Options · Impact ·
- * Terms · Steps · More detail · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet
+ * Terms · Steps · The full picture · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet
  * and the board page), so a reader learns one layout.
  *
  * PREMISE AND CONTEXT ARE TWO THINGS. The premise is the situation the item comes out of — what is going
@@ -10,7 +10,7 @@
  * in the ink colour, and room.
  *
  * Two layouts. The CARD's is open: every section is drawn in full under its heading, because a card
- * stands alone and nothing on it hides behind a click (only a long "More detail" is previewed). The
+ * stands alone and nothing on it hides behind a click (only a long "The full picture" is previewed). The
  * recommendation is NOT a section there: the answer bar tags the recommended option and says why under the
  * buttons. The BOARD's is collapsible: native `<details>`, closed except the first question.
  *
@@ -386,7 +386,7 @@ export interface AgendaBriefProps {
   readonly recommendation?: AgendaRecommendation | undefined;
   /** The steps checklist, drawn under "Steps". */
   readonly steps?: ReactNode;
-  /** The body, drawn under "More detail" — the one section that may start folded. */
+  /** The body, drawn under "The full picture" — the one section that may start folded. */
   readonly detail?: ReactNode;
   /**
    * Which half to draw. `card`: only what the minimal card needs (the ask when it is not the heading, the
@@ -450,7 +450,12 @@ export function AgendaBriefSections({
     );
   const detailBlock =
     asCard || detail === undefined ? null : (
-      <Section fold={fold} name="more" open={open} title={typed && kind === 'review' ? 'Reasoning' : 'More detail'}>
+      <Section
+        fold={fold}
+        name="more"
+        open={open}
+        title={typed && kind === 'review' ? 'Reasoning' : 'The full picture'}
+      >
         {detail}
       </Section>
     );

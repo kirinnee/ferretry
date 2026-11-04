@@ -481,8 +481,12 @@ export const foldUnchanged = (runs: readonly WordRun[]): readonly (WordRun | Fol
 // Sections
 // ---------------------------------------------------------------------------------------------------
 
-/** The sections compared, in the order the item view reads them. */
+/**
+ * The sections compared: the body first — it is the item's live document, the thing that is versioned — then the rest
+ * in the order the item view reads them.
+ */
 const DIFF_SECTIONS = [
+  { key: 'body', label: 'The full picture' },
   { key: 'title', label: 'Title' },
   { key: 'stage', label: 'Type' },
   { key: 'subject', label: 'Question' },
@@ -503,7 +507,6 @@ const DIFF_SECTIONS = [
   { key: 'urgency', label: 'Urgency' },
   { key: 'steps', label: 'Steps' },
   { key: 'cards', label: 'Cards' },
-  { key: 'body', label: 'More detail' },
   { key: 'questionAnswer', label: 'Answer to your question' },
   { key: 'why', label: 'Why it matters' },
   { key: 'howToResolve', label: 'How to resolve' },
@@ -644,7 +647,7 @@ export interface SectionDiff {
 const countOf = (runs: readonly WordRun[], kind: WordRun['kind']): number =>
   runs.filter(run => run.kind === kind).reduce((sum, run) => sum + wordCount(run.text), 0);
 
-/** Every section of `to` against `from`, in reading order; sections neither version has are left out. */
+/** Every section of `to` against `from`, the body first, then in reading order; sections neither version has are left out. */
 export const diffItems = (from: AgendaItem, to: AgendaItem): readonly SectionDiff[] =>
   DIFF_SECTIONS.flatMap(({ key, label }): SectionDiff[] => {
     const before = sectionText(from, key);

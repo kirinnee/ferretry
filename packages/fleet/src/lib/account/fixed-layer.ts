@@ -449,14 +449,15 @@ export const AGENDA_ENV = 'FY_AGENDA';
 
 /**
  * The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. It teaches the model first
- * (what an agenda is, the three-part test, search-check-open, the states, the type, splitting, chat discussion),
+ * (what an agenda is, the three-part test, search-check-open, the states, the type, the body as the live document with
+ * the chat as its log, splitting, chat discussion),
  * then the commands that open, answer, rest, log, split and merge one (docs/pack-mode.md records their budget).
  */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
     `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest. \`split\` misfits, \`merge\` items that share.`,
-    `Open: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"\`. Title ≤40, ask ≤80 (rest: \`--body\`, one-screen summary; full report: \`--link\`). Read cold: no ids/paths/jargon (\`--term "X=meaning"\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working; \`--stage\`, \`--where\`=now. Keep current (\`edit\`); only you mark it \`done\` when nothing's left. Type: explainer→question→plan→tracker→test. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
+    `Open: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"\`. Title ≤40, ask ≤80, \`--where\`=short status. Read cold: no ids/paths/jargon (\`--term "X=meaning"\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
+    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working; \`--stage\`. Body=live doc (report/plan/status): rewrite it whole (\`edit --body-file\`); chat points at it. Only you mark it \`done\` when nothing's left. Type: explainer→question→plan→tracker→test. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
     'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');
 

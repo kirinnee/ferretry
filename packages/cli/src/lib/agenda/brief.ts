@@ -33,7 +33,7 @@ import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 export interface BriefFlags extends AskFlags {
   /** `--stage`: what the item needs from the owner now (explainer, question, plan, tracker, test). */
   readonly stage?: string;
-  /** `--where`, repeated: where things stand now, one point each; an explainer or a report the owner asked for. */
+  /** `--where`, repeated: the short status, where things stand now, one point each (the full report is the body). */
   readonly where?: string | readonly string[];
   /** `--detail`: the context explained from zero, as Markdown (drawn folded away). */
   readonly detail?: string;
@@ -76,7 +76,7 @@ export interface BriefFlags extends AskFlags {
   readonly link?: readonly string[];
   /** One Markdown step each, in order, repeated. */
   readonly step?: readonly string[];
-  /** The text of `--body-file`: one Markdown document. */
+  /** The text of `--body-file`: the body, the item's live document, as one Markdown document. */
   readonly body?: string;
   /** A configuration file whose held change the owner's Allow puts into effect (`--confirms`). */
   readonly confirms?: string;

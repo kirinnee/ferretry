@@ -71,7 +71,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 631        | 158      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,266      | 317      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,289      | 322      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -114,7 +114,7 @@ The Hypermedia line then learned `card` and `board` (live board cards) on main, 
 reworded the Board section ("Before it's ready to try:", "lane by work", "add to one") and kept "show progress only": board 638 → 631, the
 measured total 7,806 (7,820 counting the separators), 44 characters under the 7,850 cap (30 counting the separators).
 PR 10 (teach round 2) re-read the Agenda and Board text against the spec and found every rule and verb (`answer`, `rest`, `log`, `split`, `merge`, the stages) already taught except the `done` verb and "say so" when unsure. Review round 1 added both, paid for by "logs their words verbatim" in place of "puts their words on it verbatim"; round 2 put the chat reply's teaching "link it" back and paid for it with "unsure→closest" in place of "unsure: closest": agenda 1,266 → 1,269 (cap 1,270), the measured total 7,806 → 7,809 (7,823 counting the separators), 41 characters under the 7,850 cap (27 counting the separators). `teaching-spec.test.ts` now holds each verb and the stage chain to the spec.
-The whole-prompt cap is unchanged.
+The body as the live document (F909, the owner on !A332: "the chat is the stream of log, the body is the DB") then replaced the body rule above: `--where`=short status on the open line, and "Body=live doc (report/plan/status): rewrite it whole (`edit --body-file`); chat points at it." on the state line, paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)", ", `--where`=now" and "Keep current (`edit`)": agenda 1,269 → 1,289 (cap 1,270 → 1,300), the measured total 7,809 → 7,829 (7,843 counting the separators), 21 characters under the 7,850 cap (7 counting the separators). The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

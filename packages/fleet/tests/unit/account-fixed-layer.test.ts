@@ -789,7 +789,8 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`.',
     );
-    should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`).');
+    // The status is short; the body is the live document (the owner: "the chat is the stream of log, the body is the DB").
+    should(text).containEql('Title ≤40, ask ≤80, `--where`=short status.');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
     should(text).containEql(
       'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
@@ -809,9 +810,12 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Owner reply/answer rests it;');
     // The ferret's answer ON the item brings it back; an owner's question is answered there, its options open.
     should(text).containEql('`answer <id> "…"` returns it.');
-    should(text).containEql('`rest <id> --why …`=working; `--stage`, `--where`=now.');
+    should(text).containEql('`rest <id> --why …`=working; `--stage`.');
+    should(text).containEql(
+      'Body=live doc (report/plan/status): rewrite it whole (`edit --body-file`); chat points at it.',
+    );
     should(text).not.containEql('--back');
-    should(text).containEql("Keep current (`edit`); only you mark it `done` when nothing's left.");
+    should(text).containEql("Only you mark it `done` when nothing's left.");
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
     should(text).containEql(
@@ -848,8 +852,11 @@ describe('AGENDA_INSTRUCTION', () => {
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
     // Assert — measured 1,269: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
     // split line names both verbs), paid for in part by `answer <id> "…"`, plus the `done` verb and "say so", paid
-    // for by "logs their words verbatim" and "unsure→closest".
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
+    // for by "logs their words verbatim" and "unsure→closest". Then 1,289: the body as the live document (F909, the
+    // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
+    // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
+    // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300).
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {

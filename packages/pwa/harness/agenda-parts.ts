@@ -2,7 +2,7 @@
  * THE NINE-PART ITEM VIEW'S FIXTURES (`agenda-page.tsx?parts=1`, driven by `agenda-parts-screenshot.ts`): one item per
  * stage — an explainer, a question, a plan to approve, a tracker and a test carrying a card ask — and a conversation
  * with several replies about the question. Every part is exercised: a folded detailed context, a terms and references
- * table, a long report in "where we are now", the conversation, card asks with their buttons, a body and an activity
+ * table, a short "where we are now", card asks with their buttons, a long report as the body, the conversation and an activity
  * log with each stage the item went through.
  */
 
@@ -87,7 +87,7 @@ const QUESTION = item('A121', 35, {
     { stage: 'question', at: ago(35) },
   ],
   ...BRIEF,
-  whereWeAre: REPORT,
+  whereWeAre: '- The fix is built: every count reads one queue\n- Only the snooze rule is left',
   decided: '- Resting items never count\n- Blockers count first',
   stillOpen: '- Whether a snoozed item counts',
   ask: {
@@ -98,7 +98,7 @@ const QUESTION = item('A121', 35, {
     ],
   },
   recommendation: { decision: 'No', why: '- A snooze is your own "not now"\n- A blocker still wakes it' },
-  body: '**What changes for you.** The badge drops by the number of snoozed items. A blocker wakes a snoozed item, and then it counts again.',
+  body: REPORT,
   revisions: [
     {
       at: ago(30),
@@ -277,7 +277,7 @@ export const PARTS_ENTRIES = [
     ].join('\n'),
   ),
   owner('p3', 31, '!A121 and the report I asked for?'),
-  ferretSays('p4', 30, 'Re !A121: the report is in "Where we are now", whole.'),
+  ferretSays('p4', 30, 'Re !A121: the report is in the body, "The full picture", whole.'),
   owner('p5', 28, '!A121 leaning No'),
   ferretSays('p6', 27, 'Re !A121: noted. No is my recommendation too; the reasons are under the options.'),
 ] as unknown as TranscriptEntry[];

@@ -8,6 +8,7 @@ import {
   ITEM_VIEW_PARTS,
   itemCardAsks,
   itemStage,
+  PART_TITLES,
   referenceRows,
   stateChip,
 } from '../../src/lib/agenda-item-sections.ts';
@@ -24,12 +25,17 @@ describe('the nine parts', () => {
       'detail',
       'references',
       'where',
-      'conversation',
       'needs',
       'body',
+      'conversation',
       'activity',
     ]);
     expect([...FOLDED_PARTS].sort()).toEqual(['activity', 'detail']);
+  });
+
+  test('call the body the full picture: it is the item’s live document', () => {
+    expect(PART_TITLES.body).toBe('The full picture');
+    expect(PART_TITLES.needs).toBe('What I need from you');
   });
 });
 

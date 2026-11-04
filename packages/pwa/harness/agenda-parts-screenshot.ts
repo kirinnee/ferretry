@@ -1,7 +1,7 @@
 /**
  * Screenshots and checks for the NINE-PART ITEM VIEW (docs/agenda.md § The item view): head, premise and context, the
- * folded detailed context, the terms and references table, where we are now, the conversation, what it needs from the
- * owner (with card asks), the body and the folded activity log.
+ * folded detailed context, the terms and references table, a short where we are now, what it needs from the owner
+ * (with card asks), the body (the full picture), the conversation and the folded activity log.
  *
  *   bun harness/agenda-parts-screenshot.ts [outDir]   # writes <outDir>/parts-<scene>-<phone|desktop>-<theme>.png
  *
@@ -93,7 +93,7 @@ const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 const NOW = new Date('2026-10-29T09:00:00.000Z');
 const LOCALE = { timezoneId: 'UTC', locale: 'en-US' } as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
-const ORDER = ['head', 'premise', 'detail', 'references', 'where', 'conversation', 'needs', 'body', 'activity'];
+const ORDER = ['head', 'premise', 'detail', 'references', 'where', 'needs', 'body', 'conversation', 'activity'];
 type Form = 'phone' | 'desktop';
 
 const violations: string[] = [];
@@ -419,10 +419,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       check(filler.length === 0, `terms ${form} ${theme}: a made-up meaning is drawn (${filler.join(' | ')})`);
       await shot(page, 'terms', form, theme);
 
-      // The long report in "where we are now", with no cut-off.
-      await scrollToPart(page, 'where');
+      // The long report in the body ("The full picture"), with no cut-off.
+      await scrollToPart(page, 'body');
       const report = await page.evaluate(() => {
-        const node = document.querySelector<HTMLElement>('[data-agenda-where-now]');
+        const node = document.querySelector<HTMLElement>('[data-agenda-part="body"] [data-agenda-section="more"]');
         return {
           last: (node?.textContent ?? '').includes('every count now agrees'),
           findings: (node?.textContent ?? '').match(/Finding \d+\./gu)?.length ?? 0,
@@ -435,7 +435,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       await shot(page, 'report', form, theme);
       // The end of the report, to show it is whole.
       await page.evaluate(() => {
-        document.querySelector('[data-agenda-where-now]')?.scrollIntoView({ block: 'end' });
+        document.querySelector('[data-agenda-part="body"]')?.scrollIntoView({ block: 'end' });
       });
       await page.waitForTimeout(200);
       await shot(page, 'report-end', form, theme);

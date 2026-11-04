@@ -357,13 +357,28 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
   `--stage` on `add` and `edit`; without one it is read from the kind (`agendaStageOfKind`: info is an explainer, a
   permission or review a plan, a to-do a test, the rest a question).
   Every stage the item entered is kept, oldest first, in `stages` (at most 64); closing it adds `done`.
-- **`whereWeAre`** (`--where`, point form or Markdown) is where things stand now. Anything the owner asked for to
-  complete the item — an explainer, a report — lives here.
+- **`whereWeAre`** (`--where`, point form or Markdown) is a **short status**: where things stand now, what is
+  decided, what is still open — a few points, never the report.
+- **`body`** (`--body-file`, Markdown with fy-render) is the item's **live document**: the report, explainer,
+  plan or status the owner reads, holding the whole current state of everything relevant. The owner's
+  model: _"the chat is the stream of log, the body is the DB, like an event store."_ So:
+  - **The ferret rewrites the body on every change** (`fy agenda edit <id> --body-file <file>`), so it always holds
+    the whole current state; it is what the item's versions keep and what the Changes diff compares first.
+  - **The conversation is only the log.** The ferret answers there briefly and points at the body; it never retypes
+    the body into the conversation.
+  - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, a step-through `html` page, and `card` and
+    `board` blocks for status. **Plain Markdown draws no fold** — raw HTML in prose stays inert — so a long part is
+    folded inside an fy-render `html` block (`<details><summary>…</summary>…</details>`), whose contents are HTML.
+    **GAP:** a fold written in Markdown (for example a fenced or directive fold block) is not built; it would take a
+    remark plugin that turns that block into a `<details>` the agenda segment renders, with its own tests.
+  - `fy agenda --help`, `add --help` and `edit --help` say this whole (`AGENDA_BODY_RULE`); the Agenda-mode prompt
+    says it in short.
 - **`detail`** (`--detail`) is the context explained from zero, for a reader new to the topic; the app draws it
   folded away.
 
-The app draws all three in the item view ([The item view](#the-item-view)): the stage on the head's chip, where we
-are as its own part, the detail folded, and every earlier stage in the folded activity log.
+The app draws them in the item view ([The item view](#the-item-view)): the stage on the head's chip, where we are as
+its own short part, the body as **The full picture** under what the item needs from the owner, the detail folded, and
+every earlier stage in the folded activity log.
 
 ### Editable asks
 
@@ -1113,7 +1128,7 @@ ignores it.
 ## Rules the writing keeps
 
 The card is read cold, so it must stand alone: a title of about 40 characters, an ask that is a short
-title-like line (about 80 characters at most, `AGENDA_ASK_TARGET_LENGTH`; the detail goes in `--body`), the premise, context and what is decided or still open as short bullets, every term of art
+title-like line (about 80 characters at most, `AGENDA_ASK_TARGET_LENGTH`; the detail goes in the body, `--body-file`), the premise, context and what is decided or still open as short bullets, every term of art
 defined with `--term`, never a secret value. The daemon lints for this and answers with advice, never a
 refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
 whose blocker has cleared is a bug.
@@ -1153,7 +1168,7 @@ or bold the answer first. Lists, tables, headings and fenced code are not counte
 
 **A bunch of bugs or asks heard at once is not a pile of new items.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret adds each to the agenda it belongs with, by the three-part test ([One channel per topic](#one-channel-per-topic)), and opens a new one only for what fits none. The prompt says it in one line — "Bug batch: ONE agenda, line each + where tracked." — a line per bug and where each is tracked. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule follows from the test the Agenda-mode instruction teaches (`AGENDA_INSTRUCTION`).
 
-**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000). One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections, and the agenda is a decision surface, not a document store. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
+**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000). One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to the current state and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections. The body is the live document of the current state, not an archive: what no longer bears on the item moves behind a link. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
 
 **A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
 as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from
@@ -1208,21 +1223,34 @@ go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message
 ## The item view
 
 **One item view everywhere** — the chat and the Inbox draw the same component (`AgendaItemView`). It
-reads top to bottom in nine parts; the order is `ITEM_VIEW_PARTS` in `packages/pwa/src/lib/agenda-item-sections.ts`,
+reads top to bottom in nine parts: the four that say what the item is and what it needs from the owner come first,
+then the body — its live document ([Stage, where we are, and the detail](#stage-where-we-are-and-the-detail)) — and
+the log, the conversation and the activity, at the bottom. The order is `ITEM_VIEW_PARTS` in
+`packages/pwa/src/lib/agenda-item-sections.ts`,
 and a part the item does not carry is not drawn:
 
-| #   | Part                   | What it holds                                                                                                                                                                                                            |
-| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Title, state and stage | the title row; the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done), the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done), and the version slot |
-| 2   | Premise and context    | the two tinted blocks; long is fine                                                                                                                                                                                      |
-| 3   | Detailed context       | `detail`, explained from zero — **folded**                                                                                                                                                                               |
-| 4   | Terms and references   | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none           |
-| 5   | Where we are now       | `whereWeAre` — the report or explainer the owner asked for — then the ferret's answer to their question, what is decided and what is still open                                                                          |
-| 6   | Conversation           | the owner's and the ferret's words about the item, oldest first, each whole                                                                                                                                              |
-| 7   | What I need from you   | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build)                                   |
-| 8   | Body                   | `body`: More detail, or a review's Reasoning (Markdown with fy-render)                                                                                                                                                   |
-| 9   | Activity               | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                           |
+| #   | Part                                | What it holds                                                                                                                                                                                                                                                                                                 |
+| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Title, description, state and stage | the title row; under it the **description** — the item's summary (its ask, `subject`), drawn whole; the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done), the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done), and the version slot |
+| 2   | Premise and context                 | the two tinted blocks; long is fine                                                                                                                                                                                                                                                                           |
+| 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                    |
+| 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none                                                                                                |
+| 5   | Where we are now                    | `whereWeAre` — a **short status**: where things stand — then the ferret's answer to their question, what is decided and what is still open                                                                                                                                                                    |
+| 6   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner          |
+| 7   | The full picture                    | `body`: the item's **live document** — the report, explainer, plan or status, rewritten on every change — drawn open and whole; a review's is its Reasoning (Markdown with fy-render)                                                                                                                         |
+| 8   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom                                                                                                                                                                                                           |
+| 9   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                |
 
+- **The head says what it is, whole.** The description (`data-agenda-description`) is drawn on the card under the
+  title, never behind ⓘ, so ⓘ holds only a host's quiet tools (the Inbox's Skip). A gate item from before card asks,
+  which repeats nothing, keeps its summary behind ⓘ, and so does a machine notice drawn with its cards, whose rows say
+  its lines once. The ask in part 6 still leads with the same words when the item has no question of its own, on
+  purpose: the head says what the item is, and part 6 — where a push lands — reads whole on its own.
+- **The one thing that needs the owner stands out.** While the item is Needs you, part 6 is marked out
+  (`data-agenda-needs-you`): a heavier accent frame, a tint and its heading in the accent — never a left rail, which the
+  app draws nowhere, and never colour alone, since the head's "Needs you" chip says it in words. A form on a phone keeps
+  no frame (three nested boxes would squeeze its fields), so there only the heading and the chip mark it. A resting,
+  snoozed or settled item draws it quiet.
 - **Folded parts remember.** The detailed context and the activity log start closed; opening one is remembered per
   item on that device (browser storage, read and written defensively — a private window simply starts closed again).
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
@@ -1241,7 +1269,7 @@ and a part the item does not carry is not drawn:
   A partial thread is never drawn as a whole one, and the rebuilt thread is never swapped in for it. An owner entry is the owner's bubble (an `answer`, `needs-info` or `discuss` keeps its form), a ferret
   entry is the ferret's, a daemon entry is drawn under "Ferretry", and an entry the ferret copied from the owner's chat
   (`fromChat`) carries a **from chat** tag.
-- **Card asks live inside the item.** A card ready to test or approve is answered in part 7, with its own buttons,
+- **Card asks live inside the item.** A card ready to test or approve is answered in part 6, with its own buttons,
   never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
   one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until card asks
@@ -1250,7 +1278,7 @@ and a part the item does not carry is not drawn:
   never docked beside each other and never mistaken for one another. A card ask carries the card's **How to test**,
   read from the board the app already loads (`howToTestFor`), above its Done / Not good.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
-  part 7 with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
+  part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
 - **The head keeps a slot** (`data-agenda-version-slot`) for the version picker and the diff control. Beside the diff
   control the picker counts the item's EDITS ("Edit 2 of 3"), because the diff's own numbers (v1, v2…) are the stored
@@ -1276,9 +1304,9 @@ and a part the item does not carry is not drawn:
   unchanged stretch inside a changed section is cut to the three lines beside each change with one line saying
   "… 240 unchanged lines …". Additions are underlined, removals struck through, with a
   status word (New, Changed, Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. The
-  sections compared are the title, the type, the question, the premise, the context, the detail, the terms, the
+  sections compared are, first, the body — the live document, the thing that is versioned — then the title, the type, the question, the premise, the context, the detail, the terms, the
   references, where we are now, what is decided and still open, the ask, a multi-decision ask's questions, each
-  option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards, the body,
+  option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards,
   the answer to a question, why it matters and how to resolve it, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing
   changed". Sections that did not change fold
   under one line. Opening an item writes the seen mark (`PUT …/seen`) for its newest version, after the baseline is
@@ -1287,8 +1315,8 @@ and a part the item does not carry is not drawn:
 
 ## What I need from you
 
-**Every card has one answer shape, and it says it in one place.** In the item view's seventh part, after where we
-are now and the conversation ([The item view](#the-item-view)), every open card draws a segment headed **What I need
+**Every card has one answer shape, and it says it in one place.** In the item view's sixth part, right after where we
+are now ([The item view](#the-item-view)), every open card draws a segment headed **What I need
 from you**. It holds exactly the ask and
 ends with one plain instruction, so the owner always knows what to do. The ask itself is a short **bold line at body size** — never heading-sized, however long it is; a long ask wraps
 and the card stays the card:
@@ -1659,8 +1687,8 @@ source module does not exist yet), and fails the checklist once it does.
 | 4   | Any reply or answer from you moves the item to Resting ("waiting on <ferret>") and out of Needs you. The ferret's answer on it brings it back to Needs you automatically, in its old spot. About 30 minutes of ferret silence gets a Warden nudge. Needs you never lists an agenda twice, and puts blockers first. | `DoD 4` (reply and owner answer rest it; the ferret's answer returns it ahead of a newer item; one nudge at 31 minutes, none at 29); `DoD 3` (unique queue, blockers first)                                                                                   |
 | 5   | Snooze keeps an item Resting until the time you picked, unless a blocker wakes it.                                                                                                                                                                                                                                 | `DoD 5`                                                                                                                                                                                                                                                       |
 | 6   | A card that's ready shows its test steps and Done / Not good inside its agenda, never as a separate item.                                                                                                                                                                                                          | `DoD 6`, and the board's gate path in `packages/daemon/tests/unit/board/card-asks.test.ts` (the ask rides the open agenda, or opens ONE named after the card); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                         |
-| 7   | An explainer or report you ask for appears in that agenda's "where we are now".                                                                                                                                                                                                                                    | `DoD 7` (`fy agenda edit --where`); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                                                                                    |
-| 8   | A long report fits with no cut-off. Every reply shows in the conversation, in order.                                                                                                                                                                                                                               | `DoD 8`: a 200k report through `fy agenda edit --body-file` read back whole; replies and the ferret's answers in their full interleaved order; the page: `agenda-conversation.test.ts` (PR 8). **GAP:** see below                                             |
+| 7   | An explainer or report you ask for appears in that agenda's body ("The full picture"), under a short "where we are now". (It was "where we are now" until the owner made the body the live document, !A332.)                                                                                                       | `DoD 7` (`fy agenda edit --where` and `--body-file`, a second `--body-file` replacing the body whole); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                 |
+| 8   | A long report fits with no cut-off. Every reply shows in the conversation, in order.                                                                                                                                                                                                                               | `DoD 8`: a 200k report through `fy agenda edit --body-file` read back whole; replies and the ferret's answers in their full interleaved order; the page: `agenda-conversation.test.ts` (PR 8); a long report is the body (see below)                          |
 | 9   | The activity log is folded. Diff mode shows what changed between any two versions you pick.                                                                                                                                                                                                                        | `DoD 9` (the versions list and any two can be fetched); the folds: `agenda-item-sections.test.ts` and `features/agenda-item-parts.test.tsx` (PR 7); the diff: `features/agenda-version-diff.test.tsx` (PR 8)                                                  |
 | 10  | Merging two agendas keeps both conversations and all their cards.                                                                                                                                                                                                                                                  | `DoD 10` (`fy agenda merge`); the button: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                                     |
 | 11  | A sub-ferret can't create a card or agenda without permission.                                                                                                                                                                                                                                                     | `DoD 11` (a sub-ferret is refused a card and an agenda; its lead is not)                                                                                                                                                                                      |
@@ -1670,10 +1698,10 @@ source module does not exist yet), and fails the checklist once it does.
 | 15  | When part of an agenda no longer passes the test, the ferret splits it into a new linked agenda.                                                                                                                                                                                                                   | `DoD 15` (`fy agenda split --move-cards`); the page: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                          |
 | 16  | A main-chat exchange about an agenda shows in that agenda's conversation, with your words verbatim and tagged "from chat", plus the ferret's reply. The chat reply links to the agenda, and the exchange moves the state as a reply would (it rests, and comes back on the ferret's answer).                       | `DoD 16` (`fy agenda log --reply` and `--rest`: verbatim, tagged, the same message never logged twice, the item rests and comes back ahead of a newer one). **GAP:** the chat reply links to the agenda — taught only (`link` in the Agenda-mode instruction) |
 
-**GAP: a long report cannot reach "where we are now" through `edit`.** `fy agenda edit --where` takes its text on the
-command line (`--where` is argv-only, and argv is capped), so the 200,000-character proof of item 8 goes through
-`--body-file`. Only a new item (`add` or `split --json-file`) can put a long report into "where we are"; an existing item cannot. Closing this means giving
-`edit` a file input for `--where`.
+**A long report reaches the item through `edit`.** "Where we are now" is a short status on the command line
+(`--where`), and the report is the body, which `fy agenda edit --body-file` rewrites whole at up to 200,000
+characters (item 8), so the GAP that a long report could not reach "where we are" through `edit` is closed by the
+model rather than by a file input for `--where`.
 
 The teaching that makes a ferret follow these rules is held to the spec by
 `packages/cli/tests/unit/agenda/teaching-spec.test.ts`.
