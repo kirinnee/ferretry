@@ -21,8 +21,6 @@ import {
   FileAgendaVersionStore,
 } from '../../../daemon/src/adapters/agenda/file-agenda-versions.ts';
 import { KeyedSerialExecutor } from '../../../daemon/src/adapters/system/keyed-serial-executor.ts';
-import { inlineAgendaVersionsWorker } from '../../../daemon/tests/support/agenda-versions-worker.ts';
-import { AgendaRestNudger } from '../../../daemon/src/lib/agenda/rest-nudge.ts';
 import {
   type AgendaActor,
   type AgendaMutation,
@@ -30,6 +28,7 @@ import {
   type OwnerChat,
   type RaiseAgendaRequest,
 } from '../../../daemon/src/lib/agenda/index.ts';
+import { AgendaRestNudger } from '../../../daemon/src/lib/agenda/rest-nudge.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../daemon/src/lib/api/capability.ts';
 import { ApiDispatcher, ApiRouter } from '../../../daemon/src/lib/api/index.ts';
 import { BoardError, BoardService, cardVisibility } from '../../../daemon/src/lib/board/index.ts';
@@ -42,9 +41,10 @@ import type {
 } from '../../../daemon/src/lib/notifications/types.ts';
 import type { PushDispatch } from '../../../daemon/src/lib/push/types.ts';
 import { agendaRoutes } from '../../../daemon/src/lib/runtime/index.ts';
-import { card, MemoryBoardStore, world as boardWorld } from '../../../daemon/tests/unit/board/support.ts';
-import { DIRECTORY, REFUSED } from '../../../daemon/tests/unit/sub-ferret/support.ts';
+import { inlineAgendaVersionsWorker } from '../../../daemon/tests/support/agenda-versions-worker.ts';
 import { request as apiRequest } from '../../../daemon/tests/unit/api/support.ts';
+import { world as boardWorld, card, MemoryBoardStore } from '../../../daemon/tests/unit/board/support.ts';
+import { DIRECTORY, REFUSED } from '../../../daemon/tests/unit/sub-ferret/support.ts';
 import pkg from '../../package.json' with { type: 'json' };
 import { card as taskCard, taskResponse } from '../unit/board/fixtures';
 import { health } from '../unit/daemon/fixtures';
@@ -946,18 +946,13 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
 });
 
 /**
- * The pages that prove what the app shows. Each points at a test file and the behaviour it names. A pointer is only
- * conditional on the PR that adds the page: while that PR is open the source module it adds does not exist, so the
- * pointer waits; once the module exists, a missing or renamed test file, or a lost phrase, FAILS the checklist.
+ * The pages that prove what the app shows. Each points at a test file and the behaviour it names: a missing or renamed
+ * test file, or a lost phrase, FAILS the checklist. Both pages are on main, so no pointer waits.
  */
-const landed = (module: string): boolean => existsSync(join(REPO, module));
-const ITEM_PAGE = 'packages/pwa/src/lib/agenda-item-sections.ts';
-const DIFF_PAGE = 'packages/pwa/src/features/agenda/agenda-version-diff.tsx';
-const pointer = (module: string) => (landed(module) ? it : it.skip);
 
 describe('Definition of done: the pages that prove the items the app shows (UI)', () => {
-  const itemPage = pointer(ITEM_PAGE);
-  const diffPage = pointer(DIFF_PAGE);
+  const itemPage = it;
+  const diffPage = it;
   const parts = 'packages/pwa/tests/unit/features/agenda-item-parts.test.tsx';
 
   itemPage('DoD 3 (UI): a push or a link opens the item AT ITS ASK', () => {
