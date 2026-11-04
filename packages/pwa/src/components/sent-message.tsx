@@ -39,11 +39,14 @@ const STATES: Readonly<
   failed: { word: 'Not delivered', mark: 'failed' },
 };
 
-/** A held send's words: an FYI waits for the receiver's turn to end, an action for the batch's time (&B157). */
-const heldWord = (sent: SentMessage): string => {
-  if (sent.hold?.kind === 'fyi') return `Held — delivered when ${displayCallsign(sent.to)}'s turn ends`;
-  if (sent.hold?.kind === 'batch') return `Held until ${sent.hold.until} to batch`;
-  return 'Held';
+/**
+ * Why a held send waits: an FYI for the receiver's turn to end, an action for the batch's time (&B157). The foot's
+ * visible word stays "Held" so the line stays one line on a phone (&F949); this is the tooltip and the screen reader's.
+ */
+const heldDetail = (sent: SentMessage): string | undefined => {
+  if (sent.hold?.kind === 'fyi') return `delivered when ${displayCallsign(sent.to)}'s turn ends`;
+  if (sent.hold?.kind === 'batch') return `delivered at ${sent.hold.until}, batched with its other messages`;
+  return undefined;
 };
 
 /** What a send's body says when this reader could not see the words. */
@@ -70,7 +73,8 @@ export function SentMessageRow({
   // A held send says when it goes, in the CLI's terms: true when it was sent, and all the sender knows (&B157 — GAP:
   // the card does not follow it to Delivered; that is the receiver's send ledger, read from the sender's chat).
   const known = STATES[sent.state];
-  const state = sent.state === 'held' ? { ...known, word: heldWord(sent) } : known;
+  const heldWhy = sent.state === 'held' ? heldDetail(sent) : undefined;
+  const state = heldWhy === undefined ? known : { ...known, detail: heldWhy };
   const reason = sent.state === 'failed' && sent.reason !== undefined && sent.reason !== '' ? sent.reason : undefined;
   return (
     <article
@@ -99,25 +103,27 @@ export function SentMessageRow({
           title={state.detail === undefined ? state.word : `${state.word} — ${state.detail}`}
         >
           <ReceiptMark className="fy-sent-mark" kind={state.mark} />
-          <span>
+          <span className="fy-sent-word">
             {state.word}
             {state.detail === undefined ? null : <span className="sr-only"> — {state.detail}</span>}
             {/* The alert says why, too: the visible reason below is drawn for the eye only. */}
             {reason === undefined ? null : <span className="sr-only">: {reason}</span>}
-            {/* The separator ends the state's words, so a foot that wraps on a phone leaves it trailing them. */}
-            <span aria-hidden="true" className="fy-sent-dot">
-              {' ·'}
-            </span>
           </span>
         </span>
-        <button
-          aria-expanded={showCommand}
-          className="fy-sent-command-toggle"
-          onClick={() => setShowCommand(current => !current)}
-          type="button"
-        >
-          {showCommand ? 'Hide command' : 'Show command'}
-        </button>
+        {/* The separator belongs to the item AFTER it, so a foot that must wrap never strands it at a line's end. */}
+        <span className="fy-sent-command">
+          <span aria-hidden="true" className="fy-sent-dot">
+            ·
+          </span>
+          <button
+            aria-expanded={showCommand}
+            className="fy-sent-command-toggle"
+            onClick={() => setShowCommand(current => !current)}
+            type="button"
+          >
+            {showCommand ? 'Hide command' : 'Show command'}
+          </button>
+        </span>
         <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
       </div>
       {reason === undefined ? null : (

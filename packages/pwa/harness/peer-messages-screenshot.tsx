@@ -232,12 +232,14 @@ try {
             return new Set(centres).size;
           }),
         );
-        if (viewport.name === 'desktop' && feet.some(lines => lines > 1))
-          fail(`${scheme}: a sent card's foot wraps (${feet.join(', ')})`);
-        const held =
-          (await page.locator('[data-scene="sender"] .fy-sent-state[data-sent-state="held"]').textContent()) ?? '';
-        if (!held.startsWith("Held — delivered when Tanna's turn ends"))
-          fail(`${scheme} ${viewport.name}: the held FYI says "${held}"`);
+        if (feet.some(lines => lines > 1))
+          fail(`${scheme} ${viewport.name}: a sent card's foot wraps (${feet.join(', ')})`);
+        const held = page.locator('[data-scene="sender"] .fy-sent-state[data-sent-state="held"]');
+        const shown = (await held.locator('.fy-sent-word').evaluate(word => word.firstChild?.textContent)) ?? '';
+        if (shown !== 'Held') fail(`${scheme} ${viewport.name}: the held FYI reads "${shown}", not "Held"`);
+        const why = (await held.getAttribute('title')) ?? '';
+        if (!why.includes("delivered when Tanna's turn ends"))
+          fail(`${scheme} ${viewport.name}: the held FYI's tooltip says "${why}"`);
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (overflow > 0) fail(`${scheme} ${viewport.name} scrolls sideways by ${overflow}px`);
         for (const name of SCENES) {

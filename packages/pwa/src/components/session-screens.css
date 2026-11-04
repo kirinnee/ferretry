@@ -2622,6 +2622,23 @@ button.fy-receipt {
   line-height: 1.4;
   min-width: 0;
 }
+.fy-sent-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The separator and the control it leads into never part: a wrap drops both to the next line together. */
+.fy-sent-command {
+  align-items: center;
+  color: var(--fy-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  gap: 4px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .fy-sent-dot {
   color: var(--fy-muted);
   font-weight: 400;
@@ -2648,7 +2665,7 @@ button.fy-receipt {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 2px 6px;
   margin-top: 4px;
 }
 .fy-sent-foot > .fy-receipt-line {
@@ -2664,10 +2681,8 @@ button.fy-receipt {
   line-height: 1.4;
   padding: 0;
 }
-/* The foot's time keeps clear of the control before it, however full the line is. */
-.fy-sent-foot > .fy-receipt-line {
-  padding-left: 8px;
-}
+/* The foot's time keeps clear of the control before it, however full the line is: the foot's own gap (a padding
+   on top of it cost the longest label, "Not delivered", its one line on a 390px phone). */
 .fy-sent-command-toggle:hover,
 .fy-sent-command-toggle:focus-visible {
   color: var(--fy-fg);

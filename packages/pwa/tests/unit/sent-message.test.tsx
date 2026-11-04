@@ -48,7 +48,10 @@ describe('a message this ferret sent', () => {
     expect(must(card.querySelector('a'), 'the recipient link').getAttribute('href')).toBe('/d/d1/session/mvtanna-1');
     expect(must(card.querySelector('.fy-sent-body strong'), 'the bold word').textContent).toBe('there');
     expect(words(card.querySelector('.fy-sent-state'))).toBe('Delivered');
-    expect(card.querySelector('.fy-sent-state .fy-sent-dot')?.getAttribute('aria-hidden')).toBe('true');
+    // The separator leads the command, not the state: a wrap never strands it at a line's end.
+    expect(card.querySelector('.fy-sent-state .fy-sent-dot')).toBeNull();
+    expect(card.querySelector('.fy-sent-command > .fy-sent-dot')?.getAttribute('aria-hidden')).toBe('true');
+    expect(card.querySelector('.fy-sent-dot + .fy-sent-command-toggle')).not.toBeNull();
     expect(card.querySelector('[role="alert"]')).toBeNull();
     // The command is one tap away, and folds back.
     expect(card.querySelector('.fy-message-tools, [data-tool-group]')).toBeNull();
@@ -80,17 +83,18 @@ describe('a message this ferret sent', () => {
   });
 
   test('reads every other state, a question, and a body it could not see', async () => {
-    for (const [state, word] of [
-      ['sending', 'Sending…'],
-      ['queued', 'Queued — it reads this when its current turn ends'],
-      ['held', 'Held'],
-      ['replied', 'Replied'],
+    for (const [state, word, shortWord] of [
+      ['sending', 'Sending…', 'Sending…'],
+      ['queued', 'Queued — it reads this when its current turn ends', 'Queued'],
+      ['held', 'Held', 'Held'],
+      ['replied', 'Replied', 'Replied'],
     ] as const) {
       const view = await mount(<TranscriptRow entry={sentRow({ state, reason: '' })} />);
       const shown = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
       // One short word on the line; the rest for a screen reader and on hover.
       expect(words(shown)).toBe(word);
       expect(shown.getAttribute('title')).toBe(word);
+      expect(must(shown.querySelector('.fy-sent-word'), 'the word').firstChild?.textContent).toBe(shortWord);
       expect(view.container.querySelector('[data-sent-reason]')).toBeNull();
       await view.unmount();
     }
@@ -111,14 +115,14 @@ describe('a message this ferret sent', () => {
   });
 
   test('says why a held send waits, in the words of the CLI form it held with (&B157)', async () => {
-    for (const [output, word] of [
+    for (const [output, detail] of [
       [
         "held as an FYI (not typed yet): it is delivered when the agent's turn ends, or by 10:40:00 at the latest; do not resend",
-        "Held — delivered when Tanna's turn ends",
+        "delivered when Tanna's turn ends",
       ],
       [
         'held until 10:38:00 to combine with other messages (action); not typed yet; do not resend',
-        'Held until 10:38 to batch',
+        'delivered at 10:38, batched with its other messages',
       ],
     ] as const) {
       const sent = must(
@@ -130,8 +134,12 @@ describe('a message this ferret sent', () => {
       );
       const view = await mount(<TranscriptRow entry={sentRow(sent)} />);
       const shown = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
-      expect(words(shown)).toBe(word);
-      expect(shown.getAttribute('title')).toBe(word);
+      // The line reads just "Held" (one line on a phone); the why is the tooltip and the accessible name.
+      const visible = must(shown.querySelector('.fy-sent-word'), 'the word').firstChild?.textContent;
+      expect(visible).toBe('Held');
+      expect(words(shown)).toBe(`Held — ${detail}`);
+      expect(shown.getAttribute('title')).toBe(`Held — ${detail}`);
+      expect(shown.querySelector('.sr-only')?.textContent).toBe(` — ${detail}`);
       await view.unmount();
     }
   });

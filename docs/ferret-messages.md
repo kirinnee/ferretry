@@ -101,20 +101,20 @@ The tool call that ran `fy send` becomes a **Sent to** card: the recipient as a 
 message (a quoted argument or the `"$(cat <<'EOF' … EOF)"` heredoc; a `--message-file` or any other
 shell expansion is named, never guessed), and its state:
 
-| State     | Read from                                                                                                                                                                                    |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sending   | No result yet                                                                                                                                                                                |
-| Held      | The CLI said `held as an FYI` — "Held — delivered when Tanna's turn ends"; or `held until 10:38:00` (an action batched with others) — "Held until 10:38 to batch"; any other `held` — "Held" |
-| Queued    | Any other successful result that is not a delivery                                                                                                                                           |
-| Delivered | The CLI said `delivered` (or `revived the session`)                                                                                                                                          |
-| Replied   | A later message in this Chat came from the recipient — the proof it was read                                                                                                                 |
-| Failed    | The call failed; the reason is the CLI's own first line                                                                                                                                      |
+| State     | Read from                                                                                                                                                                                                                                                              |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sending   | No result yet                                                                                                                                                                                                                                                          |
+| Held      | The CLI said `held` — the line reads just "Held"; `held as an FYI` adds "delivered when Tanna's turn ends" and `held until 10:38:00` (an action batched with others) adds "delivered at 10:38, batched with its other messages", as the tooltip and to a screen reader |
+| Queued    | Any other successful result that is not a delivery                                                                                                                                                                                                                     |
+| Delivered | The CLI said `delivered` (or `revived the session`)                                                                                                                                                                                                                    |
+| Replied   | A later message in this Chat came from the recipient — the proof it was read                                                                                                                                                                                           |
+| Failed    | The call failed; the reason is the CLI's own first line                                                                                                                                                                                                                |
 
 The raw command stays one tap away under **Show command**. Anything the reader does not recognise as a
 send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/peer-delivery.ts`.
 
 The card is compact (&F949): "Sent to :name" is a meta line the size of a chat row's name, and the foot is
-ONE line — the state's mark and its short word, "Show command", then the time at the right. A longer meaning
+ONE line — the state's mark and its short word, `·` and "Show command" (the separator belongs to the control after it, so a wrap never strands it), then the time at the right. A longer meaning
 ("Queued — it reads this when its current turn ends") is the state's tooltip and is read to a screen reader;
 a failure's reason takes the one line of its own under the foot, and is part of the failure's alert, so a screen
 reader hears "Not delivered: <reason>" at once.
@@ -130,8 +130,8 @@ message and each picture once after them.
 
 ## Declared gaps
 
-- **A held send does not follow itself to Delivered** (&B157). "Held — delivered when Tanna's turn ends" (or "Held
-  until 10:38 to batch") is what the CLI said when it sent; the delivery is in the RECEIVER's send ledger (`/v1/sessions/:id/sends`), and the
+- **A held send does not follow itself to Delivered** (&B157). "Held — delivered when Tanna's turn ends" (or "Held —
+  delivered at 10:38, batched with its other messages") is what the CLI said when it sent; the delivery is in the RECEIVER's send ledger (`/v1/sessions/:id/sends`), and the
   sender's Chat does not read another session's ledger. Following it means reading the receiver's ledger from
   the sender's Chat and matching the send to its row.
 
