@@ -526,16 +526,38 @@ every shell unframeable in production), both pinned by `pages-config.sh`.
   `meta`, `base`, `link`, embedded frames and objects and speculation rules, deletes the
   `RTCPeerConnection` family, then re-creates the page's classic and module scripts so they run in
   order.
-- **Inline and frameless, as if native.** It paints the message column's background, colour and font
-  (`FyRenderHtmlPaint`, re-sent on a theme change, never a remount), takes its own reported height
-  clamped to 640px — past that it scrolls inside itself, so it can never push or cover the app — and
-  stays invisible until its first draw. A replaced element cannot draw outside its box: a
-  `position: fixed` cover inside the page is fixed to the frame.
+- **Inline and frameless, as if native.** The page is **transparent**: it sits on the column's own
+  surface and paints no background. It gets the **app's theme** instead — see the theme contract below —
+  re-sent on every theme switch as a message, never a remount. It takes its own reported height (a
+  `ResizeObserver` in the shell posts it), clamped to 1200px, and **never scrolls inside itself
+  inline**: the kit's root is `overflow: hidden`, so a wheel or a swipe over the page scrolls the chat,
+  and a page past the cap is clipped rather than given a scrollbar. Fullscreen is the one state it may
+  scroll in (the parent says so with a `layout` message). It stays invisible until its first draw. A
+  replaced element cannot draw outside its box: a `position: fixed` cover inside the page is fixed to
+  the frame.
+- **The theme contract** (`src/lib/fy-render-html-kit.ts` owns it). The parent reads a fixed list of
+  app tokens (`FY_RENDER_HTML_TOKENS`: ink, surfaces, lines, accent, status tones, `--viz-1`…`--viz-8`,
+  type, radii, spacing) plus the column's ink and font from the block's computed style and sends them in
+  `FyRenderHtmlPaint`; the shell admits each by one rule — a listed name and a bounded value that cannot
+  name a resource (`url(`, `image-set(`, …), escape or leave its declaration — and sets it on its
+  root under the **app's own name**, so `var(--accent)` means the same in a live page and in a static
+  fragment (which inherits it). A token no longer sent is removed, so a repaint is one whole theme.
+  The shell's head carries the **kit** stylesheet, inlined at build time and checked by the build:
+  element defaults (buttons, inputs, selects, tables, headings) and a component set (`.fy-btn`,
+  `.fy-range`, `.fy-toggle`, `.fy-field`, `.fy-card`, `.fy-bars`/`.fy-bar`, `.fy-meter`,
+  `.fy-legend`, `.fy-table`, …), written only in tokens and placed in `@layer fy` so any author
+  rule beats it. A static fragment's shadow root gets the component rules too. The frame element is
+  given the same `color-scheme` as the page, because a frame whose element and document disagree gets
+  an opaque backdrop from the browser — that agreement is what keeps the page transparent. **Not
+  carried:** the theme's web fonts (`font-src data:` is unchanged), so a theme's font stack falls back
+  to the reader's installed fonts inside the frame. `fy render guide html` teaches all of this, with an
+  example of a slider redrawing bars.
 - **A quiet marker says it runs**: one muted "interactive" line above the page, in the flow so it never
   sits on the page's own controls. The frame's accessible name is `Interactive illustration: <alt>`.
-- **Unloaded when far away.** A page runs only while its block is within a screen or so of the viewport
-  (or fullscreen). Scrolled further, the frame is REMOVED — its scripts with it — and a plane of its
-  last reported height holds its place; scrolled back, it starts again.
+- **Unloaded when far away.** A page runs while its block is within about three screens of the viewport
+  (or fullscreen), so a reader scrolling a little past and back keeps its state. Scrolled further, the
+  frame is REMOVED — its scripts with it — and an invisible plane of its last reported height holds its
+  place; scrolled back, it starts again at that height.
 - **Two guards, neither of them a quota.** A **stall guard**: once drawn, the shell beats every second;
   a page that holds the thread stops beating and is stopped after five seconds of silence while the tab
   is visible ("stopped because it stopped responding", **Run again**). And ten minutes of **wall-clock
@@ -764,6 +786,11 @@ all of them is gone. What replaced it bounds where and when work happens, and **
   viewport (`IntersectionObserver`, `800px` vertical margin) and stays rendered. A block far down a
   long transcript decodes nothing, downloads no renderer, sanitizes nothing and reads no file until the
   reader scrolls toward it.
+- **No pop-in.** Until a block has drawn it holds an **invisible** plane, never a grey box. Its height is
+  the one that block last drew at in this session (`lib/fy-render-height-memory.ts`: keyed by type and a
+  hash of the source, in memory, 256 entries), so a block seen before — a tab switch, a chat revisited,
+  the same block in an agenda tab — reserves its real height and nothing under it jumps when it lands.
+  A block never drawn before reserves the stylesheet's default.
 - **Settled bytes.** A block's first bytes render at once, so a finished message from history never
   waits; later bytes replace them only once they have stopped changing for 400 ms. A streaming
   assistant therefore does not re-decode a partial SVG, recompile a diagram or re-sanitize a fragment
@@ -946,7 +973,48 @@ One self-contained `<svg>…</svg>` (CSS animation welcome). No `<script>` or `o
 
 ### html
 
-A fragment with inline CSS — tables, lists, `<details>`/`<summary>`, code, inline SVG, `<style>` — drawn straight into the message; nothing in it runs. Add a `<script>` or `on…=` handler only when the reader must do something — interactive means a visual with state or parameters the reader changes (sliders, toggles, inputs) that redraws as they do, never a stepper: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline `<style>` and `<script>`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). Theme tokens such as `var(--fg)` work; the fragment's styles cannot reach the app and the app's cannot reach it. ≤ 200 KiB, bounded in height, scrollable past that.
+A fragment with inline CSS — tables, lists, `<details>`/`<summary>`, code, inline SVG, `<style>` — drawn straight into the message; nothing in it runs. Add a `<script>` or `on…=` handler only when the reader must do something: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline `<style>` and `<script>`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). ≤ 200 KiB. The fragment's styles cannot reach the app and the app's cannot reach it.
+
+**Interactive means a visualization the reader changes.** Draw something — bars, a curve, a grid, a diagram — and give it parameters (sliders, toggles, a select, segmented buttons); every change redraws it at once. Never a stepper, a slideshow, a quiz or Next/Back pages: a sequence is prose.
+
+**It looks native when it uses the app's theme.** The page sits on the chat or agenda surface, so leave its background transparent and set no colour of your own unless the colour is the content (a swatch). Every colour comes from a theme token; light, dark and a theme switch while it runs follow by themselves.
+
+- Tokens, as `var(--name)`, the same in a static fragment: ink `--fg` `--fg-soft` `--muted` `--faint`; surfaces `--bg` `--surface` `--surface-2` `--surface-3`; lines `--border` `--border-soft` `--border-strong`; accent `--accent` `--accent-soft` `--accent-fg`; status `--ok` `--warn` `--err` and `--ok-bg` `--warn-bg` `--err-bg`; series `--viz-1` … `--viz-8`; type `--font-body` `--font-mono` `--text-xs` `--text-sm` `--text-base` `--text-lg`; shape `--radius-sm` `--radius-md` `--radius-pill`; space `--gap-xs` `--gap-sm` `--gap-md`.
+- Plain `<button>`, `<input>`, `<select>`, `<table>`, headings and text are already styled in a live page. Classes add the rest, live or static: `fy-btn` (`fy-btn--primary`, `fy-btn--quiet`; `aria-pressed="true"` marks one on), `fy-segmented` (a row of `fy-btn`), `fy-range` (a slider), `fy-toggle` (`<label class="fy-toggle"><input type="checkbox"> Label</label>`), `fy-input`, `fy-select`, `fy-field` (`<label class="fy-field">Rate <input class="fy-range" type="range"> <output>3</output></label>`), `fy-card`, `fy-row`, `fy-stack`, `fy-grid`, `fy-muted`, `fy-num`, `fy-chip`, `fy-stat` (`<div class="fy-stat">Cost <b>$42</b></div>`), `fy-table`, `fy-legend` with `fy-swatch`.
+- Bars without a library: `fy-bars` holds `fy-bar` elements, each `style="--v:40"` (0–100, its height in percent) with optional `data-value` and `data-label`; `fy-meter` with `style="--v:70"` is one horizontal bar. `data-tone` is `1`–`8` (the series) or `accent`, `good`, `warn`, `bad`, `muted`, on a bar, swatch, meter, chip, or an inline-SVG shape (it sets `fill`, or `stroke` on `fill="none"`).
+- Size: the frame grows to the page's height, up to 1200px, and never scrolls inside. Nothing may be wider than the column — a phone is about 360px — so let rows wrap (`fy-row` does) and give an SVG a `viewBox` with `width="100%"`. Fonts the app downloads are not available inside, so `--font-body` falls back to the reader's installed ones.
+
+A slider that redraws bars:
+
+```html
+<div class="fy-stack">
+  <label class="fy-field"
+    >Growth <input class="fy-range" id="g" type="range" min="0" max="50" value="20" /> <output id="o"></output
+  ></label>
+  <div class="fy-bars" id="bars"></div>
+  <div class="fy-legend">
+    <span><i class="fy-swatch"></i>Revenue, year 1 = 1.00</span>
+  </div>
+</div>
+<script>
+  const g = document.getElementById('g'),
+    o = document.getElementById('o'),
+    bars = document.getElementById('bars');
+  function draw() {
+    const values = [1, 2, 3, 4, 5].map(year => Math.pow(1 + g.value / 100, year - 1));
+    const top = Math.max(...values);
+    o.textContent = g.value + '%';
+    bars.innerHTML = values
+      .map(
+        (v, i) =>
+          `<div class="fy-bar" style="--v:${(v / top) * 100}" data-value="${v.toFixed(2)}" data-label="Y${i + 1}"></div>`,
+      )
+      .join('');
+  }
+  g.addEventListener('input', draw);
+  draw();
+</script>
+```
 
 ### chart
 

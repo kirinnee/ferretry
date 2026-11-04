@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createScanner, LanguageVariant, SyntaxKind, tokenIsIdentifierOrKeyword } from 'typescript/unstable/ast';
+import { FY_RENDER_HTML_KIT_CSS } from '../src/lib/fy-render-html-kit.ts';
 
 const packageRoot = resolve(import.meta.dir, '..');
 const shellDirectory = resolve(packageRoot, 'scripts/fy-render-shell');
@@ -632,17 +633,9 @@ const htmlShellDocument = (bootstrap: string): string => `<!doctype html>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>fy-render interactive page</title>
-    <style>
-      html {
-        background: Canvas;
-        color: CanvasText;
-        font-family: ui-sans-serif, system-ui, sans-serif;
-      }
-      /* Frameless in the message column, so the page starts flush with the prose around it. */
-      body {
-        margin: 0;
-      }
-    </style>
+    <!-- The app's look (src/lib/fy-render-html-kit.ts): a transparent root, element defaults and the
+         .fy-* components, in @layer fy so every author rule beats it. Tokens arrive at runtime. -->
+    <style>${FY_RENDER_HTML_KIT_CSS}</style>
   </head>
   <body>
     <script>${bootstrap}</script>
@@ -657,6 +650,8 @@ const assertHtmlShellContract = (shell: string): void => {
   for (const forbidden of ["'unsafe-eval'", "'self'", 'http:', 'https:', 'allow-same-origin'])
     if (shell.includes(forbidden)) throw new Error(`❌ the html shell gained ${forbidden}`);
   if (/<script[^>]+src=/iu.test(shell)) throw new Error('❌ the html shell carries an external script source');
+  if (!shell.includes(FY_RENDER_HTML_KIT_CSS)) throw new Error('❌ the html shell lost the theme kit');
+  if (/url\(|@import/iu.test(FY_RENDER_HTML_KIT_CSS)) throw new Error('❌ the theme kit names a resource');
   if (/<link[^>]/iu.test(shell) || /\bhref=/iu.test(shell))
     throw new Error('❌ the html shell carries a linked resource the frame would have to fetch');
 };

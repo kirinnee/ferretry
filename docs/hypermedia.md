@@ -98,6 +98,13 @@ painted from the same theme tokens; the reader's theme decides what each looks l
 repaints them. A `chart` that names a colour is refused, and a Mermaid `%%{init}%%` that sets `theme`,
 `themeVariables` or `themeCSS` is ignored ([fy-render.md § Charts](fy-render.md#charts)).
 
+**An interactive `html` page looks like the app.** It is transparent — it sits on the chat or agenda
+surface — and gets the app's theme tokens (`var(--fg)`, `var(--accent)`, `var(--viz-1)` …, light and dark,
+following a theme switch live) and a small component kit (`.fy-btn`, `.fy-range`, `.fy-toggle`,
+`.fy-bars`, `.fy-table`, …) inside its sandbox. It grows to its own height and never scrolls inside
+itself inline. Interactive means a visualization the reader changes and it redraws, never a stepper.
+`fy render guide html` teaches it; the contract is [fy-render.md § The interactive `html` frame](fy-render.md#the-interactive-html-frame).
+
 A block renders by itself once it is near the screen — there is no Render button any more
 ([fy-render.md § Inline by default](fy-render.md#inline-by-default--the-owners-decision)).
 
