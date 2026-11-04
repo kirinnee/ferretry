@@ -215,7 +215,7 @@ export const simpleCommands = (script: string): readonly (readonly Word[])[] => 
 };
 
 /** Where a ferret's message to another got to, as the sending side can tell. */
-export type SentState = 'sending' | 'delivered' | 'queued' | 'failed' | 'replied';
+export type SentState = 'sending' | 'delivered' | 'queued' | 'held' | 'failed' | 'replied';
 
 /** A ferret's `send` as the transcript shows it. */
 export interface SentMessage {
@@ -230,6 +230,11 @@ export interface SentMessage {
   readonly state: SentState;
   /** Why it failed, in the CLI's own words. */
   readonly reason?: string;
+  /**
+   * Why a held send waits, when the CLI said: an FYI until the receiver's turn ends, or an action batched until a
+   * time on the sender's clock (`HH:MM`).
+   */
+  readonly hold?: { readonly kind: 'fyi' } | { readonly kind: 'batch'; readonly until: string };
 }
 
 /** The `send` options that take a value, so the value is not read as the message. */
@@ -248,7 +253,7 @@ const failureReason = (text: string): string => {
   return line.replace(/^error:\s*/iu, '');
 };
 
-const stateOf = (call: Pick<ToolCall, 'result'>): Pick<SentMessage, 'state' | 'reason'> => {
+const stateOf = (call: Pick<ToolCall, 'result'>): Pick<SentMessage, 'state' | 'reason' | 'hold'> => {
   const result = call.result;
   if (result === undefined) return { state: 'sending' };
   const text = result.text ?? '';
@@ -257,6 +262,12 @@ const stateOf = (call: Pick<ToolCall, 'result'>): Pick<SentMessage, 'state' | 'r
     return { state: 'failed', reason: failureReason(text) };
   // `describeDisposition`'s words: everything but a plain delivery is held somewhere first.
   if (/^\s*(?:delivered|revived the session)\b/mu.test(text)) return { state: 'delivered' };
+  // `describeHold`'s words: the queue holds it ON PURPOSE (an FYI until the receiver's turn ends, an action for a
+  // minute to batch), so it is neither stuck nor typed yet (&B157).
+  if (/^\s*held as an FYI\b/mu.test(text)) return { state: 'held', hold: { kind: 'fyi' } };
+  const batch = /^\s*held until (\d{1,2}:\d{2})(?::\d{2})?\b/mu.exec(text)?.[1];
+  if (batch !== undefined) return { state: 'held', hold: { kind: 'batch', until: batch } };
+  if (/^\s*held\b/mu.test(text)) return { state: 'held' };
   return { state: 'queued' };
 };
 
