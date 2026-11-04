@@ -38,6 +38,8 @@ import {
   agendaBriefOf,
   agendaBriefRequiredProblems,
   agendaCardKind,
+  applyAgendaTabEdits,
+  type AgendaTabEdit,
   agendaEditShapeProblems,
   agendaFormProblems,
   agendaNoticeProblems,
@@ -330,6 +332,10 @@ export interface EditAgendaPatch extends AgendaBrief {
   readonly answers?: AgendaCardAnswer[];
   /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
   readonly clear?: readonly AgendaClearableField[];
+  /** Tab operations (`agenda.tabs.1`), turned into the new `tabs` before the edit applies (`withTabEdits`). */
+  readonly tabEdits?: readonly AgendaTabEdit[];
+  /** The edit's tab operations removed every tab of the ferret's own: `tabs` is cleared. Set by `withTabEdits`. */
+  readonly clearTabs?: true;
 }
 
 export type AgendaCommand =
@@ -2261,8 +2267,23 @@ const EDITABLE_FIELDS = [
   'body',
   'questionAnswer',
   'whereWeAre',
+  'tabs',
   'detail',
 ] as const satisfies readonly AgendaRevisableField[];
+
+/**
+ * An edit's TAB OPERATIONS as the new `tabs` (&F923): applied in order to the item's own tabs, so the edit stores the
+ * whole list through the ordinary path — one edit, one version, one revision. Every tab removed clears `tabs`. A plain
+ * sentence when one operation cannot apply, or when the edit also replaces `tabs` whole.
+ */
+function withTabEdits(item: AgendaItem, patch: EditAgendaPatch): EditAgendaPatch | string {
+  const { tabEdits, ...rest } = patch;
+  if (tabEdits === undefined) return patch;
+  if (patch.tabs !== undefined) return 'an edit gives tabs or tab operations, not both';
+  const applied = applyAgendaTabEdits(item.tabs, tabEdits);
+  if (!applied.ok) return applied.problem;
+  return applied.tabs.length === 0 ? { ...rest, clearTabs: true } : { ...rest, tabs: [...applied.tabs] };
+}
 
 /** The option labels of each question, in order — what an edit that keeps the ask leaves alone. */
 function questionShape(questions: AgendaBrief['questions']): string {
@@ -2424,6 +2445,10 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
   }
+  if (command.patch.tabEdits !== undefined) {
+    const tabbed = withTabEdits(target.item, command.patch);
+    return typeof tabbed === 'string' ? failure('invalid', tabbed) : edit(ledger, { ...command, patch: tabbed });
+  }
   const replaces = askReplaced(target.item, command.patch);
   if (replaces) {
     const problem = replaceProblem(target.item, command.patch, command.actor);
@@ -2466,6 +2491,7 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   // A new ask brings its own shape: the old fields it does not re-give go, and the revision records them.
   const clearing: (typeof EDITABLE_FIELDS)[number][] = [
     ...(patch.clear ?? []),
+    ...(patch.clearTabs === true ? (['tabs'] as const) : []),
     ...(dropsAnswer ? (['questionAnswer'] as const) : []),
     ...(replaces ? droppedShape(item, patch) : []),
   ];

@@ -84,9 +84,10 @@ const keeperOf = (group: readonly Entry[]): Entry => {
   return ranked.find(entry => ownerTurn(entry.item)) ?? ranked[0]!;
 };
 
-/** Whether two items ask the same thing in the same words: the ask and the body, as raised. */
+/** Whether two items ask the same thing in the same words: the ask, the body and the tabs, as raised. */
 const sameWords = (one: AgendaItem, other: AgendaItem): boolean =>
-  JSON.stringify([one.ask ?? null, one.body ?? null]) === JSON.stringify([other.ask ?? null, other.body ?? null]);
+  JSON.stringify([one.ask ?? null, one.body ?? null, one.tabs ?? null]) ===
+  JSON.stringify([other.ask ?? null, other.body ?? null, other.tabs ?? null]);
 
 /** Why an item may not be closed, or `undefined` when it may. */
 const protectedBecause = (entry: Entry, facts: DuplicateFacts): string | undefined => {
