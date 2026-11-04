@@ -154,6 +154,17 @@ function kindGuidance(
       'If it is legitimately idle (an awaited external result, a long download) say why, and recommend LEAVE.',
     ];
   }
+  if (anomaly.kind === 'inbox_stuck') {
+    return [
+      'Messages sent to this ferret have waited in FERRETRY’S OWN QUEUE far past due; the anomaly says how many, how',
+      'long and the cause the daemon read off the head of the queue. The daemon already re-checked it safely once and',
+      'it did not move. This is a fault of the delivery, not of the ferret: do not judge its work.',
+      `Read ${session.directory}/channel/queue.jsonl (the queue's log), ${session.directory}/channel/sends.jsonl (the send ledger)`,
+      'and the recent events, READ ONLY. Find the message at the head of the queue, what its send record says, and',
+      'whether anything has moved since the anomaly was written.',
+      'Do NOT send, retry, cancel, resend or delete any message, and do not type into the pane.',
+    ];
+  }
   if (anomaly.kind === 'owner_request') {
     return [
       'The OWNER asked for this investigation; no rule flagged it. Their note is the anomaly detail above.',
@@ -179,6 +190,48 @@ function kindGuidance(
   ];
 }
 
+/** The verdicts an assigned warden may give, and what each does, for every kind but a stuck inbox. */
+function verdicts(settings: WardenPromptSettings, cli: string, id: string): readonly string[] {
+  return [
+    ...authorityNotice(settings),
+    '## Verdict (exactly one; state it and the evidence in the report)',
+    '- LEAVE — the long operation is expected and progressing; no action.',
+    ...(settings.mayAct
+      ? [
+          `- NUDGE — \`${cli} send ${id} <message>\` if it looks wedged but recoverable.`,
+          `- RESUME — \`${cli} resume ${id}\` if the turn is dead but the session should continue.`,
+          '  If its PROCESS is dead or frozen rather than just its turn, recommend RESTART: it is relaunched with its conversation intact.',
+          `- KILL — \`${cli} stop ${id}\` ONLY with clear evidence it is burning time with no progress.`,
+          '  (Your credential can stop only this one assigned session.)',
+        ]
+      : [
+          '- NUDGE — it looks wedged but recoverable; recommend a nudge and say what to send.',
+          '- RESUME — the turn is dead but the session should continue.',
+          '  If its PROCESS is dead or frozen rather than just its turn, recommend RESTART: it is relaunched with its conversation intact.',
+          '- KILL — clear evidence it is burning time with no progress. Recommend STOP; do not attempt it.',
+        ]),
+    '- NEEDS_HUMAN — the rare exception: use it only when you are genuinely uncertain whether KILL would destroy needed work or cause irreversible harm. State that exact uncertainty; never use it merely because acting feels risky.',
+  ];
+}
+
+/**
+ * The verdicts an investigation of a stuck inbox may give. Its only act is the daemon's own safe re-check run once
+ * more (`inbox-stuck.ts`): whatever the report says, the ferret is never messaged, resumed, restarted or stopped
+ * for it, and nothing is resent or deleted — so the warden is told exactly that, and nothing else is offered.
+ */
+function inboxStuckVerdicts(): readonly string[] {
+  return [
+    '## Verdict (exactly one; state it and the evidence in the report)',
+    '- LEAVE — the queue has drained or is moving now, or what holds it is intended; no action.',
+    '- NUDGE — here this does NOT message the ferret: it asks the daemon to run its safe re-check once more. That',
+    '  re-proves each stuck send from the transcript and the screen, types one again only when it is proven never',
+    '  to have arrived, presses Enter only on text that is exactly a send of ours, and looks at the queue again.',
+    '  Choose it when the head of the queue is a send of ours that nothing is watching, or a box that may hold our text.',
+    '- NEEDS_HUMAN — a person must act: their own draft is in the box, a dialog needs answering, a revive was',
+    '  refused, or the re-check cannot help. Say exactly what they must do.',
+  ];
+}
+
 /**
  * The turn an ASSIGNED warden is given: one anomaly, one session, one verdict.
  *
@@ -199,7 +252,9 @@ export function buildAssignedWardenPrompt(
     `You are an ASSIGNED warden for exactly one session: ${id} (teammate ${teammate}).`,
     anomaly.kind === 'owner_request'
       ? 'The owner asked the Warden to look at it. Investigate THIS session only and deliver one verdict.'
-      : 'It was flagged sus (alive but weird) by the fleet sweep. Investigate THIS session only and deliver one verdict.',
+      : anomaly.kind === 'inbox_stuck'
+        ? 'Its inbox was flagged stuck by the fleet sweep. Investigate THIS session only and deliver one verdict.'
+        : 'It was flagged sus (alive but weird) by the fleet sweep. Investigate THIS session only and deliver one verdict.',
     '',
     '## The anomaly',
     '```json',
@@ -215,24 +270,7 @@ export function buildAssignedWardenPrompt(
       : [`- The workspace, READ ONLY: \`git -C ${session.cwd} diff --stat\` and file timestamps.`]),
     ...kindGuidance(anomaly, session, settings).map(line => `- ${line}`),
     '',
-    ...authorityNotice(settings),
-    '## Verdict (exactly one; state it and the evidence in the report)',
-    '- LEAVE — the long operation is expected and progressing; no action.',
-    ...(settings.mayAct
-      ? [
-          `- NUDGE — \`${cli} send ${id} <message>\` if it looks wedged but recoverable.`,
-          `- RESUME — \`${cli} resume ${id}\` if the turn is dead but the session should continue.`,
-          '  If its PROCESS is dead or frozen rather than just its turn, recommend RESTART: it is relaunched with its conversation intact.',
-          `- KILL — \`${cli} stop ${id}\` ONLY with clear evidence it is burning time with no progress.`,
-          '  (Your credential can stop only this one assigned session.)',
-        ]
-      : [
-          '- NUDGE — it looks wedged but recoverable; recommend a nudge and say what to send.',
-          '- RESUME — the turn is dead but the session should continue.',
-          '  If its PROCESS is dead or frozen rather than just its turn, recommend RESTART: it is relaunched with its conversation intact.',
-          '- KILL — clear evidence it is burning time with no progress. Recommend STOP; do not attempt it.',
-        ]),
-    '- NEEDS_HUMAN — the rare exception: use it only when you are genuinely uncertain whether KILL would destroy needed work or cause irreversible harm. State that exact uncertainty; never use it merely because acting feels risky.',
+    ...(anomaly.kind === 'inbox_stuck' ? inboxStuckVerdicts() : verdicts(settings, cli, id)),
     '',
     '## Rules',
     '- Do NOT touch any other session. No git writes, no repository edits, no new non-warden sessions.',
@@ -240,14 +278,18 @@ export function buildAssignedWardenPrompt(
     ...reportWritingRules(reportPath),
     '- The report MUST follow this machine-stable template (the daemon parses the verdict and the recommendation):',
     '```',
-    'Verdict: LEAVE|NUDGE|RESUME|KILL|NEEDS_HUMAN',
+    anomaly.kind === 'inbox_stuck'
+      ? 'Verdict: LEAVE|NUDGE|NEEDS_HUMAN'
+      : 'Verdict: LEAVE|NUDGE|RESUME|KILL|NEEDS_HUMAN',
     '',
     `# Warden report — ${id} (teammate ${teammate}, ${session.config.label ?? '-'})`,
     '',
     `- **Anomaly kind:** ${anomaly.kind}`,
     '',
     '## Summary',
-    '- **Recommended action:** NUDGE|STOP|RESUME|RESTART|MIGRATE (agent)|LEAVE — <one-line why>',
+    anomaly.kind === 'inbox_stuck'
+      ? '- **Recommended action:** NUDGE|LEAVE — <one-line why>'
+      : '- **Recommended action:** NUDGE|STOP|RESUME|RESTART|MIGRATE (agent)|LEAVE — <one-line why>',
     '- **Outcome:** <short reason for the verdict>',
     '',
     '## Evidence',

@@ -46,6 +46,7 @@ import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
 import type { OrphanMemory } from './orphans.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
+import type { InboxStuckMemory } from './inbox-stuck.ts';
 import type { StuckInputMemory } from './input-stuck.ts';
 import type { OverdueMemory } from './report-overdue.ts';
 import type { ReviveState } from './revive.ts';
@@ -78,6 +79,7 @@ export const WARDEN_ANOMALY_KINDS = [
   'orphaned_card',
   'report_overdue',
   'input_stuck',
+  'inbox_stuck',
 ] as const satisfies readonly WardenAnomalyKind[];
 
 const AnomalyKindSchema = z.enum(WARDEN_ANOMALY_KINDS);
@@ -422,6 +424,11 @@ export interface WardenRuntimeState {
    * session id, kept while each is flagged: what stops it pressing or noticing again every sweep.
    */
   readonly stuckInput?: StuckInputMemory;
+  /**
+   * The ferrets whose stuck inbox the Warden re-checked, or named on the stuck-inbox notice (`inbox-stuck.ts`),
+   * keyed by session id, kept while each is flagged: what stops it re-checking or noticing again every sweep.
+   */
+  readonly stuckInbox?: InboxStuckMemory;
 }
 
 /**
@@ -502,6 +509,26 @@ const RuntimeStateSchema = z.object({
         sendId: z.string().min(1),
         pressedAt: Instant.optional(),
         press: z.enum(['submitted', 'holding', 'absent', 'refused']).optional(),
+        noticedAt: Instant.optional(),
+      }),
+    )
+    .optional(),
+  stuckInbox: z
+    .record(
+      z.string(),
+      z.object({
+        messageId: z.string().min(1),
+        cause: z.enum([
+          'hung_handover',
+          'held_for_revive',
+          'draft_own',
+          'draft_unattributed',
+          'dialog',
+          'unreadable',
+          'launching',
+          'no_reason',
+        ]),
+        unstuckAt: Instant.optional(),
         noticedAt: Instant.optional(),
       }),
     )

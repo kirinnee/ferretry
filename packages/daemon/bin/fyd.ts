@@ -657,6 +657,7 @@ import {
   walkLadder,
 } from '../src/lib/board/index.ts';
 import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
+import { StuckInboxList } from '../src/lib/warden/inbox-stuck-list.ts';
 import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
 import { OrphanList } from '../src/lib/warden/orphan-list.ts';
 import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
@@ -1402,6 +1403,7 @@ import {
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
+  type WardenStuckInboxPort,
   type WardenStuckInputPort,
   type WardenSubsystem,
   WardenSweepLoop,
@@ -4603,6 +4605,8 @@ interface WardenParts {
     readonly orphans: OrphanList;
     /** Every ferret stuck on an unsent message of ours (`warden/input-stuck.ts`), as one machine item. */
     readonly stuckInput: StuckInputList;
+    /** Every ferret whose messages wait in Ferretry's queue far past due (`warden/inbox-stuck.ts`), as one machine item. */
+    readonly stuckInbox: StuckInboxList;
     readonly folded: Promise<void>;
   };
   readonly usage: UsageFeedPort;
@@ -4633,6 +4637,8 @@ interface WardenParts {
   readonly exchanges: WardenExchangeReader;
   /** A ferret stuck on an unsent message of ours (`warden/input-stuck.ts`), less the machine notice. */
   readonly stuckInput: Omit<WardenStuckInputPort, 'add' | 'remove'>;
+  /** A ferret whose messages wait in Ferretry's queue far past due (`warden/inbox-stuck.ts`), less the machine notice. */
+  readonly stuckInbox: Omit<WardenStuckInboxPort, 'add' | 'remove'>;
   readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly migrate: SessionMigrateSubsystem & AgentJobControl;
   /** Analytics, for pricing a finished warden from its own transcript. */
@@ -4824,6 +4830,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         ...parts.stuckInput,
         add: async notice => await parts.machine.stuckInput.add(notice),
         remove: async sessionId => await parts.machine.stuckInput.remove(sessionId),
+      },
+      stuckInbox: {
+        ...parts.stuckInbox,
+        add: async notice => await parts.machine.stuckInbox.add(notice),
+        remove: async sessionId => await parts.machine.stuckInbox.remove(sessionId),
       },
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
@@ -11169,6 +11180,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new FileMachineMembers(stateFiles, join(paths.state, 'warden-input-stuck.json')),
           machineAgenda,
         ),
+        stuckInbox: new StuckInboxList(
+          new FileMachineMembers(stateFiles, join(paths.state, 'warden-inbox-stuck.json')),
+          machineAgenda,
+        ),
       };
       // The old notices are folded in first and quietly; only then does the minute timer or the Warden's sweep touch
       // the lists, so nothing writes a list while the folding is still reading it.
@@ -13746,6 +13761,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               if (view?.state.health !== 'stalled') return;
               await sendRepository.transition(id, { event: 'control.input_unstuck', health: 'healthy' });
             },
+          },
+          // B148: the queue and the ledger to read, and the daemon's own safe re-check — the tracker's look a boot
+          // makes, the verified finish of a draft of ours, and one more look by the deliverer.
+          stuckInbox: {
+            queue: async sessionId => await sessionQueue.list(parseSessionId(sessionId)),
+            sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
+            trackerLook: async sessionId => await sendTracker.check(parseSessionId(sessionId)),
+            finishOwnDraft: async sessionId => (await sends.finishOwnDraft(parseSessionId(sessionId))).kind,
+            deliveryLook: async sessionId => await queueDeliverer.look(parseSessionId(sessionId)),
           },
           resume,
           revive: {

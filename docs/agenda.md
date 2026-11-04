@@ -915,6 +915,10 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
     never submitted, after the Warden's Enter did not submit it (the `input_stuck` flag,
     [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message)). A ferret leaves it
     once it takes a turn again; the item resolves when the list is empty.
+  - `warden:inbox-stuck` — one item naming every ferret whose messages wait in Ferretry's own queue far past due,
+    after the Warden's safe re-check did not move them (the `inbox_stuck` flag,
+    [message-delivery.md](message-delivery.md#b148-a-ferret-whose-inbox-is-stuck)). A ferret leaves it once its queue
+    is no longer stuck; the item resolves when the list is empty.
   - `budget:<login>:<window>` — one per login per budget window. (It used to double because the notice was
     de-duplicated only inside the agenda of the ferret it was anchored to, and the anchor differed.)
 - **Waking.** A machine item's member list is kept beside it. An update that **adds** a member to an item the owner
