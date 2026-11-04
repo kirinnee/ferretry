@@ -744,7 +744,7 @@ elta's queue held 28 messages for five hours. `input_stuck` saw none of it. Two 
    types one message at a time, held everything behind it with no wait reason at all. Only a look by the tracker
    freed it — a daemon boot, or a `fy send --wait` from somebody else reading the ledger — and it then landed in
    seconds. Nothing was typed, so `typedNotSent` was never set; and in a declared wait the turn state was `null`,
-   not `your-turn`, so the ferret was not even an `input_stuck` candidate. (The send path's own fix is B153.)
+   not `your-turn`, so the ferret was not even an `input_stuck` candidate. (The send path's own fix is [B153](#b153-a-send-that-gave-up-before-its-first-key).)
 2. **A draft nothing proves ours (elta).** A send settled `unaccounted` (`landing_unconfirmed`) whose text the pane
    drew later, unrecognised: `finishOwnDraft` answered `foreign`, so every later message waited as `draft` with no
    `waitBehind` — for a person who was not there — at a ferret idle at its prompt.
@@ -949,7 +949,7 @@ went", so `send()` threw before it told the tracker. The deliverer saw a ledger 
    not awaited: the tracker's look takes the send lock while the deliverer holds the queue's. A stopping
    daemon asks nothing, so no look can start typing after the tracker has been disarmed.
 
-The Warden's `inbox_stuck` (&F910) is the detector for whatever still gets past these.
+The Warden's `inbox_stuck` ([B148](#b148-a-ferret-whose-inbox-is-stuck)) is the detector for whatever still gets past these.
 
 ## Declared gaps
 
