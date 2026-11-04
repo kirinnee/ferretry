@@ -18,7 +18,7 @@ const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const item = (overrides: Partial<AgendaItem> = {}): AgendaItem => agendaItem('A5', overrides);
 
 describe('the nine parts', () => {
-  test('are in the spec’s order, with the detailed context and the activity log folded', () => {
+  test('are in the spec’s order, with the detailed context, the terms and references, the conversation and the activity log folded', () => {
     expect(ITEM_VIEW_PARTS).toEqual([
       'head',
       'premise',
@@ -30,7 +30,7 @@ describe('the nine parts', () => {
       'conversation',
       'activity',
     ]);
-    expect([...FOLDED_PARTS].sort()).toEqual(['activity', 'detail']);
+    expect([...FOLDED_PARTS].sort()).toEqual(['activity', 'conversation', 'detail', 'references']);
   });
 
   test('call the body the full picture: it is the item’s live document', () => {

@@ -303,23 +303,17 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     `choice ${form} ${theme}: the card is drawn in a fallback font (${faces.family}; loaded: ${faces.loaded.join(', ')})`,
   );
   await checkLayout(choice, `choice ${form} ${theme}`);
+  // Not needed and the version picker are behind the head's ⋯ now (&F920).
+  await choice.locator('[data-agenda-menu-toggle]').click();
   check(
-    (await choice.locator('.fy-card__top [data-agenda-dismiss]').count()) === 1,
-    `choice ${form} ${theme}: Not needed is not in the card's top bar`,
+    (await choice.locator('[data-agenda-menu] [data-agenda-dismiss]').count()) === 1,
+    `choice ${form} ${theme}: Not needed is not in the ⋯ menu`,
   );
   check(
-    ((await choice.locator('[data-agenda-version-picker]').textContent()) ?? '').includes('v2 of 2'),
+    ((await choice.locator('[data-agenda-menu] [data-agenda-version-picker]').textContent()) ?? '').includes('v2 of 2'),
     `choice ${form} ${theme}: the version picker does not say v2 of 2`,
   );
-  const heights = await choice.evaluate(() =>
-    ['.fy-card__top [data-agenda-dismiss]', '.fy-card__top [data-agenda-version-picker]'].map(selector =>
-      Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? -1),
-    ),
-  );
-  check(
-    heights[0] === heights[1],
-    `choice ${form} ${theme}: Not needed is ${heights[0]}px tall, the version picker ${heights[1]}px`,
-  );
+  await choice.keyboard.press('Escape');
   await shot(choice, 'choice', form, theme);
   // A term opened: its meaning shows under it, inside the card (the Terms list is already open: nothing folds).
   await choice.locator('.fy-card a[href^="#fy-term-"]').nth(1).click();

@@ -246,35 +246,16 @@ const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[numbe
   } else {
     const title = page.locator('.fy-item-view__title[data-agenda-title]', { hasText: 'Three answers' }).first();
     await title.waitFor({ state: 'visible' });
-    // The open item's title wraps onto at most two lines, never moves and is never cut at a side; a longer one is drawn
-    // whole at the top of the body as well — with or without reduced motion.
-    const found = await title.evaluate(node => {
-      const line = Number.parseFloat(getComputedStyle(node).lineHeight);
-      const full = node.querySelector('.fy-item-view__title-text')?.textContent ?? '';
-      return {
-        wrap: node.getAttribute('data-wrap') !== null,
-        marquee: node.getAttribute('data-marquee') !== null,
-        cut: node.querySelector('.fy-item-view__title-cut') !== null,
-        lines: Math.round(node.clientHeight / line),
-        clamped: node.scrollHeight > node.clientHeight + 1,
-        whole: document.querySelector('[data-agenda-full-title]')?.textContent ?? null,
-        full,
-        moving:
-          node
-            .querySelector('.fy-item-view__title-text')
-            ?.getAnimations()
-            .filter(each => each instanceof CSSAnimation).length ?? 0,
-      };
-    });
-    check(found.wrap, `${label}: the title does not wrap`);
-    check(!found.marquee, `${label}: the title is set to scroll`);
-    check(!found.cut, `${label}: the title is cut at a word`);
-    check(found.moving === 0, `${label}: the title moves`);
-    check(found.lines <= 2, `${label}: the title takes ${found.lines} lines, wanted two at most`);
-    check(
-      !found.clamped || found.whole === found.full,
-      `${label}: a title longer than two lines is not drawn whole in the body`,
-    );
+    // The open item's title is ONE line (&F920): a marquee when it is too long, cut at a word where motion is reduced,
+    // and never drawn a second time in the body.
+    const found = await title.evaluate(node => ({
+      wrap: node.getAttribute('data-wrap') !== null,
+      lines: Math.round(node.clientHeight / Number.parseFloat(getComputedStyle(node).lineHeight)),
+      twice: document.querySelectorAll('[data-agenda-full-title]').length,
+    }));
+    check(!found.wrap, `${label}: the title wraps`);
+    check(found.lines === 1, `${label}: the title takes ${found.lines} lines, wanted one`);
+    check(found.twice === 0, `${label}: the title is drawn a second time in the body`);
   }
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check(wide <= 0, `${label}: scrolls sideways by ${wide}px`);

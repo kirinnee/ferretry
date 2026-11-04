@@ -133,19 +133,23 @@ describe('the item view’s parts', () => {
     await draw(full);
     expect(one('[data-agenda-part="head"] [data-agenda-state]').textContent).toBe('Needs you');
     expect(one('[data-agenda-part="head"] [data-agenda-stage]').textContent).toBe('Question');
-    // A slot for the version (and, next, the diff) control, kept in the head.
-    expect(one('[data-agenda-part="head"] [data-agenda-version-slot] [data-agenda-version-picker]')).toBeDefined();
+    // The version picker is the head's too, behind its ⋯ — never a row of its own on the card.
+    expect(root().querySelector('.fy-card [data-agenda-version-picker]')).toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
+    expect(one('[data-agenda-menu] [data-agenda-version-slot] [data-agenda-version-picker]')).toBeDefined();
   });
 
-  test('the head draws the description — the item’s summary — under the title, whole, before the chips', async () => {
+  test('the head draws the description — the item’s summary — whole, right under its two small chips', async () => {
     const long = `Which colour for the badge? ${'It sits on every row and is the first thing the owner sees. '.repeat(20)}End.`;
     await draw(agendaItem('A47', { ...full, subject: long } as Partial<AgendaItem>));
     const head = one('[data-agenda-part="head"]');
     const description = must(head.querySelector('[data-agenda-description]'), 'the description');
     expect(description.textContent).toBe(long);
-    expect(head.firstElementChild).toBe(description);
-    // Said on the card, so the head's ⓘ does not hold it a second time.
-    expect(root().querySelector('[data-agenda-info-panel] [data-agenda-ask]')).toBeNull();
+    expect(head.firstElementChild?.matches('[data-agenda-card-top]')).toBe(true);
+    expect(head.lastElementChild).toBe(description);
+    // Said on the card, so the head's ⋯ does not hold it a second time.
+    await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
+    expect(root().querySelector('[data-agenda-menu] [data-agenda-ask]')).toBeNull();
   });
 
   test('a resting item says who it waits on, and a working one says so', async () => {
@@ -160,9 +164,9 @@ describe('the item view’s parts', () => {
 });
 
 describe('the folded parts', () => {
-  test('the detailed context and the activity log start closed, and open on a tap', async () => {
-    await draw(full);
-    for (const part of ['detail', 'activity']) {
+  test('the detailed context, the terms and references, the conversation and the activity log start closed, and open on a tap', async () => {
+    await draw(full, {}, conversation);
+    for (const part of ['detail', 'references', 'conversation', 'activity']) {
       const toggle = one<HTMLButtonElement>(`[data-agenda-fold="${part}"]`);
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
       expect(one<HTMLElement>(`[data-agenda-part="${part}"] .fy-card__fold-body`).hidden).toBe(true);
@@ -230,6 +234,7 @@ describe('the folded parts, when storage refuses reads and writes', () => {
 describe('terms and references', () => {
   test('are ONE table of every term and every link, each with its meaning, links through the reference renderer', async () => {
     await draw(full);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-fold="references"]').click());
     const table = one('[data-agenda-part="references"] table');
     const rows = [...table.querySelectorAll('tbody tr')];
     expect(rows.map(row => row.getAttribute('data-agenda-reference'))).toEqual(['term', 'link', 'link']);
@@ -281,6 +286,7 @@ describe('the full picture', () => {
 describe('the conversation', () => {
   test('shows every reply, oldest first, each whole', async () => {
     await draw(full, {}, conversation);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-fold="conversation"]').click());
     const said = [...one('[data-agenda-part="conversation"]').querySelectorAll('[data-history]')];
     expect(said.map(row => row.getAttribute('data-history'))).toEqual(['owner', 'ferret', 'owner', 'ferret']);
     expect(said[1]?.textContent).toContain('End.');
@@ -407,6 +413,7 @@ describe('what it needs from you', () => {
 
   test('draws no card ask on an earlier version, which only reads', async () => {
     await draw(full);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
     const picker = one<HTMLSelectElement>('[data-agenda-version-picker]');
     await interact(() => {
       picker.value = '1';

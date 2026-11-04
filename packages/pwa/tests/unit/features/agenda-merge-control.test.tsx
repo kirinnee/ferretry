@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
+import { useState } from 'react';
 import { AgendaLineage } from '../../../src/features/agenda/agenda-merge-control.tsx';
 import { agendaProse } from '../../../src/features/agenda/agenda-prose.tsx';
 import type { AgendaMergeView } from '../../../src/features/agenda/use-item-lifecycle.ts';
@@ -33,19 +34,45 @@ const mergeView = (
   },
 });
 
+/**
+ * The ⋯ menu's "Merge with…" row stands in here as a plain button, so the panel is driven the way the menu drives it:
+ * the row opens it, its Cancel or a sent merge closes it (the row itself is the item view's, tested there).
+ */
+function MenuHost({
+  current,
+  merge,
+  titles,
+}: {
+  readonly current: AgendaItem;
+  readonly merge: AgendaMergeView | undefined;
+  readonly titles: Readonly<Record<string, string>> | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {merge === undefined || open ? null : (
+        <button data-agenda-merge-open="" onClick={() => setOpen(true)} type="button">
+          Merge with…
+        </button>
+      )}
+      <AgendaLineage
+        item={current}
+        merge={merge}
+        mergeOpen={open}
+        onMergeClose={() => setOpen(false)}
+        renderProse={agendaProse()}
+        {...(titles === undefined ? {} : { titles })}
+      />
+    </>
+  );
+}
+
 const draw = async (
   current: AgendaItem,
   merge: AgendaMergeView | undefined,
   titles?: Readonly<Record<string, string>>,
 ): Promise<HTMLElement> => {
-  view = await mount(
-    <AgendaLineage
-      item={current}
-      merge={merge}
-      renderProse={agendaProse()}
-      {...(titles === undefined ? {} : { titles })}
-    />,
-  );
+  view = await mount(<MenuHost current={current} merge={merge} titles={titles} />);
   return view.container;
 };
 
@@ -81,8 +108,17 @@ describe('the lineage lines', () => {
 });
 
 describe('Merge with…', () => {
-  test('is hidden when the host offers no merge', async () => {
-    expect((await draw(item(), undefined)).querySelector('[data-agenda-merge-open]')).toBeNull();
+  test('draws no panel when the host offers no merge, even if asked to open one', async () => {
+    view = await mount(
+      <AgendaLineage
+        item={item()}
+        merge={undefined}
+        mergeOpen
+        onMergeClose={() => undefined}
+        renderProse={agendaProse()}
+      />,
+    );
+    expect(view.container.innerHTML).toBe('');
   });
 
   test('lists the open agendas, then says what will happen before sending anything', async () => {

@@ -1,8 +1,9 @@
 /**
  * WHERE AN ITEM CAME FROM, AND "MERGE WITH…" (docs/agenda.md § The item view, "Merge and split"). A line under the head
  * says what joined or left this item ("Merged into !A2", "Split from !A3", "Split into !A7, !A8") through the ONE reference
- * renderer, so each `!A…` reads and opens as it does in a message. Beside it, an open plain conversation offers "Merge
- * with…": a picker of the other open agendas, then a confirm step that says what will happen before anything is sent.
+ * renderer, so each `!A…` reads and opens as it does in a message. "Merge with…" on an open plain conversation is a row
+ * of the head's ⋯ menu (`agenda-item-menu.tsx`); it opens the panel here: a picker of the other open agendas, then a
+ * confirm step that says what will happen before anything is sent.
  * Each title shows once, in the picker; the confirm names the other agenda by its reference alone. There is no split button: a split is made by the ferret, and the item only shows where it came from.
  */
 
@@ -122,25 +123,31 @@ function MergePanel({
   );
 }
 
-/** The lineage lines and the merge control; nothing at all when the item has neither. */
+/** The lineage lines and the merge panel the ⋯ menu opened; nothing at all when the item has neither. */
 export function AgendaLineage({
   item,
   merge,
   titles,
   renderProse,
+  mergeOpen,
+  onMergeClose,
 }: {
   readonly item: AgendaItem;
   readonly merge: AgendaMergeView | undefined;
   /** The titles of the agendas this one names, where the board holds them. */
   readonly titles?: LineageTitles | undefined;
   readonly renderProse: Prose;
+  /** "Merge with…" was chosen in the ⋯ menu: the picker is open. */
+  readonly mergeOpen: boolean;
+  /** The panel's Cancel, or a merge that was sent. */
+  readonly onMergeClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const lines: readonly LineageLine[] = lineageLines(item, titles);
-  if (lines.length === 0 && merge === undefined) return null;
+  const open = merge !== undefined && mergeOpen;
+  if (lines.length === 0 && !open) return null;
   return (
     <div className="fy-merge" data-agenda-lineage="">
-      <div className="fy-merge__row">
+      {lines.length === 0 ? null : (
         <ul className="fy-merge__lines">
           {lines.map(line => (
             <li data-agenda-lineage-line={line.key} key={line.key}>
@@ -148,21 +155,8 @@ export function AgendaLineage({
             </li>
           ))}
         </ul>
-        {merge === undefined || open ? null : (
-          <button
-            aria-expanded={open}
-            className="fy-merge__open"
-            data-agenda-merge-open=""
-            onClick={() => setOpen(true)}
-            type="button"
-          >
-            Merge with…
-          </button>
-        )}
-      </div>
-      {merge !== undefined && open ? (
-        <MergePanel item={item} merge={merge} onDone={() => setOpen(false)} renderProse={renderProse} />
-      ) : null}
+      )}
+      {open ? <MergePanel item={item} merge={merge} onDone={onMergeClose} renderProse={renderProse} /> : null}
     </div>
   );
 }

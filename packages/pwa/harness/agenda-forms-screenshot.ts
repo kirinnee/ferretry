@@ -141,6 +141,13 @@ for (const scheme of ['light', 'dark'] as const) {
     );
     check((await form.locator('[data-agenda-form-needed]').count()) === 0, `${label}: a field says it needs an answer`);
     check(!(await form.innerText()).includes('optional'), `${label}: a field says it is optional`);
+    // Not needed is behind the head's ⋯ (&F920): the Inbox's own tools say it there.
+    await page.locator('.fy-attn-deck__top [data-agenda-menu-toggle]').click();
+    check(
+      (await page.locator('[data-agenda-menu] [data-inbox-tool="not-needed"]').count()) === 1,
+      `${label}: no Not needed`,
+    );
+    await page.keyboard.press('Escape');
     await shoot(page, 'empty', viewport.name, scheme);
 
     // partial: Send with the alerts empty goes at once (every field is optional), into the undo window. A fresh load then

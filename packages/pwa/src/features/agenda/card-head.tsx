@@ -34,7 +34,7 @@ interface CardHeadClose {
 }
 
 export interface CardHeadProps {
-  /** The title (`MarqueeTitle`): one line, or at most two in the open agenda item. */
+  /** The title (`MarqueeTitle`): one line, a marquee when it is too long. */
   readonly title: ReactNode;
   /** Drawn between the title and the controls: where the card stands (the status dot). */
   readonly status?: ReactNode;
@@ -44,6 +44,8 @@ export interface CardHeadProps {
   readonly info?: CardHeadInfo;
   readonly snooze?: CardHeadSnooze;
   readonly close?: CardHeadClose;
+  /** The open agenda item's ⋯ menu (`AgendaItemMenu`): drawn just before ✕, in place of ⓘ and the clock. */
+  readonly menu?: ReactNode;
   readonly className?: string;
 }
 
@@ -51,11 +53,21 @@ const TIGHT = 'fy-item-view__step fy-item-view__step--tight';
 
 /**
  * THE ONE-ROW HEAD every card shares — an agenda item and a card to test, in the Inbox, the quick-answer run and the
- * chat: the title (one line, a marquee when too long; the open agenda item's wraps onto two), then `status · meta · ‹ n/N › · ⓘ · clock · ✕`. Every part but
+ * chat: the title (one line, a marquee when too long), then `status · meta · ‹ n/N › · ⓘ · clock · ⋯ · ✕`. Every part but
  * the title is optional, so the controls are the same, in the same order and at the same size, wherever a card is
  * drawn; snoozing lives here and nowhere else on the card.
  */
-export function CardHead({ title, status, meta, pager, info, snooze, close, className }: CardHeadProps): ReactElement {
+export function CardHead({
+  title,
+  status,
+  meta,
+  pager,
+  info,
+  snooze,
+  close,
+  menu,
+  className,
+}: CardHeadProps): ReactElement {
   return (
     <div
       className={`fy-item-view__bar fy-card-head${className === undefined ? '' : ` ${className}`}`}
@@ -88,6 +100,7 @@ export function CardHead({ title, status, meta, pager, info, snooze, close, clas
             triggerClass={`${TIGHT} fy-card-head__snooze`}
           />
         )}
+        {menu}
         {close === undefined ? null : (
           <button
             aria-label={close.label}

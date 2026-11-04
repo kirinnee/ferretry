@@ -8,13 +8,6 @@ import { type AgendaAsk, type AgendaItem, agendaTurn, type SessionView } from '@
 import { type ReactElement, useEffect, useSyncExternalStore } from 'react';
 import type { AgendaInbox } from '../../src/hooks/use-agenda-inbox.ts';
 import {
-  type BoardItemRead,
-  RepliedAgenda,
-  type Withdrawal,
-  withRepliedCards,
-  withRepliedParked,
-} from '../../src/lib/agenda-replied.ts';
-import {
   DeferredAgendaActions,
   type DeferredTimers,
   type InboxAction,
@@ -22,7 +15,15 @@ import {
   inboxCardKey,
   isOnOwner,
 } from '../../src/lib/agenda-inbox.ts';
+import {
+  type BoardItemRead,
+  RepliedAgenda,
+  type Withdrawal,
+  withRepliedCards,
+  withRepliedParked,
+} from '../../src/lib/agenda-replied.ts';
 import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
+import { interact } from './dom.ts';
 import { sessionView } from './sessions.ts';
 
 interface ManualClock extends DeferredTimers {
@@ -226,3 +227,10 @@ export function InboxHarness({
   };
   return render(inbox);
 }
+
+/** Opens the open item's folded Conversation inside `root`, where it has one. */
+export const openConversation = async (root: ParentNode): Promise<void> => {
+  const toggle = root.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]');
+  if (toggle === null || toggle.getAttribute('aria-expanded') === 'true') return;
+  await interact(() => toggle.click());
+};

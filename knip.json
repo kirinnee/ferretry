@@ -119,6 +119,7 @@
         "harness/not-good-composer-screenshot.ts",
         "harness/not-good-ask-screenshot.ts",
         "harness/card-ask-questions-screenshot.ts",
+        "harness/agenda-compact-head-screenshot.ts",
         "harness/answer-quickly-cards-screenshot.ts",
         "harness/answer-quickly-desktop-screenshot.ts",
         "harness/roomier-inbox-2-screenshot.ts",

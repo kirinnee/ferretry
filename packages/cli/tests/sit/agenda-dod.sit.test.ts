@@ -990,12 +990,15 @@ describe('Definition of done: the pages that prove the items the app shows (UI)'
       'draws a reply WHOLE, however long, and every reply in order',
     );
   });
-  itemPage('DoD 9 (UI): the detailed context and the activity log are folded', () => {
+  itemPage('DoD 9 (UI): the detailed context, the terms, the conversation and the activity log are folded', () => {
     proves(
       'packages/pwa/tests/unit/agenda-item-sections.test.ts',
-      'are in the spec’s order, with the detailed context and the activity log folded',
+      'are in the spec’s order, with the detailed context, the terms and references, the conversation and the activity log folded',
     );
-    proves(parts, 'the detailed context and the activity log start closed, and open on a tap');
+    proves(
+      parts,
+      'the detailed context, the terms and references, the conversation and the activity log start closed, and open on a tap',
+    );
   });
   itemPage('DoD 14 (UI): the head shows the stage the agenda is at now', () => {
     proves(parts, 'the head says where the item stands and the stage it is at now');

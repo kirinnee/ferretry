@@ -2,13 +2,13 @@
  * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's nine parts, top to bottom
  * (`agenda-item-sections.ts` owns the order; the view's sticky row above holds the title):
  *
- *   1 head          the DESCRIPTION (the item's summary, whole), then the STATE chip ("Needs you", "Resting · waiting
- *                   on Zoe") and the STAGE chip ("Question", "Test"), then the version slot (the picker, "v2 of 2 ·
- *                   3m ago") and "Not needed" (the ↓ swipe skips)
+ *   1 head          the STATE chip ("Needs you", "Resting · waiting on Zoe") and the STAGE chip ("Question", "Test"),
+ *                   small, on one line; then the DESCRIPTION (the item's summary, whole). The version picker, Changes,
+ *                   Merge with… and Not needed are the view's ⋯ menu's; this draws what they open (the ↓ swipe skips)
  *   2 premise       PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks
  *   3 detail        the context explained from zero (`detail`), FOLDED
  *   4 references    ONE TABLE of every term and every link (PR, card, file, page), each with a plain meaning; links
- *                   are drawn by the one reference renderer
+ *                   are drawn by the one reference renderer — FOLDED
  *   5 where         WHERE WE ARE NOW (`whereWeAre`): a short status — where things stand, the ferret's answer to the
  *                   owner's question, what is decided so far and what is still open
  *   6 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
@@ -16,7 +16,8 @@
  *                   marked out while the item needs the owner
  *   7 body          THE FULL PICTURE: the item's live document, rewritten on every change (Markdown with fy-render),
  *                   or a review's Reasoning
- *   8 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`): the log
+ *   8 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`): the log,
+ *                   FOLDED
  *   9 activity      the grey "updated / moved / snoozed" lines, FOLDED (`agenda-activity-log.tsx`)
  *
  * A part the item does not carry is not drawn. Nothing is cut short: a long report, reply or edit line is drawn whole.
@@ -34,14 +35,14 @@ import {
   singleAgendaQuestion,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import {
   type ItemCardAsk,
   itemCardAsks,
@@ -54,7 +55,7 @@ import {
 } from '../../lib/agenda-item-sections.ts';
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
-import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
+import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
 import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
 import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
@@ -71,7 +72,7 @@ import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
-import { DiffToggle, VersionDiffPanel } from './agenda-version-diff.tsx';
+import { VersionDiffPanel } from './agenda-version-diff.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 import { useDownSwipe } from './use-down-swipe.ts';
 import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
@@ -88,8 +89,6 @@ export interface AgendaItemCardProps {
   readonly renderProse: Prose;
   /** The ↓ swipe: Skip (the host moves to the next item, changing nothing), or absent where there is no next item. */
   readonly onSkip?: (() => void) | undefined;
-  /** The host offers Not needed itself (under the head's ⓘ), so the card does not draw its own pill. */
-  readonly dismissAside?: boolean | undefined;
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
@@ -124,10 +123,22 @@ export interface AgendaItemCardProps {
   readonly itemKey?: string | undefined;
   /** A card's How to test, read from the board the app holds: what a card ask shows under its heading. Absent: none. */
   readonly howToTestFor?: ((cardId: string) => string | null | undefined) | undefined;
-  /** The versions the machine keeps for the item: with them the head draws "Changes" (the diff). Absent: no diff control. */
+  /** The versions the machine keeps for the item: the Changes panel reads them. Absent: no diff. */
   readonly versions?: AgendaVersionsView | undefined;
-  /** "Merge with…" on an open plain conversation. Absent: no merge control, though lineage lines still show. */
+  /** "Merge with…" on an open plain conversation. Absent: no merge panel, though lineage lines still show. */
   readonly merge?: AgendaMergeView | undefined;
+  /**
+   * The version the head's ⋯ menu shows (`agenda-item-menu.tsx`), and the way back to the latest: the view owns the
+   * picker, so the card only draws what was picked. Absent or past the newest: the latest version.
+   */
+  readonly shown?: number | undefined;
+  readonly onShowVersion?: ((version: number) => void) | undefined;
+  /** Changes, opened from the ⋯ menu: the diff panel under the head (`diffId` is what the menu's button controls). */
+  readonly diffOpen?: boolean | undefined;
+  readonly diffId?: string | undefined;
+  /** Merge with…, opened from the ⋯ menu: the merge panel under the head, closed by its own Cancel or a sent merge. */
+  readonly mergeOpen?: boolean | undefined;
+  readonly onMergeClose?: (() => void) | undefined;
   /** The titles of the agendas this one was merged into or split from, where the board holds them. */
   readonly lineageTitles?: LineageTitles | undefined;
 }
@@ -372,43 +383,6 @@ function CardAskBlock({
   );
 }
 
-/** "v2 of 2 · 3m ago": a native picker, so it is a keyboard's and a screen reader's as much as a finger's. */
-function VersionPicker({
-  item,
-  shown,
-  now,
-  onShow,
-  asEdits,
-}: {
-  /** Beside the diff control's stored versions (v1, v2…) these are the item's edits, so they are called edits. */
-  readonly asEdits: boolean;
-  readonly item: AgendaItem;
-  readonly shown: number;
-  readonly now: number;
-  readonly onShow: (version: number) => void;
-}) {
-  const count = versionCount(item);
-  const atOf = (version: number): string =>
-    version === 1 ? item.waitingSince : (item.revisions?.[version - 2]?.at ?? item.waitingSince);
-  const when = (version: number): string =>
-    version === count ? shortAgo(atOf(version), now) : revisionStamp(atOf(version), now);
-  return (
-    <select
-      aria-label={asEdits ? 'Edit' : 'Version'}
-      className="fy-card__version"
-      data-agenda-version-picker=""
-      onChange={event => onShow(Number(event.currentTarget.value))}
-      value={shown}
-    >
-      {Array.from({ length: count }, (_, at) => count - at).map(version => (
-        <option key={version} value={version}>
-          {`${asEdits ? 'Edit ' : 'v'}${String(version)} of ${String(count)}${when(version) === '' ? '' : ` · ${when(version)}`}`}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 const FORM_ELSEWHERE = 'Open this in the Inbox to fill it in, or answer in the reply box, numbered.';
 
 export function AgendaItemCard({
@@ -419,7 +393,6 @@ export function AgendaItemCard({
   error,
   swipeable,
   onSkip,
-  dismissAside = false,
   renderProse,
   onAct,
   onProgress,
@@ -438,14 +411,16 @@ export function AgendaItemCard({
   versions,
   merge,
   lineageTitles,
+  shown: picked,
+  onShowVersion,
+  diffOpen = false,
+  diffId,
+  mergeOpen = false,
+  onMergeClose,
 }: AgendaItemCardProps) {
-  const diffId = useId();
-  const [diffOpen, setDiffOpen] = useState(false);
   const count = versionCount(current);
-  // `null` follows the latest version, so an edit that lands while the card is open shows at once.
-  const [picked, setPicked] = useState<number | null>(null);
+  // Absent follows the latest version, so an edit that lands while the card is open shows at once.
   const shown = Math.min(picked ?? count, count);
-  const setShown = (version: number): void => setPicked(version >= count ? null : version);
   const latest = shown >= count;
   const item = latest ? current : itemAtVersion(current, shown);
   const read = forConfirmation(item);
@@ -474,12 +449,8 @@ export function AgendaItemCard({
 
   const formFields = item.fields ?? [];
   const formPicks = useFormPicks(formKey ?? item.id, formFields);
-  // A gate item is a card to try or approve: its steps are the card's How to test, and Not needed is a button under it.
+  // A gate item is a card to try or approve: its steps are the card's How to test.
   const gated = item.gate !== undefined;
-  const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated && !dismissAside;
-  const dismiss = (): void => {
-    if (!busy) onAct(DISMISS_ACTION);
-  };
   const pull = useDownSwipe(() => onSkip?.(), swipeable && onSkip !== undefined);
 
   // A choice (one question): its options are listed with what each means, and answered on the row. Any other shape
@@ -571,14 +542,9 @@ export function AgendaItemCard({
       data-agenda-version={shown}
       data-kind={meta.tone}
     >
-      {/* 1. HEAD: the description, whole; where it stands and what it is now, then the version slot (a diff control joins
-          it) and Not needed. */}
+      {/* 1. HEAD (under the view's one-line title): where it stands and what it is now, as two small chips, then the
+          description, whole. The version picker, Changes, Merge with… and Not needed are the head's ⋯ menu's. */}
       <div className="fy-card__head" data-agenda-part="head">
-        {gated || description === null ? null : (
-          <div className="fy-card__desc" data-agenda-description="">
-            {renderProse(description)}
-          </div>
-        )}
         <div className="fy-card__top" data-agenda-card-top="" {...pull}>
           <span className="fy-card__chips">
             <span className="fy-card__state" data-agenda-state={state.state}>
@@ -595,39 +561,32 @@ export function AgendaItemCard({
                 {STAGE_WORDS[stage]}
               </span>
             )}
-          </span>
-          <span className="fy-card__tools">
-            <span className="fy-card__version-slot" data-agenda-version-slot="">
-              {versions === undefined ? null : (
-                <DiffToggle controls={diffId} onToggle={() => setDiffOpen(open => !open)} open={diffOpen} />
-              )}
-              {count > 1 ? (
-                <VersionPicker
-                  asEdits={versions !== undefined}
-                  item={current}
-                  now={now}
-                  onShow={setShown}
-                  shown={shown}
-                />
-              ) : null}
-            </span>
-            {canDismiss ? (
-              <button
-                aria-label="Not needed"
-                className="fy-card__dismiss"
-                data-agenda-dismiss=""
-                disabled={busy}
-                onClick={dismiss}
-                type="button"
-              >
-                Not needed
-              </button>
-            ) : null}
+            {latest ? null : (
+              <span className="fy-card__shown" data-agenda-shown-version="">
+                Showing v{shown}
+              </span>
+            )}
           </span>
         </div>
+        {gated || description === null ? null : (
+          <div className="fy-card__desc" data-agenda-description="">
+            {renderProse(description)}
+          </div>
+        )}
       </div>
-      {versions !== undefined && diffOpen ? <VersionDiffPanel id={diffId} now={now} versions={versions} /> : null}
-      {latest ? <AgendaLineage item={current} merge={merge} renderProse={renderProse} titles={lineageTitles} /> : null}
+      {versions !== undefined && diffOpen && diffId !== undefined ? (
+        <VersionDiffPanel id={diffId} now={now} versions={versions} />
+      ) : null}
+      {latest ? (
+        <AgendaLineage
+          item={current}
+          merge={merge}
+          onMergeClose={onMergeClose ?? (() => undefined)}
+          mergeOpen={mergeOpen}
+          renderProse={renderProse}
+          titles={lineageTitles}
+        />
+      ) : null}
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
         {/* 2. PREMISE AND CONTEXT (a held config change first, which stands in for the premise). */}
@@ -643,11 +602,16 @@ export function AgendaItemCard({
             <AgendaBody renderProse={renderProse} text={mark(detail)} />
           </AgendaFold>
         )}
-        {/* 4. TERMS AND REFERENCES, one table. */}
+        {/* 4. TERMS AND REFERENCES, one table: folded. */}
         {references.length === 0 ? null : (
-          <Part part="references" title={PART_TITLES.references}>
+          <AgendaFold
+            itemKey={foldKey}
+            meta={`${String(references.length)} ${references.length === 1 ? 'entry' : 'entries'}`}
+            part="references"
+            title={PART_TITLES.references}
+          >
             <ReferencesTable renderProse={renderProse} rows={references} />
-          </Part>
+          </AgendaFold>
         )}
         {/* 5. WHERE WE ARE NOW: the short status, the answer to the owner's question, what is decided and open. */}
         {hasWhere ? (
@@ -820,7 +784,7 @@ export function AgendaItemCard({
               <button
                 className="kt-btn fy-card__latest"
                 data-agenda-latest=""
-                onClick={() => setShown(count)}
+                onClick={() => onShowVersion?.(count)}
                 type="button"
               >
                 <Check aria-hidden="true" size={13} />
@@ -853,8 +817,8 @@ export function AgendaItemCard({
           </div>
         </Part>
       )}
-      {/* 8. CONVERSATION, oldest first: the log, at the bottom. */}
-      <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
+      {/* 8. CONVERSATION, oldest first: the log, at the bottom, folded. */}
+      <AgendaItemHistory events={history} ferret={ferret} itemKey={foldKey} now={now} renderProse={renderProse} />
       {/* 9. ACTIVITY LOG: folded. */}
       <AgendaActivityLog ferret={ferret} item={current} itemKey={foldKey} now={now} />
     </article>

@@ -160,55 +160,8 @@ describe('the title where motion is reduced', () => {
   });
 });
 
-describe('the two-line title (the open agenda item)', () => {
-  const realScrollHeight = Object.getOwnPropertyDescriptor(proto, 'scrollHeight');
-  const realClientHeight = Object.getOwnPropertyDescriptor(proto, 'clientHeight');
-  let contentHeight = 40;
-  beforeEach(() => {
-    contentHeight = 40;
-    Object.defineProperty(proto, 'scrollHeight', { configurable: true, get: () => contentHeight });
-    Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 40 });
-  });
-  afterEach(() => {
-    for (const [name, real] of [
-      ['scrollHeight', realScrollHeight],
-      ['clientHeight', realClientHeight],
-    ] as const) {
-      if (real === undefined) Reflect.deleteProperty(proto, name);
-      else Object.defineProperty(proto, name, real);
-    }
-  });
-
-  const drawTwo = async (title: string, seen: boolean[]): Promise<void> => {
-    view = await mount(<MarqueeTitle onClamped={clamped => seen.push(clamped)} title={title} twoLines />);
-  };
-
-  test('never scrolls, is never cut at a word, and a tap does nothing, however wide the title is', async () => {
-    for (const reduce of [false, true]) {
-      reduceMotion(reduce);
-      await drawTwo('A title that is far too long for the row', []);
-      expect(heading().hasAttribute('data-wrap')).toBe(true);
-      expect(heading().hasAttribute('data-marquee')).toBe(false);
-      expect(heading().hasAttribute('data-cut')).toBe(false);
-      expect(heading().getAttribute('style')).toBeNull();
-      expect(view?.container.querySelector('.fy-item-view__title-cut, .fy-item-view__title-probe')).toBeNull();
-      await click();
-      expect(heading().hasAttribute('data-expanded')).toBe(false);
-      await view?.unmount();
-      view = null;
-    }
-  });
-
-  test('says whether two lines hold it, and says it again when the box resizes', async () => {
-    const seen: boolean[] = [];
-    await drawTwo('A title that fits its two lines', seen);
-    expect(seen.at(-1)).toBe(false);
-    contentHeight = 60;
-    await interact(() => must(observers[0], 'observer').fire());
-    expect(seen.at(-1)).toBe(true);
-  });
-
-  test('says it again once the page’s fonts are in and when a later face loads, and stops listening when it goes', async () => {
+describe('measuring again when the fonts change', () => {
+  test('measures again once the page’s fonts are in and when a later face loads, and stops listening when it goes', async () => {
     const listeners = new Set<() => void>();
     let fontsIn: () => void = () => undefined;
     const fonts = {
@@ -221,18 +174,18 @@ describe('the two-line title (the open agenda item)', () => {
     const own = Object.getOwnPropertyDescriptor(document, 'fonts');
     Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
     try {
-      const seen: boolean[] = [];
-      await drawTwo('A title the web face wraps onto a third line', seen);
-      expect(seen).toEqual([false]);
-      // The face is wider than the fallback: the same box now holds three lines, and nothing resized.
-      contentHeight = 60;
+      textWidth = 100;
+      await draw('A title the web face makes wider');
+      expect(heading().hasAttribute('data-marquee')).toBe(false);
+      // The face is wider than the fallback: the same words no longer fit, and nothing resized.
+      textWidth = 300;
       await interact(() => fontsIn());
-      expect(seen.at(-1)).toBe(true);
-      contentHeight = 40;
+      expect(heading().hasAttribute('data-marquee')).toBe(true);
+      textWidth = 100;
       await interact(() => {
         for (const listener of listeners) listener();
       });
-      expect(seen.at(-1)).toBe(false);
+      expect(heading().hasAttribute('data-marquee')).toBe(false);
       await view?.unmount();
       view = null;
       expect(listeners.size).toBe(0);
