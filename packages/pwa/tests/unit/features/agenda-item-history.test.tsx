@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaItemHistory } from '../../../src/features/agenda/agenda-item-history.tsx';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
-import { revisionStamp } from '../../../src/lib/agenda-revisions.ts';
+import { clockOfInstant } from '../../../src/lib/message-clock.ts';
+import type { LedgerSendRecord } from '../../../src/lib/send-ledger.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
@@ -10,7 +11,6 @@ afterEach(async () => {
   view = null;
 });
 
-const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const AT = Date.parse('2026-08-01T10:02:00.000Z');
 
 const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
@@ -19,7 +19,6 @@ const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
       events={events}
       ferret="Lizzette"
       itemKey={`history-test:${String(++drawn)}`}
-      now={NOW}
       renderProse={text => <p>{text}</p>}
     />,
   );
@@ -45,7 +44,6 @@ describe('the Conversation of an open agenda item', () => {
         ]}
         ferret="Lizzette"
         itemKey="history-test:folded"
-        now={NOW}
         renderProse={text => <p>{text}</p>}
       />,
     );
@@ -58,7 +56,7 @@ describe('the Conversation of an open agenda item', () => {
     expect(root.querySelectorAll('[data-agenda-history] [data-history]')).toHaveLength(3);
   });
 
-  test('reads like the chat, oldest first: the ferret plain under its name and time, the owner as a bubble', async () => {
+  test('is drawn with the chat’s own rows, oldest first: the ferret’s name above its words, the owner as a bubble', async () => {
     const root = await draw([
       { kind: 'ferret', key: 'r', at: AT, text: 'What should happen at the hard limit?' },
       { kind: 'owner', key: 'o', at: AT + 180_000, text: 'does pause kill a running turn?' },
@@ -71,14 +69,19 @@ describe('the Conversation of an open agenda item', () => {
     expect(
       must(root.querySelector('[data-agenda-part="conversation"] h4 .fy-card__label'), 'heading').textContent,
     ).toBe('Conversation');
-    expect(rows[0]?.querySelector('.fy-hist__who')?.textContent).toBe(
-      `Lizzette${revisionStamp(new Date(AT).toISOString(), NOW)}`,
-    );
+    // The chat's agent row: the name small above, the time at the foot — the chat's clock, not an age.
+    const ferretRow = must(rows[0]?.querySelector('article.fy-message-assistant'), 'the chat’s agent row');
+    expect(ferretRow.getAttribute('data-transcript-kind')).toBe('assistant');
+    expect(ferretRow.querySelector('header')?.textContent).toBe('Lizzette');
+    expect(ferretRow.querySelector('[data-message-footer] time')?.textContent).toBe(clockOfInstant(AT)?.short);
     expect(rows[0]?.className).toBe('fy-hist__ag');
     expect(rows[2]?.className).toBe('fy-hist__ag');
-    // Only the owner's row is a bubble.
-    expect(root.querySelectorAll('.fy-hist__me')).toHaveLength(1);
+    // Only the owner's row is a bubble: the chat's own, with its time and its ticks at the foot.
+    expect(root.querySelectorAll('article.fy-message-user')).toHaveLength(1);
     expect(rows[1]?.className).toBe('fy-hist__me');
+    const bubble = must(rows[1]?.querySelector('article.fy-message-user'), 'the chat’s own bubble');
+    expect(bubble.querySelector('[data-message-footer] time')?.textContent).toBe(clockOfInstant(AT + 180_000)?.short);
+    expect(bubble.querySelector('[data-send-receipt] svg')).not.toBeNull();
   });
 
   test('draws a reply WHOLE, however long, and every reply in order', async () => {
@@ -154,7 +157,55 @@ describe('the Conversation of an open agenda item', () => {
   test('draws Ferretry’s own words under its name', async () => {
     const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into !A2.', daemon: true }]);
     const row = must(root.querySelector('[data-history="daemon"]'), 'daemon row');
-    expect(row.querySelector('.fy-hist__who')?.textContent).toContain('Ferretry');
+    expect(row.querySelector('header')?.textContent).toContain('Ferretry');
     expect(row.textContent).not.toContain('Lizzette');
+  });
+});
+
+describe('the owner’s ticks, the chat’s own', () => {
+  const tick = (root: HTMLElement): string | null =>
+    root.querySelector('[data-history="owner"] [data-send-receipt]')?.getAttribute('data-send-receipt') ?? null;
+  const said = (reached: Extract<HistoryEvent, { kind: 'owner' }>['reached']): HistoryEvent => ({
+    kind: 'owner',
+    key: 'o',
+    at: AT,
+    text: 'ship it',
+    ...(reached === undefined ? {} : { reached }),
+  });
+
+  test('a row of the ferret’s transcript is read: four ticks', async () => {
+    expect(tick(await draw([said({ via: 'transcript', answered: false })]))).toBe('read');
+  });
+
+  test('words stored on the item are on the machine, and answered once the ferret replied', async () => {
+    expect(tick(await draw([said({ via: 'item', answered: false })]))).toBe('queued');
+    await view?.unmount();
+    expect(tick(await draw([said({ via: 'item', answered: true })]))).toBe('answered');
+    await view?.unmount();
+    // Nothing known at all claims no more than the item holds.
+    expect(tick(await draw([said(undefined)]))).toBe('queued');
+  });
+
+  test('a send the chat’s ledger recorded is drawn exactly as the chat draws it', async () => {
+    const send: LedgerSendRecord = {
+      sendId: 'send-1',
+      acceptedAt: new Date(AT).toISOString(),
+      message: 'ship it',
+      attachmentIds: [],
+      fate: 'delivered',
+    };
+    const root = await draw([said({ via: 'transcript', answered: true, send })]);
+    expect(tick(root)).toBe('answered');
+    expect(root.querySelector('[data-history="owner"] [data-send-fate]')?.getAttribute('data-send-fate')).toBe(
+      'delivered',
+    );
+  });
+
+  test('a tap on the time says what the mark means', async () => {
+    const root = await draw([said({ via: 'item', answered: false })]);
+    const mark = must(root.querySelector<HTMLButtonElement>('[data-send-receipt]'), 'the receipt');
+    expect(mark.getAttribute('aria-label')).toContain('On the machine');
+    await interact(() => mark.click());
+    expect(root.querySelector('[data-send-reason]')?.textContent).toContain('the ferret has not replied to it yet');
   });
 });

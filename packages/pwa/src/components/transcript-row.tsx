@@ -7,6 +7,7 @@ import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy }
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { stripFraming } from '../lib/message-framing.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
+import type { SendReceipt } from '../lib/send-receipt.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
 import {
@@ -366,15 +367,17 @@ function HandoffRow({
  * The reader's own message: no "You · 14:02:55" header — the bubble's alignment already says who — and
  * its time and receipt as one small faded line at its foot (`send-receipt.tsx`), on the reader's own
  * clock (`message-clock.ts`). A message the agent was handed through a file shows what the file holds
- * (`handoff-message.tsx`), never the pointer it was typed.
+ * (`handoff-message.tsx`), never the pointer it was typed. An agenda item's conversation draws the owner's words with
+ * this same row (`agenda-item-history.tsx`), its `receipt` saying how far they are known to have got.
  */
-function OwnMessageRow({
+export function OwnMessageRow({
   entry,
   rhythm,
   answered,
   children,
   viaTurnFile = false,
   record = entry.send,
+  receipt,
   actions,
   sendRow,
 }: {
@@ -391,6 +394,8 @@ function OwnMessageRow({
   readonly actions?: LedgerActions | undefined;
   /** Whether this bubble is a send on its way or the transcript row it became. */
   readonly sendRow?: 'travelling' | 'landed';
+  /** The receipt when the ledger holds no `record` of the send but its state is known another way. */
+  readonly receipt?: SendReceipt | undefined;
 }) {
   const [viaOpen, setViaOpen] = useState(false);
   return (
@@ -408,6 +413,7 @@ function OwnMessageRow({
         clock={clockOfInstant(record?.acceptedAt) ?? clockOfInstant(entry.at)}
         lead={viaTurnFile ? <HandoffVia onToggle={() => setViaOpen(current => !current)} open={viaOpen} /> : undefined}
         leadDetail={viaTurnFile && viaOpen ? <HandoffViaDetail /> : undefined}
+        receipt={receipt}
         record={record}
         side="own"
         trailing={actions?.trigger}
@@ -428,14 +434,25 @@ function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly 
   return <AgendaMessageOr fallback={<p>{stripFraming(text).body}</p>} text={onItsWay ? worded : text} />;
 }
 
-function TranscriptTextRow({
+/**
+ * An agent's (or a chrome row's) text: its name, small, above; its words; its time at its foot. An agenda item's
+ * conversation draws the ferret's words with this same row (`agenda-item-history.tsx`), in its own prose (`body`) and
+ * with a tag beside the name (`aside`).
+ */
+export function TranscriptTextRow({
   entry,
   rhythm,
   run,
+  body,
+  aside,
 }: {
   readonly entry: TranscriptEntry;
   readonly rhythm: Record<string, string | undefined>;
   readonly run?: AgentRunMark | undefined;
+  /** What the message says, drawn by the caller instead of the chat's prose. */
+  readonly body?: ReactNode;
+  /** A small tag after the name. */
+  readonly aside?: ReactNode;
 }) {
   const label = entry.label ?? defaultLabel(entry.kind);
   const chrome = entry.kind === 'tool' || entry.kind === 'command' || entry.kind === 'notice';
@@ -452,14 +469,17 @@ function TranscriptTextRow({
     >
       <header className={continued ? 'sr-only' : undefined}>
         <span>{label}</span>
+        {aside}
       </header>
-      <EntryBody
-        entry={entry}
-        prose={
-          entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{stripFraming(entry.text).body}</p>
-        }
-        speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
-      />
+      {body ?? (
+        <EntryBody
+          entry={entry}
+          prose={
+            entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{stripFraming(entry.text).body}</p>
+          }
+          speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
+        />
+      )}
       {run === undefined || run.end ? footer : <div className="fy-run-time">{footer}</div>}
     </article>
   );

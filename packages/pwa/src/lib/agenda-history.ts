@@ -25,6 +25,22 @@
 import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/protocol';
 import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELDS } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
+import type { LedgerSendRecord } from './send-ledger.ts';
+
+/**
+ * HOW FAR THE OWNER'S WORDS GOT, as far as the item view can PROVE it — never further:
+ *
+ * - `transcript`: they are a row of the ferret's own transcript (or the ferret logged them from the chat), so the
+ *   ferret took them in. `send` is the delivery the chat's ledger recorded for that row, when it has one.
+ * - `item`: they are stored on the item on the machine; whether the ferret has had them is not recorded.
+ *
+ * `answered` is the chat's own rule: the ferret said something after them.
+ */
+interface OwnerReach {
+  readonly via: 'transcript' | 'item';
+  readonly answered: boolean;
+  readonly send?: LedgerSendRecord;
+}
 
 export type HistoryEvent =
   /** An edit made the card version `version`. */
@@ -47,6 +63,8 @@ export type HistoryEvent =
       readonly note?: string;
       /** Copied from the owner's chat by the ferret (`fy agenda log`): drawn with a "from chat" tag. */
       readonly fromChat?: true;
+      /** How far the words are known to have got: drawn as the chat's own receipt ticks (`ownerReceipt`). */
+      readonly reached?: OwnerReach;
     }
   /**
    * WORDS NOT IN HAND: `earlier` stored entries that are not drawn here, because they are still being read
@@ -99,19 +117,38 @@ const ownerPart = (part: AgendaMessagePart): { readonly text: string; readonly n
 };
 
 /** What the owner said to the item in one user row, or nothing when the row is not about it. */
-const ownerSaid = (entry: TranscriptEntry, id: AgendaItem['id'], at: number): readonly HistoryEvent[] => {
+const ownerSaid = (
+  entry: TranscriptEntry,
+  id: AgendaItem['id'],
+  at: number,
+  answered: boolean,
+): readonly HistoryEvent[] => {
   if (entry.peer !== undefined) return [];
+  // A row of the ferret's transcript: the ferret took it in. The ledger's own record of it rides along when known.
+  const reached: OwnerReach = {
+    via: 'transcript',
+    answered,
+    ...(entry.send === undefined ? {} : { send: entry.send }),
+  };
   const message = parseAgendaMessage(entry.text);
   if (message !== undefined) {
     return message.parts
       .filter(part => part.items.some(named => named.id === id))
       .map(
-        part => ({ kind: 'owner', key: `${entry.id}:${part.raw}`, at, form: part.kind, ...ownerPart(part) }) as const,
+        part =>
+          ({
+            kind: 'owner',
+            key: `${entry.id}:${part.raw}`,
+            at,
+            form: part.kind,
+            ...ownerPart(part),
+            reached,
+          }) as const,
       )
       .filter(event => event.text !== '');
   }
   return citesPattern(id).test(entry.text)
-    ? [{ kind: 'owner', key: entry.id, at, text: withoutLeadingReference(entry.text, id) }]
+    ? [{ kind: 'owner', key: entry.id, at, text: withoutLeadingReference(entry.text, id), reached }]
     : [];
 };
 
@@ -244,10 +281,12 @@ const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): read
   const events: HistoryEvent[] = [];
   const ownerWords: string[] = [];
   let clock = 0;
-  for (const entry of entries) {
+  // The chat's rule for "answered": the ferret said something after the owner's words, about this item or not.
+  const lastReply = entries.findLastIndex(entry => entry.kind === 'assistant' && entry.text.trim() !== '');
+  for (const [index, entry] of entries.entries()) {
     clock = entry.at ?? clock;
     if (entry.kind === 'user') {
-      const said = ownerSaid(entry, id, clock);
+      const said = ownerSaid(entry, id, clock, index < lastReply);
       for (const event of said) if (event.kind === 'owner') ownerWords.push(event.text);
       events.push(...said);
       continue;

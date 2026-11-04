@@ -36,14 +36,19 @@ const OWNER_FORM: Readonly<Partial<Record<AgendaConversationEntry['via'], 'answe
   discuss: 'discuss',
 };
 
-/** One stored entry as the event the part draws. `index` keeps keys unique for words said at the same instant. */
-export const conversationEvent = (entry: AgendaConversationEntry, index: number): HistoryEvent => {
+/**
+ * One stored entry as the event the part draws. `index` keeps keys unique for words said at the same instant;
+ * `answered` says the ferret spoke after it. The owner's words are on the machine (stored on the item); words the
+ * ferret logged from the chat it had already read, so those reached the ferret.
+ */
+export const conversationEvent = (entry: AgendaConversationEntry, index: number, answered = false): HistoryEvent => {
   const at = Date.parse(entry.at) || 0;
   const key = `stored:${String(index)}:${entry.at}`;
   const fromChat = entry.fromChat === undefined ? {} : { fromChat: true as const };
   if (entry.by === 'owner') {
     const form = OWNER_FORM[entry.via];
-    return { kind: 'owner', key, at, text: entry.text, ...(form === undefined ? {} : { form }), ...fromChat };
+    const reached = { via: entry.fromChat === undefined ? ('item' as const) : ('transcript' as const), answered };
+    return { kind: 'owner', key, at, text: entry.text, ...(form === undefined ? {} : { form }), ...fromChat, reached };
   }
   return {
     kind: 'ferret',
@@ -73,7 +78,8 @@ export const storedHistory = (
   conversation: readonly AgendaConversationEntry[],
   gap?: ConversationGap,
 ): readonly HistoryEvent[] => {
-  const events = conversation.map(conversationEvent);
+  const lastFerret = conversation.findLastIndex(entry => entry.by === 'ferret');
+  const events = conversation.map((entry, index) => conversationEvent(entry, index, index < lastFerret));
   if (gap === undefined || gap.count <= 0) return [...revisionEvents(item), ...events];
   const line: HistoryEvent = { kind: 'gap', key: 'stored:gap', at: 0, earlier: gap.count, state: gap.state };
   return [...revisionEvents(item), ...events.slice(0, gap.at), line, ...events.slice(gap.at)];

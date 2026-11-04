@@ -941,7 +941,7 @@
   margin: 0 0 4px;
 }
 
-/* ---- the history: only the owner's messages are bubbles --------------------------------------------------- */
+/* ---- the conversation: the chat's own rows (`OwnMessageRow`, `TranscriptTextRow` in session-screens.css) -------- */
 .fy-hist__list {
   display: flex;
   flex-direction: column;
@@ -950,16 +950,9 @@
   padding: 0;
   list-style: none;
 }
-.fy-hist__ag {
+.fy-hist__ag,
+.fy-hist__me {
   min-width: 0;
-}
-.fy-hist__who {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-strong);
 }
 .fy-hist__text {
   margin-top: 2px;
@@ -976,36 +969,14 @@
   font-size: var(--text-base);
   font-weight: var(--weight-strong);
 }
-.fy-hist__me {
-  align-self: flex-end;
-  max-width: min(80%, 580px);
-  border: var(--bubble-stroke, 1px) solid var(--bubble-border, transparent);
-  border-radius: var(--bubble-radius, var(--radius-panel));
-  padding: 8px 12px;
-  background: var(--bubble-bg, var(--accent-soft));
-  color: var(--bubble-fg, var(--fg));
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.fy-hist__said {
-  display: inline;
-}
 .fy-hist__check {
   margin-right: 4px;
   vertical-align: -2px;
 }
-.fy-hist__note {
+.fy-message .fy-hist__note {
   margin-top: 2px;
   color: var(--muted);
   font-size: var(--text-sm);
-}
-.fy-hist__me .fy-hist__time {
-  display: block;
-}
-.fy-hist__time {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  font-weight: 400;
 }
 .fy-hist__gap {
   align-self: center;
@@ -1329,7 +1300,7 @@
   font-weight: 400;
   line-height: 1.5;
 }
-.fy-hist__me .fy-hist__tag {
+.fy-message-user .fy-hist__tag {
   display: table;
   margin-top: 4px;
 }

@@ -7,6 +7,7 @@ import {
   storedHistory,
   tailIsWhole,
 } from '../../src/lib/agenda-conversation.ts';
+import type { HistoryEvent } from '../../src/lib/agenda-history.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
 const entry = (overrides: Partial<AgendaConversationEntry> = {}): AgendaConversationEntry => ({
@@ -40,6 +41,7 @@ describe('one stored entry as an event', () => {
       key: 'stored:0:2026-11-01T10:00:00.000Z',
       at: Date.parse('2026-11-01T10:00:00.000Z'),
       text: 'Use Postgres.',
+      reached: { via: 'item', answered: false },
     });
     expect(conversationEvent(entry({ via: 'answer' }), 1)).toMatchObject({ kind: 'owner', form: 'answer' });
     expect(conversationEvent(entry({ via: 'needs-info' }), 2)).toMatchObject({ form: 'needs-info' });
@@ -77,5 +79,27 @@ describe('the item’s history from its stored thread', () => {
     ]);
     const said = events.filter(event => event.kind === 'owner' || event.kind === 'ferret');
     expect(said.map(event => (event as { text: string }).text)).toEqual(['one', 'two']);
+  });
+});
+
+describe('how far the owner’s stored words are known to have got', () => {
+  const reachOf = (event: HistoryEvent | undefined) => (event?.kind === 'owner' ? event.reached : undefined);
+
+  test('on the item; answered once the ferret spoke after them, and Ferretry’s own note is not the ferret', () => {
+    const events = storedHistory(agendaItem('A5'), [
+      entry({ text: 'one' }),
+      entry({ by: 'ferret', via: 'reply', text: 'two' }),
+      entry({ text: 'three' }),
+      entry({ by: 'daemon', via: 'close', text: 'closed' }),
+    ]).filter(event => event.kind === 'owner');
+    expect(events.map(reachOf)).toEqual([
+      { via: 'item', answered: true },
+      { via: 'item', answered: false },
+    ]);
+  });
+
+  test('words the ferret logged from the chat reached it', () => {
+    const fromChat = { messageId: 'm1', at: '2026-11-01T09:59:00.000Z' };
+    expect(reachOf(conversationEvent(entry({ fromChat }), 0))).toEqual({ via: 'transcript', answered: false });
   });
 });
