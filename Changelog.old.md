@@ -1,3 +1,9 @@
+## [4.268.0](https://github.com/kirinnee/ferretry/compare/v4.267.0...v4.268.0) (2026-11-04)
+
+### Features
+
+* **pwa:** draw the agenda item view in the spec's nine parts ([#1439](https://github.com/kirinnee/ferretry/issues/1439)) ([e4647f9](https://github.com/kirinnee/ferretry/commit/e4647f97e1efef2d0bd4f3f6ed747f8b30c0b290))
+
 ## [4.267.0](https://github.com/kirinnee/ferretry/compare/v4.266.0...v4.267.0) (2026-11-03)
 
 ### Features
