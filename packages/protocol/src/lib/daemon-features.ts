@@ -127,6 +127,20 @@ export const DAEMON_FEATURES = {
    */
   agendaTabs: 'agenda.tabs.1',
   /**
+   * PATCHING AN ITEM AS ONE DOCUMENT (docs/agenda.md § Patch, `fy agenda patch`): an edit names the `revision` it read
+   * and is refused `stale` when the item has moved on (read before write); it may rewrite `why` and `howToResolve`; and
+   * its `clear` takes the optional writing too (`decided`, `links`, `body`, `whereWeAre`, `detail`…), so a patch's `null`
+   * removes it. A daemon without this name refuses all three as malformed, so a client sends them only to one that
+   * reports it.
+   */
+  agendaPatch: 'agenda.patch.1',
+  /**
+   * PATCHING A CARD AS ONE DOCUMENT (docs/board.md § Patch, `fy task patch`): a card edit names the `revision` it read
+   * (the seq of the card's newest history event) and is refused `version-conflict` when the card has moved on. A daemon
+   * without this name refuses the field as malformed, so a client sends it only to one that reports it.
+   */
+  boardPatch: 'board.patch.1',
+  /**
    * CARD ASKS (docs/agenda.md § Card asks): a card never asks the owner itself. Its ask (OK to build, or Done / Not
    * good with the card's How to test) rides the agenda that carries the card as `AgendaItem.cardAsks`, the first open
    * one mirrored as `gateAttached`; an answer names its ask by `cardAsk`, and the agenda RESTS after it. Cards carry

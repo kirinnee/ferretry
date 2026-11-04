@@ -468,6 +468,97 @@ ask_changed`, the new question stays open). A close that names no version — th
 - A configuration change's ask is fixed (Allow, Deny, Discard change), and a notice or input card has none: those
   are refused.
 
+### Patch: the item as one document
+
+The owner: _"can you make it such that they modify agendas and tasks as YAML or JSON as patched?"_ (&F957),
+_"make sure the WHOLE agenda … body, premise, context, current state, all tabs (todo, reports, explainers etc) and
+what I need from you, the options and how to reply are ALL updated correctly"_, and _"updating agenda should be read
+=> edit, not just patch. we need to read to know what needs to be updated, else there might be many segments that
+might be outdated!"_. So an update is **read the whole item, update every part that is out of date, write it back as
+one patch** — and the read is enforced, not only taught.
+
+```sh
+fy agenda show A5 --yaml > a5.yaml   # the whole editable document, with the item's revision
+$EDITOR a5.yaml                      # update every part that is out of date
+fy agenda patch A5 --file a5.yaml    # one atomic edit; --file - reads stdin; JSON works too
+```
+
+- **READ BEFORE WRITE: the revision is required.** `show --yaml` prints `revision:` first: a fingerprint of what
+  the item says now (`agendaItemRevision`, owned by the protocol so the CLI and the daemon compute it alike). It
+  covers every field the document holds, the ask's version (`askVersion`), the stage and the owner's latest answer
+  (`ownerAnswer`), so the owner answering, the ask being replaced, or anybody rewriting any part moves it on. A patch
+  without it is refused before anything is sent; a patch whose revision is not the item's is refused `stale` (409) —
+  by the CLI against the item it just read, and by the daemon against the item as stored at the moment of the
+  write, so a change that lands in between is never overwritten unseen. The answer is always the same: read it
+  again, update what is out of date, patch it back. The revision is a concurrency check, not a credential: it is
+  derived from words the reader already holds and proves nothing about who may write.
+  **GAP:** the owner's chat in the conversation that has not become an answer (`ownerAnswer`) does not move the
+  revision; and `fy agenda edit`'s single-field flags still write without one (they change one named field on
+  purpose) — the teaching points every whole-item update at `show --yaml` → `patch`.
+- **Semantics: JSON Merge Patch (RFC 7386), one level deep.** A key that is present replaces that field; a key
+  that is absent leaves it alone; `null` removes it. `tabs` is the one map that merges by key: each **tab is
+  addressed by its name** (or id, as `--tab-file` reads it): a name with Markdown makes or rewrites that tab, a name
+  with `null` removes it. Every other value — a list (`decided`, `links`, `steps`, `questions`…) or an object
+  (`recommendation`, `ask`) — is **replaced whole**, never merged: each is one small value a ferret rewrites as a
+  unit, and merging inside a list has no stable key. A point list (`premise`, `context`, `decided`, `stillOpen`,
+  `impact`) may be a list of plain lines or one Markdown string, as `--premise` and `--json-file` take it.
+  New tabs go after the existing ones, in the patch's order; a rename or a move is `edit --rename-tab` /
+  `--move-tab`, because a patch's key IS the name.
+- **One patch is one edit.** The CLI parses the document (zod, `AgendaPatchSchema` in the protocol), compares it with
+  the item as it stands, and sends ONE `edit` request carrying only what differs and the revision — the same action,
+  route, validation, read-cold lint, governance (an agent edits only an item it raised; a sub-ferret raises and edits
+  nothing) and hand-back rules as `edit`. So it is all or nothing: one version, one revision, or a refusal and no
+  change. There is deliberately **no second write route**: a second path would be a second set of rules to keep
+  equal.
+- **Unchanged values are not sent.** A document written back as it was read changes nothing and sends nothing
+  (`nothing changed`). This matters for the ask: `kind`, `ask`, `answers`, `fields` and the options of
+  `questions` replace the ask only when they **differ** from the item's ([Editable asks](#editable-asks)), so a
+  round-trip never re-asks the owner by accident.
+- **What the document holds — every part the owner reads that a ferret writes.** `revision`, `title`, `summary` (the
+  one-line ask), **`why`** (the line saying why it is asked) and **`howToResolve`** (how the owner resolves it) — both
+  editable since `agenda.patch.1`, so a line written for the item's first ask can follow the ask it carries now —
+  `stage`, `premise`, `context`, `decided`, `stillOpen`, `terms`, `questions`, `recommendation`, `optionDetails`,
+  `impact`, `urgency`, `blockingNow`, `willBlock`, `neededBy` (ISO, `in 3h` or `17:00`, as `--by`), `links`, `steps`,
+  `questionAnswer`, `whereWeAre` (the main tab), `body` (the full picture), `tabs` (name → Markdown), `detail`, and
+  the ask itself (`kind`, `ask`, `answers`, `fields`). `show --yaml` prints every one the item has, multi-line Markdown
+  as YAML block text.
+- **What stays fixed, and why.** The conversation and history (the log of what was said: only `answer`, `log` and the
+  owner add to it), the owner's answer, the state, stage history, versions, the card asks a card carries (the card's,
+  not the ferret's), who raised it and when, the source and the card it belongs to. They are records of what
+  happened or belong to someone else, so no patch rewrites them; `show` prints them.
+- **Unknown and read-only keys are refused**, each by name, with the keys a patch takes: a typo never silently does
+  nothing. Every problem is said per field (`tabs.Status: a tab's words are 1 to 200,000 characters`), all at once.
+- **What `null` may remove**: `decided`, `stillOpen`, `terms`, `recommendation`, `optionDetails`, `impact`,
+  `urgency`, `blockingNow` (or `false`), `willBlock`, `neededBy`, `links`, `questionAnswer`, `whereWeAre`, `body`,
+  `detail`, and any tab. It never removes `title`, `summary`, `why`, `howToResolve`, `premise` or `context` — a cold
+  reader starts from them, so they are rewritten, never dropped — nor the ask's shape (`kind`, `ask`, `answers`,
+  `questions`, `fields`, `steps`): a new ask replaces it.
+- **It needs a daemon that reports `agenda.patch.1`**, which takes the edit's `revision`, `why` and `howToResolve` and
+  widens its `clear` list; an older daemon is named before anything is sent (`fy daemon update`).
+- **Never a secret.** The document has no token, digest or credential field and refuses unknown keys, so a patch
+  cannot carry one; the read-cold lint still flags what a cold reader cannot follow.
+- `--now` is a flag, as on `edit`: it wakes an item the owner snoozed.
+
+An example — rewrite the main tab and the Status tab, drop the Risks tab, record a decision, and ask anew:
+
+```yaml
+revision: 1x9k2m3q0a7b
+summary: Ship the patch command this week?
+why: The command is built and reviewed; shipping it needs your yes.
+whereWeAre: |
+  ## Where we are now
+  The patch command is built and reviewed; CI is green.
+decided:
+  - JSON Merge Patch, tabs by name
+stillOpen: null
+tabs:
+  Status: |
+    - Now: waiting for the merge
+    - Next: teach it in the prompt
+  Risks: null
+kind: yesno
+```
+
 ### No size limit
 
 There is no size limit a reader meets: **an item may weigh up to a transport bound of 1,000,000 characters of
@@ -1086,7 +1177,7 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 
 ## Verbs
 
-`fy agenda add | edit | answer | rest | log | merge | split | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
+`fy agenda add | edit | patch | answer | rest | log | merge | split | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
 | Verb                                | Does                                                                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1095,6 +1186,7 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 | `add --task <card>`                 | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
 | `edit <id>`                         | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
 | `edit <id> --kind <kind>`           | Replace the ask (with `--option` / `--question`): it asks again, fresh ([Editable asks](#editable-asks)).                                  |
+| `patch <id> --file <f\|->`          | Change the item as ONE YAML or JSON document (merge patch; tabs by name): one atomic edit ([Patch](#patch-the-item-as-one-document)).      |
 | `edit <id> --clear-question-answer` | Take a stale answer to the owner's question off the item.                                                                                  |
 | `answer <id> "<text>"`              | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
 | `rest <id> --why "<what>"`          | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
@@ -1108,6 +1200,7 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 | `done <id>`                         | Close it, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a resting item.                                         |
 | `dismiss <id>`                      | Close without answering; agents only their own. Quiet on a resting item.                                                                   |
 | `ls` / `show`                       | Open items with their stage, turn, how long each has rested, and blocking fields / one item in full.                                       |
+| `show <id> --yaml`                  | The editable document `patch` takes back: every field a ferret may change, tabs as name → Markdown.                                        |
 | `needs-info`, `discuss`             | The owner's side, kept for old clients. They make it the ferret's turn.                                                                    |
 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
@@ -1872,6 +1965,18 @@ only, so the ledger is unchanged (no migration).
 - **GAP (cached app):** an app cached from before the tabs parses a revision that changed `tabs` with its strict
   revision schema and cannot read it until it reloads (the projection covers only callers without the channel
   header).
+
+### Patch (`agenda.patch.1`)
+
+A daemon that takes an edit's `revision` (refusing `stale`, 409, when the item has moved on), `why` and
+`howToResolve`, and the wider `clear` list ([Patch](#patch-the-item-as-one-document)) reports `agenda.patch.1`;
+`fy agenda patch` checks it before sending anything. Every new field is optional on an existing request, so there is
+no migration.
+
+- **GAP (older daemon):** a daemon before it refuses those fields as malformed, so `fy agenda patch` stops with
+  `update the daemon first`; `fy agenda edit`'s flags still work there.
+- **GAP (cached app):** an app cached from before it does not know the `stale` error code and reads it as a generic
+  refusal; the app never sends a revision, so nothing it does is refused this way.
 
 ### The conversation (`agenda.conversation.1`)
 

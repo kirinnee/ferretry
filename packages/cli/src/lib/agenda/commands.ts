@@ -49,7 +49,41 @@ export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversatio
   Write in explainer mode, ADHD-friendly (answer first, one idea per line, plain words, an example
   for each point), shown with hypermedia: fy-render charts, mermaid, an interactive html visual the
   reader changes (sliders, toggles, inputs that redraw it; never a stepper), card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render
-  html block (<details><summary>…</summary>…</details>).`;
+  html block (<details><summary>…</summary>…</details>).
+  To update the item, READ IT WHOLE FIRST: agenda show <id> --yaml, update every part that is out of
+  date (premise, context, every tab, what you need from the owner, the options), then write it back
+  with agenda patch <id> --file f.yaml (one edit, one version).`;
+
+/**
+ * The patch rule (docs/agenda.md § Patch: the item as one document): `fy agenda patch --help` says it whole.
+ */
+const AGENDA_PATCH_RULE = `READ, THEN WRITE THE WHOLE ITEM. \`agenda show <id> --yaml\` prints every part the owner reads
+and the item's revision; update every part that is out of date and write it back:
+\`agenda patch <id> --file f.yaml\` (YAML or JSON; - or no --file reads stdin).
+  The revision is REQUIRED: an item that changed since you read it (the owner answered, the ask moved
+  on, anything was rewritten) is refused and nothing is written — read it again.
+  JSON Merge Patch (RFC 7386), one level deep: a key present REPLACES the field, an absent key leaves
+  it, null REMOVES it. tabs merge BY NAME: "Name: |" with Markdown makes or rewrites that tab, "Name:
+  null" removes it. Every other list or object (decided, links, steps, questions, recommendation,
+  ask) is replaced whole.
+  Values equal to the item's are not sent, so writing back what you read changes nothing and an
+  unchanged kind never re-asks the owner. Unknown or read-only keys are refused by name.
+  null never removes title, summary, why, howToResolve, premise or context (rewrite them) nor the
+  ask (a new kind replaces it). It is the edit action: same checks, same lint, same rules on whose
+  item it is.
+
+Example:
+  revision: 3k9x1q0z2b7
+  summary: Ship the patch command this week?
+  why: The command is built; shipping it needs your yes.
+  whereWeAre: |
+    The patch command is built and reviewed; CI is green.
+  decided: [JSON Merge Patch, tabs by name]
+  stillOpen: null
+  tabs:
+    Status: |
+      - Now: waiting for the merge
+    Risks: null`;
 
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
   --title        REQUIRED. What this is about, in a few plain words (aim for 40 characters, 60 at most,
@@ -525,9 +559,31 @@ function mountVerbs(
       .command('show')
       .description('print one item in full — read-only')
       .argument('<id>', 'the item reference, like !A3')
-      .option('--tab <name>', 'print only this tab, exactly as written: main, body, or a tab of your own'),
+      .option('--tab <name>', 'print only this tab, exactly as written: main, body, or a tab of your own')
+      .option(
+        '--yaml',
+        'print the editable document `agenda patch` takes back: every field you may change, tabs by name',
+      ),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.show(id, merged(command));
+  });
+
+  scoped(
+    agenda
+      .command('patch')
+      .description(
+        'change an open item you raised as ONE YAML or JSON document — premise, context, the main tab, every tab, the ask — in one atomic edit (read it with `agenda show <id> --yaml`)',
+      )
+      .argument('<id>', 'the item reference, like !A3')
+      .option('-f, --file <path>', 'the YAML or JSON document; - (the default) reads standard input')
+      .option('--now', 'it is urgent: an item the owner snoozed wakes too (at most once an hour)')
+      .addHelpText(
+        'after',
+        `
+${AGENDA_PATCH_RULE}`,
+      ),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.patch(id, merged(command));
   });
 
   scoped(agenda.command('ls').alias('list').description('list open items, oldest first')).action(

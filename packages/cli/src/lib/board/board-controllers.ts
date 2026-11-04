@@ -9,11 +9,13 @@ import {
   type TaskRef,
 } from '@ferretry/protocol';
 import { resolveBoardProject } from '../board-lanes/lane-request';
+import { patchYaml } from '../patch/document';
 import { refuse } from '../tasks/errors';
 import type { ITextFileReader } from '../tasks/ports';
 import type { RelatedCheck } from '../work-search/related';
 import { explainingRefusals } from './board-refusal';
 import { mergeStatus, parseStatusFile, type StatusParts } from './board-status';
+import { cardPatchDocument, composeCardPatch, parseCardPatch } from './card-patch';
 import {
   type BoardVerb,
   renderActed,
@@ -117,6 +119,11 @@ export interface TaskCreateFlags extends BoardCreateOptions, BoardCommonOptions 
 
 export interface TaskEditFlags extends BoardEditOptions, BoardCommonOptions {}
 
+/** `fy task patch`: the YAML or JSON document; `-` (the default) reads standard input. */
+export interface TaskPatchFlags extends BoardCommonOptions {
+  readonly file?: string | undefined;
+}
+
 export interface TaskLinkFlags extends BoardLinkOptions, BoardCommonOptions {}
 
 export interface TaskListShimFlags extends BoardCommonOptions {
@@ -197,9 +204,18 @@ export class BoardController {
   }
 
   /** `fy task show <id>`: one card in full. */
-  async show(idText: string, options: BoardCommonOptions): Promise<void> {
+  async show(idText: string, options: BoardCommonOptions & { readonly yaml?: boolean }): Promise<void> {
     const ref = requireCardRef(idText);
     const { task, laneSet } = await this.gateway.task(ref.id);
+    if (options.yaml === true) {
+      const shown = formatTaskRef(task);
+      return this.deps.output.success(
+        patchYaml(cardPatchDocument(task), [
+          `${shown} — read every part, update what is out of date, then: ${this.deps.binary} task patch ${task.id} --file <this file>`,
+          'a key present replaces the field, an absent key leaves it, null empties it',
+        ]),
+      );
+    }
     const children =
       task.rollup.children === 0
         ? []
@@ -494,6 +510,35 @@ export class BoardController {
     if (filed === undefined && Object.keys(parts).length === 0) return undefined;
     const base = filed === undefined ? undefined : parseStatusFile(await this.deps.files.readText(filed), filed);
     return mergeStatus(base, parts);
+  }
+
+  /**
+   * `fy task patch <id> --file <f>`: the card's words as ONE YAML or JSON document (docs/board.md § Patch). The values
+   * that differ from the card go as ONE edit action; a document that changes nothing sends nothing.
+   */
+  async patch(idText: string, options: TaskPatchFlags) {
+    const ref = requireCardRef(idText);
+    const path = options.file?.trim() || '-';
+    const source = path === '-' ? 'the patch on standard input' : path;
+    const parsed = parseCardPatch(await this.deps.files.readText(path), source);
+    if (!parsed.ok) {
+      refuse(
+        `task patch ${formatTaskRef(ref)} changed nothing:\n${parsed.problems.map(problem => `  ${problem}`).join('\n')}`,
+      );
+    }
+    const { task } = await this.gateway.task(ref.id);
+    const plan = composeCardPatch(task, parsed.patch);
+    if (plan.kind === 'stale') {
+      refuse(
+        `${formatTaskRef(task)} changed since you read it, so nothing was written: read it again (${this.deps.binary} task show ${task.id} --yaml), update every part that is out of date, and patch it back`,
+      );
+    }
+    if (plan.kind === 'unchanged') {
+      return this.deps.output.success(
+        `${formatTaskRef(task)}: nothing changed, so nothing was sent (every value matches the card)`,
+      );
+    }
+    await this.perform('patch', ref, options, plan.request);
   }
 
   async refile(

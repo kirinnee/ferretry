@@ -1,0 +1,80 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { cardPatchDocument, composeCardPatch, parseCardPatch } from '../../../src/lib/board/card-patch';
+import { patchYaml } from '../../../src/lib/patch/document';
+import { card } from './fixtures';
+
+const task = card({
+  title: 'Patch-edit agenda and cards',
+  summary: 'Ferrets send one patch',
+  premise: '- Many flags today',
+  howToTest: '1. Run it',
+  terms: [{ term: 'patch', meaning: 'a document of changes' }],
+});
+
+const parsed = (text: string) => {
+  const result = parseCardPatch(text, 'f1.yaml');
+  if (!result.ok) throw new Error(result.problems.join('\n'));
+  return result.patch;
+};
+
+describe('task show --yaml', () => {
+  it('should print the revision (the newest history seq) and every field a patch changes', () => {
+    // Act
+    const document = cardPatchDocument(task);
+
+    // Assert
+    should(document).deepEqual({
+      revision: 1,
+      title: 'Patch-edit agenda and cards',
+      summary: 'Ferrets send one patch',
+      premise: '- Many flags today',
+      context: '',
+      terms: [{ term: 'patch', meaning: 'a document of changes' }],
+      brief: '',
+      howToTest: '1. Run it',
+    });
+  });
+
+  it('should round-trip: the printed YAML patched back changes nothing', () => {
+    // Act
+    const plan = composeCardPatch(task, parsed(patchYaml(cardPatchDocument(task), ['comment'])));
+
+    // Assert
+    should(plan).deepEqual({ kind: 'unchanged' });
+  });
+});
+
+describe('task patch', () => {
+  it('should send ONE edit with what differs and the revision; null empties, a list of points becomes bullets', () => {
+    // Act
+    const plan = composeCardPatch(
+      task,
+      parsed('revision: 1\nsummary: Ferrets send one patch\ncontext:\n  - one\n  - two\nhowToTest: null\nterms: null'),
+    );
+
+    // Assert
+    should(plan).deepEqual({
+      kind: 'edit',
+      request: { action: 'edit', revision: 1, context: '- one\n- two', howToTest: '', terms: [] },
+    });
+  });
+
+  it('should refuse a patch written against an older revision', () => {
+    // Act + Assert
+    should(composeCardPatch(task, parsed('revision: 7\nbrief: new plan'))).deepEqual({ kind: 'stale' });
+  });
+
+  it('should require the revision, refuse unknown or read-only keys, and never empty the title', () => {
+    // Act
+    const missing = parseCardPatch('brief: new plan', 'f1.yaml');
+    const wrong = parseCardPatch('revision: 1\nlaneId: done\nassignee: me\ntitle: null', 'f1.yaml');
+
+    // Assert
+    should(!missing.ok && missing.problems[0]).match(/^revision: required — read the whole card first/u);
+    const problems = wrong.ok ? '' : wrong.problems.join('\n');
+    should(problems).match(/laneId: not a field a patch changes \(it takes: revision, title, summary/u);
+    should(problems).match(/assignee: not a field a patch changes/u);
+    should(problems).match(/title: /u);
+  });
+});

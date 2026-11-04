@@ -18,6 +18,7 @@
 import {
   type BoardActor,
   type BoardActorVia,
+  boardTaskRevision,
   type BoardAttachment,
   type BoardClarification,
   type BoardEditableField,
@@ -756,6 +757,13 @@ const edit = (
 ): CardOutcome => {
   requireStanding('edit', context.standing, card);
   const action = { ...request, status: mergedStatus(card, request.status) };
+  // READ BEFORE WRITE (`fy task patch`): the writer read the card at `revision`; a change since would be overwritten unseen.
+  if (action.revision !== undefined && boardTaskRevision(card) !== action.revision) {
+    throw new BoardError(
+      'version-conflict',
+      `${formatTaskRef(card)} changed since you read it: read it again (task show ${card.id} --yaml), update every part that is out of date, and patch it back`,
+    );
+  }
   const changed = BoardEditableFieldSchema.options.filter(
     field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(card[field]),
   );

@@ -11,6 +11,7 @@ import type {
   TaskEditFlags,
   TaskLinkFlags,
   TaskListShimFlags,
+  TaskPatchFlags,
 } from '../../lib/board/board-controllers';
 import { laneGuide } from '../../lib/board/lane-guide';
 import { TASK_CREATE_RULE } from '../../lib/board/umbrella';
@@ -45,6 +46,21 @@ const STATUS_DONE_HELP =
 const STATUS_NEXT_HELP = "the card's status, Next: what comes after, in order (markdown); replaces that part";
 const STATUS_FILE_HELP =
   "the card's current state, rewritten whole, from YAML or JSON { now, doneSoFar, next } (`-` reads stdin): **Now** / **Done so far** (PR links) / **Next** (markdown)";
+/** `fy task patch --help` (docs/board.md § Patch: a card as one document). */
+const TASK_PATCH_RULE = `READ, THEN WRITE THE WHOLE CARD. \`task show <id> --yaml\` prints every field you may change and
+the card's revision; update every part that is out of date and write it back: \`task patch <id> --file f.yaml\`.
+  JSON Merge Patch (RFC 7386): a key present REPLACES the field, an absent key leaves it, null EMPTIES
+  it (never title or summary). Lists (terms, a point list) are replaced whole.
+  The revision is required: a card changed since you read it is refused and nothing is written —
+  read it again. Values equal to the card's are not sent. Unknown or read-only keys are refused by name.
+  It is the edit action: the same checks and the same rules on who may change which field.
+
+Example:
+  revision: 12
+  summary: Patch-edit agenda items and cards
+  howToTest: |
+    1. Run fy task show F12 --yaml
+  brief: null`;
 
 const HOW_TO_TEST_HELP =
   'how the owner checks it before Done (markdown, a numbered list): where to go, what to do, what they should see';
@@ -112,7 +128,8 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       'one task in full: ask, premise, context, terms, brief, How to test, children, dependencies, links, asks, history',
     )
     .argument('<id>', ID_HELP)
-    .action(async (id: string, options: SessionOptions) => {
+    .option('--yaml', 'print the editable document `task patch` takes back, with its revision')
+    .action(async (id: string, options: SessionOptions & { readonly yaml?: boolean }) => {
       await board.show(id, options);
     });
 
@@ -321,6 +338,17 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--visibility <public|private>', "who sees it on the default board; only the owner hides the owner's ask")
     .action(async (id: string, options: TaskEditFlags) => {
       await board.edit(id, options);
+    });
+
+  acting(group.command('patch'))
+    .description(
+      "change a card's words as ONE YAML or JSON document, read first with `task show <id> --yaml` (its revision is required): one atomic edit",
+    )
+    .argument('<id>', ID_HELP)
+    .option('-f, --file <path>', 'the YAML or JSON document; - (the default) reads standard input')
+    .addHelpText('after', `\n${TASK_PATCH_RULE}`)
+    .action(async (id: string, options: TaskPatchFlags) => {
+      await board.patch(id, options);
     });
 
   acting(group.command('refile'))

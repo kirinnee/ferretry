@@ -869,7 +869,8 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
 export type BoardTaskCreateRequest = z.infer<typeof BoardTaskCreateRequestSchema>;
 export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestSchema>;
 
-const editFields = {
+/** The text fields `fy task edit` (and `fy task patch`, `board-patch.ts`) changes, each with its wire schema. */
+export const BoardTaskEditFields = {
   title: TaskTitleSchema.optional(),
   summary: oneLine(MAX_BOARD_SUMMARY_LENGTH).optional(),
   premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets).optional(),
@@ -948,7 +949,13 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
   z
     .strictObject({
       action: z.literal('edit'),
-      ...editFields,
+      ...BoardTaskEditFields,
+      /**
+       * READ BEFORE WRITE (`board.patch.1`, `fy task patch`): the card's revision as the writer read it
+       * (`boardTaskRevision`, the seq of its newest history event). A card that has changed since is refused
+       * `version-conflict` and nothing is written: read it again.
+       */
+      revision: PositiveIntegerSchema.optional(),
       /** Changes the card's visibility in the same mutation as its text, so one request is one outcome. */
       visibility: BoardTaskVisibilitySchema.optional(),
     })

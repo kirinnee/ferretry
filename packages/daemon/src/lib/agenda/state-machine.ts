@@ -7,6 +7,7 @@ import {
   type AgendaCardAnswer,
   type AgendaCardRow,
   type AgendaClearableField,
+  agendaItemRevision,
   type AgendaConfirms,
   type AgendaConversationEntry,
   AgendaConversationEntrySchema,
@@ -330,6 +331,11 @@ export interface EditAgendaPatch extends AgendaBrief {
   readonly ask?: AgendaAsk;
   readonly kind?: AgendaKind;
   readonly answers?: AgendaCardAnswer[];
+  /** The why line and the how-to-resolve line (`agenda.patch.1`): rewritten, never removed. */
+  readonly why?: string;
+  readonly howToResolve?: string;
+  /** READ BEFORE WRITE (`agenda.patch.1`): the revision the writer read; refused `stale` once the item moved on. */
+  readonly revision?: string;
   /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
   readonly clear?: readonly AgendaClearableField[];
   /** Tab operations (`agenda.tabs.1`), turned into the new `tabs` before the edit applies (`withTabEdits`). */
@@ -2244,6 +2250,8 @@ function failure(code: AgendaErrorCode, message: string): AgendaMutation {
 
 const EDITABLE_FIELDS = [
   'subject',
+  'why',
+  'howToResolve',
   'title',
   'context',
   'ask',
@@ -2427,6 +2435,10 @@ function kindMoved(item: AgendaItem, patch: EditAgendaPatch): boolean {
 function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) {
+    // A patch read an OPEN item: one that has closed since is not the item it read.
+    if (command.patch.revision !== undefined) {
+      return failure('stale', `${command.id} is no longer open: read it again (agenda show ${command.id})`);
+    }
     // An edit of an item closed as replied (before replies parked) is the ferret asking again: it reopens, then edits.
     const reopened = reopenReplied(
       ledger,
@@ -2444,6 +2456,17 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   }
   if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
+  }
+  if (command.patch.revision !== undefined) {
+    // READ BEFORE WRITE: the writer read the item at `revision`; anything written since would be overwritten unseen.
+    if (agendaItemRevision(target.item) !== command.patch.revision) {
+      return failure(
+        'stale',
+        `${command.id} changed since you read it: read it again (agenda show ${command.id} --yaml), update every part that is out of date, and patch it back`,
+      );
+    }
+    const { revision: _revision, ...patch } = command.patch;
+    return edit(ledger, { ...command, patch });
   }
   if (command.patch.tabEdits !== undefined) {
     const tabbed = withTabEdits(target.item, command.patch);

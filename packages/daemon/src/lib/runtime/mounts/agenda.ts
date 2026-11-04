@@ -80,6 +80,7 @@ const AGENDA_ERROR_STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   corrupt: 500,
   use_input_form: 400,
   ask_changed: 409,
+  stale: 409,
 };
 
 /**

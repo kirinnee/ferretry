@@ -786,10 +786,31 @@ export const agendaBriefRequiredProblems = (value: {
 };
 
 /**
- * The agenda fields an edit can clear: they have no empty value to write, so clearing is named. `questionAnswer` is
- * the ferret's stale answer to the owner's question (`--clear-question-answer`, `agenda.asks.1`).
+ * The agenda fields an edit clears before `agenda.patch.1`: they have no empty value to write, so clearing is named.
+ * `questionAnswer` is the ferret's stale answer to the owner's question (`--clear-question-answer`, `agenda.asks.1`).
  */
-export const AgendaClearableFieldSchema = z.enum(['blockingNow', 'willBlock', 'neededBy', 'questionAnswer']);
+export const AGENDA_FLAG_CLEARABLE_FIELDS = ['blockingNow', 'willBlock', 'neededBy', 'questionAnswer'] as const;
+
+/**
+ * The agenda fields an edit can clear. A PATCH's `null` (`fy agenda patch`, `agenda.patch.1`, docs/agenda.md § Patch)
+ * also clears the optional writing past {@link AGENDA_FLAG_CLEARABLE_FIELDS}; a daemon without that feature refuses
+ * those as malformed, so a client sends them only to one that reports it. Never `title`, `subject`, `premise` or
+ * `context` (a cold reader starts from them), nor the ask's shape (a new ask replaces it).
+ */
+export const AgendaClearableFieldSchema = z.enum([
+  ...AGENDA_FLAG_CLEARABLE_FIELDS,
+  'decided',
+  'stillOpen',
+  'terms',
+  'recommendation',
+  'optionDetails',
+  'impact',
+  'urgency',
+  'links',
+  'whereWeAre',
+  'body',
+  'detail',
+]);
 export type AgendaClearableField = z.infer<typeof AgendaClearableFieldSchema>;
 
 /**
@@ -1831,46 +1852,67 @@ export const agendaConfirmsProblems = (value: {
   ];
 };
 
+/** Rewrite an open item in place: its writing, its stage, or — replacing the ask — what it asks; never who raised it. */
+export const AgendaEditRequestSchema = z.strictObject({
+  action: z.literal('edit'),
+  id: AgendaIdSchema,
+  subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
+  /**
+   * The WHY line and the HOW-TO-RESOLVE line the owner reads (`agenda.patch.1`): rewritten, never removed, so a line
+   * written for the item's first ask can follow the ask it carries now.
+   */
+  why: prose(MAX_AGENDA_REASON_LENGTH).optional(),
+  howToResolve: prose(MAX_AGENDA_DETAIL_LENGTH).optional(),
+  /**
+   * READ BEFORE WRITE (`agenda.patch.1`, `fy agenda patch`): the item's revision (`agendaItemRevision`) as the writer
+   * read it. When the item has changed since, the edit is refused `stale` and nothing is written: read it again.
+   */
+  revision: z
+    .string()
+    .regex(/^[0-9a-z]{1,32}$/u)
+    .optional(),
+  title: AgendaCardShape.title,
+  /**
+   * What the item needs from the owner now (`--stage`); a change is kept in its `stages`. Only a daemon that
+   * reports `agenda.channel.1` takes it.
+   */
+  stage: AgendaStageSchema.optional(),
+  /**
+   * A REPLACED ASK (`agenda.asks.1`): a new ask, kind, answers or questions (their options too). The item asks
+   * again, fresh, as its one entry in the Needs-you queue; its `askVersion` moves on, so an answer to the old ask
+   * is refused, and the ferret's answer to an earlier question is cleared unless this edit sets a new one.
+   */
+  ask: AgendaAskSchema.optional(),
+  kind: AgendaCardShape.kind,
+  answers: AgendaCardShape.answers,
+  context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
+  ...AgendaBriefShape,
+  /**
+   * TAB OPERATIONS (`agenda.tabs.1`), applied in order as ONE edit (one version): make or rewrite a tab, rename,
+   * move or remove one (`applyAgendaTabEdits`). Never with `tabs`, which replaces them all.
+   */
+  tabEdits: z.array(AgendaTabEditSchema).min(1).max(MAX_AGENDA_TAB_EDITS).optional(),
+  /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
+  clear: z
+    .array(AgendaClearableFieldSchema)
+    .min(1)
+    .max(AgendaClearableFieldSchema.options.length)
+    .refine(fields => new Set(fields).size === fields.length, 'clear names each field once')
+    .optional(),
+  /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
+  now: z.literal(true).optional(),
+  /**
+   * `--back`, RETIRED from the CLI (`fy agenda answer` replaced it) and kept for older ones: the ferret needs
+   * something NEW from the owner, so a RESTING item asks again, fresh, with the whole card refreshed. Without it
+   * (and without a `questionAnswer` or a replaced ask) an edit of a resting item only rewrites the card.
+   */
+  back: z.literal(true).optional(),
+});
+
 export const AgendaActionRequestSchema = z
   .discriminatedUnion('action', [
     AddAgendaRequestSchema,
-    /** Rewrite an open item in place: its writing, its stage, or — replacing the ask — what it asks; never who raised it. */
-    z.strictObject({
-      action: z.literal('edit'),
-      id: AgendaIdSchema,
-      subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
-      title: AgendaCardShape.title,
-      /**
-       * What the item needs from the owner now (`--stage`); a change is kept in its `stages`. Only a daemon that
-       * reports `agenda.channel.1` takes it.
-       */
-      stage: AgendaStageSchema.optional(),
-      /**
-       * A REPLACED ASK (`agenda.asks.1`): a new ask, kind, answers or questions (their options too). The item asks
-       * again, fresh, as its one entry in the Needs-you queue; its `askVersion` moves on, so an answer to the old ask
-       * is refused, and the ferret's answer to an earlier question is cleared unless this edit sets a new one.
-       */
-      ask: AgendaAskSchema.optional(),
-      kind: AgendaCardShape.kind,
-      answers: AgendaCardShape.answers,
-      context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
-      ...AgendaBriefShape,
-      /**
-       * TAB OPERATIONS (`agenda.tabs.1`), applied in order as ONE edit (one version): make or rewrite a tab, rename,
-       * move or remove one (`applyAgendaTabEdits`). Never with `tabs`, which replaces them all.
-       */
-      tabEdits: z.array(AgendaTabEditSchema).min(1).max(MAX_AGENDA_TAB_EDITS).optional(),
-      /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
-      clear: z.array(AgendaClearableFieldSchema).min(1).max(AgendaClearableFieldSchema.options.length).optional(),
-      /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
-      now: z.literal(true).optional(),
-      /**
-       * `--back`, RETIRED from the CLI (`fy agenda answer` replaced it) and kept for older ones: the ferret needs
-       * something NEW from the owner, so a RESTING item asks again, fresh, with the whole card refreshed. Without it
-       * (and without a `questionAnswer` or a replaced ask) an edit of a resting item only rewrites the card.
-       */
-      back: z.literal(true).optional(),
-    }),
+    AgendaEditRequestSchema,
     z.strictObject({
       action: z.literal('resolve'),
       id: AgendaIdSchema,
@@ -2127,6 +2169,8 @@ export const AgendaErrorCodeSchema = z.enum([
   'use_input_form',
   /** An answer named an ask the ferret has since replaced (`askVersion`): the item asks something else now. */
   'ask_changed',
+  /** An edit named the revision it read (`revision`), and the item has changed since: read it again (`agenda.patch.1`). */
+  'stale',
 ]);
 export type AgendaErrorCode = z.infer<typeof AgendaErrorCodeSchema>;
 
