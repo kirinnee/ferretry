@@ -1,3 +1,9 @@
+## [4.269.0](https://github.com/kirinnee/ferretry/compare/v4.268.0...v4.269.0) (2026-11-04)
+
+### Features
+
+* **pwa:** diff any two agenda versions, merge two agendas, show split links ([#1441](https://github.com/kirinnee/ferretry/issues/1441)) ([7c83aba](https://github.com/kirinnee/ferretry/commit/7c83aba8662cc208281d6fc01de5f7a6b56d53a5))
+
 ## [4.268.0](https://github.com/kirinnee/ferretry/compare/v4.267.0...v4.268.0) (2026-11-04)
 
 ### Features

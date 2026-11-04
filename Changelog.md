@@ -1,3 +1,9 @@
+## [4.270.0](https://github.com/kirinnee/ferretry/compare/v4.269.0...v4.270.0) (2026-11-04)
+
+### Features
+
+* **agenda:** item layout v2 — the body is the live document ([#1443](https://github.com/kirinnee/ferretry/issues/1443)) ([68af3ef](https://github.com/kirinnee/ferretry/commit/68af3efa299195f610ed4b020b26978f084248ec))
+
 ## [4.269.0](https://github.com/kirinnee/ferretry/compare/v4.268.0...v4.269.0) (2026-11-04)
 
 ### Features
