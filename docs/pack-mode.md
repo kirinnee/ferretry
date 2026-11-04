@@ -40,7 +40,7 @@ far above a server's text. The runtime wrapper composes it per ferret at exec ti
 called `fy`:
 
 ```text
-Pack mode: hand self-contained parts of your task to sub-ferrets (agents, each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.
+Pack mode: hand self-contained parts of your task to sub-ferrets (each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.
 1. `fy recommend` lists usable models, most quota first, with start commands.
 2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"`: Ferretry chooses). Always pass `--name` (2–5 Title Case words). The brief is all it knows: what to do, where, what to report.
 3. If refused (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, try the next. limit_reached or depth_exceeded: do it yourself.
@@ -67,13 +67,13 @@ and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
-| Tools (terminals, browser pages)         | 1,299      | 325      | every agent runtime         |
+| Tools (terminals, browser pages)         | 1,294      | 324      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
-| Board (opt-in; `fy task`, cards)         | 631        | 158      | every agent runtime         |
+| Board (opt-in; `fy task`, cards)         | 757        | 189      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,289      | 322      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
-| Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
+| Pack mode                                | 1,038      | 260      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
 | Lessons                                  | 238        | 60       | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
@@ -115,6 +115,7 @@ reworded the Board section ("Before it's ready to try:", "lane by work", "add to
 measured total 7,806 (7,820 counting the separators), 44 characters under the 7,850 cap (30 counting the separators).
 PR 10 (teach round 2) re-read the Agenda and Board text against the spec and found every rule and verb (`answer`, `rest`, `log`, `split`, `merge`, the stages) already taught except the `done` verb and "say so" when unsure. Review round 1 added both, paid for by "logs their words verbatim" in place of "puts their words on it verbatim"; round 2 put the chat reply's teaching "link it" back and paid for it with "unsure→closest" in place of "unsure: closest": agenda 1,266 → 1,269 (cap 1,270), the measured total 7,806 → 7,809 (7,823 counting the separators), 41 characters under the 7,850 cap (27 counting the separators). `teaching-spec.test.ts` now holds each verb and the stage chain to the spec.
 The body as the live document (F909, the owner on !A332: "the chat is the stream of log, the body is the DB") then replaced the body rule above: `--where`=short status on the open line, and "Body=live doc (report/plan/status): rewrite it whole (`edit --body-file`); chat points at it." on the state line, paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)", ", `--where`=now" and "Keep current (`edit`)": agenda 1,269 → 1,289 (cap 1,270 → 1,300), the measured total 7,809 → 7,829 (7,843 counting the separators), 21 characters under the 7,850 cap (7 counting the separators). The whole-prompt cap is unchanged.
+The owner's asks are public cards (the owner, 2026-11-04: "when user ask for ticket or tickets, make sure they are not internal. the board should answer 'What's the current status of all the things I asked you to do'") added one Board sentence, 631 → 757 (cap 700 → 760). It was paid for in part by Pack (1,046 → 1,038: "agents, ") and Tools (1,299 → 1,294); the Agenda, Pack and Hypermedia wording that is left is pinned by tests, so the **whole-prompt cap was raised 7,850 → 7,950** (`8_000 - 50`), the measured total 7,942 (7,956 counting the separators, as every earlier figure here is counted: the cap is on the section text, and 44 characters remain under 8,000).
 
 ## The routing prompt
 

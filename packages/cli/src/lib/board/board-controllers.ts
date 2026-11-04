@@ -52,7 +52,7 @@ import {
   requireCardRef,
 } from './board-request';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from './ports';
-import { umbrellaRefusal, umbrellaSignals } from './umbrella';
+import { SUB_CARD_ASK_WARNING, umbrellaRefusal, umbrellaSignals } from './umbrella';
 
 const asJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -327,6 +327,8 @@ export class BoardController {
       assignee,
     });
     if (await this.noteInsteadOfCreate(request, request.ask.text, as, options)) return;
+    if (options.parent !== undefined && options.ask !== undefined && options.public !== true)
+      this.deps.output.diagnostic(SUB_CARD_ASK_WARNING);
     const created = await explainingRefusals({ binary: this.deps.binary, project: target?.name }, async () => {
       return await this.gateway.create(as, request);
     });
