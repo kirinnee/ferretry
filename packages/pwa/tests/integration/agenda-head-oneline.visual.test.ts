@@ -7,8 +7,8 @@
  *
  *  - The title, the status dot, ‹ n of N ›, the clock, ⓘ and ✕ share ONE row. The title wraps onto at most two lines
  *    (which fit the row's 44px controls); it never scrolls and is never cut at a side, and one longer than two lines is
- *    drawn whole at the top of the body as well (the owner's lead, F559: "the owner can't read the question"). The ask
- *    moves behind ⓘ, whose panel hangs under the row and sticks with it.
+ *    drawn whole at the top of the body as well (the owner's lead, F559: "the owner can't read the question"). The
+ *    summary is drawn on the card under the title (F909), outside the sticky head; ⓘ keeps only a host's tools.
  *  - The card is one border level: no frame, no padding of its own inside the view, so a form's fields use the column,
  *    which keeps a 16px gutter on a phone.
  *
@@ -148,7 +148,7 @@ describe('the open item’s head', () => {
   for (const { name } of VIEWPORTS)
     for (const family of FAMILIES)
       for (const scheme of ['light', 'dark'] as const) {
-        it(`is one row with a short title, the ask behind ⓘ (${name}, ${family}, ${scheme})`, async () => {
+        it(`is one row with a short title, the summary on the card under it (${name}, ${family}, ${scheme})`, async () => {
           const { tab, close } = await open(name, family, scheme, '&title=short');
           try {
             const { head, title, pager } = await headBox(tab);
@@ -159,7 +159,7 @@ describe('the open item’s head', () => {
             const ask = await tab.evaluate(
               () => document.querySelector('[data-agenda-ask]')?.getClientRects().length ?? 0,
             );
-            expect(ask, 'the ask is not drawn until ⓘ opens').toBe(0);
+            expect(ask, 'no ⓘ panel holds the summary').toBe(0);
             await shot(tab, name, `${family}-${scheme}`, 'short-title');
           } finally {
             await close();
@@ -235,18 +235,15 @@ describe('the open item’s head', () => {
           }
         });
 
-        it(`opens the ask under the row from ⓘ, and the head still sticks (${name}, ${family}, ${scheme})`, async () => {
+        it(`draws the summary under the title, on the card and outside the sticky head, and the head still sticks (${name}, ${family}, ${scheme})`, async () => {
           const { tab, close } = await open(name, family, scheme, '&title=short');
           try {
-            const before = (await headBox(tab)).head.height;
-            await tab.locator('[data-agenda-info-toggle]').click();
-            await framesSettled(tab);
-            const opened = await headBox(tab);
-            expect(opened.head.height, 'the panel is inside the head').toBeGreaterThan(before + 16);
-            const ask = await tab.locator('[data-agenda-ask]').boundingBox();
-            expect(ask, 'the ask is drawn').not.toBeNull();
-            expect((ask?.y ?? 0) + (ask?.height ?? 0)).toBeLessThanOrEqual(opened.head.bottom + 1);
-            await shot(tab, name, `${family}-${scheme}`, 'info-open');
+            const { head } = await headBox(tab);
+            const description = await tab.locator('[data-agenda-description]').boundingBox();
+            expect(description, 'the summary is drawn').not.toBeNull();
+            expect(description?.y ?? 0, 'under the head, not inside it').toBeGreaterThanOrEqual(head.bottom - 1);
+            expect(await tab.locator('[data-agenda-info-toggle]').count(), 'nothing is left behind ⓘ').toBe(0);
+            await shot(tab, name, `${family}-${scheme}`, 'description');
             await tab.evaluate(() => {
               const body = document.querySelector('.fy-item-view__body') as HTMLElement;
               body.scrollTop = body.scrollHeight;

@@ -224,17 +224,20 @@ describe('snooze in the card’s head', () => {
         }
 
   for (const { name } of VIEWPORTS)
-    it(`keeps the snooze out of ⓘ and out of the answer row (${name})`, async () => {
+    it(`keeps the snooze in the head row — not in ⓘ, not in the answer row (${name})`, async () => {
       const item = SCENES[0];
       const { tab, close } = await open(name, 'studio', 'light', item);
       try {
-        await tab.locator('[data-agenda-info-toggle]').click();
-        await tab.waitForSelector('[data-agenda-info-panel]:not([hidden])');
-        const inPanel = await tab.evaluate(
-          () => document.querySelectorAll('[data-agenda-info-panel] [data-agenda-snooze]').length,
-        );
-        expect(inPanel, 'ⓘ no longer holds a snooze').toBe(0);
-        await shot(tab, name, 'studio-light', 'item-info-open');
+        // The summary is drawn on the card now (F909), so this item has no ⓘ at all: the clock is the head row's own.
+        const found = await tab.evaluate(() => ({
+          info: document.querySelectorAll('[data-agenda-info-toggle], [data-agenda-info-panel]').length,
+          inRow: document.querySelectorAll('.fy-item-view__bar [data-agenda-snooze]').length,
+          everywhere: document.querySelectorAll('[data-agenda-snooze]').length,
+        }));
+        expect(found.info, 'nothing is left behind ⓘ').toBe(0);
+        expect(found.inRow, 'the snooze is in the head row').toBe(1);
+        expect(found.everywhere, 'and nowhere else').toBe(1);
+        await shot(tab, name, 'studio-light', 'item-head');
       } finally {
         await close();
       }
