@@ -651,8 +651,8 @@ as an agenda card does, with nothing folded:
 4. **How to test**: a list is drawn as numbered steps, each with a box the owner ticks as they go (on that screen
    only — a tick is a reminder, never a verdict). Steps keep the number they were written with (a list that
    starts at 4 reads 4, 5, 6); a heading or a paragraph set apart between steps is a sub-heading above the steps
-   that follow, and text before the first step is the lead. On a card waiting to be
-   tested, **Not good** (left) and **Done** (right) sit right under it, and a swipe right is Done, left is Not good;
+   that follow, and text before the first step is the lead. The card draws no answer of its own: a card waiting to
+   be tested is answered on its agenda ([Done and Not good](#done-and-not-good));
 5. the **brief**, then the **terms** — and each term is also a dotted tap tip where the card's text first uses it.
 
 A good How to test says where to go, what to do and what the owner should see, on which machine and version:
@@ -660,8 +660,8 @@ A good How to test says where to go, what to do and what the owner should see, o
 ```markdown
 On the Mac, once it runs v4.157:
 
-1. Open the Board and tap a card in Released.
-2. Scroll to How to test, and tick each step as you check it.
+1. Open the Inbox and tap the card's "Try it" ask.
+2. Follow How to test, and tick each step as you check it.
 3. You should see Done and Not good right under the steps.
 ```
 
@@ -994,11 +994,14 @@ who is not on this host ([grants.md](grants.md)).
 
 ## Done and Not good
 
-**GAP:** the owner's rule (2026-11-04) is that a card has no owner buttons — the card's agenda carries every answer and
-moves the card ([The Board rules](#the-board-rules)). The surfaces below still draw Done and Not good on the card itself
-until they are removed; the teaching already sends every ask through the agenda.
+**A card has no owner buttons** (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda tracks
+all those and are the one request user to test so it can move it. the board is almost fully autonomous!"_). The Board's
+surfaces — the Kanban card, the Table row, the side pane and the card detail — draw the card's state (its lane, its
+Status, its How to test) and no answer. The owner answers a card only on its agenda: the card ask
+([below](#cards-show-progress-their-asks-ride-the-agenda)) on the Inbox deck, a to-test row in the Inbox list and the
+Answer-quickly run, which move the card.
 
-The owner's two answers about a card, on every surface that shows one (Kanban, Table, card detail):
+The owner's two answers about a card, on those agenda surfaces:
 
 - **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
 - **Not good** opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
@@ -1012,7 +1015,7 @@ The owner's two answers about a card, on every surface that shows one (Kanban, T
 
 Where the box opens is one rule too: **inline, directly under the card it answers, at the card's exact width** — under the
 Inbox deck's card, under a to-test row in the Inbox list and in the Answer-quickly run (no sheet, no popup over the page).
-Only the Board's own card and detail pages, which have no row to sit under, keep it as a modal. It ends at the field: a
+It ends at the field: a
 detached composer draws no empty status row under it, and its placeholder is short enough for a phone (`What went wrong?`).
 
 The files travel as ordinary chat attachments. The app uploads them to the card's ferret (its assignee, else

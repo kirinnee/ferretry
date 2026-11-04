@@ -316,8 +316,8 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
-    'Hypermedia: to teach, explain or compare anything not simple (a flow, architecture, change over time), show it, not just say it; simple answers stay plain. Inline: never publish a page or link to explain unless asked.',
-    'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Walk them through with hypermedia they drive: Next buttons, sliders, tap to reveal; gentle motion (honour prefers-reduced-motion).',
+    'Hypermedia: to teach, explain or compare anything not simple (a flow, architecture, change over time), show it, not just say it; simple answers stay plain. Inline: never publish a page or link unless asked.',
+    'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles, inputs) that redraws live, no steppers; gentle motion (prefers-reduced-motion).',
     'A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.',
     '- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.',
     '- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or external links.',

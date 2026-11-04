@@ -47,8 +47,8 @@ export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversatio
   --step boxes are only what the owner ticks off.
   Never retype a tab into the conversation: answer there briefly and point at it.
   Write in explainer mode, ADHD-friendly (answer first, one idea per line, plain words, an example
-  for each point), walked through with hypermedia: fy-render charts, mermaid, a step-through html
-  page, card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render
+  for each point), shown with hypermedia: fy-render charts, mermaid, an interactive html visual the
+  reader changes (sliders, toggles, inputs that redraw it; never a stepper), card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render
   html block (<details><summary>…</summary>…</details>).`;
 
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:

@@ -946,7 +946,7 @@ One self-contained `<svg>…</svg>` (CSS animation welcome). No `<script>` or `o
 
 ### html
 
-A fragment with inline CSS — tables, lists, `<details>`/`<summary>`, code, inline SVG, `<style>` — drawn straight into the message; nothing in it runs. Add a `<script>` or `on…=` handler only when the reader must do something: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline `<style>` and `<script>`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). Theme tokens such as `var(--fg)` work; the fragment's styles cannot reach the app and the app's cannot reach it. ≤ 200 KiB, bounded in height, scrollable past that.
+A fragment with inline CSS — tables, lists, `<details>`/`<summary>`, code, inline SVG, `<style>` — drawn straight into the message; nothing in it runs. Add a `<script>` or `on…=` handler only when the reader must do something — interactive means a visual with state or parameters the reader changes (sliders, toggles, inputs) that redraws as they do, never a stepper: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline `<style>` and `<script>`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). Theme tokens such as `var(--fg)` work; the fragment's styles cannot reach the app and the app's cannot reach it. ≤ 200 KiB, bounded in height, scrollable past that.
 
 ### chart
 

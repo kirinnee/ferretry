@@ -413,7 +413,7 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
     are what the item's versions keep and what the Changes diff compares first.
   - **The conversation is only the log.** The ferret answers there briefly and points at the tabs; it never retypes
     a tab into the conversation.
-  - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, a step-through `html` page, and `card` and
+  - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, an interactive `html` visual the reader changes (never a stepper), and `card` and
     `board` blocks for status. **Plain Markdown draws no fold** — raw HTML in prose stays inert — so a long part is
     folded inside an fy-render `html` block (`<details><summary>…</summary>…</details>`), whose contents are HTML.
     **GAP:** a fold written in Markdown (for example a fenced or directive fold block) is not built; it would take a
