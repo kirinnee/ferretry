@@ -425,6 +425,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Say that the macOS smoke was skipped
+        if: ${{ vars.MACOS_SMOKE == 'skip' }}
+        run: ./scripts/ci/macos-smoke-skipped.sh
       - name: Mount the Nix store cache
         if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
@@ -528,9 +531,13 @@ jobs:
   # ADVISORY (a missing runner is a warning, a failed smoke is still red); on `main` it is REQUIRED and
   # a job that could not start is re-queued up to 3 times before the verdict fails. Release waits on
   # this, so a darwin binary is never released unproven. The Linux legs above stay required everywhere.
+  # `vars.MACOS_SMOKE == 'skip'` is the owner's switch for a macOS pool with no runner for hours: the job does
+  # not run at all, and `compile` says so in a warning and the job summary (docs/standards/ci-cd,
+  # "macOS runner shortage"). Unset, or any other value, runs the smoke exactly as above.
   smoke-darwin:
     name: Smoke darwin-arm64
     needs: compile
+    if: ${{ vars.MACOS_SMOKE != 'skip' }}
     permissions:
       contents: read
     uses: ./.github/workflows/smoke-darwin.yaml
