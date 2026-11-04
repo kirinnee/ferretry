@@ -23,7 +23,7 @@
  */
 
 import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/protocol';
-import { FIELD_LABEL, POINT_FIELDS, bulletPoints, describePrevious, itemAtVersion } from './agenda-revisions.ts';
+import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELDS } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
 
 export type HistoryEvent =
@@ -45,9 +45,30 @@ export type HistoryEvent =
       /** The answer form it was sent as; absent for a plain reply. */
       readonly form?: AgendaMessagePart['kind'];
       readonly note?: string;
+      /** Copied from the owner's chat by the ferret (`fy agenda log`): drawn with a "from chat" tag. */
+      readonly fromChat?: true;
     }
-  /** What the ferret said to the item. */
-  | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
+  /**
+   * WORDS NOT IN HAND: `earlier` stored entries that are not drawn here, because they are still being read
+   * (`loading`), could not be read (`failed`), or are past what one read takes (`capped`). Drawn as a line in their
+   * place, so a partial thread is never taken for the whole one.
+   */
+  | {
+      readonly kind: 'gap';
+      readonly key: string;
+      readonly at: 0;
+      readonly earlier: number;
+      readonly state: 'loading' | 'failed' | 'capped';
+    }
+  /** What the ferret said to the item; Ferretry's own words (`daemon`) are drawn under its name. */
+  | {
+      readonly kind: 'ferret';
+      readonly key: string;
+      readonly at: number;
+      readonly text: string;
+      readonly daemon?: true;
+      readonly fromChat?: true;
+    };
 
 const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
 

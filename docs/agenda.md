@@ -583,8 +583,8 @@ pure, lossless and idempotent; the next atomic write persists both the thread an
 displaces bounded history or revisions at the transport limit, `carriedEntries` retains the original valid snapshot
 in the ledger, and it becomes the first carried version on the next change. History already dropped
 by an earlier daemon cannot be recovered. The existing PWA `item-conversation.ts` continues reading session transcripts;
-rendering the stored thread is deferred to PR 7. `agenda.conversation.1` remains the health feature, and the new fields
-are optional for older apps.
+the item view draws the stored thread on a machine that reports `agenda.conversation.1` (see [The item view](#the-item-view)).
+That feature stays the health flag, and the new fields are optional for older apps.
 
 ### `fy agenda log`
 
@@ -716,6 +716,23 @@ only items in the same agenda home (one lineage) can be merged. Refused: an item
 a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
 address.
 
+In the app, an open plain conversation shows **Merge with…** beside its lineage lines. The picker asks "Merge this item with
+which open agenda?" and lists the other open plain conversations on the same board by id and title, each title once.
+A confirm step says what will happen before anything is sent, and repeats no title (the picker just showed it): the
+heading "Merge !A2 into this item?" (the `!A2` is a reference, opened as in a message), one line, "!A2 closes; this item
+keeps its ask. Both conversations and all cards are kept.", and the checkbox "Keep !A2 instead". The viewed item
+survives by default, and the checkbox flips it ("Merge this item into !A2?", "This item closes; !A2 keeps its ask. …").
+The choices sit in the fixed order: Cancel on the left, **Merge** on the right; Cancel leaves the panel, and the
+picker is reopened with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
+only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
+conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
+**Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so
+its title is read from the board's resolved records as well as its open items. An Inbox card that says it merged
+another in, whose conversation board this device does not yet hold (only the machine's roll-up, which lists open items
+alone), reads that one board once, so the title appears; until it lands, or if that read fails (it is tried again), the
+line names the bare id. A machine with no merge never shows the
+button, and the machine's own agenda (`machine-agenda`) offers none.
+
 ### Split
 
 `fy agenda split A5 --title … --premise … --context … "<ask>" [--move-cards F12,…] [--stage …]` raises a new item for
@@ -734,6 +751,12 @@ A card A5 carries only through its [card ask](#card-asks) can be moved too. A mo
   the card's agenda, so moving its card is refused; merge the two instead.
 - **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
   on the new item.
+
+The app shows both links as references through the one reference renderer: **Split from !A3 (its title)** on the new
+item and **Split into !A7 (its title), !A8 (its title)** on the original, each `!A…` opening as it does in a message.
+Each target carries its title when the board holds it, so a link never points outside the agenda without saying what it
+points at; a target the board does not hold is the bare id. The app has no split button: a
+split is a ferret's act, and a plain "Split off…" can follow once the owner may split by route.
 
 ## Parked items
 
@@ -1205,9 +1228,19 @@ and a part the item does not carry is not drawn:
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
   edit changed are drawn whole. The title wraps onto two lines in the head, and one longer than that is drawn whole at
   the top of the body too. Rows in a list may still be one line.
-- **The conversation** is read from the chat today (`itemHistory`: the owner's words that name the item and the
-  parts of the ferret's replies about it). A machine with the stored conversation (`agenda.conversation.1`) feeds the
-  same part from the item itself.
+- **The conversation** is read from the chat for an item that has no stored thread (`itemHistory`: the owner's words
+  that name the item and the parts of the ferret's replies about it). A machine with the stored conversation
+  (`agenda.conversation.1`) feeds the same part from the item itself: the item's own tail when it is whole, else every
+  entry read through `GET …/conversation`, in stored order. The item carries a bounded tail, so only the
+  entries BEFORE the tail are read, once each, and the tail is drawn at once under one line, "Loading N earlier
+  entries…". A reply that arrives reads only the entries the app does not hold yet, never the thread from the start.
+  A merge interleaves the absorbed thread into this one by time, so the entries read before it are no longer a prefix:
+  when the item's `mergedFrom` changes, what was read is dropped and the thread is read again from the first entry.
+  A read that fails says "N earlier entries could not be read" and tries again whenever the stored count of the thread changes (a short reply that fits in the tail counts); a thread
+  longer than one read takes says "N earlier entries are not shown: this conversation is longer than one read takes".
+  A partial thread is never drawn as a whole one, and the rebuilt thread is never swapped in for it. An owner entry is the owner's bubble (an `answer`, `needs-info` or `discuss` keeps its form), a ferret
+  entry is the ferret's, a daemon entry is drawn under "Ferretry", and an entry the ferret copied from the owner's chat
+  (`fromChat`) carries a **from chat** tag.
 - **Card asks live inside the item.** A card ready to test or approve is answered in part 7, with its own buttons,
   never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
@@ -1219,8 +1252,38 @@ and a part the item does not carry is not drawn:
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 7 with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
-- **The head keeps a slot** (`data-agenda-version-slot`) for the version and diff control; today it holds the
-  version picker.
+- **The head keeps a slot** (`data-agenda-version-slot`) for the version picker and the diff control. Beside the diff
+  control the picker counts the item's EDITS ("Edit 2 of 3"), because the diff's own numbers (v1, v2…) are the stored
+  versions, which count more than the edits do; a machine with no stored versions keeps "v2 of 3".
+- **Changes (the diff).** With two or more versions on a machine that keeps them, the slot gains a **Changes** button.
+  It opens a panel under the head that compares "since you last looked" by default (this device's last-seen mark
+  against the newest version) and lets the owner pick any two versions from **From** and **To**. Each changed section
+  shows what changed, coarse to fine: equal lines stay; the lines between them are paired in order by how alike they
+  are; inside a pair the same is done sentence by sentence, then word by word, with a short kept word between two
+  changes ("the", "of") folded into them so one edit is not confetti. A pair that shares fewer than half of its words
+  (`REWRITE_SIMILARITY`) is a REWRITE: the old block is struck through whole and the new block added whole, never
+  woven word by word, while a small edit stays a word diff. A long text with a small edit stays word-level too: equal
+  lines (and sentences) at both ends are kept first, and when the lines between are still too many to pair at once, the
+  lines that stayed equal anchor the rest, and only the gaps between anchors are paired, each under its own cap of
+  2,500 line pairs. The anchoring has no size limit: a middle small enough is matched exactly, and a larger one is
+  anchored in linear time on the lines (or sentences, or words) that occur once on each side, then each gap between
+  anchors is matched the same way, so two one-word edits at the two ends of a 3,000-line report, or of a 3,000-sentence
+  paragraph, stay two small edits. Only a gap larger than the pairing cap with nothing equal in it (about fifty lines
+  changed against fifty others) is shown as the old lines out and the new lines in. The work is bounded so a large
+  rewrite never freezes the page: one comparison has a budget of about twelve million word pairs to score how alike
+  lines are and to match words exactly, and once it is spent, likeness is a cheap bag-of-words count and the matching
+  uses anchors only, so fifty lines of 500 words each, all rewritten, come back in well under a second. A long
+  unchanged stretch inside a changed section is cut to the three lines beside each change with one line saying
+  "… 240 unchanged lines …". Additions are underlined, removals struck through, with a
+  status word (New, Changed, Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. The
+  sections compared are the title, the type, the question, the premise, the context, the detail, the terms, the
+  references, where we are now, what is decided and still open, the ask, a multi-decision ask's questions, each
+  option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards, the body,
+  the answer to a question, why it matters and how to resolve it, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing
+  changed". Sections that did not change fold
+  under one line. Opening an item writes the seen mark (`PUT …/seen`) for its newest version, after the baseline is
+  read, so "since you last looked" is the previous visit. A machine without the version routes shows no control.
+- **The terms table** shows a link's own `meaning` (`agenda.link-meaning.1`), else its label.
 
 ## What I need from you
 
@@ -1621,8 +1684,8 @@ A daemon that stores the conversation, takes `log`, `merge` and `split`, and kee
 `agenda.conversation.1` on `GET /v1/health`. Every new item field (`conversation`, `mergedFrom`, `mergedInto`,
 `splitFrom`, `splitInto`, `relatedTasks`) is optional, and the version routes are new, so an app or CLI from before
 reads every item; the CLI checks the feature first and says the daemon needs an update. The app ships before the daemon:
-the current app still reconstructs conversation from session transcripts (`item-conversation.ts`). Stored conversation
-rendering is deferred to PR 7; there is no history fallback in that reader.
+an app talking to a daemon without the feature still reconstructs the conversation from session transcripts
+(`item-conversation.ts`) and shows no diff or merge control.
 
 ### Both spellings, one window
 

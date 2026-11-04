@@ -13,7 +13,7 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import { MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
+import { type AgendaItem, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
 import {
   createContext,
   useCallback,
@@ -127,6 +127,12 @@ export interface AgendaInbox {
   readonly howToTestFor?: (daemonId: DaemonId, cardId: string) => string | null;
   /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
   readonly canSnooze?: (daemonId: DaemonId) => boolean;
+  /** The agenda client: what an open card's merge is sent through. Absent: no merge from the Inbox. */
+  readonly agendaClient?: DaemonAgendaClient;
+  /** The items one conversation's board holds (or its roll-up): what a merge can join. */
+  readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
+  /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
+  readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -198,6 +204,7 @@ const cardsKey = (cards: readonly InboxCard[]): string =>
   cards.map(card => `${card.key}\u0000${JSON.stringify(card.item)}`).join('\u0001');
 
 const NO_TO_TEST: readonly ToTestCard[] = [];
+const NO_RECORDS: readonly AgendaItem[] = [];
 
 const toTestKeyOf = (rows: readonly ToTestCard[]): string =>
   rows
@@ -426,6 +433,15 @@ export function useAgendaInboxModel(
       },
     [boards, rollup],
   );
+  const boardOf = useCallback(
+    (daemonId: DaemonId, sessionId: string): readonly AgendaItem[] => itemsOf(daemonId, sessionId)?.items ?? [],
+    [itemsOf],
+  );
+  const recordsOf = useCallback(
+    (daemonId: DaemonId, sessionId: string): readonly AgendaItem[] =>
+      boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))?.resolved ?? NO_RECORDS,
+    [boards],
+  );
   const holders = useMemo(() => gateHolders(unread, sources, itemsOf), [unread, sources, itemsOf]);
   const offersGates = useCallback(
     (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
@@ -524,6 +540,21 @@ export function useAgendaInboxModel(
       ),
     [machines, client, rollup, openFlags],
   );
+  // A card that says "Merged in from !A5" names it from the resolved records of its conversation, which only a held
+  // board carries (a roll-up has the open items alone): read that one board, once, instead of showing the bare id.
+  const mergedRead = useRef(new Set<string>());
+  useEffect(() => {
+    for (const card of [...cards, ...parked, ...withFerret]) {
+      if (card.item.mergedFrom === undefined) continue;
+      const key = daemonSessionKey({ daemonId: card.daemonId, sessionId: card.view.config.id });
+      const connection = connectionFor(card.daemonId);
+      if (connection === undefined || boards.snapshots.has(key) || mergedRead.current.has(key)) continue;
+      mergedRead.current.add(key);
+      client.revalidate(connection, daemonSessionScope(connection, card.view.config.id)).catch(() => {
+        mergedRead.current.delete(key);
+      });
+    }
+  }, [cards, parked, withFerret, boards, client, connectionFor]);
   const [resolvedReading, setResolvedReading] = useState(false);
   const resolvedBusy = useRef(false);
   const loadResolved = useCallback((): void => {
@@ -571,6 +602,9 @@ export function useAgendaInboxModel(
       connectionFor,
       howToTestFor,
       canSnooze,
+      agendaClient: client,
+      boardOf,
+      recordsOf,
     }),
     [
       unread,
@@ -593,6 +627,9 @@ export function useAgendaInboxModel(
       connectionFor,
       howToTestFor,
       canSnooze,
+      client,
+      boardOf,
+      recordsOf,
     ],
   );
 }

@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import { type AgendaId, type AgendaItem, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -71,6 +71,7 @@ import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
 import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
+import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
@@ -155,6 +156,7 @@ import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { InboxFindResults } from './inbox-find-results.tsx';
 import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers, wordsOf } from './to-test-rows.tsx';
 import { ToTestStep } from './to-test-step.tsx';
+import { useItemLifecycle } from './use-item-lifecycle.ts';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -403,7 +405,22 @@ function OpenItem({
   readonly askTap?: number;
 }) {
   const entries = useItemConversation(card, readConversation);
-  const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
+  const connection = inbox.connectionFor(card.daemonId);
+  const lifecycle = useItemLifecycle({
+    connection,
+    scope: scopeOf(card),
+    client: inbox.agendaClient,
+    item: card.item,
+    board: inbox.boardOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
+    records: inbox.recordsOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
+  });
+  const history = useMemo(
+    () =>
+      lifecycle.conversation === null
+        ? itemHistory(card.item, entries)
+        : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
+    [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
+  );
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
@@ -428,6 +445,9 @@ function OpenItem({
           formKey={card.key}
           history={history}
           itemKey={card.key}
+          {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
+          {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
+          {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
           {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
           howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
@@ -640,6 +660,7 @@ function GateWhy({
 }
 
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
+const NO_BOARD: readonly AgendaItem[] = [];
 
 /** What was said about the card's item in its conversation; nothing until it is read, and nothing when it cannot be. */
 function useItemConversation(

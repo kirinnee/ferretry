@@ -36,6 +36,7 @@ import { answerAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -46,6 +47,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { CardHead } from './card-head.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
+import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 
 export interface AgendaItemViewProps {
   readonly item: AgendaItem;
@@ -107,6 +109,12 @@ export interface AgendaItemViewProps {
   readonly howToTestFor?: (cardId: string) => string | null | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string;
+  /** The versions the machine keeps for the item (`useItemLifecycle`): the head's "Changes" control. Absent: none. */
+  readonly versions?: AgendaVersionsView;
+  /** "Merge with…" (`useItemLifecycle`). Absent: not offered. */
+  readonly merge?: AgendaMergeView;
+  /** The titles of the agendas the item was merged into or split from (`useItemLifecycle`). */
+  readonly lineageTitles?: LineageTitles;
 }
 
 /** The urgent tones the head row says; where else the item stands is the card's state chip. */
@@ -175,6 +183,9 @@ export function AgendaItemView({
   startTap,
   howToTestFor,
   itemKey,
+  versions,
+  merge,
+  lineageTitles,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -305,6 +316,9 @@ export function AgendaItemView({
             answerDock={dock}
             history={history}
             {...(itemKey === undefined ? {} : { itemKey })}
+            {...(versions === undefined ? {} : { versions })}
+            {...(merge === undefined ? {} : { merge })}
+            {...(lineageTitles === undefined ? {} : { lineageTitles })}
             {...(howToTestFor === undefined ? {} : { howToTestFor })}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { AgendaSwipeDeck, deckIntent, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
-import { daemonId } from '../../../src/lib/daemon-connection.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
+import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import {
   agendaItem,
   choices,
@@ -17,6 +20,7 @@ import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'token' });
 
 const shipIt = inboxCard(
   agendaItem('A2', {
@@ -428,6 +432,49 @@ describe('the open Inbox item’s History', () => {
     expect(owner.some(text => text?.includes('Hold until Monday'))).toBe(true);
     expect(ferret.some(text => text?.includes('Asking about'))).toBe(true);
     expect(asked).toEqual([shipIt.key]);
+    await mounted.unmount();
+  });
+
+  it('draws the item’s own stored words when the machine keeps the conversation', async () => {
+    const wires = new AgendaWireDirectory();
+    wires.note(laptop.daemonId, {
+      kind: 'read',
+      health: { features: [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation] },
+    } as never);
+    const stored = inboxCard(
+      agendaItem('A8', {
+        subject: 'Stored?',
+        ask: choices('Yes', 'No'),
+        conversationCount: 1,
+        conversation: [{ at: '2026-08-01T10:30:00.000Z', by: 'owner', via: 'reply', text: 'Words kept on the item' }],
+      } as never),
+      sessionView('sess-8', { config: { teammate: 'kai', name: 'Stored' } as never }),
+      'Laptop',
+      daemonId('laptop'),
+    );
+    const mounted = await mount(
+      <StoreProvider store={{ agendaWire: wires, connections: { list: () => [] } } as unknown as AppStore}>
+        <InboxHarness
+          cards={[stored]}
+          fake={fakeInbox()}
+          reading={false}
+          render={inbox => (
+            <AgendaInboxPage
+              clock={Date.now}
+              inbox={{ ...inbox, connectionFor: () => laptop }}
+              initialOpen={stored.key}
+              now={NOW}
+              onNavigate={() => undefined}
+              phone
+              reducedMotion
+            />
+          )}
+        />
+      </StoreProvider>,
+    );
+    await interact(() => Promise.resolve());
+    const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
+    expect(owner.some(text => text?.includes('Words kept on the item'))).toBe(true);
     await mounted.unmount();
   });
 

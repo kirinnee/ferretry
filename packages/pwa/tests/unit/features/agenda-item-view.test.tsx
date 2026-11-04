@@ -460,6 +460,25 @@ describe('the version picker', () => {
     expect(root().querySelector('[data-agenda-quick-replies]')).not.toBeNull();
   });
 
+  test('counts edits, not versions, beside the Changes control, so the two numberings never both say "v"', async () => {
+    const edited = agendaItem('A47', {
+      premise: '- Now: two engines',
+      revisions: [
+        { at: '2026-08-01T11:57:00.000Z', by: 'agent', changed: ['premise'], previous: { premise: '- Then: one' } },
+      ],
+    } as Partial<AgendaItem>);
+    await draw(edited, {
+      versions: {
+        list: { sessionId: 's', id: 'A47', latest: 2, versions: [] } as never,
+        load: async () => edited,
+      },
+    });
+    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    expect(picker.getAttribute('aria-label')).toBe('Edit');
+    expect(picker.options[0]?.textContent).toMatch(/^Edit 2 of 2/u);
+    expect(picker.options[1]?.textContent).toMatch(/^Edit 1 of 2/u);
+  });
+
   test('is not drawn for an item never edited', async () => {
     await draw(agendaItem('A3', { ask: choices('Yes', 'No') } as Partial<AgendaItem>));
     expect(root().querySelector('[data-agenda-version-picker]')).toBeNull();

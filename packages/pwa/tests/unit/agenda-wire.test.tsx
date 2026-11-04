@@ -299,3 +299,32 @@ describe('whether a machine takes card asks or snoozes (agenda.card-asks.1, agen
     expect(heard).toBe(1);
   });
 });
+
+describe('whether a machine stores the conversation and merges (agenda.conversation.1)', () => {
+  const STORES: DaemonHealthRead = {
+    kind: 'read',
+    health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
+  };
+
+  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    expect(wires.conversationOf(A)).toBeUndefined();
+    wires.note(A, STORES);
+    wires.note(B, NEW);
+    expect(wires.conversationOf(A)).toBe(true);
+    expect(wires.conversationOf(B)).toBe(false);
+    const heardBefore = heard;
+    wires.note(A, STORES);
+    expect(heard).toBe(heardBefore);
+    wires.note(A, NEW);
+    expect(wires.conversationOf(A)).toBe(false);
+    expect(heard).toBe(heardBefore + 1);
+    wires.note(A, STORES);
+    wires.clearDaemon(A);
+    expect(wires.conversationOf(A)).toBeUndefined();
+  });
+});

@@ -101,6 +101,17 @@ describe('terms and references', () => {
     expect(rows.map(row => row.meaning)).toEqual(['write-ahead log', 'The PR', '', '', '']);
     expect(referenceRows({})).toEqual([]);
   });
+
+  test('a link means its own meaning when it has one, then its label; a blank one reads as nothing', () => {
+    const rows = referenceRows({
+      links: [
+        { target: '!A3', label: 'The parent', meaning: 'Where this came from' },
+        { target: '&F12', label: 'The card', meaning: '  ' },
+        { target: '@docs/agenda.md', meaning: 'The contract' },
+      ],
+    });
+    expect(rows.map(row => row.meaning)).toEqual(['Where this came from', '', 'The contract']);
+  });
 });
 
 describe('card asks', () => {

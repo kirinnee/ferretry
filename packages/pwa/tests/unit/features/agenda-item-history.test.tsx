@@ -61,6 +61,29 @@ describe('the Conversation of an open agenda item', () => {
     expect(must(root.querySelectorAll('.fy-hist__text')[0], 'the long reply').textContent).toBe(long);
   });
 
+  test('says how many earlier entries are still loading, above the ones it has', async () => {
+    const root = await draw([
+      { kind: 'gap', key: 'gap', at: 0, earlier: 12, state: 'loading' },
+      { kind: 'owner', key: 'o', at: AT, text: 'latest' },
+    ]);
+    const rows = [...root.querySelectorAll('[data-agenda-history] li')];
+    expect(rows.map(row => row.getAttribute('data-history'))).toEqual(['gap', 'owner']);
+    expect(rows[0]?.getAttribute('data-history-gap')).toBe('loading');
+    expect(rows[0]?.textContent).toBe('Loading 12 earlier entries…');
+  });
+
+  test('says in words when earlier entries could not be read, or are more than one read takes, never a partial thread as whole', async () => {
+    const failed = await draw([{ kind: 'gap', key: 'gap', at: 0, earlier: 1, state: 'failed' }]);
+    expect(failed.querySelector('[data-history-gap="failed"]')?.textContent).toContain(
+      '1 earlier entry could not be read',
+    );
+    await view?.unmount();
+    const capped = await draw([{ kind: 'gap', key: 'gap', at: 0, earlier: 30, state: 'capped' }]);
+    expect(capped.querySelector('[data-history-gap="capped"]')?.textContent).toContain(
+      '30 earlier entries are not shown',
+    );
+  });
+
   test('draws nothing when only edits happened: they are the activity log’s', async () => {
     expect((await draw([{ kind: 'revision', key: 'v', at: AT, version: 2, summary: [] }])).innerHTML).toBe('');
   });
@@ -79,5 +102,26 @@ describe('the Conversation of an open agenda item', () => {
   test('draws no clock for an event with no time', async () => {
     const root = await draw([{ kind: 'ferret', key: 'f', at: 0, text: 'hi' }]);
     expect(root.querySelector('time')).toBeNull();
+  });
+
+  test('tags words the ferret copied from chat, on either side', async () => {
+    const root = await draw([
+      { kind: 'owner', key: 'o', at: AT, text: 'use Postgres', fromChat: true },
+      { kind: 'ferret', key: 'f', at: AT + 1, text: 'noted', fromChat: true },
+      { kind: 'owner', key: 'p', at: AT + 2, text: 'typed here' },
+    ]);
+    const rows = [...root.querySelectorAll('[data-history]')];
+    expect(rows.map(row => row.querySelector('[data-history-from-chat]')?.textContent ?? null)).toEqual([
+      'from chat',
+      'from chat',
+      null,
+    ]);
+  });
+
+  test('draws Ferretry’s own words under its name', async () => {
+    const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into !A2.', daemon: true }]);
+    const row = must(root.querySelector('[data-history="daemon"]'), 'daemon row');
+    expect(row.querySelector('.fy-hist__who')?.textContent).toContain('Ferretry');
+    expect(row.textContent).not.toContain('Lizzette');
   });
 });
