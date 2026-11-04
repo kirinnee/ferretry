@@ -2,7 +2,7 @@
  * THE CARD DETAIL (`/d/<id>/board/<taskId>`): one card in full, over the Board.
  *
  * One flowing page, in the manner of a task page: a header (id, title, the summary line, a lane dropdown, who and
- * where), then the card read top to bottom as an agenda card reads — premise and context as two tinted blocks, the
+ * where), then the card read top to bottom as an agenda card reads — the status, then premise and context as two tinted blocks, the
  * ask, How to test as a numbered checklist with Done / Not good right under it on a card waiting to be tested, the
  * brief, the terms (each also a tap tip where the text uses it) — then the plain headed sections, a timeline, and a
  * comment box pinned at the bottom. Nothing folds. A side drawer on a wide screen and a
@@ -20,6 +20,7 @@ import {
   type LaneSet,
   parseTaskRef,
   type TaskRef,
+  writtenStatusParts,
 } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMemo, useState } from 'react';
@@ -79,6 +80,7 @@ const markedTexts = (task: BoardTaskView) => {
   const seen = new Set<number>();
   const mark = (text: string): string | null => (written(text) ? markTerms(text, task.terms, seen) : null);
   return {
+    status: writtenStatusParts(task.status).map(part => ({ ...part, text: markTerms(part.text, task.terms, seen) })),
     premise: mark(task.premise),
     context: mark(task.context),
     howToTest: mark(task.howToTest),
@@ -586,7 +588,7 @@ function DetailBody({
         ) : null}
 
         <TermLayer renderProse={cardProse} terms={task.terms}>
-          <Situation context={marked.context} premise={marked.premise} renderProse={cardProse} />
+          <Situation context={marked.context} premise={marked.premise} renderProse={cardProse} status={marked.status} />
 
           <DetailSection id="ask" title="Ask">
             <AskSection

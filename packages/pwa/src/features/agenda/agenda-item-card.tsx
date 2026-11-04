@@ -155,19 +155,45 @@ const forConfirmation = (item: AgendaItem): AgendaItem => {
   return rest;
 };
 
-/** PREMISE and CONTEXT as two tinted blocks: each label above its points. A board card draws the same two. */
+/** One written part of a card's status: its key, the label it is drawn under, and its Markdown. */
+export interface StatusPart {
+  readonly key: string;
+  readonly label: string;
+  readonly text: string;
+}
+
+/**
+ * PREMISE and CONTEXT as two tinted blocks: each label above its points. A board card draws the same two, with its
+ * STATUS (the card's current state: Now / Done so far / Next, each Markdown, the empty ones left out) as a calm block
+ * above them; an agenda card never has one.
+ */
 export function Situation({
   premise,
   context,
+  status = [],
   renderProse,
 }: {
   readonly premise: string | null;
   readonly context: string | null;
+  readonly status?: readonly StatusPart[];
   readonly renderProse: Prose;
 }) {
-  if (premise === null && context === null) return null;
+  if (premise === null && context === null && status.length === 0) return null;
   return (
     <section aria-label="Situation" className="fy-card__situation" data-agenda-situation="">
+      {status.length === 0 ? null : (
+        <div className="fy-card__sit-row" data-agenda-section="status">
+          <h4 className="fy-card__label fy-card__sit-label">Status</h4>
+          <div className="fy-card__status">
+            {status.map(part => (
+              <div className="fy-card__status-part" data-status-part={part.key} key={part.key}>
+                <h5 className="fy-card__status-label">{part.label}</h5>
+                {renderProse(part.text)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {premise === null ? null : (
         <div className="fy-card__sit-row" data-agenda-section="premise">
           <h4 className="fy-card__label fy-card__sit-label">Premise</h4>

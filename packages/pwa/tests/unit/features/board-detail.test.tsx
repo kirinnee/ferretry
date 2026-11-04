@@ -197,6 +197,58 @@ describe('BoardDetail — reading', () => {
     expect(root.textContent).not.toContain('No summary yet');
   });
 
+  it('draws the status first, under the summary and before the premise, as three labelled Markdown parts', async () => {
+    const { root } = await open({
+      task: card('F1', {
+        ...IMPLEMENT,
+        summary: 'Cards say what they are doing',
+        status: {
+          now: 'writing the **route**',
+          doneSoFar: '- Protocol field\n- Design',
+          next: '1. CLI\n2. PWA',
+        },
+        premise: 'Notes are scattered',
+        context: 'Agenda v6',
+      }),
+    });
+    const situation = must(root.querySelector('[data-agenda-situation]'), 'the situation');
+    expect(
+      [...situation.querySelectorAll('.fy-card__sit-row')].map(row => row.getAttribute('data-agenda-section')),
+    ).toEqual(['status', 'premise', 'context']);
+    const status = must(situation.querySelector('[data-agenda-section="status"]'), 'the status');
+    expect(text(status, 'h4')).toBe('Status');
+    expect(
+      [...status.querySelectorAll('[data-status-part]')].map(part => part.getAttribute('data-status-part')),
+    ).toEqual(['now', 'doneSoFar', 'next']);
+    expect([...status.querySelectorAll('h5')].map(label => label.textContent)).toEqual(['Now', 'Done so far', 'Next']);
+    expect(status.querySelector('[data-status-part="now"] strong')?.textContent).toBe('route');
+    expect([...status.querySelectorAll('ul li')].map(li => li.textContent)).toEqual(['Protocol field', 'Design']);
+    expect([...status.querySelectorAll('ol li')].map(li => li.textContent)).toEqual(['CLI', 'PWA']);
+    const summary = must(root.querySelector('[data-section="summary"]'), 'the summary');
+    const premise = must(situation.querySelector('[data-agenda-section="premise"]'), 'the premise');
+    expect(summary.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.compareDocumentPosition(premise) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('skips an empty part of the status', async () => {
+    const { root } = await open({
+      task: card('F1', { ...IMPLEMENT, status: { now: 'waiting on review', doneSoFar: '  ', next: '' } }),
+    });
+    expect([...root.querySelectorAll('[data-status-part]')].map(part => part.getAttribute('data-status-part'))).toEqual(
+      ['now'],
+    );
+  });
+
+  it('draws nothing for a card with no status, or one with every part empty, and still draws the premise', async () => {
+    const none = await open({ task: card('F1', { ...IMPLEMENT, premise: 'Why' }) });
+    expect(none.root.querySelector('[data-agenda-section="status"]')).toBeNull();
+    expect(none.root.querySelector('[data-agenda-section="premise"]')).not.toBeNull();
+    await view?.unmount();
+    view = null;
+    const blank = await open({ task: card('F1', { ...IMPLEMENT, status: { now: '', doneSoFar: ' \n', next: '' } }) });
+    expect(blank.root.querySelector('[data-agenda-situation]')).toBeNull();
+  });
+
   it('marks each term where the card first uses it, and shows its meaning on a tap', async () => {
     const { root } = await open({
       task: card('F1', {
