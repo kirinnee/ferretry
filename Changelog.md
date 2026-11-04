@@ -1,3 +1,9 @@
+## [4.276.0](https://github.com/kirinnee/ferretry/compare/v4.275.1...v4.276.0) (2026-11-04)
+
+### Features
+
+* self-running board, always-current agenda and a card Status section ([#1459](https://github.com/kirinnee/ferretry/issues/1459)) ([5814e5a](https://github.com/kirinnee/ferretry/commit/5814e5ab35f91a052e16a65dc7d8fdec7ae3e29f))
+
 ## [4.275.1](https://github.com/kirinnee/ferretry/compare/v4.275.0...v4.275.1) (2026-11-04)
 
 ### Fixes

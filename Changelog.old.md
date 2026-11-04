@@ -1,3 +1,9 @@
+## [4.275.1](https://github.com/kirinnee/ferretry/compare/v4.275.0...v4.275.1) (2026-11-04)
+
+### Fixes
+
+* **chat:** draw a ferret's send once, and its card compact (B157, F949) ([#1456](https://github.com/kirinnee/ferretry/issues/1456)) ([94b0a53](https://github.com/kirinnee/ferretry/commit/94b0a536e346ac2bc53ffa0be2b3abd2b3047d41))
+
 ## [4.275.0](https://github.com/kirinnee/ferretry/compare/v4.274.0...v4.275.0) (2026-11-04)
 
 ### Features
