@@ -36,6 +36,8 @@ const HOLDER_ONLY_VERBS: readonly [string, BoardTaskActionRequestInput][] = [
   ['move', { action: 'move', to: 'in-progress' }],
   ['focus', { action: 'focus' }],
   ['link a commit', { action: 'link', commit: 'abc123' }],
+  ['set the status', { action: 'edit', status: { now: 'writing the route', doneSoFar: '', next: '' } }],
+  ['write How to test', { action: 'edit', howToTest: '1. Open the Board' }],
 ];
 
 const REFUSED_VERBS: readonly [string, BoardTaskActionRequestInput][] = [
@@ -158,6 +160,63 @@ describe('a sub-ferret on the board', () => {
     should(outcomes).eql([undefined, undefined, undefined]);
   });
 
+  it('should set the status of its own card, recorded as a field-edited event that names status', async () => {
+    // Arrange
+    const service = serviceWith();
+    const status = { now: 'writing the route', doneSoFar: '- the field', next: '1. the CLI' };
+
+    // Act
+    const written = await service.act('F1', action({ action: 'edit', status }), child);
+
+    // Assert
+    should(written.task.status).eql(status);
+    should(written.task.history.at(-1)).containEql({ type: 'field-edited', field: 'status' });
+  });
+
+  it('should write status and How to test in one edit on its own card', async () => {
+    // Arrange
+    const service = serviceWith();
+    const status = { now: 'testing', doneSoFar: '- PR', next: '' };
+
+    // Act
+    const written = await service.act(
+      'F1',
+      action({ action: 'edit', status, howToTest: '1. Open the Board\n2. See the card' }),
+      child,
+    );
+
+    // Assert
+    should(written.task).match({ status, howToTest: '1. Open the Board\n2. See the card' });
+    should(written.task.history.filter(event => event.type === 'field-edited').map(event => event.field)).eql([
+      'howToTest',
+      'status',
+    ]);
+  });
+
+  it('should have the whole edit refused when it names status or How to test AND another field', async () => {
+    // Arrange
+    const service = serviceWith();
+    const status = { now: 'x', doneSoFar: '', next: '' };
+
+    // Act
+    const mixed = await refusal(service.act('F1', action({ action: 'edit', status, summary: 'y' }), child));
+    const title = await refusal(service.act('F1', action({ action: 'edit', title: 'y' }), child));
+    const visibility = await refusal(
+      service.act('F1', action({ action: 'edit', status, visibility: 'private' }), child),
+    );
+    const test = await refusal(service.act('F1', action({ action: 'edit', howToTest: '1. Look', brief: 'z' }), child));
+
+    // Assert
+    for (const error of [mixed, title, visibility, test]) {
+      should(error?.code).equal('forbidden');
+      should(error?.message).match(REFUSED);
+      should(error?.message).containEql("so you can't edit cards");
+    }
+    should(mixed?.message).containEql(
+      'You may note on, set the status and How to test of, and link a PR or branch to your own card',
+    );
+  });
+
   it('should leave its lead free to move and note the same card', async () => {
     // Arrange
     const service = serviceWith();
@@ -178,7 +237,7 @@ describe('a sub-ferret on the board', () => {
 
     // Assert
     should(error?.message).equal(
-      `You are a sub-ferret, so you can't drop a card outside your own subtree. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send child "…"`,
+      `You are a sub-ferret, so you can't drop a card outside your own subtree. You may note on, set the status and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send child "…"`,
     );
   });
 

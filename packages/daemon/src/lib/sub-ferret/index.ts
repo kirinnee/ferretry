@@ -26,7 +26,7 @@ export const NO_SUB_FERRETS: SubFerretDirectory = {
 
 /** What a sub-ferret may still do on the board: its own card, and every card in its own subtree. */
 const SUB_FERRET_MAY_ON_BOARD =
-  'note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree';
+  'note on, set the status and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree';
 
 /** What a sub-ferret may still do on the agenda: read it and report to its lead. */
 export const SUB_FERRET_MAY_ON_AGENDA = 'read the agenda and report to your lead';

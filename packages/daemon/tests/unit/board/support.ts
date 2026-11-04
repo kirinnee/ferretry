@@ -164,7 +164,6 @@ export const card = (overrides: Partial<BoardTask> = {}): BoardTask => {
     terms: [],
     brief: '',
     howToTest: '',
-    status: '',
     owner: 'lead',
     assignee: null,
     parent: null,

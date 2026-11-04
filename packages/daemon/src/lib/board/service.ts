@@ -16,6 +16,8 @@ import {
   type AgendaRef,
   type BoardActor,
   type BoardActorVia,
+  type BoardEditableField,
+  BoardEditableFieldSchema,
   type BoardIdsResponse,
   type BoardProjectId,
   type BoardQuery,
@@ -239,14 +241,28 @@ const subFerretMay = (request: BoardTaskActionRequest): boolean =>
   request.action === 'trigger' ||
   (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
 
+/** The fields a sub-ferret may write on a card it holds: where the work stands and how the owner checks it. */
+const HOLDER_FIELDS: readonly BoardEditableField[] = ['status', 'howToTest'];
+
+/**
+ * An edit that names only the card's status and/or How to test (and at least one of them): the one edit a sub-ferret
+ * may make, on a card it holds. Any other field, or a visibility, in the same edit makes it the lead's alone.
+ */
+const isHolderFieldEdit = (request: BoardTaskActionRequest): boolean =>
+  request.action === 'edit' &&
+  request.visibility === undefined &&
+  BoardEditableFieldSchema.options.every(field => HOLDER_FIELDS.includes(field) || request[field] === undefined) &&
+  HOLDER_FIELDS.some(field => request[field] !== undefined);
+
 /**
  * What a sub-ferret may do on a card it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
- * it, link a commit or doc to it. Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
+ * it, link a commit or doc to it, set its status and How to test (an edit that names ONLY those: any other field is refused whole). Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
  * lead holds is what makes it the holder, so these are also the only refusals that point at `claim`.
  */
 const holderOnly = (request: BoardTaskActionRequest): boolean =>
   request.action === 'move' ||
   request.action === 'focus' ||
+  isHolderFieldEdit(request) ||
   (request.action === 'link' && request.pr === undefined && request.branch === undefined);
 
 const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string>> = {

@@ -37,7 +37,7 @@ describe('the work search index', () => {
   it('should find a card by words only in its status, and say the status matched', () => {
     // Arrange
     const index = indexOf(
-      cardDoc({ id: 'F1', title: 'Board store', status: '**Now:** wiring the quokka route' }),
+      cardDoc({ id: 'F1', title: 'Board store', status: { now: 'wiring the quokka route', doneSoFar: '', next: '' } }),
       cardDoc({ id: 'F2', title: 'Lane sets' }),
     );
 

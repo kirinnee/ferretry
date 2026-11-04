@@ -86,7 +86,7 @@ describe('the sub-ferret directory over the session registry', () => {
 
     // Assert
     should(refusal).equal(
-      `You are a sub-ferret, so you can't drop cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
+      `You are a sub-ferret, so you can't drop cards. You may note on, set the status and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
     );
   });
 
@@ -115,7 +115,7 @@ describe('the sub-ferret directory over the session registry', () => {
 
     // Assert
     should(named).equal(
-      `You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lead "…"`,
+      `You are a sub-ferret, so you can't move cards. You may note on, set the status and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lead "…"`,
     );
     should(open).be.null();
   });

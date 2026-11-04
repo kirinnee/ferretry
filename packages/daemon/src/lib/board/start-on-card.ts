@@ -30,6 +30,7 @@ import {
   formatTaskRef,
   type LaneSet,
   type SessionStatus,
+  writtenStatusParts,
 } from '@ferretry/protocol';
 import { focusCardBrief } from '../warden/focus-card.ts';
 import type { BoardCaller } from './authority.ts';
@@ -124,6 +125,12 @@ export function startOnCardBrief(card: BoardTaskView, laneSet: LaneSet | null, b
   return [
     `The owner asked you to take over card ${ref}. Its last ferret has finished, so nobody else is working on it. Read what is already done, then carry on from there.`,
     ...section('Summary', card.summary),
+    ...section(
+      'Status',
+      writtenStatusParts(card.status)
+        .map(part => `${part.label}:\n${part.text.trim()}`)
+        .join('\n\n'),
+    ),
     ...section('Why it exists', card.premise),
     ...section('Context', card.context),
     ...section('How to test', card.howToTest),

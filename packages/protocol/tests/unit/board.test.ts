@@ -42,6 +42,7 @@ import {
   BoardTaskVisibilitySourceSchema,
   BoardVisibilityFilterSchema,
   BoardTermSchema,
+  BoardStatusSchema,
   BoardTermsSchema,
   DependencyOverrideSchema,
   ExternalBlockSchema,
@@ -50,7 +51,7 @@ import {
   LaneSetActionRequestSchema,
   LegacyTaskRefSchema,
   MAX_BOARD_HOW_TO_TEST_LENGTH,
-  MAX_BOARD_STATUS_LENGTH,
+  MAX_BOARD_STATUS_PART_LENGTH,
   laneEditProblems,
   moveReasonProblem,
   PrChecksSchema,
@@ -61,6 +62,7 @@ import {
   ReleasedInSchema,
   RollupSchema,
   taskIdPrefix,
+  writtenStatusParts,
 } from '../../src/lib/board.ts';
 import { LANE_TEMPLATES, type LaneSet, LaneSetSchema } from '../../src/lib/board-lanes.ts';
 import { BoardActorViaSchema, BoardReopenAttachmentsSchema } from '../../src/lib/board-refs.ts';
@@ -191,7 +193,7 @@ const CARD: BoardTask = BoardTaskSchema.parse({
   terms: [{ term: 'Lane', meaning: 'a project-defined column with a fixed category' }],
   brief: '# U1\n\nBuild the protocol.',
   howToTest: '1. Open the Board\n2. See the card',
-  status: '**Now:** writing the route.\n\n**Done so far:**\n- the field\n\n**Next:**\n1. the CLI',
+  status: { now: 'writing the route', doneSoFar: '- the field', next: '1. the CLI' },
   owner: LEAD,
   assignee: CHILD,
   parent: { id: 'F18' },
@@ -258,6 +260,7 @@ const VALID: readonly SchemaCase[] = [
   { name: 'clarification', schema: BoardClarificationSchema, value: CARD.clarifications[0] },
   { name: 'term', schema: BoardTermSchema, value: CARD.terms[0] },
   { name: 'terms', schema: BoardTermsSchema, value: CARD.terms },
+  { name: 'status', schema: BoardStatusSchema, value: CARD.status },
   { name: 'override', schema: DependencyOverrideSchema, value: { by: 'owner', reason: 'ship it', at: INSTANT } },
   { name: 'dependency', schema: BoardDependencySchema, value: CARD.dependsOn[0] },
   {
@@ -595,36 +598,56 @@ describe('How to test', () => {
 });
 
 describe('Status', () => {
-  it('should read a card stored before Status existed as having none', () => {
+  const STATUS = { now: 'writing the route', doneSoFar: '- the field', next: '1. the CLI' };
+
+  it('should read a card with no status as having none, never an invented one', () => {
     const { status: _status, ...stored } = CARD;
-    should(BoardTaskSchema.parse(stored).status).equal('');
+    should(BoardTaskSchema.parse(stored)).not.have.property('status');
     const { status: _viewStatus, ...sent } = VIEW;
-    should(BoardTaskViewSchema.parse(sent).status).equal('');
+    should(BoardTaskViewSchema.parse(sent)).not.have.property('status');
+    should(BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask })).not.have.property(
+      'status',
+    );
   });
 
-  it('should keep a card’s status, and let a create and an edit carry it as its own field', () => {
-    should(BoardTaskSchema.parse(CARD).status).containEql('**Now:**');
+  it('should keep a card’s status, and let a create and an edit carry it whole as their own field', () => {
+    should(BoardTaskSchema.parse(CARD).status).eql(STATUS);
     should(BoardEditableFieldSchema.options).containEql('status');
-    should(BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask }).status).equal('');
     should(
-      BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask, status: '**Now:** x' }).status,
-    ).equal('**Now:** x');
-    should(BoardTaskActionRequestSchema.parse({ action: 'edit', status: '**Now:** y' })).match({
-      status: '**Now:** y',
-    });
+      BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask, status: STATUS }).status,
+    ).eql(STATUS);
+    should(BoardTaskActionRequestSchema.parse({ action: 'edit', status: STATUS })).match({ status: STATUS });
     should(BoardTaskActionRequestSchema.safeParse({ action: 'edit' }).success).be.false();
   });
 
-  it('should bound a status at 16 KiB on the card, a create and an edit', () => {
-    const fits = 'x'.repeat(MAX_BOARD_STATUS_LENGTH);
-    const long = 'x'.repeat(MAX_BOARD_STATUS_LENGTH + 1);
-    should(MAX_BOARD_STATUS_LENGTH).equal(16 * 1024);
+  it('should take all three parts as strings (empty allowed) and nothing else', () => {
+    const edit = (status: unknown) => BoardTaskActionRequestSchema.safeParse({ action: 'edit', status }).success;
+    should(edit({ now: '', doneSoFar: '', next: '' })).be.true();
+    should(edit({ now: 'x', doneSoFar: 'y' })).be.false();
+    should(edit({ ...STATUS, extra: 'z' })).be.false();
+    should(edit({ ...STATUS, next: 3 })).be.false();
+    should(edit('**Now:** x')).be.false();
+  });
+
+  it('should bound each part at 8 KiB on the card, a create and an edit', () => {
+    const fits = { ...STATUS, now: 'x'.repeat(MAX_BOARD_STATUS_PART_LENGTH) };
+    const long = { ...STATUS, next: 'x'.repeat(MAX_BOARD_STATUS_PART_LENGTH + 1) };
+    should(MAX_BOARD_STATUS_PART_LENGTH).equal(8 * 1024);
     should(BoardTaskSchema.safeParse({ ...CARD, status: fits }).success).be.true();
     should(BoardTaskSchema.safeParse({ ...CARD, status: long }).success).be.false();
     should(
       BoardTaskCreateRequestSchema.safeParse({ kind: 'feature', title: 'X', ask: CARD.ask, status: long }).success,
     ).be.false();
     should(BoardTaskActionRequestSchema.safeParse({ action: 'edit', status: long }).success).be.false();
+  });
+
+  it('should list the written parts in reading order, and none for an absent or empty status', () => {
+    should(writtenStatusParts(undefined)).eql([]);
+    should(writtenStatusParts({ now: '', doneSoFar: ' \n', next: '' })).eql([]);
+    should(writtenStatusParts({ now: 'a', doneSoFar: '', next: 'c' }).map(part => [part.label, part.text])).eql([
+      ['Now', 'a'],
+      ['Next', 'c'],
+    ]);
   });
 });
 
@@ -809,7 +832,6 @@ describe('board mutations', () => {
       terms: [],
       brief: '',
       howToTest: '',
-      status: '',
       workflow: 'quick',
       parent: null,
       assignee: null,

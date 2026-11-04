@@ -935,6 +935,40 @@ describe('everything else on a card', () => {
     should(lastEvent(ports)).match({ type: 'field-edited', field: 'howToTest' });
   });
 
+  it('should keep a status from the create, and record each rewrite as one edit that names status, not its text', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const first = { now: 'designing', doneSoFar: '', next: '' };
+    const second = { now: 'writing the route', doneSoFar: '- design', next: '1. CLI' };
+
+    // Act
+    const created = await service.create(create({ status: first }), lead);
+    const kept = stored(ports).status;
+    await service.act(created.task.id, action({ action: 'edit', status: second }), lead);
+
+    // Assert
+    should(kept).eql(first);
+    should(stored(ports).status).eql(second);
+    should(lastEvent(ports)).eql({ ...lastEvent(ports), type: 'field-edited', field: 'status' });
+    should(JSON.stringify(lastEvent(ports))).not.containEql('writing the route');
+  });
+
+  it('should leave a card made without a status with none, and refuse a status edit that changes nothing', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const status = { now: 'x', doneSoFar: '', next: '' };
+
+    // Act
+    const created = await service.create(create(), lead);
+    const none = stored(ports);
+    await service.act(created.task.id, action({ action: 'edit', status }), lead);
+    const same = await refusal(service.act(created.task.id, action({ action: 'edit', status: { ...status } }), lead));
+
+    // Assert
+    should(none).not.have.property('status');
+    should(same.code).equal('invalid');
+  });
+
   it('should let the assignee write How to test without owner standing', async () => {
     // Arrange
     const { ports, service } = serviceWith([card({ assignee: 'child' })]);
@@ -1538,6 +1572,19 @@ describe('a daemon trigger', () => {
       actor: { kind: 'daemon', sessionId: 'child' },
     });
     should(ports.changes.events[0]?.sessionId).equal('child');
+  });
+
+  it('should leave the status alone when it moves the card', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([
+      card({ laneId: 'implement', status: { now: 'in review soon', doneSoFar: '', next: '' } }),
+    ]);
+
+    // Act
+    await service.trigger('F1', 'pr.opened', { sessionId: 'child', reason: 'PR #930 opened' });
+
+    // Assert
+    should(stored(ports).status).eql({ now: 'in review soon', doneSoFar: '', next: '' });
   });
 
   it('should move a blocked card anyway and say so', async () => {

@@ -95,7 +95,7 @@ export const cardDocument = (card: BoardTask, laneSet: LaneSet | undefined, scru
       ['context', card.context],
       ['brief', card.brief],
       ['howToTest', card.howToTest],
-      ['status', card.status],
+      ['status', joined(card.status === undefined ? [] : [card.status.now, card.status.doneSoFar, card.status.next])],
       ['note', joined(notes)],
     ]),
   };
