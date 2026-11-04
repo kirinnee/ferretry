@@ -204,13 +204,19 @@ describe('SendPathQueueTransport', () => {
       [new SendScreenUnreadable('could not read'), 'unreadable'],
       [new SendPending('still launching'), 'launching'],
       [new SendUnavailable('a question is open'), 'dialog'],
-      // &B153: a pane that never came to a prompt typed nothing either.
-      [new SendNotReady('the agent never came to a prompt', 'busy'), 'busy'],
-      [new SendNotReady('the agent never came to a prompt', 'dialog'), 'dialog'],
-      [new SendNotReady('the agent never came to a prompt', 'stopped'), 'stopped'],
     ];
     for (const [error, reason] of cases)
       should(await transport(error).subject.handOver(ID, one(message()))).deepEqual({ kind: 'refused', reason });
+  });
+
+  it('should wait on a pane that never came to a prompt until one shows (&B153)', async () => {
+    for (const reason of ['busy', 'dialog', 'stopped'] as const)
+      should(
+        await transport(new SendNotReady('the agent never came to a prompt', reason)).subject.handOver(
+          ID,
+          one(message()),
+        ),
+      ).deepEqual({ kind: 'refused', reason, untilPrompt: true });
   });
 
   it('should put a re-look to the send tracker, for the session it names', async () => {

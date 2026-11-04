@@ -48,8 +48,11 @@ export type HandOver =
   | { readonly kind: 'landed' }
   /** Keys went to the pane and nothing has proven where they went yet; the send ledger will. */
   | { readonly kind: 'unproven' }
-  /** Nothing was typed, and this is why: the message waits again. */
-  | { readonly kind: 'refused'; readonly reason: QueueWaitReason }
+  /**
+   * Nothing was typed, and this is why: the message waits again. `untilPrompt` marks a pane that never came to
+   * a prompt (&B153): handing it over again before one shows only waits out the same readiness window.
+   */
+  | { readonly kind: 'refused'; readonly reason: QueueWaitReason; readonly untilPrompt?: true }
   /** Nothing was typed, and nothing will change that by waiting. */
   | { readonly kind: 'failed'; readonly failure: string };
 

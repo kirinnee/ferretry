@@ -116,6 +116,8 @@ export class QueueDeliverer {
   private readonly running = new Set<Promise<void>>();
   /** When each session's tracker was last asked to look at a hand-over stuck `accepted`. */
   private readonly rechecked = new Map<SessionId, number>();
+  /** Sessions whose last hand-over found no prompt: when, and the reason the queue waits on meanwhile. */
+  private readonly promptless = new Map<SessionId, { readonly at: number; readonly reason: QueueWaitReason }>();
   private stopped = false;
 
   constructor(
@@ -231,6 +233,8 @@ export class QueueDeliverer {
    * again. Not awaited: the tracker's look takes the send path's lock, and this look holds the queue's.
    */
   private recheck(id: SessionId, now: number): void {
+    // A stopping daemon starts no tracker look: one begun now could type after the tracker was disarmed.
+    if (this.stopped) return;
     const last = this.rechecked.get(id);
     if (last !== undefined && now - last < this.settings.recheckMs) return;
     this.rechecked.set(id, now);
@@ -277,6 +281,10 @@ export class QueueDeliverer {
         reason = waitReasonOf(view);
       }
     }
+    // A pane that never came to a prompt is not handed the message again until one shows, or `recheckMs` has
+    // passed (&B153). Each hand-over holds both locks through a readiness wait of about half a minute, and the
+    // queue looked again every `lookMs`: a pane that drew neither a prompt nor work looped for as long.
+    if (reason === undefined) reason = this.awaitingPrompt(id, view);
     await this.waiting(id, deliveryOrder(messages, view.target.mode), reason, behind);
     if (reason !== undefined) return false;
     // Every member is `typing` under the delivery's id BEFORE anything is handed over, so a daemon that
@@ -289,6 +297,9 @@ export class QueueDeliverer {
         failure: error instanceof Error ? error.message : String(error),
       }),
     );
+    if (outcome.kind === 'refused' && outcome.untilPrompt === true)
+      this.promptless.set(id, { at: Date.parse(this.ports.clock.now()), reason: outcome.reason });
+    else this.promptless.delete(id);
     switch (outcome.kind) {
       case 'landed':
         for (const member of members) await this.move(id, member.id, 'delivered');
@@ -308,6 +319,19 @@ export class QueueDeliverer {
         for (const member of members) await this.move(id, member.id, 'failed', outcome.failure);
         return true;
     }
+  }
+
+  /** The reason a session whose last hand-over found no prompt still waits, or `undefined` once it may go. */
+  private awaitingPrompt(id: SessionId, view: DeliveryView): QueueWaitReason | undefined {
+    const last = this.promptless.get(id);
+    if (last === undefined) return undefined;
+    const { target, pane } = view;
+    const prompt = pane.promptReady || target.promptReady === true || !pane.alive || pane.dead;
+    if (prompt || Date.parse(this.ports.clock.now()) - last.at >= this.settings.recheckMs) {
+      this.promptless.delete(id);
+      return undefined;
+    }
+    return last.reason;
   }
 
   /** Says why each waiting message is waiting, writing only what changed. */

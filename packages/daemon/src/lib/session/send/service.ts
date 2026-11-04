@@ -816,8 +816,16 @@ export class SessionSendService {
       )
         throw error;
       const occupied = error instanceof SendComposerOccupied;
-      const why = error instanceof SendPaneNotReady ? 'the agent never came to a prompt' : undefined;
-      if (!occupied && release === undefined && keptForTheTracker(record))
+      const notReady = error instanceof SendPaneNotReady ? error : undefined;
+      const why = notReady === undefined ? undefined : 'the agent never came to a prompt';
+      // Kept open for the tracker: a person's send, and a held message released into a live session that
+      // never came to a prompt — put back on hold, it would wait for a revive a live session never gets. A
+      // pane that went away is a revive's to deliver into, never the tracker's (&B153).
+      const kept =
+        !occupied &&
+        notReady?.why !== 'exited' &&
+        (release === undefined ? keptForTheTracker(record) : notReady !== undefined);
+      if (kept)
         return { typed: false, record: await this.keptUntyped(id, record, why ?? 'the composer could not be read') };
       if (release !== undefined) await this.ports.ledger.settle(id, record.sendId, { held: true });
       else

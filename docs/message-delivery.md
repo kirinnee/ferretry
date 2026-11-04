@@ -505,8 +505,10 @@ withheld (`unreadable`) and settled `unaccounted` (`pane_unreadable`) — never 
 
 A pane that never comes to a prompt is refused before a key the same way
 ([B153](#b153-a-send-that-gave-up-before-its-first-key)): a person's send is kept open and `untyped`, a
-ferret's or the daemon's is withdrawn with `SendNotReady`, a released held message goes back to held, and a
-re-attempt puts its record back and is withheld (`busy`), so the tracker waits.
+ferret's or the daemon's is withdrawn with `SendNotReady`, a released held message is kept open and
+`untyped` too, and a re-attempt puts its record back and is withheld (`busy`), so the tracker waits. A pane
+that went away during the wait is the exception: nothing is kept for the tracker, the send is withdrawn (a
+released one goes back to held), and the next send revives the session.
 
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
 next depends on whose text it is.
@@ -913,12 +915,25 @@ went", so `send()` threw before it told the tracker. The deliverer saw a ledger 
 
 1. **A pane that never comes to a prompt is a refusal before typing.** `waitReady` throws
    `PaneNotReadyError` (`busy` / `dialog` / `exited`) for every way it gives up, and the terminal says it
-   as `SendPaneNotReady`. The send path takes it back exactly like an unreadable composer: a ferret's or the
-   daemon's send is withdrawn and refused with `SendNotReady`, which the queue waits on as `busy`, `dialog`
-   or `stopped`, so its sender sees why; a person's send is kept open and `untyped` for the tracker; a
-   released held message goes back to held; and a re-attempt puts its record back and is withheld (`busy`).
-   The keys a startup dialog's known answer needs may have been pressed on the way, but never a character of
-   the message, so nothing it could prove landed is typed again.
+   as `SendPaneNotReady`. The send path takes it back the way it takes back an unreadable composer:
+   - a ferret's or the daemon's send is withdrawn and refused with `SendNotReady`, and the queue waits on it
+     as `busy`, `dialog` or `stopped`, so its sender sees why;
+   - a person's send, and a held message released into a live session, is kept open and `untyped` for the
+     tracker (back on hold, the held message would wait for a revive a live session never gets);
+   - a pane that went away is withdrawn instead (a released message goes back to held), so the next send
+     revives the session;
+   - a re-attempt puts its record back and is withheld (`busy`).
+
+   A startup dialog's known answer may have been pressed on the way, but never a character of the message,
+   so nothing is typed again that might have landed.
+
+   **The queue does not hand the message over again until a prompt shows.** Each try holds both the queue
+   lock and the send lock through a readiness wait of about half a minute, and a refusal used to bring the
+   message back on the next `lookMs` look. A pane that showed neither a prompt nor work then looped for as
+   long as it stayed that way. After an `untilPrompt` refusal the deliverer keeps the message waiting on its
+   reason until the pane or the record shows a prompt, the pane goes away, or `recheckMs` (60 s) has passed.
+   The last case is a safety net, in case a prompt is drawn but not recognised.
+
 2. **A send that throws with its row open always tells the tracker.** `send()` and `reattempt()` schedule
    a tracker look whenever they throw and the send's row is still open, or the ledger cannot be read to rule
    one out. That look follows every existing rule: transcript proof wins, a pane or queue holding the text
@@ -926,10 +941,13 @@ went", so `send()` threw before it told the tracker. The deliverer saw a ledger 
    typed again, with the attempt ledgered before any key.
 3. **A declared wait does not overrule a pane at work.** Under `waiting` a pane that visibly shows work routes
    `busy`, so the message goes into the harness's own queue. A prompt still wins, and a pane that shows
-   neither work nor a prompt still routes idle, because a ghost turn is the worse mistake. The other idle
+   neither work nor a prompt still routes idle, because a ghost turn is the worse mistake. Being busy, a
+   `--now` message (an interrupt) now ends that turn with the stop key, as it does for any busy agent. A
+   ferret parked in a blocking `fy wait` call has that call cut short. The other idle
    statuses (`awaiting_user`, `rate_limited`, `interrupted`) are set at a turn's end and keep their word.
 4. **The deliverer asks the tracker about a hand-over left `accepted`.** See the deliverer above. The ask is
-   not awaited: the tracker's look takes the send lock while the deliverer holds the queue's.
+   not awaited: the tracker's look takes the send lock while the deliverer holds the queue's. A stopping
+   daemon asks nothing, so no look can start typing after the tracker has been disarmed.
 
 The Warden's `inbox_stuck` (&F910) is the detector for whatever still gets past these.
 
@@ -961,7 +979,12 @@ The Warden's `inbox_stuck` (&F910) is the detector for whatever still gets past 
   queued message; driving that is not attempted.
 - **An idle-routed send to a pane that is neither at a prompt nor visibly working waits about 27 s per try.**
   Under any idle status such a pane routes idle, and the wait for a prompt runs out before it refuses. The
-  queue looks again every `lookMs`, so a pane stuck that way costs one readiness wait per look, with the
-  send lock held, until it draws a prompt or shows work.
+  queue tries again only once a prompt shows or `recheckMs` has passed. A pane stuck that way therefore
+  costs one readiness wait, with both locks held, about every 90 s. A person's kept send is retried by the
+  tracker every `untypedLookMs` and pays the same wait each time.
+- **A retype withheld before any key is still journalled as a retry.** `control.send_retried` is written
+  before the keys, so a re-attempt that put its record back (a composer it could not read, a pane with no
+  prompt) shows in the journal as an attempt that typed nothing. The ledger is right; readers that count
+  journal retries over-count.
 - **Rows older than the two-hour ceiling are not re-examined.** A row stuck before this fix stays stuck
   until a person cancels it — which is what Cancel and Clear stuck messages are for.

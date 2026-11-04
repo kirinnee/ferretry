@@ -78,6 +78,8 @@ class World {
   /** How many times the deliverer asked the send tracker to look; a test may make the look settle a send. */
   rechecks = 0;
   onRecheck: () => void = () => undefined;
+  /** Runs on every ledger read, so a test can act in the middle of a look. */
+  onFate: () => void = () => undefined;
   /** The settings the deliverer reads on every look; a test narrows them with Object.assign. */
   readonly settings: { -readonly [K in keyof QueueDeliverySettings]: QueueDeliverySettings[K] } = {
     ...defaultQueueDeliverySettings,
@@ -108,7 +110,10 @@ class World {
             if (answer instanceof Error) throw answer;
             return answer;
           },
-          fate: async (_id: SessionId, messageId: string) => this.fates.get(messageId),
+          fate: async (_id: SessionId, messageId: string) => {
+            this.onFate();
+            return this.fates.get(messageId);
+          },
           clearOwnDraft: async () => {
             this.clears += 1;
             return this.ownDraft();
@@ -358,6 +363,73 @@ describe('handing over a queue', () => {
     should(world.state('a')?.state).equal('delivered');
     should(world.handed).eql(['a', 'b']);
     should(world.state('b')?.state).equal('delivered');
+  });
+
+  it('should not hand a message over again until the pane shows a prompt, after one never came (&B153)', async () => {
+    // Each hand-over to a pane with no prompt waits out a half-minute readiness window under both locks;
+    // handed over on every five-second look, a pane drawing neither a prompt nor work looped for hours.
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.target = { ...world.target, status: 'awaiting_user' };
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'busy', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.queue.map(entry => entry.waitReason)).eql(['busy', 'busy']);
+
+    // A prompt shows: the queue goes at once, both in order.
+    world.pane = pane({ activeWork: false, promptReady: true });
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a', 'b']);
+    should(world.queue.map(entry => entry.state)).eql(['delivered', 'delivered']);
+  });
+
+  it('should try a promptless pane again once `recheckMs` has passed, in case its prompt is not recognised', async () => {
+    const world = new World(message('a', 'human'));
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'dialog', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.recheckMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a']);
+    should(world.state('a')?.waitReason).equal('dialog');
+
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+    should(world.state('a')?.state).equal('delivered');
+  });
+
+  it('should hand over again at once after a refusal that is not about a missing prompt', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push({ kind: 'refused', reason: 'unreadable' });
+
+    await world.deliverer.enqueued(ID);
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+  });
+
+  it('should start no tracker look once the daemon is stopping', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push(new Error('tmux went away'));
+    world.fates.set('a', 'accepted');
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.recheckMs;
+    // The stop lands mid-look, between reading the ledger and asking the tracker.
+    world.onFate = () => void world.deliverer.stop();
+
+    await world.deliverer.look(ID);
+
+    should(world.rechecks).equal(0);
   });
 
   it('should not ask the tracker about a hand-over still being proven, or one the ledger already settled', async () => {

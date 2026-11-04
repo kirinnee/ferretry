@@ -51,7 +51,7 @@ export class SendPathQueueTransport implements QueueTransport {
       if (error instanceof SendUnconfirmed) return { kind: 'unproven' };
       if (error instanceof SendDraftRefused) return { kind: 'refused', reason: 'draft' };
       if (error instanceof SendScreenUnreadable) return { kind: 'refused', reason: 'unreadable' };
-      if (error instanceof SendNotReady) return { kind: 'refused', reason: error.reason };
+      if (error instanceof SendNotReady) return { kind: 'refused', reason: error.reason, untilPrompt: true };
       if (error instanceof SendPending) return { kind: 'refused', reason: 'launching' };
       if (error instanceof SendUnavailable) return { kind: 'refused', reason: 'dialog' };
       if (error instanceof SendRefused) return { kind: 'failed', failure: error.message };

@@ -637,6 +637,19 @@ describe('send to a busy pane', () => {
     should(outcome.disposition).equal('delivered');
   });
 
+  it('ends a declared wait mid-turn when the caller said `now` (&B153)', async () => {
+    // A `waiting` record over a pane at work routes busy now, so `--now` interrupts the turn as it does for
+    // any busy agent — a ferret parked in a blocking `fy wait` call has that call cut short. Before, the idle
+    // path waited for a prompt that never came.
+    const { service, terminal } = parts(target({ status: 'waiting' }), [
+      pane({ activeWork: true }),
+      pane({ promptReady: true }),
+    ]);
+    const outcome = await service.send(request({ now: true }));
+    should(terminal.calls).eql(['observe', 'stopActiveTurn', 'deliver']);
+    should(outcome.disposition).equal('delivered');
+  });
+
   it('does not press the stop key at a pane that is not visibly working', async () => {
     const { service, terminal } = parts(target({ status: 'thinking' }), [pane(), pane()]);
     await service.send(request({ now: true }));
@@ -1270,7 +1283,7 @@ describe('&B153: a pane that never comes to a prompt', () => {
     });
   });
 
-  it('puts a held message back on hold when the pane never comes to a prompt for its release', async () => {
+  const heldRelease = (why: SendPaneNotReady['why']) => {
     const built = parts(target(), [pane({ promptReady: true })]);
     built.ledger.records.set('held-1', {
       sendId: 'held-1',
@@ -1281,12 +1294,39 @@ describe('&B153: a pane that never comes to a prompt', () => {
       held: true,
       fate: 'accepted',
     });
-    built.terminal.notReady = notReady();
+    built.terminal.notReady = notReady(why);
+    return built;
+  };
+
+  it('keeps a released held message open for the tracker when the live pane never comes to a prompt', async () => {
+    // Back on hold it would wait for a revive this live session never gets.
+    const built = heldRelease('busy');
+
+    should(await built.service.releaseHeld(ID)).equal(1);
+
+    should(built.ledger.records.get('held-1')).containEql({ fate: 'accepted', held: false, untyped: true });
+    should(built.terminal.typed).be.empty();
+    should(built.tracked).eql([ID]);
+  });
+
+  it('puts a released held message back on hold when its pane went away during the wait', async () => {
+    const built = heldRelease('exited');
 
     await built.service.releaseHeld(ID).should.be.rejectedWith(SendNotReady);
 
     should(built.ledger.records.get('held-1')).containEql({ fate: 'accepted', held: true });
     should(built.terminal.typed).be.empty();
+  });
+
+  it("withdraws a person's send whose pane went away during the wait, so the next one revives it", async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    built.terminal.notReady = notReady('exited');
+
+    const refusal = await built.service.send(request()).catch((error: unknown) => error);
+
+    should((refusal as SendNotReady).reason).equal('stopped');
+    should(built.ledger.withdrawn).eql(['send-1']);
+    should(built.tracked).be.empty();
   });
 
   it('tells the tracker about a send whose transport threw after its row was accepted', async () => {
