@@ -82,8 +82,10 @@ class CapturedOutput {
 }
 
 class StubFiles implements ITextFileReader {
+  constructor(private readonly text = 'the brief from disk') {}
+
   readText(): Promise<string> {
-    return Promise.resolve('the brief from disk');
+    return Promise.resolve(this.text);
   }
 }
 
@@ -94,10 +96,10 @@ interface Harness {
 }
 
 /** Builds the command groups exactly as the composition root does, over test doubles. */
-function harness(environmentSessionId: string | undefined = 'session-7'): Harness {
+function harness(environmentSessionId: string | undefined = 'session-7', files = new StubFiles()): Harness {
   const gateway = new FakeBoardGateway();
   const output = new CapturedOutput();
-  const board = new BoardController({ gateway, output, files: new StubFiles(), binary: 'fy', environmentSessionId });
+  const board = new BoardController({ gateway, output, files, binary: 'fy', environmentSessionId });
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
   registerTaskCommands(program, { board });
@@ -510,5 +512,29 @@ describe('fy board --private / --all', () => {
     // Assert
     await should(attempt).rejected();
     should(gateway.queried).be.undefined();
+  });
+});
+
+describe('fy task show --yaml and fy task patch', () => {
+  it('should print the editable document with the card revision', async () => {
+    // Arrange
+    const { run, output } = harness();
+
+    // Act
+    await run('task', 'show', 'F412', '--yaml');
+
+    // Assert
+    should(output.lines.join('\n')).match(/\nrevision: 1\ntitle: /u);
+  });
+
+  it('should send the document read from --file as ONE edit carrying its revision', async () => {
+    // Arrange
+    const { run, gateway } = harness('session-7', new StubFiles('revision: 1\nsummary: One patch, one edit'));
+
+    // Act
+    await run('task', 'patch', 'F412', '--file', 'f412.yaml');
+
+    // Assert
+    should(gateway.acted?.request).eql({ action: 'edit', revision: 1, summary: 'One patch, one edit' });
   });
 });
