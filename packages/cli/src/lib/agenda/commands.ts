@@ -32,7 +32,8 @@ export const AGENDA_BODY_RULE = `THE BODY IS THE LIVE DOCUMENT; the conversation
   --where is a SHORT status: where things stand, what is decided, what is still open, in a few points.
   The full report, explainer, plan or status go in the BODY (--body-file); steps the owner must DO stay
   --step, so they can be ticked. Rewrite the body on every change (agenda edit <id> --body-file <file>)
-  so it always holds the whole current state: it is what the owner reads and what is versioned. Never retype it into the conversation: answer there briefly and point at it.
+  so it always holds the whole current state: it is what the owner reads and what is versioned. Never
+  retype it into the conversation: answer there briefly and point at it.
   Write it in explainer mode by default, with hypermedia: fy-render charts, mermaid, a step-through html
   page, and card and board blocks for status. Plain Markdown draws no fold: fold a long part inside an
   fy-render html block (<details><summary>…</summary>…</details>).`;

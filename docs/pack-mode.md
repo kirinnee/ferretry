@@ -71,7 +71,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 631        | 158      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,289      | 323      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,289      | 322      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
