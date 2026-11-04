@@ -3,6 +3,7 @@ import {
   type AgendaId,
   type AgendaItem,
   type AgendaSnapshot,
+  agendaAnswerText,
   agendaCardAnswers,
   agendaInDiscussion,
   agendaShape,
@@ -42,8 +43,9 @@ function actor(by: 'human' | 'agent' | 'daemon', name: string | null): string {
 const ARROWS: Readonly<Record<AgendaDirection, string>> = { left: '←', up: '↑', right: '→' };
 
 /**
- * The answers a card gives, laid out as the swipes point — `← No · → Yes`. An old item's options past the
- * third have no swipe; they are named after the arrows so nothing the owner could pick is hidden.
+ * The answers a card gives, laid out as the swipes point — `← No · → Yes`, each in its button's words
+ * (`agendaAnswerText`). An old item's options past the third have no swipe; they are named after the arrows so
+ * nothing the owner could pick is hidden.
  */
 function answersLine(item: AgendaItem): string {
   const answers = agendaCardAnswers(item);
@@ -51,7 +53,7 @@ function answersLine(item: AgendaItem): string {
   if (answers.length === 0) {
     return agendaShape(item) === 'answers' ? 'answer: one reply, each answer numbered' : 'answer: write a full answer';
   }
-  const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${compact(answer.label, OPTION_WIDTH)}`);
+  const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${agendaAnswerText(answer.label, answers.length)}`);
   const rest = unswipedChoices(item).map(option => `"${compact(option.label, OPTION_WIDTH)}"`);
   return `answers: ${swipes.join(' · ')}${rest.length === 0 ? '' : ` · also ${rest.join(' | ')}`}`;
 }

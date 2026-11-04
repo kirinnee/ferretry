@@ -13,11 +13,10 @@
  * here sends anything: every answer leaves through the callbacks.
  */
 
-import { type AgendaAskOption, type AgendaCardAnswer, GOT_IT_LABEL } from '@ferretry/protocol';
+import { type AgendaAskOption, type AgendaCardAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { AnswerDirection } from '../../lib/agenda-answers.ts';
-import { plainLabel } from '../../lib/plain-label.ts';
 
 const ARROWS: Readonly<Record<AnswerDirection, ReactNode>> = {
   left: <ArrowLeft size={14} aria-hidden="true" />,

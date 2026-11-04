@@ -201,6 +201,11 @@
   min-width: 0;
   white-space: nowrap;
 }
+/* The arrow and the words of an answer: laid out as the button's own children here, and as one wrapping line of text
+   in an open card (`agenda-item-card.css`). */
+.fy-qr__face {
+  display: contents;
+}
 .fy-qr__chip[data-recommended] {
   border-color: var(--accent);
   color: var(--accent);

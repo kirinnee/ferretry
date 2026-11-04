@@ -262,6 +262,28 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
+  it('swipes and keys Yes and No as ← No · → Yes, whichever order the item listed them in', async () => {
+    for (const [id, listed] of [
+      ['A7', choices('Yes', 'No')],
+      ['A8', choices('No', 'Yes')],
+    ] as const) {
+      const yesNo = inboxCard(
+        agendaItem(id, { subject: 'Restart the box tonight?', kind: 'yesno', ask: listed } as never),
+      );
+      expect(swipeKeyHint(swipeTargets(yesNo.item))).toBe('Arrow left: No. Arrow right: Yes.');
+      const left = fakeInbox();
+      const swiped = await mount(deckPage(left, [yesNo]));
+      await swipe(swiped, -200, 0);
+      expect(pending(left)).toEqual(['No']);
+      await swiped.unmount();
+      const right = fakeInbox();
+      const keyed = await mount(deckPage(right, [yesNo]));
+      await interact(() => pressKey(frame(keyed, id), 'ArrowRight'));
+      expect(pending(right)).toEqual(['Yes']);
+      await keyed.unmount();
+    }
+  });
+
   it('swipes left to the left answer, and undo brings the card back', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [twoWay]));

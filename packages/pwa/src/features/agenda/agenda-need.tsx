@@ -18,9 +18,14 @@
  * the one place an answer is given, so a button never appears twice.
  */
 
-import { AGENDA_NEED_HEADING, AGENDA_SHAPE_LEADS, type AgendaQuestion, type AgendaShape } from '@ferretry/protocol';
+import {
+  AGENDA_NEED_HEADING,
+  AGENDA_SHAPE_LEADS,
+  type AgendaQuestion,
+  type AgendaShape,
+  plainLabel,
+} from '@ferretry/protocol';
 import type { ReactNode } from 'react';
-import { plainLabel } from '../../lib/plain-label.ts';
 
 type Prose = (text: string) => ReactNode;
 

@@ -663,7 +663,28 @@ describe('attention cards', () => {
     // Assert
     should(row(actual, 1)).equal('  !A1  [question]  Release');
     should(row(actual, 2)).equal('      ask: Ship the release now?');
-    should(row(actual, 3)).equal('      answers: ← Yes · → No');
+    should(row(actual, 3)).equal('      answers: ← No · → Yes');
+  });
+
+  it('should print Yes and No as ← No · → Yes whichever order the ferret listed them in', () => {
+    // Act
+    const printed = (labels: readonly string[]) =>
+      row(
+        renderAgendaList(
+          snapshot([
+            humanItem('A1', 'Ship the release now?', {
+              title: 'Release',
+              kind: 'yesno',
+              ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
+            }),
+          ]),
+        ),
+        3,
+      );
+
+    // Assert
+    should(printed(['Yes', 'No'])).equal('      answers: ← No · → Yes');
+    should(printed(['No', 'Yes'])).equal('      answers: ← No · → Yes');
   });
 
   it('should lay a permission card with an up answer out left, up, right', () => {
@@ -685,6 +706,46 @@ describe('attention cards', () => {
 
     // Assert
     should(actual).containEql('answers: ← Deny · ↑ Always allow · → Allow');
+  });
+
+  it('should name a row of three in its buttons’ shorter words, cut at a word, and a row of two in longer ones', () => {
+    // Act
+    const printed = (labels: readonly string[]) =>
+      renderAgendaList(
+        snapshot([
+          humanItem('A1', 'Which fix?', {
+            title: 'Fix',
+            kind: 'choice',
+            ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
+          }),
+        ]),
+      );
+
+    // Assert
+    should(printed(['Lock the whole session row', 'Retry with backoff', 'Do nothing at all'])).containEql(
+      'answers: ← Lock the whole… · ↑ Retry with backoff · → Do nothing at all',
+    );
+    should(printed(['Lock the whole session row', 'Wait'])).containEql('answers: ← Lock the whole session… · → Wait');
+  });
+
+  it('should say a Markdown label in its button’s plain words, cut where the button cuts it', () => {
+    // Act
+    const actual = renderAgendaList(
+      snapshot([
+        humanItem('A1', 'Which fix?', {
+          title: 'Fix',
+          kind: 'choice',
+          ask: {
+            kind: 'multiple-choice',
+            options: [{ label: '**Ship** it' }, { label: '**Lock** the whole session row' }, { label: '`Wait`' }],
+          },
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('answers: ← Ship it · ↑ Lock the whole… · → Wait');
+    should(actual).not.containEql('**');
   });
 
   it('should keep an old item headed by its ask and still show derived answers', () => {

@@ -80,7 +80,8 @@ export function AgendaChatHarness({
     client: CLIENT,
     connection: CONNECTION,
     ferret,
-    focus: target === null ? null : { target, seq: 1 },
+    // A target is a link or a notification tap: it arrives with the page.
+    focus: target === null ? null : { target, seq: 1, onEntry: true },
     now,
     scope,
     snapshot: board,

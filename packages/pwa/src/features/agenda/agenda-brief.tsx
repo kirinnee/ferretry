@@ -25,12 +25,11 @@ import type {
   AgendaRecommendation,
   AgendaRevisableField as RevisionField,
 } from '@ferretry/protocol';
-import { agendaCardKind, recommendedAgendaOption } from '@ferretry/protocol';
+import { agendaCardKind, plainLabel, recommendedAgendaOption } from '@ferretry/protocol';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';
 import { bulletPoints, type RevisionHighlight } from '../../lib/agenda-revisions.ts';
-import { plainLabel } from '../../lib/plain-label.ts';
 import { defaultAgendaProse } from './agenda-prose.tsx';
 
 type AgendaProse = (text: string) => ReactNode;

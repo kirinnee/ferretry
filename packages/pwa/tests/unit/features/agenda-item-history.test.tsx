@@ -20,7 +20,7 @@ const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
   return view.container;
 };
 
-describe('the History under an open agenda card', () => {
+describe('the Conversation of an open agenda item', () => {
   test('draws nothing when nothing was said about the item', async () => {
     expect((await draw([])).querySelector('[data-agenda-history]')).toBeNull();
   });
@@ -33,34 +33,36 @@ describe('the History under an open agenda card', () => {
       { kind: 'ferret', key: 'f', at: AT + 240_000, text: 'No. A running turn finishes.' },
     ]);
     const rows = [...root.querySelectorAll('[data-agenda-history] li')];
-    expect(rows.map(row => row.getAttribute('data-history'))).toEqual(['ferret', 'owner', 'revision', 'ferret']);
+    // An edit is the activity log's, never a line of the conversation.
+    expect(rows.map(row => row.getAttribute('data-history'))).toEqual(['ferret', 'owner', 'ferret']);
+    expect(must(root.querySelector('[data-agenda-part="conversation"] h4'), 'heading').textContent).toBe(
+      'Conversation',
+    );
     expect(rows[0]?.querySelector('.fy-hist__who')?.textContent).toBe(
       `Lizzette${revisionStamp(new Date(AT).toISOString(), NOW)}`,
     );
     expect(rows[0]?.className).toBe('fy-hist__ag');
-    expect(rows[3]?.className).toBe('fy-hist__ag');
+    expect(rows[2]?.className).toBe('fy-hist__ag');
     // Only the owner's row is a bubble.
     expect(root.querySelectorAll('.fy-hist__me')).toHaveLength(1);
     expect(rows[1]?.className).toBe('fy-hist__me');
-    expect(rows[2]?.textContent).toBe('Card updated to v2');
   });
 
-  test('says what an edit changed in a list under the "Card updated" line', async () => {
+  test('draws a reply WHOLE, however long, and every reply in order', async () => {
+    const long = `${'A long report line. '.repeat(400)}The end.`;
     const root = await draw([
-      {
-        kind: 'revision',
-        key: 'v',
-        at: AT,
-        version: 2,
-        summary: ['Premise: added “A cache is the cause”', 'Title: now “New”'],
-      },
+      { kind: 'owner', key: 'o1', at: AT, text: 'first' },
+      { kind: 'ferret', key: 'f1', at: AT + 1, text: long },
+      { kind: 'owner', key: 'o2', at: AT + 2, text: 'second' },
+      { kind: 'ferret', key: 'f2', at: AT + 3, text: 'third' },
     ]);
-    const row = must(root.querySelector('[data-history="revision"]'), 'the revision row');
-    expect(row.querySelector('span')?.textContent).toBe('Card updated to v2');
-    expect([...row.querySelectorAll('.fy-hist__changes li')].map(li => li.textContent)).toEqual([
-      'Premise: added “A cache is the cause”',
-      'Title: now “New”',
-    ]);
+    const said = [...root.querySelectorAll('[data-history]')].map(row => row.getAttribute('data-history'));
+    expect(said).toEqual(['owner', 'ferret', 'owner', 'ferret']);
+    expect(must(root.querySelectorAll('.fy-hist__text')[0], 'the long reply').textContent).toBe(long);
+  });
+
+  test('draws nothing when only edits happened: they are the activity log’s', async () => {
+    expect((await draw([{ kind: 'revision', key: 'v', at: AT, version: 2, summary: [] }])).innerHTML).toBe('');
   });
 
   test('ticks an answer, says a note under it, and leaves a reply unticked', async () => {

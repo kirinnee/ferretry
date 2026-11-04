@@ -38,6 +38,7 @@ import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
+import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
@@ -383,13 +384,28 @@ export const useAgenda = ({
   const handled = useRef<number | null>(null);
   const focusTarget = focus?.target ?? null;
   const focusSeq = focus?.seq ?? null;
+  const focusOnEntry = focus?.onEntry === true;
+  // The item a link or a notification tap opened: it opens at its ask, so the owner lands on what to do.
+  const [askAt, setAskAt] = useState<{ readonly id: AgendaId; readonly tap: number } | null>(null);
+  // Paging or closing leaves the item the request was for: the next time the owner opens one it starts at the top.
+  const askedFor = askAt?.id;
+  useEffect(() => {
+    if (askedFor !== undefined && here.card !== askedFor) setAskAt(null);
+  }, [askedFor, here.card]);
+  const inbox = useAgendaInbox();
+  const howToTestFor = useCallback(
+    (card: string): string | null | undefined => inbox?.howToTestFor?.(connection.daemonId, card),
+    [inbox, connection.daemonId],
+  );
   const location = focusTarget === null ? null : locateAgenda(snapshot, focusTarget);
   useEffect(() => {
     if (focusTarget === null || focusSeq === null || handled.current === focusSeq) return;
     if (location === 'pending') return;
     handled.current = focusSeq;
-    if (location !== 'unknown') update(() => ({ card: focusTarget, drawer: false }));
-  }, [focusTarget, focusSeq, location, update]);
+    if (location === 'unknown') return;
+    setAskAt(focusOnEntry ? { id: focusTarget, tap: focusSeq } : null);
+    update(() => ({ card: focusTarget, drawer: false }));
+  }, [focusTarget, focusSeq, focusOnEntry, location, update]);
   const missing = focusTarget !== null && location === 'unknown';
 
   const delivering = useMemo(() => deliveringIds(snapshot), [snapshot]);
@@ -536,7 +552,10 @@ export const useAgenda = ({
           ferret={ferret}
           history={history}
           item={cardItem}
+          itemKey={inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id)}
           key={cardItem.id}
+          {...(askAt?.id === cardItem.id ? { startAt: 'ask' as const, startTap: askAt.tap } : {})}
+          howToTestFor={howToTestFor}
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}

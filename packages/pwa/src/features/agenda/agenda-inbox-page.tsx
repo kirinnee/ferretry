@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import { type AgendaId, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -67,7 +67,9 @@ import {
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
+import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
+import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
@@ -353,7 +355,6 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
       }
       hooks={{ 'data-inbox-who': '' }}
     >
-      <CardKindChip kind={itemCardKind(card.item)} />
       {joinMeta(
         <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
           {who.ferret}
@@ -390,6 +391,7 @@ function OpenItem({
   skip,
   place,
   canSnooze,
+  askTap,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
@@ -397,6 +399,8 @@ function OpenItem({
   readonly skip: () => void;
   readonly place: OpenItemPlace;
   readonly canSnooze: boolean;
+  /** A tapped notification opened it: it opens at its ask, and each tap is a new number. */
+  readonly askTap?: number;
 }) {
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
@@ -423,8 +427,10 @@ function OpenItem({
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
+          itemKey={card.key}
+          {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
+          howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
-          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
           onAct={act}
           onClose={place.onClose}
@@ -1379,16 +1385,27 @@ const RUN_MOVES: readonly RunKey[] = [
   { key: 'Esc', word: 'Close' },
 ];
 
-/** The arrows an agenda card answers by, in the words of its own answers, then Skip. */
-const agendaRunKeys = (card: InboxCard): readonly RunKey[] => {
+/**
+ * The arrows an agenda card answers by, in its buttons' own words (`agendaAnswerText`), then Skip. Each is cut for the
+ * row the open card draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
+ * changes is on it, and "Done · closes" is on it when the item offers one (`doneClose`).
+ */
+export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
   const targets = swipeTargets(card.item);
+  const { slots } = answerRowLayout(cardModel(card.item), { requestChanges: true, doneClose });
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: targets.left.label }]),
-    ...(targets.up === undefined ? [] : [{ key: '↑', word: targets.up.label }]),
-    ...(targets.right === undefined ? [] : [{ key: '→', word: targets.right.label }]),
+    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
+    ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label, slots) }]),
+    ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label, slots) }]),
     ...RUN_MOVES,
   ];
 };
+
+/** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
+function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
+  const doneClose = useDoneClose(card.daemonId, card.item) !== undefined;
+  return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
+}
 
 /** A task card's two answers by arrow, then Skip. */
 const toTestRunKeys = (row: ToTestCard): readonly RunKey[] => {
@@ -1462,6 +1479,9 @@ export function AgendaInboxPage({
   useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
+  // The card a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
+  const [askAt, setAskAt] = useState<{ readonly key: string; readonly tap: number } | null>(null);
+  const askTaps = useRef(0);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
   const [machine, setMachine] = useState<DaemonId | null>(null);
@@ -1627,10 +1647,14 @@ export function AgendaInboxPage({
   const openCardKey = openCard?.key;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `openAt` and the host callback are re-made every render; the target and what it resolves to are the inputs
   useEffect(() => {
+    // The request is gone from the address once it was honoured: a later tap for the same item is a new one.
+    if (wantedKey === null) openedFor.current = null;
     if (wantedKey === null || openedFor.current === wantedKey) return;
     if (openCardKey !== undefined) {
       openedFor.current = wantedKey;
       setFilter('open');
+      askTaps.current += 1;
+      setAskAt({ key: openCardKey, tap: askTaps.current });
       openAt(openCardKey);
       onOpenSettled?.(true);
       return;
@@ -1646,6 +1670,12 @@ export function AgendaInboxPage({
     const timer = setTimeout(giveUp, OPEN_WAIT_MS);
     return () => clearTimeout(timer);
   }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+
+  // Paging away or closing the deck leaves the item the tap was for: opening one from the list starts at its top.
+  const askedKey = askAt?.key;
+  useEffect(() => {
+    if (askedKey !== undefined && (!deckOpen || deckPlace !== askedKey)) setAskAt(null);
+  }, [askedKey, deckOpen, deckPlace]);
 
   // A reply moves the deck on by itself (the card leaves, `nextSelection` deals the one after it). Undo brings the card
   // back and the deck opens it, so the owner sees the words it restored.
@@ -1973,10 +2003,11 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
+                    key={card.key}
+                    {...(askAt?.key === card.key ? { askTap: askAt.tap } : {})}
                     canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}
-                    key={card.key}
                     place={{
                       index: Math.max(0, index),
                       total: runOrder.length,
@@ -2040,7 +2071,7 @@ export function AgendaInboxPage({
                   )}
                 </div>
               )}
-              {phone || deck[0] === undefined ? null : <RunKeysHint keys={agendaRunKeys(deck[0])} />}
+              {phone || deck[0] === undefined ? null : <AgendaRunKeysHint card={deck[0]} />}
             </div>
           </div>
         )}

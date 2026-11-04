@@ -5,15 +5,22 @@
  *
  * ONE COLUMN, the composer's own width at every breakpoint, top to bottom:
  *
- *   head     ONE row: the title (one line; it scrolls when too long), where the item stands, ‹ n of N ›, the snooze
- *            clock, ⓘ and ✕. The item's ask is behind ⓘ, in a panel under the row
- *   card     everything to read and answer (`agenda-item-card.tsx`): premise and context, the question, the options,
- *            whatever sections the ferret added, the version picker, and the ONE answer row
- *   history  the conversation about the item, newest at the bottom, just above the composer
+ *   head     ONE row: the title (one line; it scrolls when too long), how urgent it is (Blocking now, Needed by 17:00),
+ *            ‹ n of N ›, the snooze clock, ⓘ and ✕. The item's ask is behind ⓘ, in a panel under the row
+ *   card     the item in the spec's nine parts (`agenda-item-card.tsx`; the order is `agenda-item-sections.ts`'s): its
+ *            state and stage chips, premise and context, the folded detailed context, the terms and references table,
+ *            where we are now, the conversation, what it needs from the owner (the ask and every card ask, each with
+ *            its own buttons), the body, and the folded activity log
+ *
+ * OPENED AT ITS ASK (`startAt: 'ask'`): a Needs-you push and a link that names the item open it scrolled to "What I need
+ * from you", with that part focused, so the owner lands on what to do; the keys still answer from there. Each tap
+ * brings its own `startTap`, so a second push for the item already open at its ask scrolls there again.
  *
  * THE HEAD STICKS to the top of the scroller, and a one-row answer (choice, approval, to-do, notice, review) is drawn in
- * a DOCK that sticks to its bottom, so the title, the pager and the buttons are in reach however long the card runs. A
- * card answered in words (reply, mixed, form) has no dock: the composer is its answer. The scroller keeps room for both
+ * a DOCK that sticks to its bottom — the view's foot, whatever the card's height — so the title, the pager and the
+ * buttons are in reach however long the card runs. A card answered in words (reply, mixed, form) has no dock: the
+ * composer is its answer. An item with a card ask has no dock either: both button sets are inline, each under its own
+ * heading. The scroller keeps room for both
  * (`scroll-padding`), so a focused field never lands behind one.
  *
  * The body is the ONE scroller (`overscroll-behavior: contain`). ✕ and Esc go back to the chat; ‹ › page through the
@@ -35,7 +42,6 @@ import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
 import { AgendaItemCard } from './agenda-item-card.tsx';
-import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { CardHead } from './card-head.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
@@ -88,11 +94,23 @@ export interface AgendaItemViewProps {
   readonly cardsForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
-  /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
-  readonly wrapTitle?: boolean;
   /** Quiet buttons kept under ⓘ (the Inbox's Skip and Not needed), so the card body keeps the room. */
   readonly tools?: ReactNode;
+  /**
+   * Open scrolled to the item's ask ("What I need from you"), focused: a Needs-you push or a link naming the item.
+   * Absent: the view opens at its top.
+   */
+  readonly startAt?: 'ask';
+  /** Which tap asked for `startAt`: a new one scrolls to the ask again, though the item is already open. */
+  readonly startTap?: number;
+  /** A card's How to test, read from the board the app holds: a card ask on this item shows it. */
+  readonly howToTestFor?: (cardId: string) => string | null | undefined;
+  /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
+  readonly itemKey?: string;
 }
+
+/** The urgent tones the head row says; where else the item stands is the card's state chip. */
+const URGENT_TONES: ReadonlySet<string> = new Set(['blocking', 'will-block', 'needed-by']);
 
 /** Keys that are a field's or a button's own. */
 const ownsKeys = (target: EventTarget): boolean =>
@@ -153,7 +171,10 @@ export function AgendaItemView({
   formKey,
   daemonId,
   tools,
-  wrapTitle = false,
+  startAt,
+  startTap,
+  howToTestFor,
+  itemKey,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -161,12 +182,15 @@ export function AgendaItemView({
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
   const infoId = useId();
   const [infoFor, setInfoFor] = useState<string | null>(null);
+  // Whether the head's two lines cut the title short: then it is drawn whole at the top of the body as well.
+  const [titleClamped, setTitleClamped] = useState(false);
   const infoOpen = infoFor === item.id;
   useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
+  const urgent = status !== null && URGENT_TONES.has(status.tone) ? status : null;
   const hasInfo = head.description !== null || tools !== undefined;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
@@ -184,8 +208,16 @@ export function AgendaItemView({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
-    root.current?.focus({ preventScroll: true });
-  }, [item.id]);
+    const ask = startAt === 'ask' ? body.current?.querySelector<HTMLElement>('[data-agenda-part="needs"]') : null;
+    if (ask === null || ask === undefined) {
+      root.current?.focus({ preventScroll: true });
+      return;
+    }
+    // At its ask: the part scrolls to the top of the scroller (its padding keeps it clear of the sticky head) and takes
+    // focus, so a screen reader starts there and the arrow keys still answer.
+    ask.scrollIntoView?.({ block: 'start' });
+    ask.focus({ preventScroll: true });
+  }, [item.id, startAt, startTap]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (ownsKeys(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -227,13 +259,13 @@ export function AgendaItemView({
               close={{ label: closeLabel, onClick: onClose }}
               pager={{ index: position.index, total: position.total, onPrevious, onNext }}
               status={
-                status === null ? null : (
-                  <span className="fy-item-view__status" title={status.label}>
-                    <AgendaStatusPill status={status} />
+                urgent === null ? null : (
+                  <span className="fy-item-view__status" title={urgent.label}>
+                    <AgendaStatusPill status={urgent} />
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} twoLines={wrapTitle || item.gate !== undefined} />}
+              title={<MarqueeTitle onClamped={setTitleClamped} title={head.title} twoLines />}
               {...(hasInfo
                 ? { info: { controls: infoId, open: infoOpen, onToggle: () => setInfoFor(infoOpen ? null : item.id) } }
                 : {})}
@@ -254,6 +286,12 @@ export function AgendaItemView({
               </div>
             ) : null}
           </header>
+          {titleClamped ? (
+            // The head's h2 already holds every word for a screen reader: this copy is for the eye only.
+            <p aria-hidden="true" className="fy-item-view__full-title" data-agenda-full-title="">
+              {head.title}
+            </p>
+          ) : null}
           <AgendaItemCard
             busy={busy}
             error={error}
@@ -264,8 +302,10 @@ export function AgendaItemView({
             renderProse={renderProse}
             swipeable={swipeable}
             dismissAside={tools !== undefined}
-            typeShown={tools !== undefined}
             answerDock={dock}
+            history={history}
+            {...(itemKey === undefined ? {} : { itemKey })}
+            {...(howToTestFor === undefined ? {} : { howToTestFor })}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}
@@ -277,7 +317,6 @@ export function AgendaItemView({
             {...(formKey === undefined ? {} : { formKey })}
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />
-          <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
           <div className="fy-item-view__dock" data-agenda-dock="" ref={setDock} />
         </div>
       </div>

@@ -88,7 +88,7 @@ export const formAnswerProblems = (
     }
     if (field.type !== 'many' && values.length !== 1) problems.push(`field "${field.id}" takes exactly one answer`);
     const allowed =
-      field.type === 'yesno' ? [FORM_YES, FORM_NO] : (field.options ?? []).map(option => option.label.trim());
+      field.type === 'yesno' ? [FORM_NO, FORM_YES] : (field.options ?? []).map(option => option.label.trim());
     for (const value of values) {
       if (!allowed.includes(value.trim())) {
         problems.push(`"${value}" is not an option of field "${field.id}" (${allowed.join(', ')})`);

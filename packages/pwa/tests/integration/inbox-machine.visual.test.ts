@@ -161,7 +161,14 @@ describe('the Inbox’s Machine group', () => {
               contextShown: [...document.querySelectorAll('[data-inbox-open]')]
                 .filter(open => (open.textContent ?? '').includes('durian'))
                 .some(open => open.querySelector('[data-agenda-section="context"]') !== null),
-              titleCut: title === null || text === null ? true : title.scrollHeight > title.clientHeight + 1,
+              // Two lines in the head; a longer title is drawn whole at the top of the body as well.
+              titleCut:
+                title === null || text === null || text === undefined
+                  ? true
+                  : title.scrollHeight > title.clientHeight + 1 &&
+                    [...document.querySelectorAll('[data-inbox-open] [data-agenda-full-title]')].every(
+                      whole => whole.textContent !== text.textContent,
+                    ),
             };
           });
           expect(laid.pad).toBeGreaterThanOrEqual(8);

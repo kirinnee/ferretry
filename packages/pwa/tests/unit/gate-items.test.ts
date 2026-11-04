@@ -168,10 +168,10 @@ describe('a gate attached to a thread', () => {
 
   test('leads with the card title: ready to test when its options reopen it, else the lane', () => {
     expect(attachedGateLead({ ...twoOptions, cardTitle: 'Badge colour' })).toBe('Badge colour is ready to test.');
-    expect(attachedGateLead(twoOptions)).toBe('is ready to test.');
+    expect(attachedGateLead(twoOptions)).toBe('It is ready to test.');
     const review = { ...twoOptions, laneName: 'Review', options: [{ ...twoOptions.options[0], outcome: 'advance' }] };
     expect(attachedGateLead({ ...review, cardTitle: 'Badge colour' } as never)).toBe('Badge colour is at Review.');
-    expect(attachedGateLead(review as never)).toBe('is at Review.');
+    expect(attachedGateLead(review as never)).toBe('It is at Review.');
   });
 
   test('is nothing for an item with no attachment, a gate item or a notice', () => {
