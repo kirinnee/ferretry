@@ -11,6 +11,7 @@ import {
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
+import { rowForOffset } from '../../src/lib/chat-search.ts';
 import { extractToolSummary, IMAGE_READ_TOOL } from '../../src/lib/tool-extract.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -1318,5 +1319,72 @@ describe('transcriptEntriesFromLog · the untimed copy Claude writes of a messag
       undefined,
       Date.UTC(2026, 9, 18, 11, 0, 0),
     ]);
+  });
+});
+
+describe('transcriptEntriesFromLog · the untimed copy Claude writes of a tool call and its result', () => {
+  test('reads one call with its one result, never a leftover "result"', () => {
+    const log = [
+      '[10:59:58] assistant/tool-call: Bash({"command":"date"})',
+      'tool/tool-result: Wed Nov  4 10:59:59 UTC 2026',
+      '[10:59:59] tool/tool-result: Wed Nov  4 10:59:59 UTC 2026',
+      'assistant/tool-call: Bash({"command":"pwd"})',
+      'tool/tool-result: /work',
+      '[11:00:01] assistant/tool-call: Bash({"command":"pwd"})',
+      '[11:00:02] tool/tool-result: /work',
+    ].join('\n');
+    const tools = transcriptEntriesFromLog(log, NOW).filter(entry => entry.kind === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.tools?.map(call => ({ name: call.use.name, orphan: call.orphanResult === true }))).toEqual([
+      { name: 'Bash', orphan: false },
+      { name: 'Bash', orphan: false },
+    ]);
+  });
+
+  test('pairs a picture’s copy with its twin though each marker names its own record', () => {
+    const log = [
+      '[10:59:58] assistant/tool-call: Read({"file_path":"/s/shot.png"})',
+      'tool/tool-result: [fy-image 100.1.0 image/png]',
+      '[10:59:59] tool/tool-result: [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const tools = transcriptEntriesFromLog(log, NOW).filter(entry => entry.kind === 'tool');
+    expect(tools[0]?.tools?.filter(call => call.orphanResult === true)).toHaveLength(0);
+  });
+});
+
+describe('transcriptEntriesFromLog · a real message is never taken for a copy', () => {
+  test('keeps an untimed message whose twin is past a turn boundary, even with no reply between', () => {
+    const log = [
+      'user/message: ok',
+      '[10:59:58] assistant/tool-call: Bash({"command":"date"})',
+      '[10:59:59] tool/tool-result: Wed Nov  4 10:59:59 UTC 2026',
+      '[11:00:00] system/turn: completed',
+      '[11:00:05] user/message: ok',
+    ].join('\n');
+    expect(
+      transcriptEntriesFromLog(log, NOW)
+        .filter(entry => entry.kind === 'user')
+        .map(entry => entry.at),
+    ).toEqual([undefined, Date.UTC(2026, 9, 18, 11, 0, 5)]);
+  });
+});
+
+describe('transcriptEntriesFromLog · a search hit on a copy', () => {
+  test('lands on the one row the copy and its twin draw, from either record', () => {
+    const log = [
+      '[10:59:00] assistant/message: Move the card.',
+      'user/message: moved',
+      '[11:00:00] user/message: moved',
+      '[11:00:01] assistant/message: Done.',
+    ].join('\n');
+    const entries = transcriptEntriesFromLog(log, NOW, 'fy', [100, 200, 300, 400]);
+    const rows = entries.flatMap(entry => (entry.offset === undefined ? [] : [{ offset: entry.offset, row: entry }]));
+    expect(rows.map(row => [row.offset, row.row.kind])).toEqual([
+      [100, 'assistant'],
+      [200, 'user'],
+      [400, 'assistant'],
+    ]);
+    expect(rowForOffset(rows, 200)?.text).toBe('moved');
+    expect(rowForOffset(rows, 300)?.text).toBe('moved');
   });
 });

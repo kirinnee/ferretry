@@ -317,57 +317,96 @@ const addImageRead = (run: ToolRun, images: readonly TranscriptImageMarker[], ke
 const MID_TURN_LEAD = 'The user sent a new message while you were working:';
 const MID_TURN_TRAILER = 'This is how Claude Code surfaces messages the user sends mid-turn';
 
-/** Whitespace-insensitive, case-sensitive: the same rule the ledger matches a send's words by. */
-const normalized = (value: string): string => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+/**
+ * Whitespace-insensitive, case-sensitive: the same rule the ledger matches a send's words by. A picture's
+ * marker names the record it came from, which differs between a copy and its twin, so only its type counts.
+ */
+const normalized = (value: string): string =>
+  value
+    .normalize('NFC')
+    .replace(/\[fy-image \S+ (\S+)\]/gu, '[fy-image $1]')
+    .replace(/\s+/gu, ' ')
+    .trim();
 
-/** The words an untimed copy carries: the message itself, with Claude's mid-turn framing lifted off. */
-const echoedWords = (text: string): string => {
-  if (!text.startsWith(MID_TURN_LEAD)) return normalized(text);
+/** The words a mid-turn copy carries: the message itself, with Claude's framing lifted off. */
+const framedWords = (text: string): string | undefined => {
+  if (!text.startsWith(MID_TURN_LEAD)) return undefined;
   const body = text.slice(MID_TURN_LEAD.length);
   const trailer = body.lastIndexOf(MID_TURN_TRAILER);
   return normalized(trailer === -1 ? body : body.slice(0, trailer));
 };
 
-const isUserMessage = (record: LogRecord): boolean => record.role === 'user' && record.kind === 'message';
+/** Where a copy's search stops: the agent speaking again, or a turn starting or ending. */
+const endsSegment = (record: LogRecord): boolean =>
+  (record.role === 'assistant' && record.kind === 'message') || (record.role === 'system' && record.kind === 'turn');
+
+/** The records that are only copies, and the row a twin's search position starts at when its copy sits right before it. */
+interface Copies {
+  readonly copies: ReadonlySet<number>;
+  readonly startsAt: ReadonlyMap<number, number>;
+}
 
 /**
- * WHICH USER RECORDS ARE ONLY A COPY OF THE NEXT ONE, so a message is drawn once.
+ * WHICH RECORDS ARE ONLY A COPY OF A LATER ONE, so a message — or a tool's result — is drawn once.
  *
- * Claude Code (seen on 2.1.317) writes a second record for each message it is given: one with NO time,
- * before the real one — the message itself when it starts a turn, or the message inside "The user sent a
- * new message while you were working: …" when it arrives mid-turn. The real record follows with its
- * time. The daemon passes both on, so the chat drew a bare bubble with no time or ticks above the real,
- * ticked one: the agent got the message once, the reader saw it twice.
+ * Claude Code (seen on 2.1.317) writes a second record for what it is given — a message, a tool's result,
+ * sometimes the call — with NO time, before the real one; a message that arrives mid-turn is copied inside
+ * "The user sent a new message while you were working: …". The real record follows with its time. The
+ * daemon passes both on, so the chat drew a bare bubble with no time or ticks above the real, ticked one,
+ * and a tool run read "Bash, result": the copy's result answered the call, the real one was left over.
  *
- * An untimed user record is a copy when a LATER timed user record carries the same words, before the
- * agent next speaks. The pairing is ONE-TO-ONE and forward-only, nearest first: sending "ok" twice on
- * purpose is two copies and two real records, so each copy folds into its own real record and both
- * messages stay. A timed record is never folded, and an untimed one with no timed twin is kept: a
- * message is never hidden on the strength of a copy that is not there.
+ * An untimed record is a copy when a LATER timed record of the same kind carries the same words, before
+ * the agent next speaks or the turn changes. The pairing is ONE-TO-ONE and forward-only, nearest first:
+ * sending "ok" twice on purpose is two copies and two real records, so each copy folds into its own real
+ * record and both messages stay. A timed record is never folded, an untimed one with no timed twin is
+ * kept — nothing is hidden on the strength of a copy that is not there — and a copy never reaches across
+ * the agent's reply or a turn boundary for its twin.
+ *
+ * A copy sitting right before its twin hands the twin its position in the file, so a search hit on
+ * either record lands on the one row they draw.
  */
-const echoRecords = (records: readonly LogRecord[]): ReadonlySet<number> => {
-  const echoes = new Set<number>();
+const copyRecords = (records: readonly LogRecord[]): Copies => {
+  const copies = new Set<number>();
   const taken = new Set<number>();
+  const twins = new Map<number, number>();
   records.forEach((record, index) => {
-    if (record.clock !== undefined || !isUserMessage(record)) return;
-    const words = echoedWords(record.lines.join('\n'));
+    if (record.clock !== undefined || isHiddenRecord(record) || endsSegment(record)) return;
+    const text = record.lines.join('\n');
+    const framed = record.role === 'user' && record.kind === 'message' ? framedWords(text) : undefined;
+    const words = framed ?? normalized(text);
     for (let next = index + 1; next < records.length; next += 1) {
       const later = records[next] as LogRecord;
-      if (later.role === 'assistant' && later.kind === 'message') return;
-      if (later.clock === undefined || !isUserMessage(later) || taken.has(next)) continue;
+      if (endsSegment(later)) return;
+      if (later.clock === undefined || taken.has(next) || later.role !== record.role || later.kind !== record.kind)
+        continue;
       if (normalized(later.lines.join('\n')) !== words) continue;
-      echoes.add(index);
+      copies.add(index);
       taken.add(next);
+      twins.set(index, next);
       return;
     }
   });
-  return echoes;
+  const startsAt = new Map<number, number>();
+  for (const [copy, twin] of twins) {
+    const offset = records[copy]?.offset;
+    if (offset === undefined) continue;
+    let adjacent = true;
+    for (let between = copy + 1; between < twin && adjacent; between += 1) {
+      const record = records[between] as LogRecord;
+      adjacent = isHiddenRecord(record) || copies.has(between);
+    }
+    if (adjacent) startsAt.set(twin, Math.min(offset, startsAt.get(twin) ?? offset));
+  }
+  return { copies, startsAt };
 };
 
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const instants = recordInstants(records, now);
-  const echoes = echoRecords(records);
+  const { copies, startsAt } = copyRecords(records);
   const idFor = recordIds();
+  /** The record being projected: a row it opens starts where its copy did, when one sat right before it. */
+  let current = -1;
+  const offsetOf = (record: LogRecord): number | undefined => startsAt.get(current) ?? record.offset;
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
   const flush = (): void => {
@@ -376,15 +415,17 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
   };
   // Every row a record opens carries where the record came from, so a search hit can find its row.
   const push = (entry: TranscriptEntry, record: LogRecord): void => {
-    entries.push(record.offset === undefined ? entry : { ...entry, offset: record.offset });
+    const offset = offsetOf(record);
+    entries.push(offset === undefined ? entry : { ...entry, offset });
   };
-  const open = (record: LogRecord): ToolRun => ({
-    calls: [],
-    ...(record.offset === undefined ? {} : { offset: record.offset }),
-  });
+  const open = (record: LogRecord): ToolRun => {
+    const offset = offsetOf(record);
+    return { calls: [], ...(offset === undefined ? {} : { offset }) };
+  };
   records.forEach((record, index) => {
     // A copy is left out like bookkeeping: it is not a row, and it does not end a tool run.
-    if (isHiddenRecord(record) || echoes.has(index)) return;
+    if (isHiddenRecord(record) || copies.has(index)) return;
+    current = index;
     const text = record.lines.join('\n');
     if (isToolRecord(record)) {
       run ??= open(record);
@@ -402,7 +443,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     }
     if (showsImages(record)) {
       // Pictures read one after another are ONE `Read N images` call in the tool run, not a card each.
-      if (run !== null || followedByImages(records, index, echoes)) {
+      if (run !== null || followedByImages(records, index, copies)) {
         run ??= open(record);
         addImageRead(
           run,
