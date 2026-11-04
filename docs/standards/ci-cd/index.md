@@ -194,11 +194,14 @@ Tests, SIT and the Linux leg of `Harness Contract` stay required on every event.
   with `advisory: ${{ github.event_name == 'pull_request' }}` and `advisory: false`. It has three `macos-15`
   attempts (`timeout-minutes: 10` each), a Linux backoff between them (120 s, then 300 s), and a `Verdict` job
   on Linux: the check that stands for the smoke. Each attempt's first step writes `started=true` to its job
-  outputs, so a cancelled attempt with no `started` is **"no runner"** and one with `started` is **"cut
-  off"**. Only "no runner" re-queues, and only off a pull request.
+  outputs, and **`started` is the source of truth, never the attempt's `result`**: GitHub shows a job it never
+  gave a runner as "cancelled" but hands the workflow `result: abandoned` for it. An attempt that is not a
+  success and has no `started` is **"no runner"**; one with `started` that did not succeed is **"ran and
+  failed"** (`result: failure`) or **"cut off"** (anything else). Only "no runner" re-queues, and only off a
+  pull request.
 - **A smoke that ran and failed is never retried**, on a pull request or off one: the flake rule below
-  (fix the root, never retry) still holds. `scripts/ci/macos-smoke-verdict.sh` judges the attempts: any pass is green; any failure is
-  red; all cancelled is `macOS runner not available; advisory on PRs` (green, warning) on a pull request and
+  (fix the root, never retry) still holds. `scripts/ci/macos-smoke-verdict.sh` judges the attempts: any pass is green; any failure that ran is
+  red; no attempt having run is `macOS runner not available; advisory on PRs` (green, warning) on a pull request and
   `macOS runner not available after N attempt(s)` (red, with "not a smoke failure" and "re-run the job") elsewhere.
   It writes the same line to the job summary.
 - **The realworld macOS proofs** (`Containment (macOS)`, `Sandbox Shell (Safari)`, `Harness Contract
@@ -219,8 +222,27 @@ Tests, SIT and the Linux leg of `Harness Contract` stay required on every event.
   `advisory: false` and `goreleaser` needs it; the three attempts are `macos-15` with a ceiling and a `started`
   marker; the backoffs re-queue only a never-started attempt and never on a pull request; the realworld and
   nightly `continue-on-error` masks only macOS legs, only on a pull request; no workflow outside the policy
-  names a macOS runner; none asks for a paid or self-hosted one; and the verdict script decides the canned cases
-  above as written.
+  names a macOS runner; none asks for a paid or self-hosted one; the verdict script decides the canned cases
+  above as written (including an `abandoned` attempt and one that failed before its first step); and the
+  `vars.MACOS_SMOKE` switch below is wired as written.
+
+### The owner's switch: `vars.MACOS_SMOKE`
+
+When the macOS pool has had no runner for hours, every release is held behind `Smoke darwin-arm64`. The
+repository variable **`MACOS_SMOKE`** is the owner's way out, the macOS twin of `vars.CI_RUNNER_POOL`:
+
+- **`MACOS_SMOKE=skip`** (exactly that value) makes the `smoke-darwin` job in `ci.yaml` and `cd.yaml` not run at all
+  (a job-level `if:`), so nothing waits 15 minutes for a runner. `CI` still succeeds, so `Release` still runs, and
+  `GoReleaser Publish` runs when the smoke was **skipped by the switch** as well as when it passed. It never runs
+  past a failed `compile` or a smoke that ran and failed.
+- **It ships an unproven darwin binary.** Nothing else runs the cross-compiled darwin binary, so while the switch is
+  on, a release is published without the darwin binary having started once on a Mac.
+- **It is never silent.** `compile` (`ci.yaml`) and `goreleaser` (`cd.yaml`) run
+  `scripts/ci/macos-smoke-skipped.sh`, which writes the warning and job-summary line `macOS smoke skipped by
+vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
+- **Unset, or any other value, is today's behaviour**: advisory on a pull request, required and retried elsewhere.
+- **Turn it off** with `gh variable delete MACOS_SMOKE` as soon as GitHub's macOS pool is back. Turn it on with
+  `gh variable set MACOS_SMOKE --body skip`.
 
 ## Workflow split
 
