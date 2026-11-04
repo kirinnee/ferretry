@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { portableConversationRows } from '../../../src/lib/session/transcript/index.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
 import compactionFixture from '../../fixtures/transcript/claude-compaction.jsonl' with { type: 'text' };
@@ -540,6 +541,42 @@ describe('ClaudeTranscriptParser: the request snapshots Claude Code writes (&B15
       { role: 'user', kind: 'attachment', blockIndex: 1, attachment: { kind: 'image' } },
     ]);
     should(actual.observedInputs.map(input => input.text)).deepEqual(['[Image #5]\nBug B23 fix is up.']);
+  });
+
+  it('should give a picture pasted before the words a point of its own, so the conversation still reads', () => {
+    // Arrange — image first, then the words: the shape that put both at block 0.
+    const subject = new ClaudeTranscriptParser();
+    const line = JSON.stringify({
+      type: 'attachment',
+      uuid: 'q1',
+      timestamp: '2026-11-04T10:37:05.000Z',
+      attachment: {
+        type: 'queued_command',
+        prompt: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+          { type: 'text', text: 'What is this?' },
+        ],
+        commandMode: 'prompt',
+        origin: { kind: 'human' },
+      },
+    });
+    const bytes = new TextEncoder().encode(`${line}\n`);
+
+    // Act
+    const parsed = subject.parse({ bytes, source: 'claude.jsonl', observedAt: '2026-11-04T10:38:00.000Z' });
+    const rows = portableConversationRows('s1', {
+      file: '/fixture/claude.jsonl',
+      reset: false,
+      cursor: { byteOffset: bytes.byteLength, pendingBytes: 0, nextLine: 2 },
+      ...parsed,
+    });
+
+    // Assert — the picture at block 0, the words at block 1, and the conversation reads them both.
+    should(parsed.events.map(event => [event.kind, event.blockIndex])).deepEqual([
+      ['message', 1],
+      ['attachment', 0],
+    ]);
+    should(rows.length).be.above(0);
   });
 
   it('should draw a queued prompt that is only a picture, and nothing for blocks it does not know', () => {

@@ -244,16 +244,25 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         const prompt = attachment.prompt;
         const parts = Array.isArray(prompt) ? prompt : [prompt];
         const words = parts
-          .map(part =>
-            typeof part === 'string'
-              ? part
-              : transcriptObject(part)?.type === 'text'
-                ? transcriptString(transcriptObject(part)?.text)
-                : undefined,
-          )
-          .filter((part): part is string => part !== undefined && part.trim().length > 0);
+          .map((part, blockIndex) => ({
+            blockIndex,
+            text:
+              typeof part === 'string'
+                ? part
+                : transcriptObject(part)?.type === 'text'
+                  ? transcriptString(transcriptObject(part)?.text)
+                  : undefined,
+          }))
+          .filter((part): part is { blockIndex: number; text: string } => (part.text?.trim().length ?? 0) > 0);
+        // The words sit at their first block, so a picture pasted BEFORE them keeps a point of its own.
+        const at = Array.isArray(prompt) ? words[0]?.blockIndex : undefined;
         if (words.length > 0)
-          events.push({ ...metadata('user'), kind: 'message', text: words.join('\n'), inputSource: 'native-queue' });
+          events.push({
+            ...metadata('user', at),
+            kind: 'message',
+            text: words.map(part => part.text).join('\n'),
+            inputSource: 'native-queue',
+          });
         parts.forEach((part, blockIndex) => {
           const block = transcriptObject(part);
           const file = block === undefined ? undefined : claudeAttachment(block);
