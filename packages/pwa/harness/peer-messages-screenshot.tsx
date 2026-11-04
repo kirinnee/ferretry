@@ -178,14 +178,16 @@ run('./node_modules/.bin/tailwindcss', [
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/') {
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
     }
-    return new Response(Bun.file(join(buildDir, url.pathname)));
+    // The build copies no fonts: a file it did not write is a 404 (the page falls back), not a server error.
+    const file = Bun.file(join(buildDir, url.pathname));
+    return (await file.exists()) ? new Response(file) : new Response(null, { status: 404 });
   },
 });
 

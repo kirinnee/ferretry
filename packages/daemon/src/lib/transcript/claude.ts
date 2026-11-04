@@ -237,19 +237,28 @@ export class ClaudeTranscriptParser implements TranscriptParser {
     if (recordType === 'attachment') {
       const attachment = transcriptObject(record.attachment);
       const origin = transcriptObject(attachment?.origin);
-      const text = transcriptString(attachment?.prompt);
-      if (
-        attachment?.type === 'queued_command' &&
-        attachment.commandMode === 'prompt' &&
-        origin?.kind === 'human' &&
-        text !== undefined &&
-        text.trim().length > 0
-      ) {
-        events.push({
-          ...metadata('user'),
-          kind: 'message',
-          text,
-          inputSource: 'native-queue',
+      if (attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' && origin?.kind === 'human') {
+        // A prompt queued while Claude was busy is a string, or (seen on 2.1.281) content blocks: its text, and a
+        // pasted image among them. This record is its only place in the chat once the request snapshots that
+        // repeat it are dropped (&B157), so both shapes draw: the words as one message, each picture after them.
+        const prompt = attachment.prompt;
+        const parts = Array.isArray(prompt) ? prompt : [prompt];
+        const words = parts
+          .map(part =>
+            typeof part === 'string'
+              ? part
+              : transcriptObject(part)?.type === 'text'
+                ? transcriptString(transcriptObject(part)?.text)
+                : undefined,
+          )
+          .filter((part): part is string => part !== undefined && part.trim().length > 0);
+        if (words.length > 0)
+          events.push({ ...metadata('user'), kind: 'message', text: words.join('\n'), inputSource: 'native-queue' });
+        parts.forEach((part, blockIndex) => {
+          const block = transcriptObject(part);
+          const file = block === undefined ? undefined : claudeAttachment(block);
+          if (file !== undefined)
+            events.push({ ...metadata('user', blockIndex), kind: 'attachment', attachment: file });
         });
       }
       return { events, issues, recognized: true };

@@ -4,7 +4,7 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { createAgentReferenceResolver } from '../../src/lib/agent-references.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import type { SentMessage } from '../../src/lib/peer-delivery.ts';
+import { readSentMessage, type SentMessage } from '../../src/lib/peer-delivery.ts';
 import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { interact, mount, must } from '../support/dom.ts';
 
@@ -68,9 +68,12 @@ describe('a message this ferret sent', () => {
     );
     const state = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
     expect(state.getAttribute('role')).toBe('alert');
-    expect(words(state)).toBe('Not delivered');
-    // The reason, in the CLI's own words, is the one thing that takes a line of its own.
-    expect(view.container.querySelector('[data-sent-reason]')?.textContent).toBe('session not found: tanna');
+    // The alert says why: a screen reader hears the reason with the failure, not after it.
+    expect(words(state)).toBe('Not delivered: session not found: tanna');
+    // For the eye, the reason in the CLI's own words is the one thing that takes a line of its own.
+    const reason = must(view.container.querySelector('[data-sent-reason]'), 'the reason');
+    expect(reason.textContent).toBe('session not found: tanna');
+    expect(reason.getAttribute('aria-hidden')).toBe('true');
     // Unproved, the recipient is a plain name.
     expect(must(view.container.querySelector('.fy-peer-name'), 'the name').textContent).toBe('Tanna');
     await view.unmount();
@@ -80,7 +83,7 @@ describe('a message this ferret sent', () => {
     for (const [state, word] of [
       ['sending', 'Sending…'],
       ['queued', 'Queued — it reads this when its current turn ends'],
-      ['held', "Held — delivered when Tanna's turn ends"],
+      ['held', 'Held'],
       ['replied', 'Replied'],
     ] as const) {
       const view = await mount(<TranscriptRow entry={sentRow({ state, reason: '' })} />);
@@ -105,6 +108,32 @@ describe('a message this ferret sent', () => {
       'The message was composed by a shell command.',
     );
     await composed.unmount();
+  });
+
+  test('says why a held send waits, in the words of the CLI form it held with (&B157)', async () => {
+    for (const [output, word] of [
+      [
+        "held as an FYI (not typed yet): it is delivered when the agent's turn ends, or by 10:40:00 at the latest; do not resend",
+        "Held — delivered when Tanna's turn ends",
+      ],
+      [
+        'held until 10:38:00 to combine with other messages (action); not typed yet; do not resend',
+        'Held until 10:38 to batch',
+      ],
+    ] as const) {
+      const sent = must(
+        readSentMessage(
+          { use: { name: 'Bash', input: { command: 'fy send tanna "Hello"' } }, result: { text: output } },
+          'fy',
+        ),
+        'the send',
+      );
+      const view = await mount(<TranscriptRow entry={sentRow(sent)} />);
+      const shown = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
+      expect(words(shown)).toBe(word);
+      expect(shown.getAttribute('title')).toBe(word);
+      await view.unmount();
+    }
   });
 
   test('opens nothing when the card carries no calls', async () => {

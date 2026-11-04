@@ -39,6 +39,13 @@ const STATES: Readonly<
   failed: { word: 'Not delivered', mark: 'failed' },
 };
 
+/** A held send's words: an FYI waits for the receiver's turn to end, an action for the batch's time (&B157). */
+const heldWord = (sent: SentMessage): string => {
+  if (sent.hold?.kind === 'fyi') return `Held — delivered when ${displayCallsign(sent.to)}'s turn ends`;
+  if (sent.hold?.kind === 'batch') return `Held until ${sent.hold.until} to batch`;
+  return 'Held';
+};
+
 /** What a send's body says when this reader could not see the words. */
 const unseenBody = (sent: SentMessage): string =>
   sent.messageFile === undefined
@@ -60,11 +67,11 @@ export function SentMessageRow({
 }) {
   const surface = useReferenceSurface();
   const [showCommand, setShowCommand] = useState(false);
-  // A held send says when it goes, by the receiver's name: true when it was sent, and all the sender knows (&B157 —
-  // GAP: the card does not follow it to Delivered; that is the receiver's send ledger, read from the sender's chat).
+  // A held send says when it goes, in the CLI's terms: true when it was sent, and all the sender knows (&B157 — GAP:
+  // the card does not follow it to Delivered; that is the receiver's send ledger, read from the sender's chat).
   const known = STATES[sent.state];
-  const state =
-    sent.state === 'held' ? { ...known, word: `Held — delivered when ${displayCallsign(sent.to)}'s turn ends` } : known;
+  const state = sent.state === 'held' ? { ...known, word: heldWord(sent) } : known;
+  const reason = sent.state === 'failed' && sent.reason !== undefined && sent.reason !== '' ? sent.reason : undefined;
   return (
     <article
       className="fy-message fy-message-sent"
@@ -95,6 +102,8 @@ export function SentMessageRow({
           <span>
             {state.word}
             {state.detail === undefined ? null : <span className="sr-only"> — {state.detail}</span>}
+            {/* The alert says why, too: the visible reason below is drawn for the eye only. */}
+            {reason === undefined ? null : <span className="sr-only">: {reason}</span>}
             {/* The separator ends the state's words, so a foot that wraps on a phone leaves it trailing them. */}
             <span aria-hidden="true" className="fy-sent-dot">
               {' ·'}
@@ -111,11 +120,11 @@ export function SentMessageRow({
         </button>
         <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
       </div>
-      {sent.state === 'failed' && sent.reason !== undefined && sent.reason !== '' ? (
-        <p className="fy-sent-reason" data-sent-reason="">
-          {sent.reason}
+      {reason === undefined ? null : (
+        <p aria-hidden="true" className="fy-sent-reason" data-sent-reason="">
+          {reason}
         </p>
-      ) : null}
+      )}
       {showCommand && entry.tools !== undefined ? <ToolGroup calls={entry.tools} isLast={isLast} live={live} /> : null}
     </article>
   );

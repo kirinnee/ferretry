@@ -493,6 +493,75 @@ describe('ClaudeTranscriptParser: the request snapshots Claude Code writes (&B15
     should(actual.observedInputs).have.length(0);
   });
 
+  it('should draw a queued prompt with a pasted image once, from the drain, when its snapshot repeats it', () => {
+    // Arrange — a prompt queued while Claude was busy, drained as content blocks (the shape Claude 2.1.281 writes),
+    // then the request snapshot that sends it again.
+    const subject = new ClaudeTranscriptParser();
+    const prompt = [
+      { type: 'text', text: '[Image #5]' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      { type: 'text', text: 'Bug B23 fix is up.' },
+    ];
+    const lines = [
+      {
+        type: 'attachment',
+        uuid: 'q1',
+        timestamp: '2026-11-04T10:37:05.000Z',
+        attachment: {
+          type: 'queued_command',
+          prompt,
+          commandMode: 'prompt',
+          origin: { kind: 'human' },
+          imagePasteIds: [5],
+          timestamp: '2026-11-04T10:37:04.000Z',
+        },
+      },
+      blob({ role: 'user', content: prompt }),
+    ];
+
+    // Act
+    const actual = subject.parse({
+      text: lines.map(line => JSON.stringify(line)).join('\n'),
+      source: 'claude.jsonl',
+      observedAt: '2026-11-04T10:38:00.000Z',
+    });
+
+    // Assert — the words once, the picture once, both from the timed drain; the input observed once.
+    should(actual.issues).have.length(0);
+    should(actual.events.map(event => event.kind)).deepEqual(['message', 'attachment']);
+    should(actual.events).containDeep([
+      {
+        role: 'user',
+        kind: 'message',
+        text: '[Image #5]\nBug B23 fix is up.',
+        inputSource: 'native-queue',
+        timestamp: '2026-11-04T10:37:05.000Z',
+      },
+      { role: 'user', kind: 'attachment', blockIndex: 1, attachment: { kind: 'image' } },
+    ]);
+    should(actual.observedInputs.map(input => input.text)).deepEqual(['[Image #5]\nBug B23 fix is up.']);
+  });
+
+  it('should draw a queued prompt that is only a picture, and nothing for blocks it does not know', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const queued = (prompt: unknown) => ({
+      type: 'attachment',
+      attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' } },
+    });
+
+    // Act
+    const picture = subject.parseRecord(
+      queued([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }]),
+    );
+    const unknown = subject.parseRecord(queued([{ type: 'text', text: '  ' }, 'Go on.', null, { type: 'mystery' }]));
+
+    // Assert
+    should(picture.events.map(event => event.kind)).deepEqual(['attachment']);
+    should(unknown.events).containDeep([{ kind: 'message', text: 'Go on.' }]);
+    should(unknown.events).have.length(1);
+  });
+
   it('should recognise a snapshot alone and say nothing about it', () => {
     // Arrange
     const subject = new ClaudeTranscriptParser();
