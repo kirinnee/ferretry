@@ -1,6 +1,19 @@
 import { describe, it } from 'bun:test';
-import { type AgendaItem, agendaItemRevision, DAEMON_FEATURES } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  type AgendaPatch,
+  AgendaEditRequestSchema,
+  agendaItemRevision,
+  DAEMON_FEATURES,
+} from '@ferretry/protocol';
 import should from 'should';
+import {
+  type AgendaLedger,
+  agendaSnapshot,
+  applyAgendaCommand,
+  applyAgendaCommandToSession,
+  type EditAgendaPatch,
+} from '../../../../daemon/src/lib/agenda/state-machine.ts';
 import { AgendaController } from '../../../src/lib/agenda/controller';
 import { agendaPatchDocument, composeAgendaPatch, parseAgendaPatch } from '../../../src/lib/agenda/patch';
 import { patchYaml } from '../../../src/lib/patch/document';
@@ -212,6 +225,26 @@ describe('agenda patch command', () => {
     should(gateway.applied).be.empty();
   });
 
+  it('should refuse a document that names no field to change', () => {
+    // Act
+    const empty = parseAgendaPatch(`revision: ${agendaItemRevision(item)}`, 'a5.yaml');
+
+    // Assert
+    should(empty.ok).be.false();
+    should(!empty.ok && empty.problems).deepEqual(['a5.yaml names no field to change: a patch changes at least one']);
+  });
+
+  it('should say every problem of a bad document at once and send nothing', async () => {
+    // Arrange
+    const { gateway, controller } = build({ '-': `revision: ${agendaItemRevision(item)}\nbogus: 1` });
+
+    // Act + Assert
+    await should(controller.patch('A5', {})).be.rejectedWith(
+      /agenda patch A5 changed nothing:\n {2}bogus: not a field/u,
+    );
+    should(gateway.applied).be.empty();
+  });
+
   it('should name an older daemon before anything is sent', async () => {
     // Arrange
     const { gateway, controller } = build({ '-': `revision: ${agendaItemRevision(item)}\nurgency: x` }, []);
@@ -234,5 +267,145 @@ describe('agenda patch command', () => {
     );
     should(out.messages[0]).match(/\nrevision: \S+\ntitle: Teaching wording\n/u);
     should(out.messages[0]).match(/\ntabs:\n {2}Status: "- Now: drafting"\n/u);
+  });
+});
+
+describe('a patch that replaces the ask', () => {
+  const AGENT = { kind: 'agent', sessionId: 'session-1', name: 'Ada' } as const;
+  const AT = '2026-11-04T08:00:00.000Z';
+  const LATER = '2026-11-04T09:00:00.000Z';
+  const OPTIONS = [{ label: 'EU' }, { label: 'US' }];
+  const DETAILS = [{ label: 'US', detail: 'Cheapest.' }];
+  const QUESTIONS = [{ question: 'Which region?' }];
+
+  /** A choice item as the daemon holds it, with option details and a question list. */
+  const choice = (): { ledger: AgendaLedger; item: AgendaItem } => {
+    const raised = applyAgendaCommandToSession(null, 'session-1', {
+      action: 'raise',
+      actor: AGENT,
+      request: {
+        source: 'agent-raised',
+        sourceRef: null,
+        title: 'Deploy region',
+        subject: 'Which region should the deploy use?',
+        why: 'The deploy needs one.',
+        premise: 'A release is ready.',
+        context: 'Two regions are set up.',
+        howToResolve: 'Pick one.',
+        kind: 'choice',
+        ask: { kind: 'multiple-choice', options: OPTIONS },
+        optionDetails: DETAILS,
+        questions: QUESTIONS,
+      },
+      at: AT,
+    });
+    if (!raised.ok) throw new Error(raised.error.message);
+    const found = agendaSnapshot(raised.ledger).items.find(open => open.id === 'A1');
+    if (found === undefined) throw new Error('no open A1');
+    return { ledger: raised.ledger, item: found };
+  };
+
+  /** The choice item's own document with `ask` changed to add an option, everything else exactly as exported. */
+  const withAddedOption = (item: AgendaItem): AgendaPatch => {
+    const document = {
+      ...agendaPatchDocument(item),
+      ask: { kind: 'multiple-choice', options: [...OPTIONS, { label: 'Asia' }] },
+    };
+    return parsed(patchYaml(document, []));
+  };
+
+  it('should send the option details and questions it keeps, since the daemon drops what a replacing edit omits', () => {
+    // Arrange
+    const { item: held } = choice();
+
+    // Act
+    const plan = composeAgendaPatch(held, withAddedOption(held), neededBy);
+
+    // Assert
+    if (plan.kind !== 'edit') throw new Error(`expected an edit, got ${plan.kind}`);
+    should(plan.request).containDeep({
+      ask: { kind: 'multiple-choice', options: [{ label: 'EU' }, { label: 'US' }, { label: 'Asia' }] },
+      optionDetails: DETAILS,
+      questions: QUESTIONS,
+    });
+    should(plan.request).not.have.property('kind');
+  });
+
+  it('should leave the option details and questions on the item once the daemon applies the composed edit', () => {
+    // Arrange
+    const { ledger, item: held } = choice();
+    const plan = composeAgendaPatch(held, withAddedOption(held), neededBy);
+    if (plan.kind !== 'edit') throw new Error(`expected an edit, got ${plan.kind}`);
+    const { action: _action, id: _id, ...patch } = plan.request;
+
+    // Act
+    const applied = applyAgendaCommand(ledger, {
+      action: 'edit',
+      actor: AGENT,
+      id: 'A1',
+      patch: patch as EditAgendaPatch,
+      at: LATER,
+    });
+
+    // Assert
+    if (!applied.ok) throw new Error(applied.error.message);
+    const after = agendaSnapshot(applied.ledger).items.find(open => open.id === 'A1');
+    should(after?.ask).deepEqual({ kind: 'multiple-choice', options: [...OPTIONS, { label: 'Asia' }] });
+    should(after?.optionDetails).deepEqual(DETAILS);
+    should(after?.questions).deepEqual(QUESTIONS);
+  });
+
+  it('should not send the kept shape when the ask is not replaced: only the question list changes', () => {
+    // Arrange
+    const { item: held } = choice();
+    const document = { ...agendaPatchDocument(held), questions: [{ question: 'Which region should it be?' }] };
+
+    // Act
+    const plan = composeAgendaPatch(held, parsed(patchYaml(document, [])), neededBy);
+
+    // Assert
+    if (plan.kind !== 'edit') throw new Error(`expected an edit, got ${plan.kind}`);
+    should(plan.request).have.property('questions');
+    should(plan.request).not.have.property('optionDetails');
+    should(plan.request).not.have.property('ask');
+  });
+
+  it('should still send nothing when the whole document is written back as it was read', () => {
+    // Arrange
+    const { item: held } = choice();
+
+    // Act
+    const plan = composeAgendaPatch(held, parsed(patchYaml(agendaPatchDocument(held), [])), neededBy);
+
+    // Assert
+    should(plan).deepEqual({ kind: 'unchanged' });
+  });
+});
+
+describe('a long why', () => {
+  it('should round-trip: a 1,500-character why written back changes nothing', () => {
+    // Arrange
+    const long: AgendaItem = { ...item, why: `${'word '.repeat(299)}end..` };
+    const yaml = patchYaml(agendaPatchDocument(long), []);
+
+    // Act
+    const plan = composeAgendaPatch(long, parsed(yaml), neededBy);
+
+    // Assert
+    should(long.why).have.length(1_500);
+    should(plan).deepEqual({ kind: 'unchanged' });
+  });
+
+  it('should compose an edit whose why the edit request accepts', () => {
+    // Arrange
+    const why = 'x'.repeat(1_500);
+    const patch = parsed(`revision: ${agendaItemRevision(item)}\nwhy: ${why}\n`);
+
+    // Act
+    const plan = composeAgendaPatch(item, patch, neededBy);
+
+    // Assert
+    if (plan.kind !== 'edit') throw new Error(`expected an edit, got ${plan.kind}`);
+    should(AgendaEditRequestSchema.safeParse(plan.request).success).be.true();
   });
 });

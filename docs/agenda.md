@@ -513,7 +513,9 @@ fy agenda patch A5 --file a5.yaml    # one atomic edit; --file - reads stdin; JS
 - **Unchanged values are not sent.** A document written back as it was read changes nothing and sends nothing
   (`nothing changed`). This matters for the ask: `kind`, `ask`, `answers`, `fields` and the options of
   `questions` replace the ask only when they **differ** from the item's ([Editable asks](#editable-asks)), so a
-  round-trip never re-asks the owner by accident.
+  round-trip never re-asks the owner by accident. When the ask does change, the values it depends on
+  (`questions`, `optionDetails`, `fields`, `steps`) that the document still gives are re-sent too, because the
+  daemon drops whatever a replacing edit does not give again.
 - **What the document holds — every part the owner reads that a ferret writes.** `revision`, `title`, `summary` (the
   one-line ask), **`why`** (the line saying why it is asked) and **`howToResolve`** (how the owner resolves it) — both
   editable since `agenda.patch.1`, so a line written for the item's first ask can follow the ask it carries now —

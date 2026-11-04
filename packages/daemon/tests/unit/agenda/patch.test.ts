@@ -90,6 +90,22 @@ describe('an edit that names the revision it read', () => {
     should(open(moved).why).equal('Use the proposed wording for the three rules?');
   });
 
+  it('should refuse `stale` when the item it read is no longer open, and write nothing', () => {
+    // Arrange: read it, then it closes
+    const ledger = raised();
+    const revision = agendaItemRevision(open(ledger));
+    const closed = ok(
+      applyAgendaCommand(ledger, { action: 'resolve', actor: { kind: 'human' }, id: 'A1', at: LATER }),
+    ).ledger;
+
+    // Act
+    const refused = edit(closed, { revision, why: 'An old reading' });
+
+    // Assert
+    should(!refused.ok && refused.error.code).equal('stale');
+    should(!refused.ok && refused.error.message).match(/A1 is no longer open: read it again/u);
+  });
+
   it('should still refuse another ferret’s item, revision or not', () => {
     // Arrange
     const ledger = raised();

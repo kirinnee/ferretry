@@ -1552,6 +1552,22 @@ describe('fy task patch', () => {
     should(sent(gateway)).be.empty();
   });
 
+  it('should say nothing changed and send nothing when every value matches the card', async () => {
+    // Arrange
+    const { gateway, log, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\ntitle: Rename the widget' }),
+    );
+
+    // Act
+    await controller.patch('F1', {});
+
+    // Assert
+    should(log).deepEqual(['ok: &F1: nothing changed, so nothing was sent (every value matches the card)']);
+    should(sent(gateway)).be.empty();
+  });
+
   it('should say every problem at once and send nothing', async () => {
     // Arrange
     const { gateway, controller } = harness(

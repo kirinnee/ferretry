@@ -65,6 +65,23 @@ describe('task patch', () => {
     should(composeCardPatch(task, parsed('revision: 7\nbrief: new plan'))).deepEqual({ kind: 'stale' });
   });
 
+  it('should refuse a document that names no field to change', () => {
+    // Act
+    const empty = parseCardPatch('revision: 1', 'f1.yaml');
+
+    // Assert
+    should(empty.ok).be.false();
+    should(!empty.ok && empty.problems).deepEqual(['f1.yaml names no field to change: a patch changes at least one']);
+  });
+
+  it('should read a null point list as emptied', () => {
+    // Act
+    const plan = composeCardPatch(task, parsed('revision: 1\npremise: null'));
+
+    // Assert
+    should(plan).containDeep({ kind: 'edit' });
+  });
+
   it('should require the revision, refuse unknown or read-only keys, and never empty the title', () => {
     // Act
     const missing = parseCardPatch('brief: new plan', 'f1.yaml');

@@ -1861,7 +1861,7 @@ export const AgendaEditRequestSchema = z.strictObject({
    * The WHY line and the HOW-TO-RESOLVE line the owner reads (`agenda.patch.1`): rewritten, never removed, so a line
    * written for the item's first ask can follow the ask it carries now.
    */
-  why: prose(MAX_AGENDA_REASON_LENGTH).optional(),
+  why: prose(MAX_AGENDA_DETAIL_LENGTH).optional(),
   howToResolve: prose(MAX_AGENDA_DETAIL_LENGTH).optional(),
   /**
    * READ BEFORE WRITE (`agenda.patch.1`, `fy agenda patch`): the item's revision (`agendaItemRevision`) as the writer

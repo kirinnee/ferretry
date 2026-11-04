@@ -32,6 +32,12 @@ const COPIED = AGENDA_PATCH_KEYS.filter(
   (key): key is CopiedKey => key !== 'revision' && key !== 'tabs' && key !== 'blockingNow' && key !== 'neededBy',
 );
 
+/**
+ * The shape fields an edit that REPLACES the ask would otherwise drop (the daemon's `REPLACED_SHAPE`): when the edit
+ * carries a kind, ask or answers, every one the patch gives is sent again, equal to the item's or not.
+ */
+const REPLACED_SHAPE = ['ask', 'answers', 'questions', 'optionDetails', 'fields', 'steps'] as const;
+
 /** The item's value for a patch key, as it is stored. */
 const stored = (item: AgendaItem, key: keyof AgendaPatch): unknown =>
   (item as unknown as Record<string, unknown>)[WIRE_NAME[key] ?? key];
@@ -93,7 +99,9 @@ export function parseAgendaPatch(
 /**
  * The ONE edit a patch is, against `item` as it stands. A patch written against another revision is `stale` (the item
  * changed since it was read). A value equal to the item's is left out (so a document written back as it was read sends
- * nothing, and an unchanged `kind` never re-asks the owner), `null` clears, tabs become tab operations by name.
+ * nothing, and an unchanged `kind` never re-asks the owner), except that when the ask is replaced the shape the patch
+ * keeps (`questions`, `optionDetails`, `fields`, `steps`) is sent again, since the daemon drops what an edit does not
+ * re-give. `null` clears, tabs become tab operations by name.
  * `neededBy` resolves a typed time ("in 3h") to an instant.
  */
 export function composeAgendaPatch(
@@ -115,6 +123,12 @@ export function composeAgendaPatch(
       continue;
     }
     if (!samePatchValue(value, stored(item, key))) fields[WIRE_NAME[key] ?? key] = value;
+  }
+  if (fields.kind !== undefined || fields.ask !== undefined || fields.answers !== undefined) {
+    for (const key of REPLACED_SHAPE) {
+      const given = patch[key];
+      if (given !== undefined && given !== null) fields[key] = given;
+    }
   }
   if (patch.blockingNow === true && item.blockingNow !== true) fields.blockingNow = true;
   if (patch.blockingNow === false || patch.blockingNow === null) clearing('blockingNow');
