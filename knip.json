@@ -70,7 +70,6 @@
         "harness/board-detail-screenshot.ts",
         "harness/board-table-screenshot.ts",
         "harness/board-kanban-screenshot.ts",
-        "harness/board-add-card-screenshot.ts",
         "harness/board-detail.tsx",
         "harness/card-content-screenshot.ts",
         "harness/double-bullets-screenshot.ts",

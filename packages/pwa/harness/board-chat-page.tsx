@@ -347,7 +347,6 @@ const agenda = {
       updatedAt: ago(1),
     });
   },
-  respond: async () => undefined,
 };
 const requested = params.get('view');
 boardSideView.set(requested === 'list' ? requested : 'kanban');
@@ -384,7 +383,6 @@ function Harness() {
         onAgents={tasks.setAgents}
         onExpand={() => tasks.setExpanded(!isExpanded)}
         phone={compact}
-        ports={{ sendMessage: async () => undefined }}
         scope={scope}
         store={store}
       />

@@ -1,10 +1,10 @@
 /**
  * WHAT A CARD'S DETAIL SAYS, AS PLAIN VALUES.
  *
- * The drawer draws; this file decides. The lane stepper (where the card is, among its project's lanes),
- * the history rows (what happened, in words, with the boring runs folded), the PR and release lines, the
- * two answers a card in 🧪 To test waits for, and the two messages the owner sends a ferret from
- * the detail. Nothing here reads the clock or the network, so every state is a value-to-value test.
+ * The drawer draws; this file decides. The history rows (what happened, in words, with the boring runs
+ * folded), the PR and release lines, and the asks joined to the agenda. The card is read-only, so nothing
+ * here composes a message for the owner to send. Nothing here reads the clock or the network, so every
+ * state is a value-to-value test.
  */
 
 import {
@@ -23,7 +23,6 @@ import {
   formatTaskRef,
   type LaneCategory,
   type LaneSet,
-  MAX_BOARD_NOTE_LENGTH,
   type PrLink,
   type ResolvedAgendaItem,
   type TaskRef,
@@ -263,62 +262,6 @@ export const historyRows = (history: readonly BoardTaskEvent[], context: History
 /** The card's open asks that are NOT also stopping the ferret: the rest of `openAsks`. */
 export const nonBlockingAsks = (task: Pick<BoardTaskView, 'openAsks' | 'waitingOnOwner'>): readonly AgendaRef[] =>
   task.openAsks.filter(ask => !(task.waitingOnOwner ?? []).some(waiting => waiting.id === ask.id));
-
-// ---------------------------------------------------------------------------------------------------
-// Messages the owner sends
-// ---------------------------------------------------------------------------------------------------
-
-/** The tag a comment to the ferret carries, so it can tell which card the words are about. */
-export const commentTag = (task: Pick<BoardTaskView, 'id'>): string => `[re ${formatTaskRef({ id: task.id })}]`;
-
-/** What the ferret is sent: the owner's words under the card's tag. */
-export const ferretComment = (task: Pick<BoardTaskView, 'id'>, text: string): string =>
-  `${commentTag(task)} ${text.trim()}`;
-
-/** The history note recorded beside a comment; bounded the way a note is. */
-export const commentNote = (text: string): string => text.trim().slice(0, MAX_BOARD_NOTE_LENGTH);
-
-/** The brief a ferret started from "+ Card" is given: the title and the ask, as the owner wrote them. */
-export const startBrief = (draft: NewCardDraft): string =>
-  `${draft.title.trim()}\n\n${draft.ask.trim()}\n\nThe owner is opening a board card for this work and will tell you its id.`;
-
-/** The first message a started ferret gets once its card exists: which card is its own. */
-export const assignedMessage = (task: Pick<BoardTaskView, 'id' | 'title'>): string =>
-  `${commentTag(task)} The owner assigned this card to you: ${task.title}. Keep it current as you work.`;
-
-// ---------------------------------------------------------------------------------------------------
-// "+ Card"
-// ---------------------------------------------------------------------------------------------------
-
-export interface NewCardDraft {
-  readonly title: string;
-  readonly ask: string;
-}
-
-export type NewCardProblem = 'title-empty' | 'title-long' | 'ask-empty' | 'assignee-missing';
-
-const MAX_TITLE_WORDS = 5;
-
-/** What stops a new card being sent, in the order the form shows it; empty when it is ready. */
-export const newCardProblems = (draft: NewCardDraft, assignee: string | null): readonly NewCardProblem[] => {
-  const problems: NewCardProblem[] = [];
-  const title = draft.title.trim();
-  if (title === '') problems.push('title-empty');
-  else if (title.split(/\s+/u).length > MAX_TITLE_WORDS) problems.push('title-long');
-  if (draft.ask.trim() === '') problems.push('ask-empty');
-  if (assignee === null) problems.push('assignee-missing');
-  return problems;
-};
-
-export const NEW_CARD_PROBLEM_TEXT: Readonly<Record<NewCardProblem, string>> = {
-  'title-empty': 'Give it a title.',
-  'title-long': 'Keep the title to five words.',
-  'ask-empty': 'Say what you want done.',
-  'assignee-missing': 'Pick who does it, or start a ferret on it.',
-};
-
-/** The source recorded with the ask a card is opened with from the Board. */
-export const OWNER_CARD_SOURCE = 'owner (board)';
 
 // ---------------------------------------------------------------------------------------------------
 // The card's asks, joined to the agenda

@@ -4,14 +4,12 @@
  * what released lately. A row is the title, its one-line summary, the status pill and when it last mattered;
  * the people and the PR numbers live on the card. The Archive keeps the flat, columned rows.
  *
- * A row has no owner buttons (no Done, no Not good, no Reopen): the owner answers in the agenda. The row's refusal
- * of a lane move is said under it, as on a card.
+ * A row has no owner buttons (no Done, no Not good, no Reopen): the owner answers in the agenda.
  */
 
 import { formatTaskRef } from '@ferretry/protocol';
 import { CornerDownRight } from 'lucide-react';
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ANSWER_AT_REST, type BoardAnswerState } from '../../lib/board-done.ts';
 import { isAgentTask } from '../../lib/board-human.ts';
 import type { BoardModel } from '../../lib/board-model.ts';
 import { cardSegments } from '../../lib/board-present.ts';
@@ -70,20 +68,10 @@ interface RowProps {
   readonly env: BoardCardEnv;
 }
 
-/** Why the row's last move did not go through, under the row. */
-function AnswerError({ answer }: { readonly answer: BoardAnswerState }) {
-  return answer.error === null ? null : (
-    <p className="fy-board-table__error" data-answer-error="" role="alert">
-      {answer.error}
-    </p>
-  );
-}
-
 function TableRow({ row, env }: RowProps) {
   const { card } = row;
   const { task } = card;
   const preview = plainPreview(task.summary);
-  const answer = env.answerFor?.(card) ?? ANSWER_AT_REST;
   const href = env.hrefFor(card);
   const segments = cardSegments(task, {
     names: env.names,
@@ -108,7 +96,6 @@ function TableRow({ row, env }: RowProps) {
       className="fy-board-table__row"
       data-activity={task.activity}
       data-category={row.category ?? 'unplaced'}
-      data-settling={answer.pressed === null ? undefined : answer.pressed}
       data-task={task.id}
       data-touch={env.touch === true ? '' : undefined}
     >
@@ -151,7 +138,6 @@ function TableRow({ row, env }: RowProps) {
           {row.laneName}
         </span>
       </div>
-      <AnswerError answer={answer} />
     </li>
   );
 }
@@ -201,7 +187,6 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
   const { task } = card;
   const action = SUMMARY_SECTIONS[entry.section].action;
   const preview = plainPreview(task.summary);
-  const answer = env.answerFor?.(card) ?? ANSWER_AT_REST;
   const href = env.hrefFor(card);
   const extras = cardSegments(task, { names: env.names, now: env.now, category: row.category, machine: null }).filter(
     segment => segment.key === 'blocked' || segment.key === 'subs',
@@ -212,7 +197,6 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
       data-action={action ? '' : undefined}
       data-agent={isAgentTask(task) ? '' : undefined}
       data-section={entry.section}
-      data-settling={answer.pressed === null ? undefined : answer.pressed}
       data-task={task.id}
       data-touch={env.touch === true ? '' : undefined}
       data-under={entry.under === null ? undefined : ''}
@@ -253,7 +237,6 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
         )}
         <span className="fy-board-summary__when">{entry.when}</span>
       </div>
-      <AnswerError answer={answer} />
     </li>
   );
 }

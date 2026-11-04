@@ -8,7 +8,6 @@ import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { cardPlaces } from '../../../src/lib/board-view.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
 import {
   boardAnswer,
   boardModelOf,
@@ -27,8 +26,6 @@ import {
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const LEAD = 'mvuc7tsf-0c3d50df';
-
-plainSendBackEditor();
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -69,7 +66,7 @@ const open = async (search = '', props: Partial<BoardPageProps> = {}, cards: typ
   };
   view = await mount(
     <BoardPage
-      agenda={{ respond: async () => undefined }}
+      agenda={{}}
       callsigns={new Map([[LEAD, 'denisha']])}
       machines={[{ connection: laptop, name: 'laptop' }]}
       now={NOW}
@@ -227,9 +224,7 @@ describe('Board on a phone — the lane strip', () => {
       showMachine: false,
       hrefFor: entry => `/d/laptop/board/${entry.task.id}`,
       onNavigate: () => undefined,
-      movesFor: () => undefined,
       places: cardPlaces(model),
-      dragging: null,
       touch: true,
     };
     view = await mount(
@@ -352,24 +347,13 @@ describe('Board on a phone — rows waiting to be tested', () => {
     expect(row.textContent).not.toMatch(/Not good/u);
   });
 
-  it('slides the reason box up on a move back from the menu, and sends the card back only with a reason', async () => {
+  it('has no hand control: no lane menu, no add-card button, no Lanes link, nothing to move a card with', async () => {
     const { root, acts } = await open('at=tested');
-    await click(root, '[data-task="F4"] .fy-board-card__more');
-    await interact(() =>
-      must(
-        [...root.querySelectorAll<HTMLElement>('[data-task="F4"] [role="menuitem"]')].find(
-          item => item.textContent === 'Implement',
-        ),
-        'Implement',
-      ).click(),
-    );
+    expect(root.querySelector('.fy-board-card__more, [role="menu"], [draggable="true"]')).toBeNull();
+    expect(root.querySelector('[data-board-add], .fy-board__fab, [data-board-lanes]')).toBeNull();
+    expect(root.querySelector('[aria-label="Add card"]')).toBeNull();
+    expect(root.textContent).not.toMatch(/Lanes ✎/u);
     expect(acts).toEqual([]);
-    const scrim = must(root.querySelector('.fy-board__scrim'), 'the reason box');
-    expect(scrim.hasAttribute('data-phone')).toBe(true);
-    expect(scrim.textContent).toContain('Move Try the thing back to Implement');
-
-    await sendBack(sendBackBox(scrim), 'The button is dead');
-    expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'implement', reason: 'The button is dead' } }]);
   });
 
   it('links the row to the full-screen card, which this page does not draw', async () => {

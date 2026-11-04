@@ -4,7 +4,7 @@
  * renderer (`ChatProse`), so hypermedia blocks and references behave exactly as in a message or an agenda card.
  */
 
-import { type BoardTaskView, formatTaskRef, type TaskRef } from '@ferretry/protocol';
+import { type BoardTaskView, formatTaskRef } from '@ferretry/protocol';
 import { ExternalLink, GitBranch } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import {
@@ -234,11 +234,9 @@ export function ChildrenList({
 export function DependencyChips({
   task,
   onOpen,
-  onUndepend,
 }: {
   readonly task: BoardTaskView;
   readonly onOpen: (id: string) => void;
-  readonly onUndepend: ((ref: TaskRef) => void) | null;
 }) {
   const waiting = new Set(task.blockedBy.map(ref => formatTaskRef(ref)));
   if (task.dependsOn.length === 0 && task.blocks.length === 0) return null;
@@ -255,16 +253,6 @@ export function DependencyChips({
                   {label} · until {dependency.until}
                   {dependency.override === undefined ? '' : ' · overridden'}
                 </button>
-                {onUndepend === null ? null : (
-                  <button
-                    aria-label={`Stop waiting for ${label}`}
-                    className="fy-board-chip__x"
-                    onClick={() => onUndepend(dependency.task)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                )}
               </span>
             );
           })}
@@ -286,43 +274,15 @@ export function DependencyChips({
   );
 }
 
-/**
- * What the card waits on, or one line saying nothing — with "Add dependency" always there and the form behind
- * it only once it is pressed, so a card that waits on nothing does not carry a form it will not use.
- */
-export function DependsLine({
-  task,
-  adding,
-  form,
-  onOpen,
-  onUndepend,
-  onToggleAdd,
-}: {
-  readonly task: BoardTaskView;
-  readonly adding: boolean;
-  readonly form: ReactNode;
-  readonly onOpen: (id: string) => void;
-  readonly onUndepend: ((ref: TaskRef) => void) | null;
-  readonly onToggleAdd: () => void;
-}) {
+/** What the card waits on and what waits on it, or one line saying nothing. Read-only: the owner edits no dependency. */
+export function DependsLine({ task, onOpen }: { readonly task: BoardTaskView; readonly onOpen: (id: string) => void }) {
   const none = task.dependsOn.length === 0 && task.blocks.length === 0;
-  return (
-    <>
-      <DependencyChips onOpen={onOpen} onUndepend={onUndepend} task={task} />
-      <p className="fy-board-detail__quiet" data-kind="add-dependency">
-        {none ? 'Nothing. ' : null}
-        <button
-          aria-expanded={adding}
-          className="fy-board-detail__link"
-          data-action="add-dependency"
-          onClick={onToggleAdd}
-          type="button"
-        >
-          Add dependency
-        </button>
-      </p>
-      {adding ? form : null}
-    </>
+  return none ? (
+    <p className="fy-board-detail__quiet" data-kind="no-dependencies">
+      Nothing.
+    </p>
+  ) : (
+    <DependencyChips onOpen={onOpen} task={task} />
   );
 }
 

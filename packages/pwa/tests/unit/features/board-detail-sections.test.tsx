@@ -249,13 +249,12 @@ describe('ChildrenList', () => {
 
 describe('DependencyChips', () => {
   it('draws nothing when there are no dependencies either way', async () => {
-    const root = await show(<DependencyChips onOpen={() => undefined} onUndepend={null} task={card('F1')} />);
+    const root = await show(<DependencyChips onOpen={() => undefined} task={card('F1')} />);
     expect(root.textContent).toBe('');
   });
 
-  it('draws what it waits for, marks the ones still blocking, and offers to stop waiting', async () => {
+  it('draws what it waits for and marks the ones still blocking, with no way to stop waiting', async () => {
     const opened: string[] = [];
-    const undepended: string[] = [];
     const task = card('F1', {
       dependsOn: [
         { task: { id: 'F2' }, until: 'shipped' },
@@ -268,13 +267,7 @@ describe('DependencyChips', () => {
       blockedBy: [{ id: 'F2' }],
       blocks: [{ id: 'F9' }],
     });
-    const root = await show(
-      <DependencyChips
-        onOpen={id => void opened.push(id)}
-        onUndepend={ref => void undepended.push(ref.id)}
-        task={task}
-      />,
-    );
+    const root = await show(<DependencyChips onOpen={id => void opened.push(id)} task={task} />);
     const dependsOn = must(root.querySelector('[aria-label="Depends on"]'), 'depends on');
     const chips = [...dependsOn.querySelectorAll('.fy-board-chip')];
     expect(chips.map(chip => chip.querySelector('.fy-board-chip__open')?.textContent)).toEqual([
@@ -284,59 +277,40 @@ describe('DependencyChips', () => {
     expect(chips[0]?.hasAttribute('data-waiting')).toBe(true);
     expect(chips[1]?.hasAttribute('data-waiting')).toBe(false);
     await interact(() => must(chips[0]?.querySelector<HTMLElement>('.fy-board-chip__open'), 'chip').click());
-    await interact(() => must(root.querySelector<HTMLElement>('[aria-label="Stop waiting for &F3"]'), 'x').click());
+    expect(root.querySelector('.fy-board-chip__x, [aria-label^="Stop waiting for"]')).toBeNull();
     const blocks = must(root.querySelector('[aria-label="Blocks"]'), 'blocks');
     await interact(() => must(blocks.querySelector<HTMLElement>('.fy-board-chip__open'), 'blocked chip').click());
     expect(opened).toEqual(['F2', 'F9']);
-    expect(undepended).toEqual(['F3']);
   });
 
-  it('draws no stop button when stopping is not offered, and no Depends-on row when it only blocks', async () => {
+  it('draws no Depends-on row when it only blocks, and no stop button either way', async () => {
     const task = card('F1', { blocks: [{ id: 'F9' }] });
-    const root = await show(<DependencyChips onOpen={() => undefined} onUndepend={null} task={task} />);
+    const root = await show(<DependencyChips onOpen={() => undefined} task={task} />);
     expect(root.querySelector('[aria-label="Depends on"]')).toBeNull();
     expect(root.querySelector('[aria-label="Blocks"]')).not.toBeNull();
     const waiting = card('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
-    await view?.render(<DependencyChips onOpen={() => undefined} onUndepend={null} task={waiting} />);
+    await view?.render(<DependencyChips onOpen={() => undefined} task={waiting} />);
     expect(root.querySelector('.fy-board-chip__x')).toBeNull();
     expect(root.querySelector('[aria-label="Blocks"]')).toBeNull();
   });
 });
 
 describe('DependsLine', () => {
-  const line = (task: BoardTaskView, adding: boolean, onToggleAdd: () => void = () => undefined) => (
-    <DependsLine
-      adding={adding}
-      form={<form data-form="depend" />}
-      onOpen={() => undefined}
-      onToggleAdd={onToggleAdd}
-      onUndepend={null}
-      task={task}
-    />
-  );
+  const line = (task: BoardTaskView) => <DependsLine onOpen={() => undefined} task={task} />;
 
-  it('says "Nothing." with Add dependency, and keeps the form away until it is pressed', async () => {
-    let pressed = 0;
-    const root = await show(
-      line(card('F1'), false, () => {
-        pressed += 1;
-      }),
-    );
-    expect(root.textContent).toBe('Nothing. Add dependency');
-    expect(root.querySelector('[data-form="depend"]')).toBeNull();
-    const add = must(root.querySelector<HTMLElement>('[data-action="add-dependency"]'), 'the add button');
-    expect(add.getAttribute('aria-expanded')).toBe('false');
-    await interact(() => add.click());
-    expect(pressed).toBe(1);
+  it('says "Nothing." and offers no way to add a dependency', async () => {
+    const root = await show(line(card('F1')));
+    expect(root.textContent).toBe('Nothing.');
+    expect(root.querySelector('button, form, input, [data-action="add-dependency"]')).toBeNull();
   });
 
-  it('shows the form once adding, under the chips of what it already waits for', async () => {
+  it('draws the chips of what it already waits for, and still no way to add or stop one', async () => {
     const waiting = card('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
-    const root = await show(line(waiting, true));
+    const root = await show(line(waiting));
     expect(root.textContent).not.toContain('Nothing.');
     expect(root.querySelector('.fy-board-chip')).not.toBeNull();
-    expect(root.querySelector('[data-form="depend"]')).not.toBeNull();
-    expect(root.querySelector('[data-action="add-dependency"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('form, input, [data-action="add-dependency"], .fy-board-chip__x')).toBeNull();
+    expect(root.textContent).not.toContain('Add dependency');
   });
 });
 

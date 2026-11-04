@@ -1,7 +1,6 @@
 import {
   AGENDA_SCHEMA_VERSION,
   type AgendaItem,
-  type AgendaResponse,
   type BoardResult,
   type BoardTaskView,
   boardErr,
@@ -70,29 +69,20 @@ const machine = { connection: laptop, name: 'laptop' };
 
 export interface DetailHarness {
   readonly props: BoardDetailProps;
-  readonly actions: ReturnType<typeof fakeActions>;
   readonly agendaStore: DaemonAgendaStore;
   readonly closed: { count: number };
   readonly navigated: string[];
-  readonly sent: { sessionId: string; message: string }[];
-  readonly responses: AgendaResponse[];
 }
 
 export interface DetailOptions {
   readonly task?: BoardTaskView | null;
   readonly laneSet?: LaneSet | null;
   readonly taskId?: string;
-  readonly actions?: ReturnType<typeof fakeActions>;
   readonly phone?: boolean;
   readonly siblings?: BoardDetailProps['siblings'];
-  readonly sendMessage?: (sessionId: string, message: string) => Promise<void>;
   readonly readFails?: boolean;
   readonly hold?: boolean;
   readonly agendaItems?: readonly AgendaItem[];
-  /** Whether the machine takes pictures with a move back; absent, the page has no way to upload. */
-  readonly sendBackFiles?: boolean;
-  /** Every upload, as `session:file`. */
-  readonly uploads?: string[];
 }
 
 /** A detail wired to a real board store over a fake port and a real agenda store. */
@@ -108,14 +98,7 @@ export const detailProps = (options: DetailOptions = {}): DetailHarness => {
   });
   const store = new DaemonBoardStore(port, fakeEnvironment());
   const agendaStore = new DaemonAgendaStore();
-  const responses: AgendaResponse[] = [];
-  const agenda: BoardAgenda = {
-    hydrate: async () => undefined,
-    respond: (async (_daemon: unknown, _scope: unknown, _id: string, response: AgendaResponse) => {
-      responses.push(response);
-    }) as unknown as BoardAgenda['respond'],
-    store: agendaStore,
-  };
+  const agenda: BoardAgenda = { hydrate: async () => undefined, store: agendaStore };
   if (options.agendaItems !== undefined) {
     const ok = agendaStore.applySnapshot(daemonSessionScope(laptop, LEAD), {
       v: AGENDA_SCHEMA_VERSION,
@@ -128,55 +111,30 @@ export const detailProps = (options: DetailOptions = {}): DetailHarness => {
     });
     if (!ok) throw new Error('the agenda fixture did not parse');
   }
-  const actions = options.actions ?? fakeActions();
   const closed = { count: 0 };
   const navigated: string[] = [];
-  const sent: DetailHarness['sent'] = [];
   const props: BoardDetailProps = {
     store,
     agenda,
-    actions,
     machine,
     taskId: options.taskId ?? 'F1',
     names,
     now: NOW,
     projectName: () => 'ferretry',
     siblings: options.siblings ?? [],
-    ports: {
-      sendMessage: async (_daemon, sessionId, message) => {
-        sent.push({ sessionId, message });
-        await options.sendMessage?.(sessionId, message);
-      },
-      ...(options.sendBackFiles === undefined
-        ? {}
-        : {
-            sendBackFiles: async () => options.sendBackFiles === true,
-            uploadAttachment: async (_daemon, sessionId, file) => {
-              options.uploads?.push(`${sessionId}:${file.name}`);
-              return {
-                id: `att_${'a'.repeat(64)}`,
-                filename: file.name,
-                mime: file.type,
-                size: file.size,
-                sha256: '0'.repeat(64),
-                createdAt: '2026-08-01T10:00:00.000Z',
-              };
-            },
-          }),
-    },
     phone: options.phone ?? false,
     onClose: () => {
       closed.count += 1;
     },
     onNavigate: to => void navigated.push(to),
   };
-  return { props, actions, agendaStore, closed, navigated, sent, responses };
+  return { props, agendaStore, closed, navigated };
 };
 
 export const click = (root: ParentNode, selector: string) =>
   interact(() => must(root.querySelector<HTMLElement>(selector), selector).click());
 
-export const buttonNamed = (root: ParentNode, label: string): HTMLButtonElement =>
+const buttonNamed = (root: ParentNode, label: string): HTMLButtonElement =>
   must(
     [...root.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes(label)),
     `the "${label}" button`,
@@ -197,12 +155,6 @@ export const fill = async (field: Field, value: string): Promise<void> => {
   const type = field instanceof HTMLSelectElement ? 'change' : 'input';
   await interact(() => field.dispatchEvent(new Event(type, { bubbles: true })));
 };
-
-export const fillLabelled = (root: ParentNode, label: string, value: string) =>
-  fill(must(root.querySelector<Field>(`[aria-label="${label}"]`), label), value);
-
-export const submit = (form: Element) =>
-  interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
 export const text = (root: ParentNode, selector: string): string | undefined =>
   root.querySelector(selector)?.textContent ?? undefined;

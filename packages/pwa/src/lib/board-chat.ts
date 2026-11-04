@@ -260,9 +260,9 @@ export interface BoardChat {
 // ---------------------------------------------------------------------------------------------------
 
 /** One lane of the chat's Kanban: only the cards this ferret holds, in the lane's own order. */
-export interface ChatKanbanLane {
+interface ChatKanbanLane {
   readonly key: string;
-  /** The project board (`BoardGroup.key`) the lane belongs to: a card can only be dropped within its own. */
+  /** The project board (`BoardGroup.key`) the lane belongs to. */
   readonly groupKey: string;
   /** The lane's id; `null` for the `Unplaced` column, which is not a place a card can be moved to. */
   readonly laneId: string | null;

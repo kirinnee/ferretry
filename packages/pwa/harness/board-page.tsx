@@ -5,19 +5,15 @@
  *
  * `?view=kanban|list|tree|dependencies|archive` picks the view; nothing leaves the page.
  *
- * A move never lands: it stays on its way, so an answer's spinner can be captured (`?refuse=1` refuses it
- * instead, to show the refusal on the card). The machine takes pictures with "Not good" (`?old=1`: it is too old
- * to), and an upload is answered at once without leaving the page.
+ * The page is read-only (no drag, lane menu, "Add card" or "Lanes ✎"), so the fake daemon only answers reads.
  */
 
-import { type BoardTaskView, boardErr, boardOk } from '@ferretry/protocol';
+import type { BoardTaskView } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { BoardPage } from '../src/features/board/board-page.tsx';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
-import { boardPorts } from '../src/lib/board-ports.ts';
-import type { DaemonFetch } from '../src/lib/runtime-models.ts';
 import {
   boardAnswer,
   card,
@@ -450,48 +446,9 @@ const store = new DaemonBoardStore(
       });
     },
     projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
-    act: async () =>
-      new URLSearchParams(window.location.search).get('refuse') === null
-        ? await new Promise<never>(() => undefined)
-        : boardErr({
-            status: 409,
-            message: 'Only the owner closes a card; this device is not paired as the owner.',
-            boardCode: 'owner-gate',
-          }),
-    create: async (_daemon, request) => {
-      (window as unknown as { __created: unknown[] }).__created.push(request);
-      return boardOk({ task: card('F99', { title: 'Fresh card' }), laneSet: laneSetFor() }) as never;
-    },
   }),
   fakeEnvironment(),
 );
-
-const OLD_MACHINE = new URLSearchParams(window.location.search).get('old') !== null;
-// A paired device's session is the only way to the daemon: the fake carrier answers an upload like one, and the
-// page refuses the raw network, so a send-back that bypassed the carrier would fail here as it does on a phone.
-const carrier: DaemonFetch = async (input, init) => {
-  const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string };
-  if (init?.method !== 'POST' || !String(input).endsWith('/attachments'))
-    return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
-  return new Response(
-    JSON.stringify({
-      id: `att_${'a'.repeat(64)}`,
-      filename: body.filename ?? 'file',
-      mime: body.mime ?? 'application/octet-stream',
-      size: 1,
-      sha256: '0'.repeat(64),
-      createdAt: new Date(NOW).toISOString(),
-    }),
-    { status: 201 },
-  );
-};
-const PORTS = {
-  sendMessage: async () => undefined,
-  startFerret: async () => 'mvzzzzzz-00000000',
-  sendBackFiles: async () => !OLD_MACHINE,
-  uploadAttachment: boardPorts(async () => ({}) as never, carrier).uploadAttachment,
-};
-(window as unknown as { __created: unknown[] }).__created = [];
 
 function Harness() {
   const params = new URLSearchParams(window.location.search);
@@ -508,7 +465,7 @@ function Harness() {
   const shell = params.get('shell') !== null;
   const page = (
     <BoardPage
-      agenda={{ respond: async () => undefined }}
+      agenda={{}}
       callsigns={CALLSIGNS}
       origin={params.get('from') === null ? null : { daemonId: laptop.daemonId, sessionId: params.get('from') ?? '' }}
       phone={phone}
@@ -516,7 +473,6 @@ function Harness() {
       now={NOW}
       onNavigate={() => undefined}
       onSearch={setSearch}
-      ports={PORTS}
       search={search}
       store={store}
     />

@@ -366,7 +366,6 @@ const agenda = {
     });
     void connection;
   },
-  respond: async () => undefined,
 };
 
 function Harness() {
@@ -382,19 +381,6 @@ function Harness() {
         onNavigate={() => undefined}
         onSearch={() => undefined}
         openCard={{ daemonId: laptop.daemonId, taskId: OPEN_ID }}
-        ports={{
-          sendMessage: async () => undefined,
-          startFerret: async () => OTTILIE,
-          sendBackFiles: async () => true,
-          uploadAttachment: async (_daemon, _session, file) => ({
-            id: `att_${'a'.repeat(64)}`,
-            filename: file.name,
-            mime: file.type,
-            size: file.size,
-            sha256: '0'.repeat(64),
-            createdAt: ago(0),
-          }),
-        }}
         search=""
         store={store}
       />
