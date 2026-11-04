@@ -338,6 +338,8 @@ describe('harnessQuestionAnswers', () => {
     should(harnessQuestionAnswers(several, open('so:\n1. eu')).ok).be.false();
     should(harnessQuestionAnswers(several, open('2. lint\n1. eu')).ok).be.false();
     should(harnessQuestionAnswers(several, open('1. eu\n4. more')).ok).be.false();
+    // A decimal is prose, not a number: "1.5 GB" is never answer 1 = "5 GB" (review of &F922).
+    should(harnessQuestionAnswers(several, open('1.5 GB should be enough')).ok).be.false();
   });
 
   it('should send a skipped question as "skipped": every question is optional, and it all goes in one answer (&F922)', () => {
@@ -364,6 +366,30 @@ describe('harnessQuestionAnswers', () => {
       answers: [
         { kind: 'other', text: SKIPPED_ANSWER },
         { kind: 'selection', labels: ['lint', 'unit'] },
+        { kind: 'other', text: SKIPPED_ANSWER },
+      ] satisfies StructuredQuestionAnswer[],
+    });
+  });
+
+  it('should pick an offered option called Skip, never read it as a skipped question (review of &F922)', () => {
+    const offersSkip = {
+      ...several,
+      questions: [
+        {
+          question: 'Run the migration?',
+          header: 'Run',
+          options: [{ label: 'Run' }, { label: 'Skip' }],
+          multiSelect: false,
+        },
+        ...several.questions.slice(1),
+      ],
+    };
+    const mapped = harnessQuestionAnswers(offersSkip, { kind: 'open-question', answer: '1. Skip\n2. skip' });
+    should(mapped).deepEqual({
+      ok: true,
+      answers: [
+        { kind: 'selection', labels: ['Skip'] },
+        { kind: 'other', text: SKIPPED_ANSWER },
         { kind: 'other', text: SKIPPED_ANSWER },
       ] satisfies StructuredQuestionAnswer[],
     });

@@ -286,12 +286,12 @@ export const AgendaResponseSchema = z
       answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
     }),
     /**
-     * A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). Any subset, none included
-     * when the owner only wrote a note: every field is optional (&F922).
+     * A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). Any subset, at least one:
+     * a form answered with only words is an `other` answer, the shape every app already reads (&F922).
      */
     z.strictObject({
       kind: z.literal('form'),
-      answers: z.array(AgendaFormAnswerSchema).max(MAX_AGENDA_FIELDS),
+      answers: z.array(AgendaFormAnswerSchema).min(1).max(MAX_AGENDA_FIELDS),
     }),
     /**
      * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it

@@ -24,9 +24,12 @@ export const withPick = (picks: FormPicks, field: string, next: readonly string[
   return next.length === 0 ? rest : { ...rest, [field]: next };
 };
 
-/** Picking one option: a pick-one holds it alone, a pick-many toggles it among the others. */
+/**
+ * Picking one option: a pick-many toggles it among the others; a pick-one holds it alone, and picking the held one
+ * again takes it back — every field is optional (&F922), so even a recommended pick can be left out.
+ */
 export const toggled = (current: readonly string[], value: string, many: boolean): readonly string[] =>
-  many ? (current.includes(value) ? current.filter(each => each !== value) : [...current, value]) : [value];
+  current.includes(value) ? current.filter(each => each !== value) : many ? [...current, value] : [value];
 
 export class AgendaFormStore {
   readonly #picks = new Map<string, FormPicks>();

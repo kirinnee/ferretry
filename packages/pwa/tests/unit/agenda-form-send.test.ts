@@ -35,6 +35,8 @@ describe('form picks', () => {
   test('start on the recommendation, and a pick-one holds one value while a pick-many toggles', () => {
     expect(recommendedPicks(FIELDS)).toEqual({ '1': ['EU'] });
     expect(toggled(['EU'], 'US', false)).toEqual(['US']);
+    // Picking the held one again takes it back: every field is optional, a recommended one too (&F922).
+    expect(toggled(['EU'], 'EU', false)).toEqual([]);
     expect(toggled(['Page'], 'Mail', true)).toEqual(['Page', 'Mail']);
     expect(toggled(['Page', 'Mail'], 'Page', true)).toEqual(['Mail']);
     expect(withPick({ '1': ['EU'] }, '1', [])).toEqual({});
@@ -79,11 +81,11 @@ describe('planning the one Send of a form', () => {
     expect(part.action.response).toEqual({ kind: 'form', answers: [{ id: '1', picked: 'EU' }] });
   });
 
-  test('words with nothing picked still go: an answer with no field and the words as its note', () => {
+  test('words with nothing picked still go, as the owner’s own words: the shape an older app reads', () => {
     const plan = planFormSend({ fields: FIELDS.slice(0, 3) }, {}, ' none of these fit ');
     expect(plan).toEqual({
       kind: 'send',
-      action: { kind: 'respond', label: 'Form', response: { kind: 'form', answers: [] }, note: 'none of these fit' },
+      action: { kind: 'respond', label: 'Form', response: { kind: 'other', answer: 'none of these fit' } },
     });
   });
 

@@ -1241,6 +1241,22 @@ describe('a form card', () => {
     expect(one('[data-agenda-form-foot]').hasAttribute('data-done')).toBe(true);
   });
 
+  test('a recommended pick can be taken back: Clear on a pick-one, the pressed Yes/No half again (&F922)', async () => {
+    await draw(form, { formKey: 'view-test-clear' });
+    expect(one('[data-agenda-form-progress]').textContent).toBe('1 of 3 answered');
+    const clear = one<HTMLButtonElement>('[data-agenda-form-clear]');
+    expect(clear.getAttribute('aria-label')).toBe('Clear answer 1');
+    await interact(() => clear.click());
+    const radios = [...root().querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map(radio => radio.checked)).toEqual([false, false]);
+    expect(root().querySelector('[data-agenda-form-clear]')).toBeNull();
+    expect(one('[data-agenda-form-progress]').textContent).toBe('0 of 3 answered');
+    await interact(() => yesNoButton('Yes').click());
+    expect(yesNoButton('Yes').getAttribute('aria-pressed')).toBe('true');
+    await interact(() => yesNoButton('Yes').click());
+    expect(yesNoButton('Yes').getAttribute('aria-pressed')).toBe('false');
+  });
+
   test('without a form key it only reads: no controls, and it says where to answer', async () => {
     await draw(form);
     expect(root().querySelector('input')).toBeNull();

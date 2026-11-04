@@ -5,7 +5,8 @@
  * - The composer's text answers the form's `text` field; a form with no such field sends it as the answer's note.
  * - EVERY FIELD IS OPTIONAL (&F922): Send goes through with any subset, at once — no field is asked about first. What
  *   the owner skipped reads `(skipped)` in the one numbered answer the ferret receives (`formWords`).
- * - Words with nothing picked still go: an answer with no field and the words as its note.
+ * - Words with nothing picked still go, as the owner's own words (`{ kind: 'other' }`): the shape every app and
+ *   daemon already reads, so an older one never meets a form answer with no field.
  * - Nothing picked and nothing typed is not an answer; Send says so instead.
  */
 
@@ -69,6 +70,11 @@ export const planFormSend = (item: Pick<AgendaItem, 'fields'>, picks: FormPicks,
   const answers = formAnswersFrom(fields, picks, typed);
   if (answers.length === 0 && typed.trim() === '')
     return { kind: 'nothing', message: 'Pick an answer or type something before you send the form.' };
+  if (answers.length === 0)
+    return {
+      kind: 'send',
+      action: { kind: 'respond', label: FORM_SENT_LABEL, response: { kind: 'other', answer: typed.trim() } },
+    };
   const hasTextField = fields.some(field => field.type === 'text');
   const note = hasTextField || typed.trim() === '' ? {} : { note: typed.trim() };
   return {

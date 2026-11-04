@@ -94,8 +94,8 @@ describe('a form card on the agenda', () => {
     };
 
     should(AgendaResponseSchema.safeParse(answer).success).be.true();
-    // Every field is optional (&F922): a form sent with only a note answers no field at all.
-    should(AgendaResponseSchema.safeParse({ kind: 'form', answers: [] }).success).be.true();
+    // Words alone go as an `other` answer (&F922), so a form answer names a field and older apps still read it.
+    should(AgendaResponseSchema.safeParse({ kind: 'form', answers: [] }).success).be.false();
   });
 
   it('should name the form kind in the instruction line', () => {

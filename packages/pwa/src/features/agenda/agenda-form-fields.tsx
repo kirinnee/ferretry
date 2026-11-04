@@ -8,7 +8,8 @@
  *
  * The asker's recommended value is already picked and says so with a "Recommended" tag; what is PICKED is the filled
  * row (or the pressed half with its check), so the two never read alike. EVERY FIELD IS OPTIONAL (&F922): nothing
- * says a field needs an answer, and Send goes with any subset. A foot pinned to the bottom of the scroller counts what
+ * says a field needs an answer, and Send goes with any subset; a pick is taken back by tapping the pressed Yes/No half
+ * again, or Clear on a pick-one (a radio cannot be unticked). A foot pinned to the bottom of the scroller counts what
  * is answered and says how to send — so it is never hidden under the composer. The picks live in `agendaForms`; the composer's one
  * Send combines them with its text (`agenda-form-send.ts`), the Inbox's and the chat's alike. Where no composer can
  * answer it (a settled item, a chat with no agenda client), the fields are a numbered list to read, not controls.
@@ -145,6 +146,18 @@ export function AgendaFormFields({
                   {renderProse(field.label)}
                   <Hint field={field} />
                 </div>
+                {live && field.type === 'one' && (picks[field.id] ?? []).length > 0 ? (
+                  <button
+                    aria-label={`Clear answer ${String(index + 1)}`}
+                    className="fy-form__clear"
+                    data-agenda-form-clear=""
+                    disabled={disabled}
+                    onClick={() => agendaForms.set(formKey, fields, field.id, [])}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                ) : null}
               </div>
               {field.type === 'text' ? (
                 <p className="fy-card__wanted-choices" data-agenda-form-text="">

@@ -322,7 +322,8 @@ function plainNumberedAnswers(text: string, count: number): readonly string[] | 
   let current: string[] | undefined;
   let last = 0;
   for (const line of text.split('\n')) {
-    const head = /^\s*(\d+)[.)]\s*(.*)$/u.exec(line);
+    // A number counts only with a space or the line's end after it: "1.5 GB" is prose, not answer 1.
+    const head = /^\s*(\d+)[.)](?:\s+(.*))?$/u.exec(line);
     const number = head === null ? Number.NaN : Number(head[1]);
     if (head !== null) {
       if (number <= last || number > count) return undefined;
@@ -360,9 +361,12 @@ export function harnessQuestionAnswers(pending: PendingQuestion, response: Agend
   // Every question is optional (&F922): one the owner skipped is answered "skipped", so the form still goes in one go.
   return {
     ok: true,
-    answers: parts.map((part, index) =>
-      isSkip(part) ? { kind: 'other', text: SKIPPED_ANSWER } : answerFor(questions[index] as PendingQuestionItem, part),
-    ),
+    answers: parts.map((part, index) => {
+      const question = questions[index] as PendingQuestionItem;
+      // An option the question offers wins over the skip words: "1. Skip" picks an offered Skip.
+      const offered = (question.options ?? []).some(option => option.label === part);
+      return !offered && isSkip(part) ? { kind: 'other', text: SKIPPED_ANSWER } : answerFor(question, part);
+    }),
   };
 }
 
