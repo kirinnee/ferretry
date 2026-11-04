@@ -238,6 +238,7 @@ import {
   INBOX_STALE_QUEUE_MS,
   inboxStuckAnomaly,
   inboxStuckCandidates,
+  inboxStuckEpisode,
   inboxStuckForInvestigation,
   inboxStuckNoticeLine,
   planInboxStuck,
@@ -511,7 +512,14 @@ function markInboxInvestigated(state: WardenRuntimeState, spawned: readonly stri
   let next: Record<string, InboxStuckTold> | undefined;
   for (const [sessionId, assignment] of Object.entries(state.assignments ?? {})) {
     const told = memory[sessionId];
-    if (told === undefined || !started.has(assignment.wardenId) || !assignment.kinds.includes('inbox_stuck')) continue;
+    // Only an investigation of THIS episode counts: one of an older episode, queued across a change, does not.
+    if (
+      told === undefined ||
+      !started.has(assignment.wardenId) ||
+      !assignment.kinds.includes('inbox_stuck') ||
+      assignment.subject !== inboxStuckEpisode(sessionId, told.messageId)
+    )
+      continue;
     next = { ...(next ?? memory), [sessionId]: { ...told, investigatedAt: at } };
   }
   return next === undefined ? state : { ...state, stuckInbox: next };
@@ -1236,10 +1244,21 @@ export class WardenSweepService {
     const orphaned = orphans.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
 
     state = await this.handleInbox({ inbox, state, config, at, force: options.force });
-    // A stuck inbox is investigated only where nothing else about the ferret is: its own anomaly (a frozen process,
-    // say) has the remedies a stuck queue's investigation does not, and must never be displaced by it.
+    // A stuck inbox is investigated only where nothing else about the ferret will be: its own anomaly (a frozen
+    // process, say) has the remedies a stuck queue's investigation does not, and must never be displaced by it —
+    // not even while Jev holds it for a first look. An own anomaly left alone (blessed) or waiting its backoff rung
+    // will not be investigated, so it does not hold the inbox's investigation back.
+    const byIdNow = new Map(fleet.map(session => [session.config.id, session]));
     const ownInvestigations = new Set(
-      anomalies.filter(anomaly => anomaly.assignedWarden === true).map(anomaly => anomaly.sessionId),
+      anomalies
+        .filter(anomaly => {
+          if (anomaly.assignedWarden !== true) return false;
+          const target = byIdNow.get(anomaly.sessionId);
+          if (target !== undefined && isAnomalyBlessed(state.blessings ?? {}, anomaly, target.state.status, nowMs))
+            return false;
+          return backoffHold(state.backoff ?? {}, anomaly, nowMs, assignedCooldownMs(config)) === undefined;
+        })
+        .map(anomaly => anomaly.sessionId),
     );
     const inboxInvestigations = inboxStuckForInvestigation(inbox.flags, state.stuckInbox ?? {}).filter(
       anomaly =>
@@ -1583,7 +1602,12 @@ export class WardenSweepService {
     // Nor may a stuck inbox overwrite anything: the ferret's own anomaly carries the remedies it needs.
     for (const anomaly of [...queued, ...candidates]) {
       const held = anomalyById.get(anomaly.sessionId);
-      if (held?.kind === 'owner_request' || (held !== undefined && anomaly.kind === 'inbox_stuck')) continue;
+      // A fresh stuck inbox still supersedes a queued copy of itself, which describes an older look.
+      if (
+        held?.kind === 'owner_request' ||
+        (anomaly.kind === 'inbox_stuck' && held !== undefined && held.kind !== 'inbox_stuck')
+      )
+        continue;
       anomalyById.set(anomaly.sessionId, anomaly);
     }
 

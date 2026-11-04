@@ -309,6 +309,32 @@ describe('a ferret whose inbox is stuck (B148)', () => {
     should(subject.state().stuckInbox?.ryu).not.have.property('investigatedAt');
   });
 
+  it('should still investigate the inbox when the ferret’s own anomaly is left alone and will not be investigated', async () => {
+    let now = NOW;
+    const stuckInbox = new FakeStuckInbox();
+    const subject = harness({ config: enabled(), fleet: [ryu()], stuckInbox, now: () => now });
+    await subject.service.run({ force: false });
+    subject.setFleet([{ ...ryu(), frozenAt: iso(NOW - 10 * MINUTE) }]);
+    subject.setState({
+      ...subject.state(),
+      blessings: {
+        ryu: {
+          sessionId: 'ryu',
+          kinds: ['agent_frozen'],
+          status: 'running',
+          blessedAt: iso(NOW),
+          expiresAt: iso(NOW + 24 * 60 * MINUTE),
+        },
+      },
+    });
+    now = NOW + 5 * MINUTE;
+    await subject.service.run({ force: false });
+
+    should(subject.spawns).have.length(1);
+    should(subject.state().assignments?.ryu?.kinds).eql(['inbox_stuck']);
+    should(subject.state().stuckInbox?.ryu?.investigatedAt).equal(iso(now));
+  });
+
   it('should investigate an episode once, however long it stays stuck', async () => {
     let now = NOW;
     const stuckInbox = new FakeStuckInbox();
@@ -351,7 +377,7 @@ describe('a ferret whose inbox is stuck (B148)', () => {
   it('should not read a queue untouched for longer than the horizon, and should say an old inbox expired, not drained', async () => {
     let now = NOW;
     const stuckInbox = new FakeStuckInbox();
-    stuckInbox.written = { ryu: NOW - 4 * 24 * 60 * MINUTE };
+    stuckInbox.written = { ryu: NOW - 5 * 24 * 60 * MINUTE };
     const stale = harness({ config: enabled(), fleet: [ryu()], stuckInbox, now: () => now });
     await stale.service.run({ force: false });
     should(stuckInbox.readCalls).equal(0);

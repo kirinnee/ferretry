@@ -56,11 +56,17 @@ export const INBOX_STUCK_LIMITS_MS: Readonly<Record<InboxUrgency, number>> = {
 export const INBOX_STUCK_HORIZON_MS = 3 * 24 * 60 * 60_000;
 
 /**
+ * The longest a message can be held to combine with others: the most `fyiMaxHoldMs` may be set to
+ * (`runtime/config.ts`), which is longer than any action window.
+ */
+const LONGEST_HOLD_MS = 24 * 60 * 60_000;
+
+/**
  * A queue not written to for longer than this cannot hold a message inside the horizon — every message is appended
- * when it is accepted, and none is held to combine for anywhere near an hour — so it is not read at all. Finished
+ * when it is accepted, and none is due later than its longest hold after that — so it is not read at all. Finished
  * ferrets keep their queues for good; reading every one of them every sweep would grow without bound.
  */
-export const INBOX_STALE_QUEUE_MS = INBOX_STUCK_HORIZON_MS + 60 * 60_000;
+export const INBOX_STALE_QUEUE_MS = INBOX_STUCK_HORIZON_MS + LONGEST_HOLD_MS;
 
 /** One send of the session's ledger, as far as this module reads it: the latest line of each. */
 export interface InboxSend {

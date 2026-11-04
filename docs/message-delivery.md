@@ -760,8 +760,9 @@ is held for a revive the reviver refused), `draft_own` (a send of ours sits type
 types once the screen reads clear), `dialog` / `launching` (the queue's own wait, held far too long), or
 `no_reason` (nothing has looked at the queue).
 
-**What is read.** A queue file not written to for longer than the horizon plus an hour (`INBOX_STALE_QUEUE_MS`) is
-not read at all — one `stat` — since every message is appended when it is accepted; finished ferrets keep their
+**What is read.** A queue file not written to for longer than the horizon plus the longest hold a message can be given
+(a day: `fyiMaxHoldMs`'s maximum; `INBOX_STALE_QUEUE_MS`) is not read at all — one `stat` — since every message is
+appended when it is accepted; finished ferrets keep their
 queues for good, and reading all of them every sweep would grow without bound. A queue, a ledger or a `stat` that
 cannot be read proves nothing: a ferret already flagged stays as it stands, on the notice and in memory.
 
@@ -786,7 +787,8 @@ cannot be read proves nothing: a ferret already flagged stays as it stands, on t
 3. **An investigation**, in the same sweep and ONCE per episode (`investigatedAt`): the flag goes to an assigned
    warden, never to Jev (it is a fact about the daemon's queue, which a ferret's transcript cannot show). It never
    displaces the ferret's own investigation: a ferret that is also frozen, say, is investigated for THAT, with the
-   remedies a frozen process needs. Its prompt has it read the queue, the ledger and the events, read-only, and
+   remedies a frozen process needs — unless that anomaly is left alone or waiting its backoff, when it will not be
+   investigated and the inbox is. Its prompt has it read the queue, the ledger and the events, read-only, and
    offers only `LEAVE`, `NEEDS_HUMAN` and `NUDGE` — which here asks the daemon to run the safe re-check once more.
    Whatever its verdict names, the ferret is never messaged, resumed, restarted or stopped for this flag
    (`fleet.warden_inbox_rechecked` with `by: investigation`), and a `LEAVE` grants no blessing. Its report — a

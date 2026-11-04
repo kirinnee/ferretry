@@ -248,7 +248,8 @@ describe('inbox_stuck: which ferrets are read', () => {
       flags: [],
       expired: ['old'],
     });
-    should(INBOX_STALE_QUEUE_MS).equal(INBOX_STUCK_HORIZON_MS + 60 * MINUTE);
+    // The horizon, plus the longest a message may be held to combine (`fyiMaxHoldMs` at most a day).
+    should(INBOX_STALE_QUEUE_MS).equal(INBOX_STUCK_HORIZON_MS + 24 * 60 * MINUTE);
   });
 });
 
