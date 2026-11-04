@@ -5,7 +5,7 @@
  * - which tabs the view draws: a notice draws its body in "What I need from you" and a card gate's body is its How to
  *   test, so for those the full picture is not a tab;
  * - which tab is open: the one this device remembered while it still exists, else the first (the main tab);
- * - which tabs the last edit changed — the dot and the word "Changed" on the tab;
+ * - which tabs changed since this device last looked (else in the last edit) — the dot and the word "Changed";
  * - the phone switcher's words: "Where we are now · 1 of 3 · 2 changed".
  */
 
@@ -23,21 +23,59 @@ export const openTab = (tabs: readonly AgendaViewTab[], remembered: string | nul
 /** The fields the main tab is drawn from: an edit of any of them changes it. */
 const MAIN_FIELDS: ReadonlySet<string> = new Set(['questionAnswer', 'decided', 'stillOpen', 'whereWeAre']);
 
-/** The ids of the tabs the item's last edit changed: what the tab row marks "Changed". */
+/** The ferret's own tabs `after` has that differ from (or are not in) `before`: by id, a rename counts. */
+const ownChanged = (before: AgendaItem['tabs'], after: AgendaItem['tabs']): readonly string[] => {
+  const was = new Map((before ?? []).map(tab => [tab.id, tab]));
+  return (after ?? [])
+    .filter(tab => {
+      const old = was.get(tab.id);
+      return old === undefined || old.body !== tab.body || old.name !== tab.name;
+    })
+    .map(tab => tab.id);
+};
+
+/** The ids of the tabs the item's last edit changed: the "Changed" marks when nothing better is known. */
 export const changedTabs = (item: AgendaItem): ReadonlySet<string> => {
   const revision = lastRevision(item);
   if (revision === null) return new Set();
   const changed = new Set<string>();
   if (revision.changed.some(field => MAIN_FIELDS.has(field))) changed.add('main');
   if (revision.changed.includes('body')) changed.add('body');
-  if (revision.changed.includes('tabs')) {
-    const before = new Map((revision.previous.tabs ?? []).map(tab => [tab.id, tab]));
-    for (const tab of item.tabs ?? []) {
-      const was = before.get(tab.id);
-      if (was === undefined || was.body !== tab.body || was.name !== tab.name) changed.add(tab.id);
-    }
-  }
+  if (revision.changed.includes('tabs'))
+    for (const id of ownChanged(revision.previous.tabs, item.tabs)) changed.add(id);
   return changed;
+};
+
+/**
+ * The ids of the tabs that differ between the version this device last saw (`seen`) and `now`: the "Changed" marks
+ * "since you last looked", so a tab edit stays marked when a later edit only touched the title.
+ */
+export const tabsChangedSince = (seen: AgendaItem, now: AgendaItem): ReadonlySet<string> => {
+  const changed = new Set<string>();
+  const text = (item: AgendaItem, field: string): string => {
+    const value = (item as unknown as Record<string, unknown>)[field];
+    return typeof value === 'string' ? value : '';
+  };
+  if ([...MAIN_FIELDS].some(field => text(seen, field) !== text(now, field))) changed.add('main');
+  if (text(seen, 'body') !== text(now, 'body')) changed.add('body');
+  for (const id of ownChanged(seen.tabs, now.tabs)) changed.add(id);
+  return changed;
+};
+
+/**
+ * The drawn tab a section of the Changes panel belongs to, so the panel can open it: the main tab's parts, the full
+ * picture, one of the ferret's own tabs (`tab:<id>`). `undefined` for any other section, or a tab not drawn.
+ */
+export const sectionTab = (key: string, tabs: readonly AgendaViewTab[]): AgendaViewTab | undefined => {
+  const id = MAIN_FIELDS.has(key)
+    ? 'main'
+    : key === 'body'
+      ? 'body'
+      : key.startsWith('tab:')
+        ? key.slice('tab:'.length)
+        : undefined;
+  // A fixed tab is matched by kind, never by an own tab that happens to share its id.
+  return tabs.find(tab => tab.id === id && (tab.kind === 'own') === key.startsWith('tab:'));
 };
 
 /** The phone switcher's words: the open tab's name, where it is among the tabs, and how many changed. */

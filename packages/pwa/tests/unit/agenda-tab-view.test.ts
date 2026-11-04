@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import { readTab, writeTab } from '../../src/lib/agenda-fold.ts';
-import { changedTabs, nextTab, openTab, switcherWords, viewTabs } from '../../src/lib/agenda-tab-view.ts';
+import {
+  changedTabs,
+  nextTab,
+  openTab,
+  sectionTab,
+  switcherWords,
+  tabsChangedSince,
+  viewTabs,
+} from '../../src/lib/agenda-tab-view.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
 /** THE TABS AS THE VIEW DRAWS THEM (&F923): which are drawn, which is open, which changed, the phone's words. */
@@ -114,5 +122,40 @@ describe('the remembered tab', () => {
     expect(readTab('m/s/A5', refusing)).toBeNull();
     writeTab('m/s/A5', 'risks', false, refusing);
     expect(readTab('m/s/A5', null)).toBeNull();
+  });
+});
+
+describe('the tabs changed since this device last looked', () => {
+  test('compare the version seen with now: the main tab for any of its parts, the body, and own tabs by id', () => {
+    const seen = item({ whereWeAre: 'Now.', decided: 'A.', body: 'Report.', tabs: own });
+    expect([...tabsChangedSince(seen, seen)]).toEqual([]);
+    const now = item({
+      whereWeAre: 'Now.',
+      decided: 'A and B.',
+      body: 'Report, longer.',
+      tabs: [
+        { id: 'decisions', name: 'Decisions', body: 'SQLite.' },
+        { id: 'risks', name: 'Open risks', body: 'Slip.' },
+        { id: 'notes', name: 'Notes', body: 'New.' },
+      ],
+    });
+    expect([...tabsChangedSince(seen, now)].sort()).toEqual(['body', 'main', 'notes', 'risks']);
+  });
+});
+
+describe('the tab a section of Changes opens', () => {
+  const tabs = viewTabs(item({ whereWeAre: 'Now.', body: 'Report.', tabs: own }), false);
+  test('is the main tab for its parts, the full picture for the body, and an own tab by its key', () => {
+    expect(sectionTab('decided', tabs)?.id).toBe('main');
+    expect(sectionTab('whereWeAre', tabs)?.id).toBe('main');
+    expect(sectionTab('body', tabs)?.id).toBe('body');
+    expect(sectionTab('tab:risks', tabs)?.name).toBe('Risks');
+  });
+
+  test('is none for any other section, a tab not drawn, or the order of the tabs', () => {
+    expect(sectionTab('premise', tabs)).toBeUndefined();
+    expect(sectionTab('tabOrder', tabs)).toBeUndefined();
+    expect(sectionTab('tab:gone', tabs)).toBeUndefined();
+    expect(sectionTab('body', viewTabs(item({ whereWeAre: 'Now.', body: 'Report.' }), true))).toBeUndefined();
   });
 });

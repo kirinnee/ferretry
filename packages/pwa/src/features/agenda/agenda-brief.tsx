@@ -25,7 +25,7 @@ import type {
   AgendaRecommendation,
   AgendaRevisableField as RevisionField,
 } from '@ferretry/protocol';
-import { agendaCardKind, plainLabel, recommendedAgendaOption } from '@ferretry/protocol';
+import { agendaCardKind, agendaTabs, plainLabel, recommendedAgendaOption } from '@ferretry/protocol';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';
@@ -421,6 +421,14 @@ export function AgendaBriefSections({
   const decided = !asCard && item.decided?.trim() ? item.decided : null;
   const context = !asCard && item.context?.trim() ? item.context : null;
   const stillOpen = !asCard && item.stillOpen?.trim() ? item.stillOpen : null;
+  // THE MAIN TAB'S PREVIEW (&F923): its own words under the decided and still-open parts it opens with, then the
+  // ferret's own tabs by name, so a reader of the brief knows the item holds more than it shows.
+  const whereNow = !asCard && item.whereWeAre?.trim() ? item.whereWeAre : null;
+  const alsoTabs = asCard
+    ? []
+    : agendaTabs(item)
+        .filter(tab => tab.kind === 'own')
+        .map(tab => tab.name);
   const changedWhole = (...fields: readonly RevisionField[]): boolean =>
     fields.some(field => highlight?.fields.has(field) === true);
   const all = item.questions ?? [];
@@ -565,6 +573,16 @@ export function AgendaBriefSections({
             text={stillOpen}
           />
         </Section>
+      )}
+      {whereNow === null ? null : (
+        <Section changed={changedWhole('whereWeAre')} fold={fold} name="where-now" open={open} title="Where we are now">
+          <div className="fy-attn-prose">{renderProse(whereNow)}</div>
+        </Section>
+      )}
+      {alsoTabs.length === 0 ? null : (
+        <p className="fy-attn-prose m-0" data-agenda-brief-also="">
+          <strong>Also in the item:</strong> {alsoTabs.join(', ')}
+        </p>
       )}
       {fold ? questionsBlock : null}
       {options.length === 0 ? null : (

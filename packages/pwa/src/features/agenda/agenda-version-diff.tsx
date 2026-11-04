@@ -6,8 +6,8 @@
  * change fold away under one line. The comparison itself is `agenda-diff.ts`'s; this only reads and draws.
  */
 
-import type { AgendaItem } from '@ferretry/protocol';
-import { GitCompareArrows } from 'lucide-react';
+import type { AgendaItem, AgendaViewTab } from '@ferretry/protocol';
+import { ChevronRight, GitCompareArrows } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
   BASIS_WORDS,
@@ -81,8 +81,15 @@ const STATUS_WORDS: Readonly<Record<SectionDiff['status'], string>> = {
   changed: 'Changed',
 };
 
-function SectionChange({ section }: { readonly section: SectionDiff }) {
+/** Opens one of the item's tabs; with the tab a section belongs to, the section offers to open it. */
+interface TabLink {
+  readonly tabFor?: ((key: SectionDiff['key']) => AgendaViewTab | undefined) | undefined;
+  readonly onOpenTab?: ((id: string) => void) | undefined;
+}
+
+function SectionChange({ section, tabFor, onOpenTab }: { readonly section: SectionDiff } & TabLink) {
   const shown = useMemo(() => foldUnchanged(section.runs), [section.runs]);
+  const tab = onOpenTab === undefined ? undefined : tabFor?.(section.key);
   return (
     <section className="fy-diff__section" data-agenda-diff-section={section.key} data-status={section.status}>
       <h5 className="fy-diff__section-head">
@@ -98,6 +105,18 @@ function SectionChange({ section }: { readonly section: SectionDiff }) {
             <span className="sr-only"> words removed</span>
           </span>
         </span>
+        {tab === undefined || onOpenTab === undefined ? null : (
+          <button
+            aria-label={`Open the tab ${tab.name}`}
+            className="fy-diff__open"
+            data-agenda-diff-open-tab={tab.id}
+            onClick={() => onOpenTab(tab.id)}
+            type="button"
+          >
+            Open tab
+            <ChevronRight aria-hidden="true" size={14} />
+          </button>
+        )}
       </h5>
       <p className="fy-diff__text m-0">
         {shown.flatMap((run, index) => {
@@ -120,16 +139,21 @@ function SectionChange({ section }: { readonly section: SectionDiff }) {
   );
 }
 
-/** The comparison panel: which two versions, what changed, and the sections that did not. */
+/**
+ * The comparison panel: which two versions, what changed, and the sections that did not. A changed section that is one
+ * of the item's tabs (or part of the main tab) offers "Open tab", which switches the tabs to it.
+ */
 export function VersionDiffPanel({
   id,
   versions,
   now,
+  tabFor,
+  onOpenTab,
 }: {
   readonly id: string;
   readonly versions: AgendaVersionsView;
   readonly now: number;
-}) {
+} & TabLink) {
   const { list } = versions;
   const fallback = useMemo(() => defaultComparison(list), [list]);
   const [custom, setCustom] = useState<VersionPair | null>(null);
@@ -209,7 +233,7 @@ export function VersionDiffPanel({
             <ins>Underlined</ins> was added. <del>Struck through</del> was removed.
           </p>
           {changed.map(section => (
-            <SectionChange key={section.key} section={section} />
+            <SectionChange key={section.key} onOpenTab={onOpenTab} section={section} tabFor={tabFor} />
           ))}
           {unchanged.length === 0 ? null : (
             <details className="fy-diff__unchanged" data-agenda-diff-unchanged="">

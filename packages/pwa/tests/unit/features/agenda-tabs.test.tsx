@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
+import type { AgendaVersionsView } from '../../../src/features/agenda/use-item-lifecycle.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
+import { settleUntil } from '../../support/settle.ts';
 
 /**
  * THE TABS (&F923; docs/agenda.md § The tabs): the item's live document — "Where we are now" first and open, "The full
@@ -60,9 +62,14 @@ const tabbed = agendaItem('A23', {
   ],
 } as unknown as Partial<AgendaItem>);
 
-const draw = async (item: AgendaItem = tabbed, itemKey = 'laptop/sess-1/A23'): Promise<void> => {
+const draw = async (
+  item: AgendaItem = tabbed,
+  itemKey = 'laptop/sess-1/A23',
+  versions?: AgendaVersionsView,
+): Promise<void> => {
   view = await mount(
     <AgendaItemView
+      {...(versions === undefined ? {} : { versions })}
       busy={false}
       error={null}
       ferret="Zoe"
@@ -204,5 +211,49 @@ describe('the tabs on a phone', () => {
     expect(one('[data-agenda-tab-switch]').getAttribute('aria-expanded')).toBe('false');
     await interact(() => one<HTMLButtonElement>('[data-agenda-tab-next]').click());
     expect(one('[data-agenda-part="tabs"]').getAttribute('data-agenda-tab')).toBe('body');
+  });
+});
+
+describe('the tabs and the versions this device saw', () => {
+  // The version this device last saw: the same item before Risks was rewritten.
+  const seenItem = {
+    ...tabbed,
+    tabs: [
+      { id: 'decisions', name: 'Decisions', body: 'We chose SQLite.' },
+      { id: 'risks', name: 'Risks', body: 'Nothing yet.' },
+    ],
+    revisions: undefined,
+  } as unknown as AgendaItem;
+  // The newest edit only renamed the item: by its last edit alone, no tab changed.
+  const retitled = {
+    ...tabbed,
+    title: 'Relay plan, final',
+    revisions: [{ at: '2026-08-01T11:30:00.000Z', by: 'agent', changed: ['title'], previous: { title: 'Relay plan' } }],
+  } as unknown as AgendaItem;
+  const versionsOf = (now: AgendaItem): AgendaVersionsView => ({
+    list: { sessionId: 's', id: 'A23', latest: 3, seen: 1, versions: [] } as never,
+    load: async version => (version === 1 ? seenItem : now),
+  });
+  const marked = (): string[] =>
+    [...root().querySelectorAll('[data-agenda-tab-button]')]
+      .filter(tab => tab.querySelector('[data-agenda-tab-changed]') !== null)
+      .map(tab => tab.getAttribute('data-agenda-tab-button') ?? '');
+
+  test('mark what changed since the version seen, even when a later edit only touched the title', async () => {
+    await draw(retitled, 'laptop/sess-1/A23', versionsOf(retitled));
+    await settleUntil(() => marked().length > 0, 'the marks since the version seen', interact);
+    expect(marked()).toEqual(['risks']);
+  });
+
+  test('a changed section in Changes opens its tab', async () => {
+    await draw(tabbed, 'laptop/sess-1/A23', versionsOf(tabbed));
+    // Changes is in the item's ⋯ menu.
+    await interact(() => one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-menu-toggle]').click());
+    await interact(() => one<HTMLButtonElement>('[data-agenda-diff-toggle]').click());
+    await settleUntil(() => root().querySelector('[data-agenda-diff-open-tab]') !== null, 'the diff', interact);
+    const open = one<HTMLButtonElement>('[data-agenda-diff-open-tab="risks"]');
+    expect(open.getAttribute('aria-label')).toBe('Open the tab Risks');
+    await interact(() => open.click());
+    expect(selected()).toBe('risks');
   });
 });

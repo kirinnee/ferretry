@@ -375,8 +375,13 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
      `--move-tab "Name=1"` (1 = first of the ferret's own) and `--remove-tab Name`. All of them, in one `edit`, are
      **one edit: one version, one revision** (`tabEdits`, at most 16, applied in order). A tab's `id` is its name's
      slug at creation and stays through renames. A name is 1–32 characters on one line, with no `=`, unique ignoring
-     case, and never a fixed tab's. Their words share 200,000 (`MAX_AGENDA_TABS_LENGTH`).
+     case, never a fixed tab's (nor `main` or `body`), and never another tab's id, so a name or an id always means one
+     tab: a reference is read as a name first (ignoring case), then as an id. Their words share 200,000
+     (`MAX_AGENDA_TABS_LENGTH`).
   - **A tab with nothing in it is not drawn, and one tab draws no tab row**: an item with only a body reads as before.
+  - **The brief previews the main tab**: the detail panel and the board's brief draw decided so far, still open, then
+    **Where we are now** (`whereWeAre`), and one line **Also in the item: Decisions, Risks** naming the ferret's own
+    tabs, so the brief never hides that the item holds more.
   - `fy agenda show <id> --tab <main|body|name>` prints one tab exactly as written, so a ferret can change it and write
     it back whole; `show` lists the tabs, `show --json` gives `whereWeAre`, `body` and `tabs` as stored.
   - The owner's model: _"the chat is the stream of log, the body is the DB, like an event store."_ So:
@@ -1283,8 +1288,11 @@ and a part the item does not carry is not drawn:
 - **The tabs (&F923).** With more than one tab: wider than a phone, a real ARIA tablist that **wraps onto a second
   line** rather than scroll or cut a name (arrows, Home and End move); on a phone (under 768px), ONE switcher button is
   the part's heading — "Where we are now ▾ · 1 of 4 · 2 changed" — opening the app's bottom sheet with the tabs as a
-  radio list, never a horizontal strip. Only the open tab is in the page. A tab the item's last edit changed carries a
-  dot and the word "Changed" (never colour alone). Each tab ends with **Next: … ›**, so a reader at its bottom never
+  radio list, never a horizontal strip. Only the open tab is in the page. A tab that changed **since this device last
+  looked** carries a dot and the word "Changed" (never colour alone): when the machine keeps versions and this device
+  saw an older one, that version is read and compared with the item now, so a tab edit stays marked when a later edit
+  only touched the title; otherwise (no versions, never opened, or the newest already seen) the marks are what the
+  item's last edit changed. Each tab ends with **Next: … ›**, so a reader at its bottom never
   scrolls back up to switch. When the ferret answered the owner's question, part 5 says **Answered: see Where we are
   now**, which opens the main tab and brings it into view, so the answer is never missed. One tab draws no tab row: the
   part is drawn under that tab's name.
@@ -1362,7 +1370,8 @@ and a part the item does not carry is not drawn:
   sections compared are, first, the tabs — the live document, the thing that is versioned — in tab order: where we
   are now, the answer to the owner's question, what is decided and still open, the full picture, then each of the
   ferret's own tabs matched **by id** (a rename reads "Open risks (was Risks)", a new tab New, a removed one Removed)
-  and a one-line **Tab order** when the tabs both versions have moved; then the title, the type, the question, the
+  and a one-line **Tab order** when the tabs both versions have moved. Each changed section that is a tab (or a part of
+  the main tab) offers **Open tab ›**, which switches the tabs to it and brings them into view; then the title, the type, the question, the
   premise, the context, the detail, the terms, the references, the ask, a multi-decision ask's questions, each
   option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards,
   why it matters and how to resolve it, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing

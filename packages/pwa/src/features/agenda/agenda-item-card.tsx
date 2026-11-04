@@ -58,7 +58,7 @@ import {
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
-import { changedTabs, openTab, viewTabs } from '../../lib/agenda-tab-view.ts';
+import { openTab, sectionTab, viewTabs } from '../../lib/agenda-tab-view.ts';
 import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
 import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
@@ -77,6 +77,7 @@ import { AgendaTabs, Section } from './agenda-tabs.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
 import { VersionDiffPanel } from './agenda-version-diff.tsx';
+import { useChangedTabs } from './use-changed-tabs.ts';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 import { useDownSwipe } from './use-down-swipe.ts';
 import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
@@ -405,6 +406,12 @@ export function AgendaItemCard({
     setRemembered(id);
     writeTab(foldKey, id, id === tabs[0]?.id);
   };
+  // Opening a tab from elsewhere on the card ("Answered: see …", a section in Changes) also brings the tabs into view.
+  const showTab = (id: string): void => {
+    selectTab(id);
+    if (typeof tabsPart.current?.scrollIntoView === 'function') tabsPart.current.scrollIntoView({ block: 'start' });
+  };
+  const changedTabIds = useChangedTabs(current, versions, latest);
   // The head's description: the item's summary under its title, drawn whole (the view's sticky row holds the title).
   // A gate item repeats nothing, and a notice drawn with its cards lists them as rows (its summary is the same lines,
   // for an older app): neither has one.
@@ -551,7 +558,13 @@ export function AgendaItemCard({
         )}
       </div>
       {versions !== undefined && diffOpen && diffId !== undefined ? (
-        <VersionDiffPanel id={diffId} now={now} versions={versions} />
+        <VersionDiffPanel
+          id={diffId}
+          now={now}
+          onOpenTab={showTab}
+          tabFor={key => sectionTab(key, tabs)}
+          versions={versions}
+        />
       ) : null}
       {latest ? (
         <AgendaLineage
@@ -601,15 +614,7 @@ export function AgendaItemCard({
               is never missed, and one tap opens it. */}
           {questionAnswer === null || tabs[0]?.kind !== 'main' ? null : (
             <p className="fy-card__answered-line" data-agenda-answered-line="">
-              <button
-                className="fy-card__answered-link"
-                onClick={() => {
-                  selectTab(tabs[0]?.id ?? '');
-                  if (typeof tabsPart.current?.scrollIntoView === 'function')
-                    tabsPart.current.scrollIntoView({ block: 'start' });
-                }}
-                type="button"
-              >
+              <button className="fy-card__answered-link" onClick={() => showTab(tabs[0]?.id ?? '')} type="button">
                 Answered: see {tabs[0].name}
               </button>
             </p>
@@ -777,7 +782,7 @@ export function AgendaItemCard({
         </div>
         {/* 6. THE TABS: the live document — the main tab first and open, then the full picture and the ferret's own. */}
         <AgendaTabs
-          changed={latest ? changedTabs(item) : new Set()}
+          changed={changedTabIds}
           mark={mark}
           onOpen={selectTab}
           open={openTabId}

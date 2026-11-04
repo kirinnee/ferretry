@@ -1767,6 +1767,7 @@
 .fy-tabs__tab:focus-visible,
 .fy-tabs__switch:focus-visible,
 .fy-tabs__next:focus-visible,
+.fy-diff__open:focus-visible,
 .fy-card__answered-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -1839,6 +1840,7 @@
   overflow-wrap: anywhere;
 }
 .fy-tabs__next,
+.fy-diff__open,
 .fy-card__answered-link {
   display: inline-flex;
   align-items: center;

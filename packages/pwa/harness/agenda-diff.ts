@@ -62,6 +62,20 @@ const ASK_V3 = {
   ],
 };
 
+/** The ferret's own tabs (&F923): Decisions is rewritten in v3, Risks never changes. */
+const TABS_BEFORE = [
+  { id: 'decisions', name: 'Decisions', body: '- Nothing is decided yet' },
+  { id: 'risks', name: 'Risks', body: '- A count that never reaches zero reads as broken' },
+];
+const TABS_V3 = [
+  {
+    id: 'decisions',
+    name: 'Decisions',
+    body: '- Resting items never count\n- The badge, the Inbox and push share one queue',
+  },
+  { id: 'risks', name: 'Risks', body: '- A count that never reaches zero reads as broken' },
+];
+
 /** Version 1, 2 and 3 of A140, as the daemon keeps them: the WHOLE item each time. */
 export const DIFF_VERSIONS: readonly AgendaItem[] = [
   item('A140', 180, {
@@ -69,6 +83,7 @@ export const DIFF_VERSIONS: readonly AgendaItem[] = [
     detail: rollout('finished'),
     whereWeAre: 'I am reading how the badge is counted. Nothing is decided yet.',
     stillOpen: '- Whether a snoozed item counts',
+    tabs: TABS_BEFORE,
     ask: ASK_V1,
   } as Partial<AgendaItem>),
   item('A140', 180, {
@@ -76,6 +91,7 @@ export const DIFF_VERSIONS: readonly AgendaItem[] = [
     detail: rollout('finished'),
     whereWeAre: 'The badge reads the open list, so a resting item adds one. I am looking at the queue.',
     stillOpen: '- Whether a snoozed item counts',
+    tabs: TABS_BEFORE,
     ask: ASK_V1,
   } as Partial<AgendaItem>),
   item('A140', 180, {
@@ -89,6 +105,7 @@ export const DIFF_VERSIONS: readonly AgendaItem[] = [
     whereWeAre:
       'The badge, the Inbox and push now read needsYouQueue, so the three agree. A snoozed item is the one open question.',
     stillOpen: '- Whether a snoozed item counts',
+    tabs: TABS_V3,
     ask: ASK_V3,
   } as Partial<AgendaItem>),
 ];
