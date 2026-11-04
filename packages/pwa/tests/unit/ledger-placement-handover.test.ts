@@ -348,3 +348,72 @@ describe('handedOverDraft', () => {
     expect(handedOverDraft(send({ path: undefined }))).toBeUndefined();
   });
 });
+
+/**
+ * &B157, the incident's own records: Claude Code 2.1.317 writes an UNTIMED copy of each message before
+ * the real, timed record. The daemon sent "moved" once, by the direct path, and proved it delivered on
+ * the timed record — but the chat drew a bare bubble (no time, no ticks) above the ticked one.
+ */
+describe('a direct send the harness wrote twice, once with no time', () => {
+  const nowMs = Date.parse('2026-11-04T04:41:00.000Z');
+  const moved = (sendId: string, acceptedAt: string, key: string, observedAt: string): LedgerSendRecord =>
+    send({
+      sendId,
+      acceptedAt,
+      message: 'moved',
+      path: 'direct',
+      fate: 'delivered',
+      fateAt: observedAt,
+      evidence: { key, observedAt },
+    });
+  const own = (rows: readonly TranscriptEntry[]) =>
+    rows
+      .filter(row => row.kind === 'user' || row.kind === 'ledger')
+      .map(row => ({ kind: row.kind, text: row.text, send: row.send?.sendId ?? row.ledger?.sendId }));
+
+  test('is one bubble, the timed row wearing the send', () => {
+    const log = [
+      '[04:39:00] assistant/message: Move #F923 to Implement on the Board.',
+      '[04:39:00] system/turn: completed',
+      'user/message: moved',
+      '[04:39:30] user/message: moved',
+      '[04:39:33] assistant/tool-call: Bash({"command":"fy task show F923"})',
+    ].join('\n');
+    const delivered = moved('87d1d58d', '2026-11-04T04:39:30.495Z', '66d6883c', '2026-11-04T04:39:30.653Z');
+    const rows = placeLedgerRows(transcriptEntriesFromLog(log, nowMs), [delivered], nowMs);
+    expect(own(rows)).toEqual([{ kind: 'user', text: 'moved', send: '87d1d58d' }]);
+    const bubble = rows.find(row => row.kind === 'user');
+    expect(bubble?.id).toBe(sendRowId('87d1d58d'));
+    expect(bubble?.at).toBe(Date.parse('2026-11-04T04:39:30.000Z'));
+  });
+
+  test('keeps a real second send of the same words as a second bubble', () => {
+    const log = [
+      'user/message: moved',
+      '[04:39:30] user/message: moved',
+      '[04:39:31] assistant/message: Checking.',
+      'user/message: moved',
+      '[04:39:50] user/message: moved',
+    ].join('\n');
+    const first = moved('send-a', '2026-11-04T04:39:30.495Z', 'key-a', '2026-11-04T04:39:30.653Z');
+    const second = moved('send-b', '2026-11-04T04:39:50.100Z', 'key-b', '2026-11-04T04:39:50.300Z');
+    const rows = placeLedgerRows(transcriptEntriesFromLog(log, nowMs), [first, second], nowMs);
+    expect(own(rows)).toEqual([
+      { kind: 'user', text: 'moved', send: 'send-a' },
+      { kind: 'user', text: 'moved', send: 'send-b' },
+    ]);
+  });
+
+  test('keeps a second send typed straight after the first, with nothing between the two', () => {
+    const log = [
+      'user/message: moved',
+      '[04:39:30] user/message: moved',
+      'user/message: moved',
+      '[04:39:31] user/message: moved',
+    ].join('\n');
+    const first = moved('send-a', '2026-11-04T04:39:30.100Z', 'key-a', '2026-11-04T04:39:30.300Z');
+    const second = moved('send-b', '2026-11-04T04:39:30.900Z', 'key-b', '2026-11-04T04:39:31.200Z');
+    const rows = placeLedgerRows(transcriptEntriesFromLog(log, nowMs), [first, second], nowMs);
+    expect(own(rows).map(row => row.send)).toEqual(['send-a', 'send-b']);
+  });
+});
