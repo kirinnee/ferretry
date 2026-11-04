@@ -56,6 +56,7 @@ import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
+import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
@@ -323,11 +324,14 @@ function CardAskBlock({
   busy,
   onAct,
   renderProse,
+  offer = null,
 }: {
   readonly ask: ItemCardAsk;
   readonly busy: boolean;
   readonly onAct: (action: InboxAction) => void;
   readonly renderProse: Prose;
+  /** The owner's last words already approve this ask (&B155): offered as its answer, one tap, never applied. */
+  readonly offer?: ReplyApproval | null;
 }) {
   return (
     <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
@@ -340,6 +344,20 @@ function CardAskBlock({
           <h5 className="fy-card__label">How to test</h5>
           <HowToTest renderProse={renderProse} text={ask.howToTest} />
         </div>
+      )}
+      {offer === null ? null : (
+        <p className="fy-card__reply-offer" data-agenda-reply-offer="">
+          <span>You replied “{offer.reply}”. Use it as your answer for the card?</span>
+          <button
+            className="kt-btn fy-card__reply-offer-use"
+            data-agenda-reply-offer-use={offer.label}
+            disabled={busy}
+            onClick={() => onAct(toGateAction(optionAction({ label: offer.label }, ''), ask.gate))}
+            type="button"
+          >
+            {offer.label}
+          </button>
+        </p>
       )}
       <AgendaQuickReplies
         busy={busy}
@@ -511,6 +529,11 @@ export function AgendaItemCard({
   // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
   // separate item. Only the latest version is answerable, so an earlier one draws none.
   const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
+  // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
+  const replyOffer = replyApproval(
+    cardAsks.map(ask => ask.gate),
+    history,
+  );
   const replies = (
     <AgendaQuickReplies
       busy={busy}
@@ -783,7 +806,14 @@ export function AgendaItemCard({
           {cardAsks.length === 0 ? null : (
             <div className="fy-card__card-asks" data-agenda-card-asks={cardAsks.length}>
               {cardAsks.map(ask => (
-                <CardAskBlock ask={ask} busy={busy} key={ask.key} onAct={onAct} renderProse={renderProse} />
+                <CardAskBlock
+                  ask={ask}
+                  busy={busy}
+                  key={ask.key}
+                  offer={replyOffer}
+                  onAct={onAct}
+                  renderProse={renderProse}
+                />
               ))}
             </div>
           )}

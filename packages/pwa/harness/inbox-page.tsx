@@ -15,6 +15,8 @@
  *   ?view=ask-gate        a QUESTION item (blue or green?) that also carries a card ask for &F61 (`not-good-ask-screenshot.ts`)
  *   ?view=ask-plan-questions  !A304's shape (&B156): a REPLY item with three numbered questions that carries the card ask
  *                         "OK to build" for &F923 (`card-ask-questions-screenshot.ts`)
+ *   ?view=ask-plan-replied  the same item after the owner replied "ok to build!" in words: the card ask offers the
+ *                         reply as its answer (&B155, `reply-approval-screenshot.ts`)
  *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
  *   ?view=gate-noproject  a gate item with NO project open: its header opens on the ferret, no stray dot
  *   ?view=open-longtitle  an item with a LONG title open: it folds onto two lines, never cut mid-word
@@ -364,6 +366,8 @@ const ASK_PLAN_QUESTIONS = item('A304', 8, 'lizzette', {
   cardAsks: [{ gate: PLAN_ASK, at: ago(7) }],
 } as unknown as Partial<AgendaItem>);
 const ASK_PLAN_QUESTIONS_CARD = card(ASK_PLAN_QUESTIONS, chat(ferret('lz', 'lizzette', 'Agenda redesign')), 'studio');
+/** The same item after the owner answered it in words — "ok to build!" — without pressing the card's button (&B155). */
+const ASK_PLAN_REPLIED_CARD = ASK_PLAN_QUESTIONS_CARD;
 const LONG_TITLE = item('A111', 6, 'ottilie', {
   title:
     'Three answers for the catalog before I can finish the relay setup tonight, and the three layouts I would keep if you can spare one more minute',
@@ -441,6 +445,7 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'gate-list': GATE_CARD,
   'ask-gate': ASK_GATE_CARD,
   'ask-plan-questions': ASK_PLAN_QUESTIONS_CARD,
+  'ask-plan-replied': ASK_PLAN_REPLIED_CARD,
   'orphan-one': ORPHAN_ONE,
   'orphan-three': ORPHAN_THREE,
   'orphan-list': ORPHAN_ONE,
@@ -499,26 +504,37 @@ const MACHINE: DaemonConnection = daemonConnection({
 const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> =>
   open.item.gate !== undefined || open.item.cards !== undefined
     ? []
-    : [
-        {
-          id: 'c1',
-          kind: 'assistant',
-          text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
-          at: NOW - 50 * 60_000,
-        },
-        {
-          id: 'c2',
-          kind: 'user',
-          text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
-          at: NOW - 30 * 60_000,
-        },
-        {
-          id: 'c3',
-          kind: 'assistant',
-          text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
-          at: NOW - 20 * 60_000,
-        },
-      ];
+    : view === 'ask-plan-replied'
+      ? // The owner answered in words, last (&B155): the card ask offers it as its answer.
+        [
+          {
+            id: 'r1',
+            kind: 'assistant',
+            text: `The tabs plan for !${open.item.id} is ready for your OK.`,
+            at: NOW - 6 * 60_000,
+          },
+          { id: 'r2', kind: 'user', text: `!${open.item.id} ok to build!`, at: NOW - 2 * 60_000 },
+        ]
+      : [
+          {
+            id: 'c1',
+            kind: 'assistant',
+            text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
+            at: NOW - 50 * 60_000,
+          },
+          {
+            id: 'c2',
+            kind: 'user',
+            text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
+            at: NOW - 30 * 60_000,
+          },
+          {
+            id: 'c3',
+            kind: 'assistant',
+            text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
+            at: NOW - 20 * 60_000,
+          },
+        ];
 /** Studio offers clearing; the laptop's daemon is older and does not — so the dialog shows both cases. */
 const CLEAR_PORT: ClearPort = {
   readHealth: async connection => ({

@@ -1639,3 +1639,20 @@
 .fy-merge__actions .fy-merge__go {
   margin-inline-start: auto;
 }
+
+/* The owner's reply already says yes to the card ask (&B155): offered as its answer, never applied. */
+.fy-card__reply-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm, 8px);
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.fy-card__reply-offer > span {
+  flex: 1 1 14rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
