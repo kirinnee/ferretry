@@ -1279,7 +1279,10 @@ and a part the item does not carry is not drawn:
   one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until card asks
   share the view: then it sits inline right under the item's own ask, headed **Your answer for this item**, and
   every card ask has its own heading (**Card &F12: your answer for the card**, then a line saying where the card stands), so two button sets are
-  never docked beside each other and never mistaken for one another. A card ask carries the card's **How to test**,
+  never docked beside each other and never mistaken for one another. A card ask keeps its own buttons whatever the
+  item asks itself: a thread of numbered questions, steps or a form still draws the card's **OK to build** or
+  **Done / Not good** (`attachedGateView` leaves the thread's own answer shape behind), and an item answered in words
+  gets no "Your answer for this item" heading over nothing. A card ask carries the card's **How to test**,
   read from the board the app already loads (`howToTestFor`), above its Done / Not good.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
