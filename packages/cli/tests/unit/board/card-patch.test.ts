@@ -79,7 +79,7 @@ describe('task patch', () => {
     const plan = composeCardPatch(task, parsed('revision: 1\npremise: null'));
 
     // Assert
-    should(plan).containDeep({ kind: 'edit' });
+    should(plan).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, premise: '' } });
   });
 
   it('should require the revision, refuse unknown or read-only keys, and never empty the title', () => {
