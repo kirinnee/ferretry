@@ -47,9 +47,10 @@ they would want to hear about in the same place, against the same background, an
   their ask is answered too. What the item needs from the owner right now is still recorded as its **stage**
   (explainer → question → plan → tracker → test, [below](#stage-the-tabs-and-the-detail)), but the prompt no longer
   teaches it as the item's type.
-- **Always current: read, then edit.** Every update reads the item whole first (`fy agenda show <id>`), then rewrites
-  every part that is out of date — premise, context, the ask (what the owner is asked for), its options and how to
-  reply, still-open and each tab (_"updating agenda should be read => edit, not just patch"_, _"make sure
+- **Always current: read, then patch.** Every update reads the item whole first (`fy agenda show <id> --yaml`, with
+  its revision), rewrites every part that is out of date — premise, context, the ask (what the owner is asked for),
+  its options and how to reply, still-open and each tab — and writes it back as one patch
+  ([Patch](#patch-the-item-as-one-document)), refused if the item moved on since the read (_"updating agenda should be read => edit, not just patch"_, _"make sure
   the chat ALWAYS update their asks, their body? they should ALWAYS check such that the asks, follow up, and all the
   different documents are updated."_); the chat only points at it.
 - **Explainers are ADHD-friendly**, walked through with hypermedia the reader drives, with an example for each point

@@ -824,7 +824,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // explainers stay in them.
     // And READ → EDIT (the owner: "we need to read to know what needs to be updated"): every part, the ask's too.
     should(text).containEql(
-      "Every update: `show <id>` whole, then `edit` all that's stale: premise, context, ask, options, kind, still-open, each tab (`--where-file|--body-file|--tab-file Name=f`); chat points there.",
+      "Every update: `show <id> --yaml` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then `patch <id> --file f`; chat points there.",
     );
     should(text).containEql('Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there.');
     should(text).not.containEql('(main)');
@@ -923,7 +923,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('Planning is a phase.');
     should(text).containEql("Title+summary=what it's doing (sitrep).");
     should(text).containEql(
-      "Each step: `zz task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done);",
+      'Each step: `zz task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz task patch <id> --file f`.',
     );
     should(text).not.containEql('no cards for planning');
   });
@@ -948,7 +948,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
-    should(text).containEql('`--how-to-test "<where, do, see>"` before try.');
+    should(text).containEql('howToTest (where/do/see) before try');
     should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
     should(text).containEql('Blocked: `zz task depend`/`block`.');
@@ -1202,7 +1202,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
     // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one card edit a sub-ferret may make.
     should(text).containEql(
-      'With a card: each step, read it (`zz task show <id>`), then `zz task edit <id>` its status (`--status-{now,done,next}`, PR links in done) and `--how-to-test`; `zz task note` adds history.',
+      'With a card: each step, `zz task show <id> --yaml`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then `zz task patch <id> --file f`; `zz task note` adds history.',
     );
     // The holder writes its own How to test now, so its report no longer carries the steps.
     should(text).not.containEql('Your final report says how the owner tests it.');

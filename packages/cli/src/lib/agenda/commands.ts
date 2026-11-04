@@ -29,10 +29,10 @@ const JSON_HELP = 'print the protocol payload instead of the human rendering';
  * the Agenda-mode prompt (`AGENDA_INSTRUCTION`) says in short.
  */
 export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversation is only the log.
-  ALWAYS KEEP THE ITEM CURRENT: before every update read it whole (agenda show <id>), then
+  ALWAYS KEEP THE ITEM CURRENT: before every update read it whole (agenda show <id> --yaml), then
   rewrite every part that is out of date — premise, context, the ask (what you need from the
   owner), its options and how to reply, still-open and each tab — so the item always holds the
-  whole current state.
+  whole current state, and write it back in one go: agenda patch <id> --file f.yaml.
   Tabs hold ANY kind of content — status, to-dos, steps, instructions, explainers, results,
   decisions, risks. There is no main type: "Where we are now" (--where-file, or --where points)
   is simply the tab that opens first: where things stand, what is decided, what is still open —
@@ -49,10 +49,7 @@ export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversatio
   Write in explainer mode, ADHD-friendly (answer first, one idea per line, plain words, an example
   for each point), shown with hypermedia: fy-render charts, mermaid, an interactive html visual the
   reader changes (sliders, toggles, inputs that redraw it; never a stepper), card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render
-  html block (<details><summary>…</summary>…</details>).
-  To update the item, READ IT WHOLE FIRST: agenda show <id> --yaml, update every part that is out of
-  date (premise, context, every tab, what you need from the owner, the options), then write it back
-  with agenda patch <id> --file f.yaml (one edit, one version).`;
+  html block (<details><summary>…</summary>…</details>).`;
 
 /**
  * The patch rule (docs/agenda.md § Patch: the item as one document): `fy agenda patch --help` says it whole.

@@ -95,3 +95,40 @@ describe('task patch', () => {
     should(problems).match(/title: /u);
   });
 });
+
+describe('task patch: the card Status merges by key', () => {
+  const withStatus = card({ status: { now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' } });
+
+  it('should print the status whole and send only the parts that changed', () => {
+    // Act
+    const document = cardPatchDocument(withStatus);
+    const plan = composeCardPatch(
+      withStatus,
+      parsed('revision: 1\nstatus:\n  now: testing\n  doneSoFar: "- the schema"'),
+    );
+
+    // Assert
+    should(document.status).deepEqual({ now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' });
+    should(plan).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, status: { now: 'testing' } } });
+  });
+
+  it('should read a card with no status as empty parts, and send nothing when the parts already match', () => {
+    // Act
+    const fresh = composeCardPatch(task, parsed('revision: 1\nstatus:\n  next: "1. ship"\n  now: ""'));
+    const same = composeCardPatch(withStatus, parsed('revision: 1\nstatus:\n  now: designing'));
+
+    // Assert
+    should(fresh).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, status: { next: '1. ship' } } });
+    should(same).deepEqual({ kind: 'unchanged' });
+  });
+
+  it('should refuse null on the status and an unknown part', () => {
+    // Act
+    const nulled = parseCardPatch('revision: 1\nstatus: null', 'f1.yaml');
+    const unknown = parseCardPatch('revision: 1\nstatus:\n  later: x', 'f1.yaml');
+
+    // Assert
+    should(nulled.ok).be.false();
+    should(!unknown.ok && unknown.problems).deepEqual(['status.later: not a field a patch changes']);
+  });
+});

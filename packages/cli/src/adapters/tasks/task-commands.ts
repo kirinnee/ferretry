@@ -50,7 +50,8 @@ const STATUS_FILE_HELP =
 const TASK_PATCH_RULE = `READ, THEN WRITE THE WHOLE CARD. \`task show <id> --yaml\` prints every field you may change and
 the card's revision; update every part that is out of date and write it back: \`task patch <id> --file f.yaml\`.
   JSON Merge Patch (RFC 7386): a key present REPLACES the field, an absent key leaves it, null EMPTIES
-  it (never title or summary). Lists (terms, a point list) are replaced whole.
+  it (never title or summary). Lists (terms, a point list) are replaced whole; status merges by
+  part (now, doneSoFar, next), "" empties a part.
   The revision is required: a card changed since you read it is refused and nothing is written —
   read it again. Values equal to the card's are not sent. Unknown or read-only keys are refused by name.
   It is the edit action: the same checks and the same rules on who may change which field.
@@ -60,6 +61,8 @@ Example:
   summary: Patch-edit agenda items and cards
   howToTest: |
     1. Run fy task show F12 --yaml
+  status:
+    now: testing the patch
   brief: null`;
 
 const HOW_TO_TEST_HELP =

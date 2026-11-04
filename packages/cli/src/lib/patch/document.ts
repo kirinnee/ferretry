@@ -46,9 +46,9 @@ export function patchProblems(
 ): readonly string[] {
   return error.issues.flatMap(issue => {
     if (issue.code === 'unrecognized_keys') {
-      return issue.keys.map(
-        key => `${shownPath([...issue.path, key], rename)}: not a field a patch changes (it takes: ${keys.join(', ')})`,
-      );
+      // A nested unknown key (`status.later`) names the field it sits in, not the top-level keys.
+      const takes = issue.path.length === 0 ? ` (it takes: ${keys.join(', ')})` : '';
+      return issue.keys.map(key => `${shownPath([...issue.path, key], rename)}: not a field a patch changes${takes}`);
     }
     const path = shownPath(issue.path, rename);
     return [`${path === '' ? 'the patch' : path}: ${issue.message}`];

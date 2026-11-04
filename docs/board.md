@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done); `--how-to-test "<where, do, see>"` before try. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -238,7 +238,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 
 ```text
 Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a card: each step, read it (`fy task show <id>`), then `fy task edit <id>` its status (`--status-{now,done,next}`, PR links in done) and `--how-to-test`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none.
+With a card: each step, `fy task show <id> --yaml`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
@@ -655,12 +655,14 @@ fy task patch F12 --file f12.yaml    # one atomic edit; --file - reads stdin; JS
   change in between is never overwritten unseen. Read it again, update, patch it back. It needs a daemon that
   reports `board.patch.1`; an older one refuses the field as malformed (`fy daemon update`).
 - **The document**: `revision`, `title`, `summary`, `premise`, `context`, `terms` (a list of `{ term, meaning }`),
-  `brief`, `howToTest` and `visibility` — the fields `fy task edit` changes. The card's **Status** (`status: { now,
-doneSoFar, next }`, Markdown each, &C48) joins the document when that field ships.
+  `brief`, `howToTest`, `visibility` and the card's **Status** (`status: { now, doneSoFar, next }`, Markdown each,
+  &C48) — the fields `fy task edit` changes. `show --yaml` prints the status whole when the card has one.
 - **Semantics: JSON Merge Patch (RFC 7386)**, as on the agenda
   ([agenda.md § Patch](agenda.md#patch-the-item-as-one-document)): a key present replaces the field, an absent key
-  leaves it, `null` empties it; lists (`terms`, a point list) are replaced whole. `status` will be the one object that
-  merges by key (`status: { now: … }` rewrites Now and keeps the rest; `status: null` clears it).
+  leaves it, `null` empties it; lists (`terms`, a point list) are replaced whole. `status` is the one object that
+  merges by key: `status: { now: … }` rewrites Now and keeps the rest, `""` empties a part, and only the parts that
+  differ are sent — the daemon merges them inside the card's write, so two ferrets rewriting different parts never
+  undo each other. `status: null` is refused.
 - **`null` empties** `premise`, `context`, `terms`, `brief` and `howToTest`. `title` and `summary` are never removed,
   only rewritten, and `visibility` is `public` or `private`.
 - **One patch is one `edit` action** on `POST /v1/board/tasks/:taskId`: the CLI parses the document with zod

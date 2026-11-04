@@ -19,7 +19,7 @@ import { taskTitleIssue } from '../tasks/task-title.ts';
 
 type CardWords = Pick<
   BoardTask,
-  'title' | 'summary' | 'premise' | 'context' | 'terms' | 'brief' | 'howToTest' | 'visibility' | 'history'
+  'title' | 'summary' | 'premise' | 'context' | 'terms' | 'brief' | 'howToTest' | 'visibility' | 'status' | 'history'
 >;
 
 type WordKey = Exclude<keyof BoardTaskPatch, 'revision'>;
@@ -76,15 +76,34 @@ export type CardPatchPlan =
 /** The ONE edit a patch is against `card`; `stale` when the card has changed since the patch's revision was read. */
 export function composeCardPatch(card: CardWords, patch: BoardTaskPatch): CardPatchPlan {
   if (patch.revision !== boardTaskRevision(card)) return { kind: 'stale' };
-  const fields = Object.fromEntries(
+  const fields: Record<string, unknown> = Object.fromEntries(
     WORD_KEYS.flatMap(key => {
+      if (key === 'status') return [];
       const value = patch[key];
       return value === undefined || samePatchValue(value, card[key]) ? [] : [[key, value]];
     }),
   );
+  const status = changedStatusParts(card, patch.status);
+  if (status !== undefined) fields.status = status;
   if (Object.keys(fields).length === 0) return { kind: 'unchanged' };
   return {
     kind: 'edit',
     request: { action: 'edit', revision: patch.revision, ...fields } as BoardTaskActionRequestInput,
   };
+}
+
+/**
+ * The status parts a patch names that differ from the card's (a card with no status reads each part as ""): the status
+ * MERGES BY KEY, so only those go, and the daemon merges them into the card's status inside its write.
+ */
+function changedStatusParts(
+  card: CardWords,
+  status: BoardTaskPatch['status'],
+): NonNullable<BoardTaskPatch['status']> | undefined {
+  if (status === undefined) return undefined;
+  const parts = (['now', 'doneSoFar', 'next'] as const).flatMap(part => {
+    const value = status[part];
+    return value === undefined || value === (card.status?.[part] ?? '') ? [] : [[part, value] as const];
+  });
+  return parts.length === 0 ? undefined : Object.fromEntries(parts);
 }

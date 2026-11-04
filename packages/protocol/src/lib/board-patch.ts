@@ -47,6 +47,11 @@ export const BoardTaskPatchSchema = z.strictObject({
   terms: z.preprocess(value => (value === null ? [] : value), BoardTaskEditFields.terms.unwrap()).optional(),
   brief: emptied(BoardTaskEditFields.brief),
   howToTest: emptied(BoardTaskEditFields.howToTest),
+  /**
+   * The card's Status (&C48): the one object that MERGES BY KEY — each part named (`now`, `doneSoFar`, `next`) replaces
+   * that part, the rest stay; `""` empties a part. The daemon merges it inside the card's write. Never `null`.
+   */
+  status: BoardTaskEditFields.status,
   visibility: BoardTaskVisibilitySchema.optional(),
 });
 export type BoardTaskPatch = z.infer<typeof BoardTaskPatchSchema>;
