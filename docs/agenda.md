@@ -7,9 +7,11 @@ nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 **An agenda is one channel of the owner's attention** ([One channel per topic](#one-channel-per-topic)): a ferret
 opens one only for what the owner alone can give — information, a decision or an action — and only when no open
 agenda passes the three-part test; otherwise it adds to the closest. It never opens one just to track or check its
-own work: no "please test X", "please verify Y" or "try it after the release". Testing a card is the board's job
-today: a finished card reaches its Released or Ready to try lane, its agenda asks the owner, and they press **Done** or **Not good**
-([board.md](board.md)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
+own work: no "please test X", "please verify Y" or "try it after the release". Testing a card goes through the card's own agenda — the board
+runs itself and a card never asks (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda
+tracks all those and are the one request user to test so it can move it"_): a finished card reaches its Released or
+Ready to try lane, the daemon puts its card ask on the card's agenda, and the owner's **Done** or **Not good** there
+moves the card ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
 [notifications.md](notifications.md#agenda-mode)).
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
@@ -39,8 +41,17 @@ they would want to hear about in the same place, against the same background, an
 - **Search, check, then open.** A ferret opens a new agenda only when something needs the owner, or soon will, and
   no open one passes the test. Otherwise it adds to the closest; if unsure, it adds to the closest.
 - **Split** a part that stops passing the test as the agenda evolves.
-- **Its type evolves:** one agenda can go explainer → question → plan → tracker → test, whatever it needs from the
-  owner right now.
+- **No main type: the tabs hold any kind of content** — status, to-dos, steps, instructions, explainers, results —
+  one tab per kind (the owner, 2026-11-04: _"now agenda doesn't have a "main" type any more"_). **Steps and explainers
+  live in the tabs and stay there** (_"make sure that steps and explainers go the body tabs and kept there!"_), after
+  their ask is answered too. What the item needs from the owner right now is still recorded as its **stage**
+  (explainer → question → plan → tracker → test, [below](#stage-the-tabs-and-the-detail)), but the prompt no longer
+  teaches it as the item's type.
+- **Always current.** Every update rewrites the item's ask, still-open and each tab that changed, whole (_"make sure
+  the chat ALWAYS update their asks, their body? they should ALWAYS check such that the asks, follow up, and all the
+  different documents are updated."_); the chat only points at it.
+- **Explainers are ADHD-friendly**, walked through with hypermedia the reader drives, with an example for each point
+  ([hypermedia.md](hypermedia.md#the-injected-instruction)).
 - **Its states, as the ferret is taught them:** Needs you buzzes the owner; Resting is quiet. The owner's reply rests
   an item, the ferret's answer on it brings it back, and only the ferret marks it Done, when nothing more is
   expected. `agenda answer` (or `edit --question-answer`) brings it back; `agenda rest --why` takes it on quietly:

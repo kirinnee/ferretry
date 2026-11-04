@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Cards (&F412) show progress only; every human ask goes in the card's agenda. The owner's asks are public cards ("status of all I asked?"): top-level, never `--parent`/`--private`; relate in `--context`. No umbrella cards; check related cards first; add to one. Before it's ready to try: `fy task edit <id> --how-to-test "<1. where 2. do 3. see>"`; lane by work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). `fy task edit <id>`: `--status-file f` (Now/Done so far+PRs/Next) rewritten whole each step; `--how-to-test "<1. where 2. do 3. see>"` before try. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -161,9 +161,22 @@ How to test written for the owner ([How a card reads](#how-a-card-reads)). Regis
 longer in the rule, because a ferret's first card registers its repository. The full `fy task create` command is no
 longer in the rule either: the command's own refusals and `--help` say every flag it needs.
 
-The rule names no gate: the owner's asks about a card — approve this plan, try this release — belong in the card's
-agenda, never on the card itself ([One card, one outcome](#one-card-one-outcome)). How the daemon puts them there
-is [Card asks](agenda.md#card-asks).
+The rule names no gate: **the board runs itself and a card never asks** (the owner, 2026-11-04: _"TASK no longer have
+user interactivity anymore! agenda tracks all those and are the one request user to test so it can move it. the board
+is almost fully autonomous!"_). The owner's answers about a card — approve this plan, try this release, Done or Not
+good — belong in the card's agenda, which moves the card ([One card, one outcome](#one-card-one-outcome)). How the
+daemon puts them there is [Card asks](agenda.md#card-asks).
+
+The rest of the rule is the owner's too (2026-11-04):
+
+- **Public = the owner's asks, private = the ferrets' own sub-cards.** _"the board should answer the question 'What's
+  the current status of all the things I asked you to do' or 'what's the sitrep'. that is how you decide internal or
+  external."_ ([Public and private cards](#public-and-private-cards)).
+- **Planning is a phase** (_"planning can be a phase!"_): a plan is worked in the card's planning lane, never a reason
+  to skip the card.
+- **The title and summary read as a sitrep** (_"reading the title should directly reflect what is doing -- similar to
+  asking "sitrep""_): "Rewrite card teaching" says what the work does; "Board stuff" does not.
+- **The card's status is rewritten whole at each step** ([The card's Status](#the-cards-status)).
 
 ## One card, one outcome
 
@@ -199,13 +212,13 @@ problem, and what a sub-ferret does is mostly report back to its lead. The daemo
 session identity — in `BoardService` (`create`, `act`) and on the lane route — so a prompt cannot talk past it
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)).
 
-| A sub-ferret may                                           | A sub-ferret is refused                                                                      |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| read the board, `fy task note` on a card, `fy task edit --status` on the card it holds | `fy task create`, `move`, `reopen`, `depend` / `undepend`, `block` / `unblock`,              |
-| `fy task link --pr <url>` / `--branch <branch>` on a card  | `reparent`, `focus`, `edit` (but `status`), `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc` |
-| `fy task drop` / `assign` on a card **in its own subtree** | `drop` / `assign` on any card outside it (see [Authority](#authority))                       |
-| `fy task trigger` (`deploy.done`) on its card              |                                                                                              |
-| `fy send` its lead (and peers the lead names)              | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                       |
+| A sub-ferret may                                                                       | A sub-ferret is refused                                                                                     |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| read the board, `fy task note` on a card, `fy task edit --status` on the card it holds | `fy task create`, `move`, `reopen`, `depend` / `undepend`, `block` / `unblock`,                             |
+| `fy task link --pr <url>` / `--branch <branch>` on a card                              | `reparent`, `focus`, `edit` (but `status`), `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc` |
+| `fy task drop` / `assign` on a card **in its own subtree**                             | `drop` / `assign` on any card outside it (see [Authority](#authority))                                      |
+| `fy task trigger` (`deploy.done`) on its card                                          |                                                                                                             |
+| `fy send` its lead (and peers the lead names)                                          | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                                      |
 
 The refusal is `forbidden` and speaks to the caller, never of "sub-ferrets" at large: it says what it can't do, what it MAY do, and who can do the rest, e.g.
 `You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send <lead-callsign> "…"`.
@@ -224,8 +237,8 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 `FY_SUB_FERRET=1` from the session's `parent` at every launch, so a stored value cannot switch it off):
 
 ```text
-Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make; routine progress: `fy task note` on your card. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a card: link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none. Your final report says how the owner tests it.
+Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
+With a card: keep its status current, rewritten whole each step: `fy task edit <id> --status-file f` (Now / Done so far + PR links / Next); `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none. Your final report says how the owner tests it.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
@@ -591,7 +604,7 @@ fields plus the ones the daemon derives.
 | `premise`, `context`    | why the work exists; what a newcomer needs to know                               |
 | `terms`, `brief`        | glossary entries for the card; the full plan, or a sub-ferret's brief            |
 | `howToTest`             | how the owner checks the result before Done; empty on a card stored before it    |
-| `status`                | the card's current state (Now / Done so far / Next), rewritten whole; see below |
+| `status`                | the card's current state (Now / Done so far / Next), rewritten whole; see below  |
 | `owner`, `assignee`     | the accountable ferret; the one doing it now (none reads as the owner)           |
 | `parent`                | the lead's card, possibly on another project's board; the roll-up follows it     |
 | `visibility`            | `public` or `private`; see [Public and private cards](#public-and-private-cards) |
@@ -673,10 +686,12 @@ rewritten whole** — the card's answer to "what's the sitrep?".
 **Now:** writing the daemon route; the protocol field is in.
 
 **Done so far:**
+
 - Protocol field `status` (https://github.com/kirinnee/ferretry/pull/321)
 - Design in docs/board.md
 
 **Next:**
+
 1. CLI `fy task edit --status-file`.
 2. PWA card view.
 ```
@@ -976,6 +991,10 @@ ships or its helper finishes ([Sub-cards close themselves](#sub-cards-close-them
 who is not on this host ([grants.md](grants.md)).
 
 ## Done and Not good
+
+**GAP:** the owner's rule (2026-11-04) is that a card has no owner buttons — the card's agenda carries every answer and
+moves the card ([The Board rules](#the-board-rules)). The surfaces below still draw Done and Not good on the card itself
+until they are removed; the teaching already sends every ask through the agenda.
 
 The owner's two answers about a card, on every surface that shows one (Kanban, Table, card detail):
 

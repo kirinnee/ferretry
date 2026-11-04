@@ -65,16 +65,17 @@ next restart. A ferret should check before telling the owner a section is missin
 Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/fleet/src/lib/account/fixed-layer.ts` (with the binary's
 name for `fy`). It is in every turn's context, so it is kept short: mermaid, svg and html are taught whole, chart keeps
 one line, and every type's full spec is one `fy render guide <type>` away, printed from
-[fy-render.md](fy-render.md). Change it there and here together.
+[fy-render.md](fy-render.md). Its second line is the owner's explainer rule (2026-11-04: _"for explainers, make sure its ADHD Firendly
+(make sure you say that) and user hypermeida to walk user through things"_, _"give example to illustrate your
+points etc"_). Change it there and here together.
 
 ````text
-Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, change over time), show it, not just say it. Do not overdo it: simple answers stay plain.
-Always inline: never publish an artifact, page, gist or link to explain, unless asked.
-Let the reader drive: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
-Write a fenced block whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, a `---` line, then the payload.
-- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
-- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
-- html: a fragment with inline CSS and <script> for interaction (runs isolated); no network loads.
+Hypermedia: to teach, explain or compare anything not simple (a flow, architecture, change over time), show it, not just say it; simple answers stay plain. Inline: never publish a page or link to explain unless asked.
+Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point (a real card, command, before/after). Walk them through with hypermedia they drive: Next buttons, sliders, tap to reveal; gentle motion (honour prefers-reduced-motion).
+A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.
+- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
+- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or external links.
+- html: a fragment, inline CSS and <script> (isolated); no network loads.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
 - card, board (live board cards), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
@@ -84,7 +85,7 @@ alt: How a request flows
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.
+Renders in chat, agenda tabs and cards; never in repo files, docs, commits or PRs.
 ````
 
 ## The supported forms

@@ -29,20 +29,25 @@ const JSON_HELP = 'print the protocol payload instead of the human rendering';
  * the Agenda-mode prompt (`AGENDA_INSTRUCTION`) says in short.
  */
 export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversation is only the log.
-  The MAIN tab, "Where we are now" (--where-file, or --where points), opens first: where things
-  stand, what is decided, what is still open — as long and as rich as it needs to be.
-  SPLIT THE REST BY CONTENT TYPE, never serial content: each kind (the work's Steps, Status,
-  Tracking, Results, Decisions, Risks, another kind of result…) gets a tab of its own, named for
+  ALWAYS KEEP THE ITEM CURRENT: every update rewrites the ask, still-open and each tab that
+  changed WHOLE, so the item always holds the whole current state.
+  Tabs hold ANY kind of content — status, to-dos, steps, instructions, explainers, results,
+  decisions, risks. There is no main type: "Where we are now" (--where-file, or --where points)
+  is simply the tab that opens first: where things stand, what is decided, what is still open —
+  as long and as rich as it needs to be.
+  SPLIT THE REST BY CONTENT TYPE, never serial content: each kind gets a tab of its own, named for
   what it holds: --tab-file "Name=file" (6 at most); --rename-tab, --move-tab, --remove-tab.
   A long continuous report, explainer or argument, where each part builds on the last, stays ONE
   tab, "The full picture" (--body-file). One kind of content is one tab: never invent tabs. With
   everything in tabs of its own, the body may stay empty. Rewrite a tab whole whenever it
-  changes: one edit is one version, and the owner sees which tabs changed. Steps the owner must
-  DO stay --step.
+  changes: one edit is one version, and the owner sees which tabs changed.
+  STEPS AND EXPLAINERS LIVE IN THE TABS AND STAY THERE, after the ask is answered too; a to-do's
+  --step boxes are only what the owner ticks off.
   Never retype a tab into the conversation: answer there briefly and point at it.
-  Write in explainer mode, with hypermedia: fy-render charts, mermaid, a step-through html page,
-  card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render html
-  block (<details><summary>…</summary>…</details>).`;
+  Write in explainer mode, ADHD-friendly (answer first, one idea per line, plain words, an example
+  for each point), walked through with hypermedia: fy-render charts, mermaid, a step-through html
+  page, card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render
+  html block (<details><summary>…</summary>…</details>).`;
 
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
   --title        REQUIRED. What this is about, in a few plain words (aim for 40 characters, 60 at most,
@@ -72,7 +77,7 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --step         when the human must DO something: one Markdown step each, in order (repeat) — the
                  complete instructions (commands in code blocks, where to click, what to paste where;
                  never a secret value), so the item alone is enough
-  --where-file   the MAIN tab, "Where we are now", a Markdown file (- reads stdin): where things stand, whole
+  --where-file   "Where we are now", the tab that opens first, a Markdown file (- reads stdin): where things stand, whole
                  (--where gives it as points instead, one each, repeat)
   --body-file    "The full picture", a Markdown file (- reads stdin): the report, explainer or plan
   --tab-file     a tab of your own, "Name=file" (repeat, 6 at most; see THE TABS ARE THE LIVE DOCUMENT below)

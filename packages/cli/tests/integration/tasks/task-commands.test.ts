@@ -263,7 +263,7 @@ describe('fy task move --help', () => {
 });
 
 describe('fy task create --help', () => {
-  it('should teach one card per outcome after the options: progress only, related cards first, no umbrella', async () => {
+  it('should teach one card per outcome after the options: never asks, related cards first, no umbrella', async () => {
     // Arrange
     const board = new BoardController({
       gateway: new FakeBoardGateway(),
