@@ -58,6 +58,8 @@ export const MAX_BOARD_PREMISE_LENGTH = 4 * 1024;
 export const MAX_BOARD_CONTEXT_LENGTH = 16 * 1024;
 /** The owner's test steps: a short checklist, sized like the context. */
 export const MAX_BOARD_HOW_TO_TEST_LENGTH = 16 * 1024;
+/** The card's current state (Now / Done so far / Next), rewritten whole: sized like the how-to-test steps. */
+export const MAX_BOARD_STATUS_LENGTH = 16 * 1024;
 export const MAX_BOARD_BRIEF_LENGTH = 64 * 1024;
 export const MAX_BOARD_REASON_LENGTH = 2 * 1024;
 export const MAX_BOARD_NOTE_LENGTH = 2 * 1024;
@@ -276,6 +278,7 @@ export const BoardEditableFieldSchema = z.enum([
   'terms',
   'brief',
   'howToTest',
+  'status',
 ]);
 export type BoardEditableField = z.infer<typeof BoardEditableFieldSchema>;
 
@@ -464,6 +467,7 @@ const BoardTaskShape = {
    * to do, what they should see. Empty until the ferret writes it; a card stored before it existed reads empty.
    */
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
+  status: z.string().max(MAX_BOARD_STATUS_LENGTH).default(''),
   /** The accountable ferret: the creator by default, the lead for a delegated card. */
   owner: SessionIdSchema,
   /** The ferret doing it now; `null` reads as the owner. */
@@ -804,6 +808,7 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   terms: BoardTermsSchema.default([]),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).default(''),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
+  status: z.string().max(MAX_BOARD_STATUS_LENGTH).default(''),
   workflow: TaskWorkflowSchema.default('quick'),
   /** The board; absent means the creating session's project. */
   projectId: BoardProjectIdSchema.optional(),
@@ -841,6 +846,7 @@ const editFields = {
   terms: BoardTermsSchema.optional(),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).optional(),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
+  status: z.string().max(MAX_BOARD_STATUS_LENGTH).optional(),
 };
 
 /**

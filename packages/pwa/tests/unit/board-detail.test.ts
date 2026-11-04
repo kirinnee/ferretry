@@ -318,6 +318,7 @@ describe('history', () => {
     });
     expect(rowOf('field-edited', { field: 'title' })).toMatchObject({ text: 'edited the title', minor: true });
     expect(rowOf('field-edited', { field: 'howToTest' })).toMatchObject({ text: 'edited How to test', minor: true });
+    expect(rowOf('field-edited', { field: 'status' })).toMatchObject({ text: 'edited the status', minor: true });
     expect(rowOf('file-claimed', { path: 'a.ts' })).toMatchObject({ text: 'claimed a.ts', minor: true });
     expect(rowOf('file-released', { path: 'a.ts', reason: 'done' })).toMatchObject({
       text: 'released a.ts',

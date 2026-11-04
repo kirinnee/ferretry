@@ -147,6 +147,7 @@ describe('buildCard', () => {
       owner: 'lead',
       assignee: null,
       brief: 'details',
+      status: '',
       legacyRef: 'lead:F1',
       createdBy: { kind: 'ferret', sessionId: 'lead' },
       clarifications: [{ text: 'use bun', by: { kind: 'owner' } }],

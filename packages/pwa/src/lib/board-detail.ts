@@ -513,6 +513,7 @@ const FIELD_WORDS: Readonly<Record<BoardEditableField, string>> = {
   terms: 'the terms',
   brief: 'the brief',
   howToTest: 'How to test',
+  status: 'the status',
 };
 
 /** The card has a PR, a branch, a doc or a release to show. */

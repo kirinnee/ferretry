@@ -50,6 +50,7 @@ import {
   LaneSetActionRequestSchema,
   LegacyTaskRefSchema,
   MAX_BOARD_HOW_TO_TEST_LENGTH,
+  MAX_BOARD_STATUS_LENGTH,
   laneEditProblems,
   moveReasonProblem,
   PrChecksSchema,
@@ -190,6 +191,7 @@ const CARD: BoardTask = BoardTaskSchema.parse({
   terms: [{ term: 'Lane', meaning: 'a project-defined column with a fixed category' }],
   brief: '# U1\n\nBuild the protocol.',
   howToTest: '1. Open the Board\n2. See the card',
+  status: '**Now:** writing the route.\n\n**Done so far:**\n- the field\n\n**Next:**\n1. the CLI',
   owner: LEAD,
   assignee: CHILD,
   parent: { id: 'F18' },
@@ -592,6 +594,40 @@ describe('How to test', () => {
   });
 });
 
+describe('Status', () => {
+  it('should read a card stored before Status existed as having none', () => {
+    const { status: _status, ...stored } = CARD;
+    should(BoardTaskSchema.parse(stored).status).equal('');
+    const { status: _viewStatus, ...sent } = VIEW;
+    should(BoardTaskViewSchema.parse(sent).status).equal('');
+  });
+
+  it('should keep a card’s status, and let a create and an edit carry it as its own field', () => {
+    should(BoardTaskSchema.parse(CARD).status).containEql('**Now:**');
+    should(BoardEditableFieldSchema.options).containEql('status');
+    should(BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask }).status).equal('');
+    should(
+      BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask, status: '**Now:** x' }).status,
+    ).equal('**Now:** x');
+    should(BoardTaskActionRequestSchema.parse({ action: 'edit', status: '**Now:** y' })).match({
+      status: '**Now:** y',
+    });
+    should(BoardTaskActionRequestSchema.safeParse({ action: 'edit' }).success).be.false();
+  });
+
+  it('should bound a status at 16 KiB on the card, a create and an edit', () => {
+    const fits = 'x'.repeat(MAX_BOARD_STATUS_LENGTH);
+    const long = 'x'.repeat(MAX_BOARD_STATUS_LENGTH + 1);
+    should(MAX_BOARD_STATUS_LENGTH).equal(16 * 1024);
+    should(BoardTaskSchema.safeParse({ ...CARD, status: fits }).success).be.true();
+    should(BoardTaskSchema.safeParse({ ...CARD, status: long }).success).be.false();
+    should(
+      BoardTaskCreateRequestSchema.safeParse({ kind: 'feature', title: 'X', ask: CARD.ask, status: long }).success,
+    ).be.false();
+    should(BoardTaskActionRequestSchema.safeParse({ action: 'edit', status: long }).success).be.false();
+  });
+});
+
 describe('card invariants', () => {
   it('should match the id prefix to the kind', () => {
     should(issuesOf({ ...CARD, kind: 'bug' })).deepEqual(['task id prefix must match its kind']);
@@ -773,6 +809,7 @@ describe('board mutations', () => {
       terms: [],
       brief: '',
       howToTest: '',
+      status: '',
       workflow: 'quick',
       parent: null,
       assignee: null,

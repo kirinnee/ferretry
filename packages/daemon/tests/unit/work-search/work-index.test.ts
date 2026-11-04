@@ -34,6 +34,20 @@ describe('the work search index', () => {
     should(result.total).equal(1);
   });
 
+  it('should find a card by words only in its status, and say the status matched', () => {
+    // Arrange
+    const index = indexOf(
+      cardDoc({ id: 'F1', title: 'Board store', status: '**Now:** wiring the quokka route' }),
+      cardDoc({ id: 'F2', title: 'Lane sets' }),
+    );
+
+    // Act
+    const result = index.search(query('quokka'), NOW_MS);
+
+    // Assert
+    should(result.hits.map(hit => [hit.id, hit.match.field])).eql([['F1', 'status']]);
+  });
+
   it('should find an agenda item by words in its body and in its history', () => {
     // Arrange
     const open = item({
