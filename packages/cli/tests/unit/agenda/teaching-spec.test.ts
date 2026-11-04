@@ -40,6 +40,7 @@ const SPEC_RULES: ReadonlyArray<{
   { rule: 'no umbrella cards', prompt: 'board', cli: 'task create', phrase: 'no umbrella' },
   { rule: 'check related cards first', prompt: 'board', cli: 'task create', phrase: 'check related cards first' },
   { rule: 'a card shows progress only', prompt: 'board', cli: 'task create', phrase: 'progress only' },
+  { rule: "the owner's ask is a public card", prompt: 'board', cli: 'task create', phrase: 'public card' },
 ];
 
 /** Case and line breaks do not change a rule: the help wraps its lines, the prompt does not. */

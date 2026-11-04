@@ -73,7 +73,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--how-to-test-file <path>', 'read How to test from a file instead')
     .option('--workflow <workflow>', `one of ${choices(TaskWorkflowSchema.options)}`)
     .option('--depends-on <id>', 'a task this one waits on (repeatable)', collect, [])
-    .option('--parent <id>', 'the task this one is part of')
+    .option('--parent <id>', "the task this one is part of; a sub-card is private, so never for the owner's asks")
     .option(
       '--approval <id>',
       'where the board is off: your answered "Track this on the board?" item (!A12) the owner said Yes to',

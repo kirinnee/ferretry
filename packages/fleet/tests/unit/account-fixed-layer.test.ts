@@ -891,6 +891,16 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(text).containEql("Cards (&F412) show progress only; every human ask goes in the card's agenda.");
     should(text).containEql('No umbrella cards; check related cards first; add to one.');
+  });
+
+  it("should teach that the owner's asks are public top-level cards, never --parent or --private", () => {
+    // Act
+    const text = BOARD_INSTRUCTION('zz');
+
+    // Assert — the board answers "status of all I asked?"; a sub-card or a private card is hidden from it.
+    should(text).containEql(
+      'The owner\'s asks are public cards ("status of all I asked?"): top-level, never `--parent`/`--private`; relate in `--context`.',
+    );
     // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
     should(text).not.containEql('raise nothing');
@@ -918,7 +928,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(700);
+    should(BOARD_INSTRUCTION('fy').length).be.below(760);
   });
 });
 

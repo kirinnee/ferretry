@@ -72,6 +72,9 @@ export function umbrellaRefusal(signals: readonly string[], binary: string): str
   ].join('\n');
 }
 
+/** One line printed when a card with the owner's words is filed under a parent: a sub-card is private. */
+export const SUB_CARD_ASK_WARNING = 'this card will be private (a sub-card); drop --parent so the owner sees it';
+
 /**
  * The card rule, as `fy task create --help` says it after the flags: the same rule the Board prompt teaches
  * (`BOARD_INSTRUCTION`), in the words of the create's own checks.
@@ -80,4 +83,6 @@ export const TASK_CREATE_RULE = `ONE CARD, ONE OUTCOME. A card shows progress on
   Check related cards first and prefer adding to an existing one: create lists them, weak matches too, and
   --related F12 adds this to that card as a note instead of creating one.
   No umbrella or overarching cards: a broad title (overhaul, misc, epic, …) or a summary that lists several outcomes
-  is refused unless --broad "<why this must be one card>". Make one card per outcome, or put it under --parent F12.`;
+  is refused unless --broad "<why this must be one card>". Make one card per outcome, or put it under --parent F12 (your own bookkeeping only).
+  THE OWNER'S ASK IS A PUBLIC CARD: the board answers "what's the status of everything I asked?", so a card for their ask is
+  top-level (no --parent, no --private); a sub-card is private. Relate it to other work in --context.`;

@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Cards (&F412) show progress only; every human ask goes in the card's agenda. No umbrella cards; check related cards first; add to one. Before it's ready to try: `fy task edit <id> --how-to-test "<1. where 2. do 3. see>"`; lane by work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Cards (&F412) show progress only; every human ask goes in the card's agenda. The owner's asks are public cards ("status of all I asked?"): top-level, never `--parent`/`--private`; relate in `--context`. No umbrella cards; check related cards first; add to one. Before it's ready to try: `fy task edit <id> --how-to-test "<1. where 2. do 3. see>"`; lane by work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -663,6 +663,13 @@ and its lead writes them.
 **Public cards are the ones the owner asked for. Private cards are the ferrets' bookkeeping**, sub-cards and helper
 cards included. The board shows public cards by default; the rest are one switch away. A public card stays linked
 to its PRs and its approval exactly as any card is: visibility only decides whether the board lists it.
+
+**How a ferret uses this.** The board has to answer the owner's "What's the current status of all the things I asked you to do?"
+("what's the sitrep?"), and that question is how a ferret decides whether a card is public. A card for the owner's ask is
+**top-level**: no `--parent`, no `--private`, because a sub-card is private and a ferret cannot make it public. `--parent` and
+`--private` are for the ferret's own bookkeeping only. Related work is named in the card's `--context`, not by grouping the
+asks under a parent. The Board prompt teaches it in one sentence, `fy task create --help` says it on `--parent` and in its rule,
+and `fy task create --parent … --ask …` (without `--public`) prints one line: `this card will be private (a sub-card); drop --parent so the owner sees it`.
 
 A card stores `visibility: public | private` and `visibilitySource: default | chosen`. A card stored before the field
 reads through one pure, total function, `cardVisibility` (`packages/daemon/src/lib/board/visibility.ts`): **public** when

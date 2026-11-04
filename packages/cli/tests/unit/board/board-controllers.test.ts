@@ -497,6 +497,20 @@ describe('fy task create', () => {
     should(log).eql(['ok: &F2 created — Todo, denisha, idle']);
   });
 
+  it("should warn once that a card with the owner's words under a --parent will be private", async () => {
+    // Arrange
+    const { controller, log } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    await controller.create([], { ...base, parent: 'F5' });
+    await controller.create([], base);
+
+    // Assert
+    should(log.filter(line => line.startsWith('diag:'))).eql([
+      'diag: this card will be private (a sub-card); drop --parent so the owner sees it',
+    ]);
+  });
+
   it('should create a private or public card with --private or --public', async () => {
     // Arrange
     const { controller, gateway } = harness(new FakeGateway(), DENISHA);
