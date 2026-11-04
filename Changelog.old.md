@@ -1,3 +1,9 @@
+## [4.271.1](https://github.com/kirinnee/ferretry/compare/v4.271.0...v4.271.1) (2026-11-04)
+
+### Fixes
+
+* **pwa:** draw a card ask's buttons on a thread of questions (B156) ([#1446](https://github.com/kirinnee/ferretry/issues/1446)) ([4ab69fe](https://github.com/kirinnee/ferretry/commit/4ab69fe9ffe8e254cee6e9ea7dc58b5f1fcc1159))
+
 ## [4.271.0](https://github.com/kirinnee/ferretry/compare/v4.270.0...v4.271.0) (2026-11-04)
 
 ### Features

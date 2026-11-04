@@ -1,3 +1,9 @@
+## [4.271.2](https://github.com/kirinnee/ferretry/compare/v4.271.1...v4.271.2) (2026-11-04)
+
+### Fixes
+
+* **pwa:** draw a message once when Claude also writes an untimed copy (B157) ([#1447](https://github.com/kirinnee/ferretry/issues/1447)) ([ec07fdd](https://github.com/kirinnee/ferretry/commit/ec07fddabb620778808e110fc9812f99fbf83d9d))
+
 ## [4.271.1](https://github.com/kirinnee/ferretry/compare/v4.271.0...v4.271.1) (2026-11-04)
 
 ### Fixes
