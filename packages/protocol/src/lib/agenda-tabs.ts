@@ -85,9 +85,9 @@ export const agendaTabId = (name: string, taken: ReadonlySet<string>): string =>
 };
 
 /**
- * The tab `ref` names: BY NAME first, in any case, and only when no tab has that name, by id. A name may equal another
- * tab's id (rename Status to Progress, then Risks to Status: "status" is Progress's id and Risks's new name), and the
- * owner and the ferret mean the name they can see.
+ * The tab `ref` names: by name in any case, else by id. A name is never another tab's id (`agendaTabProblems`), so the
+ * two never point at different tabs: renaming Status to Progress keeps the id "status", and then no other tab may be
+ * called Status.
  */
 export const findAgendaTab = (tabs: readonly Pick<AgendaTab, 'id' | 'name'>[], ref: string): number => {
   const byName = tabs.findIndex(tab => tab.name.toLowerCase() === ref.trim().toLowerCase());
@@ -125,7 +125,12 @@ export const applyAgendaTabEdits = (
       if (nameProblem !== undefined) return { ok: false, problem: nameProblem };
       tabs = [
         ...tabs,
-        { id: agendaTabId(edit.tab, new Set(tabs.map(tab => tab.id))), name: edit.tab, body: edit.body },
+        {
+          // Never another tab's id NOR another tab's name: a reference always means one tab.
+          id: agendaTabId(edit.tab, new Set(tabs.flatMap(tab => [tab.id, tab.name.toLowerCase()]))),
+          name: edit.tab,
+          body: edit.body,
+        },
       ];
       index = tabs.length - 1;
     } else if (edit.body !== undefined) {

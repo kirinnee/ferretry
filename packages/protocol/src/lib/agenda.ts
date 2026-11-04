@@ -381,7 +381,11 @@ export const agendaTabNameProblem = (name: string): string | undefined => {
     return `the tab name "${name}" is ${name.length} characters; the most is ${MAX_AGENDA_TAB_NAME_LENGTH}`;
   if (/[\r\n]/u.test(name)) return `the tab name "${name}" must be one line`;
   if (/[=#]/u.test(name)) return `the tab name "${name}" cannot hold "=" or "#"`;
-  if (RESERVED_TAB_NAMES.some(reserved => reserved.toLowerCase() === name.toLowerCase()))
+  if (
+    [...RESERVED_TAB_NAMES, AGENDA_MAIN_TAB_ID, AGENDA_BODY_TAB_ID].some(
+      reserved => reserved.toLowerCase() === name.toLowerCase(),
+    )
+  )
     return `"${name}" is a fixed tab: the main tab is --where-file, the full picture is --body-file`;
   return undefined;
 };
@@ -414,6 +418,12 @@ export const agendaTabProblems = (tabs: readonly AgendaTab[]): string[] => {
     if (ids.has(tab.id)) problems.push(`two tabs have the id "${tab.id}"`);
     names.add(name);
     ids.add(tab.id);
+  }
+  // A name is never ANOTHER tab's id, so a reference by name or by id always means one tab.
+  for (const tab of tabs) {
+    const other = tabs.find(each => each !== tab && each.id === tab.name.toLowerCase());
+    if (other !== undefined)
+      problems.push(`the name "${tab.name}" is the id of the tab "${other.name}": pick another name`);
   }
   const length = tabs.reduce((sum, tab) => sum + tab.body.length, 0);
   if (length > MAX_AGENDA_TABS_LENGTH)

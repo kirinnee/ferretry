@@ -157,27 +157,30 @@ describe('applying an edit’s tab operations', () => {
     });
   });
 
-  it('should name a tab by its name before any id, so a name that is another tab’s id still means its own tab', () => {
-    // Status → Progress keeps the id "status"; Risks → Status then takes the name (review of &F923).
-    const renamed = applyAgendaTabEdits(
+  it('should never let a name be another tab’s id, so a name or an id always means one tab (review of &F923)', () => {
+    // Status → Progress keeps the id "status": no other tab may then be called Status.
+    const refused = applyAgendaTabEdits(
       [tab('Status'), tab('Risks')],
       [
         { tab: 'Status', rename: 'Progress' },
         { tab: 'Risks', rename: 'Status' },
       ],
     );
-    if (!renamed.ok) throw new Error(renamed.problem);
-    const rewritten = applyAgendaTabEdits(renamed.tabs, [{ tab: 'status', body: 'Rewritten.' }]);
-    should(rewritten).deepEqual({
-      ok: true,
-      tabs: [
-        { id: 'status', name: 'Progress', body: 'Status words' },
-        { id: 'risks', name: 'Status', body: 'Rewritten.' },
-      ],
+    should(refused).deepEqual({
+      ok: false,
+      problem: 'the name "Status" is the id of the tab "Progress": pick another name',
     });
-    // With no tab of that name, the id still reaches its tab.
-    should(findAgendaTab(renamed.tabs, 'risks')).equal(1);
-    should(findAgendaTab(renamed.tabs, 'nope')).equal(-1);
+    // A new tab never takes another tab's name as its id either.
+    const made = applyAgendaTabEdits([tab('foo-bar', 'x', 'foo')], [{ tab: 'Foo Bar', body: 'y' }]);
+    should(made.ok && made.tabs.map(each => each.id)).deepEqual(['foo', 'foo-bar-2']);
+    // By name in any case, else by id.
+    const kept = [tab('Progress', 'x', 'status'), tab('Risks')];
+    should(findAgendaTab(kept, 'PROGRESS')).equal(0);
+    should(findAgendaTab(kept, 'status')).equal(0);
+    should(findAgendaTab(kept, 'nope')).equal(-1);
+    // main and body are the fixed tabs' names on the command line: no own tab takes them.
+    should(agendaTabNameProblem('Main')).containEql('fixed tab');
+    should(agendaTabNameProblem('body')).containEql('fixed tab');
   });
 
   it('should refuse what cannot apply, in plain words', () => {
