@@ -23,12 +23,27 @@ const SESSION_HELP =
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
+/**
+ * The body rule (docs/agenda.md § Stage, where we are, and the detail; the owner: "the chat is the stream of log, the
+ * body is the DB, like an event store"): `fy agenda --help`, `add --help` and `edit --help` all say it, in the words
+ * the Agenda-mode prompt (`AGENDA_INSTRUCTION`) says in short.
+ */
+export const AGENDA_BODY_RULE = `THE BODY IS THE LIVE DOCUMENT; the conversation is only the log.
+  --where is a SHORT status: where things stand, what is decided, what is still open, in a few points.
+  The full report, explainer, steps or status go in the BODY (--body-file). Rewrite the body on every change
+  (agenda edit <id> --body-file <file>) so it always holds the whole current state: it is what the owner
+  reads and what is versioned. Never retype it into the conversation: answer there briefly and point at it.
+  Write it in explainer mode by default, with hypermedia: fy-render charts, mermaid, a step-through html
+  page, and card and board blocks for status. Plain Markdown draws no fold: fold a long part inside an
+  fy-render html block (<details><summary>…</summary>…</details>).`;
+
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
   --title        REQUIRED. What this is about, in a few plain words (aim for 40 characters, 60 at most,
                  no IDs): it heads the card and is the notification's title — not the conversation's name
   <the ask>      the ASK: a short title-like line, about 80 characters at most, answer first — not backstory;
-                 the detail goes in --body; no # headings in the ask or any segment (the card draws them huge).
-                 It is the notification's body (\`--ask\` says the same when it is not given as words)
+                 the detail goes in the body (--body-file); no # headings in the ask or any segment (the
+                 card draws them huge). It is the notification's body (\`--ask\` says the same when it is
+                 not given as words)
   --premise      REQUIRED. The SITUATION: what is going on, so a cold reader starts here; plain lines, no
                  leading "- " (the card adds the bullet); repeat for one
                  bullet each (a --confirms card's premise is the daemon's: the held change)
@@ -50,13 +65,15 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --step         when the human must DO something: one Markdown step each, in order (repeat) — the
                  complete instructions (commands in code blocks, where to click, what to paste where;
                  never a secret value), so the item alone is enough
-  --body-file    a Markdown file (- reads stdin) for instructions that are not a list
+  --where        a SHORT status: where things stand now, one point each (repeat) — never the report
+  --body-file    the BODY, a Markdown file (- reads stdin): the live document — the whole report, explainer,
+                 steps or status (see THE BODY IS THE LIVE DOCUMENT below)
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
 THE RULE IS ISOLATION: could the owner answer with nothing else open? A card is read cold, so it
 carries everything the answer needs. Premise and context are required because they are where a cold
 reader starts — write them for that reader, not to fill a box.
-Every field renders as markdown: short bullets, one idea each, no walls of text; a fence in --body
+Every field renders as markdown: short bullets, one idea each, no walls of text; a fence in the body
 (fy-render) draws a chart or diagram when a picture beats words. Never use ticket or PR numbers,
 internal codenames, file paths or unexplained capitals — say it in plain words, or define the term
 with --term. The daemon warns when an item breaks these; fix it with
@@ -65,6 +82,8 @@ on you: \`answer <id> "<text>"\` brings it back to them, \`rest <id> --why "<wha
 and \`done\` closes it once nothing more is expected — only you (or the owner's own done or dismiss)
 close it, so run \`done\` or \`dismiss\` yourself the moment it is settled. An item whose reason is gone
 but is still open is a bug, not a safe default.
+
+${AGENDA_BODY_RULE}
 
 The card is swiped, so it offers at most 3 answers (left, up, right) — see --kind below.
 
@@ -264,7 +283,10 @@ function mountVerbs(
         [],
       )
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
-      .option('--body-file <path>', 'a Markdown file of instructions, or - for stdin')
+      .option(
+        '--body-file <path>',
+        'the body: the live document (the whole report, explainer, steps or status), a Markdown file or - for stdin',
+      )
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--will-block <thing>', 'what this will block, in a few words (e.g. "the 14:00 deploy")')
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
@@ -278,13 +300,13 @@ function mountVerbs(
       )
       .option(
         '--where <point>',
-        'where things stand now, one point each (repeat); an explainer or report the owner asked for',
+        'a short status: where things stand now, one point each (repeat); the full report goes in the body',
         collect,
         [],
       )
       .option('--detail <markdown>', 'the context explained from zero, for a reader new to the topic (shown folded)')
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
-      .addHelpText('after', `\n${AGENDA_OPEN_RULE}\n\n${askKinds(root.parent?.name() ?? 'fy')}`),
+      .addHelpText('after', `\n${AGENDA_OPEN_RULE}\n\n${AGENDA_BODY_RULE}\n\n${askKinds(root.parent?.name() ?? 'fy')}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.add(words, merged<AgendaAddOptions>(command));
   });
@@ -352,14 +374,22 @@ function mountVerbs(
         [],
       )
       .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])
-      .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin')
+      .option(
+        '--body-file <path>',
+        'rewrite the body — the live document, the whole current state — with this Markdown file, or - for stdin',
+      )
       .option(
         '--question-answer <markdown>',
         'the same as `agenda answer`: your answer to the owner, shown above its options; a resting item goes back to their list',
       )
       .option('--clear-question-answer', "take a stale answer to the owner's question off the item")
       .option('--stage <stage>', 'what it needs from the owner now: explainer, question, plan, tracker or test')
-      .option('--where <point>', 'replace where things stand now, one point each (repeat)', collect, [])
+      .option(
+        '--where <point>',
+        'replace the short status: where things stand now, one point each (repeat)',
+        collect,
+        [],
+      )
       .option('--detail <markdown>', 'replace the context explained from zero')
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--not-blocking', 'you are no longer stopped')
@@ -368,7 +398,8 @@ function mountVerbs(
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
       .option('--clear-by', 'drop when it is needed')
       .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)')
-      .option('--back', 'retired: answer with `agenda answer`, or ask anew with --kind'),
+      .option('--back', 'retired: answer with `agenda answer`, or ask anew with --kind')
+      .addHelpText('after', `\n${AGENDA_BODY_RULE}`),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AgendaEditOptions>(command));
   });

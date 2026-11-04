@@ -598,10 +598,14 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     );
   });
 
-  it('DoD 7: an explainer or report you ask for appears in the agenda’s “where we are now”', async () => {
+  it('DoD 7: an explainer or report you ask for appears in the agenda’s body, under a short “where we are now”', async () => {
     // Arrange
     const made = fresh();
     const daemon = serveRoutes(made);
+    const explainer = join(made.home, 'explainer.md');
+    const rewritten = join(made.home, 'explainer-v2.md');
+    writeFileSync(explainer, '## How the cache works\n\n- L1 is memory\n- L2 is the shared store\n- Disk is last');
+    writeFileSync(rewritten, '## How the cache works\n\n- L1 is memory\n- Disk is last: L2 is gone');
     try {
       const added = await fy(made, daemon.url, [
         'add',
@@ -614,12 +618,23 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
       ]);
       should(added.code).equal(0, added.err);
 
-      // Act
-      const edited = await fy(made, daemon.url, ['edit', 'A1', '--where', 'The cache has three layers: L1, L2, disk.']);
+      // Act — the explainer is the body; "where we are now" is the short status above it
+      const edited = await fy(made, daemon.url, [
+        'edit',
+        'A1',
+        '--where',
+        'The explainer is ready to read.',
+        '--body-file',
+        explainer,
+      ]);
+      const again = await fy(made, daemon.url, ['edit', 'A1', '--body-file', rewritten]);
 
-      // Assert
+      // Assert — the body holds the whole current state: a rewrite replaces it, never appends to it
       should(edited.code).equal(0, edited.err);
-      should((await made.item('A1')).whereWeAre).equal('The cache has three layers: L1, L2, disk.');
+      should(again.code).equal(0, again.err);
+      const item = await made.item('A1');
+      should(item.whereWeAre).equal('The explainer is ready to read.');
+      should(item.body).equal(readFileSync(rewritten, 'utf8'));
     } finally {
       daemon.stop();
     }
@@ -962,9 +977,13 @@ describe('Definition of done: the pages that prove the items the app shows (UI)'
   itemPage('DoD 6 (UI): the ask and every card ask sit inside the item, never docked', () => {
     proves(parts, 'holds the ask and EVERY card ask, each with its own buttons, inside the item — never docked');
   });
-  itemPage('DoD 7 (UI): the report the owner asked for shows whole in “where we are now”', () => {
-    proves(parts, 'holds the report the owner asked for, whole — no cut-off, however long');
-  });
+  itemPage(
+    'DoD 7 (UI): the report the owner asked for shows whole in the body, under a short “where we are now”',
+    () => {
+      proves(parts, 'holds the report the owner asked for in the body, open and whole — no cut-off, however long');
+      proves(parts, 'is the short status: where things stand, what is decided and what is still open');
+    },
+  );
   itemPage('DoD 8 (UI): a reply is drawn whole, however long, and every reply in order', () => {
     proves(
       'packages/pwa/tests/unit/features/agenda-item-history.test.tsx',

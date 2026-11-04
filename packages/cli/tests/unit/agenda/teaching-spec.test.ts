@@ -4,7 +4,7 @@ import { AgendaStageSchema } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
 import { agendaCandidates, renderCandidates } from '../../../src/lib/agenda/candidates';
-import { AGENDA_OPEN_RULE, registerAgendaCommands } from '../../../src/lib/agenda/commands';
+import { AGENDA_BODY_RULE, AGENDA_OPEN_RULE, registerAgendaCommands } from '../../../src/lib/agenda/commands';
 import { AgendaController } from '../../../src/lib/agenda/controller';
 import { TASK_CREATE_RULE, umbrellaRefusal } from '../../../src/lib/board/umbrella';
 import { agentItem, CapturingOutput, RecordingAgendaGateway, SESSION, snapshot } from './fixtures';
@@ -45,7 +45,8 @@ const SPEC_RULES: ReadonlyArray<{
 /** Case and line breaks do not change a rule: the help wraps its lines, the prompt does not. */
 const said = (text: string): string => text.toLowerCase().replace(/\s+/gu, ' ');
 
-async function agendaAddHelp(): Promise<string> {
+/** `fy agenda [verb] --help`, as a ferret reads it. */
+async function agendaHelp(...verb: string[]): Promise<string> {
   let help = '';
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({
@@ -58,9 +59,11 @@ async function agendaAddHelp(): Promise<string> {
     program,
     new AgendaController(new RecordingAgendaGateway(snapshot([])), new CapturingOutput(), SESSION),
   );
-  await program.parseAsync(['node', 'fy', 'agenda', 'add', '--help']).catch(() => undefined);
+  await program.parseAsync(['node', 'fy', 'agenda', ...verb, '--help']).catch(() => undefined);
   return help;
 }
+
+const agendaAddHelp = (): Promise<string> => agendaHelp('add');
 
 describe('the teaching matches the agenda-first spec', () => {
   for (const { rule, prompt, cli, phrase } of SPEC_RULES) {
@@ -117,7 +120,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'log', taught: 'log <id> --reply|--rest' },
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
-  { verb: 'edit', taught: '(`edit`)' },
+  { verb: 'edit', taught: '(`edit --body-file`)' },
   { verb: 'done', taught: 'mark it `done`' },
 ];
 
@@ -164,5 +167,47 @@ describe('the teaching names every agenda verb the spec lists', () => {
   it('should answer an owner question ON its item, and open one info item only when no item exists', () => {
     // Assert
     should(said(AGENDA_INSTRUCTION('fy'))).containEql('no item: one `-k info`');
+  });
+});
+
+/**
+ * THE BODY IS THE LIVE DOCUMENT (docs/agenda.md § Stage, where we are, and the detail; the owner on !A332: "the chat is
+ * the stream of log, the body is the DB"): `--where` is a short status, the body holds the whole current state and is
+ * rewritten on every change, and the conversation only points at it. The prompt says it in short; every help says it whole.
+ */
+describe('the teaching says the body is the live document and the chat is its log', () => {
+  it('should say it in the agenda prompt: a short status, the body rewritten whole, the chat pointing at it', () => {
+    // Act
+    const prompt = said(AGENDA_INSTRUCTION('fy'));
+
+    // Assert
+    should(prompt).containEql('`--where`=short status');
+    should(prompt).containEql('body=live doc (report/steps/status)');
+    should(prompt).containEql('rewrite it whole (`edit --body-file`)');
+    should(prompt).containEql('chat points at it');
+    should(prompt).not.containEql('one-screen summary');
+  });
+
+  it('should say the whole rule in fy agenda --help, add --help and edit --help', async () => {
+    // Act
+    const helps = await Promise.all([agendaHelp(), agendaHelp('add'), agendaHelp('edit')]);
+
+    // Assert
+    for (const help of helps) should(said(help)).containEql(said(AGENDA_BODY_RULE));
+  });
+
+  it('should name each part of the rule: the short status, the rewrite, the log, explainer mode, hypermedia and folds', () => {
+    // Act
+    const rule = said(AGENDA_BODY_RULE);
+
+    // Assert
+    should(rule).containEql('the body is the live document; the conversation is only the log');
+    should(rule).containEql('--where is a short status');
+    should(rule).containEql('rewrite the body on every change (agenda edit <id> --body-file <file>)');
+    should(rule).containEql('never retype it into the conversation');
+    should(rule).containEql('explainer mode by default');
+    should(rule).containEql('card and board blocks for status');
+    // The body's Markdown draws no fold of its own: a fold is an fy-render html block's <details>.
+    should(rule).containEql('plain markdown draws no fold');
   });
 });
