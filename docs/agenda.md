@@ -1284,6 +1284,16 @@ and a part the item does not carry is not drawn:
   **Done / Not good** (`attachedGateView` leaves the thread's own answer shape behind), and an item answered in words
   gets no "Your answer for this item" heading over nothing. A card ask carries the card's **How to test**,
   read from the board the app already loads (`howToTestFor`), above its Done / Not good.
+- **A reply that already says yes is offered as the card's answer (&B155).** The owner who answers an item holding a
+  card ask in words ("build", "ok to build!") has not pressed the card's button, so the card stays where it is and the
+  ferret may not press it for them. When the owner's words are the LAST thing on the item and plainly approve, the card
+  ask says "You replied “build”. Use it as your answer for the card?" beside its forward button (OK to build, Done),
+  one tap away (`replyApproval`). It is only offered, never applied, and only conservatively: ONE open card ask
+  (counted in `cardAsks`, never the one-ask `gateAttached` mirror, so an item from a daemon that keeps none offers
+  nothing), one forward option, words written AFTER that ask was raised, and a short approval (yes, ok, go ahead,
+  lgtm, ship it…; build words only for OK to build, "works" or "tested" only for Done) or the button's own label. The
+  item's own reference the composer puts in front ("!A304 ok to build!") is set aside, and only that one. Nothing
+  longer is read, and a ferret reply after the words withdraws the offer.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.

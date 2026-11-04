@@ -56,6 +56,7 @@ const full = agendaItem('A47', {
   stillOpen: '- The colour',
   body: REPORT,
   gateAttached: gate,
+  cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
   revisions: [
     { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Which badge?' } },
   ],
@@ -306,6 +307,24 @@ describe('what it needs from you', () => {
     const own = must(needs.querySelector('[data-agenda-item-answer]'), 'the item’s own answer');
     expect(own.textContent).toContain('Your answer for this item');
     expect(own.querySelector('[data-agenda-option="Blue"]')).not.toBeNull();
+  });
+
+  test('offers the owner’s plain “yes” reply as the card ask’s answer, one tap, never applied (&B155)', async () => {
+    const acted = await draw(full, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works for me!' }]);
+    const offer = one('[data-agenda-card-ask] [data-agenda-reply-offer]');
+    expect(offer.textContent).toContain('You replied “works for me!”.');
+    expect(acted).toEqual([]);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-reply-offer-use="Done"]').click());
+    expect(acted).toEqual([
+      expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' }),
+    ]);
+    await unmount();
+    // Longer words, or the ferret answering after them, offer nothing.
+    await draw(full, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works, but the colour is off' }]);
+    expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
+    await unmount();
+    await draw(full, {}, conversation);
+    expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
   });
 
   test('is marked out while the item needs the owner, and quiet once it rests', async () => {
