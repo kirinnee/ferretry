@@ -504,7 +504,7 @@ A new ask is the owner's turn. Nothing starts "in discussion": the ferret raises
 
 Internally the ferret's turn is `waitingOn: 'ferret'` with `waitingFor` either `'discussion'` (the owner
 asked to discuss it) or `'info'` (the owner asked for more information). Clients read the turn, not those two
-fields. **A chat reply is not a turn at all: it parks the item** (see "Parked items").
+fields. **A chat reply is not a turn at all: it rests the item** (stored as `parked: replied`; see "Parked items").
 
 ## Handing it back
 
@@ -1202,7 +1202,7 @@ its STAGE instead ([The item view](#the-item-view)), which is what it needs from
 | `form`            | Fill in  | fills in the card's fields                      |
 | `input`           | Type in  | types in what the card asks for                 |
 
-A **gate item** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
+A **gate item from before card asks** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
 go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message kinds are another thing and keep their own words.
 
 ## The item view
@@ -1573,7 +1573,7 @@ Plan to approve, Tracker, Test; a resolved row shows the last stage it had) and 
 tab, so the two cannot disagree. The tab is hidden while the agenda has nothing on it and agenda mode is off.
 
 The task panel has no Cards view: the Tasks tab is **Kanban** or **List** (List by default). A card's ask is an item on an
-agenda, so it appears here and in the Inbox, and a card swipes as a gate item does (**→ Done**, **← Not good**,
+agenda, so it appears here and in the Inbox, and a card ask swipes as a card's answer does (**→ Done**, **← Not good**,
 **↓ Skip**) wherever its ask is drawn.
 
 ## Delivery
@@ -1638,6 +1638,45 @@ max wait is **refused** by the config check, not clamped. All four are read at s
 - **Why this replaced the old outbox.** The old one recorded a batch as delivered the moment it was handed
   over, and swallowed a refusal. A ferret whose composer held text (a person mid-message, or a stranded
   draft) refused the send, and the owner's Discuss or answer was lost while the agenda said it had gone.
+
+## Definition of done
+
+The agenda-first redesign is done when these sixteen things are true. Each is proved by a test named
+`DoD <n>: …` in [`agenda-dod.sit.test.ts`](../packages/cli/tests/sit/agenda-dod.sit.test.ts), on a temp `FY_HOME` with
+no network and the daemon's real `AgendaService` over its real ledger, version and seen files. **Items 1, 2, 7, 8 (the
+report), 10, 14, 15 and 16 are driven through the real `fy` command** over HTTP into the daemon's real agenda routes.
+The rest are service-level checks, because the owner's side (a reply, a snooze, the clock, the push) has no `fy`
+command: item 3's push runs the real `NotificationService` with a recording sender, and item 4's nudge runs the real
+`AgendaRestNudger`. The items the app shows are proved by the page's own tests; the SIT checks that each file still
+exists and still says the behaviour it proves. A page's pointer waits only while the PR that adds the page is open (its
+source module does not exist yet), and fails the checklist once it does.
+
+| #   | The claim (the spec's words)                                                                                                                                                                                                                                                                                       | Proved by                                                                                                                                                                                                                                                     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | A ferret only opens an agenda when no open one passes the 3-part test. Otherwise it adds to the closest.                                                                                                                                                                                                           | `DoD 1` (`fy agenda add` refuses without `--new` and prints the `fy agenda edit` join; the join and the `--new` path both run)                                                                                                                                |
+| 2   | Things that depend on each other are always in one agenda.                                                                                                                                                                                                                                                         | `DoD 2` (`fy agenda add --task` lists the agenda carrying a card the new one depends on, or blocks, first: "carries &F1, which &F2 depends on"); a card that already asks points the second ask at its agenda                                                 |
+| 3   | A Needs you item notifies you and opens straight at its ask. A Resting item never buzzes you.                                                                                                                                                                                                                      | `DoD 3` (the real notification service: one push, blockers first, opening at the ask; none for Resting or snoozed); the opening: `packages/pwa/tests/unit/features/agenda-inbox-notification-open.test.tsx` (PR 7)                                            |
+| 4   | Any reply or answer from you moves the item to Resting ("waiting on <ferret>") and out of Needs you. The ferret's answer on it brings it back to Needs you automatically, in its old spot. About 30 minutes of ferret silence gets a Warden nudge. Needs you never lists an agenda twice, and puts blockers first. | `DoD 4` (reply and owner answer rest it; the ferret's answer returns it ahead of a newer item; one nudge at 31 minutes, none at 29); `DoD 3` (unique queue, blockers first)                                                                                   |
+| 5   | Snooze keeps an item Resting until the time you picked, unless a blocker wakes it.                                                                                                                                                                                                                                 | `DoD 5`                                                                                                                                                                                                                                                       |
+| 6   | A card that's ready shows its test steps and Done / Not good inside its agenda, never as a separate item.                                                                                                                                                                                                          | `DoD 6`, and the board's gate path in `packages/daemon/tests/unit/board/card-asks.test.ts` (the ask rides the open agenda, or opens ONE named after the card); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                         |
+| 7   | An explainer or report you ask for appears in that agenda's "where we are now".                                                                                                                                                                                                                                    | `DoD 7` (`fy agenda edit --where`); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                                                                                    |
+| 8   | A long report fits with no cut-off. Every reply shows in the conversation, in order.                                                                                                                                                                                                                               | `DoD 8`: a 200k report through `fy agenda edit --body-file` read back whole; replies and the ferret's answers in their full interleaved order; the page: `agenda-conversation.test.ts` (PR 8). **GAP:** see below                                             |
+| 9   | The activity log is folded. Diff mode shows what changed between any two versions you pick.                                                                                                                                                                                                                        | `DoD 9` (the versions list and any two can be fetched); the folds: `agenda-item-sections.test.ts` and `features/agenda-item-parts.test.tsx` (PR 7); the diff: `features/agenda-version-diff.test.tsx` (PR 8)                                                  |
+| 10  | Merging two agendas keeps both conversations and all their cards.                                                                                                                                                                                                                                                  | `DoD 10` (`fy agenda merge`); the button: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                                     |
+| 11  | A sub-ferret can't create a card or agenda without permission.                                                                                                                                                                                                                                                     | `DoD 11` (a sub-ferret is refused a card and an agenda; its lead is not)                                                                                                                                                                                      |
+| 12  | A ferret can show a live card or mini board inline, and it updates when the card moves.                                                                                                                                                                                                                            | `packages/pwa/tests/unit/fy-render-card-embed.test.tsx` (`DoD 12`, by pointer)                                                                                                                                                                                |
+| 13  | The board shows public cards by default, each linked to its PRs and approvals.                                                                                                                                                                                                                                     | `DoD 13`; `features/board-page.test.tsx`, `board-private-preference.test.ts`, `card-visibility.sit.test.ts`. **GAP:** each linked to its PRs and approvals has no test here                                                                                   |
+| 14  | One agenda can go from explainer to question to plan to tracker to test, with its type showing the current stage, and the history keeps each stage.                                                                                                                                                                | `DoD 14` (`fy agenda edit --stage` through every stage, then `fy agenda done`); the head: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                                        |
+| 15  | When part of an agenda no longer passes the test, the ferret splits it into a new linked agenda.                                                                                                                                                                                                                   | `DoD 15` (`fy agenda split --move-cards`); the page: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                          |
+| 16  | A main-chat exchange about an agenda shows in that agenda's conversation, with your words verbatim and tagged "from chat", plus the ferret's reply. The chat reply links to the agenda, and the exchange moves the state as a reply would (it rests, and comes back on the ferret's answer).                       | `DoD 16` (`fy agenda log --reply` and `--rest`: verbatim, tagged, the same message never logged twice, the item rests and comes back ahead of a newer one). **GAP:** the chat reply links to the agenda — taught only (`link` in the Agenda-mode instruction) |
+
+**GAP: a long report cannot reach "where we are now" through `edit`.** `fy agenda edit --where` takes its text on the
+command line (`--where` is argv-only, and argv is capped), so the 200,000-character proof of item 8 goes through
+`--body-file`. Only a new item (`add` or `split --json-file`) can put a long report into "where we are"; an existing item cannot. Closing this means giving
+`edit` a file input for `--where`.
+
+The teaching that makes a ferret follow these rules is held to the spec by
+`packages/cli/tests/unit/agenda/teaching-spec.test.ts`.
 
 ## Compatibility
 

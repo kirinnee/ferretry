@@ -128,6 +128,8 @@ the command exit non-zero.
 | it is kind `info`, or linked (`--task`) to a card this run drops, or an ask with no question | an item on the owner's turn mid-reply (a reply held or being sent)                                                                          |
 |                                                                                              | an item with a question, fields, options or a confirm: listed as "kept: needs the owner" with the `fy agenda done <id>` to close it by hand |
 
+**GAP: `fy tidy` does not see card asks.** It keeps a card or an item only for a legacy gate item (`item.gate`), not for an open card ask (`cardAsks`; `tidy/service.ts`, `tidy/plan.ts`). A follow-up should make tidy treat an open card ask like a gate.
+
 A sub-ferret may run it: its plan has no cards (the daemon already refuses a sub-ferret's drop) and only its own
 tracking items. An older daemon without the route answers 404; the CLI says to run `fy daemon update`.
 
