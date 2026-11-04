@@ -1328,17 +1328,17 @@ from you**. It holds exactly the ask and
 ends with one plain instruction, so the owner always knows what to do. The ask itself is a short **bold line at body size** — never heading-sized, however long it is; a long ask wraps
 and the card stays the card:
 
-| Kind (`--kind`)                     | The segment shows                                   | The buttons                                            |
-| ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
-| `choice`                            | ONE question, then each option with what it means   | the options (three on the row), recommended tagged     |
-| `yesno`                             | one yes-or-no question                              | No · Yes (always: No ←, Yes →)                         |
-| `permission`                        | what is being approved, and its effect (`--impact`) | Approve · Deny                                         |
-| `review`                            | what to review (`--link`)                           | Approve · Request changes                              |
-| `reply`, one question               | the question                                        | none: "Type your answer below."                        |
-| `reply`, several questions or a mix | a numbered list of each answer wanted               | none: "Reply with your answers below, numbered."       |
-| `form`                              | numbered fields, each answered where it is asked    | none: the card's fields, the reply box, one Send       |
-| `todo`                              | the steps, numbered, each ticked                    | Mark as done                                           |
-| `info`, and a notice                | the message                                         | Got it (quiet: a bare Got it does not wake the ferret) |
+| Kind (`--kind`)                     | The segment shows                                   | The buttons                                                         |
+| ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------- |
+| `choice`                            | ONE question, then each option with what it means   | the options (three on the row), recommended tagged                  |
+| `yesno`                             | one yes-or-no question                              | No · Yes (always: No ←, Yes →)                                      |
+| `permission`                        | what is being approved, and its effect (`--impact`) | Approve · Deny                                                      |
+| `review`                            | what to review (`--link`)                           | Approve · Request changes                                           |
+| `reply`, one question               | the question                                        | none: "Type your answer below."                                     |
+| `reply`, several questions or a mix | a numbered list of each answer wanted               | none: "Reply with your answers below, numbered. Skip any you like." |
+| `form`                              | numbered fields, each answered where it is asked    | none: the card's fields, the reply box, one Send                    |
+| `todo`                              | the steps, numbered, each ticked                    | Mark as done                                                        |
+| `info`, and a notice                | the message                                         | Got it (quiet: a bare Got it does not wake the ferret)              |
 
 - **A button says its option's short label** ("No", "Only blockers"): never its description, never a bare letter.
   Markdown in a label is read as plain words. A label longer than 24 characters (20 on a row of three) is cut at a
@@ -1349,8 +1349,12 @@ and the card stays the card:
   hints and `fy agenda list` say the same words, through one function. The options list may name long options by
   letter; the buttons never do.
 - **Options are only for a choice; steps only for a to-do.** Several questions, or a question mixed with anything
-  else, are `--kind reply` with one `--question` each: never option buttons. The owner answers them all in one
-  reply, by number.
+  else, are `--kind reply` with one `--question` each: never option buttons. The owner answers them in one reply, by
+  number, and may skip any (&F922). When the questions are a ferret's own question form (a harness prompt), the
+  daemon reads a plain numbered reply (`1. EU`, then `3. yes`; a number with nothing, `skip` or `skipped` after it
+  counts as skipped) as well as the board's own `1. <question>` then `→ <answer>` shape, and fills a skipped question in the
+  form with `skipped`, so the whole form still goes in one go. It reads nothing from prose: a reply that does not
+  start with a number, or whose numbers do not rise within the questions, is refused and the item is raised again.
 - **Request changes** is a button, never a swipe: it sends what the composer holds as the change asked for, or puts
   the owner in the composer when it is empty. Where no composer is at hand (the Sessions page's compact card), the
   card says to type the changes in the message box instead.
@@ -1381,7 +1385,7 @@ A **form** (`--kind form`) is several structured answers at once. Its `fields` a
 
 Write a field as `--field "id|type|Question|option|option…"`, one flag per field, in order: `--field "1|one|Which region?|EU: data
 stays in Europe|*US: cheapest"` is a pick-one with two options. A leading `*` on an option (or `*Yes` / `*No` on a yes/no) marks the
-recommended value; a trailing `optional` segment lets the field stay empty; `Name~Question` sets the short word the numbered
+recommended value; a trailing `optional` segment is still accepted (every field may stay empty); `Name~Question` sets the short word the numbered
 answer uses (`Region~Which region?` → "1. Region: EU"). The same list can be the `fields` of a `--json-file`. Ids are short and
 unique (`1`, `region`); a pick-one or pick-many needs 2–12 options, a text field none. `fy agenda edit <id> --field …` replaces
 the whole list.
@@ -1391,11 +1395,15 @@ the whole list.
 - **No secrets.** There is no secret field kind and a form answer is plain text on the item, so a password, token or code is never asked here: it goes through an input request ([input-requests.md](input-requests.md)), which the agent never reads.
 - **Recorded by field id.** The answer is stored on the item as `{ kind: "form", answers: [{ id, picked }] }` (a pick-many's
   picked is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
-- **Empty required fields are asked about once.** The first Send says which fields are unanswered and that Send again sends
-  it as it is; the next Send goes through. Nothing filled in at all is not sent.
+- **Every field is optional (&F922).** The owner may answer any subset: Send goes through at once, nothing is asked
+  about first, and what was skipped reads `(skipped)` in the one numbered answer the ferret receives. Words with nothing
+  picked still go, as an answer with no field and the words as its note (`answers` may be empty). Only nothing picked
+  and nothing typed is not sent. A field's `required` (and the CLI's trailing `optional` segment) is still accepted so
+  older raises parse, and changes nothing the app enforces or shows. A daemon from before this refuses an answer with
+  no field: that refusal is shown on the card in its own words.
 - **No swipes** except ↓ Skip. Recommended values start picked and carry a "Recommended" tag; what is picked is the
   filled row (or the filled Yes/No half, with a check), so a recommendation never reads as a pick.
-- **What is left is said.** A required field with nothing picked says "Needs an answer", and a foot pinned to the bottom
+- **What is answered is counted.** No field says it needs an answer; a foot pinned to the bottom
   of the open item counts the fields answered on the card ("2 of 3 answered") above how to send, so neither hides under
   the composer. Once the answer has gone, the Inbox's undo toast and the chat's "Sent to …" line name what was picked
   ("Region: US · Alerts: Page, Mail").

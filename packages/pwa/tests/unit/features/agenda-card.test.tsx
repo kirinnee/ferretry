@@ -117,7 +117,7 @@ describe('AgendaCard several questions', () => {
       view.container.querySelector('[data-agenda-send-answers], [data-agenda-pick], [data-agenda-option]'),
     ).toBeNull();
     expect(view.container.querySelector('[data-agenda-composer-hint]')?.textContent).toBe(
-      'Reply with your answers below, numbered.',
+      'Reply with your answers below, numbered. Skip any you like.',
     );
     expect(view.container.querySelector('input[type="text"], textarea')).toBeNull();
     expect(sent).toEqual([]);

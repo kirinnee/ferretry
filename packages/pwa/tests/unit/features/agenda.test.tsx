@@ -1302,10 +1302,8 @@ describe('a form opened in the chat (#B143)', () => {
     dispose();
   });
 
-  test('asks once about an empty required field, then sends it as it is', async () => {
+  test('sends a form answered in part on the first Send: every field is optional (&F922)', async () => {
     const view = openForm('A62', { clientOverride: recording() });
-    expect(() => live().composer.answerForm?.()).toThrow('Not answered yet: 2. Alerts, 3. Restart.');
-    expect(calls).toEqual([]);
     await runAsync(async () => {
       live().composer.answerForm?.();
     });

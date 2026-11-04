@@ -285,10 +285,13 @@ export const AgendaResponseSchema = z
       kind: z.literal('open-question'),
       answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
     }),
-    /** A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). */
+    /**
+     * A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). Any subset, none included
+     * when the owner only wrote a note: every field is optional (&F922).
+     */
     z.strictObject({
       kind: z.literal('form'),
-      answers: z.array(AgendaFormAnswerSchema).min(1).max(MAX_AGENDA_FIELDS),
+      answers: z.array(AgendaFormAnswerSchema).max(MAX_AGENDA_FIELDS),
     }),
     /**
      * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it
@@ -420,7 +423,8 @@ export type AgendaFieldType = z.infer<typeof AgendaFieldTypeSchema>;
  * One field of a `form` card. `label` is the question; `name` is the short word its line in the answer uses
  * ("Region"), else the question is used. `one` and `many` carry their options (each can say what it means);
  * `yesno` and `text` carry none. `recommended` is the asker's pick: one option for `one`, any for `many`, Yes
- * or No for `yesno`. A field is required unless it says otherwise or is `text` (the reply box).
+ * or No for `yesno`. Every field is optional to the owner, who may send any subset (&F922): `required` is kept so an
+ * older raise still parses, and says nothing the app enforces.
  */
 export const AgendaFormFieldSchema = z
   .strictObject({

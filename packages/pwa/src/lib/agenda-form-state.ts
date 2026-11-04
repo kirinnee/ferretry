@@ -30,7 +30,6 @@ export const toggled = (current: readonly string[], value: string, many: boolean
 
 export class AgendaFormStore {
   readonly #picks = new Map<string, FormPicks>();
-  readonly #asked = new Map<string, string>();
   readonly #changes = new Map<string, number>();
   readonly #listeners = new Set<() => void>();
 
@@ -45,28 +44,17 @@ export class AgendaFormStore {
 
   set(key: string, fields: readonly AgendaFormField[], field: string, next: readonly string[]): void {
     this.#picks.set(key, withPick(this.picks(key, fields), field, next));
-    this.#asked.delete(key);
     this.#changes.set(key, this.changes(key) + 1);
     this.#emit();
   }
 
-  /** How many times the owner has changed a pick on this form: the composer clears a stale "not answered" line on it. */
+  /** How many times the owner has changed a pick on this form: the composer clears a stale "nothing to send" line on it. */
   changes(key: string): number {
     return this.#changes.get(key) ?? 0;
   }
 
-  /** What the owner was last asked about when Send found required fields empty; sending again as asked goes through. */
-  asked(key: string): string | undefined {
-    return this.#asked.get(key);
-  }
-
-  markAsked(key: string, signature: string): void {
-    this.#asked.set(key, signature);
-  }
-
   forget(key: string): void {
     this.#picks.delete(key);
-    this.#asked.delete(key);
     this.#changes.delete(key);
     this.#emit();
   }

@@ -1101,7 +1101,7 @@
   gap: 8px;
   font-weight: var(--weight-strong);
 }
-/* The question, its "(pick any)" and its "Needs an answer" wrap as one run, so a wrapped note starts where the
+/* The question and its "(pick any)" wrap as one run, so a wrapped note starts where the
    question does instead of a margin's width in. */
 .fy-form__label {
   display: flex;
@@ -1125,15 +1125,6 @@
   margin: 0;
   min-width: 0;
   border: 0;
-}
-.fy-form__needed {
-  padding: 0 6px;
-  border: var(--stroke, 1px) solid var(--warn, var(--accent));
-  border-radius: var(--radius-badge);
-  color: var(--warn, var(--accent));
-  font-size: var(--text-xs, 0.75rem);
-  font-weight: normal;
-  white-space: nowrap;
 }
 /* EVERY OPTION ONE ROW: the same height and gap for a radio and a checkbox, with or without a meaning under it. The
    PICKED row is filled and edged in the accent; "Recommended" is only a tag, so the two never look alike. */
