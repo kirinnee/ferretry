@@ -28,7 +28,6 @@ import {
   type ResolvedAgendaItem,
   type TaskRef,
 } from '@ferretry/protocol';
-import { type DeclaredLanes, doneLaneOf, notGoodLaneOf } from './board-done.ts';
 import type { FerretNames } from './board-present.ts';
 
 type Lanes = Pick<LaneSet, 'lanes'>;
@@ -38,23 +37,6 @@ export const laneCategoryOf = (laneSet: Lanes | null, laneId: string): LaneCateg
 
 export const laneNameOf = (laneSet: Lanes | null, laneId: string): string =>
   laneSet?.lanes.find(lane => lane.id === laneId)?.name ?? laneId;
-
-// ---------------------------------------------------------------------------------------------------
-// The two answers of a card waiting to be tried
-// ---------------------------------------------------------------------------------------------------
-
-export interface VerdictLanes {
-  /** "✓ Done": the Done lane (`doneLaneOf`), a move forward that needs no words. */
-  readonly closeLaneId: string | null;
-  /** "✗ Not good → Implement": the Not good lane (`notGoodLaneOf`), a move back that asks why. */
-  readonly reworkLaneId: string | null;
-}
-
-/** The lanes the two verdict buttons go to; `null` when the card is not in a 🧪 verify lane. */
-export const verdictLanes = (laneSet: (Lanes & DeclaredLanes) | null, laneId: string): VerdictLanes | null => {
-  if (laneSet === null || laneCategoryOf(laneSet, laneId) !== 'verify') return null;
-  return { closeLaneId: doneLaneOf(laneSet), reworkLaneId: notGoodLaneOf(laneSet) };
-};
 
 // ---------------------------------------------------------------------------------------------------
 // Header

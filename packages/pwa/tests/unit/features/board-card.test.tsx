@@ -27,8 +27,6 @@ const cardOf = async (extra: Record<string, unknown> = {}) => {
 const moves = (log: string[] = [], overrides: Partial<BoardCardMoves> = {}): BoardCardMoves => ({
   choices: moveChoices(laneSetFor(), 'review'),
   onMove: (_card, laneId) => void log.push(`move:${laneId}`),
-  closeLaneId: 'closed',
-  reworkLaneId: 'implement',
   onDragStart: target => void log.push(`start:${target.task.id}`),
   onDragEnd: () => void log.push('end'),
   ...overrides,
@@ -210,136 +208,26 @@ describe('BoardCard', () => {
     expect(bare.querySelector('.fy-board-card__more')).toBeNull();
   });
 
-  it('offers Done and Not good on a card waiting to be tried', async () => {
-    const log: string[] = [];
-    const root = await draw({ category: 'verify', moves: moves(log) });
-    const works = must(root.querySelector<HTMLButtonElement>('[data-verdict="works"]'), 'Works');
-    const notGood = must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good');
-    expect(works.textContent).toBe('Done');
-    expect(works.title).toMatch(/^Mark .* done and close it$/u);
-    expect(notGood.textContent).toBe('Not good');
-    await interact(() => works.click());
-    await interact(() => notGood.click());
-    expect(log).toEqual(['move:closed', 'move:implement']);
+  it('draws no owner button: no Done, no Not good, no Reopen, on any card in any lane or density', async () => {
+    for (const category of ['verify', 'shipped', 'closed', 'review'] as const) {
+      for (const density of ['page', 'side'] as const) {
+        const root = await draw({ category, density, touch: category === 'verify', moves: moves() });
+        expect(root.querySelector('.fy-board-card__verdict')).toBeNull();
+        expect(root.querySelector('[data-verdict]')).toBeNull();
+        expect(root.querySelector('.fy-board-done')).toBeNull();
+        await interact(() =>
+          must(root.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
+        );
+        const items = [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].map(item => item.textContent);
+        expect(items.some(item => /done|reopen|not good/iu.test(item ?? ''))).toBe(false);
+        await release();
+      }
+    }
   });
 
-  it('puts Not good ← on the left and Done → on the right, whichever Done control the card wears', async () => {
-    const order = (root: HTMLElement): string[] =>
-      [...root.querySelectorAll<HTMLElement>('.fy-board-card__verdict > button')].map(b => b.textContent?.trim() ?? '');
-    const plain = await draw({ category: 'verify', moves: moves() });
-    expect(order(plain)).toEqual(['Not good', 'Done']);
-    expect(plain.querySelector('[data-verdict="not-good"] svg')?.classList.contains('lucide-arrow-left')).toBe(true);
-    expect(plain.querySelector('[data-verdict="works"] svg')?.classList.contains('lucide-arrow-right')).toBe(true);
-    await release();
-    const done = { done: { kind: 'done', laneId: 'closed' } as const, press: () => undefined, atRelease: false };
-    const shared = await draw({ category: 'verify', done, moves: moves() });
-    const buttons = [...shared.querySelectorAll<HTMLElement>('.fy-board-card__verdict > button')];
-    expect(buttons.map(b => b.textContent?.trim())).toEqual(['Not good', 'Done']);
-    expect(buttons[0]?.dataset.verdict).toBe('not-good');
-    expect(buttons[1]?.classList.contains('fy-board-done')).toBe(true);
-    expect(buttons[1]?.querySelector('svg')?.classList.contains('lucide-arrow-right')).toBe(true);
-    expect(buttons[1]?.querySelector('svg')?.nextElementSibling).toBeNull();
-  });
-
-  it('leaves out a verdict button whose lane the project does not have, and all of them off the verify lane', async () => {
-    const onlyClose = await draw({ category: 'verify', moves: moves([], { reworkLaneId: null }) });
-    expect(onlyClose.querySelector('[data-verdict="not-good"]')).toBeNull();
-    expect(onlyClose.querySelector('[data-verdict="works"]')).not.toBeNull();
-    await release();
-    const onlyRework = await draw({ category: 'verify', moves: moves([], { closeLaneId: null }) });
-    expect(onlyRework.querySelector('[data-verdict="works"]')).toBeNull();
-    expect(onlyRework.querySelector('[data-verdict="not-good"]')).not.toBeNull();
-    await release();
-    const neither = await draw({ category: 'verify', moves: moves([], { closeLaneId: null, reworkLaneId: null }) });
-    expect(neither.querySelector('.fy-board-card__verdict')).toBeNull();
-    await release();
-    const elsewhere = await draw({ moves: moves() });
-    expect(elsewhere.querySelector('.fy-board-card__verdict')).toBeNull();
-    await release();
-    const side = await draw({ category: 'verify', density: 'side', moves: moves() });
-    expect(side.querySelector('.fy-board-card__verdict [data-verdict="not-good"]')).not.toBeNull();
-  });
-
-  it('closes a card waiting to be tried with the shared Done, in place of Close, and keeps Not good', async () => {
-    const log: string[] = [];
-    const done = {
-      done: { kind: 'done', laneId: 'closed' } as const,
-      press: () => void log.push('done'),
-      atRelease: false,
-    };
-    const root = await draw({ category: 'verify', done, moves: moves(log) });
-    expect(root.querySelector('[data-verdict="works"]')).toBeNull();
-    const button = must(root.querySelector<HTMLButtonElement>('.fy-board-card__verdict .fy-board-done'), 'Done');
-    expect(button.textContent).toContain('Done');
-    await interact(() => button.click());
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good').click());
-    expect(log).toEqual(['done', 'move:implement']);
-    await release();
-    const touch = await draw({ category: 'verify', done, moves: moves(), touch: true });
-    expect(touch.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
-  });
-
-  it('keeps a Done verdict button when the card has no Done control to offer', async () => {
-    const reopen = { done: { kind: 'reopen', laneId: 'implement' } as const, press: () => undefined, atRelease: false };
-    const root = await draw({ category: 'verify', done: reopen, moves: moves() });
-    expect(root.querySelector('[data-verdict="works"]')).not.toBeNull();
-    expect(root.querySelector('.fy-board-done')).toBeNull();
-  });
-
-  it('gives a Released card its own Done row, and none where Done does not apply', async () => {
-    const log: string[] = [];
-    const done = {
-      done: { kind: 'done', laneId: 'closed' } as const,
-      press: () => void log.push('done'),
-      atRelease: true,
-    };
-    const root = await draw({ category: 'shipped', done, moves: moves() });
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('.fy-board-card__verdict .fy-board-done'), 'Done').click(),
-    );
-    expect(log).toEqual(['done']);
-    await release();
-    const merged = await draw({ category: 'shipped', done: { ...done, atRelease: false }, moves: moves() });
-    expect(merged.querySelector('.fy-board-done')).toBeNull();
-    await release();
-    const side = await draw({ category: 'shipped', density: 'side', done, moves: moves() });
-    expect(side.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
-    await release();
-    const bare = await draw({ category: 'shipped' });
-    expect(bare.querySelector('.fy-board-done')).toBeNull();
-  });
-
-  it('puts Done (or Reopen) first in the ⋯ menu, even when there are no lanes to move to', async () => {
-    const log: string[] = [];
-    const done = {
-      done: { kind: 'done', laneId: 'closed' } as const,
-      press: () => void log.push('done'),
-      atRelease: false,
-    };
-    const root = await draw({ done, moves: moves(log) });
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
-    );
-    const first = must(root.querySelector<HTMLButtonElement>('[role="menuitem"]'), 'the first item');
-    expect(first.textContent).toBe('Done');
-    expect(first.dataset.done).toBe('done');
-    await interact(() => first.click());
-    expect(log).toEqual(['done']);
-    expect(root.querySelector('[role="menu"]')).toBeNull();
-    await release();
-    const reopen = {
-      done: { kind: 'reopen', laneId: 'implement' } as const,
-      press: () => void log.push('reopen'),
-      atRelease: false,
-    };
-    const closed = await draw({ category: 'closed', done: reopen, moves: moves([], { choices: [] }) });
-    await interact(() =>
-      must(closed.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
-    );
-    const only = [...closed.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-    expect(only.map(item => item.textContent)).toEqual(['Reopen']);
-    await interact(() => must(only[0], 'Reopen').click());
-    expect(log).toEqual(['done', 'reopen']);
+  it('has no menu on a closed card that has no lane to move to', async () => {
+    const root = await draw({ category: 'closed', moves: moves([], { choices: [] }) });
+    expect(root.querySelector('.fy-board-card__more')).toBeNull();
   });
 
   it('marks a card whose lane is unknown as unplaced', async () => {

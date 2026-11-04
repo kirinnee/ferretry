@@ -4,7 +4,7 @@
  * on a phone.
  *
  * `?view=card|tested|ask|empty` picks the card: a card in review with a PR, children, dependencies, links and
- * history; a 🧪 To test card with the two verdict buttons; a card stopped by a blocking ask with answer buttons;
+ * history; a 🧪 To test card (no owner buttons: the owner answers in the agenda); a card stopped by a blocking ask;
  * a brand-new card with nothing on it yet.
  * Nothing leaves the page.
  */
@@ -241,7 +241,7 @@ const TESTED_CARD = card('F10', {
     now: 'Released in 4.109.0 and waiting for your check.',
     doneSoFar:
       '- Device grant replaces the token on every route ([#918](https://github.com/kirinnee/ferretry/pull/918))\n- Settings no longer prints a token',
-    next: '1. You pair a phone and look for a token\n2. Done, or Not good with what you saw',
+    next: '1. You pair a phone and look for a token\n2. You answer in the agenda: Done, or Not good with what you saw',
   },
   premise: nest('- A paired phone holds a device grant\n- Settings used to print the token after pairing'),
   context: nest('- The daemon keeps only a hash of each token\n- Shipped in 4.109.0'),

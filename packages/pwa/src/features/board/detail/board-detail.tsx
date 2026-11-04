@@ -3,9 +3,9 @@
  *
  * One flowing page, in the manner of a task page: a header (id, title, the summary line, a lane dropdown, who and
  * where), then the card read top to bottom as an agenda card reads — the status, then premise and context as two tinted blocks, the
- * ask, How to test as a numbered checklist with Done / Not good right under it on a card waiting to be tested, the
- * brief, the terms (each also a tap tip where the text uses it) — then the plain headed sections, a timeline, and a
- * comment box pinned at the bottom. Nothing folds. A side drawer on a wide screen and a
+ * ask, How to test as a numbered list (its boxes are a reading aid), the brief, the terms (each also a tap tip where the text uses it) — then the plain headed sections, a timeline, and a
+ * comment box pinned at the bottom. Nothing folds. A card has no owner buttons (no Done, no Not good, no Reopen): the
+ * owner answers where the card asks, in the agenda. A side drawer on a wide screen and a
  * full-screen page on a phone; either way the address names the card, so Back leaves it and a link opens it. The card is read through the board store (one source of truth with
  * the Board behind it), every write goes through `BoardActions`, and an ask opens in its ferret's chat as
  * the same item view every `!A5` opens — it is answered there, never here. This file composes; the facts are `board-detail.ts` and the
@@ -22,7 +22,7 @@ import {
   type TaskRef,
   writtenStatusParts,
 } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMemo, useState } from 'react';
 import { DaemonTaskReferences } from '../../../components/daemon-task-references.tsx';
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
@@ -40,10 +40,8 @@ import {
   kindLabel,
   laneCategoryOf,
   laneNameOf,
-  verdictLanes,
   written,
 } from '../../../lib/board-detail.ts';
-import { type BoardAnswer, boardDone, doneTitle } from '../../../lib/board-done.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
@@ -52,7 +50,6 @@ import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../lib/pages/routes.ts';
 import { Situation } from '../../agenda/agenda-item-card.tsx';
 import { markTerms, TermLayer } from '../../agenda/agenda-terms.tsx';
-import { AnswerIcon, BoardDoneAction } from '../board-done-action.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 import { BoardReasonBox } from '../board-reason-box.tsx';
 import { BoardSendBack, type SendBack, type SendBackPorts, useSendBackFiles } from '../board-send-back.tsx';
@@ -118,7 +115,6 @@ export interface BoardDetailProps {
 
 type Dialog =
   | { readonly kind: 'move'; readonly to: string; readonly toName: string }
-  | { readonly kind: 'rework'; readonly to: string; readonly toName: string }
   | { readonly kind: 'drop' }
   | { readonly kind: 'undepend'; readonly ref: TaskRef };
 
@@ -242,9 +238,6 @@ function DetailBody({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // The answer whose move is in flight (it spins; every answer waits), and why the last one did not go through.
-  const [pressed, setPressed] = useState<BoardAnswer | null>(null);
-  const [answerProblem, setAnswerProblem] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuName | null>(null);
   const [adding, setAdding] = useState(false);
   const [reparenting, setReparenting] = useState(false);
@@ -253,8 +246,6 @@ function DetailBody({
   const target = { daemonId: machine.connection.daemonId, id: task.id };
   const moveTarget = { ...target, laneId: task.laneId, laneSet };
   const category = laneCategoryOf(laneSet, task.laneId);
-  const verdict = verdictLanes(laneSet, task.laneId);
-  const done = verdict === null ? boardDone({ laneSet, category, dropped: task.dropped !== null }) : null;
   const recipient = task.assignee ?? task.owner;
   const asks = collectAsks(task, useBoardAsks(agenda, machine.connection, askSessions(task)));
   const here = siblings.find(card => card.task.id === task.id);
@@ -289,53 +280,36 @@ function DetailBody({
     return false;
   };
 
-  /**
-   * One of the owner's answers (Done, Works, Not good, a move): the pressed control spins and every answer is
-   * disabled until the daemon answers.
-   */
+  /** A lane move: every control waits until the daemon answers, and a refusal is said beside the comment box. */
   const settle = async (
-    answer: BoardAnswer,
     work: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>,
   ): Promise<string | null> => {
-    if (busy) return 'Another answer is still being sent.';
-    setPressed(answer);
-    setAnswerProblem(null);
+    if (busy) return 'Another move is still being sent.';
     setBusy(true);
     setProblem(null);
     setNotice(null);
     const result = await work();
     setBusy(false);
-    setPressed(null);
     if (result.ok) {
       setDialog(null);
       return null;
     }
     const message = result.error?.message ?? 'That did not go through.';
-    // An answer's refusal is said beside the answers; a lane pick's beside the comment box, and a composer's in it.
-    if (dialog === null && answer !== 'move') setAnswerProblem(message);
-    else setProblem(message);
+    setProblem(message);
     return message;
   };
 
-  const requestMove = (to: string, answer: BoardAnswer = 'move'): void => {
+  const requestMove = (to: string): void => {
     setMenu(null);
     setNotice(null);
     const plan = planMove(laneSet, task.laneId, to);
     if (plan.kind === 'refused') setNotice(plan.message);
     else if (plan.kind === 'ask-reason') {
       setProblem(null);
-      setDialog({
-        kind: answer === 'not-good' ? 'rework' : 'move',
-        to: plan.to,
-        toName: laneNameOf(laneSet, plan.to),
-      });
-    } else if (plan.kind === 'send') void settle(answer, () => actions.moveTask(moveTarget, plan.to));
+      setDialog({ kind: 'move', to: plan.to, toName: laneNameOf(laneSet, plan.to) });
+    } else if (plan.kind === 'send') void settle(() => actions.moveTask(moveTarget, plan.to));
   };
-  const sendBackFiles = useSendBackFiles(
-    ports,
-    machine.connection,
-    dialog?.kind === 'move' || dialog?.kind === 'rework' ? recipient : null,
-  );
+  const sendBackFiles = useSendBackFiles(ports, machine.connection, dialog?.kind === 'move' ? recipient : null);
 
   const copyLink = (): void => {
     setMenu(null);
@@ -356,14 +330,12 @@ function DetailBody({
     else if (dialog.kind === 'undepend') void run(() => actions.undepend(target, dialog.ref, reason));
   };
   const submitSendBack = async ({ reason, attachmentIds }: SendBack): Promise<string | null> => {
-    if (dialog?.kind !== 'move' && dialog?.kind !== 'rework') return null;
+    if (dialog?.kind !== 'move') return null;
     const files =
       attachmentIds.length === 0 || sendBackFiles === null
         ? undefined
         : { from: sendBackFiles.sessionId, ids: [...attachmentIds] };
-    return await settle(dialog.kind === 'rework' ? 'not-good' : 'move', () =>
-      actions.moveTask(moveTarget, dialog.to, reason, files),
-    );
+    return await settle(() => actions.moveTask(moveTarget, dialog.to, reason, files));
   };
 
   const dialogHeading =
@@ -371,11 +343,9 @@ function DetailBody({
       ? ''
       : dialog.kind === 'move'
         ? `Move ${task.title} back to ${dialog.toName}`
-        : dialog.kind === 'rework'
-          ? `Not good: send ${task.title} back to ${dialog.toName}`
-          : dialog.kind === 'drop'
-            ? `Drop ${task.title}`
-            : `Stop ${task.title} waiting for ${formatTaskRef(dialog.ref)}`;
+        : dialog.kind === 'drop'
+          ? `Drop ${task.title}`
+          : `Stop ${task.title} waiting for ${formatTaskRef(dialog.ref)}`;
   const dialogWords =
     dialog === null
       ? {}
@@ -383,17 +353,11 @@ function DetailBody({
         ? { placeholder: 'Why is it being dropped?', submitLabel: 'Drop it', busyLabel: 'Dropping…' }
         : dialog.kind === 'undepend'
           ? { placeholder: 'Why does it no longer wait?', submitLabel: 'Stop waiting', busyLabel: 'Saving…' }
-          : dialog.kind === 'rework'
-            ? {
-                placeholder: 'What went wrong?',
-                submitLabel: 'Send back',
-                busyLabel: 'Sending…',
-              }
-            : {
-                placeholder: 'Why is it going back?',
-                submitLabel: 'Move back',
-                busyLabel: 'Moving…',
-              };
+          : {
+              placeholder: 'Why is it going back?',
+              submitLabel: 'Move back',
+              busyLabel: 'Moving…',
+            };
 
   const laneMenu = (
     <div aria-label="Move to…" className="fy-board-menu fy-board-detail__lanemenu" id={menuId} role="menu">
@@ -422,16 +386,6 @@ function DetailBody({
               <span className="fy-board-detail__id">{formatTaskRef({ id: task.id })}</span> {task.title}
             </h2>
             <div className="fy-board-detail__tools">
-              {done === null ? null : (
-                <BoardDoneAction
-                  disabled={busy}
-                  done={done}
-                  onPress={() => requestMove(done.laneId, done.kind)}
-                  pending={pressed === done.kind}
-                  size="primary"
-                  title={task.title}
-                />
-              )}
               <button
                 className="kt-btn"
                 data-variant="ghost"
@@ -604,51 +558,6 @@ function DetailBody({
               <HowToTest key={marked.howToTest} renderProse={cardProse} text={marked.howToTest} />
             </DetailSection>
           )}
-          {verdict === null || task.dropped !== null ? null : (
-            <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
-              {verdict.reworkLaneId === null ? null : (
-                <button
-                  aria-busy={pressed === 'not-good'}
-                  className="kt-btn"
-                  data-pending={pressed === 'not-good' ? '' : undefined}
-                  data-variant="ghost"
-                  data-verdict="not-good"
-                  disabled={busy}
-                  title={`Not good → back to ${laneNameOf(laneSet, verdict.reworkLaneId)}, with a reason`}
-                  onClick={() => {
-                    setProblem(null);
-                    const to = verdict.reworkLaneId as string;
-                    setDialog({ kind: 'rework', to, toName: laneNameOf(laneSet, to) });
-                  }}
-                  type="button"
-                >
-                  <AnswerIcon icon={ArrowLeft} pending={pressed === 'not-good'} size={14} />
-                  Not good
-                </button>
-              )}
-              {verdict.closeLaneId === null ? null : (
-                <button
-                  aria-busy={pressed === 'works'}
-                  className="kt-btn"
-                  data-pending={pressed === 'works' ? '' : undefined}
-                  data-variant="primary"
-                  data-verdict="works"
-                  disabled={busy}
-                  title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
-                  onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
-                  type="button"
-                >
-                  Done
-                  <AnswerIcon icon={ArrowRight} pending={pressed === 'works'} size={14} />
-                </button>
-              )}
-            </fieldset>
-          )}
-          {answerProblem === null ? null : (
-            <p className="fy-board-reason__error fy-board-detail__answer-error" data-answer-error="" role="alert">
-              {answerProblem}
-            </p>
-          )}
 
           {marked.brief === null ? null : (
             <DetailSection id="brief" title="Brief">
@@ -746,7 +655,7 @@ function DetailBody({
         />
       </footer>
 
-      {dialog?.kind === 'move' || dialog?.kind === 'rework' ? (
+      {dialog?.kind === 'move' ? (
         <div className="fy-board__scrim">
           <BoardSendBack
             busy={busy}

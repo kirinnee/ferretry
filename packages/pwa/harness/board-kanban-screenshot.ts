@@ -1,13 +1,12 @@
 /**
- * Screenshots of the Board's Kanban with the owner's Done on a To test card and a Released card, and the ⋯ menu
- * with Done first; then Done in flight (its spinner), a refused Done, and the "Not good" composer with a picture:
+ * Screenshots of the Board's Kanban and its ⋯ menu. A card draws no owner button (no Done, no Not good, no Reopen):
+ * the owner answers in the agenda, so the Board only says where the work stands:
  *
  *   bun harness/board-kanban-screenshot.ts [outDir]    # default /tmp/claude-1000
  *
  * It bundles `board-page.tsx` (sixty-odd cards, `?big=1`), serves it on an ephemeral loopback port, aborts
- * anything that leaves it, and fails when a page scrolls sideways, a To test / Released card has no Done (a
- * Merged card has none), or — at any of several widths, from a wide desktop down to the narrowest phone — an
- * answer button leaves its card or cuts its own label.
+ * anything that leaves it, and fails when a page scrolls sideways, any card draws an owner button, or — at any of
+ * several widths, from a wide desktop down to the narrowest phone — a card's ⋯ button leaves its card.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -128,7 +127,7 @@ const THEMES = [
 ] as const;
 
 /**
- * Every answer button (Done, Close, Not good, Reopen, ⋯) must sit inside its card and show its whole label. A menu
+ * Every button on a card (the ⋯) must sit inside its card and show its whole label. A menu
  * that drops down from ⋯ is meant to reach past the card, so its items are not counted.
  */
 const checkAnswersFit = async (page: Page, where: string): Promise<number> => {
@@ -155,7 +154,7 @@ const checkAnswersFit = async (page: Page, where: string): Promise<number> => {
     return { found, checked };
   });
   if (problems.found.length > 0) fail(`at ${where}: ${problems.found.slice(0, 6).join('; ')}`);
-  process.stdout.write(`✓ ${problems.checked} answer buttons fit their cards at ${where}\n`);
+  process.stdout.write(`✓ ${problems.checked} card buttons fit their cards at ${where}\n`);
   return problems.checked;
 };
 
@@ -180,73 +179,17 @@ const shot = async (page: Page, name: string): Promise<void> => {
   process.stdout.write(`📸 ${path}\n`);
 };
 
-/** Done pressed on a To test card: it spins, its siblings wait, nothing on the card moves. */
-const checkInFlight = async (page: Page, scheme: string, label: string): Promise<void> => {
-  const card = page.locator('.fy-board-card[data-category="verify"]').first();
-  const before = await card.locator('.fy-board-done').boundingBox();
-  await card.locator('.fy-board-done').click();
-  await card.locator('.fy-board-done[data-pending] [data-spinner]').waitFor({ state: 'visible' });
-  const after = await card.locator('.fy-board-done').boundingBox();
-  if (before === null || after === null) fail('Done has no box');
-  else if (Math.abs(before.width - after.width) > 0.5 || Math.abs(before.x - after.x) > 0.5)
-    fail(`Done moved while it spins: ${before.x},${before.width} → ${after.x},${after.width}`);
-  if (!(await card.locator('[data-verdict="not-good"]').isDisabled()))
-    fail('Not good is still pressable while Done is on its way');
-  await shot(page, `board-kanban-in-flight-${scheme}-${label}`);
-};
-
-/** "Not good" on another To test card: the composer, with words and a picture. */
-const checkNotGood = async (page: Page, scheme: string, label: string): Promise<void> => {
-  await page
-    .locator('.fy-board-card[data-category="verify"]:not([data-settling]) [data-verdict="not-good"]')
-    .first()
-    .click();
-  const composer = page.locator('[data-board-send-back]');
-  await composer.waitFor({ state: 'visible' });
-  await composer.locator('button[data-composer-attach]:not([disabled])').waitFor({ state: 'visible' });
-  await composer
-    .locator('textarea, [contenteditable="true"]')
-    .first()
-    .fill('The toggle still flickers on a phone in dark mode — see the screenshot.');
-  await composer.locator('input[type="file"]:not([accept])').setInputFiles({
-    name: 'flicker.png',
-    mimeType: 'image/png',
-    buffer: PIXEL,
-  });
-  await composer.locator('[aria-label="Attached files"] li').first().waitFor({ state: 'visible' });
-  const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  if (wide > 0) fail(`the Not good composer scrolls sideways by ${wide}px`);
-  await composer
-    .locator('[aria-label="Attached files"] li', { hasText: 'ready' })
-    .first()
-    .waitFor({ state: 'visible' });
-  await page.waitForTimeout(600);
-  await shot(page, `board-kanban-not-good-${scheme}-${label}`);
-  await composer.locator('button', { hasText: 'Cancel' }).click();
-};
-
-/** A one-pixel PNG, as a picked file. */
-const PIXEL = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64',
-);
-
-const doneCount = async (page: Page, lane: string): Promise<readonly [number, number]> => {
-  const cards = page.locator(`.fy-board-lane[aria-label^="${lane},"] .fy-board-card`);
-  return [await cards.count(), await cards.locator('.fy-board-done').count()];
-};
-
-const checkDone = async (page: Page): Promise<void> => {
-  for (const lane of ['To test', 'Released']) {
-    const [cards, withDone] = await doneCount(page, lane);
-    if (cards === 0 || withDone !== cards) fail(`${withDone} of ${cards} ${lane} cards have a Done`);
-  }
-  const [merged, mergedDone] = await doneCount(page, 'Merged');
-  if (merged === 0 || mergedDone !== 0) fail(`${mergedDone} of ${merged} Merged cards show a Done row`);
+/** No card draws an owner button: no Done, no Not good, no Reopen. */
+const checkNoOwnerButtons = async (page: Page): Promise<void> => {
+  const found = await page.evaluate(
+    () =>
+      document.querySelectorAll('.fy-board-done, .fy-board-verdict, [data-verdict], .fy-board-card__verdict').length,
+  );
+  if (found > 0) fail(`${found} owner buttons on the cards`);
 };
 
 try {
-  // THE ANSWERS FIT: every card's buttons, at every width, on the Kanban (and the phone's To test lane).
+  // THE CARD BUTTONS FIT: every card's buttons, at every width, on the Kanban (and the phone's To test lane).
   {
     for (const theme of THEMES) {
       const context = await browser.newContext({ ...DESKTOP, colorScheme: theme.endsWith('light') ? 'light' : 'dark' });
@@ -281,8 +224,8 @@ try {
       try {
         const page = await open(context, `studio-${scheme}`);
         if (label === 'desktop') {
-          await checkDone(page);
-          await shot(page, `board-kanban-done-${scheme}-desktop`);
+          await checkNoOwnerButtons(page);
+          await shot(page, `board-kanban-${scheme}-desktop`);
           await page.locator('.fy-board-card__more').first().click();
           await page.waitForTimeout(150);
           await shot(page, `board-kanban-menu-${scheme}-desktop`);
@@ -290,28 +233,17 @@ try {
         } else {
           await page.locator('[role="tab"]', { hasText: 'To test' }).click();
           await page.waitForTimeout(200);
-          await shot(page, `board-kanban-done-${scheme}-phone`);
+          await checkNoOwnerButtons(page);
+          await shot(page, `board-kanban-${scheme}-phone`);
         }
-        await checkInFlight(page, scheme, label);
-        await checkNotGood(page, scheme, label);
         await page.close();
-        const refusing = await open(
-          context,
-          `studio-${scheme}`,
-          label === 'phone' ? '&refuse=1&at=tested' : '&refuse=1',
-        );
-        await refusing.locator('.fy-board-card[data-category="verify"] .fy-board-done').first().click();
-        await refusing.locator('[data-answer-error]').first().waitFor({ state: 'visible' });
-        await checkAnswersFit(refusing, `${label} ${scheme}, refused`);
-        await shot(refusing, `board-kanban-refused-${scheme}-${label}`);
-        await refusing.close();
       } finally {
         await context.close();
       }
     }
   }
   process.stdout.write(
-    '✅ the Kanban captured; Done on every To test and Released card, none on Merged; every answer fits its card at every width; Done spins in place; Not good opens the composer\n',
+    '✅ the Kanban captured; no owner button on any card; every card button fits its card at every width\n',
   );
 } finally {
   await browser.close();

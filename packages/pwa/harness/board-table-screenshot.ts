@@ -1,12 +1,11 @@
 /**
  * Screenshots of the Board's Table view on a long board (about seventy cards, long titles, imported cards,
- * every lane), plus the owner's Done on a To test card and Reopen in the Archive:
+ * every lane). A row draws no owner button (no Done, no Not good, no Reopen): the owner answers in the agenda.
  *
  *   bun harness/board-table-screenshot.ts [outDir]    # default /tmp/claude-1000
  *
  * It bundles `board-page.tsx` with `?big=1`, serves it on an ephemeral loopback port, aborts anything that
- * leaves it, and fails when a page scrolls sideways, or when — at any of several widths — a row's Done (or Reopen)
- * leaves its row or cuts its label. It also captures Done in flight (its spinner) and a refused Done on a row.
+ * leaves it, and fails when a page scrolls sideways, or when any row draws an owner button.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -101,27 +100,20 @@ const shot = async (page: Page, name: string): Promise<void> => {
   process.stdout.write(`📸 ${path}\n`);
 };
 
-/** Every row's Done / Reopen sits inside its row and shows its whole label. */
-const checkDoneFits = async (page: Page, where: string): Promise<void> => {
-  const found = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('.fy-board-table__row, .fy-board-summary__row')].flatMap(row => {
-      const box = row.getBoundingClientRect();
-      return [...row.querySelectorAll<HTMLButtonElement>('.fy-board-done')].flatMap(button => {
-        const own = button.getBoundingClientRect();
-        const name = `&${row.dataset['task'] ?? '?'} "${button.textContent?.trim()}"`;
-        return [
-          ...(own.left < box.left - 0.5 || own.right > box.right + 0.5 ? [`${name} leaves its row`] : []),
-          ...(button.scrollWidth > button.clientWidth + 1 ? [`${name} cuts its label`] : []),
-        ];
-      });
-    }),
+/** No row draws an owner button: no Done, no Not good, no Reopen. */
+const checkNoOwnerButtons = async (page: Page, where: string): Promise<void> => {
+  const found = await page.evaluate(
+    () =>
+      document.querySelectorAll(
+        '.fy-board-done, .fy-board-verdict, [data-verdict], .fy-board-card__verdict, .fy-board-summary__act',
+      ).length,
   );
-  if (found.length > 0) fail(`at ${where}: ${found.slice(0, 6).join('; ')}`);
-  process.stdout.write(`✓ every Done fits its row at ${where}\n`);
+  if (found > 0) fail(`at ${where}: ${found} owner buttons on the rows`);
+  process.stdout.write(`✓ no owner button on a row at ${where}\n`);
 };
 
-/** Centres the first To test row, so the shot shows the owner's Done on it. */
-const showDone = async (page: Page): Promise<void> => {
+/** Centres the first To test row, so the shot shows how it reads without owner buttons. */
+const showToTest = async (page: Page): Promise<void> => {
   const row = page.locator('[data-section="to-test"]').first();
   await row.evaluate(node => node.scrollIntoView({ block: 'center' }));
   await page.waitForTimeout(150);
@@ -139,8 +131,8 @@ try {
         const page = await open(context, theme, 'list');
         await shot(page, `board-table-${scheme}-${label}`);
         if (scheme === 'light') {
-          await showDone(page);
-          await shot(page, `board-done-${label}`);
+          await showToTest(page);
+          await shot(page, `board-to-test-${label}`);
         }
         await page.close();
         const agents = await open(context, theme, 'list', '&agents=1');
@@ -174,29 +166,7 @@ try {
     for (const width of [1_920, 1_180, 900, 721, 720, 390, 320]) {
       const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: 'light' });
       const page = await open(context, 'studio-light', view, extra);
-      await checkDoneFits(page, `${view} ${width}px`);
-      await context.close();
-    }
-  }
-  for (const [label, options] of [
-    ['desktop', DESKTOP],
-    ['phone', PHONE],
-  ] as const) {
-    for (const scheme of ['light', 'dark'] as const) {
-      const context = await browser.newContext({ ...options, colorScheme: scheme });
-      const page = await open(context, `studio-${scheme}`, 'list');
-      await showDone(page);
-      const row = page.locator('.fy-board-summary__row[data-section="to-test"]').first();
-      await row.locator('.fy-board-done').click();
-      await row.locator('.fy-board-done[data-pending] [data-spinner]').waitFor({ state: 'visible' });
-      await shot(page, `board-table-in-flight-${scheme}-${label}`);
-      const refusing = await open(context, `studio-${scheme}`, 'list', '&refuse=1');
-      await showDone(refusing);
-      const refused = refusing.locator('.fy-board-summary__row[data-section="to-test"]').first();
-      await refused.locator('.fy-board-done').click();
-      await refused.locator('[data-answer-error]').waitFor({ state: 'visible' });
-      await checkDoneFits(refusing, `list ${label} ${scheme}, refused`);
-      await shot(refusing, `board-table-refused-${scheme}-${label}`);
+      await checkNoOwnerButtons(page, `${view} ${width}px`);
       await context.close();
     }
   }

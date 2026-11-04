@@ -1,6 +1,7 @@
 /**
- * THE OWNER'S ANSWERS ON A CARD, AS ONE FLOW: Done, Close, Not good, Reopen, a ⋯ pick and a drop. The Board page
- * and the ferret's own Tasks tab both use it, so a card behaves the same wherever the owner answers it.
+ * THE OWNER'S ANSWERS, AS ONE FLOW: Done, Close, Not good, Reopen, a ⋯ pick and a drop. The agenda's cards to try
+ * use all of it; the Board page and the ferret's own Tasks tab use it for lane moves only (a ⋯ pick and a drop):
+ * a Board card has no Done, Not good or Reopen button, the owner answers in the agenda.
  *
  * - A move forward is sent at once. A move BACK opens the send-back composer (the words, and pictures where the
  *   machine takes them) and is sent only with its words.

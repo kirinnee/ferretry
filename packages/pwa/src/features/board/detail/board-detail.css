@@ -124,11 +124,6 @@
   align-items: center;
   gap: var(--gap-xs);
 }
-.fy-board-detail__tools .fy-board-done[data-size='primary'] {
-  min-height: 32px;
-  padding: 0 var(--gap-md);
-  border-radius: var(--radius-pill);
-}
 .fy-board-detail__meta {
   display: flex;
   flex-wrap: wrap;
@@ -354,8 +349,7 @@
   flex-direction: column;
   gap: var(--gap-xs);
 }
-fieldset.fy-board-detail__chiprow,
-fieldset.fy-board-detail__verdict {
+fieldset.fy-board-detail__chiprow {
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -368,7 +362,7 @@ fieldset.fy-board-detail__verdict {
   gap: var(--gap-xs);
 }
 
-/* The card's own reading (premise and context, the ask, How to test, the verdict, the brief, the terms) keeps the
+/* The card's own reading (premise and context, the ask, How to test, the brief, the terms) keeps the
    page's rhythm inside the term layer that holds it. */
 .fy-board-detail .fy-terms-layer {
   gap: calc(var(--space-unit) * 4);
@@ -418,13 +412,6 @@ fieldset.fy-board-detail__verdict {
 }
 .fy-board-test__step[data-done] > .fy-board-test__text {
   color: var(--faint);
-}
-
-/* ---- Verdict -------------------------------------------------------------------------------------- */
-.fy-board-detail__verdict {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-sm);
 }
 
 /* ---- Timeline: avatar dot, who and what and how long ago, the note muted below --------------------- */

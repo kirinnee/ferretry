@@ -24,7 +24,6 @@ import { useNow } from '../../hooks/use-now.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch, NO_BOARD_FILTERS } from '../../lib/board-model.ts';
-import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
 import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
@@ -54,14 +53,7 @@ import type { SendBackPorts } from './board-send-back.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
 import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
 import { TableView } from './board-table.tsx';
-import {
-  ArchiveView,
-  type BoardCardEnv,
-  type BoardDoneControl,
-  DependenciesView,
-  KanbanView,
-  TreeView,
-} from './board-views.tsx';
+import { ArchiveView, type BoardCardEnv, DependenciesView, KanbanView, TreeView } from './board-views.tsx';
 
 export interface BoardPageProps {
   readonly store: DaemonBoardStore;
@@ -256,30 +248,10 @@ export function BoardPage({
       if (group.laneSet === null || place.category === 'closed') return undefined;
       return {
         choices: moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
-        closeLaneId: doneLaneOf(group.laneSet),
-        reworkLaneId: notGoodLaneOf(group.laneSet),
+        onMove: (target, laneId) => requestMove(target, group, laneId),
         onDragStart: target => setDragging({ cardKey: target.key, groupKey: group.key }),
         onDragEnd: () => setDragging(null),
       };
-    },
-    [requestMove],
-  );
-
-  const doneFor = useCallback(
-    (card: BoardCardOf, place: BoardCardPlace): BoardDoneControl | undefined => {
-      const done = boardDone({
-        laneSet: place.group.laneSet,
-        category: place.category,
-        dropped: card.task.dropped !== null,
-      });
-      return done === null
-        ? undefined
-        : {
-            done,
-            press: () => requestMove(card, place.group, done.laneId, done.kind),
-            atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
-          };
     },
     [requestMove],
   );
@@ -307,7 +279,6 @@ export function BoardPage({
       hrefFor: card => daemonBoardCardPath(card.daemonId, card.task.id),
       onNavigate,
       movesFor: archive ? () => undefined : movesFor,
-      doneFor,
       places,
       dragging,
       answerFor,
@@ -320,7 +291,6 @@ export function BoardPage({
       onNavigate,
       archive,
       movesFor,
-      doneFor,
       places,
       dragging,
       phone,
