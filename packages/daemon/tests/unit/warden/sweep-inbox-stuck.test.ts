@@ -54,6 +54,7 @@ class FakeStuckInbox implements WardenStuckInboxPort {
   draft: 'clear' | 'foreign' | 'stuck' = 'foreign';
   trackerFails = false;
   noticeFails = false;
+  removeFails = false;
 
   async queue(sessionId: string): Promise<readonly QueuedMessage[]> {
     return this.queues[sessionId] ?? [];
@@ -83,6 +84,7 @@ class FakeStuckInbox implements WardenStuckInboxPort {
   }
 
   async remove(sessionId: string): Promise<void> {
+    if (this.removeFails) throw new Error('agenda refused');
     this.notices.delete(sessionId);
   }
 }
@@ -158,6 +160,29 @@ describe('a ferret whose inbox is stuck (B148)', () => {
     should(stuckInbox.notices.size).equal(0);
     should(subject.state().stuckInbox).be.undefined();
     should(journalTypes(subject)).containEql('fleet.warden_inbox_recovered');
+  });
+
+  it('should keep a drained ferret remembered while the notice will not let it go, and let it go once it does', async () => {
+    let now = NOW;
+    const stuckInbox = new FakeStuckInbox();
+    const subject = harness({ config: enabled(), fleet: [ryu()], stuckInbox, now: () => now });
+    await subject.service.run({ force: false });
+    now = NOW + 5 * MINUTE;
+    await subject.service.run({ force: false });
+
+    stuckInbox.queues = { ryu: [] };
+    stuckInbox.removeFails = true;
+    now = NOW + 10 * MINUTE;
+    await subject.service.run({ force: false });
+    should(stuckInbox.notices.has('ryu')).be.true();
+    should(subject.state().stuckInbox?.ryu?.noticedAt).equal(iso(NOW + 5 * MINUTE));
+    should(journalTypes(subject)).not.containEql('fleet.warden_inbox_recovered');
+
+    stuckInbox.removeFails = false;
+    now = NOW + 15 * MINUTE;
+    await subject.service.run({ force: false });
+    should(stuckInbox.notices.size).equal(0);
+    should(subject.state().stuckInbox).be.undefined();
   });
 
   it('should re-check an unattributed draft with the verified finish too, and carry on past an act that throws', async () => {

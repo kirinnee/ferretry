@@ -118,6 +118,15 @@ describe('inbox_stuck: what is undelivered, and when it is stuck', () => {
     should(inboxStuckOf(ferret('f'), [held], [], NOW + 10 * MINUTE)?.idleMinutes).equal(20);
   });
 
+  it('should say who the oldest message is from: a person, Ferretry, a named ferret or an unnamed one', () => {
+    const from = (over: Partial<QueuedMessage>) => inboxStuckOf(ferret('f'), [message('m', 30, over)], [], NOW)?.detail;
+
+    should(from({ sender: 'human', from: undefined, fromName: undefined })).match(/\(blocker from you\)/);
+    should(from({ sender: 'daemon', from: undefined, fromName: undefined })).match(/\(action from Ferretry\)/);
+    should(from({})).match(/\(action from jaeda\)/);
+    should(from({ fromName: undefined })).match(/\(action from a ferret\)/);
+  });
+
   it('should read a message’s urgency as the queue does', () => {
     should(inboxUrgency(message('m', 1, { label: 'fyi' }))).equal('fyi');
     should(inboxUrgency(message('m', 1, { label: 'action' }))).equal('action');

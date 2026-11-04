@@ -8,7 +8,7 @@ import type { MachineAgendaPort, MachineMembersStore } from '../agenda/machine-a
 import { SerialQueue } from '../agenda/serial-queue.ts';
 
 /** The ref of the one machine item every ferret whose inbox is stuck is listed on. */
-const INBOX_STUCK_REF = 'warden:inbox-stuck';
+export const INBOX_STUCK_REF = 'warden:inbox-stuck';
 
 const MAX_LISTED = 12;
 
@@ -66,9 +66,7 @@ export class StuckInboxList {
       INBOX_STUCK_REF,
       {
         title: clipAtWord(
-          ids.length === 1
-            ? `${only?.[0] ?? 'A ferret'} has messages stuck in Ferretry's queue`
-            : `${ids.length} ferrets have messages stuck in Ferretry's queue`,
+          ids.length === 1 ? `${only?.[0] ?? 'A ferret'}’s inbox is stuck` : `${ids.length} ferrets have stuck inboxes`,
           AGENDA_PUSH_TITLE_LENGTH,
         ),
         subject: clipAtWord(
