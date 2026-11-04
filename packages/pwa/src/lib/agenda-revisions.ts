@@ -56,6 +56,7 @@ export const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
   body: 'The full picture',
   questionAnswer: 'Answer to your question',
   whereWeAre: 'Where we are now',
+  tabs: 'Tabs',
   detail: 'From the start',
 };
 

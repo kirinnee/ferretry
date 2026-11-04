@@ -120,6 +120,13 @@ export const DAEMON_FEATURES = {
    */
   agendaConversation: 'agenda.conversation.1',
   /**
+   * THE ITEM'S TABS (docs/agenda.md § The tabs): an item's live document is a row of tabs — the main tab
+   * (`whereWeAre`), the full picture (`body`) and the ferret's own (`tabs`), written with `tabEdits` in one edit. A
+   * daemon without this name refuses `tabs` and `tabEdits` as malformed, so a client sends them only to one that
+   * reports it; an app before it drops the `tabs` key.
+   */
+  agendaTabs: 'agenda.tabs.1',
+  /**
    * CARD ASKS (docs/agenda.md § Card asks): a card never asks the owner itself. Its ask (OK to build, or Done / Not
    * good with the card's How to test) rides the agenda that carries the card as `AgendaItem.cardAsks`, the first open
    * one mirrored as `gateAttached`; an answer names its ask by `cardAsk`, and the agenda RESTS after it. Cards carry

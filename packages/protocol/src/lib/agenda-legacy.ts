@@ -34,10 +34,14 @@ export const LEGACY_AGENDA_LIMITS = {
 } as const;
 
 /** The revisable fields an app before the channel does not know. */
-const CHANNEL_ONLY_FIELDS: ReadonlySet<string> = new Set(['whereWeAre', 'detail']);
+const CHANNEL_ONLY_FIELDS: ReadonlySet<string> = new Set(['whereWeAre', 'detail', 'tabs']);
 
 /** The item keys only the channel carries: an older app ignores them, so a projection does not send them. */
-const CHANNEL_ONLY_KEYS = ['resting', 'ownerAnswer', 'stage', 'stages', 'whereWeAre', 'detail'] as const;
+const CHANNEL_ONLY_KEYS = ['resting', 'ownerAnswer', 'stage', 'stages', 'whereWeAre', 'detail', 'tabs'] as const;
+
+/** What an older app is told under the body when the item has tabs it cannot draw (`agenda.tabs.1`). */
+const moreTabsLine = (names: readonly string[]): string =>
+  `_This item has more tabs (${names.join(', ')}): update the app to read them._`;
 
 /** Links without the `meaning` an older app's strict link schema refuses (`agenda.link-meaning.1`). */
 function withoutLinkMeanings(fields: Record<string, unknown>): void {
@@ -106,6 +110,15 @@ function projected<T extends AgendaItem>(item: T): T {
   const bag: Record<string, unknown> = { ...clippedFields(item) };
   for (const key of CHANNEL_ONLY_KEYS) delete bag[key];
   withoutLinkMeanings(bag);
+  const hidden = [
+    ...(item.whereWeAre === undefined ? [] : ['Where we are now']),
+    ...(item.tabs ?? []).map(tab => tab.name),
+  ];
+  if (item.tabs !== undefined) {
+    const line = moreTabsLine(hidden);
+    const body = typeof bag.body === 'string' ? bag.body : '';
+    bag.body = body === '' ? line : `${clip(body, LEGACY_AGENDA_LIMITS.body - line.length - 2)}\n\n${line}`;
+  }
   if (item.undelivered !== undefined) {
     const reply = item.undelivered.reply;
     bag.undelivered = {
