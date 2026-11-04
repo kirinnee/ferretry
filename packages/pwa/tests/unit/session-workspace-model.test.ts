@@ -1273,6 +1273,17 @@ describe('transcriptEntriesFromLog · the untimed copy Claude writes of a messag
       .filter(entry => entry.kind === 'user')
       .map(entry => ({ text: entry.text, at: entry.at }));
 
+  test('folds the copy that matches though the copied run carries records the real one does not', () => {
+    const log = [
+      'user/message: <system-reminder>Today is Wednesday.</system-reminder>',
+      'user/message: moved',
+      '[11:00:00] user/message: moved',
+    ].join('\n');
+    expect(users(log).filter(entry => entry.text === 'moved')).toEqual([
+      { text: 'moved', at: Date.UTC(2026, 9, 18, 11, 0, 0) },
+    ]);
+  });
+
   test('folds an untimed copy into the timed record that follows it', () => {
     expect(users(['user/message: moved', '[11:00:00] user/message: moved'].join('\n'))).toEqual([
       { text: 'moved', at: Date.UTC(2026, 9, 18, 11, 0, 0) },
@@ -1341,14 +1352,79 @@ describe('transcriptEntriesFromLog · the untimed copy Claude writes of a tool c
     ]);
   });
 
-  test('pairs a picture’s copy with its twin though each marker names its own record', () => {
+  test('folds a picture read twice when its call lined up, though each marker names its own record', () => {
+    const log = [
+      'assistant/tool-call: Read({"file_path":"/s/shot.png"})',
+      'tool/tool-result: [fy-image 100.1.0 image/png]',
+      '[10:59:58] assistant/tool-call: Read({"file_path":"/s/shot.png"})',
+      '[10:59:59] tool/tool-result: [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const tools = transcriptEntriesFromLog(log, NOW).filter(entry => entry.kind === 'tool');
+    expect(tools[0]?.tools?.map(call => call.result?.images?.length)).toEqual([1]);
+  });
+
+  test('keeps two different pictures that only share a type', () => {
+    const log = [
+      'user/attachment: image [fy-image 100.1.0 image/png]',
+      '[10:59:59] user/attachment: image [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const pictures = transcriptEntriesFromLog(log, NOW).flatMap(entry => [
+      ...(entry.images ?? []),
+      ...(entry.tools ?? []).flatMap(call => call.result?.images ?? []),
+    ]);
+    expect(pictures).toHaveLength(2);
+  });
+
+  test('folds a picture’s result copied without its call: one call has one result', () => {
     const log = [
       '[10:59:58] assistant/tool-call: Read({"file_path":"/s/shot.png"})',
       'tool/tool-result: [fy-image 100.1.0 image/png]',
       '[10:59:59] tool/tool-result: [fy-image 200.2.0 image/png]',
     ].join('\n');
-    const tools = transcriptEntriesFromLog(log, NOW).filter(entry => entry.kind === 'tool');
-    expect(tools[0]?.tools?.filter(call => call.orphanResult === true)).toHaveLength(0);
+    const calls = transcriptEntriesFromLog(log, NOW).flatMap(entry => entry.tools ?? []);
+    expect(calls.map(call => ({ images: call.result?.images?.length, orphan: call.orphanResult === true }))).toEqual([
+      { images: 1, orphan: false },
+    ]);
+  });
+
+  test('keeps a result whose words differ, and a picture with another call between, rather than guess', () => {
+    const differ = [
+      '[10:59:58] assistant/tool-call: Bash({"command":"date"})',
+      'tool/tool-result: 10:59:58',
+      '[10:59:59] tool/tool-result: 10:59:59',
+    ].join('\n');
+    expect(
+      transcriptEntriesFromLog(differ, NOW)
+        .flatMap(entry => entry.tools ?? [])
+        .map(call => call.result?.text),
+    ).toEqual(['10:59:58', '10:59:59']);
+
+    const callBetween = [
+      '[10:59:57] assistant/tool-call: Read({"file_path":"/s/a.png"})',
+      'tool/tool-result: [fy-image 100.1.0 image/png]',
+      'assistant/tool-call: Read({"file_path":"/s/b.png"})',
+      '[10:59:59] tool/tool-result: [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const pictures = transcriptEntriesFromLog(callBetween, NOW)
+      .flatMap(entry => entry.tools ?? [])
+      .flatMap(call => call.result?.images ?? []);
+    expect(pictures).toHaveLength(2);
+  });
+
+  test('never folds a result into a different call’s identical result', () => {
+    const log = [
+      '[10:59:50] assistant/tool-call: Bash({"command":"echo ok"})',
+      'tool/tool-result: ok',
+      '[10:59:52] assistant/tool-call: Bash({"command":"printf ok"})',
+      '[10:59:53] tool/tool-result: ok',
+    ].join('\n');
+    const calls = transcriptEntriesFromLog(log, NOW).flatMap(entry => entry.tools ?? []);
+    expect(
+      calls.map(call => ({ input: call.use.input, result: call.result?.text, orphan: call.orphanResult === true })),
+    ).toEqual([
+      { input: { command: 'echo ok' }, result: 'ok', orphan: false },
+      { input: { command: 'printf ok' }, result: 'ok', orphan: false },
+    ]);
   });
 });
 
@@ -1386,5 +1462,26 @@ describe('transcriptEntriesFromLog · a search hit on a copy', () => {
     ]);
     expect(rowForOffset(rows, 200)?.text).toBe('moved');
     expect(rowForOffset(rows, 300)?.text).toBe('moved');
+  });
+
+  test('hands the position across bookkeeping, and never across a row of its own', () => {
+    const across = [
+      'user/message: moved',
+      '[11:00:00] system/usage: in=1 out=1',
+      '[11:00:00] user/message: moved',
+    ].join('\n');
+    expect(transcriptEntriesFromLog(across, NOW, 'fy', [200, 250, 300]).map(entry => entry.offset)).toEqual([200]);
+
+    const midTurn = [
+      '[10:59:58] assistant/tool-call: Bash({"command":"date"})',
+      'user/message: The user sent a new message while you were working:',
+      '    look at the board',
+      '[10:59:59] tool/tool-result: Wed Nov  4 10:59:59 UTC 2026',
+      '[11:00:00] user/message: look at the board',
+    ].join('\n');
+    // The tool run sits between the copy and its twin, so the twin keeps its own place and rows stay in order.
+    expect(transcriptEntriesFromLog(midTurn, NOW, 'fy', [100, 200, 300, 400]).map(entry => entry.offset)).toEqual([
+      100, 400,
+    ]);
   });
 });

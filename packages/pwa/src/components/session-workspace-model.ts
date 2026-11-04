@@ -317,28 +317,62 @@ const addImageRead = (run: ToolRun, images: readonly TranscriptImageMarker[], ke
 const MID_TURN_LEAD = 'The user sent a new message while you were working:';
 const MID_TURN_TRAILER = 'This is how Claude Code surfaces messages the user sends mid-turn';
 
+/** Whitespace-insensitive, case-sensitive: the same rule the ledger matches a send's words by. */
+const normalized = (value: string): string => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+
 /**
- * Whitespace-insensitive, case-sensitive: the same rule the ledger matches a send's words by. A picture's
- * marker names the record it came from, which differs between a copy and its twin, so only its type counts.
+ * The same words with each picture named only by its type. A marker's handle names the record it was read
+ * from, so a copy's picture and its twin's never share one — which is why this is trusted only for a result
+ * whose CALL was already proved a copy of the twin's call: the same invocation, read twice.
  */
-const normalized = (value: string): string =>
-  value
-    .normalize('NFC')
-    .replace(/\[fy-image \S+ (\S+)\]/gu, '[fy-image $1]')
-    .replace(/\s+/gu, ' ')
-    .trim();
+const withoutImageHandles = (value: string): string =>
+  normalized(value).replace(/\[fy-image \S+ (\S+)\]/gu, '[fy-image $1]');
 
 /** The words a mid-turn copy carries: the message itself, with Claude's framing lifted off. */
-const framedWords = (text: string): string | undefined => {
+const framedWords = (record: LogRecord): string | undefined => {
+  if (record.clock !== undefined || record.role !== 'user' || record.kind !== 'message') return undefined;
+  const text = record.lines.join('\n');
   if (!text.startsWith(MID_TURN_LEAD)) return undefined;
   const body = text.slice(MID_TURN_LEAD.length);
   const trailer = body.lastIndexOf(MID_TURN_TRAILER);
   return normalized(trailer === -1 ? body : body.slice(0, trailer));
 };
 
-/** Where a copy's search stops: the agent speaking again, or a turn starting or ending. */
+const isTurnRecord = (record: LogRecord): boolean => record.role === 'system' && record.kind === 'turn';
+
+/** Where a mid-turn copy's search stops: the agent speaking again, or a turn starting or ending. */
 const endsSegment = (record: LogRecord): boolean =>
-  (record.role === 'assistant' && record.kind === 'message') || (record.role === 'system' && record.kind === 'turn');
+  (record.role === 'assistant' && record.kind === 'message') || isTurnRecord(record);
+
+const wordsOf = (record: LogRecord): string => normalized(record.lines.join('\n'));
+
+/** The next timed record that shows, from `from` on; none past an untimed record or a turn record. */
+const nextReal = (records: readonly LogRecord[], from: number): number | undefined => {
+  for (let index = from; index < records.length; index += 1) {
+    const record = records[index] as LogRecord;
+    if (isTurnRecord(record) || record.clock === undefined) return undefined;
+    if (!isHiddenRecord(record)) return index;
+  }
+  return undefined;
+};
+
+/**
+ * Do a copy and the record it may copy say the same thing? The same words; or, for a tool's result, the
+ * same words with each picture named by its type, when it is provably the same invocation: its call lined
+ * up as a copy too, or no call sits between the two results — a call has ONE result, so a second answer
+ * to the same call can only be a copy of the first.
+ */
+const sameWords = (records: readonly LogRecord[], copy: number, twin: number, callLinedUp: boolean): boolean => {
+  const copied = records[copy] as LogRecord;
+  const real = records[twin] as LogRecord;
+  if (wordsOf(copied) === wordsOf(real)) return true;
+  if (copied.kind !== 'tool-result') return false;
+  if (withoutImageHandles(copied.lines.join('\n')) !== withoutImageHandles(real.lines.join('\n'))) return false;
+  if (callLinedUp) return true;
+  for (let between = copy + 1; between < twin; between += 1)
+    if ((records[between] as LogRecord).kind === 'tool-call') return false;
+  return true;
+};
 
 /** The records that are only copies, and the row a twin's search position starts at when its copy sits right before it. */
 interface Copies {
@@ -347,45 +381,90 @@ interface Copies {
 }
 
 /**
- * WHICH RECORDS ARE ONLY A COPY OF A LATER ONE, so a message — or a tool's result — is drawn once.
+ * WHICH RECORDS ARE ONLY A COPY OF A LATER ONE, so a message — or a tool's call and result — is drawn once.
  *
- * Claude Code (seen on 2.1.317) writes a second record for what it is given — a message, a tool's result,
- * sometimes the call — with NO time, before the real one; a message that arrives mid-turn is copied inside
- * "The user sent a new message while you were working: …". The real record follows with its time. The
- * daemon passes both on, so the chat drew a bare bubble with no time or ticks above the real, ticked one,
- * and a tool run read "Bash, result": the copy's result answered the call, the real one was left over.
+ * Claude Code (seen on 2.1.317) writes a copy of what it is given — a message, a tool's result, sometimes
+ * the call with it — with NO time, straight before the real records; a message that arrives mid-turn is
+ * copied inside "The user sent a new message while you were working: …" instead. The daemon passes both
+ * on, so the chat drew a bare bubble with no time or ticks above the real, ticked one, and a tool run read
+ * "Bash, result": the copy's result answered the call and the real one was left over.
  *
- * An untimed record is a copy when a LATER timed record of the same kind carries the same words, before
- * the agent next speaks or the turn changes. The pairing is ONE-TO-ONE and forward-only, nearest first:
- * sending "ok" twice on purpose is two copies and two real records, so each copy folds into its own real
- * record and both messages stay. A timed record is never folded, an untimed one with no timed twin is
- * kept — nothing is hidden on the strength of a copy that is not there — and a copy never reaches across
- * the agent's reply or a turn boundary for its twin.
+ * A COPY LINES UP WITH WHAT IT COPIES. A run of untimed records copies the timed records straight after
+ * it, IN ORDER: each untimed record is tried against the next timed record not yet matched, and folds into
+ * it only with the same role, kind and words; one that does not match stays, and the next is tried against
+ * the same record. Bookkeeping between them is skipped, but nothing crosses a turn record. A picture in a
+ * tool's result is compared by its type only for the same invocation (`sameWords`).
  *
- * A copy sitting right before its twin hands the twin its position in the file, so a search hit on
+ * A MID-TURN COPY is found by its framing, which only Claude writes: it folds into the next timed message
+ * with the same words before the agent next speaks or the turn changes.
+ *
+ * Every pairing is ONE-TO-ONE. Sending "ok" twice on purpose is two copies and two real records, so each
+ * copy folds into its own real record and both messages stay. A timed record is never folded, and an
+ * untimed one that lines up with nothing is kept: nothing is hidden on the strength of a copy that is not
+ * there. A copy sitting right before its twin hands the twin its position in the file, so a search hit on
  * either record lands on the one row they draw.
  */
 const copyRecords = (records: readonly LogRecord[]): Copies => {
   const copies = new Set<number>();
   const taken = new Set<number>();
   const twins = new Map<number, number>();
+  const pair = (copy: number, twin: number): void => {
+    copies.add(copy);
+    taken.add(twin);
+    twins.set(copy, twin);
+  };
+
+  // A run of plain copies against the timed records straight after it.
+  let index = 0;
+  while (index < records.length) {
+    const first = records[index] as LogRecord;
+    if (first.clock !== undefined || isHiddenRecord(first) || framedWords(first) !== undefined) {
+      index += 1;
+      continue;
+    }
+    const run: number[] = [];
+    let next = index;
+    for (; next < records.length; next += 1) {
+      const record = records[next] as LogRecord;
+      if (isTurnRecord(record) || (record.clock !== undefined && !isHiddenRecord(record))) break;
+      if (!isHiddenRecord(record) && framedWords(record) === undefined) run.push(next);
+    }
+    let twin = nextReal(records, next);
+    let previousCallLinedUp = false;
+    for (const member of run) {
+      if (twin === undefined) break;
+      const copy = records[member] as LogRecord;
+      const real = records[twin] as LogRecord;
+      if (
+        copy.role !== real.role ||
+        copy.kind !== real.kind ||
+        !sameWords(records, member, twin, previousCallLinedUp)
+      ) {
+        // Not this record's copy: it stays, and the next copy is tried against the same record.
+        previousCallLinedUp = false;
+        continue;
+      }
+      pair(member, twin);
+      previousCallLinedUp = copy.kind === 'tool-call';
+      twin = nextReal(records, twin + 1);
+    }
+    index = next;
+  }
+
+  // Mid-turn copies, by their framing.
   records.forEach((record, index) => {
-    if (record.clock !== undefined || isHiddenRecord(record) || endsSegment(record)) return;
-    const text = record.lines.join('\n');
-    const framed = record.role === 'user' && record.kind === 'message' ? framedWords(text) : undefined;
-    const words = framed ?? normalized(text);
+    const words = framedWords(record);
+    if (words === undefined) return;
     for (let next = index + 1; next < records.length; next += 1) {
       const later = records[next] as LogRecord;
       if (endsSegment(later)) return;
-      if (later.clock === undefined || taken.has(next) || later.role !== record.role || later.kind !== record.kind)
-        continue;
-      if (normalized(later.lines.join('\n')) !== words) continue;
-      copies.add(index);
-      taken.add(next);
-      twins.set(index, next);
+      if (later.clock === undefined || taken.has(next) || later.role !== 'user' || later.kind !== 'message') continue;
+      if (wordsOf(later) !== words) continue;
+      pair(index, next);
       return;
     }
   });
+
   const startsAt = new Map<number, number>();
   for (const [copy, twin] of twins) {
     const offset = records[copy]?.offset;
