@@ -6,12 +6,13 @@ import {
   type AgendaReceipt,
   type AgendaReceipts,
 } from '../../lib/agenda/index.ts';
-import type { SessionSendService } from '../../lib/session/send/service.ts';
 import { sameSendId } from '../../lib/session/send/index.ts';
+import type { SessionSendService } from '../../lib/session/send/service.ts';
 import {
   SendDraftRefused,
   type SendFate,
   type SendLedger,
+  SendNotReady,
   SendPending,
   SendScreenUnreadable,
   type SendTerminal,
@@ -27,8 +28,8 @@ import { tryParseSessionId } from '../../lib/session-id.ts';
 
 /**
  * Sends a batch through the send service, telling the outbox which refusals typed NOTHING and may be tried
- * again (a draft in the composer, a screen that could not be read, a ferret still starting) from the ones
- * that would refuse again. A send typed but not yet proven to land is accepted: its receipt decides.
+ * again (a draft in the composer, a screen that could not be read, a pane that never came to a prompt, a
+ * ferret still starting) from the ones that would refuse again. A send typed but not yet proven to land is accepted: its receipt decides.
  */
 export class SendAgendaMessenger implements AgendaMessenger {
   constructor(private readonly sends: Pick<SessionSendService, 'send'>) {}
@@ -40,7 +41,12 @@ export class SendAgendaMessenger implements AgendaMessenger {
       await this.sends.send({ id, sendId, message });
     } catch (error) {
       if (error instanceof SendUnconfirmed) return;
-      if (error instanceof SendDraftRefused || error instanceof SendScreenUnreadable || error instanceof SendPending)
+      if (
+        error instanceof SendDraftRefused ||
+        error instanceof SendScreenUnreadable ||
+        error instanceof SendNotReady ||
+        error instanceof SendPending
+      )
         throw new AgendaNotTyped(error.message);
       throw error;
     }

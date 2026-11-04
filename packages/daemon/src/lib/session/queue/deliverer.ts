@@ -17,7 +17,8 @@ import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './sett
  * ONE AT A TIME. A message is marked `typing` on disk BEFORE it is handed over, and nothing else is handed
  * over while one is. A daemon that dies in between leaves a `typing` message, and the send ledger — keyed
  * by the same id — says on the next look whether a key ever went: no record means none did, and it waits
- * again; a record says where it went. Nothing is ever typed twice on a guess.
+ * again; a record says where it went. Nothing is ever typed twice on a guess. A record still `accepted` long
+ * after its hand-over is the send tracker's to settle, and the tracker is asked to look (`recheckMs`).
  *
  * EVENT-DRIVEN. A session is looked at when a message is enqueued, when its state document changes (a
  * turn moving, a dialog opening), and — while something in it is still waiting or unproven — again after
@@ -60,6 +61,11 @@ export interface QueueTransport {
    * verified, counted Enter — and says whose it is (`OwnDraft`).
    */
   clearOwnDraft(id: SessionId): Promise<OwnDraft>;
+  /**
+   * Has the send tracker look at this session's sends now: the one look that can prove where an `accepted`
+   * hand-over went, and type it again once it is proven absent. The look keeps every rule it always has.
+   */
+  recheck(id: SessionId): Promise<void>;
 }
 
 export interface QueueDeliveryPorts {
@@ -87,6 +93,11 @@ export interface QueueDeliverySettings extends QueueCoalesceSettings {
   readonly perLook: number;
   /** The longest a stopping daemon waits for the hand-overs already in flight. */
   readonly drainMs: number;
+  /**
+   * How long a message may sit `typing` behind an `accepted` send before the tracker is asked to look at it,
+   * and how often it is asked again while it stays there (&B153).
+   */
+  readonly recheckMs: number;
 }
 
 export const defaultQueueDeliverySettings: QueueDeliverySettings = {
@@ -95,6 +106,7 @@ export const defaultQueueDeliverySettings: QueueDeliverySettings = {
   readWatchMs: 60 * 60_000,
   perLook: 8,
   drainMs: 15_000,
+  recheckMs: 60_000,
 };
 
 export class QueueDeliverer {
@@ -102,6 +114,8 @@ export class QueueDeliverer {
   private readonly open = new Set<SessionId>();
   /** The looks running now, which a stopping daemon waits out. */
   private readonly running = new Set<Promise<void>>();
+  /** When each session's tracker was last asked to look at a hand-over stuck `accepted`. */
+  private readonly rechecked = new Map<SessionId, number>();
   private stopped = false;
 
   constructor(
@@ -189,12 +203,38 @@ export class QueueDeliverer {
 
   /** Brings every message already handed over up to what the send ledger proves. */
   private async settle(id: SessionId): Promise<void> {
+    let stalled = false;
+    const now = Date.parse(this.ports.clock.now());
     for (const message of await this.messages(id)) {
       if (message.state !== 'typing' && message.state !== 'delivered' && message.state !== 'unconfirmed') continue;
       // A member of a combined turn is proven by the ONE ledger record the turn was sent under.
       const fate = await this.ports.transport.fate(id, message.deliveredAs ?? message.id);
       for (const move of movesFrom(message, fate)) await this.move(id, message.id, move.state, move.failure);
+      if (
+        message.state === 'typing' &&
+        fate === 'accepted' &&
+        now - Date.parse(message.stateAt) >= this.settings.recheckMs
+      )
+        stalled = true;
     }
+    if (stalled) this.recheck(id, now);
+    else this.rechecked.delete(id);
+  }
+
+  /**
+   * Asks the tracker to look at a hand-over that has sat `accepted` too long, at most once per `recheckMs`.
+   *
+   * Only the tracker moves an `accepted` send, and it moves one only when a look is scheduled for it. A
+   * hand-over that threw used to schedule none, so its message sat `typing` and every message behind it
+   * waited, with no reason given, until a restart or a `fy send --wait` happened to make the tracker look
+   * (&B153). The look is the tracker's own: transcript proof wins, and only a send proven absent is typed
+   * again. Not awaited: the tracker's look takes the send path's lock, and this look holds the queue's.
+   */
+  private recheck(id: SessionId, now: number): void {
+    const last = this.rechecked.get(id);
+    if (last !== undefined && now - last < this.settings.recheckMs) return;
+    this.rechecked.set(id, now);
+    void this.ports.transport.recheck(id).catch(() => undefined);
   }
 
   /**
@@ -261,7 +301,8 @@ export class QueueDeliverer {
         return false;
       case 'failed':
         // A hand-over that threw may still have typed: when the ledger, keyed by this id, has a record of
-        // it, it stays `typing` and the next look settles it. With no record nothing was typed, so it
+        // it, it stays `typing` and the next look settles it — the send path told the tracker, and a record
+        // still `accepted` after `recheckMs` is put to it again. With no record nothing was typed, so it
         // fails and the next message may go.
         if ((await this.ports.transport.fate(id, delivery.sendId)) !== undefined) return false;
         for (const member of members) await this.move(id, member.id, 'failed', outcome.failure);

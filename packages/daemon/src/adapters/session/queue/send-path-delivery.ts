@@ -2,11 +2,13 @@ import type { SendDisposition } from '@ferretry/protocol';
 import type { QueueDelivery, QueueTransport } from '../../../lib/session/queue/deliverer.ts';
 import type { DeliveryView, HandOver, OwnDraft } from '../../../lib/session/queue/delivery.ts';
 import type { SendMessageRequest, SessionSendService } from '../../../lib/session/send/service.ts';
+import type { SendTracker } from '../../../lib/session/send/tracker.ts';
 import {
   SendDraftRefused,
   type SendFate,
   type SendLaunchGate,
   type SendLedger,
+  SendNotReady,
   SendPending,
   SendRefused,
   type SendRepository,
@@ -25,14 +27,16 @@ const LANDED: ReadonlySet<SendDisposition> = new Set(['delivered', 'queued', 're
  *
  * The send path keeps the session's turn record straight and writes the ledger the read tick is proven
  * from; this class only says what its answer means for the queue. Every refusal that typed nothing is a
- * reason to wait — a draft, a screen it could not read, a session still starting, one only a person can
- * unblock — and a plain refusal (an empty message, a revive the session refused) is a failure. Anything
- * else it throws is the deliverer's to settle from the ledger, since keys may have gone.
+ * reason to wait — a draft, a screen it could not read, a pane that never came to a prompt, a session
+ * still starting, one only a person can unblock — and a plain refusal (an empty message, a revive the
+ * session refused) is a failure. Anything else it throws is the deliverer's to settle from the ledger,
+ * since keys may have gone.
  */
 export class SendPathQueueTransport implements QueueTransport {
   constructor(
     private readonly sends: Pick<SessionSendService, 'send' | 'finishOwnDraft'>,
     private readonly ledger: Pick<SendLedger, 'list'>,
+    private readonly tracking: Pick<SendTracker, 'check'>,
   ) {}
 
   async handOver(id: SessionId, delivery: QueueDelivery): Promise<HandOver> {
@@ -47,6 +51,7 @@ export class SendPathQueueTransport implements QueueTransport {
       if (error instanceof SendUnconfirmed) return { kind: 'unproven' };
       if (error instanceof SendDraftRefused) return { kind: 'refused', reason: 'draft' };
       if (error instanceof SendScreenUnreadable) return { kind: 'refused', reason: 'unreadable' };
+      if (error instanceof SendNotReady) return { kind: 'refused', reason: error.reason };
       if (error instanceof SendPending) return { kind: 'refused', reason: 'launching' };
       if (error instanceof SendUnavailable) return { kind: 'refused', reason: 'dialog' };
       if (error instanceof SendRefused) return { kind: 'failed', failure: error.message };
@@ -60,6 +65,10 @@ export class SendPathQueueTransport implements QueueTransport {
 
   async clearOwnDraft(id: SessionId): Promise<OwnDraft> {
     return await this.sends.finishOwnDraft(id);
+  }
+
+  async recheck(id: SessionId): Promise<void> {
+    await this.tracking.check(id);
   }
 }
 

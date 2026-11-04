@@ -6,6 +6,7 @@ import {
   ComposerOccupiedError,
   ComposerUnconfirmedError,
   PaneDeliveryError,
+  PaneNotReadyError,
   PaneStrandedError,
   TmuxPaneDelivery,
 } from '../../../src/adapters/index.ts';
@@ -95,6 +96,9 @@ describe('tmux pane delivery — readiness', () => {
     await should(subject.waitReady(SESSION)).be.rejectedWith(
       /blocked by a prompt on screen: "Try the new fullscreen renderer\?" — answer it in the terminal/u,
     );
+    should(await subject.waitReady(SESSION).catch((error: unknown) => error))
+      .be.instanceof(PaneNotReadyError)
+      .and.match({ why: 'dialog' });
     should(server.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
@@ -164,6 +168,10 @@ describe('tmux pane delivery — readiness', () => {
     // Assert
     await should(waited.subject.waitReady(SESSION)).be.rejectedWith(/did not become ready to accept a turn/u);
     should(waited.slept).deepEqual([100, 200]);
+    // &B153: its own type, so a send can tell "no key went" from a failure after the keys.
+    should(await waited.subject.waitReady(SESSION).catch((error: unknown) => error))
+      .be.instanceof(PaneNotReadyError)
+      .and.match({ why: 'busy' });
     should(wedged.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
@@ -178,6 +186,13 @@ describe('tmux pane delivery — readiness', () => {
     // Act / Assert
     await should(delivery(gone).subject.waitReady(SESSION)).be.rejectedWith(/exited; tmux reported no exit code/u);
     await should(delivery(died).subject.waitReady(SESSION)).be.rejectedWith(/exited \(137\)/u);
+    should(
+      await delivery(died)
+        .subject.waitReady(SESSION)
+        .catch((error: unknown) => error),
+    )
+      .be.instanceof(PaneNotReadyError)
+      .and.match({ why: 'exited' });
   });
 });
 

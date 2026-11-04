@@ -108,6 +108,18 @@ describe('routeSend', () => {
       should(routeSend(target({ status }), pane())).equal('idle');
   });
 
+  it('does not take a declared wait at its word over a pane visibly at work (&B153)', () => {
+    // ryu: `status: waiting`, `promptReady: false`, the agent mid-turn. The idle path waited for a prompt
+    // that never came and threw before any key; the harness's own queue is where the message belongs.
+    should(routeSend(target({ status: 'waiting' }), pane({ activeWork: true }))).equal('busy');
+    should(routeSend(target({ status: 'waiting', promptReady: false }), pane({ activeWork: true }))).equal('busy');
+    // A prompt still wins, and the other idle statuses keep their word: they are set at a turn's end.
+    should(routeSend(target({ status: 'waiting' }), pane({ activeWork: true, promptReady: true }))).equal('idle');
+    should(routeSend(target({ status: 'waiting', promptReady: true }), pane({ activeWork: true }))).equal('idle');
+    for (const status of ['awaiting_user', 'rate_limited', 'interrupted'] as const)
+      should(routeSend(target({ status }), pane({ activeWork: true }))).equal('idle');
+  });
+
   it("takes the tracked path when the document says the composer is ready even though the pane's frame lags", () => {
     should(routeSend(target({ promptReady: true }), pane())).equal('idle');
   });

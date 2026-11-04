@@ -278,7 +278,8 @@ export const TERMINAL_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set(['fail
  * Statuses that are idle by their own account, whatever the composer looks like.
  *
  * A parked or rate-limited session is not mid-turn; treating it as busy would ride the native queue
- * and produce an untracked turn instead of the tracked one the caller asked for.
+ * and produce an untracked turn instead of the tracked one the caller asked for. `waiting` is the one
+ * a pane visibly at work overrules (`routeSend`): a declared wait is set from inside the agent's turn.
  */
 export const IDLE_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set([
   'waiting',
@@ -565,6 +566,24 @@ export class SendComposerUnreadable extends Error {
   }
 }
 
+/** What a pane that never came to a prompt was doing instead: still at work, behind a dialog, or gone. */
+export type SendNotReadyCause = 'busy' | 'dialog' | 'exited';
+
+/**
+ * The pane never came to a prompt, so nothing of the message was typed. Thrown by the terminal BEFORE any
+ * keystroke of the payload (&B153): a session whose record said idle while its agent was still mid-turn is
+ * the case, and the message is free to go again once the pane is ready.
+ */
+export class SendPaneNotReady extends Error {
+  constructor(
+    detail: string,
+    readonly why: SendNotReadyCause,
+  ) {
+    super(`${detail}; nothing was typed`);
+    this.name = 'SendPaneNotReady';
+  }
+}
+
 /**
  * The payload WAS typed into the composer and no frame proved it landed, so it was not typed again.
  * Thrown by the terminal AFTER a keystroke: the message may be in the composer now, or on its way to
@@ -601,6 +620,21 @@ export class SendScreenUnreadable extends SendRefused {
   constructor(message: string) {
     super(message);
     this.name = 'SendScreenUnreadable';
+  }
+}
+
+/**
+ * Nothing was typed because the agent's pane never came to a prompt: it stayed at work, sat behind a dialog,
+ * or went away. Like an unreadable screen it usually passes, so the same send may be tried again — a queue
+ * waits on `reason` rather than failing the message.
+ */
+export class SendNotReady extends SendRefused {
+  constructor(
+    message: string,
+    readonly reason: 'busy' | 'dialog' | 'stopped',
+  ) {
+    super(message);
+    this.name = 'SendNotReady';
   }
 }
 

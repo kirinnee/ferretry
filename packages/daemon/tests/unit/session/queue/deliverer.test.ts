@@ -75,6 +75,9 @@ class World {
   ownDraft: () => OwnDraft = () => ({ kind: 'foreign' });
   /** How many times the deliverer asked the send path to finish a draft of ours. */
   clears = 0;
+  /** How many times the deliverer asked the send tracker to look; a test may make the look settle a send. */
+  rechecks = 0;
+  onRecheck: () => void = () => undefined;
   /** The settings the deliverer reads on every look; a test narrows them with Object.assign. */
   readonly settings: { -readonly [K in keyof QueueDeliverySettings]: QueueDeliverySettings[K] } = {
     ...defaultQueueDeliverySettings,
@@ -109,6 +112,10 @@ class World {
           clearOwnDraft: async () => {
             this.clears += 1;
             return this.ownDraft();
+          },
+          recheck: async () => {
+            this.rechecks += 1;
+            this.onRecheck();
           },
         },
         sessions: () => [ID],
@@ -300,6 +307,73 @@ describe('handing over a queue', () => {
     should(world.state('b')?.state).equal('delivered');
   });
 
+  it('should hold the queue with a reason, not behind a typing message, when the pane never came to a prompt (&B153)', async () => {
+    // ryu: the send path gave up waiting for a prompt before any key. It now says so, and the message waits
+    // as `busy` — visible to its sender — instead of sitting `typing` with everything else behind it.
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.answers.push({ kind: 'refused', reason: 'busy' });
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.state('a')).containEql({ state: 'queued', waitReason: 'busy' });
+    should(world.state('b')).containEql({ state: 'queued', waitReason: 'busy' });
+    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+
+    // The next look finds the prompt: both go, in order, and nothing was typed twice.
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a', 'b']);
+    should(world.queue.map(entry => entry.state)).eql(['delivered', 'delivered']);
+  });
+
+  it('should ask the tracker to look at a hand-over left accepted too long, then move on once it settles (&B153)', async () => {
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.answers.push(new Error('tmux session fy-ryu did not become ready to accept a turn'));
+    world.fates.set('a', 'accepted');
+
+    await world.deliverer.enqueued(ID);
+    should(world.state('a')?.state).equal('typing');
+
+    // Inside the window the tracker's own look is still due: nothing is asked.
+    world.nowMs += defaultQueueDeliverySettings.recheckMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.rechecks).equal(0);
+
+    // Past it, the tracker is asked once — and not again on every five-second look after.
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+    should(world.rechecks).equal(1);
+    should(world.handed).eql(['a']);
+
+    // Still accepted a window later: asked again. This look proves it absent and retypes it, held in the queue.
+    world.onRecheck = () => void world.fates.set('a', 'queued');
+    world.nowMs += defaultQueueDeliverySettings.recheckMs;
+    await world.deliverer.changed(ID);
+    should(world.rechecks).equal(2);
+    await world.deliverer.changed(ID);
+
+    should(world.state('a')?.state).equal('delivered');
+    should(world.handed).eql(['a', 'b']);
+    should(world.state('b')?.state).equal('delivered');
+  });
+
+  it('should not ask the tracker about a hand-over still being proven, or one the ledger already settled', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push({ kind: 'unproven' });
+    world.fates.set('a', 'accepted');
+
+    await world.deliverer.enqueued(ID);
+    world.fates.set('a', 'unaccounted');
+    world.nowMs += defaultQueueDeliverySettings.recheckMs;
+    await world.deliverer.changed(ID);
+
+    should(world.state('a')?.state).equal('unconfirmed');
+    should(world.rechecks).equal(0);
+  });
+
   it('should leave a hand-over that threw to the ledger when the ledger has it, and fail it when it does not', async () => {
     const recorded = new World(message('a', 'human'));
     recorded.answers.push(new Error('tmux went away'));
@@ -451,6 +525,7 @@ describe('handing over a queue', () => {
         handOver: async () => ({ kind: 'landed' }),
         fate: async () => undefined,
         clearOwnDraft: async () => ({ kind: 'foreign' }),
+        recheck: async () => undefined,
       },
       sessions: () => [ID],
       sleep: async () => undefined,

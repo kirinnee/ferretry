@@ -10,6 +10,7 @@ import {
   SendComposerOccupied,
   SendComposerUnreadable,
   SendLandingUnconfirmed,
+  SendPaneNotReady,
 } from '../../../lib/session/send/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import {
@@ -36,7 +37,7 @@ import {
   captureFrame,
   type DeliverySleep,
 } from '../../tmux/composer-fill.ts';
-import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
+import { PaneNotReadyError, type TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
 
 /**
@@ -225,7 +226,8 @@ export class TmuxSendTerminal implements SendTerminal {
 
   /**
    * The terminal's refusal-before-typing, and its typed-but-unproven, said in the send domain's own
-   * words — the two outcomes the service must tell apart from a transport that simply failed.
+   * words — the two outcomes the service must tell apart from a transport that simply failed. A pane that
+   * never came to a prompt is a refusal before typing too (&B153): `waitReady` gives up before the fill.
    */
   private async untyped<T>(transport: () => Promise<T>): Promise<T> {
     try {
@@ -234,6 +236,7 @@ export class TmuxSendTerminal implements SendTerminal {
       if (error instanceof ComposerOccupiedError) throw new SendComposerOccupied(error.draft);
       if (error instanceof ComposerUnreadableError) throw new SendComposerUnreadable();
       if (error instanceof ComposerUnconfirmedError) throw new SendLandingUnconfirmed(error.message);
+      if (error instanceof PaneNotReadyError) throw new SendPaneNotReady(error.message, error.why);
       throw error;
     }
   }

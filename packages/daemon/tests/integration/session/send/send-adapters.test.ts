@@ -12,11 +12,12 @@ import {
   FileResumeTurnStore,
   FileSendChannel,
   FileSendLedger,
-  SEND_LEDGERS_KEPT,
   FileSendTurnStore,
   KeyedSerialExecutor,
+  PaneNotReadyError,
   ResumeSendReviver,
   RuntimeEnvironment,
+  SEND_LEDGERS_KEPT,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
   StateHomeLayout,
@@ -33,6 +34,7 @@ import {
   ReviveRefusedForSend,
   SendComposerOccupied,
   SendLandingUnconfirmed,
+  SendPaneNotReady,
   type SendRecord,
   type SessionId,
   TmuxController,
@@ -1018,6 +1020,25 @@ describe('the tmux send terminal, as the tracker reads it', () => {
 
     should(await terminal.deliver(ID, 'x').catch((error: unknown) => error)).be.instanceof(SendLandingUnconfirmed);
     should(await terminal.queue(ID, 'x').catch((error: unknown) => error)).be.instanceof(SendLandingUnconfirmed);
+  });
+
+  it('should turn a pane that never came to a prompt into SendPaneNotReady, keeping why (&B153)', async () => {
+    const terminal = new TmuxSendTerminal(
+      new TmuxController(new FrameTmux([PLACEHOLDER])),
+      async () => 'fy-session-1',
+      {
+        deliver: async () => {
+          throw new PaneNotReadyError('tmux session fy-session-1 did not become ready to accept a turn', 'busy');
+        },
+      } as never,
+      {} as never,
+      async () => undefined,
+    );
+
+    const refusal = await terminal.deliver(ID, 'x').catch((error: unknown) => error);
+
+    should(refusal).be.instanceof(SendPaneNotReady);
+    should(refusal).match({ why: 'busy', message: /did not become ready.*; nothing was typed$/u });
   });
 
   it('should erase a stranded payload one C-u at a time, verifying before each key', async () => {

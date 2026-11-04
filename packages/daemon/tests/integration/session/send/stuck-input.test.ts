@@ -168,7 +168,7 @@ class World {
       clock: this.clock,
       scheduler: { schedule: () => undefined, cancelAll: () => undefined },
       view: async id => await new SendPathDeliveryView(repository, terminal, { launching: () => false }).view(id),
-      transport: new SendPathQueueTransport(service, this.ledger),
+      transport: new SendPathQueueTransport(service, this.ledger, this.tracker),
       sessions: () => [ID],
       sleep,
     });

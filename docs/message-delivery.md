@@ -52,6 +52,9 @@ this page, which is still how a message reaches the pane.
   being typed, and the stop waits (up to `drainMs`, 15 s) for that hand-over rather than cutting it in half. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
+  A `typing` message whose ledger row is still `accepted` after `recheckMs` (60 s) is put to the send
+  tracker (`QueueTransport.recheck` → `SendTracker.check`), at most once per `recheckMs` per session, so a
+  hand-over nothing else is watching cannot hold the queue ([below](#b153-a-send-that-gave-up-before-its-first-key)).
 - **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
   start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
   structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
@@ -500,6 +503,11 @@ send is still withdrawn and answered `409` (`send_refused`: "nothing was typed; 
 moment"), a released held message goes back to held, and a tracker re-attempt of a TYPED send is
 withheld (`unreadable`) and settled `unaccounted` (`pane_unreadable`) — never retyped.
 
+A pane that never comes to a prompt is refused before a key the same way
+([B153](#b153-a-send-that-gave-up-before-its-first-key)): a person's send is kept open and `untyped`, a
+ferret's or the daemon's is withdrawn with `SendNotReady`, a released held message goes back to held, and a
+re-attempt puts its record back and is withheld (`busy`), so the tracker waits.
+
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
 next depends on whose text it is.
 
@@ -889,6 +897,42 @@ settled unless the reader opened it. Each has **Dismiss**, remembered per device
 all cancelled** and **Clear stuck messages** do it in bulk. If repair later finds the message in the
 transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in place.
 
+## B153: a send that gave up before its first key
+
+From 2026-11-02 to 11-04 ryu's queue stopped eleven times, for 38 minutes to 5 h 49 min: one message `typing`,
+its send `accepted` at attempt 1 with nothing typed, and up to twenty messages behind it with no wait reason.
+Each was freed only by a daemon restart, or by an `fy send --wait` from another ferret that made the tracker
+look. Every time ryu's record said `waiting` — a declared wait, set by the agent from inside its turn — while
+the agent was still at work.
+
+What happened, in order: `routeSend` took `waiting` as idle by the status alone, so the send wrote its
+`accepted` row and took the idle path. `waitReady` looked for a prompt for about 27 s, found none, and threw
+a plain `PaneDeliveryError` before any key. Neither the terminal nor the service knew that error meant "no key
+went", so `send()` threw before it told the tracker. The deliverer saw a ledger row and left the message
+`typing`, and its five-second looks only read the fate, which never moved. Four fixes:
+
+1. **A pane that never comes to a prompt is a refusal before typing.** `waitReady` throws
+   `PaneNotReadyError` (`busy` / `dialog` / `exited`) for every way it gives up, and the terminal says it
+   as `SendPaneNotReady`. The send path takes it back exactly like an unreadable composer: a ferret's or the
+   daemon's send is withdrawn and refused with `SendNotReady`, which the queue waits on as `busy`, `dialog`
+   or `stopped`, so its sender sees why; a person's send is kept open and `untyped` for the tracker; a
+   released held message goes back to held; and a re-attempt puts its record back and is withheld (`busy`).
+   The keys a startup dialog's known answer needs may have been pressed on the way, but never a character of
+   the message, so nothing it could prove landed is typed again.
+2. **A send that throws with its row open always tells the tracker.** `send()` and `reattempt()` schedule
+   a tracker look whenever they throw and the send's row is still open, or the ledger cannot be read to rule
+   one out. That look follows every existing rule: transcript proof wins, a pane or queue holding the text
+   waits, a turn started since waits, an unreadable pane is unconfirmed, and only a send proven absent is
+   typed again, with the attempt ledgered before any key.
+3. **A declared wait does not overrule a pane at work.** Under `waiting` a pane that visibly shows work routes
+   `busy`, so the message goes into the harness's own queue. A prompt still wins, and a pane that shows
+   neither work nor a prompt still routes idle, because a ghost turn is the worse mistake. The other idle
+   statuses (`awaiting_user`, `rate_limited`, `interrupted`) are set at a turn's end and keep their word.
+4. **The deliverer asks the tracker about a hand-over left `accepted`.** See the deliverer above. The ask is
+   not awaited: the tracker's look takes the send lock while the deliverer holds the queue's.
+
+The Warden's `inbox_stuck` (&F910) is the detector for whatever still gets past these.
+
 ## Declared gaps
 
 - **A message held in Claude's own queue while the ferret is idle is not pushed.** Claude submits what it
@@ -915,5 +959,9 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
   the send is settled unconfirmed rather than retyped.
 - **A message in Codex's own queue cannot be cancelled there.** Codex offers `alt + ↑` to edit its last
   queued message; driving that is not attempted.
+- **An idle-routed send to a pane that is neither at a prompt nor visibly working waits about 27 s per try.**
+  Under any idle status such a pane routes idle, and the wait for a prompt runs out before it refuses. The
+  queue looks again every `lookMs`, so a pane stuck that way costs one readiness wait per look, with the
+  send lock held, until it draws a prompt or shows work.
 - **Rows older than the two-hour ceiling are not re-examined.** A row stuck before this fix stays stuck
   until a person cancels it — which is what Cancel and Clear stuck messages are for.

@@ -6,6 +6,7 @@ import type { QueueDelivery } from '../../../../src/lib/session/queue/deliverer.
 import type { SessionSendService } from '../../../../src/lib/session/send/service.ts';
 import {
   SendDraftRefused,
+  SendNotReady,
   SendPending,
   type SendRecord,
   SendRefused,
@@ -44,6 +45,7 @@ type SendRequest = Parameters<SessionSendService['send']>[0];
 
 function transport(answer: SendDisposition | Error, records: readonly SendRecord[] = [], untyped = false) {
   const requests: SendRequest[] = [];
+  const checked: string[] = [];
   const subject = new SendPathQueueTransport(
     {
       send: async request => {
@@ -56,8 +58,9 @@ function transport(answer: SendDisposition | Error, records: readonly SendRecord
       finishOwnDraft: async () => ({ kind: 'clear' as const }),
     },
     { list: async () => records },
+    { check: async id => void checked.push(id) },
   );
-  return { subject, requests };
+  return { subject, requests, checked };
 }
 
 describe('SendPathQueueTransport', () => {
@@ -201,9 +204,21 @@ describe('SendPathQueueTransport', () => {
       [new SendScreenUnreadable('could not read'), 'unreadable'],
       [new SendPending('still launching'), 'launching'],
       [new SendUnavailable('a question is open'), 'dialog'],
+      // &B153: a pane that never came to a prompt typed nothing either.
+      [new SendNotReady('the agent never came to a prompt', 'busy'), 'busy'],
+      [new SendNotReady('the agent never came to a prompt', 'dialog'), 'dialog'],
+      [new SendNotReady('the agent never came to a prompt', 'stopped'), 'stopped'],
     ];
     for (const [error, reason] of cases)
       should(await transport(error).subject.handOver(ID, one(message()))).deepEqual({ kind: 'refused', reason });
+  });
+
+  it('should put a re-look to the send tracker, for the session it names', async () => {
+    const { subject, checked } = transport('delivered');
+
+    await subject.recheck(ID);
+
+    should(checked).deepEqual([ID]);
   });
 
   it('should fail a plain refusal, and pass on what it cannot read', async () => {
