@@ -383,7 +383,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     check((await fold.getAttribute('aria-expanded')) === 'false', `the ${part} fold does not start closed`);
     await fold.click();
   }
-  check((await choice.locator('table[data-agenda-terms]').count()) === 1, 'the terms are not a table');
+  check((await choice.locator('table[data-agenda-references]').count()) === 1, 'the terms are not a table');
   const toEnd = (): Promise<void> =>
     choice.locator('.fy-item-view__body').evaluate(node => {
       node.scrollTop = node.scrollHeight;
