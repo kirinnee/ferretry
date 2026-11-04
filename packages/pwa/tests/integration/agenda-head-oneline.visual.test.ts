@@ -156,10 +156,10 @@ describe('the open item’s head', () => {
             expect(title.bottom, 'the title is on the controls’ row').toBeLessThanOrEqual(pager.bottom + 1);
             expect(title.top, 'the title is on the controls’ row').toBeGreaterThanOrEqual(pager.top - 1);
             expect(title.right, 'the title ends before the controls').toBeLessThanOrEqual(pager.left + 1);
-            const ask = await tab.evaluate(
-              () => document.querySelector('[data-agenda-ask]')?.getClientRects().length ?? 0,
+            const summary = await tab.evaluate(
+              () => document.querySelector('[data-agenda-description]')?.getClientRects().length ?? 0,
             );
-            expect(ask, 'no ⓘ panel holds the summary').toBe(0);
+            expect(summary, 'the summary is drawn on the card, not behind ⓘ').toBeGreaterThan(0);
             await shot(tab, name, `${family}-${scheme}`, 'short-title');
           } finally {
             await close();
