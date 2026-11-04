@@ -300,19 +300,22 @@ workflow_job_has "${ci_workflow}" smoke-darwin "^      advisory: [\$][{][{] gith
 workflow_job_has "${ci_workflow}" smoke-darwin '^    needs: compile$' 'must need compile'
 # The only `if:` it may carry is the owner's switch: unset (or anything but 'skip') runs it on every pull request.
 [ "$(workflow_job_block "${ci_workflow}" smoke-darwin | rg -c '^    if:')" = 1 ] || fail "${ci_workflow}: Smoke darwin-arm64 must carry exactly one if:, the vars.MACOS_SMOKE switch, and not be gated on \`changes\`"
-workflow_job_has "${ci_workflow}" smoke-darwin "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must run unless vars.MACOS_SMOKE is exactly 'skip'"
+workflow_job_has "${ci_workflow}" smoke-darwin "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must run unless vars.MACOS_SMOKE is 'skip'"
 workflow_job_has "${ci_workflow}" compile "if: [\$][{][{] vars[.]MACOS_SMOKE == 'skip' [}][}]" 'must say, in a job that runs, that the smoke was skipped by the switch'
 workflow_job_has "${ci_workflow}" compile 'scripts/ci/macos-smoke-skipped[.]sh' 'must say, in a job that runs, that the smoke was skipped by the switch'
 
 # cd.yaml: a release tag requires the darwin smoke, with its retries, before anything is published.
 workflow_job_has "${cd_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'
 workflow_job_has "${cd_workflow}" smoke-darwin '^      advisory: false$' 'must be required (advisory: false) on a release tag'
-workflow_job_has "${cd_workflow}" smoke-darwin "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must run unless vars.MACOS_SMOKE is exactly 'skip'"
+workflow_job_has "${cd_workflow}" smoke-darwin "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must run unless vars.MACOS_SMOKE is 'skip'"
 workflow_job_has "${cd_workflow}" goreleaser '^    needs: \[compile, smoke-darwin\]$' 'must wait for the compile and the darwin smoke'
 # A skipped smoke publishes only through the owner's switch, and never past a failed compile or smoke.
 workflow_job_has "${cd_workflow}" goreleaser "^    if: [\$][{][{] !cancelled[(][)] && needs[.]compile[.]result == 'success' && [(]needs[.]smoke-darwin[.]result == 'success' [|][|] [(]vars[.]MACOS_SMOKE == 'skip' && needs[.]smoke-darwin[.]result == 'skipped'[)][)] [}][}]\$" 'must publish only after a green smoke, or a smoke skipped by vars.MACOS_SMOKE=skip, and a green compile'
 workflow_job_has "${cd_workflow}" goreleaser 'scripts/ci/macos-smoke-skipped[.]sh' 'must say, in a job that runs, that the smoke was skipped by the switch'
 workflow_job_has "${cd_workflow}" sign '^    needs: goreleaser$' 'must wait for goreleaser, so nothing is signed past a skipped publish'
+# ... and must run when goreleaser published past a smoke skipped by the switch: an implicit success() would
+# skip it through the skipped ancestor, leaving the release unsigned.
+workflow_job_has "${cd_workflow}" sign "^    if: [\$][{][{] !cancelled[(][)] && needs[.]goreleaser[.]result == 'success' [}][}]\$" 'must run after a goreleaser that published past a smoke skipped by vars.MACOS_SMOKE, and only then'
 
 # realworld.yaml: the macOS proofs are advisory on a pull request and unmasked everywhere else; the Linux
 # leg of Harness Contract (and of its nightly twin) is never masked.

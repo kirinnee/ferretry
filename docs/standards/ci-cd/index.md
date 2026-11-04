@@ -231,7 +231,7 @@ Tests, SIT and the Linux leg of `Harness Contract` stay required on every event.
 When the macOS pool has had no runner for hours, every release is held behind `Smoke darwin-arm64`. The
 repository variable **`MACOS_SMOKE`** is the owner's way out, the macOS twin of `vars.CI_RUNNER_POOL`:
 
-- **`MACOS_SMOKE=skip`** (exactly that value) makes the `smoke-darwin` job in `ci.yaml` and `cd.yaml` not run at all
+- **`MACOS_SMOKE=skip`** makes the `smoke-darwin` job in `ci.yaml` and `cd.yaml` not run at all
   (a job-level `if:`), so nothing waits 15 minutes for a runner. `CI` still succeeds, so `Release` still runs, and
   `GoReleaser Publish` runs when the smoke was **skipped by the switch** as well as when it passed. It never runs
   past a failed `compile` or a smoke that ran and failed.
@@ -240,7 +240,8 @@ repository variable **`MACOS_SMOKE`** is the owner's way out, the macOS twin of 
 - **It is never silent.** `compile` (`ci.yaml`) and `goreleaser` (`cd.yaml`) run
   `scripts/ci/macos-smoke-skipped.sh`, which writes the warning and job-summary line `macOS smoke skipped by
 vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
-- **Unset, or any other value, is today's behaviour**: advisory on a pull request, required and retried elsewhere.
+- **Unset, or any value but `skip`, is today's behaviour**: advisory on a pull request, required and retried
+  elsewhere. GitHub compares strings case-insensitively, so `SKIP` also skips, and it also warns.
 - **Turn it off** with `gh variable delete MACOS_SMOKE` as soon as GitHub's macOS pool is back. Turn it on with
   `gh variable set MACOS_SMOKE --body skip`.
 

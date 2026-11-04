@@ -89,6 +89,10 @@ jobs:
     timeout-minutes: 15
     name: Sign daemon release
     needs: goreleaser
+    # GitHub skips a job whose dependency CHAIN holds a skipped job, even when the job in between ran. With
+    # the macOS smoke skipped by the owner's switch that chain is skipped, so the implicit success() would
+    # skip the signing: spell the gate out instead (goreleaser published, nothing was cancelled).
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
     environment: daemon-release
     permissions:
       contents: write
