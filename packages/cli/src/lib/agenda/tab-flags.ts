@@ -11,6 +11,7 @@ import {
   type AgendaTabEdit,
   agendaTabs,
   applyAgendaTabEdits,
+  findAgendaTab,
 } from '@ferretry/protocol';
 import { agendaReference } from './reference.ts';
 
@@ -108,8 +109,9 @@ export const newItemTabs = (edits: readonly AgendaTabEdit[] | undefined): readon
  * name or id is a tab of the ferret's own.
  */
 export const tabText = (item: AgendaItem, ref: string): string => {
-  const wanted = ref.trim().toLowerCase();
-  const tab = agendaTabs(item).find(each => each.id === wanted || each.name.toLowerCase() === wanted);
+  const tabs = agendaTabs(item);
+  // By name first, then by id: the same rule an edit names a tab by (`findAgendaTab`).
+  const tab = tabs[findAgendaTab(tabs, ref)];
   if (tab === undefined) {
     const names = agendaTabs(item).map(each => `"${each.name}" (${each.id})`);
     throw new Error(

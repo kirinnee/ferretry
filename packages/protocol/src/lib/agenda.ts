@@ -387,7 +387,12 @@ export const agendaTabNameProblem = (name: string): string | undefined => {
 };
 
 export const AgendaTabSchema = z.strictObject({
-  id: z.string().regex(TAB_ID, 'must be a-z, 0-9 or -, starting with a letter or digit').max(MAX_AGENDA_TAB_ID_LENGTH),
+  id: z
+    .string()
+    .regex(TAB_ID, 'must be a-z, 0-9 or -, starting with a letter or digit')
+    .max(MAX_AGENDA_TAB_ID_LENGTH)
+    // The fixed tabs' ids are theirs: an own tab with one would draw twice under one id and could not be named.
+    .refine(id => id !== AGENDA_MAIN_TAB_ID && id !== AGENDA_BODY_TAB_ID, 'main and body are the fixed tabs’ ids'),
   name: z.string().superRefine((value, ctx) => {
     const problem = agendaTabNameProblem(value);
     if (problem !== undefined) ctx.addIssue({ code: 'custom', message: problem });

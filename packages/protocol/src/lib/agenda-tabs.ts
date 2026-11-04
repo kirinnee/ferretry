@@ -84,9 +84,15 @@ export const agendaTabId = (name: string, taken: ReadonlySet<string>): string =>
   return `${slug}-${String(next)}`;
 };
 
-/** The tab `ref` names, by id or by name in any case. */
-const findTab = (tabs: readonly AgendaTab[], ref: string): number =>
-  tabs.findIndex(tab => tab.id === ref || tab.name.toLowerCase() === ref.toLowerCase());
+/**
+ * The tab `ref` names: BY NAME first, in any case, and only when no tab has that name, by id. A name may equal another
+ * tab's id (rename Status to Progress, then Risks to Status: "status" is Progress's id and Risks's new name), and the
+ * owner and the ferret mean the name they can see.
+ */
+export const findAgendaTab = (tabs: readonly Pick<AgendaTab, 'id' | 'name'>[], ref: string): number => {
+  const byName = tabs.findIndex(tab => tab.name.toLowerCase() === ref.trim().toLowerCase());
+  return byName >= 0 ? byName : tabs.findIndex(tab => tab.id === ref.trim().toLowerCase());
+};
 
 export type AgendaTabEditResult =
   | { readonly ok: true; readonly tabs: readonly AgendaTab[] }
@@ -105,7 +111,7 @@ export const applyAgendaTabEdits = (
   for (const edit of edits) {
     if (/^(?:main|body)$/iu.test(edit.tab) || agendaTabNameProblem(edit.tab)?.includes('fixed tab') === true)
       return { ok: false, problem: 'the main tab is --where-file and the full picture is --body-file, not a tab edit' };
-    const at = findTab(tabs, edit.tab);
+    const at = findAgendaTab(tabs, edit.tab);
     if (edit.remove === true) {
       if (at < 0) return { ok: false, problem: `there is no tab "${edit.tab}" to remove` };
       tabs = tabs.filter((_, index) => index !== at);

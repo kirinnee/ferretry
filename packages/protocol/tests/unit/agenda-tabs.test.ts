@@ -14,7 +14,7 @@ import {
   MAX_AGENDA_TABS_LENGTH,
 } from '../../src/lib/agenda.ts';
 import { legacyAgendaItem, legacyAgendaOpenSession } from '../../src/lib/agenda-legacy.ts';
-import { agendaTabId, agendaTabs, applyAgendaTabEdits } from '../../src/lib/agenda-tabs.ts';
+import { agendaTabId, agendaTabs, applyAgendaTabEdits, findAgendaTab } from '../../src/lib/agenda-tabs.ts';
 
 const AT = '2026-11-04T09:00:00.000Z';
 
@@ -106,6 +106,9 @@ describe('a tab’s name and the set of tabs', () => {
     ).be.false();
     should(AgendaTabSchema.safeParse(tab('Where we are now', 'x', 'w')).success).be.false();
     should(AgendaTabSchema.safeParse(tab('Status', 'x', 'Bad Id')).success).be.false();
+    // The fixed tabs' ids are never an own tab's (review of &F923).
+    should(AgendaTabSchema.safeParse(tab('Status', 'x', 'main')).success).be.false();
+    should(AgendaItemSchema.safeParse({ ...minimal, tabs: [tab('Notes', 'x', 'body')] }).success).be.false();
   });
 
   it('should take tab operations on an edit, each saying what to do, and remove alone', () => {
@@ -152,6 +155,29 @@ describe('applying an edit’s tab operations', () => {
       ok: true,
       tabs: [{ id: 'status', name: 'Status', body: 'New.' }],
     });
+  });
+
+  it('should name a tab by its name before any id, so a name that is another tab’s id still means its own tab', () => {
+    // Status → Progress keeps the id "status"; Risks → Status then takes the name (review of &F923).
+    const renamed = applyAgendaTabEdits(
+      [tab('Status'), tab('Risks')],
+      [
+        { tab: 'Status', rename: 'Progress' },
+        { tab: 'Risks', rename: 'Status' },
+      ],
+    );
+    if (!renamed.ok) throw new Error(renamed.problem);
+    const rewritten = applyAgendaTabEdits(renamed.tabs, [{ tab: 'status', body: 'Rewritten.' }]);
+    should(rewritten).deepEqual({
+      ok: true,
+      tabs: [
+        { id: 'status', name: 'Progress', body: 'Status words' },
+        { id: 'risks', name: 'Status', body: 'Rewritten.' },
+      ],
+    });
+    // With no tab of that name, the id still reaches its tab.
+    should(findAgendaTab(renamed.tabs, 'risks')).equal(1);
+    should(findAgendaTab(renamed.tabs, 'nope')).equal(-1);
   });
 
   it('should refuse what cannot apply, in plain words', () => {

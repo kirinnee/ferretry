@@ -103,6 +103,17 @@ describe('show --tab', () => {
     should(tabText(agentItem('A5', 'x', { decided: '- SQLite' }), 'main')).equal('');
   });
 
+  it('should read a tab by its name before another tab’s id (review of &F923)', () => {
+    const renamed = agentItem('A7', 'x', {
+      tabs: [
+        { id: 'status', name: 'Progress', body: 'The progress.' },
+        { id: 'risks', name: 'Status', body: 'The status.' },
+      ],
+    });
+    should(tabText(renamed, 'Status')).equal('The status.');
+    should(tabText(renamed, 'risks')).equal('The status.');
+  });
+
   it('should name the tabs it has when one is not there', () => {
     should(() => tabText(item, 'Decisions')).throw(
       '!A4 has no tab "Decisions": its tabs are "Where we are now" (main), "The full picture" (body), "Risks" (risks)',
