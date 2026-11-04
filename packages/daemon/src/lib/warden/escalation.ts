@@ -424,6 +424,7 @@ const PREDICATE: Readonly<Record<WardenAnomalyKind, string>> = {
   orphaned_card: 'left a card with nobody working on it',
   report_overdue: 'has not answered its parent',
   input_stuck: 'is stuck on an unsent message',
+  inbox_stuck: 'has messages stuck in Ferretry’s queue',
 };
 
 /** Why a layer is not running, in words. */

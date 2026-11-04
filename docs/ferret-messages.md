@@ -230,6 +230,12 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
   verified re-submit; if that does not submit it, the ferret's health becomes `stalled` and it is named on the
   `warden:input-stuck` machine item ([agenda.md](agenda.md#the-machine-agenda)). The whole rule is in
   [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message).
+- **A ferret whose inbox is stuck.** A ferret whose oldest undelivered message has waited in Ferretry's own queue
+  far past due is the Warden anomaly `inbox_stuck` (`packages/daemon/src/lib/warden/inbox-stuck.ts`), shown on the
+  Warden page as **inbox stuck**. Facts only — the session's queue and its send ledger — never put to Jev and never in
+  the spawn fingerprint. The Warden re-checks it once per episode, safely; if that does not move it, the ferret is
+  named on the `warden:inbox-stuck` machine item and handed to an investigation whose verdict can only re-check
+  again. The whole rule is in [message-delivery.md](message-delivery.md#b148-a-ferret-whose-inbox-is-stuck).
 - **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
   or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines

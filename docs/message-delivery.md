@@ -720,6 +720,85 @@ Jev, an investigation or the spawn fingerprint.
 existed parses `anomalies` against a closed list, and one unknown kind there rejected the whole status. A
 newer reader shows both (`wardenFlags`). For the same reason the kind is never put on a blessing.
 
+## B148: a ferret whose inbox is stuck
+
+Between 2026-11-02 and 11-04 the messages sent to ryu, a lead in a declared wait, sat undelivered eleven times for
+38 minutes to almost six hours (2h, 2h, 5h49m, 2h07m, 5h06m, 1h38m, 2h52m, 2h50m, 59m, 44m, 38m), and on 2026-11-03
+elta's queue held 28 messages for five hours. `input_stuck` saw none of it. Two shapes, read from each ferret's
+`channel/queue.jsonl`, `channel/sends.jsonl` and `events.jsonl`:
+
+1. **A hand-over that never typed (ryu).** One message was `typing` — handed to the send path — and its ledger row
+   was `accepted`, attempt 1, with no `control.send`, no deadline and no settlement. Its session said `waiting`
+   (a declared wait) while the agent was still mid-turn, so the send was routed as idle; the pane never became
+   ready, the transport threw before its first key, and the throw skipped telling the tracker. The queue, which
+   types one message at a time, held everything behind it with no wait reason at all. Only a look by the tracker
+   freed it — a daemon boot, or a `fy send --wait` from somebody else reading the ledger — and it then landed in
+   seconds. Nothing was typed, so `typedNotSent` was never set; and in a declared wait the turn state was `null`,
+   not `your-turn`, so the ferret was not even an `input_stuck` candidate. (The send path's own fix is B153.)
+2. **A draft nothing proves ours (elta).** A send settled `unaccounted` (`landing_unconfirmed`) whose text the pane
+   drew later, unrecognised: `finishOwnDraft` answered `foreign`, so every later message waited as `draft` with no
+   `waitBehind` — for a person who was not there — at a ferret idle at its prompt.
+
+**The Warden's backstop — `inbox_stuck`** (`lib/warden/inbox-stuck.ts`). Facts only: each autonomous ferret's
+queue (folded `queue.jsonl`) and its send ledger, whatever its status or turn state — a declared wait is no hold,
+because the queue never waits for one and a reply is what a waiting ferret wants. A message is undelivered while it
+is `queued` or `typing`. Not stuck, because the queue holds them on purpose: a message before its due time (a held
+action or FYI is due when its `holdUntil` ends), an FYI to a stopped ferret, a message waiting on a `question`, and
+everything older than three days past due. Stuck once the oldest undelivered message is overdue by its urgency's
+limit (`INBOX_STUCK_LIMITS_MS`):
+
+| Urgency | Which messages                                                      | Limit past due |
+| ------- | ------------------------------------------------------------------- | -------------- |
+| blocker | a person's, `--kind blocker`, `--now`, a question (`replyExpected`) | 10 min         |
+| action  | a ferret's action, unlabelled, and the daemon's own                 | 20 min         |
+| fyi     | a ferret's `--kind fyi`                                             | 45 min         |
+
+The flag names the oldest stuck message (the episode), how many are waiting, and the CAUSE at the head of the
+queue: `hung_handover` (a `typing` message whose send is accepted, nothing typed — ryu), `held_for_revive` (its send
+is held for a revive the reviver refused), `draft_own` (a send of ours sits typed in the box), `draft_unattributed`
+(elta), `unreadable` (the queue's own wait, or a person's send the screen would not let be typed, which the tracker
+types once the screen reads clear), `dialog` / `launching` (the queue's own wait, held far too long), or
+`no_reason` (nothing has looked at the queue).
+
+**What is read.** A queue file not written to for longer than the horizon plus the longest hold a message can be given
+(a day: `fyiMaxHoldMs`'s maximum; `INBOX_STALE_QUEUE_MS`) is not read at all — one `stat` — since every message is
+appended when it is accepted; finished ferrets keep their
+queues for good, and reading all of them every sweep would grow without bound. A queue, a ledger or a `stat` that
+cannot be read proves nothing: a ferret already flagged stays as it stands, on the notice and in memory.
+
+**What is done**, once per episode, while the Warden is on:
+
+1. **The safe re-check** for the cause (`unstickActs`): the send tracker's own look (`SendTracker.check`, the look a
+   boot makes) for a hung hand-over, an unreadable screen or an unattributed draft — the transcript's proof wins, a
+   message held in the pane or the harness's queue or typed into a busy turn is waited for, an unreadable screen
+   settles it unconfirmed, and only a send PROVEN never to have arrived is typed again, under the send lock, its
+   attempt ledgered before any key; the send path's verified finish of a draft (`finishOwnDraft`, which presses Enter
+   only on text that is exactly a send of ours, within its own Enter budget) for either kind of draft —
+   `input_stuck` presses for one of ours only at a ferret whose turn has ended, never in a declared wait, so a
+   declared-wait draft whose Enters are spent is left to a person; and, for every cause, one more look by the
+   deliverer.
+   A revive the reviver refused is not retried: it is a decision. Nothing is deleted or resent on a guess, and a
+   person's draft is never touched. Journal: `fleet.warden_inbox_rechecked` with what each act did.
+2. **Escalation**, when the same episode is still flagged a sweep later: the ferret is named on ONE machine item,
+   `warden:inbox-stuck` ([agenda.md](agenda.md#the-machine-agenda)), one line each — who, how many, how long, the
+   cause and the send in the way — and leaves it once its queue moves (`fleet.warden_inbox_noticed`,
+   `fleet.warden_inbox_recovered`), or once what waits in it is past the horizon (`fleet.warden_inbox_expired`: no
+   longer tracked, which is not drained). No health mark: the ferret is not the faulty party.
+3. **An investigation**, in the same sweep and ONCE per episode (`investigatedAt`): the flag goes to an assigned
+   warden, never to Jev (it is a fact about the daemon's queue, which a ferret's transcript cannot show). It never
+   displaces the ferret's own investigation: a ferret that is also frozen, say, is investigated for THAT, with the
+   remedies a frozen process needs — unless that anomaly is left alone or waiting its backoff, when it will not be
+   investigated and the inbox is. Its prompt has it read the queue, the ledger and the events, read-only, and
+   offers only `LEAVE`, `NEEDS_HUMAN` and `NUDGE` — which here asks the daemon to run the safe re-check once more.
+   Whatever its verdict names, the ferret is never messaged, resumed, restarted or stopped for this flag
+   (`fleet.warden_inbox_rechecked` with `by: investigation`), and a `LEAVE` grants no blessing. Its report — a
+   `NEEDS_HUMAN` saying what a person must do included — is on the Warden page; it raises no agenda item of its own,
+   since the ferret is already on `warden:inbox-stuck`.
+
+**On the wire it has its own field**, for `input_stuck`'s reason: the Warden status and run views carry the flags in
+an optional `stuckInbox` list (`WardenStuckInboxFlagSchema`), never in `anomalies`, and `wardenFlags` lists both.
+The kind is never offered for **Leave it alone**.
+
 ## What a message row can say
 
 | Row                         | Proof                                                                                                                                                |
@@ -820,7 +899,13 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
   (or character) count is indistinguishable from it. Every other check — a lone placeholder, one unsettled
   send that matches, an idle pane, a fresh exact read before the key — still holds.
 - **An interactive session is not flagged `input_stuck`.** It is the owner's own terminal; the send path's
-  nudges and the queue's clearing still apply to it.
+  nudges and the queue's clearing still apply to it. Nor `inbox_stuck`, for the same reason.
+- **An app older than `inbox_stuck` may refuse a Warden status that lists an investigation of it.** The flags
+  themselves travel in their own field (`stuckInbox`), but an investigation and its report's verdict carry the kind
+  in fields an older app parses against a closed list. Reloading the app (the hosted app is always the current one)
+  clears it.
+- **`inbox_stuck` re-checks a hung hand-over; it does not prevent one.** The send-path cause (a declared-wait status
+  trusted as idle, and a pre-key throw that skips tracking) is B153's.
 
 - **Claude's on-screen queue is measured on 2.1.281 only.** An earlier or later rendering that moves or
   rewords the `ctrl+x ctrl+s to send now` hint reads as `unknown` while the queued placeholder shows

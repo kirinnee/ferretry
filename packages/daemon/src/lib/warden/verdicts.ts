@@ -92,6 +92,7 @@ const ANOMALY_KINDS: Readonly<Record<WardenAnomalyKind, true>> = {
   orphaned_card: true,
   report_overdue: true,
   input_stuck: true,
+  inbox_stuck: true,
 };
 
 const WARDEN_ANOMALY_KINDS: ReadonlySet<string> = new Set(Object.keys(ANOMALY_KINDS));
