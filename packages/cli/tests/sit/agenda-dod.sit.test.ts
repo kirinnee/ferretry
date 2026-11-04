@@ -271,6 +271,7 @@ function serveRoutes(made: World) {
               DAEMON_FEATURES.agendaLinkMeaning,
               DAEMON_FEATURES.agendaChannel,
               DAEMON_FEATURES.agendaTask,
+              DAEMON_FEATURES.agendaTabs,
             ],
           }),
         );
@@ -640,6 +641,46 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     }
   });
 
+  it('DoD 7: the tabs are written whole through `edit`, read back whole, and one edit is one version (&F923)', async () => {
+    // Arrange
+    const made = fresh();
+    const daemon = serveRoutes(made);
+    const now = join(made.home, 'now.md');
+    const decisions = join(made.home, 'decisions.md');
+    const risks = join(made.home, 'risks.md');
+    writeFileSync(now, '## Status\n\n| Step | State |\n| --- | --- |\n| Config | done |');
+    writeFileSync(decisions, '1. **SQLite**, with WAL.');
+    writeFileSync(risks, '- The export may slip.');
+    try {
+      const added = await fy(made, daemon.url, ['add', 'Read the plan?', '--title', 'Plan', ...BRIEF]);
+      should(added.code).equal(0, added.err);
+
+      // Act — the main tab, and two tabs of the ferret's own, in ONE edit
+      const edited = await fy(made, daemon.url, [
+        'edit',
+        'A1',
+        '--where-file',
+        now,
+        '--tab-file',
+        `Decisions=${decisions}`,
+        '--tab-file',
+        `Risks=${risks}`,
+      ]);
+      const shown = await fy(made, daemon.url, ['show', 'A1', '--tab', 'Decisions']);
+
+      // Assert — read back whole, in order, and one edit is one revision
+      should(edited.code).equal(0, edited.err);
+      should(shown.code).equal(0, shown.err);
+      should(shown.out.trim()).equal(readFileSync(decisions, 'utf8'));
+      const item = await made.item('A1');
+      should(item.whereWeAre).equal(readFileSync(now, 'utf8'));
+      should(item.tabs?.map(tab => tab.name)).deepEqual(['Decisions', 'Risks']);
+      should(item.revisions).have.length(1);
+    } finally {
+      daemon.stop();
+    }
+  });
+
   it('DoD 8: a 200k report round-trips whole through `fy agenda edit --body-file`', async () => {
     // Arrange
     const made = fresh();
@@ -978,10 +1019,10 @@ describe('Definition of done: the pages that prove the items the app shows (UI)'
     proves(parts, 'holds the ask and EVERY card ask, each with its own buttons, inside the item — never docked');
   });
   itemPage(
-    'DoD 7 (UI): the report the owner asked for shows whole in the body, under a short “where we are now”',
+    'DoD 7 (UI): the report the owner asked for shows whole in the tabs, the main tab “where we are now” first',
     () => {
       proves(parts, 'holds the report the owner asked for in the body, open and whole — no cut-off, however long');
-      proves(parts, 'is the short status: where things stand, what is decided and what is still open');
+      proves(parts, 'opens first: decided so far and still open at its top, then where things stand');
     },
   );
   itemPage('DoD 8 (UI): a reply is drawn whole, however long, and every reply in order', () => {

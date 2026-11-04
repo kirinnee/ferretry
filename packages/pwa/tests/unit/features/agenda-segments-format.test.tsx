@@ -11,6 +11,8 @@ let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  // The open tab is remembered per item on this device: each test starts on the main tab.
+  window.localStorage.clear();
 });
 
 const WALL =
@@ -59,6 +61,11 @@ const draw = async (extra: Partial<AgendaItem> = {}): Promise<HTMLElement> => {
 const segment = (root: HTMLElement, selector: string): HTMLElement =>
   must(root.querySelector<HTMLElement>(selector), selector);
 
+/** Opens "The full picture": the main tab is open first, and only the open tab is in the page (&F923). */
+const openBody = async (root: HTMLElement): Promise<void> => {
+  await interact(() => segment(root, '[data-agenda-tab-button="body"]').click());
+};
+
 describe('every agenda segment draws the same inline Markdown, lists and line breaks', () => {
   test('the answer to a question is a bold lead over a bullet list, not a paragraph', async () => {
     const answer = segment(await draw(), '[data-agenda-question-answer]');
@@ -96,6 +103,7 @@ describe('every agenda segment draws the same inline Markdown, lists and line br
 
   test('the body and a term keep their lists', async () => {
     const root = await draw();
+    await openBody(root);
     expect(segment(root, '[data-agenda-section="more"]').querySelectorAll('li')).toHaveLength(2);
     expect(segment(root, '[data-agenda-references] td').querySelectorAll('li')).toHaveLength(2);
   });
@@ -117,11 +125,12 @@ describe('every agenda segment draws the same inline Markdown, lists and line br
       '[data-agenda-section="context"]',
       '[data-agenda-section="decided"]',
       '[data-agenda-section="still-open"]',
-      '[data-agenda-section="more"]',
       '[data-agenda-references] td',
     ]) {
       expect(segment(root, selector).querySelector('.fy-seg'), selector).not.toBeNull();
     }
+    await openBody(root);
+    expect(segment(root, '[data-agenda-section="more"]').querySelector('.fy-seg')).not.toBeNull();
   });
 
   test('a long single paragraph is still drawn whole (the writing lint is what warns about it)', async () => {
@@ -144,14 +153,17 @@ describe('a heading in a segment is drawn as bold body text, never an h1–h6', 
       questionAnswer: HEADINGS,
       body: HEADINGS,
     });
-    for (const selector of [
+    const selectors = [
       '[data-agenda-question-answer]',
       '[data-agenda-section="premise"]',
       '[data-agenda-section="context"]',
       '[data-agenda-section="decided"]',
       '[data-agenda-section="still-open"]',
+      // "The full picture" last: opening its tab closes the main one (&F923).
       '[data-agenda-section="more"]',
-    ]) {
+    ];
+    for (const selector of selectors) {
+      if (selector.includes('more')) await openBody(root);
       const each = segment(root, selector);
       expect(
         each.querySelector('.fy-seg h1, .fy-seg h2, .fy-seg h3, .fy-seg h4, .fy-seg h5, .fy-seg h6'),

@@ -789,8 +789,9 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`.',
     );
-    // The status is short; the body is the live document (the owner: "the chat is the stream of log, the body is the DB").
-    should(text).containEql('Title ≤40, ask ≤80, `--where`=short status.');
+    // The tabs are the live document (&F923): the main tab is no longer a short status, so the open line names none.
+    should(text).containEql('Title ≤40, ask ≤80. Read cold');
+    should(text).not.containEql('short status');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
     should(text).containEql(
       'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
@@ -812,7 +813,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`answer <id> "…"` returns it.');
     should(text).containEql('`rest <id> --why …`=working; `--stage`.');
     should(text).containEql(
-      'Body=live doc (report/plan/status): rewrite it whole (`edit --body-file`); chat points at it.',
+      'Live doc=tabs, rewrite each whole: `edit --where-file` (main), `--body-file`, `--tab-file Name=f`; chat points at it.',
     );
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
@@ -855,7 +856,8 @@ describe('AGENDA_INSTRUCTION', () => {
     // for by "logs their words verbatim" and "unsure→closest". Then 1,289: the body as the live document (F909, the
     // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
     // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
-    // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300).
+    // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300). The tabs (&F923) kept it at 1,289: the main tab
+    // and a ferret's own tabs, paid for by dropping ", `--where`=short status".
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
   });
 

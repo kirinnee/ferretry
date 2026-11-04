@@ -349,6 +349,125 @@ const longProse = (field: string, maximum: number) =>
         ctx.addIssue({ code: 'custom', message: agendaTooLongMessage(field, value.length, maximum) });
     });
 
+/**
+ * THE ITEM'S TABS (&F923; docs/agenda.md § The tabs). An item's live document is a row of tabs: the MAIN tab, "Where
+ * we are now" (`whereWeAre`, always first), "The full picture" (`body`), then up to `MAX_AGENDA_TABS` of the ferret's
+ * own (Overview, Status, Decisions…), each a whole Markdown document the ferret rewrites when it changes. `id` is the
+ * name's slug when the tab is made and never changes, so a rename is not a new tab.
+ */
+export const MAX_AGENDA_TABS = 6;
+export const MAX_AGENDA_TAB_NAME_LENGTH = 32;
+/** The ferret's own tabs TOGETHER: under the unchanged whole-item bound, so the item's worst case does not move. */
+export const MAX_AGENDA_TABS_LENGTH = 200_000;
+/** The most tab operations one edit carries; they apply in order, as one version. */
+export const MAX_AGENDA_TAB_EDITS = 16;
+const MAX_AGENDA_TAB_ID_LENGTH = 32;
+/** The fixed tabs' names: a ferret's own tab never takes one. */
+export const AGENDA_MAIN_TAB_NAME = 'Where we are now';
+export const AGENDA_BODY_TAB_NAME = 'The full picture';
+export const AGENDA_REVIEW_BODY_TAB_NAME = 'Reasoning';
+const RESERVED_TAB_NAMES = [AGENDA_MAIN_TAB_NAME, AGENDA_BODY_TAB_NAME, AGENDA_REVIEW_BODY_TAB_NAME];
+/** The fixed tabs' ids, which `fy agenda show --tab` also takes. */
+export const AGENDA_MAIN_TAB_ID = 'main';
+export const AGENDA_BODY_TAB_ID = 'body';
+
+const TAB_ID = /^[a-z0-9][a-z0-9-]{0,31}$/u;
+
+/** What is wrong with a tab's name, in plain words; `undefined` when it is fine. */
+export const agendaTabNameProblem = (name: string): string | undefined => {
+  if (name !== name.trim()) return `the tab name "${name}" starts or ends with a space`;
+  if (name.length === 0) return 'a tab needs a name';
+  if (name.length > MAX_AGENDA_TAB_NAME_LENGTH)
+    return `the tab name "${name}" is ${name.length} characters; the most is ${MAX_AGENDA_TAB_NAME_LENGTH}`;
+  if (/[\r\n]/u.test(name)) return `the tab name "${name}" must be one line`;
+  if (/[=#]/u.test(name)) return `the tab name "${name}" cannot hold "=" or "#"`;
+  if (
+    [...RESERVED_TAB_NAMES, AGENDA_MAIN_TAB_ID, AGENDA_BODY_TAB_ID].some(
+      reserved => reserved.toLowerCase() === name.toLowerCase(),
+    )
+  )
+    return `"${name}" is a fixed tab: the main tab is --where-file, the full picture is --body-file`;
+  return undefined;
+};
+
+export const AgendaTabSchema = z.strictObject({
+  id: z
+    .string()
+    .regex(TAB_ID, 'must be a-z, 0-9 or -, starting with a letter or digit')
+    .max(MAX_AGENDA_TAB_ID_LENGTH)
+    // The fixed tabs' ids are theirs: an own tab with one would draw twice under one id and could not be named.
+    .refine(id => id !== AGENDA_MAIN_TAB_ID && id !== AGENDA_BODY_TAB_ID, 'main and body are the fixed tabs’ ids'),
+  name: z.string().superRefine((value, ctx) => {
+    const problem = agendaTabNameProblem(value);
+    if (problem !== undefined) ctx.addIssue({ code: 'custom', message: problem });
+  }),
+  body: longProse('a tab', MAX_AGENDA_TABS_LENGTH),
+});
+export type AgendaTab = z.infer<typeof AgendaTabSchema>;
+
+/** Everything wrong with a set of the ferret's own tabs, each in plain words: empty when it fits. */
+export const agendaTabProblems = (tabs: readonly AgendaTab[]): string[] => {
+  const problems: string[] = [];
+  if (tabs.length > MAX_AGENDA_TABS)
+    problems.push(`an item has at most ${MAX_AGENDA_TABS} tabs of its own besides the main tab and the full picture`);
+  const names = new Set<string>();
+  const ids = new Set<string>();
+  for (const tab of tabs) {
+    const name = tab.name.toLowerCase();
+    if (names.has(name)) problems.push(`two tabs are called "${tab.name}"`);
+    if (ids.has(tab.id)) problems.push(`two tabs have the id "${tab.id}"`);
+    names.add(name);
+    ids.add(tab.id);
+  }
+  // A name is never ANOTHER tab's id, so a reference by name or by id always means one tab.
+  for (const tab of tabs) {
+    const other = tabs.find(each => each !== tab && each.id === tab.name.toLowerCase());
+    if (other !== undefined)
+      problems.push(`the name "${tab.name}" is the id of the tab "${other.name}": pick another name`);
+  }
+  const length = tabs.reduce((sum, tab) => sum + tab.body.length, 0);
+  if (length > MAX_AGENDA_TABS_LENGTH)
+    problems.push(agendaTooLongMessage('the tabs together', length, MAX_AGENDA_TABS_LENGTH));
+  return problems;
+};
+
+/** The ferret's own tabs, as an item stores them: 1 to `MAX_AGENDA_TABS`, unique, together within their bound. */
+const AgendaTabsSchema = z
+  .array(AgendaTabSchema)
+  .min(1)
+  .max(MAX_AGENDA_TABS)
+  .superRefine((tabs, ctx) => {
+    for (const message of agendaTabProblems(tabs)) ctx.addIssue({ code: 'custom', message });
+  });
+
+/**
+ * ONE TAB OPERATION of an edit (`--tab-file`, `--rename-tab`, `--move-tab`, `--remove-tab`). `tab` names a tab by
+ * its name (any case) or its id; a name that is not a tab yet makes one, and then needs a `body`. `remove` goes alone.
+ * `position` counts from 1 among the ferret's own tabs.
+ */
+export const AgendaTabEditSchema = z
+  .strictObject({
+    tab: z.string().trim().min(1).max(MAX_AGENDA_TAB_NAME_LENGTH),
+    body: longProse('a tab', MAX_AGENDA_TABS_LENGTH).optional(),
+    rename: z.string().trim().min(1).max(MAX_AGENDA_TAB_NAME_LENGTH).optional(),
+    position: z.number().int().min(1).max(MAX_AGENDA_TABS).optional(),
+    remove: z.literal(true).optional(),
+  })
+  .refine(
+    edit =>
+      edit.remove !== true || (edit.body === undefined && edit.rename === undefined && edit.position === undefined),
+    {
+      message: 'a tab that is removed takes no body, name or position',
+    },
+  )
+  .refine(
+    edit => edit.remove === true || edit.body !== undefined || edit.rename !== undefined || edit.position !== undefined,
+    {
+      message: 'a tab edit says what to do: a body, a new name, a position or remove',
+    },
+  );
+export type AgendaTabEdit = z.infer<typeof AgendaTabEditSchema>;
+
 const LIST_MARKER = /^\s*(?:[-*•]|\d+[.)])\s+/u;
 const NESTED_MARKER = /^(\s*(?:[-*•]|\d+[.)])\s+)(?:(?:[-*•]|\d+[.)])\s+)+/u;
 
@@ -539,10 +658,13 @@ export const AgendaBriefShape = {
    */
   questionAnswer: longProse('the question answer', MAX_AGENDA_BODY_LENGTH).optional(),
   /**
-   * WHERE WE ARE NOW, as Markdown: the current situation, in the reader's terms. Anything the owner asked for to
-   * complete the item lives here — an explainer, a report — so it is read where the item is.
+   * WHERE WE ARE NOW — THE MAIN TAB (&F923), as Markdown and fy-render, as long and rich as it needs to be: the
+   * current situation, in the reader's terms. It opens first, under the ferret's answer to the owner's question,
+   * what is decided and what is still open (`agendaTabs`).
    */
   whereWeAre: longProse('where we are', MAX_AGENDA_WHERE_LENGTH).optional(),
+  /** The ferret's own tabs (Overview, Status, Decisions…), after the main tab and the full picture (`agendaTabs`). */
+  tabs: AgendaTabsSchema.optional(),
   /** The context explained from zero, as Markdown, for a reader who knows nothing of the topic: drawn folded away. */
   detail: longProse('the detail', MAX_AGENDA_FOLDED_DETAIL_LENGTH).optional(),
 };
@@ -572,6 +694,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.body === undefined ? {} : { body: value.body }),
   ...(value.questionAnswer === undefined ? {} : { questionAnswer: value.questionAnswer }),
   ...(value.whereWeAre === undefined ? {} : { whereWeAre: value.whereWeAre }),
+  ...(value.tabs === undefined ? {} : { tabs: value.tabs }),
   ...(value.detail === undefined ? {} : { detail: value.detail }),
 });
 
@@ -810,6 +933,7 @@ export const AgendaRevisableFieldSchema = z.enum([
   'body',
   'questionAnswer',
   'whereWeAre',
+  'tabs',
   'detail',
 ]);
 export type AgendaRevisableField = z.infer<typeof AgendaRevisableFieldSchema>;
@@ -1731,6 +1855,11 @@ export const AgendaActionRequestSchema = z
       answers: AgendaCardShape.answers,
       context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
       ...AgendaBriefShape,
+      /**
+       * TAB OPERATIONS (`agenda.tabs.1`), applied in order as ONE edit (one version): make or rewrite a tab, rename,
+       * move or remove one (`applyAgendaTabEdits`). Never with `tabs`, which replaces them all.
+       */
+      tabEdits: z.array(AgendaTabEditSchema).min(1).max(MAX_AGENDA_TAB_EDITS).optional(),
       /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
       clear: z.array(AgendaClearableFieldSchema).min(1).max(AgendaClearableFieldSchema.options.length).optional(),
       /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */

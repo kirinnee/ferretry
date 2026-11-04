@@ -201,3 +201,28 @@ describe('the comparison', () => {
     expect(root.querySelector('[data-agenda-diff-summary]')?.textContent).toBeTruthy();
   });
 });
+
+describe('a changed section that is one of the tabs', () => {
+  test('offers to open its tab, and a section that is no tab offers nothing', async () => {
+    const opened: string[] = [];
+    view = await mount(
+      <VersionDiffPanel
+        id="diff"
+        now={NOW}
+        onOpenTab={id => opened.push(id)}
+        tabFor={key =>
+          (key === 'whereWeAre' ? { kind: 'main', id: 'main', name: 'Where we are now' } : undefined) as never
+        }
+        versions={viewOf(listOf(3, 1))}
+      />,
+    );
+    const root = view.container;
+    await settleUntil(() => root.querySelector('[data-agenda-diff-summary]') !== null, 'the diff', interact);
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-agenda-diff-open-tab]')];
+    expect(
+      buttons.map(button => button.closest('[data-agenda-diff-section]')?.getAttribute('data-agenda-diff-section')),
+    ).toEqual(['whereWeAre']);
+    await interact(() => buttons[0]?.click());
+    expect(opened).toEqual(['main']);
+  });
+});

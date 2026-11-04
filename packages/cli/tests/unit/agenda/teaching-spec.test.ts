@@ -121,7 +121,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'log', taught: 'log <id> --reply|--rest' },
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
-  { verb: 'edit', taught: '(`edit --body-file`)' },
+  { verb: 'edit', taught: '`edit --where-file` (main)' },
   { verb: 'done', taught: 'mark it `done`' },
 ];
 
@@ -153,7 +153,7 @@ describe('the teaching names every agenda verb the spec lists', () => {
     // Assert
     should(prompt).containEql(stages.join('→'));
     should(prompt).containEql('`--stage`');
-    should(prompt).containEql('`--where`');
+    should(prompt).containEql('`edit --where-file`');
   });
 
   it('should say a resting item is quiet, a Needs-you item buzzes, and rest --why means working', () => {
@@ -172,20 +172,21 @@ describe('the teaching names every agenda verb the spec lists', () => {
 });
 
 /**
- * THE BODY IS THE LIVE DOCUMENT (docs/agenda.md § Stage, where we are, and the detail; the owner on !A332: "the chat is
- * the stream of log, the body is the DB"): `--where` is a short status, the body holds the whole current state and is
- * rewritten on every change, and the conversation only points at it. The prompt says it in short; every help says it whole.
+ * THE TABS ARE THE LIVE DOCUMENT (docs/agenda.md § The tabs, &F923; the owner on !A332: "the chat is the stream of log,
+ * the body is the DB"): the main tab, "Where we are now", opens first and is as long as it needs to be; the full picture
+ * and the ferret's own tabs sit beside it; each is rewritten whole on every change, and the conversation only points at
+ * them. The prompt says it in short; every help says it whole.
  */
-describe('the teaching says the body is the live document and the chat is its log', () => {
-  it('should say it in the agenda prompt: a short status, the body rewritten whole, the chat pointing at it', () => {
+describe('the teaching says the tabs are the live document and the chat is its log', () => {
+  it('should say it in the agenda prompt: the tabs, each rewritten whole, the chat pointing at them', () => {
     // Act
     const prompt = said(AGENDA_INSTRUCTION('fy'));
 
     // Assert
-    should(prompt).containEql('`--where`=short status');
-    should(prompt).containEql('body=live doc (report/plan/status)');
-    should(prompt).containEql('rewrite it whole (`edit --body-file`)');
+    should(prompt).containEql('live doc=tabs, rewrite each whole');
+    should(prompt).containEql('`edit --where-file` (main), `--body-file`, `--tab-file name=f`');
     should(prompt).containEql('chat points at it');
+    should(prompt).not.containEql('short status');
     should(prompt).not.containEql('one-screen summary');
   });
 
@@ -197,19 +198,24 @@ describe('the teaching says the body is the live document and the chat is its lo
     for (const help of helps) should(said(help)).containEql(said(AGENDA_BODY_RULE));
   });
 
-  it('should name each part of the rule: the short status, the rewrite, the log, explainer mode, hypermedia and folds', () => {
+  it('should name each part of the rule: the main tab, the tabs, the rewrite, the log, explainer mode, hypermedia and folds', () => {
     // Act
     const rule = said(AGENDA_BODY_RULE);
 
     // Assert
-    should(rule).containEql('the body is the live document; the conversation is only the log');
-    should(rule).containEql('--where is a short status');
-    // The owner's to-do steps stay ticked steps: the body holds the plan, never a checklist they cannot tick.
+    should(rule).containEql('the tabs are the live document; the conversation is only the log');
+    should(rule).containEql('the main tab, "where we are now" (--where-file, or --where points), opens first');
+    should(rule).containEql('as long and as rich as it needs to be');
+    should(rule).containEql('"the full picture" (--body-file)');
+    should(rule).containEql('--tab-file "name=file" (6 at most)');
+    should(rule).containEql('--rename-tab, --move-tab, --remove-tab');
+    should(rule).not.containEql('short status');
+    // The owner's to-do steps stay ticked steps: a tab holds the plan, never a checklist they cannot tick.
     should(rule).containEql('steps the owner must do stay --step');
-    should(rule).containEql('rewrite the body on every change (agenda edit <id> --body-file <file>)');
-    should(rule).containEql('never retype it into the conversation');
-    should(rule).containEql('explainer mode by default');
-    should(rule).containEql('card and board blocks for status');
+    should(rule).containEql('rewrite a tab whole whenever it changes: one edit is one version');
+    should(rule).containEql('never retype a tab into the conversation');
+    should(rule).containEql('explainer mode');
+    should(rule).containEql('card and board blocks');
     // The body's Markdown draws no fold of its own: a fold is an fy-render html block's <details>.
     should(rule).containEql('plain markdown draws no fold');
   });

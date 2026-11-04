@@ -253,6 +253,37 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     await scrollToSelector(page, '[data-agenda-diff]');
     await shot(page, 'picker', form, theme);
 
+    // THE TABS AND CHANGES (&F923): a changed tab section opens its tab, and the marks are "since you last looked" (v1),
+    // so Decisions is marked although the last edit's record never named the tabs.
+    const offered = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-agenda-diff-open-tab]')].map(node =>
+        node.getAttribute('data-agenda-diff-open-tab'),
+      ),
+    );
+    check(
+      offered.includes('main') && offered.includes('decisions') && !offered.includes('risks'),
+      `${label('open-tab')}: Changes offers to open ${offered.join(', ')}, not the main tab and Decisions`,
+    );
+    const changed = await page.evaluate(
+      phone =>
+        phone
+          ? (document.querySelector('[data-agenda-tab-switch]')?.textContent ?? '')
+          : [...document.querySelectorAll('[data-agenda-tab-button]')]
+              .filter(node => node.querySelector('[data-agenda-tab-changed]') !== null)
+              .map(node => node.getAttribute('data-agenda-tab-button'))
+              .join(','),
+      form === 'phone',
+    );
+    check(
+      form === 'phone' ? /2 changed/.test(changed) : changed === 'main,decisions',
+      `${label('open-tab')}: the tabs marked changed since v1 are "${changed}", not the main tab and Decisions`,
+    );
+    await press(page, '[data-agenda-diff-open-tab="decisions"]');
+    await page.waitForTimeout(350);
+    const opened = await page.locator('[data-agenda-part="tabs"]').getAttribute('data-agenda-tab');
+    check(opened === 'decisions', `${label('open-tab')}: Open tab opened "${opened}", not Decisions`);
+    await shot(page, 'open-tab', form, theme);
+
     // THE CONVERSATION and THE TERMS TABLE, from the same item.
     await scrollToPart(page, 'conversation');
     const tags = await page.locator('.fy-hist__tag').allTextContents();

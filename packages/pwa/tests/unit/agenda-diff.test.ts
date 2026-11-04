@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaVersionSummary } from '@ferretry/protocol';
 import {
   BASIS_WORDS,
+  bagSimilarity,
   changedSections,
   defaultComparison,
   diffItems,
@@ -12,7 +13,6 @@ import {
   orderedPair,
   REWRITE_SIMILARITY,
   sectionText,
-  bagSimilarity,
   similarity,
   versionLabel,
   type WordRun,
@@ -496,12 +496,12 @@ describe('the sections compared', () => {
     expect(diffItems(after, before).find(section => section.key === 'body')?.status).toBe('removed');
   });
 
-  test('leaves out a section neither version has, lists the body first, then keeps reading order', () => {
+  test('leaves out a section neither version has, lists the tabs first, then keeps reading order (&F923)', () => {
     const keys = diffItems(before, after).map(section => section.key);
     expect(keys).not.toContain('steps');
-    expect(keys[0]).toBe('body');
-    expect(keys.indexOf('title')).toBeLessThan(keys.indexOf('whereWeAre'));
-    expect(keys.indexOf('whereWeAre')).toBeLessThan(keys.indexOf('ask'));
+    expect(keys.slice(0, 2)).toEqual(['whereWeAre', 'body']);
+    expect(keys.indexOf('body')).toBeLessThan(keys.indexOf('title'));
+    expect(keys.indexOf('title')).toBeLessThan(keys.indexOf('ask'));
   });
 
   test('counts the words added and removed in a section', () => {
@@ -514,8 +514,8 @@ describe('the sections compared', () => {
 
   test('picks out the changed sections and says what changed in one line', () => {
     const diff = diffItems(before, after);
-    // The body leads: it is the item's live document, the thing that is versioned.
-    expect(changedSections(diff).map(section => section.key)).toEqual(['body', 'stage', 'terms', 'whereWeAre', 'ask']);
+    // The tabs lead: they are the item's live document, the thing that is versioned.
+    expect(changedSections(diff).map(section => section.key)).toEqual(['whereWeAre', 'body', 'stage', 'terms', 'ask']);
     expect(diffSummary(diff)).toMatch(/^5 sections changed · \+\d+ words · −\d+ words?$/u);
     expect(diffSummary(diffItems(before, before))).toBe('Nothing changed');
     expect(diffSummary(diffItems(item({ title: 'A' }), item({ title: 'A b' })))).toBe(
@@ -580,6 +580,45 @@ describe('the sections compared', () => {
     } as Partial<AgendaItem>);
     expect(diffItems(before, middle).find(section => section.key === 'body')?.status).toBe('added');
     expect(diffItems(middle, after).find(section => section.key === 'body')?.status).toBe('changed');
+  });
+});
+
+describe('the ferret’s own tabs compared (&F923)', () => {
+  const tab = (id: string, name: string, body: string) => ({ id, name, body });
+  const before = item({
+    whereWeAre: 'Planning.',
+    tabs: [tab('decisions', 'Decisions', 'SQLite.'), tab('risks', 'Risks', 'Slip.'), tab('old', 'Old', 'Gone soon.')],
+  } as unknown as Partial<AgendaItem>);
+  const after = item({
+    whereWeAre: 'Planning.',
+    tabs: [
+      tab('risks', 'Open risks', 'Slip.'),
+      tab('decisions', 'Decisions', 'SQLite, with WAL.'),
+      tab('notes', 'Notes', 'New.'),
+    ],
+  } as unknown as Partial<AgendaItem>);
+
+  test('match by id: a rename says what it was, a new tab is added, a removed one removed, after the fixed tabs', () => {
+    const diff = diffItems(before, after);
+    expect(diff.slice(0, 6).map(section => [section.key, section.label, section.status])).toEqual([
+      ['whereWeAre', 'Where we are now', 'unchanged'],
+      ['tab:risks', 'Open risks (was Risks)', 'changed'],
+      ['tab:decisions', 'Decisions', 'changed'],
+      ['tab:notes', 'Notes', 'added'],
+      ['tab:old', 'Old', 'removed'],
+      ['tabOrder', 'Tab order', 'changed'],
+    ]);
+    expect(diff.find(section => section.key === 'tab:risks')).toMatchObject({ addedWords: 0, removedWords: 0 });
+    expect(diffSummary(diff)).toMatch(/^5 sections changed/u);
+  });
+
+  test('say nothing of the order when the tabs both versions have kept it', () => {
+    const reordered = item({
+      tabs: [tab('decisions', 'Decisions', 'SQLite.'), tab('new', 'New', 'x')],
+    } as unknown as Partial<AgendaItem>);
+    const keys = diffItems(before, reordered).map(section => section.key);
+    expect(keys).not.toContain('tabOrder');
+    expect(diffItems(item(), item()).some(section => section.key.startsWith('tab'))).toBe(false);
   });
 });
 

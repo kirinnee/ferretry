@@ -213,6 +213,8 @@ const agendaCases: SchemaCase[] = [
     },
   },
   { name: 'form answer', schema: agenda.AgendaFormAnswerSchema, value: { id: 'alerts', picked: ['Page', 'Mail'] } },
+  { name: 'tab', schema: agenda.AgendaTabSchema, value: { id: 'risks', name: 'Risks', body: 'The export may slip.' } },
+  { name: 'tab edit', schema: agenda.AgendaTabEditSchema, value: { tab: 'Risks', rename: 'Open risks', position: 1 } },
   {
     name: 'brief term',
     schema: agenda.AgendaTermSchema,

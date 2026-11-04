@@ -127,6 +127,7 @@
         "harness/snooze-to-test-screenshot.ts",
         "harness/agenda-forms-screenshot.ts",
         "harness/reply-approval-screenshot.ts",
+        "harness/agenda-tabs-screenshot.ts",
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",
         "harness/live-card-page.tsx",

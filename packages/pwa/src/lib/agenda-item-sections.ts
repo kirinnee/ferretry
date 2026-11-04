@@ -1,5 +1,5 @@
 /**
- * THE ITEM VIEW'S NINE PARTS, as pure decisions (docs/agenda.md § The item view). One item view everywhere — the chat,
+ * THE ITEM VIEW'S EIGHT PARTS, as pure decisions (docs/agenda.md § The item view). One item view everywhere — the chat,
  * the Inbox, the side panel — reads top to bottom. The body is the item's LIVE DOCUMENT (the owner: "the chat is the
  * stream of log, the body is the DB"), so the four parts that say what this is and what it needs come first, the body
  * after them, and the log — the conversation and the activity — at the bottom:
@@ -9,11 +9,12 @@
  *   2 premise       premise and context: may be long, and may assume what the owner already knows
  *   3 detail        the context explained from zero (`detail`): FOLDED by default
  *   4 references    one TABLE of every term and every PR, card or link, each with a plain meaning: FOLDED
- *   5 where         where we are now (`whereWeAre`): a SHORT status — where things stand, what is decided, what is open
- *   6 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
- *   7 body          the full picture: the live document — report, explainer, plan or status (Markdown with fy-render)
- *   8 conversation  the owner's and the ferret's words, oldest first: the log, never a second copy of the body: FOLDED
- *   9 activity      the grey "updated / moved / snoozed" lines: FOLDED, kept apart from the conversation
+ *   5 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
+ *   6 tabs          the live document as tabs (&F923): "Where we are now" first and open (the answer to the owner's
+ *                   question, what is decided, what is open, then the ferret's own Markdown), "The full picture", then
+ *                   the ferret's own tabs — every one Markdown with fy-render
+ *   7 conversation  the owner's and the ferret's words, oldest first: the log, never a second copy of a tab: FOLDED
+ *   8 activity      the grey "updated / moved / snoozed" lines: FOLDED, kept apart from the conversation
  *
  * Nothing here draws anything, and nothing here cuts text short: every line is kept whole.
  */
@@ -37,9 +38,8 @@ export const ITEM_VIEW_PARTS = [
   'premise',
   'detail',
   'references',
-  'where',
   'needs',
-  'body',
+  'tabs',
   'conversation',
   'activity',
 ] as const;
@@ -52,9 +52,8 @@ export const FOLDED_PARTS: ReadonlySet<ItemViewPart> = new Set(['detail', 'refer
 export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premise'>, string>> = {
   detail: 'Detailed context',
   references: 'Terms and references',
-  where: 'Where we are now',
   needs: 'What I need from you',
-  body: 'The full picture',
+  tabs: 'The live document',
   conversation: 'Conversation',
   activity: 'Activity',
 };

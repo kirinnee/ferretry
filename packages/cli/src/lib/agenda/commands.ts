@@ -24,19 +24,21 @@ const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
 /**
- * The body rule (docs/agenda.md § Stage, where we are, and the detail; the owner: "the chat is the stream of log, the
+ * The body rule (docs/agenda.md § Stage, the tabs, and the detail; the owner: "the chat is the stream of log, the
  * body is the DB, like an event store"): `fy agenda --help`, `add --help` and `edit --help` all say it, in the words
  * the Agenda-mode prompt (`AGENDA_INSTRUCTION`) says in short.
  */
-export const AGENDA_BODY_RULE = `THE BODY IS THE LIVE DOCUMENT; the conversation is only the log.
-  --where is a SHORT status: where things stand, what is decided, what is still open, in a few points.
-  The full report, explainer, plan or status go in the BODY (--body-file); steps the owner must DO stay
-  --step, so they can be ticked. Rewrite the body on every change (agenda edit <id> --body-file <file>)
-  so it always holds the whole current state: it is what the owner reads and what is versioned. Never
-  retype it into the conversation: answer there briefly and point at it.
-  Write it in explainer mode by default, with hypermedia: fy-render charts, mermaid, a step-through html
-  page, and card and board blocks for status. Plain Markdown draws no fold: fold a long part inside an
-  fy-render html block (<details><summary>…</summary>…</details>).`;
+export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversation is only the log.
+  The MAIN tab, "Where we are now" (--where-file, or --where points), opens first: where things
+  stand, what is decided, what is still open — as long and as rich as it needs to be.
+  The report, explainer or plan is "The full picture" (--body-file). A part that changes on its
+  own (Overview, Decisions, Risks…) gets a tab of its own: --tab-file "Name=file" (6 at most);
+  --rename-tab, --move-tab, --remove-tab. Rewrite a tab whole whenever it changes: one edit is one
+  version, and the owner sees which tabs changed. Steps the owner must DO stay --step.
+  Never retype a tab into the conversation: answer there briefly and point at it.
+  Write in explainer mode, with hypermedia: fy-render charts, mermaid, a step-through html page,
+  card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render html
+  block (<details><summary>…</summary>…</details>).`;
 
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
   --title        REQUIRED. What this is about, in a few plain words (aim for 40 characters, 60 at most,
@@ -66,9 +68,10 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --step         when the human must DO something: one Markdown step each, in order (repeat) — the
                  complete instructions (commands in code blocks, where to click, what to paste where;
                  never a secret value), so the item alone is enough
-  --where        a SHORT status: where things stand now, one point each (repeat) — never the report
-  --body-file    the BODY, a Markdown file (- reads stdin): the live document — the whole report, explainer,
-                 plan or status (see THE BODY IS THE LIVE DOCUMENT below)
+  --where-file   the MAIN tab, "Where we are now", a Markdown file (- reads stdin): where things stand, whole
+                 (--where gives it as points instead, one each, repeat)
+  --body-file    "The full picture", a Markdown file (- reads stdin): the report, explainer or plan
+  --tab-file     a tab of your own, "Name=file" (repeat, 6 at most; see THE TABS ARE THE LIVE DOCUMENT below)
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
 THE RULE IS ISOLATION: could the owner answer with nothing else open? A card is read cold, so it
@@ -284,10 +287,9 @@ function mountVerbs(
         [],
       )
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
-      .option(
-        '--body-file <path>',
-        'the body: the live document (the whole report, explainer, plan or status), a Markdown file or - for stdin',
-      )
+      .option('--body-file <path>', '"The full picture": the report, explainer or plan, a Markdown file or - for stdin')
+      .option('--where-file <path>', 'the main tab, "Where we are now", a Markdown file or - for stdin')
+      .option('--tab-file <name=file>', 'a tab of your own, its words from a Markdown file; repeat', collect, [])
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--will-block <thing>', 'what this will block, in a few words (e.g. "the 14:00 deploy")')
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
@@ -301,7 +303,7 @@ function mountVerbs(
       )
       .option(
         '--where <point>',
-        'a short status: where things stand now, one point each (repeat); the full report goes in the body',
+        'the main tab as points: where things stand now, one point each (repeat); or --where-file',
         collect,
         [],
       )
@@ -375,10 +377,25 @@ function mountVerbs(
         [],
       )
       .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])
+      .option('--body-file <path>', 'rewrite "The full picture" with this Markdown file, or - for stdin')
       .option(
-        '--body-file <path>',
-        'rewrite the body — the live document, the whole current state — with this Markdown file, or - for stdin',
+        '--where-file <path>',
+        'rewrite the main tab, "Where we are now", with this Markdown file, or - for stdin',
       )
+      .option(
+        '--tab-file <name=file>',
+        'make or rewrite a tab of your own with this Markdown file; repeat',
+        collect,
+        [],
+      )
+      .option('--rename-tab <old=new>', 'rename a tab of your own; repeat', collect, [])
+      .option(
+        '--move-tab <name=position>',
+        'move a tab of your own (1 = first after the full picture); repeat',
+        collect,
+        [],
+      )
+      .option('--remove-tab <name>', 'remove a tab of your own; repeat', collect, [])
       .option(
         '--question-answer <markdown>',
         'the same as `agenda answer`: your answer to the owner, shown above its options; a resting item goes back to their list',
@@ -387,7 +404,7 @@ function mountVerbs(
       .option('--stage <stage>', 'what it needs from the owner now: explainer, question, plan, tracker or test')
       .option(
         '--where <point>',
-        'replace the short status: where things stand now, one point each (repeat)',
+        'replace the main tab with points: where things stand now, one point each (repeat); or --where-file',
         collect,
         [],
       )
@@ -496,7 +513,8 @@ function mountVerbs(
     agenda
       .command('show')
       .description('print one item in full — read-only')
-      .argument('<id>', 'the item reference, like !A3'),
+      .argument('<id>', 'the item reference, like !A3')
+      .option('--tab <name>', 'print only this tab, exactly as written: main, body, or a tab of your own'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.show(id, merged(command));
   });
