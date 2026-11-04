@@ -22,6 +22,9 @@ const sentRow = (
   sent: { to: 'tanna', body: 'Hello **there**', ask: false, state: 'delivered', ...sent },
 });
 
+/** The state's words, without the separator that ends them on the foot (it is hidden from a screen reader). */
+const words = (state: Element | null): string | null | undefined => state?.textContent?.replace(/ ·$/u, '');
+
 const fleet = [
   { config: { id: 'mvtanna-1', teammate: 'tanna' }, state: { status: 'running' } },
 ] as unknown as SessionView[];
@@ -44,7 +47,8 @@ describe('a message this ferret sent', () => {
     expect(card.textContent).toContain('Sent to');
     expect(must(card.querySelector('a'), 'the recipient link').getAttribute('href')).toBe('/d/d1/session/mvtanna-1');
     expect(must(card.querySelector('.fy-sent-body strong'), 'the bold word').textContent).toBe('there');
-    expect(must(card.querySelector('.fy-sent-state'), 'the state').textContent).toBe('Delivered');
+    expect(words(card.querySelector('.fy-sent-state'))).toBe('Delivered');
+    expect(card.querySelector('.fy-sent-state .fy-sent-dot')?.getAttribute('aria-hidden')).toBe('true');
     expect(card.querySelector('[role="alert"]')).toBeNull();
     // The command is one tap away, and folds back.
     expect(card.querySelector('.fy-message-tools, [data-tool-group]')).toBeNull();
@@ -64,7 +68,7 @@ describe('a message this ferret sent', () => {
     );
     const state = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
     expect(state.getAttribute('role')).toBe('alert');
-    expect(state.textContent).toBe('Not delivered');
+    expect(words(state)).toBe('Not delivered');
     // The reason, in the CLI's own words, is the one thing that takes a line of its own.
     expect(view.container.querySelector('[data-sent-reason]')?.textContent).toBe('session not found: tanna');
     // Unproved, the recipient is a plain name.
@@ -82,7 +86,7 @@ describe('a message this ferret sent', () => {
       const view = await mount(<TranscriptRow entry={sentRow({ state, reason: '' })} />);
       const shown = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
       // One short word on the line; the rest for a screen reader and on hover.
-      expect(shown.textContent).toBe(word);
+      expect(words(shown)).toBe(word);
       expect(shown.getAttribute('title')).toBe(word);
       expect(view.container.querySelector('[data-sent-reason]')).toBeNull();
       await view.unmount();

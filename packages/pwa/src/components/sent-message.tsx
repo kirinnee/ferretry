@@ -95,6 +95,10 @@ export function SentMessageRow({
           <span>
             {state.word}
             {state.detail === undefined ? null : <span className="sr-only"> — {state.detail}</span>}
+            {/* The separator ends the state's words, so a foot that wraps on a phone leaves it trailing them. */}
+            <span aria-hidden="true" className="fy-sent-dot">
+              {' ·'}
+            </span>
           </span>
         </span>
         <button
