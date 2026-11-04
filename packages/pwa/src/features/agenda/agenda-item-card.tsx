@@ -1,5 +1,5 @@
 /**
- * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's nine parts, top to bottom
+ * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's eight parts, top to bottom
  * (`agenda-item-sections.ts` owns the order; the view's sticky row above holds the title):
  *
  *   1 head          the STATE chip ("Needs you", "Resting · waiting on Zoe") and the STAGE chip ("Question", "Test"),
@@ -9,16 +9,17 @@
  *   3 detail        the context explained from zero (`detail`), FOLDED
  *   4 references    ONE TABLE of every term and every link (PR, card, file, page), each with a plain meaning; links
  *                   are drawn by the one reference renderer — FOLDED
- *   5 where         WHERE WE ARE NOW (`whereWeAre`): a short status — where things stand, the ferret's answer to the
- *                   owner's question, what is decided so far and what is still open
- *   6 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
+ *   5 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
  *                   recommendation, the steps, the impact, EVERY CARD ASK with its own buttons, and the answer row;
- *                   marked out while the item needs the owner
- *   7 body          THE FULL PICTURE: the item's live document, rewritten on every change (Markdown with fy-render),
- *                   or a review's Reasoning
- *   8 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`): the log,
+ *                   marked out while the item needs the owner. When the ferret answered the owner's question, one line
+ *                   "Answered: see Where we are now" opens the main tab and brings it into view
+ *   6 tabs          THE LIVE DOCUMENT AS TABS (`agenda-tabs.tsx`, &F923): "Where we are now" first and open — the
+ *                   answer to the owner's question, decided so far, still open, then the ferret's own Markdown —
+ *                   then "The full picture" (a review's Reasoning) and the ferret's own tabs. The open tab is
+ *                   remembered per item on this device
+ *   7 conversation  the owner's and the ferret's words, oldest first, each whole (`agenda-item-history.tsx`): the log,
  *                   FOLDED
- *   9 activity      the grey "updated / moved / snoozed" lines, FOLDED (`agenda-activity-log.tsx`)
+ *   8 activity      the grey "updated / moved / snoozed" lines, FOLDED (`agenda-activity-log.tsx`)
  *
  * A part the item does not carry is not drawn. Nothing is cut short: a long report, reply or edit line is drawn whole.
  * Terms are dotted-underlined where the premise, the context and the options use them (`agenda-terms.tsx`). Picking
@@ -35,11 +36,12 @@ import {
   singleAgendaQuestion,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
+import { readTab, writeTab } from '../../lib/agenda-fold.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
@@ -56,6 +58,7 @@ import {
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
+import { changedTabs, openTab, viewTabs } from '../../lib/agenda-tab-view.ts';
 import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
 import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
@@ -70,6 +73,7 @@ import { AgendaLineage } from './agenda-merge-control.tsx';
 import { AgendaNeed, WantedAnswers, wantedAnswers } from './agenda-need.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
+import { AgendaTabs, Section } from './agenda-tabs.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
 import { VersionDiffPanel } from './agenda-version-diff.tsx';
@@ -149,24 +153,6 @@ const forConfirmation = (item: AgendaItem): AgendaItem => {
   const { premise: _premise, ...rest } = item;
   return rest;
 };
-
-/** One titled section inside a part: drawn open, under its own name. */
-function Section({
-  name,
-  title,
-  children,
-}: {
-  readonly name: string;
-  readonly title: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <section className="fy-card__section" data-agenda-section={name}>
-      <h4 className="fy-card__label fy-card__section-title">{title}</h4>
-      <div className="fy-card__section-body">{children}</div>
-    </section>
-  );
-}
 
 /** PREMISE and CONTEXT as two tinted blocks: each label above its points. A board card draws the same two. */
 export function Situation({
@@ -266,24 +252,6 @@ function LinksList({
         </li>
       ))}
     </ul>
-  );
-}
-
-/** One of the view's parts that is always open, under its title. */
-function Part({
-  part,
-  title,
-  children,
-}: {
-  readonly part: 'references' | 'where' | 'body';
-  readonly title: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <section aria-label={title} className="fy-card__part" data-agenda-part={part}>
-      <h4 className="fy-card__label fy-card__part-title">{title}</h4>
-      {children}
-    </section>
   );
 }
 
@@ -427,6 +395,16 @@ export function AgendaItemCard({
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
   const foldKey = itemKey ?? item.id;
+  // THE TABS (&F923): the open one is remembered per item on this device; a notice draws its body in its ask, and a card
+  // gate's body is its How to test, so for those the full picture is not a tab.
+  const [remembered, setRemembered] = useState(() => readTab(foldKey));
+  const tabsPart = useRef<HTMLElement | null>(null);
+  const tabs = viewTabs(item, model.notice || item.gate !== undefined);
+  const openTabId = openTab(tabs, remembered);
+  const selectTab = (id: string): void => {
+    setRemembered(id);
+    writeTab(foldKey, id, id === tabs[0]?.id);
+  };
   // The head's description: the item's summary under its title, drawn whole (the view's sticky row holds the title).
   // A gate item repeats nothing, and a notice drawn with its cards lists them as rows (its summary is the same lines,
   // for an older app): neither has one.
@@ -484,7 +462,6 @@ export function AgendaItemCard({
   const kind = meta.kind;
   const body = item.body?.trim() ? item.body : null;
   const questionAnswer = item.questionAnswer?.trim() ? item.questionAnswer : null;
-  const whereWeAre = read.whereWeAre?.trim() ? read.whereWeAre : null;
   const detail = read.detail?.trim() ? read.detail : null;
   const steps = item.steps ?? [];
   // What the segment already says is not said again below it: an approval's effect, a review's links (they stay under
@@ -532,7 +509,6 @@ export function AgendaItemCard({
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
-  const hasWhere = whereWeAre !== null || questionAnswer !== null || read.decided?.trim() || read.stillOpen?.trim();
 
   return (
     <article
@@ -613,33 +589,7 @@ export function AgendaItemCard({
             <ReferencesTable renderProse={renderProse} rows={references} />
           </AgendaFold>
         )}
-        {/* 5. WHERE WE ARE NOW: the short status, the answer to the owner's question, what is decided and open. */}
-        {hasWhere ? (
-          <Part part="where" title={PART_TITLES.where}>
-            {whereWeAre === null ? null : (
-              <div className="fy-card__where" data-agenda-where-now="">
-                <AgendaBody renderProse={renderProse} text={whereWeAre} />
-              </div>
-            )}
-            {questionAnswer === null ? null : (
-              <div className="fy-card__answered" data-agenda-question-answer="">
-                <h5 className="fy-card__label">Answer to your question</h5>
-                <PointForm renderProse={renderProse} text={mark(questionAnswer)} />
-              </div>
-            )}
-            {read.decided?.trim() ? (
-              <Section name="decided" title="Decided so far">
-                <PointForm renderProse={renderProse} text={read.decided} />
-              </Section>
-            ) : null}
-            {read.stillOpen?.trim() ? (
-              <Section name="still-open" title="Still open">
-                <PointForm renderProse={renderProse} text={read.stillOpen} />
-              </Section>
-            ) : null}
-          </Part>
-        ) : null}
-        {/* 6. WHAT I NEED FROM YOU: the ask, then every card ask with its own buttons, then the answer row. While the item
+        {/* 5. WHAT I NEED FROM YOU: the ask, then every card ask with its own buttons, then the answer row. While the item
             needs the owner it is marked out, so the one thing to do is the thing the eye lands on. */}
         <div
           className="fy-card__part"
@@ -647,6 +597,23 @@ export function AgendaItemCard({
           {...(answerable && state.state === 'needs-you' ? { 'data-agenda-needs-you': '' } : {})}
           tabIndex={-1}
         >
+          {/* The ferret answered the owner's question: the answer is the main tab's first block, below — said here so it
+              is never missed, and one tap opens it. */}
+          {questionAnswer === null || tabs[0]?.kind !== 'main' ? null : (
+            <p className="fy-card__answered-line" data-agenda-answered-line="">
+              <button
+                className="fy-card__answered-link"
+                onClick={() => {
+                  selectTab(tabs[0]?.id ?? '');
+                  if (typeof tabsPart.current?.scrollIntoView === 'function')
+                    tabsPart.current.scrollIntoView({ block: 'start' });
+                }}
+                type="button"
+              >
+                Answered: see {tabs[0].name}
+              </button>
+            </p>
+          )}
           {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
           {inputDrawn ? null : (
             <AgendaNeed
@@ -808,18 +775,20 @@ export function AgendaItemCard({
             </>
           )}
         </div>
+        {/* 6. THE TABS: the live document — the main tab first and open, then the full picture and the ferret's own. */}
+        <AgendaTabs
+          changed={latest ? changedTabs(item) : new Set()}
+          mark={mark}
+          onOpen={selectTab}
+          open={openTabId}
+          partRef={tabsPart}
+          renderProse={renderProse}
+          tabs={tabs}
+        />
       </TermLayer>
-      {/* 7. BODY: the full picture, the item's live document, drawn open and whole. */}
-      {body === null || model.notice || gated ? null : (
-        <Part part="body" title={kind === 'review' ? 'Reasoning' : PART_TITLES.body}>
-          <div data-agenda-section={kind === 'review' ? 'reasoning' : 'more'}>
-            <AgendaBody renderProse={renderProse} text={body} />
-          </div>
-        </Part>
-      )}
-      {/* 8. CONVERSATION, oldest first: the log, at the bottom, folded. */}
+      {/* 7. CONVERSATION, oldest first: the log, at the bottom, folded. */}
       <AgendaItemHistory events={history} ferret={ferret} itemKey={foldKey} now={now} renderProse={renderProse} />
-      {/* 9. ACTIVITY LOG: folded. */}
+      {/* 8. ACTIVITY LOG: folded. */}
       <AgendaActivityLog ferret={ferret} item={current} itemKey={foldKey} now={now} />
     </article>
   );

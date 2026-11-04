@@ -87,7 +87,18 @@ const PHONE = {
 const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
 const SCENES = ['question', 'explainer', 'test', 'long-title'] as const;
-const ORDER = ['head', 'premise', 'detail', 'references', 'where', 'needs', 'body', 'conversation', 'activity'];
+const ORDER = ['head', 'premise', 'detail', 'references', 'needs', 'tabs', 'conversation', 'activity'];
+
+/** Opens "The full picture" among the item's tabs (&F923): the main tab opens first, and only the open tab is drawn. */
+const openFullPicture = async (page: Page): Promise<void> => {
+  if ((await page.locator('[data-agenda-tab-button="body"]').count()) > 0) {
+    await page.locator('[data-agenda-tab-button="body"]').click();
+  } else if ((await page.locator('[data-agenda-tab-switch]').count()) > 0) {
+    await page.locator('[data-agenda-tab-switch]').click();
+    await page.locator('[data-agenda-tab-choice="body"]').click();
+  }
+  await page.waitForTimeout(300);
+};
 type Form = 'phone' | 'desktop';
 
 const violations: string[] = [];
@@ -112,7 +123,7 @@ const inspect = async (page: Page, label: string, scene: string): Promise<void> 
     const card = document.querySelector('.fy-card');
     const head = card?.querySelector('[data-agenda-part="head"]');
     const needs = card?.querySelector('[data-agenda-part="needs"]');
-    const body = card?.querySelector('[data-agenda-part="body"]');
+    const body = card?.querySelector('[data-agenda-part="tabs"]');
     const loaded = [...document.fonts].filter(face => face.status === 'loaded').map(face => face.family);
     return {
       sideways: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -121,7 +132,9 @@ const inspect = async (page: Page, label: string, scene: string): Promise<void> 
         each.getAttribute('data-agenda-part'),
       ),
       descriptionFirst: head?.firstElementChild?.hasAttribute('data-agenda-description') ?? false,
-      bodyTitle: body?.querySelector('h4')?.textContent ?? null,
+      bodyTitle:
+        body?.querySelector('[role="tab"][aria-selected="true"], .fy-tabs__switch-name, :scope > h4')?.textContent ??
+        null,
       bodyFolded: body?.querySelector('[data-agenda-fold]') !== null && body !== null && body !== undefined,
       needsMarked: needs?.hasAttribute('data-agenda-needs-you') ?? false,
       board: (body?.querySelectorAll('[data-fy-card-embed-board] [data-category]').length ?? 0) > 0,
@@ -163,6 +176,7 @@ for (const theme of THEMES)
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(800);
       const label = `${scene} ${form} ${theme}`;
+      await openFullPicture(page);
       await inspect(page, label, scene);
       await shot(page, `${scene}-top-${form}-${theme}`);
       // Whole: the viewport grows to the column, so every part is in one picture (the head stays at the top).
@@ -173,7 +187,7 @@ for (const theme of THEMES)
       await page.waitForTimeout(400);
       // A chart mounts only once it is in view, so it is looked for with the whole column on screen.
       if (scene === 'question') {
-        const chart = await page.evaluate(() => document.querySelector('[data-agenda-part="body"] canvas') !== null);
+        const chart = await page.evaluate(() => document.querySelector('[data-agenda-part="tabs"] canvas') !== null);
         check(chart, `${label}: the chart in the body is not drawn`);
       }
       await shot(page, `${scene}-full-${form}-${theme}`);

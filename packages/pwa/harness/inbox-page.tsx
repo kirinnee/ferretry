@@ -28,6 +28,9 @@
  *                         the button for "Open its chat"
  *   ?view=open-headings   an item with a LONG ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
+ *   ?view=tabs            an item whose live document is TABS (&F923): Where we are now (with the answer to the
+ *                         owner's question, decided, still open), The full picture, Decisions and Risks — the last edit
+ *                         changed two of them (`agenda-tabs-screenshot.ts`)
  *   ?view=open            doubles as the reply run (`inbox-reply-screenshot.ts`): Send moves on to the next card with
  *                         the "Replied" toast, Undo brings the card back with its words restored
  *
@@ -279,6 +282,48 @@ const FORM = item('A43', 5, 'ottilie', {
     { id: '4', type: 'text', label: 'Anything else I should know?', name: 'Notes', required: false },
   ],
 } as unknown as Partial<AgendaItem>);
+const TABBED = item('A44', 4, 'ottilie', {
+  title: 'Second relay plan',
+  subject: 'Pick the region for the second relay.',
+  ask: options(['Frankfurt', 'London']),
+  premise: '- One relay serves every phone today',
+  context: '- A second one halves the round trip for half the fleet',
+  questionAnswer: '- Yes: sessions pause for about ten seconds during the switch\n- Nothing is lost',
+  decided: '- It runs on the same build as the first relay\n- Alerts page you only when it is down',
+  stillOpen: '- The region\n- The restart window',
+  whereWeAre:
+    '**Building the relay image.** The config is written and tested on the laptop.\n\n| Step | State |\n| --- | --- |\n| Config | done |\n| Image | building |\n| Deploy | waits on your pick |\n\nOnce you pick the region it goes out the same day.',
+  body: '## Why a second relay\n\nEvery phone talks to one relay today. Half the fleet is far from it, so every message makes a long round trip.\n\n## What it costs\n\nOne more small machine, about the price of a coffee a month.',
+  tabs: [
+    {
+      id: 'decisions',
+      name: 'Decisions',
+      body: '1. **Same build** as the first relay.\n2. **Alerts** only when it is down.',
+    },
+    {
+      id: 'risks',
+      name: 'Risks',
+      body: '- The switch drops live sessions for about ten seconds.\n- A wrong region doubles the round trip instead.',
+    },
+  ],
+  revisions: [
+    {
+      at: '2026-10-29T08:30:00.000Z',
+      by: 'agent',
+      changed: ['whereWeAre', 'tabs'],
+      previous: {
+        whereWeAre: 'Writing the config.',
+        tabs: [
+          {
+            id: 'decisions',
+            name: 'Decisions',
+            body: '1. **Same build** as the first relay.\n2. **Alerts** only when it is down.',
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as Partial<AgendaItem>);
 /** A board card waiting at the "Try it" gate, as the daemon raises it: an ordinary choice item plus `gate`. */
 const GATE = item('G61', 3, 'daemon', {
   title: 'Pairing a second phone',
@@ -437,6 +482,7 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-5': card(FIVE, RELAY, 'studio'),
   'open-7': card(SEVEN, RELEASE, 'studio'),
   form: card(FORM, RELAY, 'studio'),
+  tabs: card(TABBED, RELAY, 'studio'),
   gate: GATE_CARD,
   'gate-plan': GATE_PLAN_CARD,
   'gate-noproject': GATE_NO_PROJECT_CARD,

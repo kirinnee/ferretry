@@ -17,24 +17,23 @@ import { agendaItem } from '../support/agenda-inbox.tsx';
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const item = (overrides: Partial<AgendaItem> = {}): AgendaItem => agendaItem('A5', overrides);
 
-describe('the nine parts', () => {
+describe('the eight parts', () => {
   test('are in the spec’s order, with the detailed context, the terms and references, the conversation and the activity log folded', () => {
     expect(ITEM_VIEW_PARTS).toEqual([
       'head',
       'premise',
       'detail',
       'references',
-      'where',
       'needs',
-      'body',
+      'tabs',
       'conversation',
       'activity',
     ]);
     expect([...FOLDED_PARTS].sort()).toEqual(['activity', 'conversation', 'detail', 'references']);
   });
 
-  test('call the body the full picture: it is the item’s live document', () => {
-    expect(PART_TITLES.body).toBe('The full picture');
+  test('call the tabs the item’s live document (&F923)', () => {
+    expect(PART_TITLES.tabs).toBe('The live document');
     expect(PART_TITLES.needs).toBe('What I need from you');
   });
 });

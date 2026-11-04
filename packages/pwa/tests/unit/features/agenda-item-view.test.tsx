@@ -575,8 +575,9 @@ describe('the sections the ferret added', () => {
       } as Partial<AgendaItem>),
     );
     const titles = [...root().querySelectorAll('.fy-card__section > h4')].map(title => title.textContent);
-    expect(titles).toEqual(['Decided so far', 'Still open', 'Why I recommend Allow it for a week', 'What it allows']);
-    expect(one('[data-agenda-part="where"] [data-agenda-section="decided"]')).toBeDefined();
+    // Decided and still open sit at the top of the main tab, after what it needs (&F923).
+    expect(titles).toEqual(['Why I recommend Allow it for a week', 'What it allows', 'Decided so far', 'Still open']);
+    expect(one('[data-agenda-part="tabs"] [data-agenda-section="decided"]')).toBeDefined();
     expect(one('[data-agenda-part="needs"] [data-agenda-section="impact"]')).toBeDefined();
     expect(one('[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
     expect(one('[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe('Allow it for a week');
@@ -597,12 +598,12 @@ describe('the sections the ferret added', () => {
     await draw(
       agendaItem('A5', { kind: 'review', ask: { kind: 'answer-review' }, body: 'Because.' } as Partial<AgendaItem>),
     );
-    expect(one('[data-agenda-part="body"] > h4').textContent).toBe('Reasoning');
-    expect(one('[data-agenda-part="body"] [data-agenda-section="reasoning"]').textContent).toBe('Because.');
+    expect(one('[data-agenda-part="tabs"] > h4').textContent).toBe('Reasoning');
+    expect(one('[data-agenda-part="tabs"] [data-agenda-section="reasoning"]').textContent).toBe('Because.');
     await view?.unmount();
     view = null;
     await draw(agendaItem('A6', { ask: choices('Yes', 'No'), body: 'More.' } as Partial<AgendaItem>));
-    expect(one('[data-agenda-part="body"] > h4').textContent).toBe('The full picture');
+    expect(one('[data-agenda-part="tabs"] > h4').textContent).toBe('The full picture');
     expect(root().querySelector('details')).toBeNull();
   });
 });
@@ -853,14 +854,14 @@ describe('What I need from you', () => {
     ],
   } as Partial<AgendaItem>);
 
-  test('is the sixth part: after where we are now, before the body, the conversation and the activity log', async () => {
+  test('is the fifth part: after the references, before the tabs, the conversation and the activity log', async () => {
     await draw(agendaItem('A47', { ...richItem, body: 'A report.' } as Partial<AgendaItem>), {}, [
       { kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47' },
     ]);
     const parts = [...one('.fy-card').querySelectorAll('[data-agenda-part]')].map(each =>
       each.getAttribute('data-agenda-part'),
     );
-    expect(parts).toEqual(['head', 'premise', 'references', 'where', 'needs', 'body', 'conversation', 'activity']);
+    expect(parts).toEqual(['head', 'premise', 'references', 'needs', 'tabs', 'conversation', 'activity']);
     expect(one('[data-agenda-part="needs"] [data-agenda-need]')).toBeDefined();
     expect(need().querySelector('h4')?.textContent).toBe('What I need from you');
   });
@@ -1164,13 +1165,15 @@ describe('a question the owner replied to', () => {
     parked: { reason: 'replied', at: '2026-08-01T11:50:00.000Z' },
   } as unknown as Partial<AgendaItem>);
 
-  test('shows the ferret’s answer above its own options, which stay live, with no Got it', async () => {
+  test('says the ferret answered above its own options, which stay live; the answer opens the main tab (&F923)', async () => {
     const spy = await draw(asked, { parkedNote: <p data-parked-note="">Replied — waiting on Zoe</p> });
     const answer = one('.fy-card [data-agenda-question-answer]');
     expect(answer.textContent).toContain('Answer to your question');
     expect(answer.textContent).toContain('WAL is the write-ahead log');
+    expect(answer.closest('[data-agenda-part]')?.getAttribute('data-agenda-part')).toBe('tabs');
+    const line = one('[data-agenda-answered-line]');
     const need = one('[data-agenda-need]');
-    expect(answer.compareDocumentPosition(need) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.compareDocumentPosition(need) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(one('[data-parked-note]').textContent).toBe('Replied — waiting on Zoe');
     const buttons = [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-quick-replies] button')];
     expect(buttons.map(button => button.textContent)).toEqual(

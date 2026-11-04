@@ -93,7 +93,18 @@ const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 const NOW = new Date('2026-10-29T09:00:00.000Z');
 const LOCALE = { timezoneId: 'UTC', locale: 'en-US' } as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
-const ORDER = ['head', 'premise', 'detail', 'references', 'where', 'needs', 'body', 'conversation', 'activity'];
+const ORDER = ['head', 'premise', 'detail', 'references', 'needs', 'tabs', 'conversation', 'activity'];
+
+/** Opens "The full picture" among the item's tabs (&F923): the main tab opens first, and only the open tab is drawn. */
+const openFullPicture = async (page: Page): Promise<void> => {
+  if ((await page.locator('[data-agenda-tab-button="body"]').count()) > 0) {
+    await page.locator('[data-agenda-tab-button="body"]').click();
+  } else if ((await page.locator('[data-agenda-tab-switch]').count()) > 0) {
+    await page.locator('[data-agenda-tab-switch]').click();
+    await page.locator('[data-agenda-tab-choice="body"]').click();
+  }
+  await page.waitForTimeout(300);
+};
 type Form = 'phone' | 'desktop';
 
 const violations: string[] = [];
@@ -419,9 +430,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       await shot(page, 'terms', form, theme);
 
       // The long report in the body ("The full picture"), with no cut-off.
-      await scrollToPart(page, 'body');
+      await openFullPicture(page);
+      await scrollToPart(page, 'tabs');
       const report = await page.evaluate(() => {
-        const node = document.querySelector<HTMLElement>('[data-agenda-part="body"] [data-agenda-section="more"]');
+        const node = document.querySelector<HTMLElement>('[data-agenda-part="tabs"] [data-agenda-section="more"]');
         return {
           last: (node?.textContent ?? '').includes('every count now agrees'),
           findings: (node?.textContent ?? '').match(/Finding \d+\./gu)?.length ?? 0,
@@ -434,7 +446,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       await shot(page, 'report', form, theme);
       // The end of the report, to show it is whole.
       await page.evaluate(() => {
-        document.querySelector('[data-agenda-part="body"]')?.scrollIntoView({ block: 'end' });
+        document.querySelector('[data-agenda-part="tabs"]')?.scrollIntoView({ block: 'end' });
       });
       await page.waitForTimeout(200);
       await shot(page, 'report-end', form, theme);

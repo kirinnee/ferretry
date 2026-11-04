@@ -101,26 +101,16 @@ const parts = (): (string | null)[] =>
   [...root().querySelectorAll('[data-agenda-part]')].map(part => part.getAttribute('data-agenda-part'));
 
 describe('the item view’s parts', () => {
-  test('are the spec’s nine, in order, for an item that carries every one', async () => {
+  test('are the spec’s eight, in order, for an item that carries every one', async () => {
     await draw(full, {}, conversation);
-    expect(parts()).toEqual([
-      'head',
-      'premise',
-      'detail',
-      'references',
-      'where',
-      'needs',
-      'body',
-      'conversation',
-      'activity',
-    ]);
+    expect(parts()).toEqual(['head', 'premise', 'detail', 'references', 'needs', 'tabs', 'conversation', 'activity']);
   });
 
-  test('keep the log at the bottom: the conversation and the activity come after the body, never between the asks', async () => {
+  test('keep the log at the bottom: the conversation and the activity come after the tabs, never between the asks', async () => {
     await draw(full, {}, conversation);
     const order = parts();
-    expect(order.indexOf('needs')).toBeLessThan(order.indexOf('body'));
-    expect(order.indexOf('body')).toBeLessThan(order.indexOf('conversation'));
+    expect(order.indexOf('needs')).toBeLessThan(order.indexOf('tabs'));
+    expect(order.indexOf('tabs')).toBeLessThan(order.indexOf('conversation'));
     expect(order.slice(-2)).toEqual(['conversation', 'activity']);
   });
 
@@ -249,24 +239,33 @@ describe('terms and references', () => {
   });
 });
 
-describe('where we are now', () => {
-  test('is the short status: where things stand, what is decided and what is still open', async () => {
+describe('where we are now, the main tab (&F923)', () => {
+  test('opens first: decided so far and still open at its top, then where things stand', async () => {
     await draw(full);
-    const where = one('[data-agenda-part="where"]');
-    expect(where.querySelector('h4')?.textContent).toBe('Where we are now');
-    expect(where.querySelector('[data-agenda-where-now]')?.textContent).toContain('The two colours are tested');
-    expect(where.querySelector('[data-agenda-section="decided"]')).not.toBeNull();
-    expect(where.querySelector('[data-agenda-section="still-open"]')).not.toBeNull();
-    // The report is the body's, never repeated here.
-    expect(where.textContent).not.toContain('The report you asked for');
+    const tabs = one('[data-agenda-part="tabs"]');
+    expect(tabs.getAttribute('data-agenda-tab')).toBe('main');
+    expect(one('[role="tab"][aria-selected="true"]').textContent).toBe('Where we are now');
+    const panel = one('[data-agenda-tab-panel="main"]');
+    expect([...panel.children].map(child => child.getAttribute('data-agenda-section') ?? child.className)).toEqual([
+      'decided',
+      'still-open',
+      'fy-card__where',
+    ]);
+    expect(panel.textContent).toContain('The two colours are tested');
+    // The report is the full picture's, never repeated here: only the open tab is in the page.
+    expect(tabs.textContent).not.toContain('The report you asked for');
   });
 
-  test('holds the ferret’s answer to the owner’s question too', async () => {
+  test('holds the ferret’s answer to the owner’s question first, and What I need from you says it is there', async () => {
     await draw(
       agendaItem('A9', { ask: choices('Yes', 'No'), questionAnswer: 'It ships on Friday.' } as Partial<AgendaItem>),
     );
-    expect(one('[data-agenda-part="where"] [data-agenda-question-answer]').textContent).toContain(
-      'It ships on Friday.',
+    // One tab: no tab row, the part is drawn under the tab's name.
+    expect(one('[data-agenda-part="tabs"] > h4').textContent).toBe('Where we are now');
+    expect(root().querySelector('[role="tablist"]')).toBeNull();
+    expect(one('[data-agenda-part="tabs"] [data-agenda-question-answer]').textContent).toContain('It ships on Friday.');
+    expect(one('[data-agenda-part="needs"] [data-agenda-answered-line]').textContent).toBe(
+      'Answered: see Where we are now',
     );
   });
 });
@@ -274,8 +273,9 @@ describe('where we are now', () => {
 describe('the full picture', () => {
   test('holds the report the owner asked for in the body, open and whole — no cut-off, however long', async () => {
     await draw(full);
-    const body = one('[data-agenda-part="body"]');
-    expect(body.querySelector('h4')?.textContent).toBe('The full picture');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="body"]').click());
+    const body = one('[data-agenda-tab-panel="body"]');
+    expect(one('[role="tab"][aria-selected="true"]').textContent).toBe('The full picture');
     expect(body.querySelector('[data-agenda-fold]')).toBeNull();
     expect(body.textContent).toContain('The report you asked for');
     expect(body.textContent).toContain('The last line of the report.');
