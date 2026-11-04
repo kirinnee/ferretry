@@ -169,6 +169,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   {
     const page = await open('A140');
     await checkCommon(page, label('item'));
+    await press(page, '[data-agenda-menu-toggle]');
     await press(page, '[data-agenda-diff-toggle]');
     await page.locator('[data-agenda-diff-summary]').waitFor({ state: 'visible' });
     const basis = (await page.locator('[data-agenda-diff-basis]').textContent()) ?? '';
@@ -287,6 +288,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       absorbed.includes('Snoozed items in the Inbox'),
       `${label('merge')}: the absorbed agenda, closed, is not named by its title ("${absorbed}")`,
     );
+    await press(page, '[data-agenda-menu-toggle]');
     await press(page, '[data-agenda-merge-open]');
     await page.locator('[data-agenda-merge-picker]').waitFor({ state: 'visible' });
     check(
@@ -344,6 +346,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
         .count()) >= 1,
       `${label('merged')}: "merged into !A141" is not a link`,
     );
+    if ((await page.locator('[data-agenda-menu-toggle]').count()) > 0) await press(page, '[data-agenda-menu-toggle]');
     check(
       (await page.locator('[data-agenda-merge-open]').count()) === 0,
       `${label('merged')}: a closed item offers a merge`,
@@ -370,6 +373,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   // AN OLDER MACHINE: no diff control, no merge button.
   {
     const page = await open('A140', '&old=1');
+    if ((await page.locator('[data-agenda-menu-toggle]').count()) > 0) await press(page, '[data-agenda-menu-toggle]');
     check(
       (await page.locator('[data-agenda-diff-toggle]').count()) === 0,
       `${label('old machine')}: a diff control is drawn`,

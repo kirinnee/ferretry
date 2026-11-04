@@ -5,7 +5,7 @@ import type { AgendaItem } from '@ferretry/protocol';
 import { AgendaItemCard } from '../../../src/features/agenda/agenda-item-card.tsx';
 import { agendaProse } from '../../../src/features/agenda/agenda-prose.tsx';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -50,6 +50,9 @@ const draw = async (extra: Partial<AgendaItem> = {}): Promise<HTMLElement> => {
       swipeable={false}
     />,
   );
+  // The terms and references table is folded: open it, as the owner does, to read its cells.
+  const terms = view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="references"]');
+  if (terms !== null && terms.getAttribute('aria-expanded') !== 'true') await interact(() => terms.click());
   return view.container;
 };
 

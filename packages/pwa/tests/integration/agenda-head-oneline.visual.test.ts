@@ -5,10 +5,10 @@
  * old idea of (i) + marquee to keep it into a single line!)" and "the card form have similar problem, and the padding
  * and margins make them even smaller".
  *
- *  - The title, the status dot, ‹ n of N ›, the clock, ⓘ and ✕ share ONE row. The title wraps onto at most two lines
- *    (which fit the row's 44px controls); it never scrolls and is never cut at a side, and one longer than two lines is
- *    drawn whole at the top of the body as well (the owner's lead, F559: "the owner can't read the question"). The
- *    summary is drawn on the card under the title (F909), outside the sticky head; ⓘ keeps only a host's tools.
+ *  - The title, the status dot, ‹ n of N ›, ⋯ and ✕ share ONE row. The title is ONE line (&F920, the owner: "make sure
+ *    title is marquee instead of wrap"): a marquee when too long, and where motion is reduced it is cut at a word with
+ *    the whole title a tap away; it is never drawn a second time. The summary is drawn on the card under the title
+ *    (F909), outside the sticky head; the quiet controls are behind ⋯.
  *  - The card is one border level: no frame, no padding of its own inside the view, so a form's fields use the column,
  *    which keeps a 16px gutter on a phone.
  *
@@ -167,10 +167,12 @@ describe('the open item’s head', () => {
         });
 
         for (const motion of ['no-preference', 'reduce'] as const)
-          it(`wraps a long title onto at most two lines in the same row, never moving or cut at a side, and draws it whole in the body (${name}, ${family}, ${scheme}, motion ${motion})`, async () => {
+          it(`keeps a long title on ONE line in the same row — a marquee, or cut at a word with the rest a tap away where motion is reduced — and never draws it twice (${name}, ${family}, ${scheme}, motion ${motion})`, async () => {
             const { tab, close } = await open(name, family, scheme, '&title=long', motion);
             try {
-              await tab.waitForSelector('[data-agenda-full-title]');
+              await tab.waitForSelector(
+                motion === 'reduce' ? '[data-agenda-title][data-cut]' : '[data-agenda-title][data-marquee]',
+              );
               const { head, title, pager } = await headBox(tab);
               expect(head.height, 'a long title does not make the head more than one row').toBeLessThanOrEqual(ONE_ROW);
               expect(title.right, 'the title ends before the controls').toBeLessThanOrEqual(pager.left + 1);
@@ -178,49 +180,40 @@ describe('the open item’s head', () => {
                 const box = document.querySelector('[data-agenda-title]') as HTMLElement;
                 const text = box.querySelector('.fy-item-view__title-text') as HTMLElement;
                 const lineHeight = Number.parseFloat(getComputedStyle(box).lineHeight);
-                const lines = [...text.getClientRects()].map(line => Math.round(line.top));
-                const whole = document.querySelector('[data-agenda-full-title]') as HTMLElement;
-                const head = (document.querySelector('.fy-item-view__head') as HTMLElement).getBoundingClientRect();
-                const first = text.getClientRects()[0];
                 return {
                   wrap: box.getAttribute('data-wrap') !== null,
-                  marquee: box.getAttribute('data-marquee') !== null,
-                  cut: box.getAttribute('data-cut') !== null,
                   // A CSS animation (the marquee): a theme's colour transition is not the title moving.
                   moving: text.getAnimations().filter(each => each instanceof CSSAnimation).length,
                   shownLines: Math.round(box.clientHeight / lineHeight),
-                  lineTops: new Set(lines).size,
-                  clamped: box.scrollHeight > box.clientHeight + 1,
-                  leftClip: first === undefined ? true : first.left < box.getBoundingClientRect().left - 1,
+                  cut: box.querySelector('.fy-item-view__title-cut')?.textContent ?? '',
                   title: text.textContent ?? '',
-                  whole: whole.textContent ?? '',
-                  wholeTop: whole.getBoundingClientRect().top,
-                  wholeDrawn: whole.getClientRects().length > 0,
-                  headBottom: head.bottom,
+                  whole: document.querySelectorAll('[data-agenda-full-title]').length,
                   controlsRight: (document.querySelector('.fy-item-view__pager') as HTMLElement).getBoundingClientRect()
                     .right,
                   width: document.documentElement.clientWidth,
                 };
               });
-              expect(state.wrap, 'the head wraps the title').toBe(true);
-              expect(state.marquee, 'it never scrolls').toBe(false);
-              expect(state.cut, 'nor is it cut at a word').toBe(false);
-              expect(state.moving, 'nothing moves').toBe(0);
-              expect(state.shownLines, 'two lines in the head').toBe(2);
-              expect(state.lineTops, 'the words wrap onto more than one line').toBeGreaterThan(1);
-              expect(state.leftClip, 'never cut on the left').toBe(false);
-              expect(state.controlsRight, '‹ n/N ›, ⓘ, the clock and ✕ fit the screen').toBeLessThanOrEqual(
-                state.width + 1,
-              );
-              expect(state.clamped, 'this title is longer than two lines').toBe(true);
-              expect(state.whole, 'so it is drawn whole in the body').toBe(state.title);
-              expect(state.wholeDrawn).toBe(true);
-              expect(state.wholeTop, 'straight under the head').toBeGreaterThanOrEqual(state.headBottom - 1);
-              const height = head.height;
-              await tab.locator('[data-agenda-title]').click();
-              await framesSettled(tab);
-              expect((await headBox(tab)).head.height, 'a tap changes nothing').toBeLessThanOrEqual(height + 1);
-              await shot(tab, name, `${family}-${scheme}`, motion === 'reduce' ? 'long-title-reduced' : 'long-title');
+              expect(state.wrap, 'the head never wraps the title').toBe(false);
+              expect(state.shownLines, 'one line in the head').toBe(1);
+              expect(state.whole, 'never a second copy in the body').toBe(0);
+              expect(state.controlsRight, '‹ n/N ›, ⋯ and ✕ fit the screen').toBeLessThanOrEqual(state.width + 1);
+              if (motion === 'reduce') {
+                expect(state.moving, 'nothing moves').toBe(0);
+                expect(state.cut.endsWith('…'), 'cut at a word, with an ellipsis').toBe(true);
+                expect(state.title.startsWith(state.cut.slice(0, -1).trimEnd()), 'the cut is the title’s start').toBe(
+                  true,
+                );
+                await shot(tab, name, `${family}-${scheme}`, 'long-title-reduced');
+                await tab.locator('[data-agenda-title]').click();
+                await framesSettled(tab);
+                expect(
+                  await tab.locator('[data-agenda-title][data-expanded]').count(),
+                  'a tap shows the whole title',
+                ).toBe(1);
+              } else {
+                expect(state.moving, 'the title scrolls to its end and back').toBeGreaterThan(0);
+                await shot(tab, name, `${family}-${scheme}`, 'long-title');
+              }
             } finally {
               await close();
             }
@@ -242,7 +235,10 @@ describe('the open item’s head', () => {
             const description = await tab.locator('[data-agenda-description]').boundingBox();
             expect(description, 'the summary is drawn').not.toBeNull();
             expect(description?.y ?? 0, 'under the head, not inside it').toBeGreaterThanOrEqual(head.bottom - 1);
-            expect(await tab.locator('[data-agenda-info-toggle]').count(), 'nothing is left behind ⓘ').toBe(0);
+            expect(
+              await tab.locator('[data-agenda-info-toggle]').count(),
+              'there is no ⓘ: the quiet controls are ⋯',
+            ).toBe(0);
             await shot(tab, name, `${family}-${scheme}`, 'description');
             await tab.evaluate(() => {
               const body = document.querySelector('.fy-item-view__body') as HTMLElement;

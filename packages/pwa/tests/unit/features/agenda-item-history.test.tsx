@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaItemHistory } from '../../../src/features/agenda/agenda-item-history.tsx';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
 import { revisionStamp } from '../../../src/lib/agenda-revisions.ts';
-import { type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -15,14 +15,47 @@ const AT = Date.parse('2026-08-01T10:02:00.000Z');
 
 const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
   view = await mount(
-    <AgendaItemHistory events={events} ferret="Lizzette" now={NOW} renderProse={text => <p>{text}</p>} />,
+    <AgendaItemHistory
+      events={events}
+      ferret="Lizzette"
+      itemKey={`history-test:${String(++drawn)}`}
+      now={NOW}
+      renderProse={text => <p>{text}</p>}
+    />,
   );
+  // The conversation is folded: open it, as the owner does, to read it.
+  const toggle = view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]');
+  if (toggle !== null) await interact(() => toggle.click());
   return view.container;
 };
+let drawn = 0;
 
 describe('the Conversation of an open agenda item', () => {
   test('draws nothing when nothing was said about the item', async () => {
     expect((await draw([])).querySelector('[data-agenda-history]')).toBeNull();
+  });
+
+  test('starts folded, saying how many messages it holds, and opens on a tap', async () => {
+    view = await mount(
+      <AgendaItemHistory
+        events={[
+          { kind: 'gap', key: 'gap', at: 0, earlier: 3, state: 'loading' },
+          { kind: 'owner', key: 'o', at: AT, text: 'is it done?' },
+          { kind: 'ferret', key: 'f', at: AT + 1, text: 'Yes.' },
+        ]}
+        ferret="Lizzette"
+        itemKey="history-test:folded"
+        now={NOW}
+        renderProse={text => <p>{text}</p>}
+      />,
+    );
+    const root = view.container;
+    const toggle = must(root.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toBe('Conversation2 messages');
+    expect(root.querySelector('[data-agenda-history]')).toBeNull();
+    await interact(() => toggle.click());
+    expect(root.querySelectorAll('[data-agenda-history] [data-history]')).toHaveLength(3);
   });
 
   test('reads like the chat, oldest first: the ferret plain under its name and time, the owner as a bubble', async () => {
@@ -35,9 +68,9 @@ describe('the Conversation of an open agenda item', () => {
     const rows = [...root.querySelectorAll('[data-agenda-history] li')];
     // An edit is the activity log's, never a line of the conversation.
     expect(rows.map(row => row.getAttribute('data-history'))).toEqual(['ferret', 'owner', 'ferret']);
-    expect(must(root.querySelector('[data-agenda-part="conversation"] h4'), 'heading').textContent).toBe(
-      'Conversation',
-    );
+    expect(
+      must(root.querySelector('[data-agenda-part="conversation"] h4 .fy-card__label'), 'heading').textContent,
+    ).toBe('Conversation');
     expect(rows[0]?.querySelector('.fy-hist__who')?.textContent).toBe(
       `Lizzette${revisionStamp(new Date(AT).toISOString(), NOW)}`,
     );

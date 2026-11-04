@@ -109,6 +109,7 @@ test('picking an older version while a follow-up holds the view lets the hold go
     await click(view.container.querySelector('[data-input-offer="HOME"]'));
     await flush();
     expect(view.container.querySelector('[data-input-always-button]')).not.toBeNull();
+    await interact(() => view.container.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]')?.click());
     const picker = view.container.querySelector<HTMLSelectElement>('[data-agenda-version-picker]');
     if (picker === null) throw new Error('expected the edited input to have a version picker');
     await interact(() => {

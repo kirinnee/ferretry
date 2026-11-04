@@ -103,65 +103,104 @@ const TOOLS = (
   </button>
 );
 
-describe('the item view tools behind ⓘ', () => {
-  test('draws ⓘ for a host that hands it tools even when the item has no description, and puts them in its panel', async () => {
-    await draw(richItem, {
-      tools: (
-        <button data-test-tool="" type="button">
-          Skip
-        </button>
-      ),
-    });
+/** Opens the head's ⋯ menu (a popover here: the test window is wider than a phone). */
+const openMenu = async (): Promise<HTMLElement> => {
+  const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-menu-toggle]');
+  if (toggle.getAttribute('aria-expanded') !== 'true') await interact(() => toggle.click());
+  return one('[data-agenda-menu="popover"]');
+};
+
+describe('the item view’s ⋯ menu', () => {
+  test('holds a host’s quiet tools even when the item has nothing else to put there', async () => {
+    await draw(agendaItem('A49', { title: 'Same', subject: 'Same' } as Partial<AgendaItem>), { tools: TOOLS });
     expect(root().querySelector('[data-test-tool]')).toBeNull();
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    expect(one('[data-test-tool]').textContent).toBe('Skip');
+    const menu = await openMenu();
+    expect(must(menu.querySelector('[data-test-tool]'), 'tool').textContent).toBe('Skip');
+  });
+
+  test('is a popover named for the item’s options, opened and closed by ⋯, and by Esc without closing the item', async () => {
+    const spy = await draw(richItem, { tools: TOOLS });
+    const toggle = one<HTMLButtonElement>('[data-agenda-menu-toggle]');
+    expect(toggle.getAttribute('aria-label')).toBe('Item options');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    const menu = await openMenu();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-controls')).toBe(menu.id);
+    expect(menu.getAttribute('role')).toBe('dialog');
+    await press('Escape', {}, must(menu.querySelector('button, select'), 'a control'));
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(spy.closed).toBe(0);
+    await openMenu();
+    await interact(() => toggle.click());
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+  });
+
+  test('closes on a press outside it', async () => {
+    await draw(richItem, { tools: TOOLS });
+    await openMenu();
+    await interact(() => {
+      one('[data-agenda-description]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    });
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+  });
+
+  test('a new item opens with its ⋯ closed', async () => {
+    await draw(richItem, { tools: TOOLS });
+    await openMenu();
+    await view?.unmount();
+    view = null;
+    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>), { tools: TOOLS });
+    expect(one('[data-agenda-menu-toggle]').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test('draws no ⋯ when there is nothing to put behind it: a settled item, never edited, with no host tools', async () => {
+    await draw(agendaItem('A49', { title: 'Same', subject: 'Same', why: 'Same' } as Partial<AgendaItem>), {
+      settled: <p>Done.</p>,
+    });
+    expect(root().querySelector('[data-agenda-menu-toggle]')).toBeNull();
   });
 });
 
 describe('the item view snooze control', () => {
-  test('draws no clock when it is given nothing to snooze with', async () => {
+  test('offers no Snooze when it is given nothing to snooze with', async () => {
     await draw(richItem);
+    await openMenu();
+    expect(root().querySelector('[data-agenda-menu-group="snooze"]')).toBeNull();
     expect(root().querySelector('[data-agenda-snooze]')).toBeNull();
   });
 
-  test('puts the clock in the head’s one row, after ⓘ and before ✕ — never in the ⓘ panel — and snoozes from there; off while busy', async () => {
+  test('is the ⋯ menu’s row of times — never a clock in the head — and snoozes from there, closing the menu; off while busy', async () => {
     const snoozed: string[] = [];
     await draw(richItem, { onSnooze: until => snoozed.push(until), tools: TOOLS });
-    const clock = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-snooze]');
-    expect(clock.className).toBe('fy-item-view__step fy-item-view__step--tight fy-card-head__snooze');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    expect(root().querySelectorAll('[data-agenda-snooze]')).toHaveLength(1);
-    expect(root().querySelector('[data-agenda-info-panel] [data-agenda-snooze]')).toBeNull();
-    await interact(() => clock.click());
-    await interact(() => must(root().querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
+    expect(root().querySelector('.fy-item-view__bar [data-agenda-snooze]')).toBeNull();
+    const menu = await openMenu();
+    const picks = [...menu.querySelectorAll('[data-agenda-menu-group="snooze"] [data-agenda-menu-snooze]')];
+    expect(picks.map(pick => pick.textContent)).toEqual(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']);
+    await interact(() => must(menu.querySelector<HTMLElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').click());
     expect(snoozed).toEqual([new Date(NOW + 3_600_000).toISOString()]);
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
     await view?.unmount();
     view = null;
     await draw(richItem, { onSnooze: () => undefined, busy: true });
-    expect(one<HTMLButtonElement>('[data-agenda-snooze]').disabled).toBe(true);
+    await openMenu();
+    expect(one<HTMLButtonElement>('[data-agenda-menu-snooze="hour"]').disabled).toBe(true);
   });
 
-  test('has no ⓘ for an item with nothing to say under its title, but still has its clock', async () => {
-    await draw(
-      agendaItem('A48', {
-        title: 'Same',
-        subject: 'Same',
-        why: 'Same',
-        ask: choices('Yes', 'No'),
-      } as unknown as Partial<AgendaItem>),
-      {
-        onSnooze: () => undefined,
-      },
-    );
-    expect(root().querySelector('[data-agenda-info-toggle]')).toBeNull();
-    expect(root().querySelectorAll('.fy-item-view__bar [data-agenda-snooze]')).toHaveLength(1);
+  test('opens Custom… in place, with a time field and its own Snooze', async () => {
+    const snoozed: string[] = [];
+    await draw(richItem, { onSnooze: until => snoozed.push(until) });
+    const menu = await openMenu();
+    const custom = must(menu.querySelector<HTMLButtonElement>('[data-agenda-menu-snooze="custom"]'), 'Custom…');
+    await interact(() => custom.click());
+    expect(custom.getAttribute('aria-expanded')).toBe('true');
+    expect(menu.querySelector('[data-snooze-custom] input[type="datetime-local"]')).not.toBeNull();
   });
 });
 
 describe('the v6 layout: title, ONE card — one column', () => {
-  test('is a dialog over the message list whose ONE scroller holds the head and the card (the conversation inside it)', async () => {
+  test('is a dialog over the message list whose ONE scroller holds the head and the card (the conversation inside it, folded)', async () => {
     const history: HistoryEvent[] = [{ kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47: noted.' }];
-    await draw(richItem, {}, history);
+    await draw(richItem, { itemKey: 'view-test:v6-layout' }, history);
     expect(one('section').getAttribute('role')).toBe('dialog');
     const column = one('.fy-item-view__body > .fy-item-view__column');
     expect([...column.children].map(child => child.className.split(' ')[0])).toEqual([
@@ -169,27 +208,30 @@ describe('the v6 layout: title, ONE card — one column', () => {
       'fy-card',
       'fy-item-view__dock',
     ]);
+    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toBe('Conversation1 message');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-fold="conversation"]').click());
     expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toContain('Re !A47: noted.');
     // The answer row is in the sticky dock at the foot of the column, not a strip of its own above the composer.
     expect(one('.fy-item-view__dock [data-agenda-quick-replies]')).toBeDefined();
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
-  test('is ONE row: the title, then the urgency dot, the pager, ⓘ, the clock and ✕ — nothing under it until ⓘ opens', async () => {
+  test('is ONE row: the one-line title, then the urgency dot, the pager, ⋯ and ✕ — nothing under it', async () => {
     await draw(agendaItem('A47', { ...richItem, blockingNow: true } as Partial<AgendaItem>), {
       onSnooze: () => undefined,
       tools: TOOLS,
     });
     const head = one('.fy-item-view__head');
-    expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
-      'fy-item-view__bar fy-card-head',
-    ]);
+    expect([...head.children].map(child => child.className)).toEqual(['fy-item-view__bar fy-card-head']);
     const bar = one('.fy-item-view__head > .fy-item-view__bar');
     expect([...bar.children].map(child => child.className.split(' ')[0])).toEqual([
       'fy-item-view__title',
       'fy-item-view__pager',
     ]);
     expect(one('[data-agenda-title]').textContent).toBe('Database for the board');
+    // One line: no wrap mode, and no second copy of the title in the body.
+    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(false);
+    expect(root().querySelector('[data-agenda-full-title]')).toBeNull();
     const tools = [...bar.querySelectorAll('.fy-item-view__pager > *')].map(
       node => node.getAttribute('aria-label') ?? node.getAttribute('data-agenda-where') ?? node.className,
     );
@@ -199,22 +241,23 @@ describe('the v6 layout: title, ONE card — one column', () => {
       'Previous item',
       '2 of 3',
       'Next item',
-      'About this item',
-      'fy-snooze',
+      'fy-item-menu',
       'Back to the chat',
     ]);
+    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-snooze]')).toBeNull();
     expect(root().querySelector('[data-agenda-ask]')).toBeNull();
   });
 
-  test('says the item’s summary on the card under the title, whole — not behind ⓘ, which a bare chat view does not draw', async () => {
+  test('says the item’s summary on the card under the title, whole — never behind ⋯', async () => {
     await draw(richItem);
     expect(one('.fy-card [data-agenda-part="head"] [data-agenda-description]').textContent).toBe(
       'Which database should keep the board’s finished items?',
     );
-    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-info-panel]')).toBeNull();
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-agenda-menu-group="about"]')).toBeNull();
   });
 
-  test('keeps a gate item’s summary behind ⓘ, since its card repeats nothing: a tap opens the panel, another closes it', async () => {
+  test('keeps a gate item’s summary behind ⋯, since its card repeats nothing', async () => {
     await draw(
       agendaItem('A50', {
         title: 'Badge colour',
@@ -233,31 +276,12 @@ describe('the v6 layout: title, ONE card — one column', () => {
       } as unknown as Partial<AgendaItem>),
     );
     expect(root().querySelector('[data-agenda-description]')).toBeNull();
-    const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-info-toggle]');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-controls')).toBe(one('[data-agenda-info-panel]').id);
-    expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
-    await interact(() => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(one<HTMLElement>('.fy-item-view__head > [data-agenda-info-panel]').hidden).toBe(false);
-    expect(one('.fy-item-view__head [data-agenda-ask]').textContent).toBe('Try it: the badge is blue now');
-    await interact(() => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
-  });
-
-  test('a new item opens with its ⓘ closed', async () => {
-    await draw(richItem, { tools: TOOLS });
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    await view?.unmount();
-    view = null;
-    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>), { tools: TOOLS });
-    expect(one('[data-agenda-info-toggle]').getAttribute('aria-expanded')).toBe('false');
-  });
-
-  test('draws no ⓘ when there is nothing to say behind it', async () => {
-    await draw(agendaItem('A49', { title: 'Same', subject: 'Same', why: 'Same' } as Partial<AgendaItem>), {}, []);
-    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-info-panel]')).toBeNull();
+    const menu = await openMenu();
+    expect(must(menu.querySelector('[data-agenda-menu-group="about"] [data-agenda-ask]'), 'summary').textContent).toBe(
+      'Try it: the badge is blue now',
+    );
+    // A gate is answered on its own buttons: the menu offers no Not needed for it.
+    expect(menu.querySelector('[data-agenda-dismiss]')).toBeNull();
   });
 
   test('keeps a title that fits as plain text, and marks none as scrolling until the browser says it overflows', async () => {
@@ -283,13 +307,12 @@ describe('the v6 layout: title, ONE card — one column', () => {
     expect(root().querySelector('.fy-item-view__bar [data-agenda-status]')).toBeNull();
   });
 
-  test('teaches nothing: no hint line under the type, no ⋯ menu', async () => {
+  test('teaches nothing: no hint line under the type, and ⋯ is an icon, not a word', async () => {
     await draw(richItem);
     expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Question');
     const text = root().textContent ?? '';
     expect(text).not.toContain('it is yours to decide');
     expect(text).not.toContain('⋯');
-    expect(root().querySelector('[aria-haspopup="menu"]:not([data-agenda-snooze])')).toBeNull();
   });
 });
 
@@ -388,20 +411,24 @@ describe('the question and its options', () => {
 });
 
 describe('Not needed', () => {
-  test('is a small pill in the card’s top bar — a button only, saying no swipe and no arrow', async () => {
+  test('is a button in the ⋯ menu — never in the card — saying no swipe and no arrow, and closes the menu', async () => {
     const spy = await draw(richItem);
-    const pill = one<HTMLButtonElement>('.fy-card__top [data-agenda-dismiss]');
-    expect(pill.textContent).toBe('Not needed');
-    expect(pill.getAttribute('aria-label')).toBe('Not needed');
-    expect(pill.querySelector('.fy-card__arrow')).toBeNull();
+    expect(root().querySelector('.fy-card [data-agenda-dismiss]')).toBeNull();
+    const menu = await openMenu();
+    const button = must(menu.querySelector<HTMLButtonElement>('[data-agenda-dismiss]'), 'Not needed');
+    expect(button.textContent).toBe('Not needed');
+    expect(button.querySelector('.fy-card__arrow')).toBeNull();
     expect(root().querySelector('.fy-qr [data-agenda-dismiss]')).toBeNull();
-    await interact(() => pill.click());
+    await interact(() => button.click());
     expect(spy.acted).toEqual([DISMISS_ACTION]);
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
   });
 
-  test('stays a button on a phone too: still no swipe wording', async () => {
-    await draw(richItem, { swipeable: true });
-    expect(one('.fy-card__top [data-agenda-dismiss]').getAttribute('aria-label')).toBe('Not needed');
+  test('is left to the host where it hands its own tools (the Inbox’s Skip and Not needed): said once', async () => {
+    await draw(richItem, { tools: TOOLS });
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-agenda-dismiss]')).toBeNull();
+    expect(menu.querySelector('[data-test-tool]')).not.toBeNull();
   });
 
   test('is never the ↓ key or the ↓ swipe on the answer row: those skip to the next item and answer nothing', async () => {
@@ -461,6 +488,7 @@ describe('Not needed', () => {
 
   test('is not offered where the item cannot be answered here', async () => {
     await draw(richItem, { settled: <p data-settled="">Snoozed</p> });
+    await openMenu();
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
     expect(one('.fy-card [data-settled]').textContent).toBe('Snoozed');
   });
@@ -475,15 +503,25 @@ describe('the version picker', () => {
       ],
     } as Partial<AgendaItem>);
     await draw(edited);
-    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    expect(root().querySelector('.fy-card [data-agenda-version-picker]')).toBeNull();
+    const picker = must(
+      (await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-slot] [data-agenda-version-picker]'),
+      'picker',
+    );
     expect([...picker.options].map(option => option.textContent)).toEqual(['v2 of 2 · 3m ago', expect.any(String)]);
     expect(picker.options[1]?.textContent).toMatch(/^v1 of 2/u);
     await interact(() => {
       picker.value = '1';
       picker.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    // Picking closes the menu, and the head says an earlier version is on screen.
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    // The picked control went with the menu: focus is back on ⋯, never dropped on the page.
+    expect(document.activeElement).toBe(one('[data-agenda-menu-toggle]'));
+    expect(one('[data-agenda-shown-version]').textContent).toBe('Showing v1');
     expect(one('[data-agenda-situation]').textContent).toContain('Then: one');
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    await openMenu();
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
     await interact(() => one<HTMLButtonElement>('[data-agenda-latest]').click());
     expect(one('[data-agenda-situation]').textContent).toContain('Now: two engines');
@@ -503,8 +541,11 @@ describe('the version picker', () => {
         load: async () => edited,
       },
     });
-    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
     expect(picker.getAttribute('aria-label')).toBe('Edit');
+    expect(
+      must(root().querySelector('[data-agenda-version-slot] [data-agenda-diff-toggle]'), 'Changes').textContent,
+    ).toBe('Changes');
     expect(picker.options[0]?.textContent).toMatch(/^Edit 2 of 2/u);
     expect(picker.options[1]?.textContent).toMatch(/^Edit 1 of 2/u);
   });
@@ -539,6 +580,7 @@ describe('the sections the ferret added', () => {
     expect(one('[data-agenda-part="needs"] [data-agenda-section="impact"]')).toBeDefined();
     expect(one('[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
     expect(one('[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe('Allow it for a week');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-fold="references"]').click());
     expect(one<HTMLAnchorElement>('[data-agenda-references] a').href).toBe('https://example.test/pr/1');
   });
 
@@ -579,8 +621,13 @@ describe('terms', () => {
     expect(root().querySelector('[data-agenda-term-tip]')).toBeNull();
   });
 
-  test('are listed in the open Terms and references table, each with its meaning', async () => {
-    await draw(richItem);
+  test('are listed in the Terms and references table — folded, with how many it holds — each with its meaning', async () => {
+    await draw(richItem, { itemKey: 'view-test:terms-table' });
+    const toggle = one<HTMLButtonElement>('[data-agenda-fold="references"]');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toBe('Terms and references2 entries');
+    expect(root().querySelector('table[data-agenda-references]')).toBeNull();
+    await interact(() => toggle.click());
     const table = one('[data-agenda-part="references"] table[data-agenda-references]');
     expect([...table.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
     expect([...table.querySelectorAll('tbody td')].map(cell => cell.textContent)).toEqual([
@@ -657,7 +704,7 @@ describe('an input request', () => {
     } as Partial<AgendaItem>);
     await draw(input, { inputForm: <form data-fake-input="" /> });
     expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
-    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
     await interact(() => {
       picker.value = '1';
       picker.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1194,7 +1241,9 @@ describe('a form card', () => {
   test('has no answer buttons to swipe, but Not needed is still there', async () => {
     await draw(form, { formKey: 'view-test' });
     expect(root().querySelector('[data-agenda-quick-replies] button')).toBeNull();
-    expect(one('[data-agenda-dismiss]').textContent).toContain('Not needed');
+    expect(must((await openMenu()).querySelector('[data-agenda-dismiss]'), 'Not needed').textContent).toBe(
+      'Not needed',
+    );
   });
 
   test('picking changes the form: a radio replaces, a checkbox adds, Yes/No presses', async () => {
@@ -1270,64 +1319,43 @@ describe('a form card', () => {
 describe('the title in the head', () => {
   const LONG = 'Should the badge count snoozed items, and should a blocker that wakes one count it again right away?';
   const proto = HTMLElement.prototype;
-  const real = {
-    scrollHeight: Object.getOwnPropertyDescriptor(proto, 'scrollHeight'),
-    clientHeight: Object.getOwnPropertyDescriptor(proto, 'clientHeight'),
-  };
-  /** Lays the head's title out as `lines` lines of a two-line box (happy-dom lays nothing out). */
-  const titleLines = (lines: number): void => {
-    Object.defineProperty(proto, 'scrollHeight', {
+  test('is ONE line on every item — never wrapped, never drawn a second time in the body', async () => {
+    await draw(agendaItem('A60', { title: LONG }));
+    const title = one('[data-agenda-title]');
+    expect(title.hasAttribute('data-wrap')).toBe(false);
+    expect(title.textContent).toBe(LONG);
+    expect(root().querySelector('[data-agenda-full-title]')).toBeNull();
+  });
+
+  test('scrolls as a marquee when the browser says it overflows its one line', async () => {
+    const rect = (width: number): DOMRect => ({ width, height: 20 }) as DOMRect;
+    const realRect = proto.getBoundingClientRect;
+    const realWidth = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+    proto.getBoundingClientRect = function (this: HTMLElement) {
+      return rect(this.classList.contains('fy-item-view__title-text') ? 900 : 0);
+    };
+    Object.defineProperty(proto, 'clientWidth', {
       configurable: true,
       get(this: HTMLElement) {
-        return this.hasAttribute('data-agenda-title') ? lines * 20 : 0;
+        return this.hasAttribute('data-agenda-title') ? 200 : 0;
       },
     });
-    Object.defineProperty(proto, 'clientHeight', {
-      configurable: true,
-      get(this: HTMLElement) {
-        return this.hasAttribute('data-agenda-title') ? Math.min(lines, 2) * 20 : 0;
-      },
-    });
-  };
-  afterEach(() => {
-    for (const [name, descriptor] of Object.entries(real)) {
-      if (descriptor === undefined) Reflect.deleteProperty(proto, name);
-      else Object.defineProperty(proto, name, descriptor);
+    try {
+      await draw(agendaItem('A61', { title: LONG }));
+      expect(one('[data-agenda-title]').hasAttribute('data-marquee')).toBe(true);
+    } finally {
+      proto.getBoundingClientRect = realRect;
+      if (realWidth === undefined) Reflect.deleteProperty(proto, 'clientWidth');
+      else Object.defineProperty(proto, 'clientWidth', realWidth);
     }
   });
 
-  test('wraps onto at most two lines on every item — never a marquee — ordinary, gate or machine alike', async () => {
-    await draw(agendaItem('A60', { title: LONG }));
-    const title = one('[data-agenda-title]');
-    expect(title.hasAttribute('data-wrap')).toBe(true);
-    expect(title.hasAttribute('data-marquee')).toBe(false);
-    expect(title.textContent).toBe(LONG);
-  });
-
-  test('the rule wraps at words onto two lines, and never scrolls or cuts at a side', () => {
+  test('the rule keeps the head title on one line: nowrap, never a line clamp', () => {
     const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
-    const rule = css.slice(css.indexOf('.fy-item-view__title[data-wrap] {'));
+    const rule = css.slice(css.indexOf('.fy-item-view__title {'));
     const body = rule.slice(0, rule.indexOf('}'));
-    expect(body).toContain('-webkit-line-clamp: 2');
-    expect(body).toContain('line-clamp: 2');
-    expect(body).toContain('white-space: normal');
-    expect(body).not.toContain('nowrap');
-    expect(body).not.toContain('word-break: break-all');
-  });
-
-  test('a title longer than its two lines is drawn whole at the top of the body as well', async () => {
-    titleLines(3);
-    await draw(agendaItem('A61', { title: LONG }));
-    const whole = one('[data-agenda-full-title]');
-    expect(whole.textContent).toBe(LONG);
-    expect(whole.getAttribute('aria-hidden')).toBe('true');
-    // First in the body: straight under the sticky head, before the card's own parts.
-    expect(whole.previousElementSibling?.matches('[data-agenda-top]')).toBe(true);
-  });
-
-  test('a title its two lines hold is drawn once, in the head', async () => {
-    titleLines(2);
-    await draw(agendaItem('A62', { title: 'Database for the board' }));
-    expect(root().querySelector('[data-agenda-full-title]')).toBeNull();
+    expect(body).toContain('white-space: nowrap');
+    expect(css).not.toContain('.fy-item-view__title[data-wrap]');
+    expect(css).not.toContain('line-clamp: 2');
   });
 });

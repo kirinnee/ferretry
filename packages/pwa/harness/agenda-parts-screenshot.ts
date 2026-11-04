@@ -12,8 +12,8 @@
  * its box clipping it); the conversation drops a reply; the card ask's buttons are not inside "What I need from you",
  * lack their own heading or the card's test steps, are cut off, or sit under the dock; the item's own answer is docked
  * beside a card ask; the activity log does not list each stage; a push does not open the item at its ask; the head's
- * title scrolls, is cut at a side or takes more than two lines, or is longer than them and not drawn whole in the
- * body; a Yes / No row is not No ← · Yes →; or a choice whose options are explained has buttons that do not say its
+ * title takes more than ONE line, is cut on the left or is drawn a second time in the body (a long one is a marquee,
+ * &F920); the terms or the conversation start open; a Yes / No row is not No ← · Yes →; or a choice whose options are explained has buttons that do not say its
  * options' short labels (a bare letter, a description, an empty or cut-off button), or a label of a choice of three
  * that is cut, broken inside a word or longer than two lines on a phone.
  */
@@ -147,10 +147,9 @@ const checkCommon = async (page: Page, label: string): Promise<void> => {
         document.documentElement.scrollWidth - window.innerWidth,
         body === null ? 0 : body.scrollWidth - body.clientWidth,
       ),
-      // The head's title is the one clamp allowed (two lines), and only because it is drawn whole in the body too.
       clamped: [...(document.querySelector('[data-agenda-view]')?.querySelectorAll('*') ?? [])].filter(node => {
         const style = getComputedStyle(node);
-        return style.webkitLineClamp !== 'none' && style.webkitLineClamp !== '' && !node.matches('[data-agenda-title]');
+        return style.webkitLineClamp !== 'none' && style.webkitLineClamp !== '';
       }).length,
       title: (() => {
         const box = document.querySelector<HTMLElement>('.fy-item-view__head [data-agenda-title]');
@@ -158,13 +157,12 @@ const checkCommon = async (page: Page, label: string): Promise<void> => {
         if (box === null || box === undefined || text === null || text === undefined) return null;
         const first = text.getClientRects()[0];
         return {
-          moves: box.hasAttribute('data-marquee') || text.getAnimations().some(each => each instanceof CSSAnimation),
-          cut: box.hasAttribute('data-cut'),
           lines: Math.round(box.clientHeight / Number.parseFloat(getComputedStyle(box).lineHeight)),
-          leftClip: first === undefined || first.left < box.getBoundingClientRect().left - 1,
-          clamped: box.scrollHeight > box.clientHeight + 1,
-          full: text.textContent ?? '',
-          whole: document.querySelector('[data-agenda-full-title]')?.textContent ?? null,
+          // A marquee moves the text left on purpose; only a title that starts cut is a fault.
+          leftClip:
+            !box.hasAttribute('data-marquee') &&
+            (first === undefined || first.left < box.getBoundingClientRect().left - 1),
+          twice: document.querySelectorAll('[data-agenda-full-title]').length,
         };
       })(),
       yesNo: [...document.querySelectorAll('[data-agenda-option]')]
@@ -187,14 +185,9 @@ const checkCommon = async (page: Page, label: string): Promise<void> => {
   const title = found.title;
   check(title !== null, `${label}: the head has no title`);
   if (title !== null) {
-    check(!title.moves, `${label}: the head's title scrolls`);
-    check(!title.cut, `${label}: the head's title is cut at a word`);
     check(!title.leftClip, `${label}: the head's title is cut on the left`);
-    check(title.lines <= 2, `${label}: the head's title takes ${title.lines} lines, wanted two at most`);
-    check(
-      !title.clamped || title.whole === title.full,
-      `${label}: the title is longer than the head's two lines and not drawn whole in the body`,
-    );
+    check(title.lines === 1, `${label}: the head's title takes ${title.lines} lines, wanted one`);
+    check(title.twice === 0, `${label}: the head's title is drawn a second time in the body`);
   }
   check(
     // Read left to right, each pair is No, Yes; a lone No (beside "Only blockers") or a lone Yes has no pair to order.
@@ -397,8 +390,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       await scrollToPart(page, 'detail');
       await shot(page, 'detail-open', form, theme);
 
-      // The terms and references table.
+      // The terms and references table: folded, then open.
       await scrollToPart(page, 'references');
+      check(
+        (await page.locator('[data-agenda-fold="references"]').getAttribute('aria-expanded')) === 'false',
+        `references ${form} ${theme}: the terms and references start open`,
+      );
+      await press(page, '[data-agenda-fold="references"]');
+      await page.waitForTimeout(150);
       const table = await page.evaluate(() => {
         const node = document.querySelector('[data-agenda-part="references"] table');
         const rows = [...(node?.querySelectorAll('tbody tr') ?? [])];
@@ -440,7 +439,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       await page.waitForTimeout(200);
       await shot(page, 'report-end', form, theme);
 
-      // The conversation, several replies, oldest first.
+      // The conversation, several replies, oldest first: folded, then open.
+      await scrollToPart(page, 'conversation');
+      check(
+        (await page.locator('[data-agenda-fold="conversation"]').getAttribute('aria-expanded')) === 'false',
+        `conversation ${form} ${theme}: the conversation starts open`,
+      );
+      await press(page, '[data-agenda-fold="conversation"]');
+      await page.waitForTimeout(150);
       await scrollToPart(page, 'conversation');
       const said = await page
         .locator('[data-agenda-part="conversation"] [data-history]')
@@ -572,14 +578,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     await page.close();
   }
 
-  // A TITLE LONGER THAN THE HEAD'S TWO LINES on a phone: wrapped there, and whole at the top of the body.
+  // A LONG TITLE: one line in the head (a marquee), never drawn a second time in the body.
   const long = await open('A125');
   await scrollTop(long);
   await checkCommon(long, `long-title ${form} ${theme}`);
-  if (form === 'phone') {
-    const whole = await long.locator('[data-agenda-full-title]').count();
-    check(whole === 1, `long-title ${form} ${theme}: the long title is not drawn whole in the body`);
-  }
+  check(
+    form === 'desktop' || (await long.locator('[data-agenda-title][data-marquee]').count()) === 1,
+    `long-title ${form} ${theme}: the long title is not a marquee`,
+  );
   await shot(long, 'long-title', form, theme);
   await long.close();
 

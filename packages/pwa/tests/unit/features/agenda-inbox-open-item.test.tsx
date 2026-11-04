@@ -16,6 +16,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
+import { openConversation } from '../../support/agenda-folds.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
@@ -129,7 +130,7 @@ describe('the open Inbox item', () => {
     expect(topView(mounted).querySelector('[data-agenda-dismiss]')).toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
     await interact(() =>
-      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
@@ -137,12 +138,15 @@ describe('the open Inbox item', () => {
   });
 
   it('offers no Snooze and no composer on a ferret’s rule suggestion: the ferret reads its own board (C2)', async () => {
-    const snoozeOf = (root: ParentNode) => root.querySelector('[data-agenda-snooze]');
+    const snoozeOf = async (root: HTMLElement): Promise<Element | null> => {
+      await interact(() => root.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]')?.click());
+      return root.querySelector('[data-agenda-menu-group="snooze"]');
+    };
     const plain = await mount(
       page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, renderComposer: () => <textarea /> }),
     );
     const offered =
-      snoozeOf(topView(plain)) !== null && plain.container.querySelector('[data-inbox-composer]') !== null;
+      (await snoozeOf(topView(plain))) !== null && plain.container.querySelector('[data-inbox-composer]') !== null;
     await plain.unmount();
     const mounted = await mount(
       page(fakeInbox(), [suggestionCard], {
@@ -151,7 +155,7 @@ describe('the open Inbox item', () => {
       }),
     );
     expect(offered).toBe(true);
-    expect(snoozeOf(topView(mounted))).toBeNull();
+    expect(await snoozeOf(topView(mounted))).toBeNull();
     expect(mounted.container.querySelector('[data-inbox-composer]')).toBeNull();
     await mounted.unmount();
   });
@@ -167,7 +171,7 @@ describe('the open Inbox item', () => {
     );
     const mounted = await mount(page(fakeInbox(), [suggested], { initialOpen: suggested.key }));
     await interact(() =>
-      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
@@ -427,6 +431,7 @@ describe('the open Inbox item’s History', () => {
       }),
     );
     await interact(() => Promise.resolve());
+    await openConversation(mounted.container);
     const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
     const ferret = [...mounted.container.querySelectorAll('[data-history="ferret"]')].map(node => node.textContent);
     expect(owner.some(text => text?.includes('Hold until Monday'))).toBe(true);
@@ -473,6 +478,7 @@ describe('the open Inbox item’s History', () => {
       </StoreProvider>,
     );
     await interact(() => Promise.resolve());
+    await openConversation(mounted.container);
     const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
     expect(owner.some(text => text?.includes('Words kept on the item'))).toBe(true);
     await mounted.unmount();
@@ -525,7 +531,7 @@ describe('opening an item takes its alerts down (docs/notifications.md § When a
     await interact(() => undefined);
     const first = [...openedOnDeck];
     await interact(() =>
-      must(topView(deck).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     await interact(() =>
       must(topView(deck).querySelector<HTMLButtonElement>('[data-inbox-tool="skip"]'), 'Skip').click(),

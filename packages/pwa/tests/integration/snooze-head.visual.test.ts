@@ -5,9 +5,12 @@
  * The owner (2026-11-01, &F370): "snooze is a common operation, would prefer if you can fit it into the top bar (for
  * cards, tasks, both in inbox and in chat)".
  *
- *  - An agenda item (`AgendaItemView`), the Inbox's quick-answer card to test (`ToTestStep`) and a list of cards to
- *    test (`ToTestList`: the chat's task panel, the Board's Cards view) each draw ONE clock, in the head's row, after
- *    ⓘ and before ✕ where those exist: never in the ⓘ panel, never in the answer row.
+ *  - The Inbox's quick-answer card to test (`ToTestStep`) and a list of cards to test (`ToTestList`: the chat's task
+ *    panel, the Board's Cards view) each draw ONE clock, in the head's row, after ⓘ and before ✕ where those exist:
+ *    never in the ⓘ panel, never in the answer row.
+ *  - The open agenda item (`AgendaItemView`) keeps Snooze behind its ONE ⋯ (&F920, the owner: "make it context menu
+ *    (and btm sheet on mobile)"), so its head has room for the title: a bottom sheet on a phone, a popover wider, and
+ *    never a clock in the row or the answer row.
  *  - The head stays ONE row, and on a 390px phone the title still has room for 16 characters before it scrolls.
  *  - The snooze menu opens inside the viewport and holds 1 hour / 4 hours / Tomorrow / Custom.
  *
@@ -85,6 +88,9 @@ const SCENES = [
   { scene: 'list', head: '.fy-totest__top', ready: '.fy-totest__top [data-to-test-title]' },
 ] as const;
 
+/** The cards whose head draws the clock itself; the open agenda item's Snooze is behind its ⋯. */
+const CLOCK_SCENES = SCENES.slice(1);
+
 /** One row's tallest control is 44px on touch; the head's own padding is under 20px more. */
 const ONE_ROW = 72;
 
@@ -160,7 +166,7 @@ describe('snooze in the card’s head', () => {
   for (const { name } of VIEWPORTS)
     for (const family of FAMILIES)
       for (const scheme of ['light', 'dark'] as const)
-        for (const scene of SCENES) {
+        for (const scene of CLOCK_SCENES) {
           const tag = `${family}-${scheme}`;
           const label = `${scene.scene}, ${name}, ${family}, ${scheme}`;
 
@@ -224,20 +230,39 @@ describe('snooze in the card’s head', () => {
         }
 
   for (const { name } of VIEWPORTS)
-    it(`keeps the snooze in the head row — not in ⓘ, not in the answer row (${name})`, async () => {
+    it(`keeps the open item’s Snooze behind ⋯ — no clock in the row, none in the answer row — on a sheet or popover inside the viewport (${name})`, async () => {
       const item = SCENES[0];
       const { tab, close } = await open(name, 'studio', 'light', item);
       try {
-        // The summary is drawn on the card now (F909), so this item has no ⓘ at all: the clock is the head row's own.
         const found = await tab.evaluate(() => ({
           info: document.querySelectorAll('[data-agenda-info-toggle], [data-agenda-info-panel]').length,
-          inRow: document.querySelectorAll('.fy-item-view__bar [data-agenda-snooze]').length,
-          everywhere: document.querySelectorAll('[data-agenda-snooze]').length,
+          clocks: document.querySelectorAll('[data-agenda-snooze]').length,
+          menus: document.querySelectorAll('.fy-item-view__bar [data-agenda-menu-toggle]').length,
         }));
-        expect(found.info, 'nothing is left behind ⓘ').toBe(0);
-        expect(found.inRow, 'the snooze is in the head row').toBe(1);
-        expect(found.everywhere, 'and nowhere else').toBe(1);
-        await shot(tab, name, 'studio-light', 'item-head');
+        expect(found.info, 'there is no ⓘ').toBe(0);
+        expect(found.clocks, 'no clock anywhere on the item').toBe(0);
+        expect(found.menus, 'ONE ⋯ in the head row').toBe(1);
+        await tab.locator('[data-agenda-menu-toggle]').click();
+        const where = name === 'phone' ? '[data-agenda-menu="sheet"]' : '[data-agenda-menu="popover"]';
+        await tab.waitForSelector(`${where} [data-agenda-menu-group="snooze"]`);
+        await tab.evaluate(() => new Promise<void>(done => setTimeout(() => requestAnimationFrame(() => done()), 300)));
+        const menu = await tab.evaluate((query: string) => {
+          const box = (document.querySelector(query) as HTMLElement).getBoundingClientRect();
+          return {
+            box: { top: box.top, bottom: box.bottom, left: box.left, right: box.right },
+            width: document.documentElement.clientWidth,
+            height: window.innerHeight,
+            words: [...document.querySelectorAll(`${query} [data-agenda-menu-snooze]`)].map(
+              entry => entry.textContent?.trim() ?? '',
+            ),
+          };
+        }, where);
+        expect(menu.box.left, 'inside on the left').toBeGreaterThanOrEqual(-1);
+        expect(menu.box.right, 'inside on the right').toBeLessThanOrEqual(menu.width + 1);
+        expect(menu.box.top, 'inside at the top').toBeGreaterThanOrEqual(-1);
+        expect(menu.box.bottom, 'inside at the bottom').toBeLessThanOrEqual(menu.height + 1);
+        expect(menu.words).toEqual(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']);
+        await shot(tab, name, 'studio-light', 'item-menu');
       } finally {
         await close();
       }

@@ -4,15 +4,15 @@
  * stream of log, the body is the DB"), so the four parts that say what this is and what it needs come first, the body
  * after them, and the log — the conversation and the activity — at the bottom:
  *
- *   1 head          the title, the description (the item's summary), the STATE chip and the STAGE chip (and the slot a
- *                   version control sits in)
+ *   1 head          the one-line title, the STATE chip and the STAGE chip (small, on the line under it), then the
+ *                   description (the item's summary); the quiet controls are the head's ⋯ menu
  *   2 premise       premise and context: may be long, and may assume what the owner already knows
  *   3 detail        the context explained from zero (`detail`): FOLDED by default
- *   4 references    one TABLE of every term and every PR, card or link, each with a plain meaning
+ *   4 references    one TABLE of every term and every PR, card or link, each with a plain meaning: FOLDED
  *   5 where         where we are now (`whereWeAre`): a SHORT status — where things stand, what is decided, what is open
  *   6 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
  *   7 body          the full picture: the live document — report, explainer, plan or status (Markdown with fy-render)
- *   8 conversation  the owner's and the ferret's words, oldest first: the log, never a second copy of the body
+ *   8 conversation  the owner's and the ferret's words, oldest first: the log, never a second copy of the body: FOLDED
  *   9 activity      the grey "updated / moved / snoozed" lines: FOLDED, kept apart from the conversation
  *
  * Nothing here draws anything, and nothing here cuts text short: every line is kept whole.
@@ -46,7 +46,7 @@ export const ITEM_VIEW_PARTS = [
 export type ItemViewPart = (typeof ITEM_VIEW_PARTS)[number];
 
 /** The parts drawn folded until the owner opens them. */
-export const FOLDED_PARTS: ReadonlySet<ItemViewPart> = new Set(['detail', 'activity']);
+export const FOLDED_PARTS: ReadonlySet<ItemViewPart> = new Set(['detail', 'references', 'conversation', 'activity']);
 
 /** What each part is called on screen. */
 export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premise'>, string>> = {

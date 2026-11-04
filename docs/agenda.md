@@ -731,14 +731,14 @@ only items in the same agenda home (one lineage) can be merged. Refused: an item
 a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
 address.
 
-In the app, an open plain conversation shows **Merge with…** beside its lineage lines. The picker asks "Merge this item with
+In the app, an open plain conversation offers **Merge with…** in the item's ⋯ menu; it opens the picker under the head, by the lineage lines. The picker asks "Merge this item with
 which open agenda?" and lists the other open plain conversations on the same board by id and title, each title once.
 A confirm step says what will happen before anything is sent, and repeats no title (the picker just showed it): the
 heading "Merge !A2 into this item?" (the `!A2` is a reference, opened as in a message), one line, "!A2 closes; this item
 keeps its ask. Both conversations and all cards are kept.", and the checkbox "Keep !A2 instead". The viewed item
 survives by default, and the checkbox flips it ("Merge this item into !A2?", "This item closes; !A2 keeps its ask. …").
 The choices sit in the fixed order: Cancel on the left, **Merge** on the right; Cancel leaves the panel, and the
-picker is reopened with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
+picker is reopened from ⋯ with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
 only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
 **Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so
@@ -810,8 +810,8 @@ ever, and closing it would lose it when the ferret still needs something.
 ### Snoozed
 
 The owner can put an open item away ("we are waiting for approval"): **for** a while or **until** a time — 1 hour,
-4 hours, tomorrow 9:00 in their own time zone, or a time they pick. In the app it is the clock in the item's head
-(never a button in the answer row), and on a phone the Inbox swipe-down compass offers the same four choices (one
+4 hours, tomorrow 9:00 in their own time zone, or a time they pick. In the app it is **Snooze** in the open item's ⋯ menu, and the
+clock in a card-to-test's head (never a button in the answer row), and on a phone the Inbox swipe-down compass offers the same four choices (one
 list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the command line `fy agenda snooze <id> --for 4h | --until 17:00`, and
 `fy agenda unsnooze <id>` brings it back now.
 
@@ -1179,13 +1179,11 @@ as bold text at the segment's own size, never an h1–h6: the card's own labels 
 you**) are its only headings. Chat messages keep their headings; only agenda segments demote them
 (`demoteHeadings` on `Markdown`, set once by `AgendaProse`).
 
-**The open item's title is always readable.** The open item's head stays ONE row, and its title wraps onto **at most
-two lines** (which fit beside the row's controls — ‹ n/N ›, ⓘ, the clock, ✕ — on a 390px phone): it never scrolls and
-is never cut at either side, with or without reduced motion. A title longer than two lines is drawn **whole at the top
-of the body** as well, straight under the head (`data-agenda-full-title`), so the owner can always read the question.
-Every item wraps this way — ordinary, gate or machine notice. Other card heads (a card to test in the Inbox) keep one
-line: a title too wide scrolls to its end and back (the marquee), and where motion is reduced it ends at the last whole
-WORD that fits, then "…" (`wordCut`; a tap shows all of it). List rows keep their own clamps. A card's who/where line
+**The open item's title is always readable.** The open item's head stays ONE row, and its title is **one line**: a
+title too wide scrolls to its end and back (the marquee), and where motion is reduced it ends at the last whole WORD
+that fits, then "…" (`wordCut`), with the whole title a tap away. It is never wrapped and never drawn a second time in
+the body: the room under the head is the premise's. Every item does this — ordinary, gate or machine notice — and so
+does every other card head (a card to test in the Inbox). List rows keep their own clamps. A card's who/where line
 ("ferret · task · card · machine") puts a dot only between parts that have words (`joinMeta`): a missing part leaves no
 leading, trailing or doubled dot.
 
@@ -1233,17 +1231,17 @@ the log, the conversation and the activity, at the bottom. The order is `ITEM_VI
 `packages/pwa/src/lib/agenda-item-sections.ts`,
 and a part the item does not carry is not drawn:
 
-| #   | Part                                | What it holds                                                                                                                                                                                                                                                                                                 |
-| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Title, description, state and stage | the title row; under it the **description** — the item's summary (its ask, `subject`), drawn whole; the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done), the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done), and the version slot |
-| 2   | Premise and context                 | the two tinted blocks; long is fine                                                                                                                                                                                                                                                                           |
-| 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                    |
-| 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none                                                                                                |
-| 5   | Where we are now                    | `whereWeAre` — a **short status**: where things stand — then the ferret's answer to their question, what is decided and what is still open                                                                                                                                                                    |
-| 6   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner          |
-| 7   | The full picture                    | `body`: the item's **live document** — the report, explainer, plan or status, rewritten on every change — drawn open and whole; a review's is its Reasoning (Markdown with fy-render)                                                                                                                         |
-| 8   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom                                                                                                                                                                                                           |
-| 9   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                |
+| #   | Part                                | What it holds                                                                                                                                                                                                                                                                                                                                                                                 |
+| --- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Title, description, state and stage | the title row (ONE line, a marquee when too long; the quiet controls behind ⋯); on the line under it two small chips, the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done) and the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done); then the **description** — the item's summary (its ask, `subject`), drawn whole |
+| 2   | Premise and context                 | the two tinted blocks; long is fine                                                                                                                                                                                                                                                                                                                                                           |
+| 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                                                                                                    |
+| 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none — **folded**                                                                                                                                                                   |
+| 5   | Where we are now                    | `whereWeAre` — a **short status**: where things stand — then the ferret's answer to their question, what is decided and what is still open                                                                                                                                                                                                                                                    |
+| 6   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
+| 7   | The full picture                    | `body`: the item's **live document** — the report, explainer, plan or status, rewritten on every change — drawn open and whole; a review's is its Reasoning (Markdown with fy-render)                                                                                                                                                                                                         |
+| 8   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom — **folded**                                                                                                                                                                                                                                                                              |
+| 9   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                                                                                                |
 
 - **The head says what it is, whole.** The description (`data-agenda-description`) is drawn on the card under the
   title, never behind ⓘ, so ⓘ holds only a host's quiet tools (the Inbox's Skip). A gate item from before card asks,
@@ -1255,11 +1253,22 @@ and a part the item does not carry is not drawn:
   app draws nowhere, and never colour alone, since the head's "Needs you" chip says it in words. A form on a phone keeps
   no frame (three nested boxes would squeeze its fields), so there only the heading and the chip mark it. A resting,
   snoozed or settled item draws it quiet.
-- **Folded parts remember.** The detailed context and the activity log start closed; opening one is remembered per
+- **One menu for the quiet controls.** The head is ONE row: the title, how urgent it is, ‹ n/N ›, **⋯** and ✕. Everything
+  the owner reaches for only now and then is behind ⋯ (`agenda-item-menu.tsx`), so on a 390px phone the premise starts
+  in the top quarter of the screen: the version picker and **Changes**, **Snooze** (1 hour · 4 hours · Tomorrow 9:00 ·
+  Custom…), **Merge with…**, **Not needed** (or the host's own quiet tools — the Inbox's Skip and Not needed — said
+  once), and a gate item's or card notice's summary under "About this item". On a phone (under 768px) the menu is the
+  app's bottom sheet; wider, it is a popover under ⋯. Esc, a tap outside and the sheet's swipe close it; every choice
+  that does something closes it, and Esc never closes the item under it. Only what the item has is offered, and an item
+  with nothing to put there draws no ⋯. The two chips sit small on the line under the title, and an earlier version on
+  screen adds a third, **Showing v2**.
+- **Folded parts remember.** The detailed context, the terms and references, the conversation and the activity log
+  start closed, each saying how much it holds ("2 entries", "4 messages"); opening one is remembered per
   item on that device (browser storage, read and written defensively — a private window simply starts closed again).
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
-  edit changed are drawn whole. The title wraps onto two lines in the head, and one longer than that is drawn whole at
-  the top of the body too. Rows in a list may still be one line.
+  edit changed are drawn whole, once opened. The title is ONE line in the head: a marquee when it is too long, and
+  where motion is reduced it ends at a whole word with "…" and a tap shows all of it (`MarqueeTitle`), so the whole
+  title is always one tap away. Rows in a list may still be one line.
 - **The conversation** is read from the chat for an item that has no stored thread (`itemHistory`: the owner's words
   that name the item and the parts of the ferret's replies about it). A machine with the stored conversation
   (`agenda.conversation.1`) feeds the same part from the item itself: the item's own tail when it is whole, else every
@@ -1297,11 +1306,12 @@ and a part the item does not carry is not drawn:
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
-- **The head keeps a slot** (`data-agenda-version-slot`) for the version picker and the diff control. Beside the diff
+- **The version slot is in the ⋯ menu** (`data-agenda-version-slot`): the version picker and the diff control. Beside the diff
   control the picker counts the item's EDITS ("Edit 2 of 3"), because the diff's own numbers (v1, v2…) are the stored
-  versions, which count more than the edits do; a machine with no stored versions keeps "v2 of 3".
+  versions, which count more than the edits do; a machine with no stored versions keeps "v2 of 3". Picking a version
+  closes the menu and redraws the card as it read then, with "Showing v2" among the chips and the way back to the latest.
 - **Changes (the diff).** With two or more versions on a machine that keeps them, the slot gains a **Changes** button.
-  It opens a panel under the head that compares "since you last looked" by default (this device's last-seen mark
+  It closes the menu and opens a panel under the head (the menu's button then says **Hide changes**) that compares "since you last looked" by default (this device's last-seen mark
   against the newest version) and lets the owner pick any two versions from **From** and **To**. Each changed section
   shows what changed, coarse to fine: equal lines stay; the lines between them are paired in order by how alike they
   are; inside a pair the same is done sentence by sentence, then word by word, with a short kept word between two
@@ -1500,8 +1510,8 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   - **↓ is Skip**, everywhere a card swipes (the deck, the chat dock, the card's top bar and answer row, the ↓ key,
     and the to-test and task-panel cards): it moves on to the next one; nothing is sent, nothing is dismissed and
     the item stays open. A single mis-swipe can therefore never close a card.
-  - **Not needed is a button, or the far side of the compass** (below) — never a plain swipe. It is the pill in the
-    card's top bar and a button under the card, into the same undo window as any answer. A notice has no Not needed
+  - **Not needed is a button, or the far side of the compass** (below) — never a plain swipe. It is a button in the open
+    item's ⋯ menu, into the same undo window as any answer. A notice has no Not needed
     (it is cleared, not dismissed). The item's › also skips.
 
   A held drag is stamped with what letting go would do (there is no hint line under the card); a card pulled down shows
@@ -1556,9 +1566,9 @@ letting go does:
 
 A swipe down is therefore never destructive without Undo. The choices are a pure state machine
 (`agenda-compass.ts`: a drag path in, an intent out), so the thresholds are tested without a pointer. Nothing depends on the
-gesture: under every open card are plain buttons — **Skip** and **Not needed** — and the head's clock (`CardHead`: 1 h / 4 h /
-tomorrow / custom) snoozes; the arrow keys are unchanged. Snooze is offered only where the machine advertises it
-(`agenda.snooze.1`), in the compass and in the clock alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
+gesture: behind every open card's ⋯ are plain buttons — **Skip** and **Not needed** — and **Snooze** (1 h / 4 h /
+tomorrow / custom); the arrow keys are unchanged. Snooze is offered only where the machine advertises it
+(`agenda.snooze.1`), in the compass and in the menu alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
 
 ### Card asks in the Inbox
 
@@ -1567,7 +1577,7 @@ the same labels and directions as below, naming the card by its title, tap only,
 What follows is how it draws a card at a gate. A **gate item** (read from a daemon older than card asks) is a board card
 waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-card: the owner tests its parent, and a sub-card [closes itself](board.md#sub-cards-close-themselves) instead of waiting in a verify lane) (`item.gate`: the card, its lane and what each option does):
 the owner meets one stream, not a question list and a separate to-test list. It is
-the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — the **Test** chip
+the card's ONE head row (the title, ‹ n/N ›, ⋯, ✕ — `CardHead`; its summary, Snooze and Skip behind ⋯) under ONE quiet meta line: **what it is** — the **Test** chip
 (a card in a verify lane; its ask reads "Try it: …") or the **Approve** chip (a plan awaiting approval; its ask reads "OK to build?") — the project, the ferret and "Open chat ›". It repeats
 nothing: no summary line, no chip, no restated ask. Its body is the card's _How to test_ as numbered tick-steps, and its
 options are the gate's own, laid out as every choice is (the first ←, the second ↑, the third →) and then MIRRORED left/right for a gate, so the forward option is always on the right.

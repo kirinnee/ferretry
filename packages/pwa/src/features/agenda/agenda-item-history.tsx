@@ -2,7 +2,8 @@
  * THE CONVERSATION OF AN OPEN AGENDA ITEM — the owner's and the ferret's words about it, read like the chat: oldest
  * first. ONLY THE OWNER'S messages are bubbles (right-aligned, like the chat's own); the ferret's text is plain, under
  * its name and the time, with no tool calls and no thinking — the relevance rule that decides what is here is
- * `itemHistory`'s. Every reply is drawn WHOLE: nothing is cut, however long. Never folded.
+ * `itemHistory`'s. Every reply is drawn WHOLE: nothing is cut, however long. FOLDED until the owner opens it (and
+ * remembered per item, like the other folded parts), so the item does not scroll for ever.
  *
  * The edits ("Updated to v2") are not words anyone said: they are the activity log's (`agenda-activity-log.tsx`).
  */
@@ -11,6 +12,7 @@ import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { revisionStamp } from '../../lib/agenda-revisions.ts';
+import { AgendaFold } from './agenda-fold.tsx';
 
 /** What Ferretry itself is called where its own words (a closing note, a notice) are drawn. */
 const DAEMON_NAME = 'Ferretry';
@@ -100,30 +102,33 @@ export function AgendaItemHistory({
   now,
   ferret,
   renderProse,
+  itemKey,
   title = 'Conversation',
 }: {
   readonly events: readonly HistoryEvent[];
   readonly now: number;
   readonly ferret: string;
   readonly renderProse: (text: string) => ReactNode;
+  /** Names the item on this device, so whether its conversation is open is remembered per item. */
+  readonly itemKey: string;
   /** The part's heading. */
   readonly title?: string;
 }) {
   const spoken = spokenEvents(events);
   if (spoken.length === 0) return null;
+  const said = spoken.filter(event => event.kind !== 'gap').length;
   return (
-    <section
-      aria-label={title}
-      className="fy-card__part fy-hist"
-      data-agenda-history=""
-      data-agenda-part="conversation"
+    <AgendaFold
+      itemKey={itemKey}
+      meta={`${String(said)} ${said === 1 ? 'message' : 'messages'}`}
+      part="conversation"
+      title={title}
     >
-      <h4 className="fy-card__label fy-card__part-title">{title}</h4>
-      <ol className="fy-hist__list">
+      <ol aria-label={title} className="fy-hist fy-hist__list" data-agenda-history="">
         {spoken.map(event => (
           <HistoryRow event={event} ferret={ferret} key={event.key} now={now} renderProse={renderProse} />
         ))}
       </ol>
-    </section>
+    </AgendaFold>
   );
 }
