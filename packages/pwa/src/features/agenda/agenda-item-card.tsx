@@ -530,10 +530,7 @@ export function AgendaItemCard({
   // separate item. Only the latest version is answerable, so an earlier one draws none.
   const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
   // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
-  const replyOffer = replyApproval(
-    cardAsks.map(ask => ask.gate),
-    history,
-  );
+  const replyOffer = cardAsks.length === 0 ? null : replyApproval(item, history);
   const replies = (
     <AgendaQuickReplies
       busy={busy}
@@ -810,7 +807,7 @@ export function AgendaItemCard({
                   ask={ask}
                   busy={busy}
                   key={ask.key}
-                  offer={replyOffer}
+                  offer={replyOffer?.ask === ask.key ? replyOffer : null}
                   onAct={onAct}
                   renderProse={renderProse}
                 />

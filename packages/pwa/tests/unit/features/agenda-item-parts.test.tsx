@@ -56,6 +56,7 @@ const full = agendaItem('A47', {
   stillOpen: '- The colour',
   body: REPORT,
   gateAttached: gate,
+  cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
   revisions: [
     { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Which badge?' } },
   ],
