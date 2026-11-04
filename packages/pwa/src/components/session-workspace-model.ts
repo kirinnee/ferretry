@@ -236,6 +236,8 @@ const recordInstants = (records: readonly LogRecord[], now: number): readonly (n
 interface ToolRun {
   /** Where the run's first record came from. */
   offset?: number;
+  /** Where every record the run draws came from — its calls, results and their copies (`alsoAt`). */
+  readonly anchors: number[];
   readonly calls: {
     key: string;
     use: ToolUseData;
@@ -252,14 +254,21 @@ interface ToolRun {
  * to pair with is kept as an orphan rather than dropped, because a row that silently vanished would
  * read as a tool that never ran.
  */
-const toolEntry = (run: ToolRun): TranscriptEntry => ({
-  // Named by the call that OPENED the run, so a run that grows is still the row the reader opened.
-  id: `tools:${run.calls[0]?.key ?? ''}`,
-  ...(run.offset === undefined ? {} : { offset: run.offset }),
-  kind: 'tool',
-  text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
-  tools: run.calls,
-});
+/** The places a row stands for besides where it begins, in order, once each. */
+const otherAnchors = (anchors: readonly number[], offset: number | undefined): number[] =>
+  [...new Set(anchors)].filter(anchor => anchor !== offset).sort((left, right) => left - right);
+
+const toolEntry = (run: ToolRun): TranscriptEntry => {
+  const alsoAt = otherAnchors(run.anchors, run.offset);
+  return {
+    // Named by the call that OPENED the run, so a run that grows is still the row the reader opened.
+    id: `tools:${run.calls[0]?.key ?? ''}`,
+    ...(run.offset === undefined ? {} : { offset: run.offset, ...(alsoAt.length === 0 ? {} : { alsoAt }) }),
+    kind: 'tool',
+    text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
+    tools: run.calls,
+  };
+};
 
 /** A slash command as one compact row: `/model opus[1m] → Set model to …`. */
 const commandEntry = (id: string, command: SlashCommand): TranscriptEntry => ({
@@ -350,26 +359,36 @@ const wordsOf = (record: LogRecord): string => normalized(record.lines.join('\n'
 const nextReal = (records: readonly LogRecord[], from: number): number | undefined => {
   for (let index = from; index < records.length; index += 1) {
     const record = records[index] as LogRecord;
-    if (isTurnRecord(record) || record.clock === undefined) return undefined;
-    if (!isHiddenRecord(record)) return index;
+    if (isTurnRecord(record)) return undefined;
+    if (isHiddenRecord(record)) continue;
+    if (record.clock === undefined) return undefined;
+    return index;
   }
   return undefined;
 };
 
 /**
- * How many calls are still waiting for a result where record `at` sits: the tool run it is in, read back
- * to where the run began, leaving out the records already found to be copies.
+ * How many calls are still waiting for a result where record `at` sits. The tool run it is in is read
+ * back to where it began, then FORWARD as the chat pairs it: each result answers the oldest waiting call,
+ * and a result with no call waiting (its call fell outside the loaded page) answers nothing. Records
+ * already found to be copies are left out.
  */
 const pendingCalls = (records: readonly LogRecord[], at: number, copies: ReadonlySet<number>): number => {
-  let pending = 0;
+  let start = at;
   for (let index = at - 1; index >= 0; index -= 1) {
     const record = records[index] as LogRecord;
     if (copies.has(index) || isHiddenRecord(record)) continue;
-    if (record.kind === 'tool-call') pending += 1;
-    else if (record.kind === 'tool-result') pending -= 1;
-    else break;
+    if (!isToolRecord(record)) break;
+    start = index;
   }
-  return pending;
+  let waiting = 0;
+  for (let index = start; index < at; index += 1) {
+    const record = records[index] as LogRecord;
+    if (copies.has(index) || isHiddenRecord(record)) continue;
+    if (record.kind === 'tool-call') waiting += 1;
+    else if (waiting > 0) waiting -= 1;
+  }
+  return waiting;
 };
 
 /**
@@ -400,6 +419,8 @@ const sameWords = (
 interface Copies {
   readonly copies: ReadonlySet<number>;
   readonly startsAt: ReadonlyMap<number, number>;
+  /** Where each twin's copies came from, so a search hit on a copy still finds the row the twin draws. */
+  readonly copiedAt: ReadonlyMap<number, readonly number[]>;
 }
 
 /**
@@ -498,16 +519,26 @@ const copyRecords = (records: readonly LogRecord[]): Copies => {
     }
     if (adjacent) startsAt.set(twin, Math.min(offset, startsAt.get(twin) ?? offset));
   }
-  return { copies, startsAt };
+  const copiedAt = new Map<number, number[]>();
+  for (const [copy, twin] of twins) {
+    const offset = records[copy]?.offset;
+    if (offset !== undefined) copiedAt.set(twin, [...(copiedAt.get(twin) ?? []), offset]);
+  }
+  return { copies, startsAt, copiedAt };
 };
 
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const instants = recordInstants(records, now);
-  const { copies, startsAt } = copyRecords(records);
+  const { copies, startsAt, copiedAt } = copyRecords(records);
   const idFor = recordIds();
   /** The record being projected: a row it opens starts where its copy did, when one sat right before it. */
   let current = -1;
   const offsetOf = (record: LogRecord): number | undefined => startsAt.get(current) ?? record.offset;
+  /** Every place in the file the current record's row stands for: the record itself and its copies. */
+  const anchorsOf = (record: LogRecord): number[] => [
+    ...(record.offset === undefined ? [] : [record.offset]),
+    ...(copiedAt.get(current) ?? []),
+  ];
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
   const flush = (): void => {
@@ -517,11 +548,12 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
   // Every row a record opens carries where the record came from, so a search hit can find its row.
   const push = (entry: TranscriptEntry, record: LogRecord): void => {
     const offset = offsetOf(record);
-    entries.push(offset === undefined ? entry : { ...entry, offset });
+    const alsoAt = otherAnchors(anchorsOf(record), offset);
+    entries.push(offset === undefined ? entry : { ...entry, offset, ...(alsoAt.length === 0 ? {} : { alsoAt }) });
   };
   const open = (record: LogRecord): ToolRun => {
     const offset = offsetOf(record);
-    return { calls: [], ...(offset === undefined ? {} : { offset }) };
+    return { calls: [], anchors: [], ...(offset === undefined ? {} : { offset }) };
   };
   records.forEach((record, index) => {
     // A copy is left out like bookkeeping: it is not a row, and it does not end a tool run.
@@ -530,6 +562,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     const text = record.lines.join('\n');
     if (isToolRecord(record)) {
       run ??= open(record);
+      run.anchors.push(...anchorsOf(record));
       const key = idFor(`${record.clock ?? ''}|${record.kind}|${text}`);
       if (record.kind === 'tool-call') {
         const at = instants[index];
@@ -546,6 +579,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       // Pictures read one after another are ONE `Read N images` call in the tool run, not a card each.
       if (run !== null || followedByImages(records, index, copies)) {
         run ??= open(record);
+        run.anchors.push(...anchorsOf(record));
         addImageRead(
           run,
           attachmentImages(record),

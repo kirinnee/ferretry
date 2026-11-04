@@ -11,7 +11,7 @@ import {
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
-import { rowForOffset } from '../../src/lib/chat-search.ts';
+import { rowAnchors, rowForOffset } from '../../src/lib/chat-search.ts';
 import { extractToolSummary, IMAGE_READ_TOOL } from '../../src/lib/tool-extract.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -1411,6 +1411,34 @@ describe('transcriptEntriesFromLog · the untimed copy Claude writes of a tool c
     expect(pictures).toHaveLength(2);
   });
 
+  test('counts a result whose call fell off the page as answering nothing, so two calls still wait', () => {
+    const log = [
+      '[10:59:49] tool/tool-result: from a call above the loaded page',
+      '[10:59:51] assistant/tool-call: Read({"file_path":"/s/a.png"})',
+      '[10:59:51] assistant/tool-call: Read({"file_path":"/s/b.png"})',
+      'tool/tool-result: [fy-image 100.1.0 image/png]',
+      '[10:59:52] tool/tool-result: [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const calls = transcriptEntriesFromLog(log, NOW)
+      .flatMap(entry => entry.tools ?? [])
+      .filter(call => call.orphanResult !== true);
+    expect(calls.map(call => call.result?.images?.length)).toEqual([1, 1]);
+  });
+
+  test('lines a copied call and result up across untimed bookkeeping', () => {
+    const log = [
+      'assistant/tool-call: Bash({"command":"pwd"})',
+      'tool/tool-result: /work',
+      '[10:59:58] assistant/tool-call: Bash({"command":"pwd"})',
+      'system/usage: in=1 out=1',
+      '[10:59:59] tool/tool-result: /work',
+    ].join('\n');
+    const calls = transcriptEntriesFromLog(log, NOW).flatMap(entry => entry.tools ?? []);
+    expect(calls.map(call => ({ result: call.result?.text, orphan: call.orphanResult === true }))).toEqual([
+      { result: '/work', orphan: false },
+    ]);
+  });
+
   test('keeps both pictures when two calls are waiting, since a result cannot say which it answers', () => {
     const log = [
       '[10:59:50] assistant/message: Reading both.',
@@ -1497,6 +1525,39 @@ describe('transcriptEntriesFromLog · a search hit on a copy', () => {
     ]);
     expect(rowForOffset(rows, 200)?.text).toBe('moved');
     expect(rowForOffset(rows, 300)?.text).toBe('moved');
+  });
+
+  test('finds each message of a batch of copies, though the copies came before both messages', () => {
+    const log = [
+      'user/message: alpha',
+      'user/message: beta',
+      '[11:00:00] user/message: alpha',
+      '[11:00:01] user/message: beta',
+    ].join('\n');
+    const entries = transcriptEntriesFromLog(log, NOW, 'fy', [100, 200, 300, 400]);
+    const rows = rowAnchors(
+      entries.flatMap(entry =>
+        entry.offset === undefined ? [] : [{ offset: entry.offset, also: entry.alsoAt ?? [], row: entry.text }],
+      ),
+    );
+    expect([100, 200, 300, 400].map(offset => rowForOffset(rows, offset))).toEqual(['alpha', 'beta', 'alpha', 'beta']);
+  });
+
+  test('finds a tool run by its result though a mid-turn copy sat inside it', () => {
+    const log = [
+      '[10:59:58] assistant/tool-call: Bash({"command":"date"})',
+      'user/message: The user sent a new message while you were working:',
+      '    look at the board',
+      '[10:59:59] tool/tool-result: Wed Nov  4 10:59:59 UTC 2026',
+      '[11:00:00] user/message: look at the board',
+    ].join('\n');
+    const entries = transcriptEntriesFromLog(log, NOW, 'fy', [100, 200, 300, 400]);
+    const rows = rowAnchors(
+      entries.flatMap(entry =>
+        entry.offset === undefined ? [] : [{ offset: entry.offset, also: entry.alsoAt ?? [], row: entry.kind }],
+      ),
+    );
+    expect([100, 200, 300, 400].map(offset => rowForOffset(rows, offset))).toEqual(['tool', 'user', 'tool', 'user']);
   });
 
   test('hands the position across bookkeeping, and never across a row of its own', () => {
