@@ -490,7 +490,7 @@ describe('a sub-ferret reporting a trigger', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).equal(
-      `You are a sub-ferret, so you can't report events on a card they are not doing. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
+      `You are a sub-ferret, so you can't report events on a card they are not doing. You may note on, set the status and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
     );
     should(ports.store.writes).eql([]);
   });

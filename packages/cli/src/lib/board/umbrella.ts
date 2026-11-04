@@ -79,10 +79,16 @@ export const SUB_CARD_ASK_WARNING = 'this card will be private (a sub-card); dro
  * The card rule, as `fy task create --help` says it after the flags: the same rule the Board prompt teaches
  * (`BOARD_INSTRUCTION`), in the words of the create's own checks.
  */
-export const TASK_CREATE_RULE = `ONE CARD, ONE OUTCOME. A card shows progress only; every ask of the owner goes in the card's agenda, never on the card.
+export const TASK_CREATE_RULE = `ONE CARD, ONE OUTCOME. The board runs itself: a card never asks the owner. Every answer, test and Done goes in the
+  card's agenda, which moves the card.
   Check related cards first and prefer adding to an existing one: create lists them, weak matches too, and
   --related F12 adds this to that card as a note instead of creating one.
   No umbrella or overarching cards: a broad title (overhaul, misc, epic, …) or a summary that lists several outcomes
   is refused unless --broad "<why this must be one card>". Make one card per outcome, or put it under --parent F12 (your own bookkeeping only).
-  THE OWNER'S ASK IS A PUBLIC CARD: the board answers "what's the status of everything I asked?", so a card for their ask is
-  top-level (no --parent, no --private); a sub-card is private. Relate it to other work in --context.`;
+  PUBLIC CARDS ARE THE OWNER'S ASKS: the board answers "what's the status of everything I asked?", so a card for their ask is
+  top-level (no --parent, no --private); a sub-card is private. Relate it to other work in --context.
+  The title and summary say what the work is doing, so reading the board is a sitrep. Planning is a phase (its own
+  lane), not a reason to skip the card.
+  At each step read the card whole, then edit every part that is stale: title, summary, How to test and the status
+  (--status-now, --status-done, --status-next: what is happening, what is done with PR links, what comes next);
+  task note stays the history.`;

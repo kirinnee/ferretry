@@ -1100,6 +1100,43 @@ describe('the action verbs', () => {
     ]);
   });
 
+  it('should send only the parts --status-now/--status-done/--status-next name, without reading the card', async () => {
+    // Arrange — the daemon merges them into the card's status in its own write, so concurrent edits never undo each other.
+    const gateway = new FakeGateway();
+    gateway.taskView = card({ id: 'F1', status: { now: 'old', doneSoFar: '- done', next: '1. next' } });
+    const { controller } = harness(gateway);
+
+    // Act
+    await controller.edit('F1', { statusNow: 'new' });
+    await controller.edit('F1', { statusDone: '- a\n- b', statusNext: '' });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'edit', status: { now: 'new' } },
+      { action: 'edit', status: { doneSoFar: '- a\n- b', next: '' } },
+    ]);
+    should(gateway.taskCalls).eql([]);
+  });
+
+  it('should send the whole status from --status-file without reading the card, and let a flag override a part', async () => {
+    // Arrange
+    const files = new FakeFiles({ '/status.yaml': 'now: from file\ndoneSoFar: |\n  - a\nnext: later\n' });
+    const { controller, gateway } = harness(new FakeGateway(), undefined, files);
+
+    // Act
+    await controller.edit('F1', { statusFile: '/status.yaml' });
+    await controller.edit('F1', { statusFile: '/status.yaml', statusNext: 'sooner' });
+    const bad = await refusal(() => controller.edit('F1', { statusFile: '/status.yaml', statusNow: 3 as never }));
+
+    // Assert
+    should(sent(gateway).slice(0, 2)).eql([
+      { action: 'edit', status: { now: 'from file', doneSoFar: '- a\n', next: 'later' } },
+      { action: 'edit', status: { now: 'from file', doneSoFar: '- a\n', next: 'sooner' } },
+    ]);
+    should(gateway.taskCalls).eql([]);
+    should(bad).be.a.String();
+  });
+
   it('should refile to another project, resolving the lane against that project’s own lanes', async () => {
     // Arrange
     const { controller, gateway } = harness(new FakeGateway(), DENISHA);

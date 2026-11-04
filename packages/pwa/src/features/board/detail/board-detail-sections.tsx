@@ -62,9 +62,9 @@ export function Prose({ text }: { readonly text: string }) {
 }
 
 /**
- * HOW TO TEST: the owner's checklist before Done. A list is drawn as numbered steps (each keeps the number it was
- * written with), each with a box the owner ticks as they go (on this screen only: a tick is a reminder, never a
- * verdict); a heading or label between steps is drawn as a sub-heading above the steps it introduces; anything
+ * HOW TO TEST: the owner's checklist before the answer. A list is drawn as numbered steps (each keeps the number it
+ * was written with), each with a box the owner ticks as they read (on this screen only: a tick is a reminder, never a
+ * verdict, and no button sits under the steps: the owner answers in the agenda); a heading or label between steps is drawn as a sub-heading above the steps it introduces; anything
  * else is drawn whole.
  */
 export function HowToTest({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {

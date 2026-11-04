@@ -583,6 +583,11 @@
   border-radius: var(--radius-md);
   background: var(--fy-sit-bg);
 }
+/* The card's Status: the neutral surface, so it reads as the sitrep and the two tinted blocks below it stay the reasons. */
+.fy-card__sit-row[data-agenda-section='status'] {
+  --fy-sit-bg: var(--surface-2, var(--bg));
+  --fy-sit-ink: var(--fg);
+}
 .fy-card__sit-row[data-agenda-section='premise'] {
   --fy-sit-bg: var(--accent-soft);
   --fy-sit-ink: var(--accent-strong);
@@ -612,6 +617,38 @@
 }
 .fy-board-detail .fy-card__sit-row :is(p, ul, ol) {
   margin: 0;
+}
+/* A status is three parts (Now / Done so far / Next), each a small label over Markdown: paragraphs and lists. */
+.fy-board-detail .fy-card__status {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+  --md-font-size: var(--text-md);
+}
+.fy-board-detail .fy-card__status-part {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.fy-board-detail .fy-card__status-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  line-height: 1.5;
+}
+.fy-board-detail .fy-card__status .md {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fy-board-detail .fy-card__status :is(ul, ol) {
+  padding-left: 20px;
 }
 
 /* The ferret's answer to a question the owner asked about this item: above the options, which stay live. */

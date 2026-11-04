@@ -13,8 +13,8 @@
  * human card it serves.
  *
  * A card opens in the host's drawer (`onOpenCard`), never by leaving the chat. "Add to chat" is a card action:
- * it puts the card's `&F18` into THIS session's draft. The owner's Done and Not good ride on the card where
- * the host supplies them (`movesFor`, `doneFor`); a host that does not leaves the cards read-only.
+ * it puts the card's `&F18` into THIS session's draft. A card has no owner buttons (no Done, no Not good): the owner
+ * answers in the agenda. The host may supply lane moves (`movesFor`); a host that does not leaves the cards read-only.
  */
 
 import { formatTaskRef } from '@ferretry/protocol';
@@ -33,7 +33,6 @@ import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
 import { BoardCard, type BoardCardMoves, type BoardDensity } from './board-card.tsx';
 import { InternalToggle } from './board-filters.tsx';
 import { BoardLane } from './board-lane.tsx';
-import type { BoardDoneControl } from './board-views.tsx';
 
 export interface BoardSideTabProps {
   readonly chat: BoardChat;
@@ -46,10 +45,8 @@ export interface BoardSideTabProps {
   readonly onView: (view: BoardSideView) => void;
   /** Opens a card's detail where the reader is, over the chat. */
   readonly onOpenCard: (card: BoardCardOf) => void;
-  /** The owner's moves (Not good, the ⋯ menu); absent: the cards cannot be moved from here. */
+  /** The owner's lane moves (the ⋯ menu, a drop); absent: the cards cannot be moved from here. */
   readonly movesFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardCardMoves | undefined;
-  /** The owner's Done ✓; absent: the cards cannot be closed from here. */
-  readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
   /** `side` in the Info panel; `page` when the tab fills the chat. */
   readonly density?: BoardDensity;
   /** "Show private" on or off. */
@@ -60,7 +57,7 @@ export interface BoardSideTabProps {
   readonly dragging?: BoardCardOf | null;
   /** A card was dropped on a lane (only lanes of the dragged card's own board take drops). */
   readonly onDropCard?: (card: BoardCardOf, lane: ChatKanbanLane) => void;
-  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
+  /** The lane move in flight on a card, and its last refusal; every card is at rest when absent. */
   readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
@@ -141,7 +138,6 @@ export function BoardSideTab({
   onView,
   onOpenCard,
   movesFor,
-  doneFor,
   density = 'side',
   onAgents,
   onExpand,
@@ -163,7 +159,6 @@ export function BoardSideTab({
   const draw = (card: BoardCardOf, extra: { readonly depth?: number; readonly lane?: string } = {}): ReactElement => {
     const place = cards.places.get(card.key);
     const moves = place === undefined ? undefined : movesFor?.(card, place);
-    const done = place === undefined ? undefined : doneFor?.(card, place);
     const answer = answerFor?.(card);
     return (
       <BoardCard
@@ -180,7 +175,6 @@ export function BoardSideTab({
         onNavigate={() => onOpenCard(card)}
         showMachine={false}
         {...(moves === undefined ? {} : { moves })}
-        {...(done === undefined ? {} : { done })}
         {...(answer === undefined ? {} : { answer })}
         {...(extra.lane === undefined ? {} : { lane: extra.lane })}
       />

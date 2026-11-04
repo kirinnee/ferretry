@@ -188,13 +188,8 @@ describe('TableView', () => {
     card('F6', { laneId: 'released', shippedIn: OLD_RELEASE }),
     card('F7', { laneId: 'todo' }),
   ];
-  const doneFor: BoardCardEnv['doneFor'] = (entry, place) =>
-    place.category === 'closed'
-      ? undefined
-      : { done: { kind: 'done', laneId: 'closed' }, press: () => pressed.push(entry.task.id), atRelease: false };
-  const pressed: string[] = [];
   const table = (model: BoardModel, props: Partial<Parameters<typeof TableView>[0]> = {}) => (
-    <TableView env={envOf(model, { doneFor })} model={model} onWindow={() => undefined} window="7d" {...props} />
+    <TableView env={envOf(model)} model={model} onWindow={() => undefined} window="7d" {...props} />
   );
   const rowIds = (root: HTMLElement, section?: string) =>
     ids(
@@ -238,58 +233,21 @@ describe('TableView', () => {
     );
   });
 
-  it('puts Done on the to-test rows only, and presses it without opening the card', async () => {
+  it('draws no owner button on any row: no Done, no Not good, no Reopen, and no Done column', async () => {
     const model = await boardModelOf(cards);
-    const navigated: string[] = [];
-    view = await mount(table(model, { env: envOf(model, { doneFor, onNavigate: to => void navigated.push(to) }) }));
+    view = await mount(table(model));
     const root = view.container;
-    expect([...root.querySelectorAll('.fy-board-done')].length).toBe(1);
-    expect(root.querySelector('[data-task="F1"] .fy-board-done')?.textContent).toBe('Done');
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('[data-task="F1"] .fy-board-done'), 'Done').click(),
-    );
-    expect(pressed).toEqual(['F1']);
-    expect(navigated).toEqual([]);
-    await view.render(table(model, { env: envOf(model) }));
-    expect(view.container.querySelector('.fy-board-done')).toBeNull();
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
+    expect(root.querySelector('.fy-board-summary__act, [data-col="done"]')).toBeNull();
+    expect(root.textContent).not.toMatch(/Not good|Reopen/u);
+    expect([...root.querySelectorAll('button')].map(button => button.textContent)).not.toContain('Done');
   });
 
-  it('gives a to-test row the same Done and Not good as a card, spinning the one pressed', async () => {
+  it('says a refused lane move under its row', async () => {
     const model = await boardModelOf(cards);
-    const moved: string[] = [];
-    const movesFor: BoardCardEnv['movesFor'] = () => ({
-      choices: [],
-      onMove: (entry, laneId, answer) => void moved.push(`${entry.task.id}>${laneId}:${answer}`),
-      closeLaneId: 'closed',
-      reworkLaneId: 'implement',
-      onDragStart: () => undefined,
-      onDragEnd: () => undefined,
-    });
-    view = await mount(table(model, { env: envOf(model, { doneFor, movesFor }) }));
-    const root = view.container;
-    const verdicts = [...root.querySelectorAll('[data-task="F1"] .fy-board-card__verdict > *')];
-    expect(verdicts.map(node => node.textContent)).toEqual(['Not good', 'Done']);
-    expect(root.querySelectorAll('[data-task="F2"] .fy-board-card__verdict').length).toBe(0);
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('[data-task="F1"] [data-verdict="not-good"]'), 'Not good').click(),
+    view = await mount(
+      table(model, { env: envOf(model, { answerFor: () => ({ pressed: null, error: 'No such lane.' }) }) }),
     );
-    expect(moved).toEqual(['F1>implement:not-good']);
-    await view.render(
-      table(model, {
-        env: envOf(model, {
-          doneFor,
-          movesFor,
-          answerFor: () => ({ pressed: 'not-good', error: 'No such lane.' }),
-        }),
-      }),
-    );
-    const sent = must(view.container.querySelector('[data-task="F1"] [data-verdict="not-good"]'), 'Not good');
-    expect(sent.getAttribute('aria-busy')).toBe('true');
-    expect(
-      view.container
-        .querySelector('[data-task="F1"] [data-verdict="works"], [data-task="F1"] .fy-board-done')
-        ?.hasAttribute('disabled'),
-    ).toBe(true);
     expect(view.container.querySelector('[data-task="F1"] [data-answer-error]')?.textContent).toBe('No such lane.');
   });
 
@@ -324,7 +282,7 @@ describe('TableView', () => {
       [originCard('F2', 'human'), originCard('F9', 'human'), originCard('F10', 'agent', { id: 'F2' })],
       { ...NO_BOARD_FILTERS, agents: true },
     );
-    view = await mount(table(model, { env: envOf(model, { doneFor }) }));
+    view = await mount(table(model, { env: envOf(model) }));
     const root = view.container;
     expect(rowIds(root, 'working')).toEqual(['F2', 'F10', 'F9']);
     expect(root.querySelector('[data-task="F10"]')?.hasAttribute('data-under')).toBe(true);

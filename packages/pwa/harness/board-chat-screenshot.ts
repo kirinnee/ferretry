@@ -103,12 +103,12 @@ const open = async (
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (wide > 0) fail(`${state} scrolls sideways by ${wide}px`);
   const cut = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('.fy-board-card, .fy-board-verdict, .fy-board-done')]
+    [...document.querySelectorAll<HTMLElement>('.fy-board-card')]
       .filter(node => node.scrollWidth > node.clientWidth + 1)
       .map(node => node.textContent?.slice(0, 40) ?? ''),
   );
   if (cut.length > 0) fail(`${cut.length} card parts overflow their box: ${cut.slice(0, 3).join(' | ')}`);
-  // Every button on a card in the ferret (Add to chat, ⋯, any answer) stays inside its card.
+  // Every button on a card in the ferret (Add to chat, ⋯, stays inside its card.
   const spills = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('.fy-board-card')].flatMap(card => {
       const box = card.getBoundingClientRect();
@@ -172,7 +172,7 @@ try {
             await toTest.scrollIntoViewIfNeeded();
             await toTest.evaluate(lane => lane.scrollIntoView({ inline: 'start', block: 'nearest' }));
             await page.waitForTimeout(250);
-            if ((await page.locator('.fy-board-done').count()) === 0) fail('no Done button on a To test card');
+            if ((await page.locator('.fy-board-done, [data-verdict]').count()) > 0) fail('an owner button on a card');
             await shot(page, `tested-${scheme}-${label}`);
             await page.evaluate(() => document.querySelector('.fy-board-side__kanban')?.scrollTo({ left: 0 }));
             await page.locator('.fy-board-card__title').first().click();

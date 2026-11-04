@@ -121,6 +121,33 @@ The tabs (&F923) then made the main tab, "Where we are now", the first and defau
 
 The owner then asked for the body to be split by content type (&F946: _"split by content type, unless there's no serial dependency … a long continuous report should STILL be 1 tab"_): the state line became "Live doc=tabs by content kind (serial stays one), rewrite each whole: …", paid for in part by the open line's placeholders (`--premise "<now>" --context "<facts>"`) and an unquoted `--term X=meaning`: agenda 1,289 → 1,311 (cap 1,300 → 1,320). The rest of the wording is pinned by tests, so the **whole-prompt cap was raised 7,950 → 7,970** (`8_000 - 30`), the measured total 7,964 — still under 8 KB.
 
+The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules and paid for them inside the 8 KB:
+
+- **Board** (757 → 814, cap 760 → 820): the board runs itself (_"TASK no longer have user interactivity anymore! agenda
+  tracks all those"_: a card never asks; answers, tests and Done ride its agenda, which moves it), public = the owner's
+  asks and private = the ferret's sub-cards, planning is a phase, the title and summary read as a sitrep, and the card's
+  status (`--status-{now,done,next}`), and **read → edit** (the owner: _"we need to read to know what needs to be
+  updated, else there might be many segments that might be outdated!"_: `fy task show` whole, then edit every stale
+  part). Paid for by "(`fy board lanes show`)", which the move's
+  help and refusals already print, and by tighter words for the umbrella, related-card and agenda sentences.
+- **Agenda** (1,311 → 1,380, cap 1,320 → 1,390): every update reads the item whole (`show`) and edits every stale part
+  — premise, context, the ask, its options and kind (how to reply), still-open and each tab (!A358); the tabs
+  hold any kind of content (to-dos, steps, explainers, results) and steps and explainers stay there. Paid for by the
+  stage chain and `--stage` (the owner: _"now agenda doesn't have a "main" type any more"_; the stage stays in the
+  daemon and in `--stage`'s help) by `--where-file|--body-file|--tab-file` written as one flag list. Review kept the open line's value
+  placeholders, so a copied command runs.
+- **Hypermedia** (1,320 → 1,209): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
+  point, and interactive visuals the reader changes, never steppers (_"interactive should not be steppers -- there's no
+  need for steppers"_) — paid for by tightening the section's first lines and its
+  mermaid, svg and html lines. Its last line now says where fy-render draws (chat, agenda tabs and cards), which the
+  old "Chat only" contradicted.
+
+The cap now **counts the blank line between sections** (14 characters), as the composed prompt has it — every earlier
+figure above left them out. The measured total is 7,993 with them, so the **whole-prompt cap is now `8_000`**: the 8 KB
+itself, 7 characters of headroom. The next rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its card line (read it, then edit its status and How
+to test; the old "Your final report says how the owner tests it" went, since the holder now writes it); it is not in
+the lead's total, and the sub-ferret prompt (2,631) stays smaller than the lead's (2,910).
+
 ## The routing prompt
 
 ONE setting says which model runs which kind of sub-task: `prompt` in `config/models-guide.yaml`, plain text of
@@ -340,8 +367,9 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 
 ## Checking on your sub-ferrets
 
-A lead does not need its children to message it progress. A sub-ferret puts routine progress on its card
-(`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
+A lead does not need its children to message it progress. A sub-ferret keeps its card's **Status** current (read it with `fy task show
+<id>`, then `fy task edit <id> --status-now|--status-done|--status-next`; [board.md](board.md#the-cards-status)), puts
+routine progress on its card (`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
 **looks when it wants to**:
 
 ```text
@@ -394,10 +422,12 @@ are weaker models, writing to the board and agenda becomes a coordination proble
 to report back. Enforced by the daemon from the caller's session identity, not by the prompt:
 
 - **Refused** (`forbidden`, saying what to do instead): every agenda write (`add`, `edit`, `surface`, `done`, `dismiss`),
-  `fy notify`, every card verb except the two below, and editing a project's lanes. The message reads
+  `fy notify`, every card verb except the three below, and editing a project's lanes. The message reads
   `You are a sub-ferret, so you can't <this>. You may <what it may>. For anything else ask your lead: fy send <lead-callsign> "…"`.
   For a `move`, `focus` or commit/doc `link` on a card its lead holds the last sentence is "Your lead holds this card: claim it first: fy task claim <id>": `fy task claim` takes the card (only from an ancestor, never a sibling's or cousin's), and the holder may then do exactly those, not `drop` or re-plan it ([board.md](board.md#claiming-a-card-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` cards in it ([board.md](board.md#authority)).
 - **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
+  `fy task edit <id>` naming only the status (`--status-now|--status-done|--status-next|--status-file`) and How to test
+  (`--how-to-test`), on the card it holds;
   reading the board and the agenda. `fy new` still makes the sub-ferret's card where it makes one at all.
 - **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and
   `dismiss` items on a session it started: `fy agenda done !A1 -s <sub-session>`. The daemon proves it by lineage
@@ -411,8 +441,8 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on card (a password, code or approval the daemon asks for) stays
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); routine progress goes on its card (`fy task note`) and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2552**.
+  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); at each step it reads its card and rewrites the stale parts of its status and How to test (`fy task edit`), routine progress goes on its card (`fy task note`), and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
+  out. Sizes with the default binary name: **lead 2910 characters** (4292 with Agenda mode on), **sub-ferret 2631**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

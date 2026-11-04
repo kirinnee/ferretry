@@ -255,24 +255,21 @@ describe('BoardPage — views', () => {
     expect(second.searches).toEqual(['view=list']);
   });
 
-  it('closes a card from its To test row with Done, without opening it', async () => {
-    const { root, acts, navigated } = await open({ props: { search: 'view=list' } });
-    expect(root.querySelector('[data-task="F2"] .fy-board-done')).toBeNull();
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
-    expect(navigated).toEqual([]);
+  it('draws no Done or Not good on a To test row, and no Done column', async () => {
+    const { root } = await open({ props: { search: 'view=list' } });
+    expect(root.querySelector('[data-task="F4"]')).not.toBeNull();
+    expect(
+      root.querySelector(
+        '.fy-board-done, .fy-board-card__verdict, [data-verdict], [data-col="done"], .fy-board-summary__act',
+      ),
+    ).toBeNull();
   });
 
-  it('reopens a closed card from the Archive, asking why first', async () => {
-    const { root, acts } = await open({ props: { search: 'view=archive' } });
-    const button = must(root.querySelector<HTMLButtonElement>('[data-task="F8"] .fy-board-done'), 'Reopen');
-    expect(button.textContent).toBe('Reopen');
-    await interact(() => button.click());
-    expect(acts).toEqual([]);
-    await sendBack(sendBackBox(root), 'it broke again');
-    expect(acts).toEqual([
-      { daemonId: 'daemon/laptop', id: 'F8', request: { action: 'move', to: 'implement', reason: 'it broke again' } },
-    ]);
+  it('draws no Reopen on a closed card in the Archive', async () => {
+    const { root } = await open({ props: { search: 'view=archive' } });
+    expect(root.querySelector('[data-task="F8"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict], [data-col="done"]')).toBeNull();
+    expect(root.textContent).not.toContain('Reopen');
   });
 
   it('draws the Tree and the Dependencies views', async () => {
@@ -598,19 +595,18 @@ describe('BoardPage — moving cards', () => {
     expect(root.querySelector('[data-answer-error]')).toBeNull();
   });
 
-  it('closes a card from To test in one tap with Done', async () => {
-    const { root, acts } = await open();
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('sends "Not good" back to the last active lane, with a reason', async () => {
-    const { root, acts } = await open();
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    expect(root.querySelector('[role="dialog"]')?.textContent).toContain(
-      'Not good: send Try the thing back to Implement',
+  it('draws no Done or Not good on a card in To test, or anywhere on the Kanban', async () => {
+    const { root } = await open();
+    expect(root.querySelector('[data-task="F4"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-card__more'), 'menu').click(),
     );
-    expect(acts).toEqual([]);
+    expect(
+      [...root.querySelectorAll('[data-task="F4"] [role="menuitem"]')].some(item =>
+        /done|reopen|not good/iu.test(item.textContent ?? ''),
+      ),
+    ).toBe(false);
   });
 
   it('does not move a card in the Archive', async () => {
@@ -823,7 +819,7 @@ describe('BoardPage — the phone header', () => {
   });
 });
 
-describe('BoardPage — an answer in flight', () => {
+describe('BoardPage — a move in flight', () => {
   const hold = () => {
     let release: (answer: Awaited<ReturnType<DaemonBoardStore['act']>>) => void = () => undefined;
     const act = () =>
@@ -833,34 +829,26 @@ describe('BoardPage — an answer in flight', () => {
     return { act, release: (answer: Awaited<ReturnType<DaemonBoardStore['act']>>) => release(answer) };
   };
 
-  it('spins the pressed Done, holds every answer on that card, and sends one move however often it is pressed', async () => {
+  it('holds the card whose move is on its way, and sends one move however often it is asked', async () => {
     const held = hold();
     const { root, acts } = await open({ act: held.act });
-    await click(root, '[data-task="F4"] .fy-board-done');
-    const done = must(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-done'), 'Done');
-    expect(done.hasAttribute('data-pending')).toBe(true);
-    expect(done.disabled).toBe(true);
-    expect(done.getAttribute('aria-busy')).toBe('true');
-    expect(done.querySelector('[data-spinner]')).not.toBeNull();
-    expect(done.textContent).toBe('Done');
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] [data-verdict="not-good"]')?.disabled).toBe(true);
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-card__more')?.disabled).toBe(true);
-    expect(root.querySelector('[data-task="F4"]')?.getAttribute('data-settling')).toBe('done');
-    expect(root.querySelector('[data-task="F4"]')?.getAttribute('draggable')).toBe('false');
+    await pickLane(await openMenu(root, 'F2'), 'Review/CI');
+    const li = must(root.querySelector('[data-task="F2"]'), 'F2');
+    expect(li.getAttribute('data-settling')).toBe('move');
+    expect(li.getAttribute('draggable')).toBe('false');
+    expect(root.querySelector<HTMLButtonElement>('[data-task="F2"] .fy-board-card__more')?.disabled).toBe(true);
     // Other cards are not held.
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F2"] .fy-board-card__more')?.disabled).toBe(false);
-    await interact(() => done.click());
+    expect(root.querySelector<HTMLButtonElement>('[data-task="F3"] .fy-board-card__more')?.disabled).toBe(false);
     expect(acts).toHaveLength(1);
-    held.release(boardOk(card('F4', { laneId: 'closed' })));
+    held.release(boardOk(card('F2', { laneId: 'review' })));
     await interact(() => flush());
     expect(root.querySelector('[data-settling]')).toBeNull();
   });
 
-  it('ignores another answer on a card while one is on its way', async () => {
+  it('ignores a drop on a card while its move is on its way', async () => {
     const held = hold();
     const { root, acts } = await open({ act: held.act });
-    await click(root, '[data-task="F4"] .fy-board-done');
-    // The buttons are held; a drop that still arrives must not start a second move either.
+    await pickLane(await openMenu(root, 'F2'), 'Review/CI');
     const dragged = (type: string) => {
       const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperty(event, 'dataTransfer', {
@@ -868,7 +856,7 @@ describe('BoardPage — an answer in flight', () => {
       });
       return event;
     };
-    await interact(() => must(root.querySelector('[data-task="F4"]'), 'F4').dispatchEvent(dragged('dragstart')));
+    await interact(() => must(root.querySelector('[data-task="F2"]'), 'F2').dispatchEvent(dragged('dragstart')));
     const merged = must(
       [...root.querySelectorAll<HTMLElement>('.fy-board-lane')].find(lane =>
         lane.getAttribute('aria-label')?.startsWith('Merged'),
@@ -878,46 +866,12 @@ describe('BoardPage — an answer in flight', () => {
     await interact(() => merged.dispatchEvent(dragged('drop')));
     expect(acts).toHaveLength(1);
     expect(root.querySelector('[role="dialog"]')).toBeNull();
-    held.release(boardOk(card('F4')));
+    held.release(boardOk(card('F2')));
     await interact(() => flush());
-  });
-
-  it('says a refused Done on the card, and nowhere else', async () => {
-    const { root } = await open({
-      act: async () => boardErr({ status: 409, message: 'only the owner closes', boardCode: 'owner-gate' as const }),
-    });
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(root.querySelector('[data-task="F4"] [data-answer-error][role="alert"]')?.textContent).toBe(
-      'only the owner closes',
-    );
-    expect(root.querySelector('.fy-board__notice')).toBeNull();
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-done')?.disabled).toBe(false);
-  });
-
-  it('spins Done on a Table row and says its refusal under the row', async () => {
-    const held = hold();
-    const { root } = await open({ act: held.act, props: { search: 'view=list' } });
-    await click(root, '.fy-board-summary__row[data-task="F4"] .fy-board-done');
-    const row = must(root.querySelector('.fy-board-summary__row[data-task="F4"]'), 'the row');
-    expect(row.getAttribute('data-settling')).toBe('done');
-    expect(row.querySelector('.fy-board-done [data-spinner]')).not.toBeNull();
-    held.release(boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }));
-    await interact(() => flush());
-    expect(row.querySelector('[data-answer-error]')?.textContent).toBe('no');
-    expect(row.hasAttribute('data-settling')).toBe(false);
-  });
-
-  it('words a Reopen from the Archive as one', async () => {
-    const { root } = await open({ props: { search: 'view=archive' } });
-    await click(root, '[data-task="F8"] .fy-board-done');
-    expect(root.querySelector('.fy-board-reason__heading')?.textContent).toBe(
-      'Reopen Old closed thing: back to Implement',
-    );
-    expect(sendBackField(root).getAttribute('placeholder')).toBe('Why is it going back?');
   });
 });
 
-describe('BoardPage — Not good with pictures', () => {
+describe('BoardPage — a move back with pictures', () => {
   const IMAGE = `att_${'a'.repeat(64)}`;
   const withFiles = (offered: boolean, uploads: string[] = []): Partial<BoardPageProps> => ({
     ports: {
@@ -940,7 +894,7 @@ describe('BoardPage — Not good with pictures', () => {
     await interact(() => flush());
   };
 
-  it("uploads to the card's ferret and sends the files with the words, spinning Not good meanwhile", async () => {
+  it("uploads to the card's ferret and sends the files with the words, holding the card meanwhile", async () => {
     const uploads: string[] = [];
     let release: () => void = () => undefined;
     const { root, acts } = await open({
@@ -950,7 +904,7 @@ describe('BoardPage — Not good with pictures', () => {
           release = () => resolve(boardOk(card('F4', { laneId: 'implement' })));
         }),
     });
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    await pickLane(await openMenu(root, 'F4'), 'Implement');
     await interact(() => flush());
     await pickFile(root);
     const ferret = card('F4').owner;
@@ -968,7 +922,7 @@ describe('BoardPage — Not good with pictures', () => {
         },
       },
     ]);
-    expect(root.querySelector('[data-task="F4"] [data-verdict="not-good"]')?.hasAttribute('data-pending')).toBe(true);
+    expect(root.querySelector('[data-task="F4"]')?.getAttribute('data-settling')).toBe('move');
     expect(root.querySelector('button[data-composer-send]')?.getAttribute('aria-label')).toBe('Sending…');
     release();
     await interact(() => flush());
@@ -980,7 +934,7 @@ describe('BoardPage — Not good with pictures', () => {
       props: withFiles(true),
       act: async () => boardErr({ status: 409, message: 'not in its session', boardCode: 'owner-gate' as const }),
     });
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    await pickLane(await openMenu(root, 'F4'), 'Implement');
     await sendBack(sendBackBox(root), 'no');
     expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('not in its session');
     expect(sendBackField(root).value).toBe('no');
@@ -988,7 +942,7 @@ describe('BoardPage — Not good with pictures', () => {
 
   it('sends the words alone to a machine too old for pictures', async () => {
     const { root, acts } = await open({ props: withFiles(false) });
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    await pickLane(await openMenu(root, 'F4'), 'Implement');
     await interact(() => flush());
     expect(root.querySelector('[data-composer-attach]')).toBeNull();
     expect(root.querySelector('[data-send-back-note="update"]')).not.toBeNull();

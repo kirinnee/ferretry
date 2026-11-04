@@ -201,56 +201,50 @@ describe('ChatTasks — opening a card', () => {
   });
 });
 
-describe('ChatTasks — the owner’s Done and Not good', () => {
-  it('closes a card waiting in To test with Done ✓', async () => {
+describe('ChatTasks — no owner buttons', () => {
+  it('draws no Done, Not good or Reopen on a card, at the side density or on a closed card', async () => {
     const { root, acts } = await open();
-    await interact(() => must(root.querySelector<HTMLElement>('[data-task="F22"] .fy-board-done'), 'Done').click());
-    await interact(() => flush());
-    expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('opens the Board composer before Not good sends the card back', async () => {
-    const { root, acts } = await open();
+    expect(root.querySelector('[data-task="F22"][data-density="side"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
     await interact(() =>
-      must(root.querySelector<HTMLElement>('[data-task="F22"] [data-verdict="not-good"]'), 'Not good').click(),
+      must(root.querySelector<HTMLElement>('[data-task="F22"] .fy-board-card__more'), 'menu').click(),
     );
-    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the composer');
-    expect(dialog.hasAttribute('data-board-send-back')).toBe(true);
-    expect(dialog.textContent).toContain('Not good: send Try the board back to Implement');
+    const items = [...root.querySelectorAll('[data-task="F22"] [role="menuitem"]')].map(item => item.textContent ?? '');
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.some(item => /done|reopen|not good/iu.test(item))).toBe(false);
+    expect(root.querySelector('[data-task="F23"] .fy-board-card__more')).toBeNull();
     expect(acts).toEqual([]);
-  });
-
-  it('draws Done and Not good on the card itself at the side density', async () => {
-    const { root } = await open();
-    const row = must(
-      root.querySelector('[data-task="F22"][data-density="side"] .fy-board-card__verdict'),
-      'verdict row',
-    );
-    expect(row.querySelector('.fy-board-done')).not.toBeNull();
-    expect(row.querySelector('[data-verdict="not-good"]')).not.toBeNull();
-  });
-
-  it('offers Reopen on a closed card, from its menu', async () => {
-    const { root, acts } = await open();
-    await interact(() =>
-      must(root.querySelector<HTMLElement>('[data-task="F23"] .fy-board-card__more'), 'menu').click(),
-    );
-    const reopen = must(root.querySelector<HTMLElement>('[data-task="F23"] [data-done="reopen"]'), 'Reopen');
-    await interact(() => reopen.click());
-    expect(acts.length + document.body.querySelectorAll('[role="dialog"]').length).toBeGreaterThan(0);
   });
 });
 
 describe('ChatTasks — the reason box', () => {
+  const pickMenu = async (root: HTMLElement, task: string, name: string): Promise<void> => {
+    await interact(() =>
+      must(root.querySelector<HTMLElement>(`[data-task="${task}"] .fy-board-card__more`), 'menu').click(),
+    );
+    await interact(() =>
+      must(
+        [...root.querySelectorAll<HTMLElement>(`[data-task="${task}"] [role="menuitem"]`)].find(
+          item => item.textContent === name,
+        ),
+        name,
+      ).click(),
+    );
+  };
   const askReason = async (extra: Parameters<typeof open>[0] = {}) => {
     const opened = await open(extra);
-    await interact(() =>
-      must(opened.root.querySelector<HTMLElement>('[data-task="F22"] [data-verdict="not-good"]'), 'Not good').click(),
-    );
+    await pickMenu(opened.root, 'F22', 'Implement');
     return opened;
   };
   const box = () => must(document.body.querySelector<HTMLElement>('form[role="dialog"], [role="dialog"]'), 'box');
   const typeReason = (reason: string): Promise<void> => sendBack(box(), reason);
+
+  it('opens the Board composer before a move back sends the card', async () => {
+    const { acts } = await askReason();
+    expect(box().hasAttribute('data-board-send-back')).toBe(true);
+    expect(box().textContent).toContain('Move Try the board back to Implement');
+    expect(acts).toEqual([]);
+  });
 
   it('sends the card back with the reason and closes the box', async () => {
     const { acts } = await askReason();
@@ -273,14 +267,6 @@ describe('ChatTasks — the reason box', () => {
     await interact(() => must(cancel, 'Cancel').click());
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(acts).toEqual([]);
-  });
-
-  it('says a refused Done on the card itself, as the Board does', async () => {
-    const { root } = await open({ refuse: 'Nope' });
-    await interact(() => must(root.querySelector<HTMLElement>('[data-task="F22"] .fy-board-done'), 'Done').click());
-    await interact(() => flush());
-    expect(root.querySelector('[data-task="F22"] [data-answer-error]')?.textContent).toBe('Nope');
-    expect(root.querySelector('[data-board-side-notice]')).toBeNull();
   });
 });
 

@@ -345,31 +345,28 @@ describe('Board on a phone — counts and filters', () => {
 });
 
 describe('Board on a phone — rows waiting to be tested', () => {
-  it('puts ✓ Done and ✗ Not good right on the row', async () => {
+  it('draws no Done or Not good on the row: the owner answers in the agenda', async () => {
     const { root } = await open('at=tested');
     const row = must(root.querySelector('[data-task="F4"]'), 'the To test row');
-    expect(row.querySelector('.fy-board-done')?.textContent).toBe('Done');
-    expect(row.querySelector('.fy-board-done')?.getAttribute('aria-label')).toBe(
-      'Mark Try the thing done and close it',
+    expect(row.querySelector('.fy-board-done, .fy-board-verdict, [data-verdict], .fy-board-card__verdict')).toBeNull();
+    expect(row.textContent).not.toMatch(/Not good/u);
+  });
+
+  it('slides the reason box up on a move back from the menu, and sends the card back only with a reason', async () => {
+    const { root, acts } = await open('at=tested');
+    await click(root, '[data-task="F4"] .fy-board-card__more');
+    await interact(() =>
+      must(
+        [...root.querySelectorAll<HTMLElement>('[data-task="F4"] [role="menuitem"]')].find(
+          item => item.textContent === 'Implement',
+        ),
+        'Implement',
+      ).click(),
     );
-    const buttons = [...row.querySelectorAll<HTMLButtonElement>('.fy-board-verdict')];
-    expect(buttons.map(button => button.textContent)).toEqual(['Not good']);
-    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Not good: send back Try the thing']);
-  });
-
-  it('closes the card in one tap on Done', async () => {
-    const { root, acts } = await open('at=tested');
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('slides the reason box up on Not good, and sends the card back only with a reason', async () => {
-    const { root, acts } = await open('at=tested');
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
     expect(acts).toEqual([]);
     const scrim = must(root.querySelector('.fy-board__scrim'), 'the reason box');
     expect(scrim.hasAttribute('data-phone')).toBe(true);
-    expect(scrim.textContent).toContain('Not good: send Try the thing back to Implement');
+    expect(scrim.textContent).toContain('Move Try the thing back to Implement');
 
     await sendBack(sendBackBox(scrim), 'The button is dead');
     expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'implement', reason: 'The button is dead' } }]);

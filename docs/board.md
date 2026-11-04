@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Cards (&F412) show progress only; every human ask goes in the card's agenda. The owner's asks are public cards ("status of all I asked?"): top-level, never `--parent`/`--private`; relate in `--context`. No umbrella cards; check related cards first; add to one. Before it's ready to try: `fy task edit <id> --how-to-test "<1. where 2. do 3. see>"`; lane by work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done); `--how-to-test "<where, do, see>"` before try. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -161,9 +161,22 @@ How to test written for the owner ([How a card reads](#how-a-card-reads)). Regis
 longer in the rule, because a ferret's first card registers its repository. The full `fy task create` command is no
 longer in the rule either: the command's own refusals and `--help` say every flag it needs.
 
-The rule names no gate: the owner's asks about a card — approve this plan, try this release — belong in the card's
-agenda, never on the card itself ([One card, one outcome](#one-card-one-outcome)). How the daemon puts them there
-is [Card asks](agenda.md#card-asks).
+The rule names no gate: **the board runs itself and a card never asks** (the owner, 2026-11-04: _"TASK no longer have
+user interactivity anymore! agenda tracks all those and are the one request user to test so it can move it. the board
+is almost fully autonomous!"_). The owner's answers about a card — approve this plan, try this release, Done or Not
+good — belong in the card's agenda, which moves the card ([One card, one outcome](#one-card-one-outcome)). How the
+daemon puts them there is [Card asks](agenda.md#card-asks).
+
+The rest of the rule is the owner's too (2026-11-04):
+
+- **Public = the owner's asks, private = the ferrets' own sub-cards.** _"the board should answer the question 'What's
+  the current status of all the things I asked you to do' or 'what's the sitrep'. that is how you decide internal or
+  external."_ ([Public and private cards](#public-and-private-cards)).
+- **Planning is a phase** (_"planning can be a phase!"_): a plan is worked in the card's planning lane, never a reason
+  to skip the card.
+- **The title and summary read as a sitrep** (_"reading the title should directly reflect what is doing -- similar to
+  asking "sitrep""_): "Rewrite card teaching" says what the work does; "Board stuff" does not.
+- **The card's status is rewritten whole at each step** ([The card's Status](#the-cards-status)).
 
 ## One card, one outcome
 
@@ -199,13 +212,13 @@ problem, and what a sub-ferret does is mostly report back to its lead. The daemo
 session identity — in `BoardService` (`create`, `act`) and on the lane route — so a prompt cannot talk past it
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)).
 
-| A sub-ferret may                                           | A sub-ferret is refused                                                                      |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| read the board, `fy task note` on a card                   | `fy task create`, `move`, `reopen`, `depend` / `undepend`, `block` / `unblock`,              |
-| `fy task link --pr <url>` / `--branch <branch>` on a card  | `reparent`, `focus`, `edit`, `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc` |
-| `fy task drop` / `assign` on a card **in its own subtree** | `drop` / `assign` on any card outside it (see [Authority](#authority))                       |
-| `fy task trigger` (`deploy.done`) on its card              |                                                                                              |
-| `fy send` its lead (and peers the lead names)              | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                       |
+| A sub-ferret may                                                                                           | A sub-ferret is refused                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| read the board, `fy task note` on a card, `fy task edit --status-*` / `--how-to-test` on the card it holds | `fy task create`, `move`, `reopen`, `depend` / `undepend`, `block` / `unblock`,                                             |
+| `fy task link --pr <url>` / `--branch <branch>` on a card                                                  | `reparent`, `focus`, `edit` (but `status` and `howToTest`), `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc` |
+| `fy task drop` / `assign` on a card **in its own subtree**                                                 | `drop` / `assign` on any card outside it (see [Authority](#authority))                                                      |
+| `fy task trigger` (`deploy.done`) on its card                                                              |                                                                                                                             |
+| `fy send` its lead (and peers the lead names)                                                              | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                                                      |
 
 The refusal is `forbidden` and speaks to the caller, never of "sub-ferrets" at large: it says what it can't do, what it MAY do, and who can do the rest, e.g.
 `You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send <lead-callsign> "…"`.
@@ -224,8 +237,8 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 `FY_SUB_FERRET=1` from the session's `parent` at every launch, so a stored value cannot switch it off):
 
 ```text
-Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make; routine progress: `fy task note` on your card. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a card: link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none. Your final report says how the owner tests it.
+Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
+With a card: each step, read it (`fy task show <id>`), then `fy task edit <id>` its status (`--status-{now,done,next}`, PR links in done) and `--how-to-test`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
@@ -591,6 +604,7 @@ fields plus the ones the daemon derives.
 | `premise`, `context`    | why the work exists; what a newcomer needs to know                               |
 | `terms`, `brief`        | glossary entries for the card; the full plan, or a sub-ferret's brief            |
 | `howToTest`             | how the owner checks the result before Done; empty on a card stored before it    |
+| `status`                | the card's current state `{ now, doneSoFar, next }`, or absent; see below        |
 | `owner`, `assignee`     | the accountable ferret; the one doing it now (none reads as the owner)           |
 | `parent`                | the lead's card, possibly on another project's board; the roll-up follows it     |
 | `visibility`            | `public` or `private`; see [Public and private cards](#public-and-private-cards) |
@@ -623,21 +637,22 @@ never printed ([reference-standard.md](reference-standard.md)).
 
 ## How a card reads
 
-Every text a ferret writes on a card — `summary`, `premise`, `context`, `brief` and `howToTest` — is Markdown,
+Every text a ferret writes on a card — `summary`, `status`, `premise`, `context`, `brief` and `howToTest` — is Markdown,
 drawn by the chat's one renderer (`ChatProse`), so `fy-render` hypermedia (mermaid, svg, html, chart, image…) draws
 exactly as in a message or an agenda card ([fy-render.md](fy-render.md)), and references are read through the one
 grammar and its proof-before-link gate ([reference-standard.md](reference-standard.md)). The card detail reads top to bottom
 as an agenda card does, with nothing folded:
 
-1. the title, with the **summary** as one line under it;
+1. the title, with the **summary** as one line under it, then the **Status** ([The card's Status](#the-cards-status)) when
+   it has one;
 2. **premise** and **context** as two soft tinted blocks, each label above its points (the agenda card's own
    `Situation` and tokens); a repeated `--premise` / `--context` is one bullet each;
 3. the owner's **ask**, verbatim, with its clarifications (the ask, clarifications, history notes and terms are Markdown too);
 4. **How to test**: a list is drawn as numbered steps, each with a box the owner ticks as they go (on that screen
    only — a tick is a reminder, never a verdict). Steps keep the number they were written with (a list that
    starts at 4 reads 4, 5, 6); a heading or a paragraph set apart between steps is a sub-heading above the steps
-   that follow, and text before the first step is the lead. On a card waiting to be
-   tested, **Not good** (left) and **Done** (right) sit right under it, and a swipe right is Done, left is Not good;
+   that follow, and text before the first step is the lead. The card draws no answer of its own: a card waiting to
+   be tested is answered on its agenda ([Done and Not good](#done-and-not-good));
 5. the **brief**, then the **terms** — and each term is also a dotted tap tip where the card's text first uses it.
 
 A good How to test says where to go, what to do and what the owner should see, on which machine and version:
@@ -645,8 +660,8 @@ A good How to test says where to go, what to do and what the owner should see, o
 ```markdown
 On the Mac, once it runs v4.157:
 
-1. Open the Board and tap a card in Released.
-2. Scroll to How to test, and tick each step as you check it.
+1. Open the Inbox and tap the card's "Try it" ask.
+2. Follow How to test, and tick each step as you check it.
 3. You should see Done and Not good right under the steps.
 ```
 
@@ -655,8 +670,64 @@ one short line), a small **How to test** marker when the card has one, and a qui
 `verify` lane that has none, so a missing one stands out to the lead.
 
 `fy task create` and `fy task edit` take `--how-to-test <md>` or `--how-to-test-file <path>`; any ferret that may
-edit the card may write it (it is not a re-plan). A sub-ferret cannot edit cards, so it puts the steps in its report
-and its lead writes them.
+edit the card may write it (it is not a re-plan), and so may a sub-ferret on the card it holds, as it writes the
+card's `status` ([The card's Status](#the-cards-status)).
+
+## The card's Status
+
+The owner (2026-11-04): _"card content should have well formatted status updates too -- what is happening to the card,
+what has been implemented. sub-ferrets and ferrets should update them!"_ A card's notes are its history, appended one
+line at a time, so the latest state is scattered across them. **`status` is the card's current state, in one place,
+kept current** — the card's answer to "what's the sitrep?".
+
+**Its shape is fixed: three parts**, so every card reads the same and every surface draws it the same way. On the wire
+`status` is an object, each part Markdown (`MAX_BOARD_STATUS_PART_LENGTH` each); all three are required strings and
+`''` is allowed; the whole field **absent** means the card has no status yet (every card stored before it existed):
+
+| Part        | Holds                                                              |
+| ----------- | ------------------------------------------------------------------ |
+| `now`       | what is happening on the card at this moment, one or two lines     |
+| `doneSoFar` | what is implemented, one bullet each, with the PR link where there |
+| `next`      | what comes after, in order                                         |
+
+```yaml
+status:
+  now: Writing the daemon route; the protocol field is in.
+  doneSoFar: |
+    - Protocol field `status` (https://github.com/kirinnee/ferretry/pull/321)
+    - Design in docs/board.md
+  next: |
+    1. CLI `fy task edit --status-now`.
+    2. PWA card view.
+```
+
+**Read it whole, then rewrite what is stale.** It is an ordinary editable field (`BoardEditableField` `status`).
+An edit names **the parts it replaces** (`status: { now }`, or all three); each part it leaves out keeps the card's,
+and a card with no status yet starts from empty parts. **The daemon merges the parts in the card's own write**, so a
+holder rewriting Now while its lead rewrites Done so far never undoes the other. `fy task edit <id>` takes
+`--status-now <md>`, `--status-done <md>` and `--status-next <md>`, each sending that one part, and
+`--status-file <path>` with all three as YAML or JSON (`-` reads stdin; a part the file leaves out is empty, and a flag
+beside it replaces its part). At each step the ferret reads the card (`fy task show <id>`) and rewrites every part
+that is out of date, the title and summary included, so nothing on the card is stale. The edit records a
+`field-edited` event naming `status`, never its text — the history says when it changed, and `status` says what it
+is. A part is cleared by writing it empty (`--status-next ""`); the field itself is never removed. Notes stay the
+history: `fy task note` is still how a ferret records a step, a finding or a decision as it happens.
+
+**Who writes it.** The card's ferrets, at each step that changes the answer: the lead on its own cards, and **the
+card's current holder** (assignee, else owner) — a sub-ferret included — on its own card. A sub-ferret's edit may name
+only `status` and `howToTest` ([Sub-ferrets](#sub-ferrets-no-moves-only-reports)); any other field in the same edit is
+refused whole, as before. The daemon never writes it: a daemon-made lane move, a PR fact or a release leaves `status`
+alone, because only the ferret knows what the work is doing; the lane already says where it is.
+
+**Where it reads.**
+
+- The card detail draws it **first**, right under the title and the summary, under the label **Status**: **Now**,
+  **Done so far** and **Next**, each drawn only when it has words ([How a card reads](#how-a-card-reads)). A card with
+  no status draws nothing.
+- `fy task show` prints it right after the header, before the ask, the same three labels.
+- The work index reads it with the brief, so `fy search` finds a card by what it is doing now.
+- A YAML or JSON patch of a card sends `status` parts by key (`now`, `doneSoFar`, `next`), merged as an edit's are;
+  a part is cleared by writing it empty. A sub-ferret's patch follows the same holder rule.
 
 ## Public and private cards
 
@@ -926,7 +997,14 @@ who is not on this host ([grants.md](grants.md)).
 
 ## Done and Not good
 
-The owner's two answers about a card, on every surface that shows one (Kanban, Table, card detail):
+**A card has no owner buttons** (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda tracks
+all those and are the one request user to test so it can move it. the board is almost fully autonomous!"_). The Board's
+surfaces — the Kanban card, the Table row, the side pane and the card detail — draw the card's state (its lane, its
+Status, its How to test) and no answer. The owner answers a card only on its agenda: the card ask
+([below](#cards-show-progress-their-asks-ride-the-agenda)) on the Inbox deck, a to-test row in the Inbox list and the
+Answer-quickly run, which move the card.
+
+The owner's two answers about a card, on those agenda surfaces:
 
 - **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
 - **Not good** opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
@@ -940,7 +1018,7 @@ The owner's two answers about a card, on every surface that shows one (Kanban, T
 
 Where the box opens is one rule too: **inline, directly under the card it answers, at the card's exact width** — under the
 Inbox deck's card, under a to-test row in the Inbox list and in the Answer-quickly run (no sheet, no popup over the page).
-Only the Board's own card and detail pages, which have no row to sit under, keep it as a modal. It ends at the field: a
+It ends at the field: a
 detached composer draws no empty status row under it, and its placeholder is short enough for a phone (`What went wrong?`).
 
 The files travel as ordinary chat attachments. The app uploads them to the card's ferret (its assignee, else

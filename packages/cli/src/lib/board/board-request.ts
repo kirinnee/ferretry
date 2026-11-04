@@ -9,6 +9,7 @@ import {
   BoardStateFilterSchema,
   type BoardTaskActionRequest,
   BoardTaskActionRequestSchema,
+  type BoardStatus,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
   type BoardTaskVisibility,
@@ -369,6 +370,14 @@ export function visibilityOf(value: string | undefined): BoardTaskVisibility | u
 }
 
 export interface BoardEditOptions {
+  /** `--status-now`: replaces the Now part of the status, the others kept. */
+  readonly statusNow?: string;
+  /** `--status-done`: replaces the Done so far part. */
+  readonly statusDone?: string;
+  /** `--status-next`: replaces the Next part. */
+  readonly statusNext?: string;
+  /** `--status-file`: YAML or JSON `{ now, doneSoFar, next }`; `-` reads standard input. */
+  readonly statusFile?: string;
   readonly title?: string;
   readonly summary?: string;
   readonly premise?: string | readonly string[];
@@ -382,8 +391,12 @@ export interface BoardEditOptions {
   readonly visibility?: string;
 }
 
-/** The texts `--brief-file` and `--how-to-test-file` stand for, already read, because reading a file is IO. */
+/**
+ * The texts `--brief-file` and `--how-to-test-file` stand for, already read, because reading a file is IO, and the
+ * status parts the `--status-*` flags and `--status-file` name (the daemon merges them into the card's current status).
+ */
 export interface BoardEditTexts {
+  readonly status?: Partial<BoardStatus> | undefined;
   readonly brief?: string | undefined;
   readonly howToTest?: string | undefined;
 }
@@ -400,6 +413,7 @@ const editFields = (options: BoardEditOptions, texts: BoardEditTexts) => {
     ...(terms === undefined ? {} : { terms }),
     ...(texts.brief === undefined ? {} : { brief: texts.brief }),
     ...(texts.howToTest === undefined ? {} : { howToTest: texts.howToTest }),
+    ...(texts.status === undefined ? {} : { status: texts.status }),
   };
   return fields;
 };
@@ -410,7 +424,7 @@ export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts
   const visibility = visibilityOf(options.visibility);
   if (Object.keys(fields).length === 0 && visibility === undefined) {
     refuse(
-      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test, --how-to-test-file or --visibility',
+      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test, --how-to-test-file, --status-now, --status-done, --status-next, --status-file or --visibility',
     );
   }
   if ('title' in fields && fields.title !== undefined) {

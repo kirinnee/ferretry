@@ -38,6 +38,14 @@ const acting = (command: Command): Command =>
 
 const ID_HELP = 'the task id: &F21 (or F21)';
 
+const STATUS_NOW_HELP =
+  "the card's status, Now: what is happening this moment (markdown); replaces that part, the others stay";
+const STATUS_DONE_HELP =
+  "the card's status, Done so far: what is implemented, one bullet each with its PR link (markdown); replaces that part";
+const STATUS_NEXT_HELP = "the card's status, Next: what comes after, in order (markdown); replaces that part";
+const STATUS_FILE_HELP =
+  "the card's current state, rewritten whole, from YAML or JSON { now, doneSoFar, next } (`-` reads stdin): **Now** / **Done so far** (PR links) / **Next** (markdown)";
+
 const HOW_TO_TEST_HELP =
   'how the owner checks it before Done (markdown, a numbered list): where to go, what to do, what they should see';
 
@@ -285,7 +293,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('edit'))
-    .description("change a card's title, summary, premise, context, glossary, brief, How to test or visibility")
+    .description("change a card's title, summary, status, premise, context, glossary, brief, How to test or visibility")
     .argument('<id>', ID_HELP)
     .option('--title <title>', TASK_TITLE_GUIDANCE)
     .option('--summary <line>', 'one line for the card face')
@@ -306,6 +314,10 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--brief-file <path>', 'read the brief from a file instead')
     .option('--how-to-test <md>', HOW_TO_TEST_HELP)
     .option('--how-to-test-file <path>', 'read How to test from a file instead')
+    .option('--status-now <md>', STATUS_NOW_HELP)
+    .option('--status-done <md>', STATUS_DONE_HELP)
+    .option('--status-next <md>', STATUS_NEXT_HELP)
+    .option('--status-file <path>', STATUS_FILE_HELP)
     .option('--visibility <public|private>', "who sees it on the default board; only the owner hides the owner's ask")
     .action(async (id: string, options: TaskEditFlags) => {
       await board.edit(id, options);

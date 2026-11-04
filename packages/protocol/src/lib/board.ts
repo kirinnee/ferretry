@@ -58,6 +58,8 @@ export const MAX_BOARD_PREMISE_LENGTH = 4 * 1024;
 export const MAX_BOARD_CONTEXT_LENGTH = 16 * 1024;
 /** The owner's test steps: a short checklist, sized like the context. */
 export const MAX_BOARD_HOW_TO_TEST_LENGTH = 16 * 1024;
+/** Each part of a card's status (Now, Done so far, Next): the three together are at most 24 KiB. */
+export const MAX_BOARD_STATUS_PART_LENGTH = 8 * 1024;
 export const MAX_BOARD_BRIEF_LENGTH = 64 * 1024;
 export const MAX_BOARD_REASON_LENGTH = 2 * 1024;
 export const MAX_BOARD_NOTE_LENGTH = 2 * 1024;
@@ -276,6 +278,7 @@ export const BoardEditableFieldSchema = z.enum([
   'terms',
   'brief',
   'howToTest',
+  'status',
 ]);
 export type BoardEditableField = z.infer<typeof BoardEditableFieldSchema>;
 
@@ -439,6 +442,36 @@ export type BoardTaskVisibility = z.infer<typeof BoardTaskVisibilitySchema>;
 export const BoardTaskVisibilitySourceSchema = z.enum(['default', 'chosen']);
 export type BoardTaskVisibilitySource = z.infer<typeof BoardTaskVisibilitySourceSchema>;
 
+/**
+ * A card's status: its current state in three Markdown parts, kept current by the ferret that holds the card. An edit
+ * names the parts it replaces and the daemon merges them in the card's own write. A part with nothing to say is ''.
+ * The field itself is optional on a card: absent means no status yet, and no reader invents one.
+ */
+export const BoardStatusSchema = z.strictObject({
+  /** What is happening on the card at this moment. */
+  now: z.string().max(MAX_BOARD_STATUS_PART_LENGTH),
+  /** What is implemented, one bullet each, with the PR link where there is one. */
+  doneSoFar: z.string().max(MAX_BOARD_STATUS_PART_LENGTH),
+  /** What comes after, in order. */
+  next: z.string().max(MAX_BOARD_STATUS_PART_LENGTH),
+});
+export type BoardStatus = z.infer<typeof BoardStatusSchema>;
+
+/** The three parts of a status in reading order, each with the label every surface draws it under. */
+export const BOARD_STATUS_PARTS = [
+  { key: 'now', label: 'Now' },
+  { key: 'doneSoFar', label: 'Done so far' },
+  { key: 'next', label: 'Next' },
+] as const satisfies readonly { readonly key: keyof BoardStatus; readonly label: string }[];
+
+/** The parts of a status that say something, in reading order; none for an absent status or one with every part empty. */
+export const writtenStatusParts = (
+  status: BoardStatus | undefined,
+): readonly { readonly key: keyof BoardStatus; readonly label: string; readonly text: string }[] =>
+  status === undefined
+    ? []
+    : BOARD_STATUS_PARTS.map(part => ({ ...part, text: status[part.key] })).filter(part => part.text.trim() !== '');
+
 const BoardTaskShape = {
   v: z.literal(BOARD_TASK_SCHEMA_VERSION),
   id: BoardTaskIdSchema,
@@ -464,6 +497,8 @@ const BoardTaskShape = {
    * to do, what they should see. Empty until the ferret writes it; a card stored before it existed reads empty.
    */
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
+  /** The card's current state, rewritten whole by its holder; absent until a ferret writes one. */
+  status: BoardStatusSchema.optional(),
   /** The accountable ferret: the creator by default, the lead for a delegated card. */
   owner: SessionIdSchema,
   /** The ferret doing it now; `null` reads as the owner. */
@@ -804,6 +839,7 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   terms: BoardTermsSchema.default([]),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).default(''),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
+  status: BoardStatusSchema.optional(),
   workflow: TaskWorkflowSchema.default('quick'),
   /** The board; absent means the creating session's project. */
   projectId: BoardProjectIdSchema.optional(),
@@ -841,6 +877,12 @@ const editFields = {
   terms: BoardTermsSchema.optional(),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).optional(),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
+  /**
+   * The parts of the status to replace: each part named replaces that part, each part left out keeps the card's (an
+   * empty part for a card with no status yet). The daemon merges them in the card's own write, so two ferrets
+   * rewriting different parts at once never undo each other.
+   */
+  status: BoardStatusSchema.partial().optional(),
 };
 
 /**

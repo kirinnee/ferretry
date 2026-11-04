@@ -38,9 +38,12 @@ const SPEC_RULES: ReadonlyArray<{
   { rule: "the owner's reply rests an item", prompt: 'agenda', cli: 'agenda add', phrase: 'rests' },
   { rule: 'only the ferret marks it Done', prompt: 'agenda', cli: 'agenda add', phrase: 'only you mark it' },
   { rule: 'no umbrella cards', prompt: 'board', cli: 'task create', phrase: 'no umbrella' },
-  { rule: 'check related cards first', prompt: 'board', cli: 'task create', phrase: 'check related cards first' },
-  { rule: 'a card shows progress only', prompt: 'board', cli: 'task create', phrase: 'progress only' },
-  { rule: "the owner's ask is a public card", prompt: 'board', cli: 'task create', phrase: 'public card' },
+  { rule: 'add to a related card', prompt: 'board', cli: 'task create', phrase: 'related card' },
+  { rule: 'a card never asks the owner', prompt: 'board', cli: 'task create', phrase: 'never ask' },
+  { rule: "public cards are the owner's asks", prompt: 'board', cli: 'task create', phrase: "the owner's asks" },
+  { rule: 'planning is a phase', prompt: 'board', cli: 'task create', phrase: 'planning is a phase' },
+  { rule: 'the board reads as a sitrep', prompt: 'board', cli: 'task create', phrase: 'sitrep' },
+  { rule: 'read the card whole before an edit', prompt: 'board', cli: 'task create', phrase: 'whole, then' },
 ];
 
 /** Case and line breaks do not change a rule: the help wraps its lines, the prompt does not. */
@@ -121,7 +124,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'log', taught: 'log <id> --reply|--rest' },
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
-  { verb: 'edit', taught: '`edit --where-file` (main)' },
+  { verb: 'edit', taught: 'then `edit` all that' },
   { verb: 'done', taught: 'mark it `done`' },
 ];
 
@@ -145,15 +148,15 @@ describe('the teaching names every agenda verb the spec lists', () => {
     });
   }
 
-  it('should teach the stage chain in the order the protocol lists it, and the flags that move it', () => {
-    // Arrange
+  it("should teach no item type: the stage chain stays the daemon's and --stage's help, never the prompt's", () => {
+    // Arrange — the owner (&C48): "now agenda doesn't have a "main" type any more"; the tabs hold any kind.
     const stages = AgendaStageSchema.options.filter(stage => stage !== 'done');
     const prompt = AGENDA_INSTRUCTION('fy');
 
     // Assert
-    should(prompt).containEql(stages.join('→'));
-    should(prompt).containEql('`--stage`');
-    should(prompt).containEql('`edit --where-file`');
+    should(prompt).not.containEql(stages.join('→'));
+    should(prompt).not.containEql('`--stage`');
+    should(prompt).containEql('each tab (`--where-file|');
   });
 
   it('should say a resting item is quiet, a Needs-you item buzzes, and rest --why means working', () => {
@@ -183,9 +186,10 @@ describe('the teaching says the tabs are the live document and the chat is its l
     const prompt = said(AGENDA_INSTRUCTION('fy'));
 
     // Assert
-    should(prompt).containEql('live doc=tabs by content kind (serial stays one), rewrite each whole');
-    should(prompt).containEql('`edit --where-file` (main), `--body-file`, `--tab-file name=f`');
-    should(prompt).containEql('chat points at it');
+    should(prompt).containEql("every update: `show <id>` whole, then `edit` all that's stale");
+    should(prompt).containEql('(`--where-file|--body-file|--tab-file name=f`)');
+    should(prompt).containEql('tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there');
+    should(prompt).containEql('chat points there');
     should(prompt).not.containEql('short status');
     should(prompt).not.containEql('one-screen summary');
   });
@@ -204,7 +208,16 @@ describe('the teaching says the tabs are the live document and the chat is its l
 
     // Assert
     should(rule).containEql('the tabs are the live document; the conversation is only the log');
-    should(rule).containEql('the main tab, "where we are now" (--where-file, or --where points), opens first');
+    // The owner (&C48): every update rewrites the ask, still-open and the tabs; tabs hold any kind; no main type.
+    // And READ → EDIT (the owner: "we need to read to know what needs to be updated, else there might be many segments
+    // that might be outdated!"), every part of it (!A358): premise, context, the ask, its options and how to reply, tabs.
+    should(rule).containEql('always keep the item current: before every update read it whole (agenda show <id>)');
+    should(rule).containEql(
+      'premise, context, the ask (what you need from the owner), its options and how to reply, still-open and each tab',
+    );
+    should(rule).containEql('tabs hold any kind of content');
+    should(rule).containEql('there is no main type: "where we are now" (--where-file, or --where points)');
+    should(rule).containEql('is simply the tab that opens first');
     should(rule).containEql('as long and as rich as it needs to be');
     should(rule).containEql('"the full picture" (--body-file)');
     should(rule).containEql('--tab-file "name=file" (6 at most)');
@@ -216,11 +229,12 @@ describe('the teaching says the tabs are the live document and the chat is its l
     should(rule).containEql('where each part builds on the last, stays one tab');
     should(rule).containEql('one kind of content is one tab: never invent tabs');
     should(rule).containEql('the body may stay empty');
-    // The owner's to-do steps stay ticked steps: a tab holds the plan, never a checklist they cannot tick.
-    should(rule).containEql('steps the owner must do stay --step');
+    // The owner (&C48): "make sure that steps and explainers go the body tabs and kept there!"
+    should(rule).containEql('steps and explainers live in the tabs and stay there, after the ask is answered too');
+    should(rule).containEql("a to-do's --step boxes are only what the owner ticks off");
     should(rule).containEql('rewrite a tab whole whenever it changes: one edit is one version');
     should(rule).containEql('never retype a tab into the conversation');
-    should(rule).containEql('explainer mode');
+    should(rule).containEql('explainer mode, adhd-friendly');
     should(rule).containEql('card and board blocks');
     // The body's Markdown draws no fold of its own: a fold is an fy-render html block's <details>.
     should(rule).containEql('plain markdown draws no fold');

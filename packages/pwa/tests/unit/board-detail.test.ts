@@ -28,7 +28,6 @@ import {
   type SessionAgenda,
   startBrief,
   testSteps,
-  verdictLanes,
   written,
 } from '../../src/lib/board-detail.ts';
 import { card, laneSetFor } from './board-support.ts';
@@ -44,29 +43,6 @@ describe('lane lookups', () => {
     expect(laneNameOf(lanes, 'review')).toBe(lanes.lanes.find(lane => lane.id === 'review')?.name ?? '');
     expect(laneNameOf(lanes, 'gone')).toBe('gone');
     expect(laneNameOf(null, 'gone')).toBe('gone');
-  });
-});
-
-describe('verdictLanes', () => {
-  const verify = lanes.lanes.find(lane => lane.category === 'verify')?.id ?? '';
-
-  it('goes to Closed and to the last active lane from a verify lane', () => {
-    const active = lanes.lanes.filter(lane => lane.category === 'active');
-    expect(verdictLanes(lanes, verify)).toEqual({
-      closeLaneId: lanes.lanes.find(lane => lane.category === 'closed')?.id ?? null,
-      reworkLaneId: active[active.length - 1]?.id ?? null,
-    });
-  });
-
-  it('is absent outside a verify lane and without lanes', () => {
-    expect(verdictLanes(lanes, 'implement')).toBeNull();
-    expect(verdictLanes(lanes, 'gone')).toBeNull();
-    expect(verdictLanes(null, verify)).toBeNull();
-  });
-
-  it('has no close or rework lane when the set has neither', () => {
-    const bare = { lanes: lanes.lanes.filter(lane => lane.category === 'verify') };
-    expect(verdictLanes(bare, verify)).toEqual({ closeLaneId: null, reworkLaneId: null });
   });
 });
 
@@ -318,6 +294,7 @@ describe('history', () => {
     });
     expect(rowOf('field-edited', { field: 'title' })).toMatchObject({ text: 'edited the title', minor: true });
     expect(rowOf('field-edited', { field: 'howToTest' })).toMatchObject({ text: 'edited How to test', minor: true });
+    expect(rowOf('field-edited', { field: 'status' })).toMatchObject({ text: 'edited the status', minor: true });
     expect(rowOf('file-claimed', { path: 'a.ts' })).toMatchObject({ text: 'claimed a.ts', minor: true });
     expect(rowOf('file-released', { path: 'a.ts', reason: 'done' })).toMatchObject({
       text: 'released a.ts',

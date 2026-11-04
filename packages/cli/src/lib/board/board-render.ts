@@ -14,6 +14,7 @@ import {
   type LaneSet,
   type PrLink,
   type TaskRef,
+  writtenStatusParts,
 } from '@ferretry/protocol';
 
 /** How a session id reads: its callsign when the directory knows it, else the id itself. */
@@ -202,6 +203,20 @@ export const describeEvent = (event: BoardTaskEvent, laneSet: LaneSet | null, na
 
 const section = (title: string, body: string): string[] => ['', title, ...body.split('\n').map(line => `  ${line}`)];
 
+/** The written parts of a status, each label above its text (indented), a blank line between parts. */
+const renderStatusParts = (parts: ReturnType<typeof writtenStatusParts>): string =>
+  parts
+    .map(part =>
+      [
+        part.label,
+        ...part.text
+          .trim()
+          .split('\n')
+          .map(line => `  ${line}`),
+      ].join('\n'),
+    )
+    .join('\n\n');
+
 const agendaList = (refs: readonly AgendaRef[]): string => refs.map(formatAgendaRef).join(', ');
 
 /** The terms table: the term column is as wide as the longest term, the meaning follows. */
@@ -234,6 +249,8 @@ export function renderCard(
   if (card.blocked !== null) lines.push(`blocked   ${card.blocked.reason}`);
   if (card.dropped !== null) lines.push(`dropped   ${card.dropped.reason}`);
 
+  const status = writtenStatusParts(card.status);
+  if (status.length > 0) lines.push(...section('Status', renderStatusParts(status)));
   lines.push(...section('Ask', `${card.ask.text}\n— ${card.ask.source}`));
   for (const clarification of card.clarifications) {
     lines.push(...section('Clarified', `${clarification.text}\n— ${clarification.source}`));

@@ -654,7 +654,7 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'chart', 'card, board (live board cards), map, image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'chart', 'card, board (live cards), map, image, video, audio, pdf'];
     const teaching = HYPERMEDIA_INSTRUCTION('zz');
 
     // Act
@@ -666,27 +666,37 @@ describe('hypermedia teaching', () => {
     should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
     for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
     should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
-    should(teaching).containEql('Do not overdo it');
+    should(teaching).containEql('anything not simple');
     // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
-    should(teaching).startWith('Hypermedia: when you teach, explain, compare or walk through');
-    should(teaching).containEql('never publish an artifact, page, gist or link to explain, unless asked');
-    should(teaching).containEql('step-through Next buttons');
+    should(teaching).startWith('Hypermedia: to teach, explain or compare anything not simple');
+    should(teaching).containEql('Inline: never publish a page or link unless asked.');
+    // The owner: "interactive should not be steppers … the visualization changes based on user interaction".
+    should(teaching).containEql(
+      'Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers;',
+    );
+    should(teaching).not.containEql('Next buttons');
     should(teaching).containEql('prefers-reduced-motion');
+    // The owner's explainer rule (&C48): ADHD-friendly, said in those words, with an example for each point.
+    should(teaching).containEql(
+      'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point.',
+    );
+    // fy-render draws in chat, agenda tabs and cards, so "chat only" no longer contradicts the agenda's tabs.
+    should(teaching).containEql('Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.');
+    should(teaching).not.containEql('Chat only');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
     should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
     // Map, media and chart's full spec are one command away, named with the binary.
     should(teaching).containEql('full spec: `zz render guide chart`');
-    should(teaching).containEql(
-      '- card, board (live board cards), map, image, video, audio, pdf: `zz render guide <type>`',
-    );
+    should(teaching).containEql('- card, board (live cards), map, image, video, audio, pdf: `zz render guide <type>`');
     should(teaching).not.containEql('`fy ');
-    should(teaching).containEql('auto-themed, so no %%{init}%% or colours');
+    should(teaching).containEql('auto-themed: no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
     should(teaching).containEql('flowchart TB');
     should(teaching).containEql('top-down, short labels');
     should(teaching).not.containEql('flowchart LR');
     // In every prompt, so it is capped: 1,970 with the top-down hint, then cut to ~1,500 by moving map, media and
-    // chart's full spec behind `render guide` to make room for the Board section.
+    // chart's full spec behind `render guide` to make room for the Board section. The explainer rule (&C48) was paid
+    // for by tightening the first lines and the mermaid, svg and html lines: 1,320 → 1,209; then the html line's theme-token rule (&B163).
     should(teaching.length).be.below(1_550);
   });
 });
@@ -809,13 +819,20 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Owner reply/answer rests it;');
     // The ferret's answer ON the item brings it back; an owner's question is answered there, its options open.
     should(text).containEql('`answer <id> "…"` returns it.');
-    should(text).containEql('`rest <id> --why …`=working; `--stage`.');
+    should(text).containEql('`rest <id> --why …`=working.');
+    // The owner (&C48): "make sure the chat ALWAYS update their asks, their body"; tabs hold any kind, and steps and
+    // explainers stay in them.
+    // And READ → EDIT (the owner: "we need to read to know what needs to be updated"): every part, the ask's too.
     should(text).containEql(
-      'Live doc=tabs by content kind (serial stays one), rewrite each whole: `edit --where-file` (main), `--body-file`, `--tab-file Name=f`; chat points at it.',
+      "Every update: `show <id>` whole, then `edit` all that's stale: premise, context, ask, options, kind, still-open, each tab (`--where-file|--body-file|--tab-file Name=f`); chat points there.",
     );
+    should(text).containEql('Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there.');
+    should(text).not.containEql('(main)');
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
-    should(text).containEql('Type: explainer→question→plan→tracker→test.');
+    // No item type (the owner: "now agenda doesn't have a "main" type any more"): the stage chain is not taught.
+    should(text).not.containEql('Type:');
+    should(text).not.containEql('`--stage`');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
     should(text).containEql(
       'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
@@ -857,8 +874,11 @@ describe('AGENDA_INSTRUCTION', () => {
     // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300). The tabs (&F923) kept it at 1,289: the main tab
     // and a ferret's own tabs, paid for by dropping ", `--where`=short status". Then 1,311: the owner's split rule (&F946),
     // "tabs by content kind (serial stays one)", paid for in part by the open line's placeholders ("<now>", "<facts>")
-    // and `--term X=meaning` unquoted (cap 1,300 → 1,320).
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_320);
+    // and `--term X=meaning` unquoted (cap 1,300 → 1,320). Then 1,338: the owner's always-rewrite and tabs-hold-anything
+    // rules (&C48), paid for in part by the stage chain and `--stage` (cap 1,320 → 1,340); then 1,352 for read → edit,
+    // paid for in part by the stage chain; review then restored the open line's value placeholders, so a copied command
+    // runs (1,380, cap 1,390).
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_390);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {
@@ -886,13 +906,26 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).not.containEql('make one)');
   });
 
-  it('should say a card shows progress only, its asks ride its agenda, and one card is never an umbrella', () => {
+  it('should say a card never asks, its agenda moves it, and one card is never an umbrella', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
-    // Assert
-    should(text).containEql("Cards (&F412) show progress only; every human ask goes in the card's agenda.");
-    should(text).containEql('No umbrella cards; check related cards first; add to one.');
+    // Assert — the owner (&C48): "TASK no longer have user interactivity anymore! agenda tracks all those".
+    should(text).containEql('Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it.');
+    should(text).containEql('One outcome, no umbrellas; add to a related card.');
+  });
+
+  it('should teach planning as a phase, the title as a sitrep and the status rewritten whole', () => {
+    // Act
+    const text = BOARD_INSTRUCTION('zz');
+
+    // Assert — the owner (&C48): "planning can be a phase!", "reading the title should directly reflect what is doing".
+    should(text).containEql('Planning is a phase.');
+    should(text).containEql("Title+summary=what it's doing (sitrep).");
+    should(text).containEql(
+      "Each step: `zz task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done);",
+    );
+    should(text).not.containEql('no cards for planning');
   });
 
   it("should teach that the owner's asks are public top-level cards, never --parent or --private", () => {
@@ -901,7 +934,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — the board answers "status of all I asked?"; a sub-card or a private card is hidden from it.
     should(text).containEql(
-      'The owner\'s asks are public cards ("status of all I asked?"): top-level, never `--parent`/`--private`; relate in `--context`.',
+      'Public=the owner\'s asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards.',
     );
     // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
@@ -915,12 +948,11 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
-    should(text).containEql(`Before it's ready to try: \`zz task edit <id> --how-to-test "<1. where 2. do 3. see>"\``);
-    should(text).containEql('lane by work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql('`--how-to-test "<where, do, see>"` before try.');
+    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
-    should(text).containEql('`zz task depend` (card)');
-    should(text).containEql('`zz task block`');
-    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
+    should(text).containEql('Blocked: `zz task depend`/`block`.');
+    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<words>"`');
     should(text).containEql("Owner's bug:");
     should(text).endWith('PRs, merges, `zz signal done` self-move.');
     should(text).not.containEql('`fy ');
@@ -930,7 +962,9 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(760);
+    // 757 → 814 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
+    // the three-part status (cap 760 → 820).
+    should(BOARD_INSTRUCTION('fy').length).be.below(820);
   });
 });
 
@@ -1161,12 +1195,17 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
     should(text).containEql('batched a minute');
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
-    should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('Link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
     should(text).containEql(
-      'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make; routine progress: `zz task note` on your card.',
+      'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make.',
     );
-    should(text).containEql('Your final report says how the owner tests it.');
+    // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one card edit a sub-ferret may make.
+    should(text).containEql(
+      'With a card: each step, read it (`zz task show <id>`), then `zz task edit <id>` its status (`--status-{now,done,next}`, PR links in done) and `--how-to-test`; `zz task note` adds history.',
+    );
+    // The holder writes its own How to test now, so its report no longer carries the steps.
+    should(text).not.containEql('Your final report says how the owner tests it.');
     should(text).containEql(
       "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz task claim <id>`, don't ask. No card? Make none.",
     );
@@ -1180,7 +1219,8 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
+    // 759 → 840 for the card-status line (&C48, cap 760 → 880); still smaller than the lead's prompt.
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(880);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {

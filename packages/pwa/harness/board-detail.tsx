@@ -4,7 +4,7 @@
  * on a phone.
  *
  * `?view=card|tested|ask|empty` picks the card: a card in review with a PR, children, dependencies, links and
- * history; a 🧪 To test card with the two verdict buttons; a card stopped by a blocking ask with answer buttons;
+ * history; a 🧪 To test card (no owner buttons: the owner answers in the agenda); a card stopped by a blocking ask;
  * a brand-new card with nothing on it yet.
  * Nothing leaves the page.
  */
@@ -119,6 +119,15 @@ const REVIEW_CARD = card('F2', {
   clarifications: [
     { text: 'On a phone this is a full page, and Back must work.', source: 'owner (board)', at: ago(300), by: owner },
   ],
+  status: {
+    now: 'Drawing the card detail on a phone; the drawer on desktop is in.',
+    doneSoFar: [
+      '- Side drawer and full-screen page ([#972](https://github.com/kirinnee/ferretry/pull/972))',
+      '- Ask, children, links and history sections',
+      '- Move path from the lane pill',
+    ].join('\n'),
+    next: '1. Back button on the phone page\n2. Review fixes, then merge',
+  },
   premise: 'Today the owner reads a card in a terminal; the Board shows only a compact card.',
   context: 'The Board page (#972) is merged; this builds on its compact card and its move path.',
   terms: [
@@ -228,6 +237,12 @@ const TESTED_CARD = card('F10', {
   assignee: MARGOT,
   summary: 'Pair a phone, then check Settings: no token is shown anywhere.',
   ask: { text: 'A paired device must never be able to read a token back.', source: `session:${DENISHA}` },
+  status: {
+    now: 'Released in 4.109.0 and waiting for your check.',
+    doneSoFar:
+      '- Device grant replaces the token on every route ([#918](https://github.com/kirinnee/ferretry/pull/918))\n- Settings no longer prints a token',
+    next: '1. You pair a phone and look for a token\n2. You answer in the agenda: Done, or Not good with what you saw',
+  },
   premise: nest('- A paired phone holds a device grant\n- Settings used to print the token after pairing'),
   context: nest('- The daemon keeps only a hash of each token\n- Shipped in 4.109.0'),
   terms: [{ term: 'device grant', meaning: 'What a paired phone holds instead of a token: it can be revoked.' }],

@@ -18,19 +18,11 @@ import {
   buildTree,
   flattenTree,
 } from '../../lib/board-view.ts';
-import { type BoardAnswerState, type BoardDone, doneLaneOf } from '../../lib/board-done.ts';
+import { type BoardAnswerState, doneLaneOf } from '../../lib/board-done.ts';
 import { BoardCard, type BoardCardMoves } from './board-card.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
 import { archiveRowsOf, TableRows } from './board-table.tsx';
-
-/** The Done control of one card: which one it is, and what a press does. */
-export interface BoardDoneControl {
-  readonly done: BoardDone;
-  readonly press: () => void;
-  /** The card sits in the release lane, where the Done row is drawn on the card itself. */
-  readonly atRelease: boolean;
-}
 
 /** What every view needs to draw and wire a card. */
 export interface BoardCardEnv {
@@ -42,16 +34,11 @@ export interface BoardCardEnv {
   /** `undefined` for a card the owner cannot move from here (the Archive). */
   readonly movesFor: (card: BoardCardOf, place: BoardCardPlace) => BoardCardMoves | undefined;
   readonly places: ReadonlyMap<string, BoardCardPlace>;
-  /**
-   * The owner's "Done ✓" (or "Reopen", on a closed card) for a card, and what pressing it does; `undefined` where
-   * this view is not the owner's to close from, such as a ferret's own scope.
-   */
-  readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
   /** The card being dragged, and the board it came from: only that board's lanes take the drop. */
   readonly dragging: { readonly cardKey: string; readonly groupKey: string } | null;
-  /** A phone: thumb-sized cards and the To test buttons spelled out. */
+  /** A phone: thumb-sized cards. */
   readonly touch?: boolean;
-  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
+  /** The lane move in flight on a card, and its last refusal; every card is at rest when absent. */
   readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
@@ -65,7 +52,6 @@ interface PlacedProps {
 export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
-  const done = place === undefined ? undefined : env.doneFor?.(card, place);
   const answer = env.answerFor?.(card);
   return (
     <BoardCard
@@ -80,7 +66,6 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       showMachine={env.showMachine}
       touch={env.touch === true}
       {...(moves === undefined ? {} : { moves })}
-      {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
       {...(answer === undefined ? {} : { answer })}

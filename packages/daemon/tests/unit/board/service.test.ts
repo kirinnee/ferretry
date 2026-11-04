@@ -935,6 +935,65 @@ describe('everything else on a card', () => {
     should(lastEvent(ports)).match({ type: 'field-edited', field: 'howToTest' });
   });
 
+  it('should keep a status from the create, and record each rewrite as one edit that names status, not its text', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const first = { now: 'designing', doneSoFar: '', next: '' };
+    const second = { now: 'writing the route', doneSoFar: '- design', next: '1. CLI' };
+
+    // Act
+    const created = await service.create(create({ status: first }), lead);
+    const kept = stored(ports).status;
+    await service.act(created.task.id, action({ action: 'edit', status: second }), lead);
+
+    // Assert
+    should(kept).eql(first);
+    should(stored(ports).status).eql(second);
+    should(lastEvent(ports)).eql({ ...lastEvent(ports), type: 'field-edited', field: 'status' });
+    should(JSON.stringify(lastEvent(ports))).not.containEql('writing the route');
+  });
+
+  it('should merge the parts an edit names into the card status, so two partial edits never undo each other', async () => {
+    // Arrange — the holder rewrites Now while the lead rewrites Done so far, neither having read the other's edit.
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create({ status: { now: 'a', doneSoFar: 'b', next: 'c' } }), lead);
+
+    // Act
+    await service.act(created.task.id, action({ action: 'edit', status: { now: 'testing' } }), lead);
+    await service.act(created.task.id, action({ action: 'edit', status: { doneSoFar: '- PR 1' } }), lead);
+
+    // Assert
+    should(stored(ports).status).eql({ now: 'testing', doneSoFar: '- PR 1', next: 'c' });
+  });
+
+  it('should start a card with no status from empty parts when an edit names only one', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create(), lead);
+
+    // Act
+    await service.act(created.task.id, action({ action: 'edit', status: { next: '1. CLI' } }), lead);
+
+    // Assert
+    should(stored(ports).status).eql({ now: '', doneSoFar: '', next: '1. CLI' });
+  });
+
+  it('should leave a card made without a status with none, and refuse a status edit that changes nothing', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const status = { now: 'x', doneSoFar: '', next: '' };
+
+    // Act
+    const created = await service.create(create(), lead);
+    const none = stored(ports);
+    await service.act(created.task.id, action({ action: 'edit', status }), lead);
+    const same = await refusal(service.act(created.task.id, action({ action: 'edit', status: { ...status } }), lead));
+
+    // Assert
+    should(none).not.have.property('status');
+    should(same.code).equal('invalid');
+  });
+
   it('should let the assignee write How to test without owner standing', async () => {
     // Arrange
     const { ports, service } = serviceWith([card({ assignee: 'child' })]);
@@ -1538,6 +1597,19 @@ describe('a daemon trigger', () => {
       actor: { kind: 'daemon', sessionId: 'child' },
     });
     should(ports.changes.events[0]?.sessionId).equal('child');
+  });
+
+  it('should leave the status alone when it moves the card', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([
+      card({ laneId: 'implement', status: { now: 'in review soon', doneSoFar: '', next: '' } }),
+    ]);
+
+    // Act
+    await service.trigger('F1', 'pr.opened', { sessionId: 'child', reason: 'PR #930 opened' });
+
+    // Assert
+    should(stored(ports).status).eql({ now: 'in review soon', doneSoFar: '', next: '' });
   });
 
   it('should move a blocked card anyway and say so', async () => {

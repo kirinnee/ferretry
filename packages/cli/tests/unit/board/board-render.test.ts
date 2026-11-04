@@ -424,6 +424,7 @@ describe('renderCard', () => {
       ],
       brief: 'rename it everywhere',
       howToTest: '1. Run fy task show\n2. See the new name',
+      status: { now: 'renaming', doneSoFar: '- the type', next: '' },
       rollup: {
         children: 2,
         byCategory: { backlog: 1, active: 1, review: 0, shipped: 0, verify: 0, closed: 0 },
@@ -515,6 +516,28 @@ describe('renderCard', () => {
 
     // Assert
     should(lines).containEql('Children — 0 children, 0 active');
+  });
+
+  it('should print the Status parts right after the header lines and before the Ask, skipping an empty part', () => {
+    // Act
+    const lines = renderCard(full(), lanes, [], names).split('\n');
+
+    // Assert
+    const status = lines.indexOf('Status');
+    should(status).be.above(lines.indexOf('blocked   waiting on vendor'));
+    should(status).be.below(lines.indexOf('Ask'));
+    should(lines.slice(status + 1, status + 6)).eql(['  Now', '    renaming', '  ', '  Done so far', '    - the type']);
+    should(lines).not.containEql('  Next');
+  });
+
+  it('should leave Status out for a card with none, or with every part empty', () => {
+    // Act
+    const none = renderCard(card(), lanes, [], names);
+    const empty = renderCard(card({ status: { now: '', doneSoFar: ' ', next: '' } }), lanes, [], names);
+
+    // Assert
+    should(none).not.match(/Status/u);
+    should(empty).not.match(/Status/u);
   });
 
   it('should leave How to test out for a card without one', () => {

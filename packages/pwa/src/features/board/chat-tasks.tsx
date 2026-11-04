@@ -4,8 +4,9 @@
  * The tab itself only draws. This host owns what the Board page owns for the same cards, scaled down to one
  * ferret's: the view the reader picked (kept on this device; Cards until one is), the card detail drawer that opens OVER the chat
  * (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it), and the move flow
- * behind Done ✓, Not good and the ⋯ menu, which is the Board's own (`useBoardAnswers`): a move back opens the same
- * composer, the pressed answer spins and the card's others wait, and a refusal is said on the card.
+ * behind the ⋯ menu and a drop, which is the Board's own (`useBoardAnswers`): a move back opens the same composer,
+ * the card's others wait while a move is in flight, and a refusal is said on the card. A card here has no owner
+ * buttons (no Done, no Not good, no Reopen): the owner answers in the agenda.
  * Drawn small in the Info panel, or at page density when `expanded` (the chat page lays that over the chat);
  * either way it is this one host, so a move, the drawer and the reason box behave the same in both.
  * Nothing here navigates: a card link inside the drawer reopens the drawer on that card.
@@ -16,7 +17,6 @@ import { createPortal } from 'react-dom';
 import { type BoardMachine, useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
 import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
 import { chatSiblings } from '../../lib/board-chat.ts';
-import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
 import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import { boardSideView } from '../../lib/board-side-view.ts';
@@ -28,7 +28,6 @@ import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts'
 import { useBoardAnswers } from './board-answers.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
-import type { BoardDoneControl } from './board-views.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
 
 export interface ChatTasksProps {
@@ -104,13 +103,10 @@ export function ChatTasks({
     (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
       const { group } = place;
       if (group.laneSet === null) return undefined;
-      // A closed card has no lane to move to: its menu holds Reopen alone.
-      const closed = place.category === 'closed';
+      // A closed card has no lane to move to.
       return {
-        choices: closed ? [] : moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
-        closeLaneId: closed ? null : doneLaneOf(group.laneSet),
-        reworkLaneId: closed ? null : notGoodLaneOf(group.laneSet),
+        choices: place.category === 'closed' ? [] : moveChoices(group.laneSet, card.task.laneId),
+        onMove: (target, laneId) => requestMove(target, group, laneId),
         onDragStart: setDragging,
         onDragEnd: () => setDragging(null),
       };
@@ -125,24 +121,6 @@ export function ChatTasks({
       if (place !== undefined && lane.laneId !== null) requestMove(card, place.group, lane.laneId);
     },
     [chat.cards.places, requestMove],
-  );
-
-  const doneFor = useCallback(
-    (card: BoardCardOf, place: BoardCardPlace): BoardDoneControl | undefined => {
-      const done = boardDone({
-        laneSet: place.group.laneSet,
-        category: place.category,
-        dropped: card.task.dropped !== null,
-      });
-      return done === null
-        ? undefined
-        : {
-            done,
-            press: () => requestMove(card, place.group, done.laneId, done.kind),
-            atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
-          };
-    },
-    [requestMove],
   );
 
   // CALLED ON `agenda`, NEVER COPIED OFF IT: its methods read the client's own private fields.
@@ -199,7 +177,6 @@ export function ChatTasks({
         chat={chat}
         answerFor={answerFor}
         density={expanded ? 'page' : 'side'}
-        doneFor={doneFor}
         dragging={dragging}
         movesFor={movesFor}
         now={now}

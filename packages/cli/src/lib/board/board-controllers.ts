@@ -13,6 +13,7 @@ import { refuse } from '../tasks/errors';
 import type { ITextFileReader } from '../tasks/ports';
 import type { RelatedCheck } from '../work-search/related';
 import { explainingRefusals } from './board-refusal';
+import { mergeStatus, parseStatusFile, type StatusParts } from './board-status';
 import {
   type BoardVerb,
   renderActed,
@@ -472,8 +473,27 @@ export class BoardController {
   }
 
   async edit(idText: string, options: TaskEditFlags) {
-    const texts = await this.resolveTexts(options);
-    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, texts));
+    const ref = requireCardRef(idText);
+    const texts = { ...(await this.resolveTexts(options)), status: await this.resolveStatus(options) };
+    await this.perform('edit', ref, options, buildEditAction(options, texts));
+  }
+
+  /**
+   * The status parts `--status-file` and `--status-now` / `--status-done` / `--status-next` come to: the file's
+   * three parts with each named flag replacing its part, or the flags' parts alone. The daemon merges what is sent into
+   * the card's current status in the card's own write, so nothing is read here. None when the caller named no status.
+   */
+  private async resolveStatus(options: BoardEditOptions): Promise<StatusParts | undefined> {
+    const parts: StatusParts = {
+      ...(options.statusNow === undefined ? {} : { now: options.statusNow }),
+      ...(options.statusDone === undefined ? {} : { doneSoFar: options.statusDone }),
+      ...(options.statusNext === undefined ? {} : { next: options.statusNext }),
+    };
+    const path = options.statusFile?.trim();
+    const filed = path === undefined || path === '' ? undefined : path;
+    if (filed === undefined && Object.keys(parts).length === 0) return undefined;
+    const base = filed === undefined ? undefined : parseStatusFile(await this.deps.files.readText(filed), filed);
+    return mergeStatus(base, parts);
   }
 
   async refile(
