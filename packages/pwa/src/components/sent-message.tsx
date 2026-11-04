@@ -12,10 +12,11 @@
  */
 
 import { useState } from 'react';
+import { displayCallsign } from '../lib/callsign.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { SentMessage, SentState } from '../lib/peer-delivery.ts';
-import type { TranscriptEntry } from '../lib/session-screens.ts';
 import type { SendReceiptKind } from '../lib/send-receipt.ts';
+import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerName } from './agent-message-rows.tsx';
 import { Markdown } from './markdown.tsx';
 import { ReceiptMark } from './receipt-mark.tsx';
@@ -23,10 +24,16 @@ import { useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
-/** How each state reads, and the receipt mark it wears. */
-const STATES: Readonly<Record<SentState, { readonly word: string; readonly mark: SendReceiptKind }>> = {
+/**
+ * How each state reads: one short word on the card's one-line foot (&F949), the whole meaning on hover and to a screen
+ * reader, and the receipt mark it wears.
+ */
+const STATES: Readonly<
+  Record<SentState, { readonly word: string; readonly detail?: string; readonly mark: SendReceiptKind }>
+> = {
   sending: { word: 'Sending…', mark: 'sending' },
-  queued: { word: 'Queued — it reads this when its current turn ends', mark: 'queued' },
+  queued: { word: 'Queued', detail: 'it reads this when its current turn ends', mark: 'queued' },
+  held: { word: 'Held', mark: 'queued' },
   delivered: { word: 'Delivered', mark: 'delivered' },
   replied: { word: 'Replied', mark: 'answered' },
   failed: { word: 'Not delivered', mark: 'failed' },
@@ -53,7 +60,11 @@ export function SentMessageRow({
 }) {
   const surface = useReferenceSurface();
   const [showCommand, setShowCommand] = useState(false);
-  const state = STATES[sent.state];
+  // A held send says when it goes, by the receiver's name: true when it was sent, and all the sender knows (&B157 —
+  // GAP: the card does not follow it to Delivered; that is the receiver's send ledger, read from the sender's chat).
+  const known = STATES[sent.state];
+  const state =
+    sent.state === 'held' ? { ...known, word: `Held — delivered when ${displayCallsign(sent.to)}'s turn ends` } : known;
   return (
     <article
       className="fy-message fy-message-sent"
@@ -61,7 +72,7 @@ export function SentMessageRow({
       data-transcript-kind="sent"
       {...rhythm}
     >
-      <header>
+      <header className="fy-sent-head">
         <span className="fy-sent-label">Sent to</span>
         <PeerName peer={{ name: sent.to }} surface={surface} />
         {sent.ask ? <span className="fy-peer-kind">waiting for a reply</span> : null}
@@ -71,16 +82,21 @@ export function SentMessageRow({
       ) : (
         <Markdown className="fy-sent-body" text={sent.body} {...surface} />
       )}
-      <p className="fy-sent-state" data-sent-state={sent.state} role={sent.state === 'failed' ? 'alert' : undefined}>
-        <ReceiptMark className="fy-sent-mark" kind={state.mark} />
-        <span>
-          {state.word}
-          {sent.reason === undefined || sent.reason === '' ? null : (
-            <span className="fy-sent-reason"> — {sent.reason}</span>
-          )}
-        </span>
-      </p>
+      {/* ONE LINE (&F949): where it got to · Show command, the time at the right. A failure's reason, in the CLI's own
+          words, is the one thing that takes a line of its own. */}
       <div className="fy-sent-foot">
+        <span
+          className="fy-sent-state"
+          data-sent-state={sent.state}
+          role={sent.state === 'failed' ? 'alert' : undefined}
+          title={state.detail === undefined ? state.word : `${state.word} — ${state.detail}`}
+        >
+          <ReceiptMark className="fy-sent-mark" kind={state.mark} />
+          <span>
+            {state.word}
+            {state.detail === undefined ? null : <span className="sr-only"> — {state.detail}</span>}
+          </span>
+        </span>
         <button
           aria-expanded={showCommand}
           className="fy-sent-command-toggle"
@@ -91,6 +107,11 @@ export function SentMessageRow({
         </button>
         <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
       </div>
+      {sent.state === 'failed' && sent.reason !== undefined && sent.reason !== '' ? (
+        <p className="fy-sent-reason" data-sent-reason="">
+          {sent.reason}
+        </p>
+      ) : null}
       {showCommand && entry.tools !== undefined ? <ToolGroup calls={entry.tools} isLast={isLast} live={live} /> : null}
     </article>
   );

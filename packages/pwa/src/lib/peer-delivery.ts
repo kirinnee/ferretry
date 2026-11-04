@@ -215,7 +215,7 @@ export const simpleCommands = (script: string): readonly (readonly Word[])[] => 
 };
 
 /** Where a ferret's message to another got to, as the sending side can tell. */
-export type SentState = 'sending' | 'delivered' | 'queued' | 'failed' | 'replied';
+export type SentState = 'sending' | 'delivered' | 'queued' | 'held' | 'failed' | 'replied';
 
 /** A ferret's `send` as the transcript shows it. */
 export interface SentMessage {
@@ -257,6 +257,9 @@ const stateOf = (call: Pick<ToolCall, 'result'>): Pick<SentMessage, 'state' | 'r
     return { state: 'failed', reason: failureReason(text) };
   // `describeDisposition`'s words: everything but a plain delivery is held somewhere first.
   if (/^\s*(?:delivered|revived the session)\b/mu.test(text)) return { state: 'delivered' };
+  // `describeHold`'s words: the queue holds it ON PURPOSE (an FYI until the receiver's turn ends, an action for a
+  // minute to batch), so it is neither stuck nor typed yet (&B157).
+  if (/^\s*held (?:as an FYI|until)\b/mu.test(text)) return { state: 'held' };
   return { state: 'queued' };
 };
 

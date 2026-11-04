@@ -64,7 +64,9 @@ describe('a message this ferret sent', () => {
     );
     const state = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
     expect(state.getAttribute('role')).toBe('alert');
-    expect(state.textContent).toBe('Not delivered — session not found: tanna');
+    expect(state.textContent).toBe('Not delivered');
+    // The reason, in the CLI's own words, is the one thing that takes a line of its own.
+    expect(view.container.querySelector('[data-sent-reason]')?.textContent).toBe('session not found: tanna');
     // Unproved, the recipient is a plain name.
     expect(must(view.container.querySelector('.fy-peer-name'), 'the name').textContent).toBe('Tanna');
     await view.unmount();
@@ -74,10 +76,15 @@ describe('a message this ferret sent', () => {
     for (const [state, word] of [
       ['sending', 'Sending…'],
       ['queued', 'Queued — it reads this when its current turn ends'],
+      ['held', "Held — delivered when Tanna's turn ends"],
       ['replied', 'Replied'],
     ] as const) {
       const view = await mount(<TranscriptRow entry={sentRow({ state, reason: '' })} />);
-      expect(view.container.querySelector('.fy-sent-state')?.textContent).toBe(word);
+      const shown = must(view.container.querySelector<HTMLElement>('.fy-sent-state'), 'the state');
+      // One short word on the line; the rest for a screen reader and on hover.
+      expect(shown.textContent).toBe(word);
+      expect(shown.getAttribute('title')).toBe(word);
+      expect(view.container.querySelector('[data-sent-reason]')).toBeNull();
       await view.unmount();
     }
     const asked = await mount(
@@ -103,6 +110,21 @@ describe('a message this ferret sent', () => {
       must(view.container.querySelector<HTMLButtonElement>('.fy-sent-command-toggle'), 'toggle').click(),
     );
     expect(view.container.textContent).not.toContain('Bash');
+    await view.unmount();
+  });
+});
+
+describe('the sent card is compact (&F949)', () => {
+  test('its foot is ONE row: where it got to · Show command, then the time', async () => {
+    const view = await mount(<TranscriptRow entry={sentRow({ state: 'held' })} />);
+    const foot = must(view.container.querySelector<HTMLElement>('.fy-sent-foot'), 'the foot');
+    // The state, the dot, the command toggle and the time are the foot's own children: no line above it.
+    expect(foot.querySelector('.fy-sent-state')).not.toBeNull();
+    expect(foot.querySelector('.fy-sent-command-toggle')).not.toBeNull();
+    expect(foot.querySelector('time')?.textContent).not.toBe('');
+    expect(view.container.querySelectorAll('.fy-message-sent > .fy-sent-state')).toHaveLength(0);
+    // The head is a meta line: "Sent to" and the name, in the head's own class.
+    expect(view.container.querySelector('.fy-sent-head')?.textContent).toContain('Sent to');
     await view.unmount();
   });
 });

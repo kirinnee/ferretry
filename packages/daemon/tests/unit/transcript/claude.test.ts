@@ -435,3 +435,72 @@ describe('ClaudeTranscriptParser compaction boundaries', () => {
     should((actual.events[4] as { trigger?: string }).trigger).be.undefined();
   });
 });
+
+describe('ClaudeTranscriptParser: the request snapshots Claude Code writes (&B157)', () => {
+  // The shape Claude Code 2.1.317 writes after a tool run: no time, no uuid, only the message it will send again.
+  const blob = (message: unknown) => ({ type: 'api-request-blob', hash: 'f'.repeat(64), sessionId: 's1', message });
+
+  it('should draw nothing for a snapshot that repeats a tool call, a result, words or a system reminder', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const call = {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'fy send zoe "Done."' } }],
+    };
+    const lines = [
+      {
+        type: 'assistant',
+        timestamp: '2026-11-04T10:37:00.000Z',
+        uuid: 'u1',
+        message: { ...call, id: 'msg_1', model: 'claude', stop_reason: 'tool_use' },
+      },
+      {
+        type: 'user',
+        timestamp: '2026-11-04T10:37:01.000Z',
+        uuid: 'u2',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'held as an FYI' }],
+        },
+      },
+      blob(call),
+      blob({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'held as an FYI' }] }),
+      blob({
+        role: 'user',
+        content: [{ type: 'text', text: '<system-reminder> Today is Tuesday. </system-reminder>' }],
+      }),
+      blob({ role: 'assistant', content: 'Sent.' }),
+    ];
+
+    // Act
+    const actual = subject.parse({
+      text: lines.map(line => JSON.stringify(line)).join('\n'),
+      source: 'claude.jsonl',
+      observedAt: '2026-11-04T10:38:00.000Z',
+    });
+
+    // Assert — one call and one result, both timed; no untimed copy, no reminder, no input observed twice.
+    should(actual.issues).have.length(0);
+    const calls = actual.events.flatMap(event => (event.kind === 'tool-call' ? [event] : []));
+    const results = actual.events.flatMap(event => (event.kind === 'tool-result' ? [event] : []));
+    should(calls).have.length(1);
+    should(results).have.length(1);
+    // The one result answers the one call: the real one, at its real time.
+    should(results[0]?.result.callId).equal(calls[0]?.call.id);
+    should(calls[0]?.timestamp).equal('2026-11-04T10:37:00.000Z');
+    should(actual.events.filter(event => event.kind === 'message')).have.length(0);
+    should(actual.events.every(event => event.timestamp !== undefined)).be.true();
+    should(actual.observedInputs).have.length(0);
+  });
+
+  it('should recognise a snapshot alone and say nothing about it', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord(blob({ role: 'user', content: 'Please go on.' }));
+
+    // Assert
+    should(actual).deepEqual({ events: [], issues: [], recognized: true });
+  });
+});

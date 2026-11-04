@@ -227,6 +227,13 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       return { events, issues, recognized: true };
     }
 
+    // A SNAPSHOT OF THE NEXT REQUEST, NOT SOMETHING THAT HAPPENED (&B157). Claude Code (seen on 2.1.317) writes each
+    // message it sends the model again as `api-request-blob`: an earlier tool call, a result, the owner's words, its own
+    // system reminders — untimed, after the records they copy. Read as conversation they drew every `fy send` twice
+    // (the copy with no time, and stealing the call's result so both said "Sending…") and leaked the reminders as
+    // messages. Every block in one is either a copy of a real record or request scaffolding, so it says nothing.
+    if (recordType === 'api-request-blob') return { events, issues, recognized: true };
+
     if (recordType === 'attachment') {
       const attachment = transcriptObject(record.attachment);
       const origin = transcriptObject(attachment?.origin);

@@ -101,18 +101,35 @@ The tool call that ran `fy send` becomes a **Sent to** card: the recipient as a 
 message (a quoted argument or the `"$(cat <<'EOF' … EOF)"` heredoc; a `--message-file` or any other
 shell expansion is named, never guessed), and its state:
 
-| State     | Read from                                                                    |
-| --------- | ---------------------------------------------------------------------------- |
-| Sending   | No result yet                                                                |
-| Queued    | Any successful result other than a delivery                                  |
-| Delivered | The CLI said `delivered` (or `revived the session`)                          |
-| Replied   | A later message in this Chat came from the recipient — the proof it was read |
-| Failed    | The call failed; the reason is the CLI's own first line                      |
+| State     | Read from                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------- |
+| Sending   | No result yet                                                                             |
+| Held      | The CLI said `held as an FYI` or `held until` — "Held — delivered when Tanna's turn ends" |
+| Queued    | Any other successful result that is not a delivery                                        |
+| Delivered | The CLI said `delivered` (or `revived the session`)                                       |
+| Replied   | A later message in this Chat came from the recipient — the proof it was read              |
+| Failed    | The call failed; the reason is the CLI's own first line                                   |
 
 The raw command stays one tap away under **Show command**. Anything the reader does not recognise as a
 send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/peer-delivery.ts`.
 
+The card is compact (&F949): "Sent to :name" is a meta line the size of a chat row's name, and the foot is
+ONE line — the state's mark and its short word, "Show command", then the time at the right. A longer meaning
+("Queued — it reads this when its current turn ends") is the state's tooltip and is read to a screen reader;
+a failure's reason takes the one line of its own under the foot.
+
+Each send is drawn ONCE (&B157). Claude Code (seen on 2.1.317) writes every message it sends the model again
+as an untimed `api-request-blob` record — an earlier tool call, its result, the owner's words, its own system
+reminders. Read as conversation, that drew every `fy send` twice: a copy with no time, and both cards stuck
+on "Sending…" because the copy took the call's result. The daemon's Claude parser
+(`packages/daemon/src/lib/transcript/claude.ts`) drops those records.
+
 ## Declared gaps
+
+- **A held send does not follow itself to Delivered** (&B157). "Held — delivered when Tanna's turn ends" is what
+  the CLI said when it sent; the delivery is in the RECEIVER's send ledger (`/v1/sessions/:id/sends`), and the
+  sender's Chat does not read another session's ledger. Following it means reading the receiver's ledger from
+  the sender's Chat and matching the send to its row.
 
 - **One machine.** A send is always between two sessions on the same daemon, so no machine is shown.
 - **Live sender state.** The Sent card reads the CLI's answer at send time, then `replied` from the

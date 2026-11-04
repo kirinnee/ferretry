@@ -6,7 +6,8 @@
  *     inline, each as a card FROM that ferret with only its body; the delivery's own "Read turn-001.md"
  *     is gone.
  *   * sender — tomi's Chat: its `fy send` calls as "Sent to" cards — one Tanna has since replied to, one
- *     still queued — instead of `Bash · fy send tanna "…"`.
+ *     still queued, one FYI held until Tanna's turn ends — instead of `Bash · fy send tanna "…"`. Each card's
+ *     foot is one line (&F949); a held FYI says when it goes (&B157).
  *   * failed — a send the daemon refused, with the CLI's reason said out loud.
  *
  *   bun harness/peer-messages-screenshot.tsx      # writes harness/out/peer-<scene>-<viewport>-<scheme>.png
@@ -23,7 +24,8 @@ import { chromium } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
-const outDir = join(harnessDir, 'out');
+const outDir = process.argv[2] === undefined ? join(harnessDir, 'out') : resolve(process.argv[2]);
+const buildDir = join(harnessDir, 'out');
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -95,6 +97,8 @@ const SENDER_LOG = [
   '[01:45:02] user/message: ' + turnFileInstruction(TOMI_TURNS + '/turn-004.md'),
   '[01:46:40] assistant/tool-call: Bash(' + json({ command: "fy send tanna --ask \\"$(cat <<'EOF'\\nCan you review the **relay** PR next?\\n\\n- it touches the carrier chooser\\n- CI is green\\nEOF\\n)\\"" }) + ')',
   "[01:46:41] tool/tool-result: queued in the agent's own queue (it auto-submits at the turn boundary)",
+  '[01:47:10] assistant/tool-call: Bash(' + json({ command: 'fy send tanna --kind fyi "Nothing for you to do: the Mac jobs are re-running."' }) + ')',
+  "[01:47:11] tool/tool-result: held as an FYI (not typed yet): it is delivered when the agent's turn ends, or by 01:52:11 at the latest, together with its other pending messages; do not resend",
 ].join('\\n');
 const senderSends = [
   { sendId: 's4', acceptedAt: '2026-10-19T01:45:00.000Z', message: 'x', attachmentIds: [], fate: 'delivered', turn: 4, from: TANNA, fromName: 'tanna' },
@@ -159,15 +163,16 @@ const html = (theme: string) => `<!doctype html>
 </html>`;
 
 mkdirSync(outDir, { recursive: true });
-await Bun.write(join(outDir, 'peer-messages-entry.tsx'), PAGE_ENTRY);
-run('bun', ['build', join(outDir, 'peer-messages-entry.tsx'), '--outdir', outDir, '--target', 'browser']);
+mkdirSync(buildDir, { recursive: true });
+await Bun.write(join(buildDir, 'peer-messages-entry.tsx'), PAGE_ENTRY);
+run('bun', ['build', join(buildDir, 'peer-messages-entry.tsx'), '--outdir', buildDir, '--target', 'browser']);
 run('./node_modules/.bin/tailwindcss', [
   '--config',
   'tailwind.config.ts',
   '--input',
   'src/styles/index.css',
   '--output',
-  join(outDir, 'app.css'),
+  join(buildDir, 'app.css'),
 ]);
 
 const server = Bun.serve({
@@ -180,7 +185,7 @@ const server = Bun.serve({
         headers: { 'content-type': 'text/html' },
       });
     }
-    return new Response(Bun.file(join(outDir, url.pathname)));
+    return new Response(Bun.file(join(buildDir, url.pathname)));
   },
 });
 
@@ -214,6 +219,23 @@ try {
         await page.goto(`${server.url}?theme=studio-${scheme}`);
         await page.locator('[data-scene="receiver"] .fy-message-peer[data-peer="tomi"]').waitFor({ state: 'visible' });
         await page.locator('[data-scene="sender"] [data-sent-state="replied"]').first().waitFor({ state: 'visible' });
+        // Each sent card's foot is ONE line on a desktop (&F949), and the held FYI says when it goes (&B157).
+        const feet = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('.fy-sent-foot')].map(foot => {
+            // Lines by each visible child's centre: a foot centres its children, whatever their heights.
+            const centres = [...foot.children]
+              .map(child => (child as HTMLElement).getBoundingClientRect())
+              .filter(box => box.height > 0)
+              .map(box => Math.round((box.top + box.height / 2) / 6));
+            return new Set(centres).size;
+          }),
+        );
+        if (viewport.name === 'desktop' && feet.some(lines => lines > 1))
+          fail(`${scheme}: a sent card's foot wraps (${feet.join(', ')})`);
+        const held =
+          (await page.locator('[data-scene="sender"] .fy-sent-state[data-sent-state="held"]').textContent()) ?? '';
+        if (!held.startsWith("Held — delivered when Tanna's turn ends"))
+          fail(`${scheme} ${viewport.name}: the held FYI says "${held}"`);
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (overflow > 0) fail(`${scheme} ${viewport.name} scrolls sideways by ${overflow}px`);
         for (const name of SCENES) {

@@ -206,6 +206,16 @@ describe('readSentMessage', () => {
     expect(readSentMessage(bash('fy send a b', { text: 'revived the session with the message' }), 'fy')?.state).toBe(
       'delivered',
     );
+    // Held on purpose (&B157): an FYI until the receiver's turn ends, an action for a minute to batch — whatever line
+    // of the output says so.
+    const held = "held as an FYI (not typed yet): it is delivered when the agent's turn ends; do not resend";
+    expect(readSentMessage(bash('fy send a b', { text: `${held}\n  /tmp/s/a` }), 'fy')?.state).toBe('held');
+    expect(
+      readSentMessage(
+        bash('fy send a b', { text: 'held until 10:38:00 to combine with other messages (action)' }),
+        'fy',
+      )?.state,
+    ).toBe('held');
     expect(
       readSentMessage(bash('fy send a b', { text: 'error: session not found: a', isError: true }), 'fy'),
     ).toMatchObject({
