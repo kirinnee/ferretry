@@ -6,7 +6,6 @@ import {
   nextTab,
   openTab,
   sectionTab,
-  switcherWords,
   tabsChangedSince,
   viewTabs,
 } from '../../src/lib/agenda-tab-view.ts';
@@ -72,17 +71,6 @@ describe('the tabs the last edit changed', () => {
       revisions: [{ at: '2026-08-01T11:00:00.000Z', by: 'agent', changed: ['tabs'], previous: {} }],
     });
     expect([...changedTabs(bare)].sort()).toEqual(['decisions', 'risks']);
-  });
-});
-
-describe('the phone switcher’s words', () => {
-  test('name the open tab, its place, and how many changed', () => {
-    const tabs = viewTabs(item({ whereWeAre: 'Now.', tabs: own }), false);
-    expect(switcherWords(tabs, 'decisions', new Set(['risks', 'main']))).toEqual({
-      name: 'Decisions',
-      meta: '2 of 3 · 2 changed',
-    });
-    expect(switcherWords(tabs, 'gone', new Set())).toEqual({ name: 'Where we are now', meta: '1 of 3' });
   });
 });
 

@@ -91,12 +91,9 @@ const ORDER = ['head', 'premise', 'detail', 'references', 'needs', 'tabs', 'conv
 
 /** Opens "The full picture" among the item's tabs (&F923): the main tab opens first, and only the open tab is drawn. */
 const openFullPicture = async (page: Page): Promise<void> => {
-  if ((await page.locator('[data-agenda-tab-button="body"]').count()) > 0) {
+  // One tab row everywhere (&F946): a phone scrolls it sideways, so the tab is there to press.
+  if ((await page.locator('[data-agenda-tab-button="body"]').count()) > 0)
     await page.locator('[data-agenda-tab-button="body"]').click();
-  } else if ((await page.locator('[data-agenda-tab-switch]').count()) > 0) {
-    await page.locator('[data-agenda-tab-switch]').click();
-    await page.locator('[data-agenda-tab-choice="body"]').click();
-  }
   await page.waitForTimeout(300);
 };
 type Form = 'phone' | 'desktop';

@@ -1705,8 +1705,12 @@
 }
 
 /* THE TABS (&F923): the item's live document. Wider, a tab row that WRAPS onto a second line rather than scroll or cut
-   a name; on a phone, one switcher button as the part's heading. A tab the last edit changed carries a dot (and the
-   word, for a screen reader). */
+   a name; on a phone (&F946), the SAME row on one line, scrolling sideways, an end that hides more tabs fading out so
+   the cut name shows there is more. A tab that changed carries a dot (and the word, for a screen reader). */
+.fy-tabs__row {
+  position: relative;
+  min-width: 0;
+}
 .fy-tabs__list {
   display: flex;
   flex-wrap: wrap;
@@ -1736,7 +1740,6 @@
   color: var(--accent-strong, var(--accent));
 }
 .fy-tabs__tab:focus-visible,
-.fy-tabs__switch:focus-visible,
 .fy-tabs__next:focus-visible,
 .fy-diff__open:focus-visible,
 .fy-card__answered-link:focus-visible {
@@ -1753,62 +1756,45 @@
   border-radius: 50%;
   background: var(--accent);
 }
+/* The phone's row: one line that scrolls sideways under its own line (drawn as a background, so the scroller never
+   clips it), its scroll bar hidden — the faded end is the cue. */
+.fy-tabs__row[data-agenda-tab-row='scroll'] .fy-tabs__list {
+  position: relative;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 24px;
+  scrollbar-width: none;
+  border-bottom: 0;
+  background: linear-gradient(var(--border-soft, var(--border)), var(--border-soft, var(--border))) bottom / 100%
+    var(--stroke, 1px) no-repeat;
+}
+.fy-tabs__row[data-agenda-tab-row='scroll'] .fy-tabs__list::-webkit-scrollbar {
+  display: none;
+}
+.fy-tabs__row[data-agenda-tab-row='scroll'] .fy-tabs__tab {
+  flex: none;
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.fy-tabs__row[data-agenda-tab-row='scroll'][data-more-end] .fy-tabs__list {
+  -webkit-mask-image: linear-gradient(to right, var(--fg) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, var(--fg) calc(100% - 28px), transparent);
+}
+.fy-tabs__row[data-agenda-tab-row='scroll'][data-more-start] .fy-tabs__list {
+  -webkit-mask-image: linear-gradient(to left, var(--fg) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, var(--fg) calc(100% - 28px), transparent);
+}
+.fy-tabs__row[data-agenda-tab-row='scroll'][data-more-start][data-more-end] .fy-tabs__list {
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--fg) 28px, var(--fg) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, var(--fg) 28px, var(--fg) calc(100% - 28px), transparent);
+}
 .fy-tabs__panel {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 8px;
-}
-.fy-tabs__heading {
-  margin: 0;
-}
-.fy-tabs__switch {
-  display: inline-flex;
-  max-width: 100%;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-}
-.fy-tabs__switch-name {
-  overflow-wrap: anywhere;
-}
-.fy-tabs__switch-meta {
-  color: var(--muted);
-  font-weight: normal;
-}
-.fy-tabs__sheet {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-sm, 8px);
-  padding: 0 16px 16px;
-}
-.fy-tabs__choices {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.fy-tabs__choice {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-}
-.fy-tabs__choice[data-on] {
-  background: var(--accent-soft);
-}
-.fy-tabs__choice-name {
-  flex: 1;
-  overflow-wrap: anywhere;
 }
 .fy-tabs__next,
 .fy-diff__open,

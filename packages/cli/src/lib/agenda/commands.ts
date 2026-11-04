@@ -31,10 +31,14 @@ const JSON_HELP = 'print the protocol payload instead of the human rendering';
 export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversation is only the log.
   The MAIN tab, "Where we are now" (--where-file, or --where points), opens first: where things
   stand, what is decided, what is still open — as long and as rich as it needs to be.
-  The report, explainer or plan is "The full picture" (--body-file). A part that changes on its
-  own (Overview, Decisions, Risks…) gets a tab of its own: --tab-file "Name=file" (6 at most);
-  --rename-tab, --move-tab, --remove-tab. Rewrite a tab whole whenever it changes: one edit is one
-  version, and the owner sees which tabs changed. Steps the owner must DO stay --step.
+  SPLIT THE REST BY CONTENT TYPE, never serial content: each kind (the work's Steps, Status,
+  Tracking, Results, Decisions, Risks, another kind of result…) gets a tab of its own, named for
+  what it holds: --tab-file "Name=file" (6 at most); --rename-tab, --move-tab, --remove-tab.
+  A long continuous report, explainer or argument, where each part builds on the last, stays ONE
+  tab, "The full picture" (--body-file). One kind of content is one tab: never invent tabs. With
+  everything in tabs of its own, the body may stay empty. Rewrite a tab whole whenever it
+  changes: one edit is one version, and the owner sees which tabs changed. Steps the owner must
+  DO stay --step.
   Never retype a tab into the conversation: answer there briefly and point at it.
   Write in explainer mode, with hypermedia: fy-render charts, mermaid, a step-through html page,
   card and board blocks. Plain Markdown draws no fold: fold a long part inside an fy-render html

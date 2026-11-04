@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { lintAgendaWriting } from '../../../src/lib/agenda/writing-lint.ts';
+import {
+  AGENDA_MIXED_BODY_LENGTH,
+  AGENDA_MIXED_BODY_SECTIONS,
+  lintAgendaWriting,
+} from '../../../src/lib/agenda/writing-lint.ts';
 
 const clean = {
   title: 'Work login plan',
@@ -353,5 +357,45 @@ describe('attention writing lint: a link says what it is', () => {
       [],
     );
     should(lintAgendaWriting(clean)).deepEqual([]);
+  });
+});
+
+describe('attention writing lint: a long body that may be several kinds of content (&F946)', () => {
+  const part = (title: string, length: number): string =>
+    `## ${title}\n\n${'- A plain point about it.\n'.repeat(Math.ceil(length / 26))}`;
+  const long = [part('Steps', 1_500), part('Status', 1_500), part('Results', 1_500)].join('\n');
+
+  it('should hint, never refuse, at tabs for a long body with several top-level sections', () => {
+    should(long.length).be.above(AGENDA_MIXED_BODY_LENGTH);
+    const actual = lintAgendaWriting({ ...clean, body: long });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(
+      /^the body has 3 sections in \d+ characters: .*--tab-file "Name=file".*continuous report.*one tab$/u,
+    );
+  });
+
+  it('should say nothing for a short body, too few sections, or headings inside fenced code', () => {
+    const short = [part('Steps', 200), part('Status', 200), part('Results', 200)].join('\n');
+    const two = [part('Steps', 2_500), part('Status', 2_500)].join('\n');
+    const fenced = `\`\`\`md\n${long}\n\`\`\`\n${'More words. '.repeat(10)}`;
+    const deep = long.replaceAll('## ', '### ');
+    // A four-backtick example showing a three-backtick block (headings and all) is one block of code; so is a tilde
+    // fence holding backticks. An unclosed fence runs to the end.
+    const nested = `\`\`\`\`md\n\`\`\`text\n${long}\n\`\`\`\n\`\`\`\``;
+    const tilde = `~~~\n\`\`\`\n${long}\n~~~`;
+    const unclosed = `\`\`\`\n${long}`;
+
+    should(AGENDA_MIXED_BODY_SECTIONS).equal(3);
+    should(lintAgendaWriting({ ...clean, body: short })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: two })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: fenced })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: deep })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: nested })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: tilde })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, body: unclosed })).deepEqual([]);
+    // After a fence closes, its sections count again; a fence line with words after it does not close it.
+    should(lintAgendaWriting({ ...clean, body: `\`\`\`\`\n\`\`\`\` not yet\n\`\`\`\`\n${long}` })).have.length(1);
+    should(lintAgendaWriting({ ...clean })).deepEqual([]);
   });
 });

@@ -5,8 +5,7 @@
  * - which tabs the view draws: a notice draws its body in "What I need from you" and a card gate's body is its How to
  *   test, so for those the full picture is not a tab;
  * - which tab is open: the one this device remembered while it still exists, else the first (the main tab);
- * - which tabs changed since this device last looked (else in the last edit) — the dot and the word "Changed";
- * - the phone switcher's words: "Where we are now · 1 of 3 · 2 changed".
+ * - which tabs changed since this device last looked (else in the last edit) — the dot and the word "Changed".
  */
 
 import { type AgendaItem, type AgendaViewTab, agendaTabs } from '@ferretry/protocol';
@@ -76,24 +75,6 @@ export const sectionTab = (key: string, tabs: readonly AgendaViewTab[]): AgendaV
         : undefined;
   // A fixed tab is matched by kind, never by an own tab that happens to share its id.
   return tabs.find(tab => tab.id === id && (tab.kind === 'own') === key.startsWith('tab:'));
-};
-
-/** The phone switcher's words: the open tab's name, where it is among the tabs, and how many changed. */
-export const switcherWords = (
-  tabs: readonly AgendaViewTab[],
-  open: string,
-  changed: ReadonlySet<string>,
-): { readonly name: string; readonly meta: string } => {
-  const index = Math.max(
-    0,
-    tabs.findIndex(tab => tab.id === open),
-  );
-  const marked = tabs.filter(tab => changed.has(tab.id)).length;
-  const parts = [
-    `${String(index + 1)} of ${String(tabs.length)}`,
-    ...(marked === 0 ? [] : [`${String(marked)} changed`]),
-  ];
-  return { name: tabs[index]?.name ?? '', meta: parts.join(' · ') };
 };
 
 /** The tab after `open`, for the "Next: … ›" link at a tab's foot; `undefined` on the last. */

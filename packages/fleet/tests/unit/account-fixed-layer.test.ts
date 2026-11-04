@@ -786,15 +786,13 @@ describe('AGENDA_INSTRUCTION', () => {
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert — premise and context are part of the one command: every item is read cold.
-    should(text).containEql(
-      'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`.',
-    );
+    should(text).containEql('Open: `zz agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"`.');
     // The tabs are the live document (&F923): the main tab is no longer a short status, so the open line names none.
     should(text).containEql('Title ≤40, ask ≤80. Read cold');
     should(text).not.containEql('short status');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
     should(text).containEql(
-      'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
+      'Read cold: no ids/paths/jargon (`--term X=meaning`); short points, answer first, no headings.',
     );
     // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
     should(text).containEql(AGENDA_SHAPE_LINE);
@@ -813,7 +811,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`answer <id> "…"` returns it.');
     should(text).containEql('`rest <id> --why …`=working; `--stage`.');
     should(text).containEql(
-      'Live doc=tabs, rewrite each whole: `edit --where-file` (main), `--body-file`, `--tab-file Name=f`; chat points at it.',
+      'Live doc=tabs by content kind (serial stays one), rewrite each whole: `edit --where-file` (main), `--body-file`, `--tab-file Name=f`; chat points at it.',
     );
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
@@ -857,8 +855,10 @@ describe('AGENDA_INSTRUCTION', () => {
     // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
     // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
     // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300). The tabs (&F923) kept it at 1,289: the main tab
-    // and a ferret's own tabs, paid for by dropping ", `--where`=short status".
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
+    // and a ferret's own tabs, paid for by dropping ", `--where`=short status". Then 1,311: the owner's split rule (&F946),
+    // "tabs by content kind (serial stays one)", paid for in part by the open line's placeholders ("<now>", "<facts>")
+    // and `--term X=meaning` unquoted (cap 1,300 → 1,320).
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_320);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {

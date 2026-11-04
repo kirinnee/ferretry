@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
+import { AgendaTabs } from '../../../src/features/agenda/agenda-tabs.tsx';
 import type { AgendaVersionsView } from '../../../src/features/agenda/use-item-lifecycle.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
@@ -102,6 +103,7 @@ describe('the tabs, wider than a phone', () => {
       'RisksChanged',
     ]);
     expect(selected()).toBe('main');
+    expect(one('[data-agenda-tab-row]').getAttribute('data-agenda-tab-row')).toBe('wrap');
     const panel = one('[role="tabpanel"]');
     expect(panel.getAttribute('aria-labelledby')).toBe(one('[role="tab"][aria-selected="true"]').id);
     expect(panel.textContent).toContain('Building the relay.');
@@ -177,40 +179,67 @@ describe('the tabs, wider than a phone', () => {
 });
 
 describe('the tabs on a phone', () => {
-  test('are one switcher that names the open tab, its place and what changed, and a sheet to pick another', async () => {
+  /** The row's measures, as a browser would lay out four tabs wider than a 390px phone. */
+  const laidOut = (row: HTMLElement, scrollWidth: number, clientWidth: number): void => {
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, value: scrollWidth });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: clientWidth });
+  };
+
+  test('are the same tablist, on one line that scrolls sideways — never a dropdown or a sheet (&F946)', async () => {
     setViewport(390);
     await draw();
-    expect(root().querySelector('[role="tablist"]')).toBeNull();
-    const switcher = one<HTMLButtonElement>('[data-agenda-tab-switch]');
-    expect(switcher.textContent).toBe('Where we are now· 1 of 4 · 2 changed');
-    expect(switcher.getAttribute('aria-expanded')).toBe('false');
-    await interact(() => switcher.click());
-    expect(switcher.getAttribute('aria-expanded')).toBe('true');
-    const sheet = one('[data-agenda-tab-sheet]', document.body);
-    expect(view?.container.contains(sheet)).toBe(false);
-    const choices = [...sheet.querySelectorAll<HTMLInputElement>('[data-agenda-tab-choice]')];
-    expect(choices.map(choice => [choice.value, choice.checked])).toEqual([
-      ['main', true],
-      ['body', false],
-      ['decisions', false],
-      ['risks', false],
-    ]);
-    expect(sheet.querySelectorAll('[data-agenda-tab-changed]')).toHaveLength(2);
-    await interact(() => choices[2]?.click());
-    expect(one('[data-agenda-tab-switch]').textContent).toBe('Decisions· 3 of 4 · 2 changed');
-    expect(one('[data-agenda-tab-panel]').textContent).toContain('We chose SQLite.');
-    // Picking one closes the sheet.
-    expect(one('[data-agenda-tab-switch]').getAttribute('aria-expanded')).toBe('false');
+    expect(one('[data-agenda-tab-row]').getAttribute('data-agenda-tab-row')).toBe('scroll');
+    const tabs = [...root().querySelectorAll('[role="tablist"] [role="tab"]')];
+    expect(tabs.map(tab => tab.getAttribute('data-agenda-tab-button'))).toEqual(['main', 'body', 'decisions', 'risks']);
+    const part = one('[data-agenda-part="tabs"]');
+    expect(part.querySelector('[aria-haspopup]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-tab-sheet], [data-agenda-tab-switch]')).toBeNull();
+    // The changed dot stays, and Next still moves on.
+    expect(root().querySelectorAll('[role="tab"] [data-agenda-tab-changed]')).toHaveLength(2);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-next]').click());
+    expect(selected()).toBe('body');
   });
 
-  test('the sheet’s close button closes it, and Next moves on without it', async () => {
+  test('fade the end that hides more tabs, and follow the scroll', async () => {
     setViewport(390);
     await draw();
-    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-switch]').click());
-    await interact(() => one<HTMLButtonElement>('button[aria-label="Close the tabs"]', document.body).click());
-    expect(one('[data-agenda-tab-switch]').getAttribute('aria-expanded')).toBe('false');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-next]').click());
-    expect(one('[data-agenda-part="tabs"]').getAttribute('data-agenda-tab')).toBe('body');
+    const row = one<HTMLElement>('[role="tablist"]');
+    const wrapper = one('[data-agenda-tab-row]');
+    expect(wrapper.hasAttribute('data-more-end')).toBe(false);
+    laidOut(row, 600, 358);
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(wrapper.hasAttribute('data-more-end')).toBe(true);
+    expect(wrapper.hasAttribute('data-more-start')).toBe(false);
+    row.scrollLeft = 120;
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(wrapper.hasAttribute('data-more-start')).toBe(true);
+    expect(wrapper.hasAttribute('data-more-end')).toBe(true);
+    row.scrollLeft = 242;
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(wrapper.hasAttribute('data-more-end')).toBe(false);
+  });
+
+  test('scroll the open tab into the row, sideways only', async () => {
+    setViewport(390);
+    await draw();
+    const row = one<HTMLElement>('[role="tablist"]');
+    laidOut(row, 600, 358);
+    const place = (id: string, left: number, width: number): void => {
+      const tab = one<HTMLElement>(`[data-agenda-tab-button="${id}"]`);
+      Object.defineProperty(tab, 'offsetLeft', { configurable: true, value: left });
+      Object.defineProperty(tab, 'offsetWidth', { configurable: true, value: width });
+    };
+    place('main', 0, 160);
+    place('body', 160, 150);
+    place('decisions', 310, 120);
+    place('risks', 430, 100);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="risks"]').click());
+    expect(row.scrollLeft).toBe(430 + 100 - 358 + 24);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="decisions"]').click());
+    // Already in view: the row stays where it is.
+    expect(row.scrollLeft).toBe(196);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-tab-button="body"]').click());
+    expect(row.scrollLeft).toBe(136);
   });
 });
 
@@ -255,5 +284,95 @@ describe('the tabs and the versions this device saw', () => {
     expect(open.getAttribute('aria-label')).toBe('Open the tab Risks');
     await interact(() => open.click());
     expect(selected()).toBe('risks');
+  });
+});
+
+describe('the phone row as it changes (&F946 round 1)', () => {
+  const own = [
+    { id: 'first', kind: 'own' as const, name: 'First', body: 'a' },
+    { id: 'second', kind: 'own' as const, name: 'Second', body: 'b' },
+  ];
+  const tabsOf = (tabs: typeof own, open = 'second') => (
+    <AgendaTabs
+      changed={new Set<string>()}
+      mark={text => text}
+      onOpen={() => undefined}
+      open={open}
+      renderProse={text => text}
+      tabs={tabs}
+    />
+  );
+
+  test('remeasures a renamed tab, with the same number of tabs', async () => {
+    setViewport(390);
+    view = await mount(tabsOf(own));
+    const row = one<HTMLElement>('[role="tablist"]');
+    let wide = 300;
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, get: () => wide });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: 350 });
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(false);
+    wide = 600;
+    await view.render(
+      tabsOf([{ ...own[0], name: 'A much longer renamed first tab' } as (typeof own)[0], own[1] as (typeof own)[0]]),
+    );
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(true);
+  });
+
+  test('keeps the open tab in view when the row resizes', async () => {
+    setViewport(390);
+    const original = globalThis.ResizeObserver;
+    const watched: { readonly target: Element; readonly resize: () => void }[] = [];
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: () => void) {}
+      observe(target: Element): void {
+        watched.push({ target, resize: this.callback });
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      view = await mount(tabsOf(own));
+      const row = one<HTMLElement>('[role="tablist"]');
+      const open = one<HTMLElement>('[data-agenda-tab-button="second"]');
+      let width = 350;
+      Object.defineProperty(row, 'scrollWidth', { configurable: true, value: 500 });
+      Object.defineProperty(row, 'clientWidth', { configurable: true, get: () => width });
+      Object.defineProperty(open, 'offsetLeft', { configurable: true, value: 250 });
+      Object.defineProperty(open, 'offsetWidth', { configurable: true, value: 100 });
+      // Each tab is watched too: a font loading resizes a tab without resizing the row.
+      expect(watched.some(entry => entry.target === open)).toBe(true);
+      width = 200;
+      await interact(() => watched.find(entry => entry.target === row)?.resize());
+      expect(row.scrollLeft).toBe(250 + 100 - 200 + 24);
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
+  });
+
+  test('drops the fade when the phone becomes a wider screen', async () => {
+    setViewport(390);
+    const crossings: (() => void)[] = [];
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: () => ({
+        matches: false,
+        addEventListener: (_type: string, callback: () => void) => crossings.push(callback),
+        removeEventListener: () => undefined,
+      }),
+    });
+    await draw();
+    const row = one<HTMLElement>('[role="tablist"]');
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, value: 600 });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: 350 });
+    await interact(() => row.dispatchEvent(new Event('scroll')));
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(true);
+    await interact(() => {
+      window.innerWidth = 1440;
+      for (const crossing of crossings) crossing();
+    });
+    expect(one('[data-agenda-tab-row]').getAttribute('data-agenda-tab-row')).toBe('wrap');
+    expect(one('[data-agenda-tab-row]').hasAttribute('data-more-end')).toBe(false);
   });
 });
