@@ -222,9 +222,9 @@ const COMPONENT_CSS = `
 .fy-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 2px var(--accent-soft)}
 .fy-toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:var(--text-sm,13px)}
 .fy-toggle>input{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:30px;height:18px;margin:0;border-radius:var(--radius-pill,999px);background:var(--surface-3,var(--border));transition:background .15s;cursor:pointer}
-.fy-toggle>input::before{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--bg,Canvas);transition:transform .15s}
+.fy-toggle>input::before{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg-soft,CanvasText);transition:transform .15s,background .15s}
 .fy-toggle>input:checked{background:var(--accent)}
-.fy-toggle>input:checked::before{transform:translateX(12px)}
+.fy-toggle>input:checked::before{transform:translateX(12px);background:var(--accent-fg,var(--bg,Canvas))}
 .fy-toggle>input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .fy-field{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;align-items:center;gap:4px 10px;font-size:var(--text-sm,13px);color:var(--fg-soft,inherit)}
 .fy-field>output{min-width:3ch;text-align:right;color:var(--fg,inherit);font-variant-numeric:tabular-nums}
