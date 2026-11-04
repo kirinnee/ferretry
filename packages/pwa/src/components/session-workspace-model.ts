@@ -357,12 +357,34 @@ const nextReal = (records: readonly LogRecord[], from: number): number | undefin
 };
 
 /**
+ * How many calls are still waiting for a result where record `at` sits: the tool run it is in, read back
+ * to where the run began, leaving out the records already found to be copies.
+ */
+const pendingCalls = (records: readonly LogRecord[], at: number, copies: ReadonlySet<number>): number => {
+  let pending = 0;
+  for (let index = at - 1; index >= 0; index -= 1) {
+    const record = records[index] as LogRecord;
+    if (copies.has(index) || isHiddenRecord(record)) continue;
+    if (record.kind === 'tool-call') pending += 1;
+    else if (record.kind === 'tool-result') pending -= 1;
+    else break;
+  }
+  return pending;
+};
+
+/**
  * Do a copy and the record it may copy say the same thing? The same words; or, for a tool's result, the
  * same words with each picture named by its type, when it is provably the same invocation: its call lined
- * up as a copy too, or no call sits between the two results — a call has ONE result, so a second answer
- * to the same call can only be a copy of the first.
+ * up as a copy too, or exactly ONE call is waiting and no other call sits between the two results — a call
+ * has one result, so a second answer to that one call can only be a copy of the first.
  */
-const sameWords = (records: readonly LogRecord[], copy: number, twin: number, callLinedUp: boolean): boolean => {
+const sameWords = (
+  records: readonly LogRecord[],
+  copy: number,
+  twin: number,
+  callLinedUp: boolean,
+  copies: ReadonlySet<number>,
+): boolean => {
   const copied = records[copy] as LogRecord;
   const real = records[twin] as LogRecord;
   if (wordsOf(copied) === wordsOf(real)) return true;
@@ -371,7 +393,7 @@ const sameWords = (records: readonly LogRecord[], copy: number, twin: number, ca
   if (callLinedUp) return true;
   for (let between = copy + 1; between < twin; between += 1)
     if ((records[between] as LogRecord).kind === 'tool-call') return false;
-  return true;
+  return pendingCalls(records, copy, copies) === 1;
 };
 
 /** The records that are only copies, and the row a twin's search position starts at when its copy sits right before it. */
@@ -438,7 +460,7 @@ const copyRecords = (records: readonly LogRecord[]): Copies => {
       if (
         copy.role !== real.role ||
         copy.kind !== real.kind ||
-        !sameWords(records, member, twin, previousCallLinedUp)
+        !sameWords(records, member, twin, previousCallLinedUp, copies)
       ) {
         // Not this record's copy: it stays, and the next copy is tried against the same record.
         previousCallLinedUp = false;

@@ -1411,6 +1411,41 @@ describe('transcriptEntriesFromLog · the untimed copy Claude writes of a tool c
     expect(pictures).toHaveLength(2);
   });
 
+  test('keeps both pictures when two calls are waiting, since a result cannot say which it answers', () => {
+    const log = [
+      '[10:59:50] assistant/message: Reading both.',
+      '[10:59:51] assistant/tool-call: Read({"file_path":"/s/a.png"})',
+      '[10:59:51] assistant/tool-call: Read({"file_path":"/s/b.png"})',
+      'tool/tool-result: [fy-image 100.1.0 image/png]',
+      '[10:59:52] tool/tool-result: [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const calls = transcriptEntriesFromLog(log, NOW).flatMap(entry => entry.tools ?? []);
+    expect(
+      calls.map(call => ({
+        path: (call.use.input as { file_path: string }).file_path,
+        images: call.result?.images?.length,
+      })),
+    ).toEqual([
+      { path: '/s/a.png', images: 1 },
+      { path: '/s/b.png', images: 1 },
+    ]);
+  });
+
+  test('folds a picture copy when the one call waiting follows a call already answered', () => {
+    const log = [
+      '[10:59:50] assistant/message: Reading.',
+      '[10:59:51] assistant/tool-call: Bash({"command":"date"})',
+      '[10:59:51] system/usage: in=1 out=1',
+      '[10:59:52] tool/tool-result: 10:59:52',
+      '[10:59:53] assistant/tool-call: Read({"file_path":"/s/a.png"})',
+      'tool/tool-result: [fy-image 100.1.0 image/png]',
+      '[10:59:54] tool/tool-result: [fy-image 200.2.0 image/png]',
+    ].join('\n');
+    const calls = transcriptEntriesFromLog(log, NOW).flatMap(entry => entry.tools ?? []);
+    expect(calls.map(call => call.orphanResult === true)).toEqual([false, false]);
+    expect(calls[1]?.result?.images?.length).toBe(1);
+  });
+
   test('never folds a result into a different call’s identical result', () => {
     const log = [
       '[10:59:50] assistant/tool-call: Bash({"command":"echo ok"})',
