@@ -235,6 +235,7 @@ import {
   type InboxStuckFlag,
   type InboxStuckTold,
   type InboxUnstickAct,
+  INBOX_STALE_QUEUE_MS,
   inboxStuckAnomaly,
   inboxStuckCandidates,
   inboxStuckForInvestigation,
@@ -475,6 +476,8 @@ export interface WardenStuckInputPort {
  * the daemon's own safe acts toward it, and the machine notice that names it.
  */
 export interface WardenStuckInboxPort {
+  /** When the session's queue was last written (ms), or `undefined` when it has none. Throws when it cannot be read. */
+  queueWrittenAt(sessionId: string): Promise<number | undefined>;
   /** Every message the session's queue holds, oldest first. */
   queue(sessionId: string): Promise<readonly QueuedMessage[]>;
   /** Every send the session was sent, the latest line of each. */
@@ -488,6 +491,30 @@ export interface WardenStuckInboxPort {
   /** The one machine item that lists every stuck inbox. Each throws when it cannot be written. */
   add(notice: StuckInboxNotice): Promise<void>;
   remove(sessionId: string): Promise<void>;
+}
+
+/** One sweep's read of the queues: the flags, the ferrets past the horizon, and those that could not be read. */
+interface InboxRead {
+  readonly flags: readonly InboxStuckFlag[];
+  readonly expired: ReadonlySet<string>;
+  readonly unread: ReadonlySet<string>;
+}
+
+/**
+ * Remembers that an investigation just started for a stuck inbox was its episode's one. `spawned` names the
+ * investigators; their assignments name the ferrets.
+ */
+function markInboxInvestigated(state: WardenRuntimeState, spawned: readonly string[], at: string): WardenRuntimeState {
+  const memory = state.stuckInbox;
+  if (memory === undefined || spawned.length === 0) return state;
+  const started = new Set(spawned);
+  let next: Record<string, InboxStuckTold> | undefined;
+  for (const [sessionId, assignment] of Object.entries(state.assignments ?? {})) {
+    const told = memory[sessionId];
+    if (told === undefined || !started.has(assignment.wardenId) || !assignment.kinds.includes('inbox_stuck')) continue;
+    next = { ...(next ?? memory), [sessionId]: { ...told, investigatedAt: at } };
+  }
+  return next === undefined ? state : { ...state, stuckInbox: next };
 }
 
 export interface WardenBoardPort {
@@ -1182,7 +1209,7 @@ export class WardenSweepService {
       ...orphans,
       ...overdue.anomalies,
       ...stuckFlags,
-      ...inbox.map(inboxStuckAnomaly),
+      ...inbox.flags.map(inboxStuckAnomaly),
     ];
 
     let state = parseWardenRuntimeState(await this.ports.state.read());
@@ -1208,9 +1235,17 @@ export class WardenSweepService {
     // A card whose ferret was just started again has a ferret on it.
     const orphaned = orphans.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
 
-    state = await this.handleInbox({ stuck: inbox, state, config, at, force: options.force });
-    const inboxInvestigations = inboxStuckForInvestigation(inbox, state.stuckInbox ?? {}).filter(
-      anomaly => !reviveRun.revived.has(anomaly.sessionId) && !moveRun.moved.has(anomaly.sessionId),
+    state = await this.handleInbox({ inbox, state, config, at, force: options.force });
+    // A stuck inbox is investigated only where nothing else about the ferret is: its own anomaly (a frozen process,
+    // say) has the remedies a stuck queue's investigation does not, and must never be displaced by it.
+    const ownInvestigations = new Set(
+      anomalies.filter(anomaly => anomaly.assignedWarden === true).map(anomaly => anomaly.sessionId),
+    );
+    const inboxInvestigations = inboxStuckForInvestigation(inbox.flags, state.stuckInbox ?? {}).filter(
+      anomaly =>
+        !reviveRun.revived.has(anomaly.sessionId) &&
+        !moveRun.moved.has(anomaly.sessionId) &&
+        !ownInvestigations.has(anomaly.sessionId),
     );
 
     const assigned = await this.runAssigned({
@@ -1222,7 +1257,7 @@ export class WardenSweepService {
       at,
       force: options.force,
     });
-    state = assigned.state;
+    state = markInboxInvestigated(assigned.state, assigned.spawned, at);
 
     const escalated = await this.escalate({
       anomalies: anomalies.filter(anomaly => anomaly.assignedWarden !== true),
@@ -1272,7 +1307,13 @@ export class WardenSweepService {
 
     return {
       sweptAt: at,
-      ...wireFlags([...anomalies, ...orphaned, ...overdue.anomalies, ...stuckFlags, ...inbox.map(inboxStuckAnomaly)]),
+      ...wireFlags([
+        ...anomalies,
+        ...orphaned,
+        ...overdue.anomalies,
+        ...stuckFlags,
+        ...inbox.flags.map(inboxStuckAnomaly),
+      ]),
       ...escalated.outcome,
       ...(assigned.spawned.length === 0 ? {} : { assignedWardens: [...assigned.spawned] }),
     };
@@ -1539,8 +1580,10 @@ export class WardenSweepService {
     // the situation as it is now rather than as it was one sweep ago. The one
     // exception is the owner's request, which no flag may overwrite.
     const anomalyById = new Map<string, WardenAnomaly>();
+    // Nor may a stuck inbox overwrite anything: the ferret's own anomaly carries the remedies it needs.
     for (const anomaly of [...queued, ...candidates]) {
-      if (anomalyById.get(anomaly.sessionId)?.kind === 'owner_request') continue;
+      const held = anomalyById.get(anomaly.sessionId);
+      if (held?.kind === 'owner_request' || (held !== undefined && anomaly.kind === 'inbox_stuck')) continue;
       anomalyById.set(anomaly.sessionId, anomaly);
     }
 
@@ -2339,7 +2382,7 @@ export class WardenSweepService {
     const target = byId.get(targetId);
     if (target === undefined || record.kinds.length === 0 || verdict !== 'cleared') return state;
     // A stuck inbox is a fact about the daemon's queue, not a judgement of the ferret: nothing is left alone on it,
-    // and its episode memory already keeps it from being investigated twice (`inbox-stuck.ts`).
+    // and its episode is investigated once (`investigatedAt`, `inbox-stuck.ts`).
     if (record.kinds.includes('inbox_stuck')) return state;
     const cleared = this.clearFlags(
       state,
@@ -2757,24 +2800,42 @@ export class WardenSweepService {
    * The ferrets whose messages wait in Ferretry's queue far past due (`inbox-stuck.ts`). A queue or ledger that
    * cannot be read proves nothing this sweep.
    */
-  private async detectInbox(fleet: readonly WardenFleetSession[], nowMs: number): Promise<readonly InboxStuckFlag[]> {
+  private async detectInbox(fleet: readonly WardenFleetSession[], nowMs: number): Promise<InboxRead> {
     const port = this.ports.stuckInbox;
-    if (port === undefined) return [];
+    if (port === undefined) return { flags: [], expired: new Set(), unread: new Set() };
     const candidates = inboxStuckCandidates(fleet);
     const queues = new Map<string, readonly QueuedMessage[]>();
     const ledgers = new Map<string, readonly InboxSend[]>();
+    const unread = new Set<string>();
     for (const candidate of candidates) {
       const id = candidate.config.id;
-      const messages = await port.queue(id).catch(() => undefined);
-      // A queue with nothing waiting needs no ledger read.
-      if (messages === undefined || !messages.some(message => message.state === 'queued' || message.state === 'typing'))
+      // A queue untouched for longer than the horizon holds nothing that could be flagged: not read at all.
+      const written = await port.queueWrittenAt(id).then(
+        at => ({ at }),
+        () => undefined,
+      );
+      if (written === undefined) {
+        unread.add(id);
         continue;
+      }
+      if (written.at === undefined || nowMs - written.at > INBOX_STALE_QUEUE_MS) continue;
+      const messages = await port.queue(id).catch(() => undefined);
+      if (messages === undefined) {
+        unread.add(id);
+        continue;
+      }
+      // A queue with nothing waiting needs no ledger read.
+      if (!messages.some(message => message.state === 'queued' || message.state === 'typing')) continue;
       const sends = await port.sends(id).catch(() => undefined);
-      if (sends === undefined) continue;
+      if (sends === undefined) {
+        unread.add(id);
+        continue;
+      }
       queues.set(id, messages);
       ledgers.set(id, sends);
     }
-    return detectInboxStuck(candidates, queues, ledgers, nowMs);
+    const found = detectInboxStuck(candidates, queues, ledgers, nowMs);
+    return { flags: found.flags, expired: new Set(found.expired), unread };
   }
 
   /**
@@ -2821,7 +2882,7 @@ export class WardenSweepService {
    * notice that could not be written is journalled and not remembered, so the next sweep tries again.
    */
   private async handleInbox(input: {
-    readonly stuck: readonly InboxStuckFlag[];
+    readonly inbox: InboxRead;
     readonly state: WardenRuntimeState;
     readonly config: WardenConfig;
     readonly at: string;
@@ -2830,9 +2891,10 @@ export class WardenSweepService {
     const port = this.ports.stuckInbox;
     if (port === undefined) return input.state;
     const plan = planInboxStuck({
-      stuck: input.stuck,
+      stuck: input.inbox.flags,
       memory: input.state.stuckInbox ?? {},
       enabled: input.force || input.config.enabled,
+      unread: input.inbox.unread,
     });
     const memory: Record<string, InboxStuckTold> = { ...input.state.stuckInbox };
     for (const sessionId of plan.recovered) {
@@ -2842,9 +2904,13 @@ export class WardenSweepService {
       );
       if (!cleared) continue;
       delete memory[sessionId];
-      this.ports.journal.record('fleet.warden_inbox_recovered', { sessionId });
+      // Past the horizon is not drained: it is no longer tracked, and says so.
+      this.ports.journal.record(
+        input.inbox.expired.has(sessionId) ? 'fleet.warden_inbox_expired' : 'fleet.warden_inbox_recovered',
+        { sessionId },
+      );
     }
-    const byId = new Map(input.stuck.map(flag => [flag.sessionId, flag]));
+    const byId = new Map(input.inbox.flags.map(flag => [flag.sessionId, flag]));
     for (const step of plan.steps) {
       const flag = byId.get(step.sessionId);
       if (flag === undefined) continue;

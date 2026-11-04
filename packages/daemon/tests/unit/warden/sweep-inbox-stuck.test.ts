@@ -55,12 +55,25 @@ class FakeStuckInbox implements WardenStuckInboxPort {
   trackerFails = false;
   noticeFails = false;
   removeFails = false;
+  /** When each queue was last written; NOW a minute ago unless a test says otherwise. */
+  written: Record<string, number | undefined> = {};
+  /** Which read throws this sweep, if any. */
+  fails: 'written' | 'queue' | 'sends' | undefined;
+  readCalls = 0;
+
+  async queueWrittenAt(sessionId: string): Promise<number | undefined> {
+    if (this.fails === 'written') throw new Error('EACCES');
+    return sessionId in this.written ? this.written[sessionId] : NOW - MINUTE;
+  }
 
   async queue(sessionId: string): Promise<readonly QueuedMessage[]> {
+    this.readCalls += 1;
+    if (this.fails === 'queue') throw new Error('EIO');
     return this.queues[sessionId] ?? [];
   }
 
   async sends(sessionId: string): Promise<readonly InboxSend[]> {
+    if (this.fails === 'sends') throw new Error('EMFILE');
     return this.ledgers[sessionId] ?? [];
   }
 
@@ -277,5 +290,118 @@ describe('a ferret whose inbox is stuck (B148)', () => {
       should(subject.remedies).be.empty();
       should(subject.state().blessings ?? {}).not.have.property('ryu');
     }
+  });
+
+  it('should never displace the ferret’s own investigation: a frozen ferret with a stuck inbox is investigated as frozen', async () => {
+    let now = NOW;
+    const stuckInbox = new FakeStuckInbox();
+    const subject = harness({ config: enabled(), fleet: [ryu()], stuckInbox, now: () => now });
+    await subject.service.run({ force: false });
+    subject.setFleet([{ ...ryu(), frozenAt: iso(NOW - 10 * MINUTE) }]);
+    now = NOW + 5 * MINUTE;
+    await subject.service.run({ force: false });
+
+    should(stuckInbox.notices.has('ryu')).be.true();
+    should(subject.spawns).have.length(1);
+    should(subject.spawns[0]?.prompt).match(/"kind": "agent_frozen"/);
+    should(subject.spawns[0]?.prompt).not.match(/Its inbox was flagged stuck/);
+    should(subject.state().assignments?.ryu?.kinds).eql(['agent_frozen']);
+    should(subject.state().stuckInbox?.ryu).not.have.property('investigatedAt');
+  });
+
+  it('should investigate an episode once, however long it stays stuck', async () => {
+    let now = NOW;
+    const stuckInbox = new FakeStuckInbox();
+    const subject = harness({
+      config: enabled({ assignedCooldownMinutes: 0 }),
+      fleet: [ryu()],
+      stuckInbox,
+      now: () => now,
+    });
+    for (let sweep = 0; sweep < 6; sweep += 1) {
+      await subject.service.run({ force: false });
+      now += 30 * MINUTE;
+    }
+
+    should(subject.spawns).have.length(1);
+    should(subject.state().stuckInbox?.ryu?.investigatedAt).equal(iso(NOW + 30 * MINUTE));
+  });
+
+  it('should leave a ferret on the notice, remembered, when its queue or ledger cannot be read this sweep', async () => {
+    for (const fails of ['written', 'queue', 'sends'] as const) {
+      let now = NOW;
+      const stuckInbox = new FakeStuckInbox();
+      const subject = harness({ config: enabled(), fleet: [ryu()], stuckInbox, now: () => now });
+      await subject.service.run({ force: false });
+      now = NOW + 5 * MINUTE;
+      await subject.service.run({ force: false });
+      const remembered = subject.state().stuckInbox;
+
+      stuckInbox.fails = fails;
+      now = NOW + 10 * MINUTE;
+      await subject.service.run({ force: false });
+
+      should(stuckInbox.notices.has('ryu')).be.true();
+      should(subject.state().stuckInbox).eql(remembered);
+      should(journalTypes(subject)).not.containEql('fleet.warden_inbox_recovered');
+      should(stuckInbox.acts).have.length(2);
+    }
+  });
+
+  it('should not read a queue untouched for longer than the horizon, and should say an old inbox expired, not drained', async () => {
+    let now = NOW;
+    const stuckInbox = new FakeStuckInbox();
+    stuckInbox.written = { ryu: NOW - 4 * 24 * 60 * MINUTE };
+    const stale = harness({ config: enabled(), fleet: [ryu()], stuckInbox, now: () => now });
+    await stale.service.run({ force: false });
+    should(stuckInbox.readCalls).equal(0);
+
+    const aging = new FakeStuckInbox();
+    const subject = harness({ config: enabled(), fleet: [ryu()], stuckInbox: aging, now: () => now });
+    await subject.service.run({ force: false });
+    now = NOW + 3 * 24 * 60 * MINUTE;
+    await subject.service.run({ force: false });
+
+    should(journalTypes(subject)).containEql('fleet.warden_inbox_expired');
+    should(journalTypes(subject)).not.containEql('fleet.warden_inbox_recovered');
+    should(subject.state().stuckInbox).be.undefined();
+  });
+
+  it('should re-check on a forced run even with the Warden off', async () => {
+    const stuckInbox = new FakeStuckInbox();
+    const subject = harness({ config: enabled({ enabled: false }), fleet: [ryu()], stuckInbox });
+
+    await subject.service.run({ force: true });
+
+    should(stuckInbox.acts).eql(['tracker:ryu', 'delivery:ryu']);
+  });
+
+  it('should re-check nothing on a NEEDS_HUMAN verdict', async () => {
+    let now = NOW;
+    const stuckInbox = new FakeStuckInbox();
+    const spawnAt = iso(NOW + 5 * MINUTE).replaceAll(/[:.]/gu, '-');
+    const subject = harness({
+      config: enabled(),
+      fleet: [ryu()],
+      stuckInbox,
+      now: () => now,
+      reports: {
+        [`/state/warden/reports/${spawnAt}-ryu.md`]: [
+          'Verdict: NEEDS_HUMAN',
+          '',
+          '- **Anomaly kind:** inbox_stuck',
+          '- **Recommended action:** LEAVE — a person’s draft is in the box; send or clear it',
+        ].join('\n'),
+      },
+    });
+    await subject.service.run({ force: false });
+    now = NOW + 5 * MINUTE;
+    await subject.service.run({ force: false });
+    now = NOW + 10 * MINUTE;
+    await subject.service.run({ force: false });
+
+    should(subject.journal.filter(entry => entry.data.by === 'investigation')).be.empty();
+    should(stuckInbox.acts).have.length(2);
+    should(subject.remedies).be.empty();
   });
 });

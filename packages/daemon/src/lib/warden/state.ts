@@ -530,6 +530,7 @@ const RuntimeStateSchema = z.object({
         ]),
         unstuckAt: Instant.optional(),
         noticedAt: Instant.optional(),
+        investigatedAt: Instant.optional(),
       }),
     )
     .optional(),

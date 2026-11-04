@@ -156,12 +156,10 @@ function kindGuidance(
   }
   if (anomaly.kind === 'inbox_stuck') {
     return [
-      'Messages sent to this ferret have waited in FERRETRY’S OWN QUEUE far past due; the anomaly says how many, how',
-      'long and the cause the daemon read off the head of the queue. The daemon already re-checked it safely once and',
-      'it did not move. This is a fault of the delivery, not of the ferret: do not judge its work.',
-      `Read ${session.directory}/channel/queue.jsonl (the queue's log), ${session.directory}/channel/sends.jsonl (the send ledger)`,
-      'and the recent events, READ ONLY. Find the message at the head of the queue, what its send record says, and',
-      'whether anything has moved since the anomaly was written.',
+      'Messages sent to this ferret have waited in FERRETRY’S OWN QUEUE far past due: the anomaly says how many, how long, and the cause the daemon read off the head of the queue.',
+      'The daemon already re-checked it safely once, and it did not move. This is a fault of the delivery, not of the ferret: do not judge its work.',
+      `Read, READ ONLY: ${session.directory}/channel/queue.jsonl (the queue's log), ${session.directory}/channel/sends.jsonl (the send ledger) and the recent events.`,
+      'Find the message at the head of the queue, what its send record says, and whether anything has moved since the anomaly was written.',
       'Do NOT send, retry, cancel, resend or delete any message, and do not type into the pane.',
     ];
   }

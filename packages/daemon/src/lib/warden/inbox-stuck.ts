@@ -29,8 +29,8 @@
  * never to have arrived; the send path's verified finish of a draft that is provably ours; and one more look by
  * the deliverer. Nothing is deleted or resent on a guess, and a person's draft is never touched. If the same
  * episode is still flagged a sweep later, the ferret is named on ONE machine notice listing every stuck inbox,
- * which clears itself as each drains, and the flag is handed to an investigation, whose verdict can only run the
- * same safe unstick again.
+ * which clears itself as each drains, and the flag is handed to ONE investigation per episode — never in place of the
+ * ferret's own — whose verdict can only run the same safe unstick again.
  *
  * Pure: the fleet, the queues, the ledgers and the memory arrive through the arguments.
  */
@@ -55,6 +55,13 @@ export const INBOX_STUCK_LIMITS_MS: Readonly<Record<InboxUrgency, number>> = {
 /** A message overdue by more than this is wreckage, not news: it is not reported however it ended. */
 export const INBOX_STUCK_HORIZON_MS = 3 * 24 * 60 * 60_000;
 
+/**
+ * A queue not written to for longer than this cannot hold a message inside the horizon — every message is appended
+ * when it is accepted, and none is held to combine for anywhere near an hour — so it is not read at all. Finished
+ * ferrets keep their queues for good; reading every one of them every sweep would grow without bound.
+ */
+export const INBOX_STALE_QUEUE_MS = INBOX_STUCK_HORIZON_MS + 60 * 60_000;
+
 /** One send of the session's ledger, as far as this module reads it: the latest line of each. */
 export interface InboxSend {
   readonly sendId: string;
@@ -71,9 +78,10 @@ export interface InboxSend {
  * - `hung_handover` — a message is `typing` and its send is `accepted` with nothing typed and nothing watching:
  *   the transport gave up before its first key and the tracker was never told (ryu).
  * - `held_for_revive` — its send is held for an explicit revive the reviver refused; nobody was told to revive.
- * - `draft_own` — the box holds a send of ours that did not submit; `input_stuck` presses for that one.
+ * - `draft_own` — the box holds a send of ours that did not submit (`input_stuck` presses at a ferret whose turn ended).
  * - `draft_unattributed` — the box holds text nothing proves ours, at a ferret nobody is typing into (elta).
- * - `dialog`, `unreadable`, `launching` — the queue's own wait reason, held far longer than it ever should be.
+ * - `dialog`, `unreadable`, `launching` — the queue's own wait reason, held far longer than it ever should be;
+ *   `unreadable` also for a person's send the screen would not let be typed, which the tracker types once it reads clear.
  * - `no_reason` — waiting with nothing in front of it and no reason given: the deliverer has not looked.
  */
 export type InboxStuckCause =
@@ -155,6 +163,9 @@ export function inboxStuckCause(
     if (send?.held === true || send?.path === 'revive-queue')
       return { cause: 'held_for_revive', blockingSendId: sendId };
     if (send?.typedNotSent === true) return { cause: 'draft_own', blockingSendId: sendId };
+    // A person's send the screen refused before any key: the tracker is watching it, and types it once the
+    // screen reads clear.
+    if (send?.untyped === true) return { cause: 'unreadable', blockingSendId: sendId };
     return { cause: 'hung_handover', blockingSendId: sendId };
   }
   switch (oldest.waitReason) {
@@ -237,23 +248,36 @@ export function inboxStuckOf(
   };
 }
 
-/** The flag for each candidate whose queue is stuck. A queue or ledger that could not be read proves nothing. */
+/** Whether a queue still holds a message it waits on for real that is older than the horizon: it EXPIRED, not drained. */
+export function inboxExpired(view: WardenSessionView, messages: readonly QueuedMessage[], nowMs: number): boolean {
+  return undelivered(messages).some(
+    message => !intendedHold(message, view) && nowMs - inboxDueMs(message) > INBOX_STUCK_HORIZON_MS,
+  );
+}
+
+/**
+ * The flag for each candidate whose queue is stuck, and the candidates not flagged only because what waits in
+ * them is past the horizon. A candidate whose queue or ledger is missing from the maps was not read, and is in
+ * neither: it proves nothing.
+ */
 export function detectInboxStuck(
   candidates: readonly WardenSessionView[],
   queues: ReadonlyMap<string, readonly QueuedMessage[]>,
   ledgers: ReadonlyMap<string, readonly InboxSend[]>,
   nowMs: number,
   limits: Readonly<Record<InboxUrgency, number>> = INBOX_STUCK_LIMITS_MS,
-): readonly InboxStuckFlag[] {
+): { readonly flags: readonly InboxStuckFlag[]; readonly expired: readonly string[] } {
   const flags: InboxStuckFlag[] = [];
+  const expired: string[] = [];
   for (const view of candidates) {
     const messages = queues.get(view.config.id);
     const sends = ledgers.get(view.config.id);
     if (messages === undefined || sends === undefined) continue;
     const flag = inboxStuckOf(view, messages, sends, nowMs, limits);
     if (flag !== undefined) flags.push(flag);
+    else if (inboxExpired(view, messages, nowMs)) expired.push(view.config.id);
   }
-  return flags;
+  return { flags, expired };
 }
 
 /** The flag as the anomaly every other surface reads: the Warden's own fields left behind. */
@@ -278,16 +302,20 @@ export function inboxStuckAnomaly(flag: InboxStuckFlag): WardenAnomaly {
 export type InboxUnstickAct = 'tracker_look' | 'finish_own_draft' | 'delivery_look';
 
 /**
- * The safe unstick for a cause, in order. A send held for a refused revive gets none of its own — a revive is
- * a decision, and the reviver already refused it — and a send of ours typed in the box is `input_stuck`'s to
- * press; both still get a delivery look, which can do nothing but the queue's normal work.
+ * The safe unstick for a cause, in order. A send of ours typed in the box gets the verified finish (`input_stuck`
+ * presses for it only at a ferret whose turn has ended, never in a declared wait). A send held for a refused
+ * revive gets nothing of its own — a revive is a decision, and the reviver already refused it. Every cause gets a
+ * delivery look, which can do nothing but the queue's normal work.
  */
 export function unstickActs(cause: InboxStuckCause): readonly InboxUnstickAct[] {
   switch (cause) {
     case 'hung_handover':
+    case 'unreadable':
       return ['tracker_look', 'delivery_look'];
     case 'draft_unattributed':
       return ['tracker_look', 'finish_own_draft', 'delivery_look'];
+    case 'draft_own':
+      return ['finish_own_draft', 'delivery_look'];
     default:
       return ['delivery_look'];
   }
@@ -298,8 +326,10 @@ export interface InboxStuckTold {
   readonly messageId: string;
   readonly cause: InboxStuckCause;
   readonly unstuckAt?: string;
-  /** When the ferret was named on the machine notice (and handed to an investigation). */
+  /** When the ferret was named on the machine notice. */
   readonly noticedAt?: string;
+  /** When an investigation of this episode was started: one per episode. */
+  readonly investigatedAt?: string;
 }
 
 /** Keyed by session id, kept while the ferret is flagged. */
@@ -317,16 +347,20 @@ export type InboxStuckStep =
 
 /**
  * What to do this sweep: the safe unstick once for a new episode; the notice once that episode outlives it (a
- * sweep later, still flagged); and every ferret no longer flagged taken off. Nothing is done while the Warden is
- * off; recoveries are cleared either way.
+ * sweep later, still flagged); and every ferret no longer flagged taken off — except one whose queue or ledger
+ * could not be read this sweep (`unread`), which proves nothing and is left as it stands. Nothing is done while
+ * the Warden is off; recoveries are cleared either way.
  */
 export function planInboxStuck(input: {
   readonly stuck: readonly Pick<InboxStuckFlag, 'sessionId' | 'messageId' | 'cause'>[];
   readonly memory: InboxStuckMemory;
   readonly enabled: boolean;
+  readonly unread?: ReadonlySet<string>;
 }): { readonly steps: readonly InboxStuckStep[]; readonly recovered: readonly string[] } {
   const flagged = new Set(input.stuck.map(each => each.sessionId));
-  const recovered = Object.keys(input.memory).filter(sessionId => !flagged.has(sessionId));
+  const recovered = Object.keys(input.memory).filter(
+    sessionId => !flagged.has(sessionId) && input.unread?.has(sessionId) !== true,
+  );
   if (!input.enabled) return { steps: [], recovered };
   const steps: InboxStuckStep[] = [];
   for (const { sessionId, messageId, cause } of input.stuck) {
@@ -341,8 +375,8 @@ export function planInboxStuck(input: {
 }
 
 /**
- * The flags to hand to an investigation: those already on the notice — the safe unstick did not clear them — as
- * an assigned warden's one session each. The investigation's own backoff and cooldown keep it from repeating.
+ * The flags to hand to an investigation: those already on the notice — the safe unstick did not clear them — and
+ * not yet investigated this episode, as an assigned warden's one session each.
  */
 export function inboxStuckForInvestigation(
   stuck: readonly InboxStuckFlag[],
@@ -351,7 +385,7 @@ export function inboxStuckForInvestigation(
   return stuck
     .filter(flag => {
       const told = memory[flag.sessionId];
-      return told?.messageId === flag.messageId && told.noticedAt !== undefined;
+      return told?.messageId === flag.messageId && told.noticedAt !== undefined && told.investigatedAt === undefined;
     })
     .map(flag => ({ ...inboxStuckAnomaly(flag), assignedWarden: true }));
 }

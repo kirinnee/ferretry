@@ -55,7 +55,7 @@ export class StuckInboxList {
     const held = await this.store.read();
     const ids = Object.keys(held).sort();
     if (ids.length === 0) {
-      await this.machine.resolve(INBOX_STUCK_REF, 'Every stuck inbox has drained.');
+      await this.machine.resolve(INBOX_STUCK_REF, 'No ferret’s inbox is flagged stuck any more.');
       return;
     }
     const lines = ids.slice(0, MAX_LISTED).map(id => `- ${held[id]?.[1] ?? id}`);
@@ -79,7 +79,8 @@ export class StuckInboxList {
           'Messages sent to these ferrets have not been delivered long after they were due: something at the head of ' +
           'each queue is not moving, and every later message waits behind it. The Warden re-checked each one safely — ' +
           'it re-proves a send from the transcript and the screen, and types one again only when proven never to have ' +
-          'arrived — and the queue is still stuck. An investigation has been asked to look.',
+          'arrived — and the queue is still stuck. An investigation has been asked to look; its report is on the ' +
+          'Warden page.',
         premise: 'The Warden read it from each ferret’s message queue and its send ledger.',
         context: clipAtWord([...lines, ...more].join('\n'), MAX_AGENDA_DETAIL_LENGTH),
         howToResolve:

@@ -4,9 +4,11 @@ import should from 'should';
 import {
   detectInboxStuck,
   INBOX_STUCK_HORIZON_MS,
+  INBOX_STALE_QUEUE_MS,
   INBOX_STUCK_LIMITS_MS,
   type InboxSend,
   inboxDueMs,
+  inboxExpired,
   inboxStuckAnomaly,
   inboxStuckCandidates,
   inboxStuckForInvestigation,
@@ -179,6 +181,15 @@ describe('inbox_stuck: what is undelivered, and when it is stuck', () => {
     });
   });
 
+  it('should name a person’s send the screen would not let be typed as an unreadable screen, not a hung hand-over', () => {
+    const typing = message('t', 30, { sender: 'human', from: undefined, state: 'typing' });
+
+    should(inboxStuckOf(ferret('f'), [typing], [send('t', { untyped: true })], NOW)).match({
+      cause: 'unreadable',
+      blockingSendId: 't',
+    });
+  });
+
   it('should name a send held for a refused revive, found by the id a combined turn was sent under', () => {
     const member = message('m2', 30, { state: 'typing', deliveredAs: 'm1' });
     const lead = message('m1', 31, { state: 'typing', deliveredAs: 'm1' });
@@ -220,17 +231,34 @@ describe('inbox_stuck: which ferrets are read', () => {
       ['unread-ledger', ryuQueue(30)],
     ]);
     const ledgers = new Map([['ryu', ryuSends]]);
-    const flags = detectInboxStuck([ryu, ferret('unread-ledger'), ferret('unread-queue')], queues, ledgers, NOW);
+    const found = detectInboxStuck([ryu, ferret('unread-ledger'), ferret('unread-queue')], queues, ledgers, NOW);
 
-    should(flags.map(flag => flag.sessionId)).eql(['ryu']);
+    should(found.flags.map(flag => flag.sessionId)).eql(['ryu']);
+    should(found.expired).be.empty();
+  });
+
+  it('should tell an inbox past the horizon from a drained one', () => {
+    const view = ferret('old');
+    const ancient = [message('m', INBOX_STUCK_HORIZON_MS / MINUTE + 1)];
+
+    should(inboxExpired(view, ancient, NOW)).be.true();
+    should(inboxExpired(view, [message('m', 30)], NOW)).be.false();
+    should(inboxExpired(view, [message('m', INBOX_STUCK_HORIZON_MS / MINUTE + 1, { state: 'read' })], NOW)).be.false();
+    should(detectInboxStuck([view], new Map([['old', ancient]]), new Map([['old', []]]), NOW)).eql({
+      flags: [],
+      expired: ['old'],
+    });
+    should(INBOX_STALE_QUEUE_MS).equal(INBOX_STUCK_HORIZON_MS + 60 * MINUTE);
   });
 });
 
 describe('inbox_stuck: what the Warden does', () => {
   it('should re-check a hung hand-over with the tracker’s look, an unattributed draft with the verified finish too', () => {
     should(unstickActs('hung_handover')).eql(['tracker_look', 'delivery_look']);
+    should(unstickActs('unreadable')).eql(['tracker_look', 'delivery_look']);
     should(unstickActs('draft_unattributed')).eql(['tracker_look', 'finish_own_draft', 'delivery_look']);
-    for (const cause of ['held_for_revive', 'draft_own', 'dialog', 'unreadable', 'launching', 'no_reason'] as const)
+    should(unstickActs('draft_own')).eql(['finish_own_draft', 'delivery_look']);
+    for (const cause of ['held_for_revive', 'dialog', 'launching', 'no_reason'] as const)
       should(unstickActs(cause)).eql(['delivery_look']);
   });
 
@@ -257,6 +285,8 @@ describe('inbox_stuck: what the Warden does', () => {
     const stuck = [{ sessionId: 'elta', messageId: 'm0', cause: 'draft_unattributed' as const }];
 
     should(planInboxStuck({ stuck, memory, enabled: false })).eql({ steps: [], recovered: ['ryu'] });
+    // A queue that could not be read proves nothing: the ferret stays as it stands.
+    should(planInboxStuck({ stuck, memory, enabled: true, unread: new Set(['ryu']) }).recovered).be.empty();
   });
 
   it('should hand to an investigation only a ferret already on the notice for this episode, as its own assignment', () => {
@@ -267,6 +297,7 @@ describe('inbox_stuck: what the Warden does', () => {
     should(inboxStuckForInvestigation(flags, {})).be.empty();
     should(inboxStuckForInvestigation(flags, { ryu: { messageId: '8e8d7aaf', cause: 'hung_handover' } })).be.empty();
     should(inboxStuckForInvestigation(flags, { ryu: { ...noticed.ryu, messageId: 'older' } })).be.empty();
+    should(inboxStuckForInvestigation(flags, { ryu: { ...noticed.ryu, investigatedAt: iso(NOW) } })).be.empty();
     const handed = inboxStuckForInvestigation(flags, noticed);
     should(handed).have.length(1);
     should(handed[0]).match({ kind: 'inbox_stuck', sessionId: 'ryu', assignedWarden: true });

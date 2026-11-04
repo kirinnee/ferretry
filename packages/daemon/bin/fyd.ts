@@ -13765,6 +13765,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // B148: the queue and the ledger to read, and the daemon's own safe re-check — the tracker's look a boot
           // makes, the verified finish of a draft of ours, and one more look by the deliverer.
           stuckInbox: {
+            queueWrittenAt: async sessionId => {
+              const written = await stat(queueStore.file(parseSessionId(sessionId))).catch((error: unknown) => {
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+                throw error;
+              });
+              return written?.mtimeMs;
+            },
             queue: async sessionId => await sessionQueue.list(parseSessionId(sessionId)),
             sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
             trackerLook: async sessionId => await sendTracker.check(parseSessionId(sessionId)),

@@ -755,30 +755,43 @@ limit (`INBOX_STUCK_LIMITS_MS`):
 
 The flag names the oldest stuck message (the episode), how many are waiting, and the CAUSE at the head of the
 queue: `hung_handover` (a `typing` message whose send is accepted, nothing typed — ryu), `held_for_revive` (its send
-is held for a revive the reviver refused), `draft_own` (a send of ours sits typed in the box — `input_stuck` presses
-for it), `draft_unattributed` (elta), `dialog` / `unreadable` / `launching` (the queue's own wait, held far too
-long), or `no_reason` (nothing has looked at the queue).
+is held for a revive the reviver refused), `draft_own` (a send of ours sits typed in the box), `draft_unattributed`
+(elta), `unreadable` (the queue's own wait, or a person's send the screen would not let be typed, which the tracker
+types once the screen reads clear), `dialog` / `launching` (the queue's own wait, held far too long), or
+`no_reason` (nothing has looked at the queue).
+
+**What is read.** A queue file not written to for longer than the horizon plus an hour (`INBOX_STALE_QUEUE_MS`) is
+not read at all — one `stat` — since every message is appended when it is accepted; finished ferrets keep their
+queues for good, and reading all of them every sweep would grow without bound. A queue, a ledger or a `stat` that
+cannot be read proves nothing: a ferret already flagged stays as it stands, on the notice and in memory.
 
 **What is done**, once per episode, while the Warden is on:
 
 1. **The safe re-check** for the cause (`unstickActs`): the send tracker's own look (`SendTracker.check`, the look a
-   boot makes) for a hung hand-over or an unattributed draft — the transcript's proof wins, a message held in the
-   pane or the harness's queue or typed into a busy turn is waited for, an unreadable screen settles it
-   unconfirmed, and only a send PROVEN never to have arrived is typed again, under the send lock, its attempt
-   ledgered before any key; the send path's verified finish of an unattributed draft (`finishOwnDraft`, which
-   presses Enter only on text that is exactly a send of ours); and, for every cause, one more look by the deliverer.
+   boot makes) for a hung hand-over, an unreadable screen or an unattributed draft — the transcript's proof wins, a
+   message held in the pane or the harness's queue or typed into a busy turn is waited for, an unreadable screen
+   settles it unconfirmed, and only a send PROVEN never to have arrived is typed again, under the send lock, its
+   attempt ledgered before any key; the send path's verified finish of a draft (`finishOwnDraft`, which presses Enter
+   only on text that is exactly a send of ours, within its own Enter budget) for either kind of draft —
+   `input_stuck` presses for one of ours only at a ferret whose turn has ended, never in a declared wait, so a
+   declared-wait draft whose Enters are spent is left to a person; and, for every cause, one more look by the
+   deliverer.
    A revive the reviver refused is not retried: it is a decision. Nothing is deleted or resent on a guess, and a
    person's draft is never touched. Journal: `fleet.warden_inbox_rechecked` with what each act did.
 2. **Escalation**, when the same episode is still flagged a sweep later: the ferret is named on ONE machine item,
    `warden:inbox-stuck` ([agenda.md](agenda.md#the-machine-agenda)), one line each — who, how many, how long, the
    cause and the send in the way — and leaves it once its queue moves (`fleet.warden_inbox_noticed`,
-   `fleet.warden_inbox_recovered`). No health mark: the ferret is not the faulty party.
-3. **An investigation**, in the same sweep: the flag goes to an assigned warden, never to Jev (it is a fact about the
-   daemon's queue, which a ferret's transcript cannot show). Its prompt has it read the queue, the ledger and the
-   events, read-only, and offers only `LEAVE`, `NEEDS_HUMAN` and `NUDGE` — which here asks the daemon to run the
-   safe re-check once more. Whatever its verdict names, the ferret is never messaged, resumed, restarted or stopped
-   for this flag (`fleet.warden_inbox_rechecked` with `by: investigation`), and a `LEAVE` grants no blessing: the
-   episode's own memory keeps it from being investigated twice, and the usual backoff and cooldown apply.
+   `fleet.warden_inbox_recovered`), or once what waits in it is past the horizon (`fleet.warden_inbox_expired`: no
+   longer tracked, which is not drained). No health mark: the ferret is not the faulty party.
+3. **An investigation**, in the same sweep and ONCE per episode (`investigatedAt`): the flag goes to an assigned
+   warden, never to Jev (it is a fact about the daemon's queue, which a ferret's transcript cannot show). It never
+   displaces the ferret's own investigation: a ferret that is also frozen, say, is investigated for THAT, with the
+   remedies a frozen process needs. Its prompt has it read the queue, the ledger and the events, read-only, and
+   offers only `LEAVE`, `NEEDS_HUMAN` and `NUDGE` — which here asks the daemon to run the safe re-check once more.
+   Whatever its verdict names, the ferret is never messaged, resumed, restarted or stopped for this flag
+   (`fleet.warden_inbox_rechecked` with `by: investigation`), and a `LEAVE` grants no blessing. Its report — a
+   `NEEDS_HUMAN` saying what a person must do included — is on the Warden page; it raises no agenda item of its own,
+   since the ferret is already on `warden:inbox-stuck`.
 
 **On the wire it has its own field**, for `input_stuck`'s reason: the Warden status and run views carry the flags in
 an optional `stuckInbox` list (`WardenStuckInboxFlagSchema`), never in `anomalies`, and `wardenFlags` lists both.
@@ -886,9 +899,9 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
 - **An interactive session is not flagged `input_stuck`.** It is the owner's own terminal; the send path's
   nudges and the queue's clearing still apply to it. Nor `inbox_stuck`, for the same reason.
 - **An app older than `inbox_stuck` may refuse a Warden status that lists an investigation of it.** The flags
-  themselves travel in their own field (`stuckInbox`), but an investigation, its verdict and its agenda item carry
-  the kind in fields an older app parses against a closed list. Reloading the app (the hosted app is always the
-  current one) clears it.
+  themselves travel in their own field (`stuckInbox`), but an investigation and its report's verdict carry the kind
+  in fields an older app parses against a closed list. Reloading the app (the hosted app is always the current one)
+  clears it.
 - **`inbox_stuck` re-checks a hung hand-over; it does not prevent one.** The send-path cause (a declared-wait status
   trusted as idle, and a pre-key throw that skips tracking) is B153's.
 
