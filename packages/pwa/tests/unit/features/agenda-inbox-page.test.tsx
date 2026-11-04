@@ -20,8 +20,8 @@ import {
   fakeInbox,
   InboxHarness,
   inboxCard,
-  openConversation,
 } from '../../support/agenda-inbox.tsx';
+import { openConversation } from '../../support/agenda-folds.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { sessionView } from '../../support/sessions.ts';
