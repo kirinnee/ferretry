@@ -1,3 +1,9 @@
+## [4.271.0](https://github.com/kirinnee/ferretry/compare/v4.270.0...v4.271.0) (2026-11-04)
+
+### Features
+
+* **warden:** flag a stuck inbox and re-check it safely (B148) ([#1445](https://github.com/kirinnee/ferretry/issues/1445)) ([2c92cb1](https://github.com/kirinnee/ferretry/commit/2c92cb135afa93dd855531ad4b16b225a57a032b))
+
 ## [4.270.0](https://github.com/kirinnee/ferretry/compare/v4.269.0...v4.270.0) (2026-11-04)
 
 ### Features
