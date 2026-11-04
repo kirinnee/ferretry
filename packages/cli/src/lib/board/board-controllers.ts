@@ -1,6 +1,7 @@
 import {
   type BoardProject,
   type BoardProjectsResponse,
+  type BoardStatus,
   type BoardTaskActionRequestInput,
   type BoardTaskResponse,
   formatTaskRef,
@@ -13,6 +14,7 @@ import { refuse } from '../tasks/errors';
 import type { ITextFileReader } from '../tasks/ports';
 import type { RelatedCheck } from '../work-search/related';
 import { explainingRefusals } from './board-refusal';
+import { mergeStatus, parseStatusFile, type StatusParts } from './board-status';
 import {
   type BoardVerb,
   renderActed,
@@ -472,8 +474,30 @@ export class BoardController {
   }
 
   async edit(idText: string, options: TaskEditFlags) {
-    const texts = await this.resolveTexts(options);
-    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, texts));
+    const ref = requireCardRef(idText);
+    const texts = { ...(await this.resolveTexts(options)), status: await this.resolveStatus(ref, options) };
+    await this.perform('edit', ref, options, buildEditAction(options, texts));
+  }
+
+  /**
+   * The whole status `--status-file` and `--status-now` / `--status-done` / `--status-next` come to: the file (else the
+   * card's current status, read here because the wire takes no partial one) with each named part replaced. None when
+   * the caller named no status.
+   */
+  private async resolveStatus(ref: TaskRef, options: BoardEditOptions): Promise<BoardStatus | undefined> {
+    const parts: StatusParts = {
+      ...(options.statusNow === undefined ? {} : { now: options.statusNow }),
+      ...(options.statusDone === undefined ? {} : { doneSoFar: options.statusDone }),
+      ...(options.statusNext === undefined ? {} : { next: options.statusNext }),
+    };
+    const path = options.statusFile?.trim();
+    const filed = path === undefined || path === '' ? undefined : path;
+    if (filed === undefined && Object.keys(parts).length === 0) return undefined;
+    const base =
+      filed === undefined
+        ? (await this.gateway.task(ref.id)).task.status
+        : parseStatusFile(await this.deps.files.readText(filed), filed);
+    return mergeStatus(base, parts);
   }
 
   async refile(

@@ -1100,6 +1100,54 @@ describe('the action verbs', () => {
     ]);
   });
 
+  it('should merge --status-now over the card’s current status, so the other parts are kept', async () => {
+    // Arrange
+    const gateway = new FakeGateway();
+    gateway.taskView = card({ id: 'F1', status: { now: 'old', doneSoFar: '- done', next: '1. next' } });
+    const { controller } = harness(gateway);
+
+    // Act
+    await controller.edit('F1', { statusNow: 'new' });
+    await controller.edit('F1', { statusDone: '- a\n- b', statusNext: '' });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'edit', status: { now: 'new', doneSoFar: '- done', next: '1. next' } },
+      { action: 'edit', status: { now: 'old', doneSoFar: '- a\n- b', next: '' } },
+    ]);
+    should(gateway.taskCalls).eql(['F1', 'F1']);
+  });
+
+  it('should start a status from empty parts on a card that has none', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    await controller.edit('F1', { statusNext: '1. CLI' });
+
+    // Assert
+    should(sent(gateway)).eql([{ action: 'edit', status: { now: '', doneSoFar: '', next: '1. CLI' } }]);
+  });
+
+  it('should send the whole status from --status-file without reading the card, and let a flag override a part', async () => {
+    // Arrange
+    const files = new FakeFiles({ '/status.yaml': 'now: from file\ndoneSoFar: |\n  - a\nnext: later\n' });
+    const { controller, gateway } = harness(new FakeGateway(), undefined, files);
+
+    // Act
+    await controller.edit('F1', { statusFile: '/status.yaml' });
+    await controller.edit('F1', { statusFile: '/status.yaml', statusNext: 'sooner' });
+    const bad = await refusal(() => controller.edit('F1', { statusFile: '/status.yaml', statusNow: 3 as never }));
+
+    // Assert
+    should(sent(gateway).slice(0, 2)).eql([
+      { action: 'edit', status: { now: 'from file', doneSoFar: '- a\n', next: 'later' } },
+      { action: 'edit', status: { now: 'from file', doneSoFar: '- a\n', next: 'sooner' } },
+    ]);
+    should(gateway.taskCalls).eql([]);
+    should(bad).be.a.String();
+  });
+
   it('should refile to another project, resolving the lane against that project’s own lanes', async () => {
     // Arrange
     const { controller, gateway } = harness(new FakeGateway(), DENISHA);

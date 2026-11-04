@@ -421,6 +421,15 @@ describe('the action builders', () => {
     should(buildEditAction({ term: [] }, { brief: 'brief only' })).eql({ action: 'edit', brief: 'brief only' });
   });
 
+  it('should edit the status whole, and name the status flags in the nothing-to-edit refusal', () => {
+    // Arrange
+    const status = { now: 'x', doneSoFar: '- y', next: '1. z' };
+
+    // Act + Assert
+    should(buildEditAction({}, { status })).eql({ action: 'edit', status });
+    should(() => buildEditAction({}, {})).throw(/--status-now, --status-done, --status-next, --status-file/u);
+  });
+
   it('should edit How to test alone, and premise and context as bullets or cleared', () => {
     // Act + Assert
     should(buildEditAction({}, { howToTest: ' 1. Open it\n\n\n2FA codes\n4. See it\n' })).eql({
