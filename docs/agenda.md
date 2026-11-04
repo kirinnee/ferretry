@@ -350,22 +350,40 @@ a blocker first) read it. The app's Inbox adopts it with the side-panel Agenda t
 **The Resting list** (`restingQueue`) is every resting or snoozed item, each once: those **waiting on their ferret
 first**, then those it is **working** on, each oldest rest first, then the snoozed ones by when they wake.
 
-### Stage, where we are, and the detail
+### Stage, the tabs, and the detail
 
 - **`stage`** is what the item needs from the owner right now — `explainer`, `question`, `plan`, `tracker`, `test`,
   then `done` — separate from its state (a question can rest; a tracker can need the owner). A ferret sets it with
   `--stage` on `add` and `edit`; without one it is read from the kind (`agendaStageOfKind`: info is an explainer, a
   permission or review a plan, a to-do a test, the rest a question).
   Every stage the item entered is kept, oldest first, in `stages` (at most 64); closing it adds `done`.
-- **`whereWeAre`** (`--where`, point form or Markdown) is a **short status**: where things stand now, what is
-  decided, what is still open — a few points, never the report.
-- **`body`** (`--body-file`, Markdown with fy-render) is the item's **live document**: the report, explainer,
-  plan or status the owner reads, holding the whole current state of everything relevant. The owner's
-  model: _"the chat is the stream of log, the body is the DB, like an event store."_ So:
-  - **The ferret rewrites the body on every change** (`fy agenda edit <id> --body-file <file>`), so it always holds
-    the whole current state; it is what the item's versions keep and what the Changes diff compares first.
-  - **The conversation is only the log.** The ferret answers there briefly and points at the body; it never retypes
-    the body into the conversation.
+- **THE TABS ARE THE ITEM'S LIVE DOCUMENT (&F923).** The owner: _"allow agenda's body to have TABS so they can
+  create things like (overview, status, decisions) etc, like files that need to be updated"_, and _"where we are at
+  now should be a tab -- the main tab. so it doesnt have to be constrained into a limited segment, and can be as
+  expressive too"_. The protocol owns the order (`agendaTabs`); the app, the CLI and the Changes diff read it there:
+  1. **"Where we are now" — the main tab**, always first and open by default; its name is fixed and it is never
+     renamed, moved or removed. It holds, in this order: the ferret's **answer to the owner's question**
+     (`questionAnswer`), **decided so far** (`decided`), **still open** (`stillOpen`), then **`whereWeAre`** — full
+     Markdown with fy-render, as long and as rich as it needs to be (200,000), no longer a short status. A ferret
+     writes it whole with `--where-file <file>` (`-` reads stdin), or as points with `--where` (repeat); both together
+     are refused.
+  2. **"The full picture"** (a review's **"Reasoning"**) — `body` (`--body-file`): the report, explainer or plan.
+     It is unchanged: the gate's How to test, a notice's card and older apps all keep reading `body`. A notice draws
+     it in its ask and a card gate's body is its How to test, so for those it is not a tab.
+  3. **The ferret's own tabs** — `tabs: [{ id, name, body }]`, at most 6 (8 tabs in all): a part that changes on its
+     own (Overview, Decisions, Risks…). `--tab-file "Name=file"` makes or rewrites one; `--rename-tab "Old=New"`,
+     `--move-tab "Name=1"` (1 = first of the ferret's own) and `--remove-tab Name`. All of them, in one `edit`, are
+     **one edit: one version, one revision** (`tabEdits`, at most 16, applied in order). A tab's `id` is its name's
+     slug at creation and stays through renames. A name is 1–32 characters on one line, with no `=`, unique ignoring
+     case, and never a fixed tab's. Their words share 200,000 (`MAX_AGENDA_TABS_LENGTH`).
+  - **A tab with nothing in it is not drawn, and one tab draws no tab row**: an item with only a body reads as before.
+  - `fy agenda show <id> --tab <main|body|name>` prints one tab exactly as written, so a ferret can change it and write
+    it back whole; `show` lists the tabs, `show --json` gives `whereWeAre`, `body` and `tabs` as stored.
+  - The owner's model: _"the chat is the stream of log, the body is the DB, like an event store."_ So:
+  - **The ferret rewrites a tab whole whenever it changes**, so the tabs always hold the whole current state; they
+    are what the item's versions keep and what the Changes diff compares first.
+  - **The conversation is only the log.** The ferret answers there briefly and points at the tabs; it never retypes
+    a tab into the conversation.
   - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, a step-through `html` page, and `card` and
     `board` blocks for status. **Plain Markdown draws no fold** — raw HTML in prose stays inert — so a long part is
     folded inside an fy-render `html` block (`<details><summary>…</summary>…</details>`), whose contents are HTML.
@@ -376,9 +394,9 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
 - **`detail`** (`--detail`) is the context explained from zero, for a reader new to the topic; the app draws it
   folded away.
 
-The app draws them in the item view ([The item view](#the-item-view)): the stage on the head's chip, where we are as
-its own short part, the body as **The full picture** under what the item needs from the owner, the detail folded, and
-every earlier stage in the folded activity log.
+The app draws them in the item view ([The item view](#the-item-view)): the stage on the head's chip, the tabs under
+what the item needs from the owner (the main tab open), the detail folded, and every earlier stage in the folded
+activity log.
 
 ### Editable asks
 
@@ -424,8 +442,9 @@ ask_changed`, the new question stays open). A close that names no version — th
 ### No size limit
 
 There is no size limit a reader meets: **an item may weigh up to a transport bound of 1,000,000 characters of
-JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound under it — the body, where we are,
-the detail and an answer to the owner's question 200,000; the context and every reply or answer of the owner's
+JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound under it — the body, the main tab
+(`whereWeAre`), the detail and an answer to the owner's question 200,000; the ferret's own tabs 200,000 together
+(6 at most, a name 32); the context and every reply or answer of the owner's
 64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history,
 and the app cuts nothing either — a long report, every reply and every line an edit changed are drawn whole.
 The wire history (20 entries) and the revisions (10) stay bounded: the full conversation and every version live in
@@ -1172,7 +1191,7 @@ or bold the answer first. Lists, tables, headings and fenced code are not counte
 
 **A bunch of bugs or asks heard at once is not a pile of new items.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret adds each to the agenda it belongs with, by the three-part test ([One channel per topic](#one-channel-per-topic)), and opens a new one only for what fits none. The prompt says it in one line — "Bug batch: ONE agenda, line each + where tracked." — a line per bug and where each is tracked. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule follows from the test the Agenda-mode instruction teaches (`AGENDA_INSTRUCTION`).
 
-**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000). One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to the current state and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections. The body is the live document of the current state, not an archive: what no longer bears on the item moves behind a link. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
+**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000); the ferret's own tabs (&F923) at most `MAX_AGENDA_TABS_LENGTH` (200,000) together, refused "the tabs together" the same way. One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to the current state and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections. The body is the live document of the current state, not an archive: what no longer bears on the item moves behind a link. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
 
 **A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
 as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from
@@ -1225,8 +1244,8 @@ go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message
 ## The item view
 
 **One item view everywhere** — the chat and the Inbox draw the same component (`AgendaItemView`). It
-reads top to bottom in nine parts: the four that say what the item is and what it needs from the owner come first,
-then the body — its live document ([Stage, where we are, and the detail](#stage-where-we-are-and-the-detail)) — and
+reads top to bottom in eight parts: the four that say what the item is and what it needs from the owner come first,
+then the tabs — its live document ([Stage, the tabs, and the detail](#stage-the-tabs-and-the-detail)) — and
 the log, the conversation and the activity, at the bottom. The order is `ITEM_VIEW_PARTS` in
 `packages/pwa/src/lib/agenda-item-sections.ts`,
 and a part the item does not carry is not drawn:
@@ -1237,11 +1256,10 @@ and a part the item does not carry is not drawn:
 | 2   | Premise and context                 | the two tinted blocks; long is fine                                                                                                                                                                                                                                                                                                                                                           |
 | 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                                                                                                    |
 | 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none — **folded**                                                                                                                                                                   |
-| 5   | Where we are now                    | `whereWeAre` — a **short status**: where things stand — then the ferret's answer to their question, what is decided and what is still open                                                                                                                                                                                                                                                    |
-| 6   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
-| 7   | The full picture                    | `body`: the item's **live document** — the report, explainer, plan or status, rewritten on every change — drawn open and whole; a review's is its Reasoning (Markdown with fy-render)                                                                                                                                                                                                         |
-| 8   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom — **folded**                                                                                                                                                                                                                                                                              |
-| 9   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                                                                                                |
+| 5   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
+| 6   | The live document (tabs)            | **Where we are now** first and open (the answer to the owner's question, decided so far, still open, then `whereWeAre`), **The full picture** (`body`; a review's Reasoning), then the ferret's own tabs — each drawn open and whole, Markdown with fy-render                                                                                                                                 |
+| 7   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom — **folded**                                                                                                                                                                                                                                                                              |
+| 8   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                                                                                                |
 
 - **The head says what it is, whole.** The description (`data-agenda-description`) is drawn on the card under the
   title, never behind ⓘ, so ⓘ holds only a host's quiet tools (the Inbox's Skip). A gate item from before card asks,
@@ -1262,9 +1280,19 @@ and a part the item does not carry is not drawn:
   that does something closes it, and Esc never closes the item under it. Only what the item has is offered, and an item
   with nothing to put there draws no ⋯. The two chips sit small on the line under the title, and an earlier version on
   screen adds a third, **Showing v2**.
+- **The tabs (&F923).** With more than one tab: wider than a phone, a real ARIA tablist that **wraps onto a second
+  line** rather than scroll or cut a name (arrows, Home and End move); on a phone (under 768px), ONE switcher button is
+  the part's heading — "Where we are now ▾ · 1 of 4 · 2 changed" — opening the app's bottom sheet with the tabs as a
+  radio list, never a horizontal strip. Only the open tab is in the page. A tab the item's last edit changed carries a
+  dot and the word "Changed" (never colour alone). Each tab ends with **Next: … ›**, so a reader at its bottom never
+  scrolls back up to switch. When the ferret answered the owner's question, part 5 says **Answered: see Where we are
+  now**, which opens the main tab and brings it into view, so the answer is never missed. One tab draws no tab row: the
+  part is drawn under that tab's name.
 - **Folded parts remember.** The detailed context, the terms and references, the conversation and the activity log
   start closed, each saying how much it holds ("2 entries", "4 messages"); opening one is remembered per
   item on that device (browser storage, read and written defensively — a private window simply starts closed again).
+  So is the open tab (`fy.agenda.tab.v1:<item>`): the main tab is the default, and a remembered tab the item no
+  longer has falls back to it.
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
   edit changed are drawn whole, once opened. The title is ONE line in the head: a marquee when it is too long, and
   where motion is reduced it ends at a whole word with "…" and a tap shows all of it (`MarqueeTitle`), so the whole
@@ -1331,10 +1359,13 @@ and a part the item does not carry is not drawn:
   unchanged stretch inside a changed section is cut to the three lines beside each change with one line saying
   "… 240 unchanged lines …". Additions are underlined, removals struck through, with a
   status word (New, Changed, Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. The
-  sections compared are, first, the body — the live document, the thing that is versioned — then the title, the type, the question, the premise, the context, the detail, the terms, the
-  references, where we are now, what is decided and still open, the ask, a multi-decision ask's questions, each
+  sections compared are, first, the tabs — the live document, the thing that is versioned — in tab order: where we
+  are now, the answer to the owner's question, what is decided and still open, the full picture, then each of the
+  ferret's own tabs matched **by id** (a rename reads "Open risks (was Risks)", a new tab New, a removed one Removed)
+  and a one-line **Tab order** when the tabs both versions have moved; then the title, the type, the question, the
+  premise, the context, the detail, the terms, the references, the ask, a multi-decision ask's questions, each
   option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards,
-  the answer to a question, why it matters and how to resolve it, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing
+  why it matters and how to resolve it, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing
   changed". Sections that did not change fold
   under one line. Opening an item writes the seen mark (`PUT …/seen`) for its newest version, after the baseline is
   read, so "since you last looked" is the previous visit. A machine without the version routes shows no control.
@@ -1723,7 +1754,7 @@ source module does not exist yet), and fails the checklist once it does.
 | 4   | Any reply or answer from you moves the item to Resting ("waiting on <ferret>") and out of Needs you. The ferret's answer on it brings it back to Needs you automatically, in its old spot. About 30 minutes of ferret silence gets a Warden nudge. Needs you never lists an agenda twice, and puts blockers first. | `DoD 4` (reply and owner answer rest it; the ferret's answer returns it ahead of a newer item; one nudge at 31 minutes, none at 29); `DoD 3` (unique queue, blockers first)                                                                                   |
 | 5   | Snooze keeps an item Resting until the time you picked, unless a blocker wakes it.                                                                                                                                                                                                                                 | `DoD 5`                                                                                                                                                                                                                                                       |
 | 6   | A card that's ready shows its test steps and Done / Not good inside its agenda, never as a separate item.                                                                                                                                                                                                          | `DoD 6`, and the board's gate path in `packages/daemon/tests/unit/board/card-asks.test.ts` (the ask rides the open agenda, or opens ONE named after the card); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                         |
-| 7   | An explainer or report you ask for appears in that agenda's body ("The full picture"), under a short "where we are now". (It was "where we are now" until the owner made the body the live document, !A332.)                                                                                                       | `DoD 7` (`fy agenda edit --where` and `--body-file`, a second `--body-file` replacing the body whole); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                 |
+| 7   | An explainer or report you ask for appears in that agenda's tabs, the main tab ("Where we are now") first and "The full picture" beside it (&F923). (It was "where we are now" until the owner made the body the live document, !A332.)                                                                            | `DoD 7` (`fy agenda edit --where` and `--body-file`, a second `--body-file` replacing the body whole); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                 |
 | 8   | A long report fits with no cut-off. Every reply shows in the conversation, in order.                                                                                                                                                                                                                               | `DoD 8`: a 200k report through `fy agenda edit --body-file` read back whole; replies and the ferret's answers in their full interleaved order; the page: `agenda-conversation.test.ts` (PR 8); a long report is the body (see below)                          |
 | 9   | The activity log is folded. Diff mode shows what changed between any two versions you pick.                                                                                                                                                                                                                        | `DoD 9` (the versions list and any two can be fetched); the folds: `agenda-item-sections.test.ts` and `features/agenda-item-parts.test.tsx` (PR 7); the diff: `features/agenda-version-diff.test.tsx` (PR 8)                                                  |
 | 10  | Merging two agendas keeps both conversations and all their cards.                                                                                                                                                                                                                                                  | `DoD 10` (`fy agenda merge`); the button: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                                     |
@@ -1734,10 +1765,10 @@ source module does not exist yet), and fails the checklist once it does.
 | 15  | When part of an agenda no longer passes the test, the ferret splits it into a new linked agenda.                                                                                                                                                                                                                   | `DoD 15` (`fy agenda split --move-cards`); the page: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                          |
 | 16  | A main-chat exchange about an agenda shows in that agenda's conversation, with your words verbatim and tagged "from chat", plus the ferret's reply. The chat reply links to the agenda, and the exchange moves the state as a reply would (it rests, and comes back on the ferret's answer).                       | `DoD 16` (`fy agenda log --reply` and `--rest`: verbatim, tagged, the same message never logged twice, the item rests and comes back ahead of a newer one). **GAP:** the chat reply links to the agenda — taught only (`link` in the Agenda-mode instruction) |
 
-**A long report reaches the item through `edit`.** "Where we are now" is a short status on the command line
-(`--where`), and the report is the body, which `fy agenda edit --body-file` rewrites whole at up to 200,000
-characters (item 8), so the GAP that a long report could not reach "where we are" through `edit` is closed by the
-model rather than by a file input for `--where`.
+**A long report reaches the item through `edit`.** The main tab, "Where we are now", is written whole from a file
+(`fy agenda edit --where-file`, up to 200,000 characters), the report is "The full picture" (`--body-file`, item 8),
+and a part that changes on its own is a tab of the ferret's own (`--tab-file "Name=file"`); every one is read back
+whole with `fy agenda show <id> --tab <name>`, and one edit of any of them is one version (&F923).
 
 The teaching that makes a ferret follow these rules is held to the spec by
 `packages/cli/tests/unit/agenda/teaching-spec.test.ts`.
@@ -1756,7 +1787,9 @@ A daemon that rests items on an answer and takes the channel's requests reports 
 before reads every item. The request fields are refused as malformed by a daemon without their feature, so the CLI
 checks it first and says the daemon needs an update: `stage`, `whereWeAre`, `detail` and the `rest` action need
 `agenda.channel.1`; an edit's `ask`/`kind`/`answers`, `clear: ['questionAnswer']` and an answer's `askVersion` need
-`agenda.asks.1`; so does a Done or Skip's `askVersion`; a link's `meaning` needs `agenda.link-meaning.1`. An older app that sends no `askVersion` is refused only for an
+`agenda.asks.1`; so does a Done or Skip's `askVersion`; a link's `meaning` needs `agenda.link-meaning.1`; an item's
+`tabs` and an edit's `tabEdits` need `agenda.tabs.1` (`--where-file` only writes `whereWeAre`, so it needs nothing more
+than the channel). An older app that sends no `askVersion` is refused only for an
 answer to a replaced ask (see
 [Editable asks](#editable-asks)). `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
@@ -1775,11 +1808,25 @@ history entry is a key it refuses. A daemon therefore serves the items in two sh
 - **Without it** — the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
   every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
   `stages`, `whereWeAre`, `detail`), a link's `meaning` (`links[].meaning`, also in a revision's `previous`) and the `response` of a history entry left out, and a revision that only changed a
-  field the older app does not know dropped. The projection is a view: it is never written back, so nothing is lost on
+  field the older app does not know dropped. The ferret's own `tabs` are left out too, a revision that only changed
+  them dropped, and one line is added under the body naming the tabs it cannot draw: "_This item has more tabs
+  (Where we are now, Status): update the app to read them._" The projection is a view: it is never written back, so nothing is lost on
   the machine. It covers the board, Send now, the roll-up of every conversation and the machine agenda, including
   `questionAnswer`, revision `previous` values and nested undelivered responses and notes. If an older app retries
   the exact clipped reply it received, the ledger transition restores the stored full reply before applying it;
   a legacy view never replaces the owner's words with a shortened answer.
+
+### Tabs (`agenda.tabs.1`)
+
+A daemon that stores an item's own tabs and applies an edit's tab operations reports `agenda.tabs.1`; the CLI checks
+it before sending `tabs` or `tabEdits` and says the daemon needs an update. An item without `tabs` has the fixed tabs
+only, so the ledger is unchanged (no migration).
+
+- **GAP (downgrade):** a daemon rolled back to before the tabs drops `tabs` on its next write of that item; the
+  version store still holds them, so Changes can show them, but they are not restored on the way up.
+- **GAP (cached app):** an app cached from before the tabs parses a revision that changed `tabs` with its strict
+  revision schema and cannot read it until it reloads (the projection covers only callers without the channel
+  header).
 
 ### The conversation (`agenda.conversation.1`)
 

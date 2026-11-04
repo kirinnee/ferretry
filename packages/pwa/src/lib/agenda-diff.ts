@@ -482,10 +482,16 @@ export const foldUnchanged = (runs: readonly WordRun[]): readonly (WordRun | Fol
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * The sections compared: the body first — it is the item's live document, the thing that is versioned — then the rest
- * in the order the item view reads them.
+ * The sections compared: THE TABS first, in tab order — they are the item's live document, the thing that is versioned
+ * (&F923): "Where we are now" with the answer to the owner's question, decided so far and still open right after it,
+ * then "The full picture", then each of the ferret's own tabs (`ownTabDiffs`, matched by id) and the tab order — then
+ * the rest in the order the item view reads them.
  */
 const DIFF_SECTIONS = [
+  { key: 'whereWeAre', label: 'Where we are now' },
+  { key: 'questionAnswer', label: 'Answer to your question' },
+  { key: 'decided', label: 'Decided so far' },
+  { key: 'stillOpen', label: 'Still open' },
   { key: 'body', label: 'The full picture' },
   { key: 'title', label: 'Title' },
   { key: 'stage', label: 'Type' },
@@ -495,9 +501,6 @@ const DIFF_SECTIONS = [
   { key: 'detail', label: 'Detailed context' },
   { key: 'terms', label: 'Terms' },
   { key: 'links', label: 'References' },
-  { key: 'whereWeAre', label: 'Where we are now' },
-  { key: 'decided', label: 'Decided so far' },
-  { key: 'stillOpen', label: 'Still open' },
   { key: 'ask', label: 'What I need from you' },
   { key: 'questions', label: 'Questions' },
   { key: 'optionDetails', label: 'About each option' },
@@ -507,11 +510,12 @@ const DIFF_SECTIONS = [
   { key: 'urgency', label: 'Urgency' },
   { key: 'steps', label: 'Steps' },
   { key: 'cards', label: 'Cards' },
-  { key: 'questionAnswer', label: 'Answer to your question' },
   { key: 'why', label: 'Why it matters' },
   { key: 'howToResolve', label: 'How to resolve' },
 ] as const;
 export type DiffSectionKey = (typeof DIFF_SECTIONS)[number]['key'];
+/** How many of the sections are the fixed tabs' (`whereWeAre` … `body`): the ferret's own tabs go right after them. */
+const FIXED_TAB_SECTIONS = 5;
 
 const KIND_WORDS: Readonly<Record<string, string>> = {
   permission: 'Allow or deny',
@@ -636,7 +640,8 @@ type SectionStatus = 'unchanged' | 'added' | 'removed' | 'changed';
 
 /** One section compared: its words, and how many words were added and removed. */
 export interface SectionDiff {
-  readonly key: DiffSectionKey;
+  /** A fixed section, one of the ferret's own tabs (`tab:<id>`), or the order of those tabs. */
+  readonly key: DiffSectionKey | `tab:${string}` | 'tabOrder';
   readonly label: string;
   readonly status: SectionStatus;
   readonly runs: readonly WordRun[];
@@ -647,17 +652,83 @@ export interface SectionDiff {
 const countOf = (runs: readonly WordRun[], kind: WordRun['kind']): number =>
   runs.filter(run => run.kind === kind).reduce((sum, run) => sum + wordCount(run.text), 0);
 
-/** Every section of `to` against `from`, the body first, then in reading order; sections neither version has are left out. */
-export const diffItems = (from: AgendaItem, to: AgendaItem): readonly SectionDiff[] =>
-  DIFF_SECTIONS.flatMap(({ key, label }): SectionDiff[] => {
-    const before = sectionText(from, key);
-    const after = sectionText(to, key);
-    if (before === '' && after === '') return [];
-    const runs = diffText(before, after);
-    const status: SectionStatus =
-      before === after ? 'unchanged' : before === '' ? 'added' : after === '' ? 'removed' : 'changed';
-    return [{ key, label, status, runs, addedWords: countOf(runs, 'added'), removedWords: countOf(runs, 'removed') }];
-  });
+/** One section's two texts compared; nothing when neither version has it. A rename alone still counts as a change. */
+const compared = (
+  key: SectionDiff['key'],
+  label: string,
+  before: string,
+  after: string,
+  renamed = false,
+): SectionDiff[] => {
+  if (before === '' && after === '') return [];
+  const runs = diffText(before, after);
+  const status: SectionStatus =
+    before === after
+      ? renamed
+        ? 'changed'
+        : 'unchanged'
+      : before === ''
+        ? 'added'
+        : after === ''
+          ? 'removed'
+          : 'changed';
+  return [{ key, label, status, runs, addedWords: countOf(runs, 'added'), removedWords: countOf(runs, 'removed') }];
+};
+
+/**
+ * The ferret's own tabs compared, matched BY ID so a rename reads "Open risks (was Risks)" rather than a removal and a
+ * new tab: the newer version's tabs in its order, then the ones it removed; and a "Tab order" line when the tabs both
+ * versions have moved.
+ */
+const ownTabDiffs = (from: AgendaItem, to: AgendaItem): readonly SectionDiff[] => {
+  const before = from.tabs ?? [];
+  const after = to.tabs ?? [];
+  const was = new Map(before.map(tab => [tab.id, tab]));
+  const kept = new Set(after.map(tab => tab.id));
+  const sections = [
+    ...after.flatMap(tab => {
+      const old = was.get(tab.id);
+      const renamed = old !== undefined && old.name !== tab.name;
+      return compared(
+        `tab:${tab.id}`,
+        renamed ? `${tab.name} (was ${old.name})` : tab.name,
+        old?.body ?? '',
+        tab.body,
+        renamed,
+      );
+    }),
+    ...before.filter(tab => !kept.has(tab.id)).flatMap(tab => compared(`tab:${tab.id}`, tab.name, tab.body, '')),
+  ];
+  const shared = (tabs: typeof before): string =>
+    tabs
+      .filter(tab => was.has(tab.id) && kept.has(tab.id))
+      .map(tab => tab.id)
+      .join(' ');
+  if (shared(before) === shared(after)) return sections;
+  return [
+    ...sections,
+    ...compared(
+      'tabOrder',
+      'Tab order',
+      before.map(tab => tab.name).join(' · '),
+      after.map(tab => tab.name).join(' · '),
+    ),
+  ];
+};
+
+/**
+ * Every section of `to` against `from`: the tabs first, in tab order, then the rest in reading order; sections neither
+ * version has are left out.
+ */
+export const diffItems = (from: AgendaItem, to: AgendaItem): readonly SectionDiff[] => {
+  const fixed = ({ key, label }: (typeof DIFF_SECTIONS)[number]): SectionDiff[] =>
+    compared(key, label, sectionText(from, key), sectionText(to, key));
+  return [
+    ...DIFF_SECTIONS.slice(0, FIXED_TAB_SECTIONS).flatMap(fixed),
+    ...ownTabDiffs(from, to),
+    ...DIFF_SECTIONS.slice(FIXED_TAB_SECTIONS).flatMap(fixed),
+  ];
+};
 
 /** The sections that changed: what the view opens; every other section folds under "N unchanged". */
 export const changedSections = (diff: readonly SectionDiff[]): readonly SectionDiff[] =>

@@ -1,5 +1,5 @@
 /**
- * WHAT AN ITEM IS AT, AND SINCE WHEN IT NEEDS THE OWNER (docs/agenda.md § Stage, where we are, and the detail): read
+ * WHAT AN ITEM IS AT, AND SINCE WHEN IT NEEDS THE OWNER (docs/agenda.md § Stage, the tabs, and the detail): read
  * from the fields an item carries, so an item from before stages reads too. Pure and total.
  */
 import type { AgendaAsk, AgendaKind } from './agenda.ts';

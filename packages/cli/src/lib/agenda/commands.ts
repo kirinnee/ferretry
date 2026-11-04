@@ -24,7 +24,7 @@ const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
 /**
- * The body rule (docs/agenda.md § Stage, where we are, and the detail; the owner: "the chat is the stream of log, the
+ * The body rule (docs/agenda.md § Stage, the tabs, and the detail; the owner: "the chat is the stream of log, the
  * body is the DB, like an event store"): `fy agenda --help`, `add --help` and `edit --help` all say it, in the words
  * the Agenda-mode prompt (`AGENDA_INSTRUCTION`) says in short.
  */
