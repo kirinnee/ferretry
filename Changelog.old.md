@@ -1,3 +1,13 @@
+## [4.273.0](https://github.com/kirinnee/ferretry/compare/v4.272.0...v4.273.0) (2026-11-04)
+
+### Features
+
+* **agenda:** every form field and question is optional; one Send sends any subset (F922) ([#1450](https://github.com/kirinnee/ferretry/issues/1450)) ([4a26ebe](https://github.com/kirinnee/ferretry/commit/4a26ebecb1e7f46bd34b70fa0ab420ffb2009c9f))
+
+### Fixes
+
+* **pwa:** offer a plain "yes" reply as the card ask's answer (B155) ([#1453](https://github.com/kirinnee/ferretry/issues/1453)) ([e6ce6ee](https://github.com/kirinnee/ferretry/commit/e6ce6eedb8c751abecbd4c1f88f3a1ca7c7f8a2e))
+
 ## [4.272.0](https://github.com/kirinnee/ferretry/compare/v4.271.2...v4.272.0) (2026-11-04)
 
 ### Features

@@ -1,3 +1,11 @@
+## [4.274.0](https://github.com/kirinnee/ferretry/compare/v4.273.0...v4.274.0) (2026-11-04)
+
+### Features
+
+* **agenda:** the item's live document as tabs, the main tab first (F923) ([#1452](https://github.com/kirinnee/ferretry/issues/1452)) ([eed8f52](https://github.com/kirinnee/ferretry/commit/eed8f52c32c9da6487d7256b17a71e0dab91b2bb))
+* **pwa:** compact agenda item head — one-line title, one ⋯ menu, folded terms and conversation (F920) ([#1448](https://github.com/kirinnee/ferretry/issues/1448)) ([75b15a7](https://github.com/kirinnee/ferretry/commit/75b15a7b29c91ecae80d7f589cde089726327a11))
+* **pwa:** draw an agenda item's conversation with the chat's own rows and ticks (F921) ([#1449](https://github.com/kirinnee/ferretry/issues/1449)) ([3184d11](https://github.com/kirinnee/ferretry/commit/3184d11501787a4bb4cfe10314d5589c181b2566))
+
 ## [4.273.0](https://github.com/kirinnee/ferretry/compare/v4.272.0...v4.273.0) (2026-11-04)
 
 ### Features
