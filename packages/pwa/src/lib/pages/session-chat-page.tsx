@@ -112,11 +112,11 @@ import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
+import { useFormComposer } from '../agenda-form-send.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
-import { useFormComposer } from '../agenda-form-send.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { ChatTasksView } from '../board-chat-url.ts';
 import type { DaemonBoardStore } from '../board-store.ts';
@@ -142,6 +142,7 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
+import { hideWaiting } from '../waiting-fold.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
@@ -599,6 +600,8 @@ export function SessionChatPage({
   }, []);
   const openAgendaReference = useCallback((id: AgendaId): void => showAgenda(id), [showAgenda]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
+  // A message still waiting to go into the ferret is on the Queue page, not in the chat (waiting-fold.ts).
+  const shownEntries = useMemo(() => hideWaiting(entries), [entries]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
   const readDictationConversation = useCallback(() => conversationFromTranscript(entriesRef.current), []);
@@ -1642,7 +1645,7 @@ export function SessionChatPage({
               agentName={agentName}
               busy={busy}
               daemonId={connection.daemonId}
-              entries={entries}
+              entries={shownEntries}
               liveInRow={agenda.hostsLive}
               jumpHost={agenda.jumpHost}
               {...(onRetry === undefined ? {} : { onRetry })}

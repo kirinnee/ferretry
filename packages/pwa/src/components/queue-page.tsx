@@ -6,13 +6,18 @@
 
 import type { QueuedMessage } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
+import { clockOfInstant } from '../lib/message-clock.ts';
+import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   ferretRows,
+  groupNextSend,
   isWaitingRow,
   type QueueGroup,
   type QueueRow,
+  type RowSend,
+  rowSend,
+  TURN_ENDS_COPY,
   waitingCountLine,
   waitingGroups,
 } from '../lib/queue-view.ts';
@@ -47,7 +52,23 @@ export interface QueueRowHandlers {
   readonly cancel: (row: QueueRow) => Promise<void>;
 }
 
-function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly handlers: QueueRowHandlers }) {
+/** "sends by 11:20" / "when its turn ends", on the reader's clock. */
+const sendCopy = (send: RowSend, lead: string): string => {
+  if ('turn' in send) return TURN_ENDS_COPY;
+  const clock = clockOfInstant(send.at);
+  return clock === undefined ? TURN_ENDS_COPY : `${lead} ${clock.short}`;
+};
+
+function QueueRowView({
+  row,
+  handlers,
+  now,
+}: {
+  readonly row: QueueRow;
+  readonly handlers: QueueRowHandlers;
+  readonly now: number;
+}) {
+  const send = rowSend(row, now);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(row.text);
   const [note, setNote] = useState<string | null>(null);
@@ -71,6 +92,9 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
           </span>
         )}
         <span>{row.why}</span>
+        {send === undefined ? null : (
+          <span data-queue-send={'turn' in send ? 'turn' : send.at}>{sendCopy(send, 'sends by')}</span>
+        )}
       </div>
       {editing ? (
         <div className="flex flex-col gap-2">
@@ -136,6 +160,17 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
   );
 }
 
+/** The earliest next send of one ferret, beside its name. */
+function GroupNextSend({ group, now }: { readonly group: QueueGroup; readonly now: number }) {
+  const next = groupNextSend(group, now);
+  if (next === undefined) return null;
+  return (
+    <span className="text-meta text-muted" data-queue-next={'turn' in next ? 'turn' : next.at}>
+      {sendCopy(next, 'next send')}
+    </span>
+  );
+}
+
 export interface QueuePageViewProps {
   readonly title: string;
   readonly groups: readonly QueueGroup[];
@@ -145,6 +180,8 @@ export interface QueuePageViewProps {
   readonly onOpenFerret: (group: QueueGroup) => void;
   readonly onShowAll?: () => void;
   readonly loading: boolean;
+  /** The reader's clock for the send times; a test or a screenshot fixes it. */
+  readonly now?: number;
 }
 
 export function QueuePageView({
@@ -155,6 +192,7 @@ export function QueuePageView({
   onOpenFerret,
   onShowAll,
   loading,
+  now = Date.now(),
 }: QueuePageViewProps) {
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
   return (
@@ -185,10 +223,11 @@ export function QueuePageView({
               {group.ferret}
             </button>
             {showMachine ? <span className="text-meta text-muted">{group.machine}</span> : null}
+            <GroupNextSend group={group} now={now} />
           </h2>
           <ul className="m-0 list-none divide-y divide-border-soft p-0">
             {group.rows.map(row => (
-              <QueueRowView handlers={handlers} key={row.id} row={row} />
+              <QueueRowView handlers={handlers} key={row.id} now={now} row={row} />
             ))}
           </ul>
         </section>

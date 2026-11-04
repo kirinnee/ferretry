@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '@ferretry/protocol';
 import {
   ferretRows,
+  groupNextSend,
   isWaitingRow,
   orderedRows,
   outboxRowOf,
+  type QueueGroup,
   queueRowOf,
+  rowSend,
   waitingCountLine,
   waitingGroups,
 } from '../../src/lib/queue-view.ts';
@@ -132,5 +135,44 @@ describe('waiting', () => {
       '1 message is waiting',
       '3 messages are waiting',
     ]);
+  });
+});
+
+describe('when a queued message goes', () => {
+  const NOW = Date.parse('2026-11-04T11:00:00.000Z');
+  const row = (extra: Partial<QueuedMessage> = {}) => queueRowOf('d1', 's1', 'Casen', message(extra));
+
+  test('a hold still running says when it ends', () => {
+    expect(rowSend(row({ holdUntil: '2026-11-04T11:20:00.000Z' }), NOW)).toEqual({ at: '2026-11-04T11:20:00.000Z' });
+  });
+
+  test('no hold, or one that has run out, waits for the turn to end — unless something else is in the way', () => {
+    expect(rowSend(row(), NOW)).toEqual({ turn: true });
+    expect(rowSend(row({ waitReason: 'busy' as never }), NOW)).toEqual({ turn: true });
+    expect(rowSend(row({ holdUntil: '2026-11-04T10:59:00.000Z' }), NOW)).toEqual({ turn: true });
+    expect(rowSend(row({ waitReason: 'stopped' as never }), NOW)).toBeUndefined();
+  });
+
+  test('only a queued message has a send time', () => {
+    expect(rowSend(row({ state: 'read' }), NOW)).toBeUndefined();
+    expect(rowSend(outboxRowOf('Casen', entry()), NOW)).toBeUndefined();
+  });
+
+  test('a ferret’s next send is its earliest hold, else its turn’s end', () => {
+    const at = (hold: string) => row({ id: hold, holdUntil: hold });
+    const group = (rows: ReturnType<typeof row>[]): QueueGroup => ({
+      key: 'k',
+      daemonId: 'd1',
+      machine: 'M',
+      sessionId: 's1',
+      ferret: 'Casen',
+      rows,
+    });
+    expect(
+      groupNextSend(group([at('2026-11-04T11:30:00.000Z'), at('2026-11-04T11:20:00.000Z'), row({ id: 'plain' })]), NOW),
+    ).toEqual({ at: '2026-11-04T11:20:00.000Z' });
+    expect(groupNextSend(group([row({ id: 'plain' })]), NOW)).toEqual({ turn: true });
+    expect(groupNextSend(group([row({ waitReason: 'stopped' as never })]), NOW)).toBeUndefined();
+    expect(groupNextSend(group([]), NOW)).toBeUndefined();
   });
 });
