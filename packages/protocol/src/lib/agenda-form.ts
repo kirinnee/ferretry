@@ -53,7 +53,7 @@ export const formWords = (
  * Everything wrong with answers to a form, each in plain words — empty when they fit: an answer to no field, a
  * field answered twice, a value that is not one of the field's options, or several values for a pick-one. A field
  * left empty is NOT a problem: every field is optional to the owner (&F922); a form answered with only words is sent
- * as an `other` answer instead.
+ * as a plain reply to its ask (`open-question`) instead.
  */
 export const formAnswerProblems = (
   fields: readonly AgendaFormField[],

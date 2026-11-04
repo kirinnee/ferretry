@@ -287,7 +287,8 @@ export const AgendaResponseSchema = z
     }),
     /**
      * A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). Any subset, at least one:
-     * a form answered with only words is an `other` answer, the shape every app already reads (&F922).
+     * a form answered with only words is an `open-question` answer to its ask, the shape every app already reads
+     * (&F922).
      */
     z.strictObject({
       kind: z.literal('form'),

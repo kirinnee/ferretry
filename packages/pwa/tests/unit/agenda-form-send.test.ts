@@ -85,7 +85,7 @@ describe('planning the one Send of a form', () => {
     const plan = planFormSend({ fields: FIELDS.slice(0, 3) }, {}, ' none of these fit ');
     expect(plan).toEqual({
       kind: 'send',
-      action: { kind: 'respond', label: 'Form', response: { kind: 'other', answer: 'none of these fit' } },
+      action: { kind: 'respond', label: 'Form', response: { kind: 'open-question', answer: 'none of these fit' } },
     });
   });
 

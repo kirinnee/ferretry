@@ -1397,8 +1397,8 @@ the whole list.
   picked is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
 - **Every field is optional (&F922).** The owner may answer any subset: Send goes through at once, nothing is asked
   about first, and what was skipped reads `(skipped)` in the one numbered answer the ferret receives. Words with nothing
-  picked still go, as the owner's own words (`{ kind: "other" }`, "Other answer (none of the options): …"), so a
-  form answer always names at least one field and every older app and daemon still reads it. Only nothing picked
+  picked still go, as a plain reply to the form's ask (`{ kind: "open-question" }`), so a form answer
+  always names at least one field and every older app and daemon still reads it. Only nothing picked
   and nothing typed is not sent. A field's `required` (and the CLI's trailing `optional` segment) is still accepted so
   older raises parse, and changes nothing the app enforces or shows. A recommended pick can be taken back: tap the
   picked Yes/No half again, or **Clear** on a pick-one field.
