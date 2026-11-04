@@ -1,3 +1,9 @@
+## [4.275.0](https://github.com/kirinnee/ferretry/compare/v4.274.0...v4.275.0) (2026-11-04)
+
+### Features
+
+* **agenda:** a horizontal tab row on a phone, and tabs split by content type (F946) ([#1454](https://github.com/kirinnee/ferretry/issues/1454)) ([4433463](https://github.com/kirinnee/ferretry/commit/443346374c4e49dc0b9367a4dfc6f46b4c9fc486))
+
 ## [4.274.0](https://github.com/kirinnee/ferretry/compare/v4.273.0...v4.274.0) (2026-11-04)
 
 ### Features
