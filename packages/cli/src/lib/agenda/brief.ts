@@ -33,7 +33,7 @@ import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 export interface BriefFlags extends AskFlags {
   /** `--stage`: what the item needs from the owner now (explainer, question, plan, tracker, test). */
   readonly stage?: string;
-  /** `--where`, repeated: the short status, where things stand now, one point each (the full report is the body). */
+  /** `--where`, repeated: the main tab, "Where we are now", as points, one each (`--where-file` gives it whole). */
   readonly where?: string | readonly string[];
   /** `--detail`: the context explained from zero, as Markdown (drawn folded away). */
   readonly detail?: string;

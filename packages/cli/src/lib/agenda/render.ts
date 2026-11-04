@@ -8,6 +8,7 @@ import {
   agendaInDiscussion,
   agendaShape,
   agendaStage,
+  agendaTabs,
   agendaState,
   agendaTurn,
   agendaWakeAt,
@@ -240,6 +241,12 @@ function instructionLines(item: AgendaItem): string[] {
     });
   }
   if (item.body !== undefined) lines.push(`${INDENT}body: ${compact(item.body)}`);
+  for (const tab of item.tabs ?? []) lines.push(`${INDENT}tab ${tab.name}: ${compact(tab.body)}`);
+  const tabs = agendaTabs(item);
+  if (tabs.length > 1)
+    lines.push(
+      `${INDENT}tabs: ${tabs.map(tab => tab.name).join(' · ')} (one in full: agenda show ${agendaReference(item.id)} --tab <name>)`,
+    );
   return lines;
 }
 

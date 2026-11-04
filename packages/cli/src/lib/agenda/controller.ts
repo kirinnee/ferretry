@@ -44,6 +44,7 @@ import {
   renderRepliesSent,
   wasWithdrawn,
 } from './render.ts';
+import { newItemTabs, ownTabFlags, type TabFlags, tabFieldsOf, tabText } from './tab-flags.ts';
 import { twoDecisionsWarning } from './two-decisions.ts';
 import { parseNeededBy } from './when.ts';
 
@@ -84,7 +85,12 @@ export interface AgendaCommandOptions {
 }
 
 /** Flags that describe a new agenda item, and where its JSON body is read from. */
-export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags, 'neededBy' | 'task'>, CardFlag {
+export interface AgendaAddOptions
+  extends
+    AgendaCommandOptions,
+    Omit<BriefFlags, 'neededBy' | 'task'>,
+    CardFlag,
+    Pick<TabFlags, 'whereFile' | 'tabFile'> {
   /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
   readonly by?: string;
   /** A JSON body with the same fields; `-` reads standard input. */
@@ -103,7 +109,7 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
 }
 
 /** Flags that reword an open item. */
-export interface AgendaEditOptions extends AgendaCommandOptions, Omit<EditFlags, 'neededBy'> {
+export interface AgendaEditOptions extends AgendaCommandOptions, Omit<EditFlags, 'neededBy'>, TabFlags {
   /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
   readonly now?: boolean;
   /** `--back`: RETIRED (`agenda answer` replaced it); refused with the way to say it now. */
@@ -213,7 +219,7 @@ export class AgendaController {
   }
 
   /** Prints one item, open or resolved; read-only, so a mistyped verb can never raise anything. */
-  async show(reference: string, options: AgendaCommandOptions): Promise<void> {
+  async show(reference: string, options: AgendaCommandOptions & { readonly tab?: string }): Promise<void> {
     const id = parseAgendaReference(reference);
     const sessionId = this.#target(options);
     const snapshot = await this.gateway.snapshot(sessionId);
@@ -221,6 +227,10 @@ export class AgendaController {
     const resolved = snapshot.resolved.find(item => item.id === id);
     const found = open ?? resolved;
     if (found === undefined) throw new Error(`no agenda item ${agendaReference(id)} in ${sessionId}`);
+    if (options.tab !== undefined) {
+      this.out.success(tabText(found, options.tab));
+      return;
+    }
     this.out.success(
       options.json === true
         ? JSON.stringify(found, null, 2)
@@ -246,7 +256,9 @@ export class AgendaController {
     const [words, options] = this.#legacyNew(typed, given, file);
     const pointer = this.#relatedPointer(options);
     const flag = resolveCardFlag(words, pointer.card === undefined ? options : { ...options, task: pointer.card });
-    const composed = composeAddRequest(
+    const tabbed = await tabFieldsOf(options, options.where, path => this.#read(path), stdinCount(options));
+    const tabs = newItemTabs(tabbed.tabEdits);
+    const written = composeAddRequest(
       flag.words,
       {
         ...withoutBy(options),
@@ -256,11 +268,17 @@ export class AgendaController {
       },
       file,
     );
+    const composed = {
+      ...written,
+      ...(tabbed.whereWeAre === undefined ? {} : { whereWeAre: tabbed.whereWeAre }),
+      ...(tabs === undefined ? {} : { tabs: [...tabs] }),
+    };
     requireBrief(composed);
     for (const notice of linkFlagNotices(options.link)) this.out.diagnostic(notice);
     if (composed.stage !== undefined || composed.whereWeAre !== undefined || composed.detail !== undefined) {
       await this.#requireChannel('--stage, --where and --detail');
     }
+    if (tabs !== undefined) await this.#requireChannel('--tab-file', DAEMON_FEATURES.agendaTabs);
     if (pointer.item !== undefined) return await this.#editInstead(pointer.item, composed, options);
     const sessionId = this.#target(options);
     // The board is read first so the item just raised can be named by identity rather than guessed at
@@ -455,8 +473,12 @@ export class AgendaController {
       options.stage !== undefined ||
       // `--where` collects, so it is an empty list when not given.
       (typeof options.where === 'string' ? options.where : (options.where ?? []).join('')).trim() !== '' ||
-      options.detail !== undefined;
+      options.detail !== undefined ||
+      (options.whereFile?.trim() ?? '') !== '';
     if (channel) await this.#requireChannel('--stage, --where and --detail on edit');
+    if (ownTabFlags(options)) {
+      await this.#requireChannel('--tab-file, --rename-tab, --move-tab and --remove-tab', DAEMON_FEATURES.agendaTabs);
+    }
     if (options.clearQuestionAnswer === true || options.kind !== undefined) {
       await this.#requireChannel('--kind and --clear-question-answer on edit', DAEMON_FEATURES.agendaAsks);
     }
@@ -464,11 +486,16 @@ export class AgendaController {
     const wording = (options.question ?? []).some(question => question.trim() !== '');
     const current = wording ? (await this.gateway.snapshot(sessionId)).items.find(item => item.id === id) : undefined;
     const [, body] = await this.#inputs(undefined, options.bodyFile);
-    const request = composeEditRequest(
-      id,
-      { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
-      current,
-    );
+    const tabbed = await tabFieldsOf(options, options.where, path => this.#read(path), stdinCount(options));
+    const request = {
+      ...composeEditRequest(
+        id,
+        { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
+        current,
+      ),
+      ...(tabbed.whereWeAre === undefined ? {} : { whereWeAre: tabbed.whereWeAre }),
+      ...(tabbed.tabEdits === undefined ? {} : { tabEdits: [...tabbed.tabEdits] }),
+    };
     for (const notice of linkFlagNotices(options.link)) this.out.diagnostic(notice);
     const snapshot = await this.gateway.apply(sessionId, {
       ...(await this.#withLinkMeanings(request)),
@@ -759,6 +786,12 @@ export class AgendaController {
     return [file, await this.input.read(named)];
   }
 
+  /** A file a flag names (`-` is standard input). */
+  async #read(path: string): Promise<string> {
+    if (this.input === undefined) throw new Error(`${path} cannot be read here`);
+    return await this.input.read(path);
+  }
+
   /** The JSON body `--json-file` names, or none. */
   async #briefFile(path: string | undefined): Promise<BriefFile | undefined> {
     const named = text(path);
@@ -873,3 +906,7 @@ function onlyNewId(before: AgendaSnapshot, after: AgendaSnapshot): AgendaId | un
   const [first] = added;
   return added.length === 1 ? first?.id : undefined;
 }
+
+/** How many of a command's `--json-file` and `--body-file` read standard input: the tab files may take one more. */
+const stdinCount = (options: { readonly jsonFile?: string; readonly bodyFile?: string }): number =>
+  [options.jsonFile, options.bodyFile].filter(path => path?.trim() === '-').length;

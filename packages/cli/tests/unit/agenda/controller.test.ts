@@ -1388,3 +1388,106 @@ describe('agenda link meanings toward an older daemon (agenda.link-meaning.1)', 
     });
   });
 });
+
+describe('agenda controller tabs (agenda.tabs.1)', () => {
+  const tabbed = snapshot([
+    agentItem('A2', 'pick a cluster', {
+      whereWeAre: '## Status\nBuilding.',
+      tabs: [{ id: 'risks', name: 'Risks', body: 'The export may slip.' }],
+    }),
+  ]);
+  const withTabs = (offered: readonly string[]) => {
+    const gateway = new RecordingAgendaGateway(tabbed, tabbed);
+    gateway.offered = offered;
+    const out = new CapturingOutput();
+    const files: Record<string, string> = { 'where.md': '## Status\nShipped.', 'risks.md': 'None left.' };
+    const input = { read: async (path: string) => files[path] ?? '' };
+    return { gateway, out, controller: new AgendaController(gateway, out, SESSION, input) };
+  };
+  const BOTH = [DAEMON_FEATURES.agendaChannel, DAEMON_FEATURES.agendaTabs];
+
+  it('should raise an item with its main tab and tabs of its own', async () => {
+    // Arrange
+    const { controller, gateway } = withTabs(BOTH);
+
+    // Act
+    await controller.add(['Pick a cluster'], {
+      ...BRIEF,
+      title: 'Pick a cluster',
+      new: 'a cluster for the tabs test',
+      whereFile: 'where.md',
+      tabFile: ['Risks=risks.md'],
+    });
+
+    // Assert
+    should(gateway.applied[0]?.request).containDeep({
+      whereWeAre: '## Status\nShipped.',
+      tabs: [{ id: 'risks', name: 'Risks', body: 'None left.' }],
+    });
+  });
+
+  it('should send an edit’s main tab and tab operations', async () => {
+    // Arrange
+    const { controller, gateway } = withTabs(BOTH);
+
+    // Act
+    await controller.edit('A2', { whereFile: 'where.md', tabFile: ['Risks=risks.md'], removeTab: ['Old'] });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({
+      action: 'edit',
+      id: 'A2',
+      whereWeAre: '## Status\nShipped.',
+      tabEdits: [
+        { tab: 'Risks', body: 'None left.' },
+        { tab: 'Old', remove: true },
+      ],
+    });
+  });
+
+  it('should refuse tabs of its own toward a daemon without agenda.tabs.1, and say how to fix it', async () => {
+    // Arrange
+    const { controller, gateway } = withTabs([DAEMON_FEATURES.agendaChannel]);
+
+    // Act + Assert
+    await should(controller.add(['x'], { ...BRIEF, title: 'x', tabFile: ['Risks=risks.md'] })).be.rejectedWith(
+      /older than --tab-file; update the daemon first/u,
+    );
+    await should(controller.edit('A2', { moveTab: ['Risks=1'] })).be.rejectedWith(
+      /older than --tab-file, --rename-tab/u,
+    );
+    // The main tab alone needs only the channel: it is the old whereWeAre, written whole.
+    await controller.edit('A2', { whereFile: 'where.md' });
+    should(gateway.applied).have.length(1);
+  });
+
+  it('should print one tab exactly as written with show --tab', async () => {
+    // Arrange
+    const { controller, out } = withTabs(BOTH);
+
+    // Act
+    await controller.show('!A2', { tab: 'main' });
+    await controller.show('A2', { tab: 'Risks' });
+
+    // Assert
+    should(out.messages).deepEqual(['## Status\nBuilding.', 'The export may slip.']);
+  });
+
+  it('should list the tabs in the item’s full print, and how to read one whole', async () => {
+    // Arrange
+    const { controller, out } = withTabs(BOTH);
+
+    // Act
+    await controller.show('A2', {});
+
+    // Assert
+    should(out.messages[0]).containEql('tab Risks: The export may slip.');
+    should(out.messages[0]).containEql('tabs: Where we are now · Risks (one in full: agenda show !A2 --tab <name>)');
+  });
+
+  it('should refuse a tab file where nothing can read one', async () => {
+    const { controller, gateway } = build(SESSION);
+    gateway.offered = BOTH;
+    await should(controller.edit('A1', { whereFile: 'where.md' })).be.rejectedWith(/where.md cannot be read here/u);
+  });
+});
