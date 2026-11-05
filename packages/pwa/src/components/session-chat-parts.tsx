@@ -110,10 +110,17 @@ export function PendingAttachmentStrip({
                   {/* Another device's upload in progress: its size is not known here yet. */}
                   {entry.removable === false ? null : (
                     <>
-                      <span className="shrink-0 text-faint">{formatAttachmentSize(entry.size ?? entry.file.size)}</span>
-                      <span aria-hidden="true" className="shrink-0 text-faint">
-                        ·
-                      </span>
+                      {/* A stored file whose size the tile did not know has no size to state, rather than "0 B". */}
+                      {(entry.size ?? entry.file.size) > 0 && (
+                        <>
+                          <span className="shrink-0 text-faint">
+                            {formatAttachmentSize(entry.size ?? entry.file.size)}
+                          </span>
+                          <span aria-hidden="true" className="shrink-0 text-faint">
+                            ·
+                          </span>
+                        </>
+                      )}
                     </>
                   )}
                   {entry.status === 'uploading' ? (

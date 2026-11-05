@@ -4,6 +4,8 @@ import { Pause, Play, Search } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
+import { AttachmentReferences } from '../../components/attachment-reference-surface.tsx';
+import { AttachmentReferenceTarget } from '../../components/attachment-reference-target.tsx';
 import { CacheUpdating } from '../../components/cache-updating.tsx';
 import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
@@ -1807,63 +1809,76 @@ export function SessionChatPage({
             {/* One blob cache for every picture on the page — a chat's screenshots and hand-off photos — so the
           full-screen viewer reuses what the thumbnails hold and every object URL is revoked when this unmounts. */}
             <AttachmentGalleryProvider>
-              <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
-              {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
+              {/* `%attachment:name` is proved by the files the messages on this page carry, and a + on one of
+          their tiles writes into THIS session's composer. */}
+              <AttachmentReferences daemonId={connection.daemonId} sessionId={session.config.id}>
+                <AttachmentReferenceTarget scope={scope}>
+                  <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+                  {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
           composer could scroll the whole session sideways and leave the header off the left edge. */}
-              <main
-                className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
-                data-daemon={connection.daemonId}
-                data-session={session.config.id}
-              >
-                <SessionWorkspace
-                  agentSurfaces={agentSurfaces}
-                  // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
-                  // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
-                  // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
-                  chat={
-                    <InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chatWithTasks}</InAppBrowserWorkspace>
-                  }
-                  connection={connection}
-                  driving={driving}
-                  formFactor={formFactor}
-                  references={references}
-                  renderHeader={header}
-                  rails={workspaceRails}
-                  session={session}
-                  workspace={workspace}
-                  {...(infoSlot === undefined ? {} : { info: infoSlot })}
-                  {...(deck === undefined ? {} : { deck })}
-                  {...(readSnapshot === undefined ? {} : { readSnapshot })}
-                  {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
-                  {...(browser === undefined ? {} : { browser })}
-                  browserPages={browserPages}
-                />
-                <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
-                <BottomSheet
-                  ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
-                  closeLabel="Close"
-                  id={utilityId}
-                  onClose={() => setUtility(null)}
-                  open={utility !== null}
-                  panelClassName="bg-surface"
-                >
-                  <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
-                    {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
-                  </div>
-                </BottomSheet>
-                {convert.sheet}
-                <MigrateSheet
-                  {...(accountPicker === undefined ? {} : { accountPicker })}
-                  canMutate={canControl}
-                  connection={connection}
-                  onClose={() => setMigrateOpen(false)}
-                  onMigrated={(_daemon, _scope, view) => publish(view)}
-                  open={migrateOpen}
-                  scope={scope}
-                  {...(usage === undefined ? {} : { usage })}
-                  view={session}
-                />
-              </main>
+                  <main
+                    className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
+                    data-daemon={connection.daemonId}
+                    data-session={session.config.id}
+                  >
+                    <SessionWorkspace
+                      agentSurfaces={agentSurfaces}
+                      // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
+                      // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
+                      // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
+                      chat={
+                        <InAppBrowserWorkspace compact={formFactor !== 'desktop'}>
+                          {chatWithTasks}
+                        </InAppBrowserWorkspace>
+                      }
+                      connection={connection}
+                      driving={driving}
+                      formFactor={formFactor}
+                      references={references}
+                      renderHeader={header}
+                      rails={workspaceRails}
+                      session={session}
+                      workspace={workspace}
+                      {...(infoSlot === undefined ? {} : { info: infoSlot })}
+                      {...(deck === undefined ? {} : { deck })}
+                      {...(readSnapshot === undefined ? {} : { readSnapshot })}
+                      {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
+                      {...(browser === undefined ? {} : { browser })}
+                      browserPages={browserPages}
+                    />
+                    <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
+                    <BottomSheet
+                      ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
+                      closeLabel="Close"
+                      id={utilityId}
+                      onClose={() => setUtility(null)}
+                      open={utility !== null}
+                      panelClassName="bg-surface"
+                    >
+                      <div
+                        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+                        data-session-utility={utility ?? ''}
+                      >
+                        {utility === 'analytics' ? (
+                          <SessionAnalyticsSurface connection={connection} scope={scope} />
+                        ) : null}
+                      </div>
+                    </BottomSheet>
+                    {convert.sheet}
+                    <MigrateSheet
+                      {...(accountPicker === undefined ? {} : { accountPicker })}
+                      canMutate={canControl}
+                      connection={connection}
+                      onClose={() => setMigrateOpen(false)}
+                      onMigrated={(_daemon, _scope, view) => publish(view)}
+                      open={migrateOpen}
+                      scope={scope}
+                      {...(usage === undefined ? {} : { usage })}
+                      view={session}
+                    />
+                  </main>
+                </AttachmentReferenceTarget>
+              </AttachmentReferences>
             </AttachmentGalleryProvider>
           </HandoffSourceProvider>
         </PackSessionsProvider>

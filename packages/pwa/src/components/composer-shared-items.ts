@@ -273,7 +273,26 @@ export function useSharedComposerItems({
     () => items.filter(isAttachment).filter(item => !localIds.has(item.id)),
     [items, localIds],
   );
-  const previews = useRemotePreviews(daemon, scope, remoteItems, fetcher, urls);
+  // A file the + put back is this device's chip but holds no bytes, so its picture is read from the daemon like another device's.
+  const storedLocal = useMemo(
+    () =>
+      attachments.entries.flatMap((entry): SharedDraftAttachment[] =>
+        entry.view !== undefined && entry.file.size === 0 && entry.size !== undefined
+          ? [
+              {
+                kind: 'attachment',
+                id: entry.view.id,
+                name: entry.view.filename,
+                mime: entry.view.mime,
+                bytes: entry.size,
+              },
+            ]
+          : [],
+      ),
+    [attachments.entries],
+  );
+  const previewItems = useMemo(() => [...remoteItems, ...storedLocal], [remoteItems, storedLocal]);
+  const previews = useRemotePreviews(daemon, scope, previewItems, fetcher, urls);
 
   const entries = useMemo((): readonly PendingAttachment[] => {
     const remote = remoteItems.map((item): PendingAttachment => {
@@ -295,7 +314,11 @@ export function useSharedComposerItems({
         removable: false,
       }),
     );
-    return [...attachments.entries, ...remote, ...placeholders];
+    const own = attachments.entries.map((entry): PendingAttachment => {
+      const picture = entry.view !== undefined && entry.file.size === 0 ? previews.get(entry.view.id) : undefined;
+      return picture === undefined || entry.objectUrl !== undefined ? entry : { ...entry, objectUrl: picture };
+    });
+    return [...own, ...remote, ...placeholders];
   }, [attachments.entries, previews, remoteItems, uploads]);
 
   const attachmentIds = useMemo(
@@ -322,17 +345,17 @@ export function useSharedComposerItems({
 
   const open = useCallback(
     (entry: PendingAttachment, show: (file: File) => void): void => {
-      if (!entry.localId.startsWith(REMOTE_PREFIX)) {
+      // A file this session already stored (another device's, or one the + put back) holds no bytes of its own.
+      const storedId = entry.localId.startsWith(REMOTE_PREFIX)
+        ? entry.localId.slice(REMOTE_PREFIX.length)
+        : entry.file.size === 0 && entry.size !== undefined
+          ? entry.view?.id
+          : undefined;
+      if (storedId === undefined) {
         show(entry.file);
         return;
       }
-      void loadAttachmentBlob(
-        daemon,
-        scope,
-        entry.localId.slice(REMOTE_PREFIX.length),
-        undefined,
-        ...(fetcher === undefined ? [] : [fetcher]),
-      )
+      void loadAttachmentBlob(daemon, scope, storedId, undefined, ...(fetcher === undefined ? [] : [fetcher]))
         .then(blob => show(new File([blob], entry.file.name, { type: entry.file.type })))
         .catch(() => {
           // It could not be read just now; the chip stays, and a second tap tries again.

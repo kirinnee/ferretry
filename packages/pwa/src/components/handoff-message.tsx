@@ -23,7 +23,9 @@ import type { StoredTranscriptAttachment } from '../lib/attachments.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { AgendaMessageOr } from './agenda-message.tsx';
 import { TranscriptAttachmentGallery } from './attachment-gallery.tsx';
+import { AttachmentReferenceSurface, useRecordAttachments } from './attachment-reference-surface.tsx';
 import { Markdown } from './markdown.tsx';
+import { useReferenceSurface } from './reference-surface.tsx';
 
 /** The one line that says why a message travelled as a file. */
 export const TURN_FILE_EXPLANATION =
@@ -200,8 +202,15 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
   // A listed file that is not one of this session's stored attachments cannot be fetched, so it keeps
   // its name as a plain chip rather than becoming a thumbnail that would ask for somebody else's file.
   const named = handoff.attachments.filter(attachment => attachment.attachmentId === undefined);
+  // What this message carries, by the name the ferret was handed: it proves `%attachment:name` in this very
+  // message first, and every later message's references after it.
+  const files = useMemo(
+    () => stored.map(file => ({ attachmentId: file.attachmentId, filename: file.filename })),
+    [stored],
+  );
+  useRecordAttachments(handoff.name, files);
   return (
-    <>
+    <AttachmentReferenceSurface local={files}>
       {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
       {stored.length === 0 ? null : (
         <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
@@ -216,7 +225,7 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
           ))}
         </ul>
       )}
-    </>
+    </AttachmentReferenceSurface>
   );
 }
 
@@ -251,7 +260,8 @@ function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
  * a batch is several paragraphs, so it travels as a file.
  */
 function HandoffText({ text }: { readonly text: string }) {
-  return <AgendaMessageOr fallback={<Markdown className="fy-handoff-text" text={text} />} text={text} />;
+  const surface = useReferenceSurface();
+  return <AgendaMessageOr fallback={<Markdown className="fy-handoff-text" text={text} {...surface} />} text={text} />;
 }
 
 /** When the file is gone the line is simply shown, because then it is the only thing explaining the faded pointer above it. */

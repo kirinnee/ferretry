@@ -67,15 +67,59 @@ export const composeQuotedDraft = (draft: string, selection: string): string => 
   return `${draft.replace(/\s*$/u, '')}\n\n${block}`;
 };
 
+/**
+ * A file the session already stores, named so a composer can attach it again WITHOUT uploading it.
+ * Only what a chip needs: the id is what a send names, the rest is what the chip says.
+ */
+export interface ExistingAttachment {
+  readonly id: string;
+  readonly filename: string;
+  readonly mime: string;
+  readonly size?: number;
+}
+
+/**
+ * What a composer did with an existing attachment.
+ *
+ *   `added`    the chip is there now.
+ *   `present`  it already was one; nothing changed.
+ *   `refused`  this composer takes no files, or is at its limit — the caller still has the token to write.
+ */
+export type ExistingAttachmentOutcome = 'added' | 'present' | 'refused';
+
 /** A mounted composer, addressable by the daemon and session it belongs to. */
 export interface ComposerQuoteTarget extends DaemonSessionScope {
   /** The draft the composer currently holds. */
   readonly draft: () => string;
   /** Replace the draft, then focus and put the caret at the end of it. */
   readonly replaceDraft: (next: string) => void;
+  /**
+   * Put text into the draft AT THE CARET (or over the selection), with a space on either side where the
+   * neighbouring words need one, then focus the composer with the caret after it. The path "Add to chat"
+   * of a person's own typing would take, rather than an append.
+   */
+  readonly insertAtCaret?: (text: string) => void;
+  /** Attach a file the session already stores, by its id: no upload. */
+  readonly attachExisting?: (file: ExistingAttachment) => ExistingAttachmentOutcome;
 }
 
 const targets = new Map<string, ComposerQuoteTarget>();
+const listeners = new Set<() => void>();
+let generation = 0;
+
+const changed = (): void => {
+  generation += 1;
+  for (const listener of [...listeners]) listener();
+};
+
+/** Tells a reader when a composer mounts or unmounts, for a control that is only live while one is open. */
+export const subscribeComposerTargets = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+/** A number that changes whenever the set of mounted composers does; the snapshot of the subscription above. */
+export const composerTargetsGeneration = (): number => generation;
 
 /**
  * Publishes a mounted composer as the quote target for its own scope. The
@@ -85,8 +129,11 @@ const targets = new Map<string, ComposerQuoteTarget>();
 export const registerComposerQuoteTarget = (target: ComposerQuoteTarget): (() => void) => {
   const key = daemonSessionKey(target);
   targets.set(key, target);
+  changed();
   return () => {
-    if (targets.get(key) === target) targets.delete(key);
+    if (targets.get(key) !== target) return;
+    targets.delete(key);
+    changed();
   };
 };
 

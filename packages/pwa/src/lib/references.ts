@@ -3,7 +3,7 @@
  *
  * References are authored as plain sigil tokens:
  *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `%surface:key`
- *   `/skill` or `$skill`
+ *   `%attachment:name`  `/skill` or `$skill`
  *
  * A reference is a TOKEN, never a Markdown link. `[label](#fy-reference?…)`
  * written by hand is not a reference and never becomes one: the renderer only
@@ -111,6 +111,19 @@ export interface SurfaceReference {
   readonly key: string;
 }
 
+/**
+ * A file that was attached to a message of THIS session, written `%attachment:shot.png`.
+ *
+ * `name` is the file's DELIVERED name — the last segment of the path the ferret was handed — so the agent
+ * can match the token to the file without any daemon help. It shares the `%kind:key` family with the
+ * surfaces but is not one: a stored file is never "closed", so there is no tombstone, and no live owner to
+ * ask. Names are case-sensitive, because filenames are.
+ */
+export interface AttachmentReference {
+  readonly kind: 'attachment';
+  readonly name: string;
+}
+
 export interface SkillReference {
   readonly kind: 'skill';
   /** Canonical lowercase skill name, without either sigil. */
@@ -123,6 +136,7 @@ export type Reference =
   | TaskReference
   | AgendaReference
   | SurfaceReference
+  | AttachmentReference
   | SkillReference;
 
 /** An agent reference that a live fleet has proved, daemon and session both. */
@@ -145,12 +159,24 @@ export interface ResolvedSurfaceReference extends SurfaceReference {
   readonly sessionId: string;
 }
 
+/**
+ * An attachment a transcript has proved, with the stored file it resolved to: the daemon and session it
+ * belongs to (an attachment id is only meaningful inside its own session) and its id. The id is what a click
+ * finds the carrying message by; the name is what the reader sees.
+ */
+export interface ResolvedAttachmentReference extends AttachmentReference {
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+  readonly attachmentId: string;
+}
+
 export type ResolvedReference =
   | ResolvedAgentReference
   | FileReference
   | TaskReference
   | AgendaReference
   | ResolvedSurfaceReference
+  | ResolvedAttachmentReference
   | SkillReference;
 
 export interface ReferenceMatch {
@@ -191,6 +217,16 @@ const AGENDA_TOKEN = new RegExp(`^!(${AGENDA_ID_BODY})$`, 'u');
  */
 const SURFACE_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu;
+/**
+ * An attachment name is a DELIVERED filename: letters, digits, `_`, `.` and `-`, up to 128 characters, that
+ * starts with a letter, digit or `_` and does not END in `.` or `-`. The last rule is what keeps
+ * `see %attachment:shot.png.` linking `shot.png` and leaving the full stop to the sentence.
+ */
+const ATTACHMENT_NAME_BODY = '[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,126}[A-Za-z0-9_])?';
+const ATTACHMENT_NAME = new RegExp(`^${ATTACHMENT_NAME_BODY}$`, 'u');
+const ATTACHMENT_TOKEN = new RegExp(`^%attachment:(${ATTACHMENT_NAME_BODY})$`, 'iu');
+/** A stored attachment's id is opaque here; it only has to be safe to put in an envelope. */
+const ATTACHMENT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 // LOWERCASE ONLY, unlike an agent callsign. A skill name is a directory name,
 // not a daemon-normalised identity, and `$HOME`/`$PATH` are far more common in
 // prose and in code than a capitalised skill invocation is. Reading `$HOME` as
@@ -216,12 +252,17 @@ const SKILL_TOKEN = new RegExp(`^[/$](${SKILL_NAME_BODY})$`, 'u');
 const BOUNDARY_BEFORE_CHARS = '\\s([{"\'`<>=—–';
 const BOUNDARY_BEFORE = `(^|[${BOUNDARY_BEFORE_CHARS}])`;
 const BOUNDARY_AFTER = '(?=$|[\\s)\\]}"\'`,;!?<>:.=—–])';
+// A name is dotted, so the generic boundary (which accepts a `.`) would let backtracking cut `shot.png-` back to
+// the DIFFERENT name `shot`. A dot ends an attachment token only when it is itself the end of the sentence: last,
+// or followed by whitespace or closing punctuation.
+const BOUNDARY_AFTER_ATTACHMENT = '(?=$|[\\s)\\]}"\'`,;!?<>:=—–]|\\.(?:$|[\\s)\\]}"\'`,;!?<>:=—–]))';
 const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
 const CANDIDATE_ALTERNATIVES = [
   `:${AGENT_NAME_BODY}${BOUNDARY_AFTER}`,
   `&${TASK_ID_BODY}${BOUNDARY_AFTER}`,
   `!${AGENDA_ID_BODY}${BOUNDARY_AFTER}`,
   `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
+  `%attachment:${ATTACHMENT_NAME_BODY}${BOUNDARY_AFTER_ATTACHMENT}`,
   `[/$]${SKILL_NAME_BODY}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
 ];
@@ -308,6 +349,9 @@ function safeSessionId(value: string): boolean {
   return SESSION_ID.test(value) && value !== '.' && value !== '..';
 }
 
+/** Whether this is a name the attachment grammar can write down. */
+export const isAttachmentReferenceName = (value: string): boolean => ATTACHMENT_NAME.test(value);
+
 const surfaceKind = (value: string): value is SurfaceKind => (SURFACE_KINDS as readonly string[]).includes(value);
 
 function validSurfaceReference(reference: SurfaceReference): boolean {
@@ -341,6 +385,9 @@ export function parseReferenceToken(raw: string): Reference | null {
   // two.
   if (surface?.[1] && surface[2])
     return { kind: 'surface', surface: surface[1].toLowerCase() as SurfaceKind, key: surface[2] };
+
+  const attachment = raw.match(ATTACHMENT_TOKEN);
+  if (attachment?.[1]) return { kind: 'attachment', name: attachment[1] };
 
   const skill = raw.match(SKILL_TOKEN);
   if (skill?.[1]) return { kind: 'skill', name: skill[1] };
@@ -416,6 +463,21 @@ export interface ResolvedSurface {
  */
 export type SurfaceProof = ({ readonly state: 'open' } & ResolvedSurface) | { readonly state: 'closed' };
 
+/** What a transcript's attachment index answers with: the daemon, the session and the stored file's id. */
+export interface ResolvedAttachment {
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+  readonly attachmentId: string;
+  readonly name: string;
+}
+
+/**
+ * Answers a delivered name with the stored attachment of this session's loaded transcript that carries it,
+ * or nothing. Not three-state like a surface: a file that is not in the loaded transcript is merely
+ * unproved, never "gone".
+ */
+export type AttachmentReferenceResolver = (name: string) => ResolvedAttachment | null | undefined;
+
 export type SurfaceReferenceResolver = (lookup: SurfaceReference) => SurfaceProof | null | undefined;
 
 /**
@@ -429,6 +491,7 @@ export interface ReferenceResolvers {
   readonly task?: TaskReferenceResolver;
   readonly attention?: AgendaReferenceResolver;
   readonly surface?: SurfaceReferenceResolver;
+  readonly attachment?: AttachmentReferenceResolver;
   readonly skill?: SkillReferenceResolver;
 }
 
@@ -471,6 +534,9 @@ export function formatReference(reference: Reference | ResolvedReference): strin
     case 'surface':
       if (!validSurfaceReference(reference)) throw new TypeError('invalid surface reference');
       return `%${reference.surface}:${reference.key}`;
+    case 'attachment':
+      if (!ATTACHMENT_NAME.test(reference.name)) throw new TypeError('invalid attachment reference');
+      return `%attachment:${reference.name}`;
     case 'skill':
       // `/name` over `$name`: it is the form the shipped harness invokes and the
       // one the composer's `/` trigger inserts. `$name` remains a valid AUTHORED
@@ -520,6 +586,27 @@ function resolvedSurface(
 }
 
 /**
+ * Re-checks the index's answer against the grammar before it becomes a link, and insists the answer is for
+ * the NAME that was asked: an index that quietly answers with a neighbouring file would link the wrong
+ * attachment under the right words.
+ */
+function resolvedAttachment(
+  asked: AttachmentReference,
+  value: ResolvedAttachment | null | undefined,
+): ResolvedAttachmentReference | null {
+  if (!value || value.name !== asked.name || !ATTACHMENT_NAME.test(asked.name)) return null;
+  if (typeof value.daemonId !== 'string' || value.daemonId.trim() === '') return null;
+  if (!safeSessionId(value.sessionId) || !ATTACHMENT_ID.test(value.attachmentId)) return null;
+  return {
+    kind: 'attachment',
+    daemonId: value.daemonId,
+    sessionId: value.sessionId,
+    attachmentId: value.attachmentId,
+    name: value.name,
+  };
+}
+
+/**
  * Whether a surface token is PROVED GONE, as opposed to merely unproved.
  *
  * The transform paints a tombstone only for this, so an offline daemon or an
@@ -558,6 +645,8 @@ export function resolveReference(reference: Reference, resolvers: ReferenceResol
         return validSurfaceReference(reference) && resolvers.surface
           ? resolvedSurface(reference, resolvers.surface(reference))
           : null;
+      case 'attachment':
+        return resolvers.attachment ? resolvedAttachment(reference, resolvers.attachment(reference.name)) : null;
       case 'skill':
         return resolvers.skill?.(reference.name) ? reference : null;
     }
@@ -614,6 +703,16 @@ export function referenceHref(reference: ResolvedReference): string {
       query.set('session', reference.sessionId);
       query.set('surface', reference.surface);
       query.set('key', reference.key);
+      break;
+    case 'attachment':
+      if (resolvedAttachment(reference, reference) === null)
+        throw new TypeError('invalid resolved attachment reference');
+      // The session travels with the link for the reason a surface's does: an attachment id names a file
+      // only inside the session that stored it.
+      query.set('daemon', reference.daemonId);
+      query.set('session', reference.sessionId);
+      query.set('id', reference.attachmentId);
+      query.set('name', reference.name);
       break;
     case 'skill':
       if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid resolved skill reference');
@@ -673,6 +772,18 @@ export function parseReferenceHref(href: string | undefined): ResolvedReference 
     const asked: SurfaceReference = { kind: 'surface', surface, key };
     return resolvedSurface(asked, { state: 'open', daemonId: daemon as DaemonId, sessionId, surface, key });
   }
+  if (kind === 'attachment') {
+    if (!exactKeys(query, ['kind', 'daemon', 'session', 'id', 'name'])) return null;
+    const daemon = one(query, 'daemon');
+    const sessionId = one(query, 'session');
+    const attachmentId = one(query, 'id');
+    const name = one(query, 'name');
+    if (!daemon || !sessionId || !attachmentId || !name) return null;
+    return resolvedAttachment(
+      { kind: 'attachment', name },
+      { daemonId: daemon as DaemonId, sessionId, attachmentId, name },
+    );
+  }
   if (kind === 'skill') {
     if (!exactKeys(query, ['kind', 'name'])) return null;
     const name = one(query, 'name');
@@ -696,6 +807,8 @@ export function referenceIdentity(reference: ResolvedReference): string {
       // Identity is (daemon, session, kind, key) — the same four facts the
       // envelope carries, and nothing that a rename can move.
       return `surface:${reference.daemonId}:${reference.sessionId}:${reference.surface}:${reference.key}`;
+    case 'attachment':
+      return `attachment:${reference.daemonId}:${reference.sessionId}:${reference.attachmentId}`;
     case 'skill':
       return `skill:${reference.name}`;
   }
@@ -734,6 +847,17 @@ export function revalidateReference(
         // terminal with that id.
         return current?.daemonId === reference.daemonId && current.sessionId === reference.sessionId ? current : null;
       }
+      case 'attachment': {
+        const current = resolvers.attachment
+          ? resolvedAttachment(reference, resolvers.attachment(reference.name))
+          : null;
+        // The same file in the same session on the same daemon — not merely another file by that name.
+        return current?.daemonId === reference.daemonId &&
+          current.sessionId === reference.sessionId &&
+          current.attachmentId === reference.attachmentId
+          ? current
+          : null;
+      }
       case 'skill':
         return resolvers.skill?.(reference.name) ? reference : null;
     }
@@ -758,6 +882,8 @@ export function referenceTitle(reference: ResolvedReference): string {
       return `Open agenda item !${reference.id}`;
     case 'surface':
       return `Open this session's ${reference.surface} ${reference.key}`;
+    case 'attachment':
+      return `Show the attached file ${reference.name} in the conversation`;
     case 'skill':
       return `Open the /${reference.name} skill`;
   }

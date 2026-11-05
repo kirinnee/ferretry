@@ -536,6 +536,110 @@ pre,
 .md a:hover {
   text-decoration-color: var(--accent);
 }
+/* A proved `%attachment:name` is a chip, not a bare link: a small file icon says "this is a file you attached
+   earlier", and the pill shape keeps a filename with dots and dashes reading as one thing. */
+.md a.fy-attachment-ref {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0 0.5em;
+  border-radius: 0.75em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  text-decoration: none;
+  vertical-align: bottom;
+  /* A long name wraps rather than being cut: the reader must be able to read which file it is. */
+  overflow-wrap: anywhere;
+}
+.md a.fy-attachment-ref:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.fy-attachment-ref-icon {
+  display: inline-block;
+  margin-right: 0.3em;
+  vertical-align: -2px;
+}
+/* The tile a reference scrolled to: a ring that fades, so the eye lands on it and then lets go. */
+[data-attachment-flash] {
+  border-radius: var(--radius-control, 8px);
+  animation: fy-attachment-flash 1800ms ease-out 1;
+}
+@keyframes fy-attachment-flash {
+  0%,
+  60% {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-attachment-flash] {
+    animation: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+/* The + on a stored attachment tile. The BUTTON is the 44px touch target; the round mark inside it is what is
+   seen. With a pointer it appears on hover and on keyboard focus; on a touch screen (no hover) it is always
+   there, because a control nobody can find by hovering is not a control. */
+.fy-attachment-add {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.fy-attachment-add-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: var(--border-width) solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+.fy-attachment-add:hover:not(:disabled) .fy-attachment-add-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+.fy-attachment-add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+  border-radius: 999px;
+}
+.fy-attachment-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+@media (hover: hover) and (pointer: fine) {
+  .fy-attachment-add {
+    opacity: 0;
+  }
+  .fy-attachment-tile:hover .fy-attachment-add,
+  .fy-attachment-tile:focus-within .fy-attachment-add {
+    opacity: 1;
+  }
+  .fy-attachment-tile:hover .fy-attachment-add:disabled {
+    opacity: 0.45;
+  }
+}
+/* A document card keeps its text clear of the +. */
+.fy-attachment-tile--card > :first-child {
+  padding-right: 40px;
+}
 /* A reference inside code — inline span or fence — keeps the CODE's colour,
    including whichever highlight token it landed in. The accent colour that
    marks a prose link would repaint a keyword or a string and quietly undo the
