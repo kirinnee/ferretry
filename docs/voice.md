@@ -456,6 +456,12 @@ Free voices **built into the device** (`speechSynthesis`): no paid or cloud voic
   arrives with the settings slice). It is then labelled in words wherever it is shown — "Google US English (sends text to Google)" in the
   list, "… sends text to Google to be spoken." on the row; the vendor is read off the voice's name, and an unknown one says "its maker".
   A picked voice that is no longer on the device is ignored and the automatic order above applies.
+  The warning is a boxed notice with a warning icon and full-size text (not a small grey line), shown **next to the button before
+  Read aloud is pressed** (`ReadAloudController.previewVoiceNote()`) as well as while reading.
+- **Captions** show **whole lines only**: the box grows with the reply to six lines and then scrolls a line at a time, resting on line
+  boundaries (`caption-scroll.ts`), with padding outside the scrolling part so no line touches a border. The sentence being said has a
+  tinted background, a solid bar on its left, an underline and a heavier weight, and no trailing highlight past its last word.
+  Read aloud and Stop are at least 44 px tall (48 px on a phone or touch screen).
 - **A voice is always named, never the browser's unset default** (which can be a remote voice, and would send the reply away with no
   warning). If the device lists no voices yet (browsers load them late; the speaker asks as soon as the page makes it, so by a tap they
   are there), the same "unavailable" words show; pressing Read aloud again works once they have loaded.

@@ -46,6 +46,8 @@ export interface RowReadAloud {
   readonly state: ReadAloudState;
   /** True while THIS row's message is the one being spoken. */
   readonly reading: boolean;
+  /** Where the text goes if it is read now (named in words for a voice that sends it away), or null for a device voice. */
+  readonly voiceNote: () => string | null;
   readonly read: (markdown: string) => void;
   readonly stop: () => void;
 }
@@ -59,6 +61,11 @@ export function useReadAloud(key: string): RowReadAloud {
     supported: controller.supported,
     state: mine,
     reading: mine.status === 'reading',
+    // While reading, the voice in use; before, the voice a reading would use: said BEFORE Read aloud is pressed.
+    voiceNote: () =>
+      mine.status === 'reading'
+        ? mine.voiceNote
+        : controller.previewVoiceNote(settings === null ? undefined : settings.get().voiceId),
     // The voice, speed and length are read at the tap, so a change in Settings applies to the next reading.
     read: markdown => controller.read(key, markdown, settings === null ? {} : readOptionsOf(settings.get())),
     stop: () => controller.stop(),

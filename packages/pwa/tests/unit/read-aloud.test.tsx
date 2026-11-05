@@ -73,6 +73,10 @@ describe('<ReadAloudControl>', () => {
       "Code block, 1 line of TypeScript. It's on screen.",
     ]);
     expect(captions(root)?.textContent).not.toContain('secret');
+    // A sentence carries no trailing space of its own, so a marked one never highlights past its last word.
+    for (const node of root.querySelectorAll('.fy-read-caption'))
+      expect(node.textContent).toBe(node.textContent?.trim());
+    expect(root.querySelector('.fy-read-aloud-note')).toBeNull();
 
     await interact(() => synth.start());
     expect(root.querySelector('[data-current]')?.textContent?.trim()).toBe('The fix is in.');
@@ -154,7 +158,7 @@ describe('<ReadAloudControl>', () => {
     expect(synth.spoken).toEqual([]);
   });
 
-  test('a remote voice the person picked is named on the row', async () => {
+  test('a remote voice the person picked is warned about BEFORE Read aloud is pressed, and while reading', async () => {
     const remote = voice('Google US English', 'en-US', { local: false });
     const synth = new FakeSynth([remote]);
     const speaker = createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
@@ -164,8 +168,34 @@ describe('<ReadAloudControl>', () => {
         <ReadAloudControl entryId="m1" text="Hello there." />
       </ReadAloudProvider>,
     );
-    await interact(() => button(mounted?.container as HTMLElement).click());
-    expect(mounted.container.querySelector('.fy-read-aloud-note')?.textContent).toContain('sends text to Google');
+    const root = mounted.container;
+    const warning = (): Element => must(root.querySelector('.fy-read-aloud-note'), 'the voice warning');
+    // Before anything is pressed: words and an icon, in the page, not only in a live region.
+    expect(button(root).textContent).toBe('Read aloud');
+    expect(warning().textContent).toBe('Google US English sends text to Google to be spoken.');
+    expect(warning().querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(warning().hasAttribute('data-voice-warning')).toBe(true);
+    expect(status(root)).toBe('');
+    await interact(() => button(root).click());
+    expect(button(root).textContent).toBe('Stop');
+    expect(warning().textContent).toBe('Google US English sends text to Google to be spoken.');
+    await interact(() => button(root).click());
+    // Stopped: the next press would send it again, so it still says so.
+    expect(button(root).textContent).toBe('Read aloud');
+    expect(warning().textContent).toContain('sends text to Google');
+  });
+
+  test('a device voice shows no warning, before or while reading', async () => {
+    const { controller } = setup();
+    mounted = await mount(
+      <ReadAloudProvider controller={controller}>
+        <ReadAloudControl entryId="m1" text="Hello there." />
+      </ReadAloudProvider>,
+    );
+    const root = mounted.container;
+    expect(root.querySelector('[data-voice-warning]')).toBeNull();
+    await interact(() => button(root).click());
+    expect(root.querySelector('[data-voice-warning]')).toBeNull();
   });
 
   test('renders nothing where the device cannot speak, or the message has nothing to say', async () => {
@@ -189,31 +219,58 @@ describe('<ReadAloudControl>', () => {
     expect(mounted.container.querySelector('.fy-read-aloud')).toBeNull();
   });
 
-  test('scrolls the sentence being read into view, smoothly unless motion is reduced', async () => {
-    const calls: unknown[] = [];
-    const original = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: unknown) {
-      calls.push([this.textContent?.trim(), options]);
-    };
+  /** Read REPLY with the layout faked (lines of 30px, the box six lines high) and answer where the box was told to scroll. */
+  const scrolledTo = async (reducedMotion: boolean): Promise<unknown[]> => {
+    const proto = HTMLElement.prototype as { getClientRects: () => unknown };
+    const original = proto.getClientRects;
     const originalMatch = window.matchMedia;
+    const originalStyle = window.getComputedStyle;
+    const scrolls: unknown[] = [];
     try {
+      window.matchMedia = ((query: string) => ({
+        matches: reducedMotion && query.includes('reduce'),
+      })) as typeof window.matchMedia;
       const { controller, synth } = setup();
       mounted = await mount(
         <ReadAloudProvider controller={controller}>
           <ReadAloudControl entryId="m1" text={REPLY} />
         </ReadAloudProvider>,
       );
-      await interact(() => button(mounted?.container as HTMLElement).click());
-      expect(calls[0]).toEqual(['The fix is in.', { block: 'nearest', behavior: 'smooth' }]);
-      window.matchMedia = ((query: string) => ({ matches: query.includes('reduce') })) as typeof window.matchMedia;
+      const root = mounted.container;
+      await interact(() => button(root).click());
+      // No layout here yet: nothing to measure, so nothing scrolls and nothing throws.
+      await interact(() => synth.start());
+      expect(scrolls).toEqual([]);
+      const box = must(root.querySelector<HTMLElement>('.fy-read-captions-scroll'), 'the scrolling part');
+      Object.defineProperty(box, 'clientHeight', { value: 180 });
+      Object.defineProperty(box, 'scrollHeight', { value: 360 });
+      box.scrollTo = ((options: unknown) => scrolls.push(options)) as typeof box.scrollTo;
+      // Lines are 30px; the first sentences are on line 1, the third on line 8.
+      proto.getClientRects = function (this: HTMLElement) {
+        const top = this.textContent?.includes('Code block') ? 210 : 0;
+        return [{ top, bottom: top + 30 }];
+      };
+      window.getComputedStyle = (() => ({ lineHeight: '30px' })) as unknown as typeof window.getComputedStyle;
+      await interact(() => synth.finish());
       await interact(() => synth.start());
       await interact(() => synth.finish());
       await interact(() => synth.start());
-      expect(calls.at(-1)).toEqual(['Run the tests next.', { block: 'nearest', behavior: 'auto' }]);
+      expect(root.querySelector('[data-current]')?.textContent).toContain('Code block');
+      return scrolls;
     } finally {
-      HTMLElement.prototype.scrollIntoView = original;
+      proto.getClientRects = original;
       window.matchMedia = originalMatch;
+      window.getComputedStyle = originalStyle;
     }
+  };
+
+  test('rests the captions on a whole line: the sentence being read is scrolled to by lines, smoothly', async () => {
+    // A line of context before line 8 is line 7, which is 6 lines of 30px down.
+    expect((await scrolledTo(false)).at(-1)).toEqual({ top: 180, behavior: 'smooth' });
+  });
+
+  test('with reduced motion the captions jump rather than glide', async () => {
+    expect((await scrolledTo(true)).at(-1)).toEqual({ top: 180, behavior: 'auto' });
   });
 });
 

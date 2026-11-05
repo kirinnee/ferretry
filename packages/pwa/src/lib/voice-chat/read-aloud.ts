@@ -64,6 +64,8 @@ export interface ReadAloudController {
   read(key: string, markdown: string, options?: ReadOptions): void;
   /** Stop whatever is being read. */
   stop(): void;
+  /** What to say about the voice a reading would use right now, before anything is read: null for a device voice. */
+  previewVoiceNote(voiceId?: string | null): string | null;
   /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
   dismiss(): void;
 }
@@ -87,6 +89,21 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
     for (const listener of [...listeners]) listener();
   };
 
+  /** The voice a reading would use: the one the person picked, else the best that stays on the device; null for none. */
+  const pickVoice = (voiceId?: string | null): { readonly voice: SpeakerVoice | null; readonly language: string } => {
+    let language = 'en-US';
+    try {
+      language = deps.language?.() ?? language;
+    } catch {
+      // No language to ask: English.
+    }
+    try {
+      return { voice: chooseVoice(speaker.voices(), language, voiceId ?? deps.pickedVoice?.()), language };
+    } catch {
+      return { voice: null, language };
+    }
+  };
+
   return {
     supported: speaker.supported,
     voices: () => {
@@ -97,6 +114,7 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
       }
     },
     getState: () => state,
+    previewVoiceNote: voiceId => voiceNote(pickVoice(voiceId).voice),
     subscribe: listener => {
       listeners.add(listener);
       return () => {
@@ -115,18 +133,7 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         set({ ...IDLE, key });
         return;
       }
-      let language = 'en-US';
-      try {
-        language = deps.language?.() ?? language;
-      } catch {
-        // No language to ask: English.
-      }
-      let voice: SpeakerVoice | null = null;
-      try {
-        voice = chooseVoice(speaker.voices(), language, options.voiceId ?? deps.pickedVoice?.());
-      } catch {
-        voice = null;
-      }
+      const { voice, language } = pickVoice(options.voiceId);
       if (voice === null) {
         // No voice that stays on the device and none picked: say so, and never hand the text to the browser's default.
         speaker.stop();

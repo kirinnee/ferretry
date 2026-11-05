@@ -84,6 +84,39 @@ describe('createReadAloud', () => {
     expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Google US English' });
   });
 
+  test('previewVoiceNote names where the text would go BEFORE anything is read', () => {
+    const picked = voice('Google US English', 'en-US', { local: false });
+    const synth = new FakeSynth([picked, voice('Samantha', 'en-US', { isDefault: true })]);
+    const device = createReadAloud({ speaker: over(synth), language: () => 'en-US' });
+    expect(device.previewVoiceNote()).toBeNull();
+    const remote = createReadAloud({
+      speaker: over(synth),
+      language: () => 'en-US',
+      pickedVoice: () => picked.voiceURI,
+    });
+    expect(remote.previewVoiceNote()).toBe('Google US English sends text to Google to be spoken.');
+    expect(remote.getState().status).toBe('idle');
+    expect(synth.spoken).toEqual([]);
+  });
+
+  test('previewVoiceNote is null when there is no voice, or the device cannot say', () => {
+    const none = createReadAloud({ speaker: over(new FakeSynth([])), language: () => 'en-US' });
+    expect(none.previewVoiceNote()).toBeNull();
+    const broken = scripted();
+    const throwing = createReadAloud({
+      speaker: {
+        ...broken.port,
+        voices: () => {
+          throw new Error('no voices');
+        },
+      },
+      language: () => {
+        throw new Error('no language');
+      },
+    });
+    expect(throwing.previewVoiceNote()).toBeNull();
+  });
+
   test('stop() stops the voice and says stopped; a second stop is a no-op', () => {
     const synth = new FakeSynth();
     const controller = createReadAloud({ speaker: over(synth) });
