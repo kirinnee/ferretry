@@ -29,6 +29,7 @@
 @import '../features/harness-dialog/dialog-card.css';
 @import '../features/occupied-composer/occupied-composer-notice.css';
 @import '../components/pack-call.css';
+@import '../components/live-voice-bar.css';
 @import '../components/agenda-message.css';
 
 /* ============================================================================
