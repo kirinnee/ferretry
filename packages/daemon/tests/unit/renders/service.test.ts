@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { RENDER_QUOTAS, type StoredRenderMeta } from '@ferretry/protocol';
+import { RENDER_MAX_PENDING_SAVES, RENDER_QUOTAS, type StoredRenderMeta } from '@ferretry/protocol';
 import should from 'should';
 import { RenderError, renderDigest, renderIdPrefix } from '../../../src/lib/renders/index.ts';
 import { HTML, MemoryRenderRepository, renderService, SVG } from '../../support/renders.ts';
@@ -106,6 +106,44 @@ describe('RenderService.save', () => {
     should((await renderService(repository).save(svg())).id).equal(saved.id);
   });
 
+  it('should find content again under a longer id when the shorter holder of its prefix was lost', async () => {
+    const repository = new MemoryRenderRepository();
+    const first = await renderService(repository).save(svg());
+    const digest = renderDigest('svg', 'A circle', SVG);
+    const longer = renderIdPrefix(digest, 8);
+    // As if the six-character record was lost: only the eight-character one survives a restart.
+    repository.metas.clear();
+    repository.payloads.clear();
+    repository.metas.set(longer, { ...(first.meta as StoredRenderMeta), id: longer });
+    repository.payloads.set(longer, SVG);
+
+    const again = await renderService(repository).save(svg());
+
+    should(again.id).equal(longer);
+    should(again.created).be.false();
+    should([...repository.metas.keys()]).deepEqual([longer]);
+  });
+
+  it('should refuse a picture when every length of its id is held by a record naming other content', async () => {
+    const repository = new MemoryRenderRepository();
+    const digest = renderDigest('svg', 'A circle', SVG);
+    for (let length = 6; length <= 52; length += 2) {
+      const id = renderIdPrefix(digest, length);
+      repository.metas.set(id, {
+        v: 1,
+        id,
+        kind: 'html',
+        alt: 'liar',
+        bytes: 1,
+        sha256: 'f'.repeat(64),
+        createdAt: '2026-11-05T00:00:00.000Z',
+        author: {},
+      });
+    }
+
+    should((await refusal(renderService(repository).save(svg()))).code).equal('id_space_exhausted');
+  });
+
   it('should rebuild its knowledge from what is on disk and find a saved render again', async () => {
     const repository = new MemoryRenderRepository();
     const saved = await renderService(repository).save(svg());
@@ -135,6 +173,44 @@ describe('RenderService.save', () => {
 
     should(new Set(saves.map(saved => saved.id)).size).equal(3);
     should(repository.metas.size).equal(3);
+  });
+});
+
+describe('RenderService saves in flight', () => {
+  const settle = async (until: () => boolean): Promise<void> => {
+    for (let turns = 0; turns < 100 && !until(); turns += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+
+  it('should refuse the next save at once when the bound is in flight, and take saves again after they finish', async () => {
+    const repository = new MemoryRenderRepository();
+    const release = repository.hold();
+    const service = renderService(repository);
+    const pending = Array.from(
+      { length: RENDER_MAX_PENDING_SAVES },
+      async (_, n) => await service.save(svg(`Circle ${n}`)),
+    );
+    await settle(() => service.saturated());
+
+    should(service.saturated()).be.true();
+    should((await refusal(service.save(svg('One too many')))).code).equal('busy');
+    should(repository.metas.size).equal(0);
+
+    release();
+    should((await Promise.all(pending)).every(saved => saved.created)).be.true();
+    should(service.saturated()).be.false();
+    should((await service.save(svg('One more'))).created).be.true();
+  });
+
+  it('should free its slot when a save is refused or fails', async () => {
+    const repository = new MemoryRenderRepository();
+    repository.failListing = true;
+    const service = renderService(repository);
+
+    for (let n = 0; n < RENDER_MAX_PENDING_SAVES * 2; n += 1) await service.save(svg()).catch(() => undefined);
+
+    should(service.saturated()).be.false();
+    repository.failListing = false;
+    should((await service.save(svg())).created).be.true();
   });
 });
 

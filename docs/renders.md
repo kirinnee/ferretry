@@ -58,10 +58,12 @@ The meta (`StoredRenderMetaSchema` in `packages/protocol/src/lib/renders.ts`):
   A six-character id is 30 bits: short enough to type, long enough that a collision is rare on one machine.
 - **The same kind, alt and payload always give the same id.** A retried save is the same render and writes
   nothing; `created` in the answer says which happened.
-- **Collisions are handled, not assumed away.** If the six-character id is already held by _different_
-  content, the daemon tries 8, 10, … up to 52 characters (the whole digest) until the id is free or held by
-  the same content. A shorter id that was freed later is never reused for content already stored at a
-  longer one: the walk finds the stored id first.
+- **Collisions are handled, not assumed away.** Content already stored is found **first, by its digest**
+  (the index keeps a map from digest to render), whatever length its id was given, and answered as it is. Only
+  new content walks the lengths: if the six-character id is already held by _different_ content, the daemon
+  tries 8, 10, … up to 52 characters (the whole digest) until the id is free. So a shorter id whose record was
+  lost later is never issued again for content that survives under a longer one, and a restart cannot make a
+  retry duplicate it.
 - **An id grants nothing.** It has to be unique, not secret. Access is the route's gate.
 - The id grammar is `RenderIdSchema` (`^[0-9a-hjkmnp-tv-z]{6,52}$`); the token is `%<kind>:<id>`.
 
@@ -99,8 +101,16 @@ Answers `201` for a new render and `200` for one already saved, with
 `{ id, token, created, meta }` (`meta` may carry `supersededBy`). The picture is attributed to the session
 credential's session, or to the session an older `fy` names in `x-ferretry-session-id`, or to nobody (`{}`).
 
+**Saves in flight are bounded.** Saves write one at a time, so every one waiting holds its whole payload in
+memory. The service counts the saves in flight (admitted and not yet finished); once
+`RENDER_MAX_PENDING_SAVES` (8, `packages/protocol/src/lib/renders.ts`) are, a further save is refused at once
+with `429 render_busy` ("too many pictures are being saved at once; retry") and is never queued. The mount
+checks this after the caller check and **before the body is read**, so an excess request's body is never
+read; the service enforces it too, since other callers can reach it. A slot is released when its save ends,
+however it ends.
+
 Refusals: `400` (a body that does not fit the schema, including an unknown kind or field), `403`, `404
-render_supersedes_not_found`, `422 render_invalid`, `507 render_quota_exceeded`.
+render_supersedes_not_found`, `422 render_invalid`, `429 render_busy`, `507 render_quota_exceeded`.
 
 ### `GET /v1/renders/:id/meta`
 
@@ -120,7 +130,10 @@ never a picture.
 ### The invariant: a picture is never a document on the daemon's origin
 
 **Both reads answer `application/json; charset=utf-8` with `X-Content-Type-Options: nosniff`, whatever the
-request's `Accept` says.** A stored `html` picture opened directly in a browser tab is therefore JSON text and
+request's `Accept` says, and so does every answer a handler produces — errors included** (one wrapper renders a
+refused id, caller, body or store as the dispatcher's usual envelope, status and code, plus the header; the `304`
+keeps `application/json` too). The one thing it cannot reach is an answer the dispatcher gives **before** a
+handler runs — the boundary's `401` and `403` — and those are JSON error envelopes with no payload in them. A stored `html` picture opened directly in a browser tab is therefore JSON text and
 cannot run on the daemon's origin; the only way it runs is the opaque sandbox frame the app puts it in
 ([fy-render.md](fy-render.md)). This is the security invariant of the feature and it is pinned by tests that
 request the raw route with `Accept: text/html` and `image/svg+xml` (`tests/unit/runtime/mounts/renders.test.ts`).

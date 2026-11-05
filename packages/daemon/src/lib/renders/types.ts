@@ -24,7 +24,11 @@ export type RenderErrorCode =
   | 'quota_exceeded'
   | 'not_found'
   | 'damaged'
-  | 'id_space_exhausted';
+  | 'id_space_exhausted'
+  | 'busy';
+
+/** The refusal for a save past the in-flight bound: the same sentence from the mount's early check and the service's own. */
+export const busyError = (): RenderError => new RenderError('busy', 'too many pictures are being saved at once; retry');
 
 /** A render refusal the HTTP mount turns into a status. The message is the sentence the saver reads. */
 export class RenderError extends Error {

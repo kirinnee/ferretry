@@ -47,6 +47,13 @@ export const RENDER_QUOTAS = {
   machineBytes: 1024 * 1024 * 1024,
 } as const;
 
+/**
+ * The most saves the daemon holds in flight at once (admitted and not yet finished). Saves write one at a time,
+ * so every one waiting holds its whole payload in memory; past this a save is refused at once with `busy`
+ * rather than queued. A guess to tune, like the quotas.
+ */
+export const RENDER_MAX_PENDING_SAVES = 8;
+
 /** The author bucket of a save made with no session behind it. */
 export const RENDER_HOST_AUTHOR = 'host' as const;
 

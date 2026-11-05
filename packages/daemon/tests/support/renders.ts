@@ -8,6 +8,16 @@ export class MemoryRenderRepository implements RenderRepository {
   readonly payloads = new Map<string, string>();
   listings = 0;
   failListing = false;
+  #gate: Promise<void> | undefined;
+
+  /** Holds every `write` open until the returned function is called, so a test can keep saves in flight. */
+  hold(): () => void {
+    let release = (): void => undefined;
+    this.#gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    return release;
+  }
 
   async listMetas(): Promise<readonly StoredRenderMeta[]> {
     this.listings += 1;
@@ -20,6 +30,7 @@ export class MemoryRenderRepository implements RenderRepository {
   }
 
   async write(meta: StoredRenderMeta, payload: string): Promise<void> {
+    await this.#gate;
     this.payloads.set(meta.id, payload);
     this.metas.set(meta.id, meta);
   }

@@ -2,6 +2,7 @@ import {
   RENDER_HOST_AUTHOR,
   RENDER_ID_MAX_LENGTH,
   RENDER_ID_MIN_LENGTH,
+  RENDER_MAX_PENDING_SAVES,
   RENDER_QUOTAS,
   type RenderBody,
   type RenderMeta,
@@ -13,7 +14,7 @@ import {
 import { renderSaveRefusal } from '@ferretry/protocol/render-save';
 import type { SerialExecutor } from '../ports.ts';
 import { renderDigest, renderIdPrefix } from './digest.ts';
-import { type RenderClock, RenderError, type RenderRepository } from './types.ts';
+import { busyError, type RenderClock, RenderError, type RenderRepository } from './types.ts';
 
 /** How far a "newer version" chain is followed. Links only ever point at an older render, so it ends; this is the bound anyway. */
 const CHAIN_LIMIT = 64;
@@ -30,6 +31,8 @@ interface Usage {
 /** What the store holds, in memory: rebuilt from the metas on first use and kept in step by every save. */
 class RenderIndex {
   readonly byId = new Map<string, StoredRenderMeta>();
+  /** Content digest -> the render holding it, so a retry finds its render at whatever length its id was given. */
+  readonly bySha = new Map<string, StoredRenderMeta>();
   /** Older id -> the newest render that named it in `supersedes`. */
   readonly successor = new Map<string, StoredRenderMeta>();
   readonly byAuthor = new Map<string, Usage>();
@@ -37,6 +40,7 @@ class RenderIndex {
 
   add(meta: StoredRenderMeta): void {
     this.byId.set(meta.id, meta);
+    if (!this.bySha.has(meta.sha256)) this.bySha.set(meta.sha256, meta);
     const author = authorKey(meta.author.sessionId);
     const usage = this.byAuthor.get(author) ?? { count: 0, bytes: 0 };
     usage.count += 1;
@@ -74,6 +78,7 @@ class RenderIndex {
  */
 export class RenderService {
   #index: Promise<RenderIndex> | undefined;
+  #inFlight = 0;
 
   constructor(
     private readonly repository: RenderRepository,
@@ -81,20 +86,37 @@ export class RenderService {
     private readonly executor: SerialExecutor,
   ) {}
 
+  /** Whether as many saves as the bound allows are in flight, so the next would be refused without being read. */
+  saturated(): boolean {
+    return this.#inFlight >= RENDER_MAX_PENDING_SAVES;
+  }
+
   async save(request: RenderSaveRequest, authorSessionId?: string): Promise<RenderSaveResponse> {
+    if (this.saturated()) throw busyError();
     const refusal = renderSaveRefusal(request);
     if (refusal !== null) throw new RenderError('invalid', refusal);
+    this.#inFlight += 1;
+    try {
+      return await this.#saveExclusive(request, authorSessionId);
+    } finally {
+      this.#inFlight -= 1;
+    }
+  }
+
+  async #saveExclusive(request: RenderSaveRequest, authorSessionId: string | undefined): Promise<RenderSaveResponse> {
     return await this.executor.runExclusive(async () => {
       const index = await this.#load();
       const digest = renderDigest(request.kind, request.alt, request.payload);
       const sha256 = digest.toString('hex');
+      // Content already stored is found by its digest, whatever length its id was given: a shorter id freed since
+      // (its meta lost) must never be re-issued for content that survives under a longer one.
+      const stored = index.bySha.get(sha256);
+      if (stored !== undefined) return this.#answer(index, stored, false);
       let id = '';
       for (let length = RENDER_ID_MIN_LENGTH; ; length = Math.min(length + 2, RENDER_ID_MAX_LENGTH)) {
         id = renderIdPrefix(digest, length);
-        const held = index.byId.get(id);
-        if (held === undefined) break;
-        if (held.sha256 === sha256) return this.#answer(index, held, false);
-        // The whole digest is the id at 52 characters, so a different render holding it cannot happen.
+        if (!index.byId.has(id)) break;
+        // The whole digest is the id at 52 characters, so only a record that lies about its digest can hold it.
         if (length >= RENDER_ID_MAX_LENGTH) throw new RenderError('id_space_exhausted', 'no free id for this picture');
       }
       if (request.supersedes !== undefined && !index.byId.has(request.supersedes))

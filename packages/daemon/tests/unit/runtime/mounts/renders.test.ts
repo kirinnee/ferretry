@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { RENDER_MAX_BODY_BYTES, type RenderBody, type RenderSaveResponse } from '@ferretry/protocol';
+import {
+  RENDER_MAX_BODY_BYTES,
+  RENDER_MAX_PENDING_SAVES,
+  type RenderBody,
+  type RenderSaveResponse,
+} from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
@@ -12,11 +17,12 @@ const DEVICE = { deviceId: `fy_device_id_${'d'.repeat(22)}`, appSession: 'app-on
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}` } as const;
 const AT_THE_MACHINE = { loopback: true } as const;
 
-function fixture() {
-  const renders = renderService();
+function fixture(repository = new MemoryRenderRepository()) {
+  const renders = renderService(repository);
   const routes = renderRoutes(renders);
   const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
   return {
+    renders,
     routes,
     dispatch: async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
       await dispatcher.dispatch(request(overrides)),
@@ -33,6 +39,12 @@ const save = (body: unknown, overrides: Omit<Parameters<typeof request>[0], 'met
 });
 
 const circle = { kind: 'svg', alt: 'A circle', payload: SVG };
+
+/** R1 (docs/renders.md § The invariant): an answer a handler produces says it is data, errors included. */
+function shouldBeData(response: ApiResponse): void {
+  should(response.headers.get('x-content-type-options')).equal('nosniff');
+  should(response.headers.get('content-type')).equal('application/json; charset=utf-8');
+}
 
 describe('renders: the grants rows', () => {
   it('should declare all three routes operator, with no capability and no warden remedy', () => {
@@ -123,6 +135,71 @@ describe('POST /v1/renders', () => {
     should(reads.consumed).be.false();
   });
 
+  it('should refuse a save with 429 before it reads the body once the bound is in flight, and take saves again after', async () => {
+    const repository = new MemoryRenderRepository();
+    const release = repository.hold();
+    const { dispatch, renders } = fixture(repository);
+    const pending = Array.from(
+      { length: RENDER_MAX_PENDING_SAVES },
+      async (_, n) => await dispatch(save({ ...circle, alt: `Circle ${n}` })),
+    );
+    for (let turns = 0; turns < 100 && !renders.saturated(); turns += 1)
+      await new Promise(resolve => setTimeout(resolve, 0));
+    const reads = { limits: [] as (number | undefined)[], consumed: false, discarded: false };
+
+    const refused = await dispatch(save(circle, { reads }));
+
+    should(refused.status).equal(429);
+    should(jsonBody(refused).code).equal('render_busy');
+    should(String(jsonBody(refused).error)).match(/retry/u);
+    should(reads.consumed).be.false();
+    shouldBeData(refused);
+    release();
+    should((await Promise.all(pending)).map(response => response.status)).deepEqual(
+      Array.from({ length: RENDER_MAX_PENDING_SAVES }, () => 201),
+    );
+    should((await dispatch(save(circle))).status).equal(201);
+  });
+
+  it('should still refuse a caller who may not save with 403 when the bound is in flight', async () => {
+    const repository = new MemoryRenderRepository();
+    const release = repository.hold();
+    const { dispatch, renders } = fixture(repository);
+    const pending = Array.from(
+      { length: RENDER_MAX_PENDING_SAVES },
+      async (_, n) => await dispatch(save({ ...circle, alt: `Circle ${n}` })),
+    );
+    for (let turns = 0; turns < 100 && !renders.saturated(); turns += 1)
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+    const refused = await dispatch(save(circle, { headers: {}, device: DEVICE, loopback: false }));
+
+    should(refused.status).equal(403);
+    release();
+    await Promise.all(pending);
+  });
+
+  it('should carry nosniff and a JSON content type on every refusal it gives', async () => {
+    const repository = new MemoryRenderRepository();
+    const { dispatch } = fixture(repository);
+    const saved = jsonBody(await dispatch(save(circle))) as unknown as RenderSaveResponse;
+    repository.payloads.delete(saved.id);
+
+    const refusals: [ApiResponse, number][] = [
+      [await dispatch({ path: '/v1/renders/..', headers: human }), 400],
+      [await dispatch(save(circle, { headers: {}, device: DEVICE })), 403],
+      [await dispatch({ path: '/v1/renders/aaaaaa', headers: human }), 404],
+      [await dispatch(save({ kind: 'svg', alt: 'x', payload: '<div>no</div>' })), 422],
+      [await dispatch(save({ ...circle, extra: 1 })), 400],
+      [await dispatch({ path: `/v1/renders/${saved.id}`, headers: human }), 500],
+    ];
+
+    for (const [response, status] of refusals) {
+      should(response.status).equal(status);
+      shouldBeData(response);
+    }
+  });
+
   it('should refuse an invalid picture with the rule that refused it', async () => {
     const { dispatch } = fixture();
     const response = await dispatch(save({ kind: 'svg', alt: 'x', payload: '<svg viewBox="0 0 1 1"><script/></svg>' }));
@@ -197,6 +274,7 @@ describe('GET /v1/renders/:id', () => {
     should(response.status).equal(304);
     should(response.body).equal('');
     should(response.headers.get('x-content-type-options')).equal('nosniff');
+    should(response.headers.get('content-type')).equal('application/json');
   });
 
   // R1 (docs/renders.md § The invariant): a stored html picture must never be a document on the daemon's origin.
