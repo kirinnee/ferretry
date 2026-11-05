@@ -30,6 +30,8 @@ export interface FakeLive {
   signal(signal: ReplySignal): void;
   setVisible(visible: boolean): void;
   outcome: { current: TakeOutcome };
+  /** How long `endTurn` takes to answer, in fake milliseconds: the engine's remaining decode time. */
+  readonly decodeMs: { current: number };
   sendResult: { current: SendOutcome };
 }
 
@@ -45,6 +47,7 @@ export const fakeLive = (): FakeLive => {
   const outcome = {
     current: { kind: 'words', text: 'Fix the bug.', raw: 'fix the bug', cleaned: true } as TakeOutcome,
   };
+  const decodeMs = { current: 0 };
   const sendResult = { current: { kind: 'sent', sentAtMs: 0 } as SendOutcome };
   let onFrame: (frame: LevelFrame) => void = () => undefined;
   let reply: ((signal: ReplySignal) => void) | null = null;
@@ -74,6 +77,7 @@ export const fakeLive = (): FakeLive => {
         const handle: TakeHandle = {
           endTurn: async () => {
             take.endTurns += 1;
+            if (decodeMs.current > 0) await new Promise<void>(resolve => ports.clock.after(decodeMs.current, resolve));
             return outcome.current;
           },
           resume: async () => true,
@@ -150,6 +154,7 @@ export const fakeLive = (): FakeLive => {
       for (const listener of visibility) listener(next);
     },
     outcome,
+    decodeMs,
     sendResult,
   };
 };

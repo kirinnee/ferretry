@@ -426,7 +426,7 @@ const take = session.beginFinish(); // null when this engine cannot, or the mic 
 otherwise it decodes the whole take afresh, so the words are always those of the audio that was said. It
 never stops the microphone and never sends anything. Offered by the whole-take engines (Parakeet 0.6B and
 110M, the other sherpa batch models, Whisper); not by Vosk (already ~0.05 s), Browser voice, or Parakeet
-with near-live words on. The Live loop calls it; nothing in dictation does yet.
+with near-live words on. The Live loop calls it (see [Live voice](#live-voice-the-one-place-voice-sends)); nothing in dictation does.
 
 ### Measuring your own device
 
@@ -686,13 +686,117 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
   microphones (browser noise suppression and auto-gain change the levels) need an on-device check with
   the in-app timing numbers (pause → STT done, countdown held/used), which tune the defaults.
 - **Café/TV** — see above.
-- **No screen yet.** The Live bar, the countdown and the loop that uses these events come in later slices.
+- **The screen is built:** the Live bar, the countdown and the loop that uses these events are in [Live voice](#live-voice-the-one-place-voice-sends).
+
+## Live voice: the one place voice sends
+
+**This is a rule change, on purpose.** Dictation never sends: `hooks/use-dictation.ts` still has no path from
+recognised words to a sent message, and the mic button still ends in the review box. **Live voice is the one
+exception.** You press **Live**, you speak, and a turn you finish is put in the composer where you can see it,
+counted down, and sent through the composer's **own** send — the same route, grants, send ledger and audit as
+a typed message. The only code that sends from voice is `hooks/use-live-voice.ts`; its header says so.
+
+### What it does
+
+| State             | What you see                                  | Mic     |
+| ----------------- | --------------------------------------------- | ------- |
+| Starting          | "Starting…" until the mic is open             | opening |
+| Listening         | level bars, "Listening"                       | open    |
+| Hearing           | the words appearing in the composer           | open    |
+| Sending in 1.5 s  | a ring counting down, **Hold**, **Send now**  | open    |
+| Working           | "Working 0:12", **End**                       | **off** |
+| Reading (slice 5) | reserved: the reply being read aloud          | **off** |
+| On hold           | "On hold — paused while you type", **Resume** | off     |
+| Paused            | the tab is hidden                             | off     |
+
+- **The words are in the composer, visibly, during the countdown.** What is sent is exactly what the composer
+  shows at that moment. Edit them, add to them or delete them: typing pauses the countdown and holds, and
+  nothing is sent until you press **Send now** or **Resume**.
+- **The countdown is 1.5 s** (`DEFAULT_GRACE_MS`, adjustable in the machine's range) and always visible: a
+  ring, plus a text count when reduced motion is on. **Hold** stops it, **Send now** skips it.
+- **The words must be on screen for 500 ms before an automatic send** (`SETTLE_MS`), so a late transcript can
+  never be sent before you could see it. **Send now** skips that too. With a countdown of 0 the send follows
+  the words as soon as they are shown.
+- **Speaking again during the countdown cancels the send** and goes back to listening; the words so far stay
+  and the next words are added after them. Engines that stop on `finish()` (Vosk, Browser voice, near-live
+  Parakeet) open a new session and carry the earlier words; the whole-take engines (Parakeet, Whisper) keep the
+  mic open and only discard the early decode (`discard()`, see [Starting to transcribe during the send
+  countdown](#starting-to-transcribe-during-the-send-countdown)).
+- **Interrupting is a tap or a key, never your voice.** The mic is **off** while the ferret works, so nothing it
+  or the room says can send or stop anything. **Skip**/**End** do it by hand.
+- **Keys** (only when focus is not in a text field): **Enter** = Send now, **H** = Hold, **Space** = Resume
+  (or Skip while the ferret works), **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat
+  page).
+- **A failed send is never retried automatically.** The loop goes to **On hold** with your words kept in the
+  composer and the reason said; **Resume** sends again by your hand. While a message is on the wire, Hold,
+  typing and hiding the tab do nothing to it.
+- **Idle for 10 minutes ends Live** (`IDLE_END_MS`). It never turns itself back on.
+- **One Live tab:** it takes a Web Lock; a second tab says "Live is on in another tab". It asks for a Screen
+  Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. A hidden tab
+  **pauses** Live (mic closed) and resumes when visible.
+- **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
+  The mic button is held back while Live is on, and Live while the mic is recording.
+
+### Clean-up in Live: Fix only
+
+Live runs the Fix clean-up (`lib/voice-chat/live-cleanup.ts`) with a 3 s budget, and **any failure sends the
+raw words** — a slow or broken correction never holds a turn. A machine that has Polish configured gets Fix in
+Live; Polish is too slow and too free for a send that nobody reads first. **Known gap:** a machine whose
+clean-up is Polish with only a machine key (no device key) leaves the words **raw** in Live.
+
+### Refusals, in words
+
+The bar says why Live did not start, then goes away after 10 s: microphone blocked (with how to allow it),
+no engine chosen (open Settings › Voice), the chosen engine not installed, the engine failed, Live open in
+another tab, no send rights, and — on an iPhone Home Screen app — that Browser voice cannot run there (choose an
+on-device engine). The words live in `lib/voice-chat/live-view.ts` (`LIVE_BLOCK_COPY`).
+
+### What the code is
+
+`lib/voice-chat/live-machine.ts` is a pure reducer `(state, event) → { state, effects }`, tested table-driven
+including every race (speech returning during the countdown, a late transcript for an old attempt, a failed
+send, typing while words are still being worked out, hiding the tab mid-send). `live-runner.ts` owns the I/O
+through ports (`lib/voice-chat/ports.ts`: level frames, take, send, reply feed, wake lock, visibility, clock,
+mic lock) and drops every stale async answer by generation. `reply-feed.ts` counts a reply as finished only
+once `working` was seen or `turnStateAt` changed — never by comparing clocks.
+
+### Latency: last word to sent
+
+Measured per turn by the loop itself (`TurnNumbers`: end → words, end → send, **last word → sent**; numbers
+only, never words; the last twenty are kept in memory and the working state says "Sent 3.4 s after your last
+word."). The table is **computed, not measured with a microphone**: the real machine, runner and endpointer
+run on a virtual clock (`tests/unit/voice-chat/live-latency.test.ts`) with an engine whose decode time after
+the pause is the "After early finish" figure measured on this 32-core Linux box (above). Clean-up and the
+network round trip are **not** in it.
+
+| Engine (this box)                  | Decode left after the pause | Last word → sent, 1.5 s countdown |
+| ---------------------------------- | --------------------------: | --------------------------------: |
+| Parakeet 110M                      |                         0 s |                         **3.0 s** |
+| Parakeet 0.6B, early finish        |                      0.22 s |                         **3.0 s** |
+| Vosk small                         |                      0.06 s |                         **3.0 s** |
+| Whisper base.en, early finish      |                      1.80 s |                         **3.8 s** |
+| Parakeet 0.6B, **no** early finish |                      1.76 s |                        **3.76 s** |
+| Parakeet 0.6B, countdown 0         |                      0.22 s |                        **1.72 s** |
+
+So at the defaults the loop is **pause (1.5 s) + countdown (1.5 s)** and the engine is hidden inside the
+countdown whenever it needs under 1 s — which is what the early finish buys. Whisper's decode does not fit
+in the countdown, so it adds the difference. A phone is several times slower than this box: expect the
+engine term to grow there, and measure it (the working state shows your real number). **Not measured:**
+real microphones, noise suppression, phones, Safari, any GPU.
+
+### Still open
+
+- **Reading the reply aloud is not wired.** The **Reading** state, the `speak` / `stopSpeaking` effects and a
+  `SpeakerPort` exist and are tested with a fake port; nothing is connected to them yet (slice 5).
+- **No `⌥L` chord yet;** the palette entry and the button are the ways in.
+- **A daemon without `turnState`** never reports a reply, so Live stays in **Working** until you press **Skip**
+  or **End**.
+- **The iOS mic reopen is unproven:** whether Safari lets Live reopen the mic after the ferret works, without a
+  fresh tap, has not been tried on a device. The first turn is from the tap; later turns are unproven there.
 
 ## Not built yet
 
-- **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
-  only its end-of-turn detector exists so far — see [Pause detection](#pause-detection-the-end-of-a-spoken-turn).
-  There is no Live button, bar or loop yet.
+- **Live voice reading the reply aloud:** the listen-and-send loop is built (see [Live voice](#live-voice-the-one-place-voice-sends)); reading the ferret's reply aloud is not wired yet.
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
   downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
   channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per
