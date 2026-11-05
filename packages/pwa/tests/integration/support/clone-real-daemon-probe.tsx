@@ -158,11 +158,21 @@ async function clientOver(
     CREDENTIALS,
     GRANTED,
   );
-  const phone = new ApiDispatcher(new ApiRouter([...routes.config]), CREDENTIALS, PHONE, undefined, witness);
+  const phone = new ApiDispatcher(
+    new ApiRouter([...routes.fleet, ...routes.config]),
+    CREDENTIALS,
+    PHONE,
+    undefined,
+    witness,
+  );
   const transport: IFyHttpTransport = {
     send: async (url, init) => {
       const target = new URL(url);
-      const governed = governedConfig && seat.role === 'target' && target.pathname.startsWith('/v1/config/');
+      // A settings write rides the Update's own proposal, so the phone's grants govern that too.
+      const governed =
+        governedConfig &&
+        seat.role === 'target' &&
+        (target.pathname.startsWith('/v1/config/') || target.pathname.startsWith('/v1/fleet/proposals'));
       const method = init.method ?? 'GET';
       const body = typeof init.body === 'string' ? init.body : undefined;
       const answer = await (governed ? phone : owner).dispatch(
@@ -360,6 +370,10 @@ async function copy(governedConfig: boolean): Promise<Report> {
   const keysShown = q('[data-clone-keys-names]')?.textContent ?? '';
   await tick('learning');
   await tick('controls');
+  // The default runtime changed on both machines (this one has its own), so nothing is chosen for it: keep this one's.
+  const defaultKey = '[data-clone-key="controls:defaultRuntime"] input[type="radio"]';
+  await waitFor('the default runtime to be offered', () => q(defaultKey) !== null);
+  await click(q(defaultKey), 'keep this machine’s default runtime');
   await click(q('[data-change-submit]'), 'the Update button');
   await waitFor('the Done step', () => step() === 'done');
 

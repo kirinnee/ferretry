@@ -29,7 +29,7 @@ interface Written {
   readonly path: string;
   readonly detail?: string;
   readonly status: number;
-  readonly answer?: { readonly imported?: readonly string[]; readonly replaced?: readonly string[] };
+  readonly answer?: { readonly imported?: readonly string[]; readonly kept?: readonly string[] };
 }
 
 interface Seen {
@@ -104,7 +104,7 @@ describe('the app’s Update over the daemon’s real routes and real files', ()
         should(exported?.detail).equal('MISSING_KEY');
         const completed = seen.written.find(call => /^\/v1\/secrets\/imports\/[^/]+$/u.test(call.path));
         should(completed?.answer?.imported).deepEqual(['MISSING_KEY']);
-        should(completed?.answer?.replaced).deepEqual([]);
+        should(completed?.answer?.kept).deepEqual([]);
         should(seen.vaultNames).deepEqual(['HELD_KEY', 'MISSING_KEY', 'OTHER_HELD_KEY']);
 
         // The held entries are the same bytes, value and timestamps included (Option A); no stored byte moved.
@@ -127,15 +127,15 @@ describe('the app’s Update over the daemon’s real routes and real files', ()
     async () => {
       const seen = (await ran()).machine;
 
+      // The settings ride the Update's own proposal (one review, one apply), so no file is written on its own, and the
+      // keys' instants are recorded once the sealed copy has landed.
       should(sequence(seen)).deepEqual([
         'target POST /v1/fleet/proposals clone.import → 200',
-        'target POST /v1/fleet/proposals/:id/apply → 200',
-        'target PUT /v1/config/file learning.yaml → 200',
-        'target POST /v1/fleet/proposals machine.settings → 200',
         'target POST /v1/fleet/proposals/:id/apply → 200',
         'target POST /v1/secrets/imports → 201',
         'source POST /v1/secrets/exports/:id MISSING_KEY → 200',
         'target POST /v1/secrets/imports/:id → 200',
+        'target POST /v1/fleet/clone/keys → 200',
       ]);
       // The learning write was applied, not held: in effect, nothing waiting, nothing to confirm.
       should(seen.learning).deepEqual({
@@ -158,15 +158,14 @@ describe('the app’s Update over the daemon’s real routes and real files', ()
     async () => {
       const seen = (await ran()).phone;
 
+      // The phone's grants govern the proposal that carries the settings, so the loosening is held, not refused.
       should(sequence(seen)).deepEqual([
         'target POST /v1/fleet/proposals clone.import → 200',
-        'target POST /v1/fleet/proposals/:id/apply → 200',
-        'target PUT /v1/config/file learning.yaml → 200',
-        'target POST /v1/fleet/proposals machine.settings → 200',
         'target POST /v1/fleet/proposals/:id/apply → 200',
         'target POST /v1/secrets/imports → 201',
         'source POST /v1/secrets/exports/:id MISSING_KEY → 200',
         'target POST /v1/secrets/imports/:id → 200',
+        'target POST /v1/fleet/clone/keys → 200',
         // Confirm, first without a passkey for it (refused), then with one.
         'target POST /v1/config/confirm learning.yaml → 403',
         'target POST /v1/config/confirm learning.yaml → 200',
