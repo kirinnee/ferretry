@@ -408,7 +408,7 @@
   --bubble-fg: var(--fg);
   --bubble-border: var(--border-soft);
   --bubble-stroke: 1px;
-  --bubble-radius: 14px 14px 4px 14px;
+  --bubble-radius: 14px 14px 8px 14px;
   --bubble-shadow: var(--shadow-sm);
 }
 
@@ -447,7 +447,7 @@
   --bubble-fg: var(--fg);
   --bubble-border: var(--border-soft);
   --bubble-stroke: 1px;
-  --bubble-radius: 14px 14px 4px 14px;
+  --bubble-radius: 14px 14px 8px 14px;
   --bubble-shadow: var(--shadow-sm);
 
   --code-bg: #121215;
