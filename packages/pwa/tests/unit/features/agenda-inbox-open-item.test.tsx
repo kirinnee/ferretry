@@ -3,6 +3,7 @@ import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { AgendaSwipeDeck, deckIntent, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
+import { STALE_ASK_COPY } from '../../../src/lib/agenda-gate-send.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
@@ -371,6 +372,53 @@ describe('the open Inbox item', () => {
         attachments: { from: 'sess-5', ids: ['a1'] },
       }),
     ]);
+    await mounted.unmount();
+  });
+
+  it('a Send that resumes after Good was tapped answers nothing: Good is never replaced by a late Not good', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'Ready to try',
+      entry: 3,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F12',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const fake = fakeInbox();
+    let send: ((words: { message: string }) => void) | undefined;
+    const mounted = await mount(
+      page(fake, [own], {
+        initialOpen: own.key,
+        renderComposer: (_card, _answerForm, answer) => {
+          send = answer?.send;
+          return <textarea />;
+        },
+      }),
+    );
+    // Send was pressed, then the owner tapped Good (or answered on another device) before it finished.
+    const late = send;
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLElement>('[data-agenda-answer-option="Done"]'), 'Good').click(),
+    );
+    expect(pending(fake)).toEqual(['Done']);
+    expect(() => late?.({ message: 'The badge is red' })).toThrow(STALE_ASK_COPY);
+    expect(pending(fake)).toEqual(['Done']);
     await mounted.unmount();
   });
 

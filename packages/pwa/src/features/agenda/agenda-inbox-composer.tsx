@@ -117,6 +117,14 @@ export function AgendaInboxComposer({
   // The ask that is open NOW: a send bound to an earlier one asks this when it finally runs, and fails if it moved on.
   const typing = useRef(answerTyped);
   typing.current = answerTyped;
+  // A composer that is gone has no open ask: a Send still awaiting when the card was answered (or left) answers nothing.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const askKey = answerTyped?.key;
   const forTyped = askKey !== undefined;
   // A typed answer goes through the raw client — never the chat's reference prefix — and one client per ask.
@@ -126,7 +134,7 @@ export function AgendaInboxComposer({
       forTyped
         ? api === null || chat === null
           ? null
-          : withTypedSend(api, askKey, () => typing.current, chat)
+          : withTypedSend(api, askKey, () => (mounted.current ? typing.current : undefined), chat)
         : form.api,
     [api, askKey, chat, forTyped, form.api],
   );

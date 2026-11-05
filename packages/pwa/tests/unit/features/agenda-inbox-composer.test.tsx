@@ -214,6 +214,35 @@ describe('the open Inbox item’s composer', () => {
     run(() => view.unmount());
   });
 
+  test('a Send still awaiting when its composer goes (Good tapped, or the card answered elsewhere) answers nothing', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const heard: string[] = [];
+    const view = render(
+      <AgendaInboxComposer
+        answerTyped={{ key: 'gate:F12:tested:3', send: words => void heard.push(words.message), approves: () => false }}
+        clientFor={async () => ({ send: async () => ({}) as never })}
+        compact
+        connection={daemon}
+        itemId={'A404' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    const pressed = view.root.findByType(Composer).props.api as { send: (s: string, i: unknown) => unknown };
+    // Send was pressed and is awaiting (the composer awaits before the client's send runs) …
+    const late = gate.then(() => pressed.send('sess-2', { message: 'The badge is red' }));
+    // … the card is answered Good, and its composer goes away, then the Send resumes.
+    run(() => view.unmount());
+    release();
+    await expect(late).rejects.toThrow(STALE_ASK_COPY);
+    expect(heard).toEqual([]);
+  });
+
   test('a form’s “nothing to send” line goes once a pick changes', async () => {
     const api = { send: async () => ({}) as never };
     const view = render(

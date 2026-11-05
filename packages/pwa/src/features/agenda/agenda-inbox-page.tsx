@@ -83,7 +83,7 @@ import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
-import { type TypedAnswerTarget, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
+import { STALE_ASK_COPY, type TypedAnswerTarget, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
@@ -352,6 +352,8 @@ const typedAnswerFor = (
     // Clear approval ("works now") is a reply the card offers back as Good, never a Not good with those words.
     approves: words => typedApproval(ask.gate, words) !== null,
     send: send => {
+      // The card already has an answer held or being sent (Good tapped, or answered elsewhere): these words are too late.
+      if (host.inbox.deferred.hiddenKeys().has(card.key)) throw new Error(STALE_ASK_COPY);
       const answer = typedGateAnswer(ask, send, card.view.config.id);
       if (answer.kind === 'refused') throw new Error(answer.message);
       answerCard(host, card, answer.action);
