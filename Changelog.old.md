@@ -1,3 +1,16 @@
+## [4.279.0](https://github.com/kirinnee/ferretry/compare/v4.278.0...v4.279.0) (2026-11-05)
+
+### Features
+
+* **fleet:** three-way clone update planner, review route, clone.import update ([#1386](https://github.com/kirinnee/ferretry/issues/1386)) ([b4edfc0](https://github.com/kirinnee/ferretry/commit/b4edfc0abb6a862ce15a8fcebff0dff83e0a2366)), closes [#F544](https://github.com/kirinnee/ferretry/issues/F544) [#F544](https://github.com/kirinnee/ferretry/issues/F544) [#1383](https://github.com/kirinnee/ferretry/issues/1383) [#1383](https://github.com/kirinnee/ferretry/issues/1383)
+* **insights:** count Insights days in a time zone the reader picks ([#1471](https://github.com/kirinnee/ferretry/issues/1471)) ([e0e361e](https://github.com/kirinnee/ferretry/commit/e0e361e6070dd8d49aeb95e155cd8003652d829a))
+
+### Fixes
+
+* **analytics:** name each machine and what to do when a fleet query fails (B149) ([#1487](https://github.com/kirinnee/ferretry/issues/1487)) ([c63a443](https://github.com/kirinnee/ferretry/commit/c63a4436afedfc7805812b48ece3b084a605fd1e))
+* **daemon:** stop flagging restarted ferrets as out of date on hypermedia ([#1463](https://github.com/kirinnee/ferretry/issues/1463)) ([dec9e5b](https://github.com/kirinnee/ferretry/commit/dec9e5b90461c92ed12cfb93b79e1fd2e73acae5))
+* **pwa:** open the queue page without crashing, and let Find answer Queue (B160) ([#1481](https://github.com/kirinnee/ferretry/issues/1481)) ([b0d806f](https://github.com/kirinnee/ferretry/commit/b0d806f4924f7618e7e17ff4e998dd6e6032b1e2))
+
 ## [4.278.0](https://github.com/kirinnee/ferretry/compare/v4.277.0...v4.278.0) (2026-11-05)
 
 ### Features
