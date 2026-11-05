@@ -61,13 +61,15 @@ const INTERACTIVE_PAGE = `<div class="fy-stack">
   let series = 'rev';
   function draw() {
     const rate = series === 'rev' ? g.value / 100 : g.value / 200;
-    const values = [1, 2, 3, 4, 5].map(year => Math.pow(1 + rate, year - 1));
+    // Round is one decision: the heights, the labels and the legend all use the rounded value (1 decimal, so the bars still differ).
+    const digits = round.checked ? 1 : 2;
+    const values = [1, 2, 3, 4, 5].map(year => Number(Math.pow(1 + rate, year - 1).toFixed(digits)));
     const top = Math.max(...values);
     o.textContent = g.value + '%';
     sw.setAttribute('data-tone', series === 'rev' ? '1' : '3');
-    lg.textContent = (series === 'rev' ? 'Revenue' : 'Cost') + ', year 1 = 1.00';
+    lg.textContent = (series === 'rev' ? 'Revenue' : 'Cost') + ', year 1 = ' + values[0].toFixed(digits);
     bars.innerHTML = values.map((v, i) => '<div class="fy-bar" data-tone="' + (series === 'rev' ? '1' : '3') +
-      '" style="--v:' + (v / top) * 100 + '" data-value="' + (round.checked ? Math.round(v) : v.toFixed(2)) +
+      '" style="--v:' + (v / top) * 100 + '" data-value="' + v.toFixed(digits) +
       '" data-label="Y' + (i + 1) + '"></div>').join('');
   }
   function pick(next) {

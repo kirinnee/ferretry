@@ -11,13 +11,15 @@ const rule = (selector: string): string => {
 };
 
 describe('a picture or chart in the card', () => {
-  test('is capped at its natural size, never stretched to the card, and a sized diagram is left alone', () => {
-    const start = css.indexOf('.fy-card .fy-render :is(');
+  test('a picture is capped at its natural size, never stretched to the card, and a sized diagram is left alone', () => {
+    const start = css.indexOf('.fy-card .fy-render .fy-render-image:not([data-fy-render-sized=');
     expect(start).toBeGreaterThanOrEqual(0);
     const capped = css.slice(start, css.indexOf('}', start));
-    expect(capped).toContain('.fy-render-image:not([data-fy-render-sized=');
-    expect(capped).toContain('.fy-render-chart');
     expect(capped).toContain('max-width: min(100%, 480px)');
+  });
+
+  test('a chart fills its column: no width cap is set on it', () => {
+    expect(css).not.toMatch(/\.fy-render-chart[^{]*\{[^}]*max-width/u);
   });
 });
 

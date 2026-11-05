@@ -347,6 +347,22 @@ const scene = async (kind: Scene, form: Form, mode: Mode): Promise<void> => {
       return count;
     });
   check(coloured > 500, `${name}: the chart drew no bars (${coloured} coloured pixels)`);
+  // The chart fills its column: every chart canvas is as wide as its fy-render stage (within 2px).
+  const widths = await page.locator('figure[data-fy-render-type="chart"]').evaluateAll(figures =>
+    figures.map(figure => ({
+      canvas: figure.querySelector('canvas')?.getBoundingClientRect().width ?? 0,
+      stage: figure.querySelector('.fy-render-stage')?.getBoundingClientRect().width ?? 0,
+    })),
+  );
+  check(widths.length > 0, `${name}: no chart figure to measure`);
+  for (const { canvas, stage } of widths)
+    check(
+      stage > 0 && Math.abs(canvas - stage) <= 2,
+      `${name}: the chart canvas is ${Math.round(canvas)}px wide in a ${Math.round(stage)}px stage`,
+    );
+  info(
+    `${name}: chart canvas ${widths.map(w => Math.round(w.canvas)).join(',')} / stage ${widths.map(w => Math.round(w.stage)).join(',')}`,
+  );
   await shot(page, `${name}-below`);
 
   // Drive the real controls: the slider, the segmented buttons and the toggle, and prove the bars redraw.
@@ -370,8 +386,20 @@ const scene = async (kind: Scene, form: Form, mode: Mode): Promise<void> => {
     `${name}: the segmented control did not change the series tone (${before.tones.join(',')} → ${after.tones.join(',')})`,
   );
   check(
-    after.values.every(value => /^\d+$/u.test(value)),
-    `${name}: the toggle did not round the values (${after.values.join(',')})`,
+    after.values.every(value => /^\d+\.\d$/u.test(value)),
+    `${name}: the toggle did not round the values to one decimal (${after.values.join(',')})`,
+  );
+  check(
+    (await frame.locator('#lg').textContent())?.endsWith(`year 1 = ${after.values[0]}`) === true,
+    `${name}: the legend reads "${await frame.locator('#lg').textContent()}", not the rounded first value ${after.values[0]}`,
+  );
+  // Heights follow the rounded values, not the raw ones: the tallest bar carries the largest rounded value.
+  const rounded = after.values.map(Number);
+  check(
+    after.heights.every(
+      (height, at) => Math.abs(height / Math.max(...after.heights) - (rounded[at] ?? 0) / Math.max(...rounded)) < 0.03,
+    ),
+    `${name}: the bar heights (${after.heights.join(',')}) do not follow the rounded values (${after.values.join(',')})`,
   );
   check(
     (await frame.locator('#o').textContent()) === '50%',

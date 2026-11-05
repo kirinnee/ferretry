@@ -251,6 +251,21 @@ describe('fy-render chart value formats', () => {
     should(formatChartValue(3, axis('money', 'EUR'), en)).equal('€3.00');
   });
 
+  test('should print one money format per axis: no cents on a whole-dollar axis, cents on every tick of a fractional one', () => {
+    const tick = (value: number, ticks: readonly number[]) =>
+      formatChartValue(value, axis('money'), { ...en, compact: true, ticks });
+    // A whole-dollar axis never shows `.00`: `$5` and `$0`, not `$5.00` beside `$10`.
+    const whole = [0, 5, 10, 15, 20, 25];
+    should(whole.map(value => tick(value, whole))).eql(['$0', '$5', '$10', '$15', '$20', '$25']);
+    // One fractional tick puts cents on all of them.
+    const fractional = [0, 2.5, 5, 7.5, 10];
+    should(fractional.map(value => tick(value, fractional))).eql(['$0.00', '$2.50', '$5.00', '$7.50', '$10.00']);
+    // A lone tick (no axis around it) judges itself; a tooltip keeps its cents.
+    should(formatChartValue(5, axis('money'), { ...en, compact: true })).equal('$5');
+    should(formatChartValue(2.5, axis('money'), { ...en, compact: true })).equal('$2.50');
+    should(formatChartValue(5, axis('money'), en)).equal('$5.00');
+  });
+
   test('should print seconds as a person says a duration', () => {
     should(formatChartValue(0.45, axis('duration'), en)).equal('450 ms');
     should(formatChartValue(12.5, axis('duration'), en)).equal('12.5 s');

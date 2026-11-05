@@ -368,8 +368,8 @@ fieldset.fy-board-detail__chiprow {
   gap: calc(var(--space-unit) * 4);
 }
 
-/* A picture or chart is drawn at its natural size, as on an agenda card, never stretched across a wide drawer. */
-.fy-board-detail .fy-render :is(.fy-render-image:not([data-fy-render-sized='true']), .fy-render-chart) {
+/* A picture is drawn at its natural size, as on an agenda card, never stretched across a wide drawer; a chart fills the column. */
+.fy-board-detail .fy-render .fy-render-image:not([data-fy-render-sized='true']) {
   max-width: min(100%, 480px);
 }
 

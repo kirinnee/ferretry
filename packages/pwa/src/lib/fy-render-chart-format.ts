@@ -61,11 +61,16 @@ const bytes = (value: number, locale: string | undefined): string => {
  * `12,345`; tooltips and the data table use the full form.
  *
  * `percent` takes the value AS a percentage — `42` is `42%` — because that is how an author writes one.
+ *
+ * ONE FORMAT PER AXIS. A `money` tick has no cents when every tick on its axis is a whole amount (`$10`,
+ * `$5`, `$0`) and cents on EVERY tick when any one has a fraction (`$2.50`, `$5.00`), so an axis never mixes
+ * `$10` with `$5.00`. `ticks` is the axis's tick values; a lone tick judges itself. Outside a tick (a
+ * tooltip, the data table) a small amount keeps its cents.
  */
 export function formatChartValue(
   value: number | null,
   axis: ChartValueAxis,
-  options: { readonly compact?: boolean; readonly locale?: string } = {},
+  options: { readonly compact?: boolean; readonly locale?: string; readonly ticks?: readonly number[] } = {},
 ): string {
   if (value === null || !Number.isFinite(value)) return '—';
   const { locale } = options;
@@ -77,14 +82,21 @@ export function formatChartValue(
       return new Intl.NumberFormat(locale, { maximumFractionDigits: 1, notation, style: 'percent', ...compact }).format(
         value / 100,
       );
-    case 'money':
+    case 'money': {
+      const cents =
+        options.compact === true
+          ? (options.ticks ?? [value]).some(tick => !Number.isInteger(tick))
+          : Math.abs(value) < 10;
       return new Intl.NumberFormat(locale, {
         currency: axis.currency,
-        maximumFractionDigits: Math.abs(value) < 10 ? 2 : 0,
+        maximumFractionDigits: cents ? 2 : 0,
+        // Intl's currency default is two digits: without this a whole $5 prints as $5.00.
+        minimumFractionDigits: notation === 'compact' ? undefined : cents ? 2 : 0,
         notation,
         style: 'currency',
         ...compact,
       }).format(value);
+    }
     case 'duration':
       return duration(value, locale);
     case 'bytes':

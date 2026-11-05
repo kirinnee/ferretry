@@ -27,7 +27,13 @@ const theme = (mode: 'light' | 'dark' = 'dark', overrides: Partial<Record<ThemeT
   const colors = Object.fromEntries(
     THEME_TOKENS.map((token, index) => [token, `#0000${(index + 1).toString(16).padStart(2, '0')}`]),
   ) as Record<ThemeToken, string>;
-  return { colors: { ...colors, ...overrides }, font: 'Inter, system-ui, sans-serif', mode, radius: 4 };
+  return {
+    backdrop: '#0a0b0c',
+    colors: { ...colors, ...overrides },
+    font: 'Inter, system-ui, sans-serif',
+    mode,
+    radius: 4,
+  };
 };
 
 const spec = (payload: string): ChartSpec => {
@@ -89,6 +95,21 @@ describe('fy-render palette — the diagram cache key', () => {
     // Two dark themes that differ in one hue are two keys: "dark" alone would keep a stale diagram up.
     should(paletteKey(theme('dark', { 'viz-3': '#123456' }))).not.equal(base);
     should(paletteKey({ ...theme('dark'), font: 'Georgia, serif' })).not.equal(base);
+    // The surface the diagram sits on is part of the key: a page that repaints it redraws the diagram.
+    should(paletteKey({ ...theme('dark'), backdrop: '#0b0b0d' })).not.equal(base);
+  });
+});
+
+describe('fy-render palette — Mermaid edge labels', () => {
+  test('should paint the edge-label box in what the diagram sits on, not in the card surface', () => {
+    const read = { ...theme('dark'), backdrop: '#0b0b0d' };
+    should(mermaidThemeVariables(read).colors.edgeLabelBackground).equal('#0b0b0d');
+    should(mermaidThemeVariables(read).colors.edgeLabelBackground).not.equal(read.colors.surface);
+  });
+
+  test('should fall back to the page background when nothing painted could be read', () => {
+    const read = { ...theme('dark'), backdrop: '' };
+    should(mermaidThemeVariables(read).colors.edgeLabelBackground).equal(read.colors.bg);
   });
 });
 
@@ -99,7 +120,8 @@ describe('fy-render palette — Mermaid theme variables', () => {
     const variables = mermaidThemeVariables(read);
 
     // Assert
-    const tokenValues = new Set(Object.values(read.colors));
+    // The edge-label box is the one variable painted from what the diagram sits on rather than from a token.
+    const tokenValues = new Set([...Object.values(read.colors), read.backdrop]);
     for (const [key, value] of Object.entries(variables.colors)) {
       should(MERMAID_COLOR_VARIABLES as readonly string[]).containEql(key);
       should(tokenValues.has(value)).be.true();
