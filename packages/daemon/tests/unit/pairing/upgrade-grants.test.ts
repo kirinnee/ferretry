@@ -1,9 +1,25 @@
 import { describe, it } from 'bun:test';
 import { join } from 'node:path';
-import { DAEMON_CAPABILITIES, type DaemonCapability, FULL_DEVICE_GRANTS } from '@ferretry/protocol';
+import {
+  type CapabilityGrants,
+  DAEMON_CAPABILITIES,
+  type DaemonCapability,
+  FULL_DEVICE_GRANTS,
+} from '@ferretry/protocol';
 import should from 'should';
 import { NodePairingCryptography, StatePairingRepository } from '../../../src/adapters/pairing/index.ts';
-import { createFoundationPaths, PairingDeviceRegistry, resolveStateHome } from '../../../src/lib/index.ts';
+import {
+  createFoundationPaths,
+  DEFAULT_CAPABILITY_GRANTS,
+  type GrantAuditEntry,
+  PairingDeviceRegistry,
+  repairSharingFromPairing,
+  repairVoiceFromPairing,
+  resolveStateHome,
+  SHARING_REPAIR_ACTOR,
+  VOICE_REPAIR_ACTOR,
+  type WholeJournal,
+} from '../../../src/lib/index.ts';
 
 /**
  * A daemon that is upgraded must start on the `devices.json` the release before it wrote.
@@ -181,5 +197,102 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
       const repository = await seed(state, JSON.stringify(bad));
       await should(repository.open('workstation')).be.rejected();
     }
+  });
+});
+
+/**
+ * The two one-time boot repairs on the bytes real releases wrote (docs/grants.md, capability nine).
+ *
+ * A fixture per historical shape: the v4.172 file has SEVEN capabilities (before Sharing), the v4.283 file EIGHT
+ * (before Voice). Both are loaded by THIS build, which also knows `voice`, and then run in the order the daemon's
+ * boot runs them — Sharing, then Voice. Nothing here is hand-assembled from `DAEMON_CAPABILITIES`, so a ninth
+ * capability that stops an earlier repair from firing fails on the day it is added.
+ */
+const PRE_VOICE_FIXTURE = join(import.meta.dir, '../../fixtures/pairing/devices-v4.283.json');
+const NOW = Date.parse('2026-11-06T12:00:00.000Z');
+const ON = { use: true, configure: true };
+
+/** What the daemon's boot does, over the devices the repository opened and an in-memory journal. */
+async function bootRepairs(opened: Awaited<ReturnType<StatePairingRepository['open']>>) {
+  const stored = new Map(opened.devices.map(device => [device.id, device.grants]));
+  const entries: GrantAuditEntry[] = [];
+  const deps = {
+    devices: {
+      devices: async () => [...stored].map(([id, grants]) => ({ id, grants })),
+      setDeviceGrants: async (id: string, grants: CapabilityGrants) => {
+        stored.set(id, grants);
+        return true;
+      },
+    },
+    daemonWide: () => DEFAULT_CAPABILITY_GRANTS,
+    journal: { readAll: async (): Promise<WholeJournal> => ({ kind: 'read', entries: [...entries], unreadable: 0 }) },
+    audit: {
+      record: async (entry: GrantAuditEntry) => {
+        entries.push(entry);
+      },
+      recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
+    },
+    clock: { nowMs: () => NOW },
+  };
+  const sharing = await repairSharingFromPairing(deps);
+  const voice = await repairVoiceFromPairing(deps);
+  return { stored, entries, sharing, voice };
+}
+
+describe('a daemon with voice upgraded onto the devices.json of each earlier release', () => {
+  it('should hold the pre-voice fixture to the eight capabilities that release knew', async () => {
+    const document = JSON.parse(await Bun.file(PRE_VOICE_FIXTURE).text()) as {
+      devices: { grants: Record<string, unknown> }[];
+    };
+    for (const device of document.devices)
+      should(Object.keys(device.grants)).deepEqual([...OLD_RELEASE_CAPABILITIES, 'sharing']);
+  });
+
+  it('should give a pre-Sharing full device Sharing and then Voice, and the restricted one neither', async () => {
+    const state = home();
+    const opened = await (await seed(state, await fixtureText())).open('workstation');
+    // The upgrade alone widens nothing: both newer capabilities read off.
+    should(opened.devices.find(device => device.id === PHONE)?.grants.sharing).deepEqual(OFF);
+    should(opened.devices.find(device => device.id === PHONE)?.grants.voice).deepEqual(OFF);
+
+    const { stored, entries, sharing, voice } = await bootRepairs(opened);
+
+    should(sharing).deepEqual({ kind: 'repaired', deviceIds: [PHONE], unrecorded: [], failed: [] });
+    should(voice).deepEqual({ kind: 'repaired', deviceIds: [PHONE], unrecorded: [], failed: [] });
+    should(stored.get(PHONE)).deepEqual(FULL_DEVICE_GRANTS);
+    should(entries.map(entry => entry.actor)).deepEqual([SHARING_REPAIR_ACTOR, VOICE_REPAIR_ACTOR]);
+    for (const capability of ['sharing', 'voice'] as const) should(stored.get(TABLET)?.[capability]).deepEqual(OFF);
+    should(stored.get(TABLET)?.fleet).deepEqual({ use: true, configure: false });
+  });
+
+  it('should give a pre-Voice full device only Voice', async () => {
+    const state = home();
+    const opened = await (await seed(state, await Bun.file(PRE_VOICE_FIXTURE).text())).open('workstation');
+    should(opened.devices.find(device => device.id === PHONE)?.grants.sharing).deepEqual(ON);
+    should(opened.devices.find(device => device.id === PHONE)?.grants.voice).deepEqual(OFF);
+
+    const { stored, entries, sharing, voice } = await bootRepairs(opened);
+
+    should(sharing).deepEqual({ kind: 'repaired', deviceIds: [], unrecorded: [], failed: [] });
+    should(voice).deepEqual({ kind: 'repaired', deviceIds: [PHONE], unrecorded: [], failed: [] });
+    should(stored.get(PHONE)).deepEqual(FULL_DEVICE_GRANTS);
+    should(entries.map(entry => entry.actor)).deepEqual([VOICE_REPAIR_ACTOR]);
+    should(stored.get(TABLET)?.voice).deepEqual(OFF);
+  });
+
+  it('should repair nothing on the next boot, because the devices already hold both', async () => {
+    const state = home();
+    const opened = await (await seed(state, await fixtureText())).open('workstation');
+    const first = await bootRepairs(opened);
+    // The second boot sees the widened record AND the journal the first boot wrote.
+    const again = {
+      ...opened,
+      devices: opened.devices.map(device => ({ ...device, grants: first.stored.get(device.id) ?? device.grants })),
+    };
+    const second = await bootRepairs(again);
+
+    should(second.sharing).deepEqual({ kind: 'repaired', deviceIds: [], unrecorded: [], failed: [] });
+    should(second.voice).deepEqual({ kind: 'repaired', deviceIds: [], unrecorded: [], failed: [] });
+    should(second.entries).deepEqual([]);
   });
 });

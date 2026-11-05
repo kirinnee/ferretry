@@ -7,7 +7,7 @@ import type {
   GrantClock,
   GrantDocumentPort,
   SerialExecutor,
-  SharingRepairJournal,
+  FollowsPairingJournal,
   WholeJournal,
 } from '../../lib/index.ts';
 
@@ -69,7 +69,7 @@ export class SystemGrantClock implements GrantClock {
  * IT LIVES IN THE STATE HOME, so it is keyed by daemon by construction: one daemon's record can never
  * be read as another's, because a state home has exactly one owner.
  */
-export class JournalGrantAudit implements GrantAuditPort, SharingRepairJournal {
+export class JournalGrantAudit implements GrantAuditPort, FollowsPairingJournal {
   constructor(
     private readonly path: string,
     private readonly files: FileSystemPort,
@@ -125,7 +125,7 @@ export class JournalGrantAudit implements GrantAuditPort, SharingRepairJournal {
 
   /**
    * Every record in the journal, or `too-large` past `maxBytes` — for a decision that must not miss an old
-   * record (the Sharing repair, `sharing-follows-pairing.ts`). Unreadable lines are counted, as `recent` does.
+   * record (the boot repairs, `follows-pairing.ts`). Unreadable lines are counted, as `recent` does.
    */
   async readAll(maxBytes: number): Promise<WholeJournal> {
     const information = await this.files.information(this.path);

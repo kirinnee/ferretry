@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { type CapabilityGrants, FULL_DEVICE_GRANTS, LIMITED_DEVICE_GRANTS } from '@ferretry/protocol';
 import should from 'should';
 import {
+  CAPABILITIES_BEFORE_SHARING,
   DEFAULT_CAPABILITY_GRANTS,
   type EnforcedGrants,
   type GrantAuditEntry,
@@ -23,6 +24,13 @@ const ON = { use: true, configure: true };
 
 /** The owner's phone as the upgrade left it: everything it held before Sharing existed, Sharing filled off. */
 const oldFull = (): CapabilityGrants => ({ ...FULL_DEVICE_GRANTS, sharing: OFF });
+
+/**
+ * The same phone as a build that has `voice` reads it when the record predates BOTH: Sharing and Voice filled off.
+ * Sharing's repair must still fire for it — its "held everything before" test names the seven capabilities that
+ * existed before Sharing, rather than "every capability but Sharing", which would demand Voice too.
+ */
+const preSharingFull = (): CapabilityGrants => ({ ...FULL_DEVICE_GRANTS, sharing: OFF, voice: OFF });
 
 interface Rig {
   devices?: Record<string, CapabilityGrants>;
@@ -86,6 +94,33 @@ describe('Sharing for a device that held everything before Sharing existed', () 
         changes: [`${PHONE}/sharing.use=on`, `${PHONE}/sharing.configure=on`],
         at: '2026-11-01T12:00:00.000Z',
       },
+    ]);
+  });
+
+  it('still fires for a device from before Sharing when a later capability is off, because the test names its seven', async () => {
+    const { deps, stored, recorded } = rig({ devices: { [PHONE]: preSharingFull() } });
+
+    should(await repairSharingFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [PHONE],
+      unrecorded: [],
+      failed: [],
+    });
+    should(stored.get(PHONE)?.sharing).deepEqual(ON);
+    // Only Sharing: whatever a later capability's own repair decides is not this one's to settle.
+    should(stored.get(PHONE)?.voice).deepEqual(OFF);
+    should(recorded).have.length(1);
+  });
+
+  it('names exactly the seven capabilities that existed before it', () => {
+    should([...CAPABILITIES_BEFORE_SHARING]).deepEqual([
+      'fleet',
+      'terminal',
+      'browser',
+      'filesystem',
+      'warden',
+      'pairing',
+      'secrets',
     ]);
   });
 

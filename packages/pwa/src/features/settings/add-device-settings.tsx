@@ -51,7 +51,7 @@ import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
 import { QrSymbol } from '../../components/qr-symbol.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { axisLabel, capabilityLabel } from '../../lib/grants.ts';
+import { axisLabel, capabilityBlurb, capabilityLabel } from '../../lib/grants.ts';
 import {
   deviceAxisControl,
   deviceGrantPatch,
@@ -418,6 +418,9 @@ function PairedDeviceRow({
                 data-device-capability={capability}
               >
                 <span className="text-meta font-semibold text-fg">{capabilityLabel(capability)}</span>
+                <span className="text-meta leading-base text-muted" data-device-capability-blurb="">
+                  {capabilityBlurb(capability)}
+                </span>
                 <div className="grid min-w-0 grid-cols-2 gap-2">
                   {CAPABILITY_AXES.map(axis => (
                     <DeviceAxisSwitch
