@@ -824,9 +824,15 @@ describe('AGENDA_INSTRUCTION', () => {
     // explainers stay in them.
     // And READ → EDIT (the owner: "we need to read to know what needs to be updated"): every part, the ask's too.
     should(text).containEql(
-      "Every update: `show <id> --yaml` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then `patch <id> --file f`; chat points there.",
+      "Asks/answers stack on the topic's ONE item: `show <id> --yaml` whole, then `patch <id> --file f`; chat points there.",
     );
-    should(text).containEql('Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there.');
+    should(text).not.containEql("rewrite all that's stale");
+    // The owner on !A404: every unresolved ask stays floated in where-we-are and what-I-need; answered Q&A goes to a
+    // History tab, oldest first, with the answer.
+    should(text).containEql(
+      'EVERY open ask stays floated in premise (where we are) + ask (what I need); answered Q&A→`History` tab, oldest first, with answer.',
+    );
+    should(text).containEql('Tabs: any kind, serial stays one.');
     should(text).not.containEql('(main)');
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
@@ -877,7 +883,10 @@ describe('AGENDA_INSTRUCTION', () => {
     // and `--term X=meaning` unquoted (cap 1,300 → 1,320). Then 1,338: the owner's always-rewrite and tabs-hold-anything
     // rules (&C48), paid for in part by the stage chain and `--stage` (cap 1,320 → 1,340); then 1,352 for read → edit,
     // paid for in part by the stage chain; review then restored the open line's value placeholders, so a copied command
-    // runs (1,380, cap 1,390).
+    // runs (1,380, cap 1,390). Then 1,385 for the owner's float-open-asks rule (&F1166, !A404): asks and answers stack on
+    // one item, every unresolved ask stays floated, answered Q&A goes to a History tab — paid for by dropping the
+    // "rewrite all that's stale (…)" list and the tabs sentence's parenthesis, which the whole-prompt cap (8,000, 7,998
+    // measured) left no room to grow past.
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_390);
   });
 

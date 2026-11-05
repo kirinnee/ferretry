@@ -47,8 +47,19 @@ they would want to hear about in the same place, against the same background, an
   their ask is answered too. What the item needs from the owner right now is still recorded as its **stage**
   (explainer → question → plan → tracker → test, [below](#stage-the-tabs-and-the-detail)), but the prompt no longer
   teaches it as the item's type.
+- **Open asks stay floated; answered ones go to History.** Every ask or answer on a topic stacks onto the SAME item
+  (the owner, on !A404: _"everytime there's something asked or resolved (user might change topic), add it, stack it
+  onto where we are at and what I need from you. don't drop the previous questions"_). **EVERY open ask stays
+  floated** in the premise ("where we are") and the ask ("what I need from you"), however many have piled up: an
+  earlier question is never dropped to make room for a newer one. An answered question moves to a **`History` tab**
+  (_"keep earlier questions and answers on another tab, but don't let go of unresolved questions"_), oldest first,
+  each marked answered with its answer. A new item is opened only for a clearly separate topic (the three-part test
+  above). The prompt says it in one sentence and `fy agenda --help` says it whole (`AGENDA_BODY_RULE`).
+  **GAP (daemon):** the daemon does not yet keep the other asks open when the owner answers ONE ask of a
+  multi-ask item (a reply with several `-q` questions is one numbered reply that rests the whole item), nor append the
+  answered ask to a `History` tab itself; the ferret does both by hand on its next patch.
 - **Always current: read, then patch.** Every update reads the item whole first (`fy agenda show <id> --yaml`, with
-  its revision), rewrites every part that is out of date — premise, context, the ask (what the owner is asked for),
+  its revision), keeps every open ask and rewrites every part that is out of date — premise, context, the ask (what the owner is asked for),
   its options and how to reply, still-open and each tab — and writes it back as one patch
   ([Patch](#patch-the-item-as-one-document)), refused if the item moved on since the read (_"updating agenda should be read => edit, not just patch"_, _"make sure
   the chat ALWAYS update their asks, their body? they should ALWAYS check such that the asks, follow up, and all the
