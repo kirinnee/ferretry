@@ -1,3 +1,9 @@
+## [4.283.1](https://github.com/kirinnee/ferretry/compare/v4.283.0...v4.283.1) (2026-11-05)
+
+### Fixes
+
+* **daemon:** start Codex at its reasoning level instead of typing /model ([#1498](https://github.com/kirinnee/ferretry/issues/1498)) ([03afd43](https://github.com/kirinnee/ferretry/commit/03afd43e9f98fce933e2430d7f2d41066f8e21dd))
+
 ## [4.283.0](https://github.com/kirinnee/ferretry/compare/v4.282.0...v4.283.0) (2026-11-05)
 
 ### Features

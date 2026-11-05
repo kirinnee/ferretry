@@ -163,13 +163,13 @@ describe('Live reading — the interrupt, Repeat and End', () => {
 
 describe('Live reading — races', () => {
   it('a message sent by hand while reading stops the old reading and WAITS for the send: it is in flight, not sent', () => {
-    const begun = run([{ type: 'outside-send', atMs: 9_000 }], READING.state);
+    const begun = run([{ type: 'person-send', atMs: 9_000 }], READING.state);
     should(begun.state.phase).equal('sending');
     should(begun.state.sendInFlight).be.true();
     should(begun.state.outside).be.true();
     should(micIsOpen(begun.state)).be.false();
-    // The feed is armed first (a fast turn can finish while the send is acknowledged); nothing is watched yet.
-    should(types(begun.effects)).deepEqual(['stopSpeaking', 'armReply']);
+    // The runner arms the feed as the press begins (a fast turn can finish while the send is acknowledged).
+    should(types(begun.effects)).deepEqual(['stopSpeaking']);
     // The stopped reading answers late, the room is noisy: nothing happens.
     const noise = run(
       [{ type: 'speak-done', id: 1, end: 'stopped' }, { type: 'speech-start' }, { type: 'reply', signal: 'done' }],
@@ -177,7 +177,7 @@ describe('Live reading — races', () => {
     );
     should(noise.state).equal(begun.state);
     // Accepted: Live follows the new turn and records nothing about it.
-    const sent = run([{ type: 'outside-sent', atMs: 9_400 }], begun.state);
+    const sent = run([{ type: 'sent', atMs: 9_400 }], begun.state);
     should(sent.state.phase).equal('working');
     should(sent.state.sentAtMs).equal(9_400);
     should(sent.state.turn).equal(READING.state.turn + 1);
@@ -188,25 +188,22 @@ describe('Live reading — races', () => {
     should(reply.effects).deepEqual([{ type: 'stopWatchReply' }, { type: 'speak', what: 'reply', id: 2 }]);
   });
 
-  it('a message sent by hand that FAILS lands On hold with the feed disarmed: Live never watches a turn that did not begin', () => {
-    const begun = run([{ type: 'outside-send', atMs: 9_000 }], READING.state);
-    const failed = run([{ type: 'outside-failed' }], begun.state);
+  it('a message sent by hand that FAILS lands On hold: Live never watches a turn that did not begin', () => {
+    const begun = run([{ type: 'person-send', atMs: 9_000 }], READING.state);
+    const failed = run([{ type: 'send-failed' }], begun.state);
     should(failed.state.phase).equal('hold');
     should(failed.state.holdReason).equal('send-failed');
     should(failed.state.sendInFlight).be.false();
     should(failed.state.outside).be.false();
     should(micIsOpen(failed.state)).be.false();
-    should(types(failed.effects)).deepEqual(['stopWatchReply']);
-    // Live's own send answers (`sent`) mean nothing to a send by hand, and a stale answer after the failure is ignored.
-    should(run([{ type: 'sent', atMs: 1 }, { type: 'send-failed' }], begun.state).state).equal(begun.state);
-    should(run([{ type: 'outside-sent', atMs: 1 }, { type: 'outside-failed' }], failed.state).state).equal(
-      failed.state,
-    );
+    should(failed.effects).deepEqual([]);
+    // A stale answer after the failure is ignored.
+    should(run([{ type: 'sent', atMs: 1 }, { type: 'send-failed' }], failed.state).state).equal(failed.state);
   });
 
-  it('a message sent by hand does nothing in any other phase', () => {
-    for (const state of [WORKING, run(LISTENING).state, INITIAL_LIVE_STATE]) {
-      should(run([{ type: 'outside-send', atMs: 1 }], state).state).equal(state);
+  it('a message sent by hand while Live works, or is off, changes nothing (a separate message)', () => {
+    for (const state of [WORKING, INITIAL_LIVE_STATE]) {
+      should(run([{ type: 'person-send', atMs: 1 }], state).state).equal(state);
     }
   });
 
@@ -406,7 +403,7 @@ describe('Live reading — totality', () => {
     { type: 'speak-done', id: 1, end: 'unavailable' },
     { type: 'skip' },
     { type: 'repeat' },
-    { type: 'outside-send', atMs: 5 },
+    { type: 'person-send', atMs: 5 },
     { type: 'resume' },
     { type: 'end' },
     { type: 'visibility', visible: false },

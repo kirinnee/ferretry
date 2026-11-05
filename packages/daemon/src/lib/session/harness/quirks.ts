@@ -15,9 +15,10 @@ export interface HarnessQuirks {
   /**
    * Reasoning effort is a native slash command the harness handles locally.
    *
-   * Codex has no such command — effort is only settable from inside its modal
-   * picker — so a request to set it as a command is refused rather than typed
-   * into the conversation as a message.
+   * Codex has no such command — in a live session effort is only settable from
+   * inside its modal picker, and a start puts it on the argv instead
+   * (`startupEffort`) — so a request to set it as a command is refused rather
+   * than typed into the conversation as a message.
    */
   readonly effortIsRuntimeCommand: boolean;
   /**

@@ -34,6 +34,14 @@
  *   - LISTENING NEEDS BOTH THE MICROPHONE AND THE LOCK: `starting` becomes `listening` only once the mic is
  *     open (`listening` event) AND the one-Live-tab lock is granted (`locks`); a refusal of the lock ends Live
  *     in any phase.
+ *   - A SEND CAN BE TAKEN BACK UNTIL THE COMPOSER STARTS IT. `sendInFlight` begins when the machine approves the send;
+ *     the composer's own send starts a moment later (a render later). In between the runner holds a revocable ticket
+ *     and a stop (Hold, typing, a hidden tab) first dispatches `send-withdrawn` — the send goes back to "words ready,
+ *     nothing sent" — and then the stop itself, so it lands exactly where a stop in the countdown does.
+ *   - THE PERSON'S OWN SEND RETIRES THE ATTEMPT. The composer's ordinary Send (arrow, Enter) while Live is anywhere but
+ *     working/reading is `person-send`: the countdown, the timers and the take (and its pending decode) are gone, the
+ *     microphone is shut, and the turn is the same "send in flight → working" path Live's own send takes. The person
+ *     sent what they saw; Live never sends it again.
  *   - A FAILED SEND is On hold with the words kept; nothing is retried by itself.
  *   - AN EMPTY OR NOISE TAKE goes quietly back to listening.
  *   - THE MICROPHONE IS OPEN ONLY WHILE `listening`, `hearing` or `sending` (until the send starts).
@@ -59,9 +67,10 @@
  *   - `tapToListen` (an iPhone, where a page may not open the microphone without a tap) lands On hold with
  *     reason `listen` after each reply instead of reopening the microphone by itself; and when an automatic
  *     reopen is refused anywhere, the same Listen hold is the fallback.
- *   - A message sent BY HAND while a reply is being read (`outside-send`) stops the reading — it belongs to an
- *     older turn — and the send is IN FLIGHT (`sending`, `outside`): `outside-sent` makes Live follow the new turn,
- *     `outside-failed` lands On hold. Live never assumes a send that has not been answered.
+ *   - A message sent BY HAND while a reply is being read (`person-send`) stops the reading — it belongs to an
+ *     older turn — and the send is IN FLIGHT (`sending`, `outside`): its acknowledgement (`sent`) makes Live follow the
+ *     new turn without recording a Live turn, its failure lands On hold with the draft kept. Live never assumes a send
+ *     that has not been answered.
  */
 
 import type { LiveBlock, ReadEnd, ReadWhat } from './ports.ts';
@@ -125,7 +134,7 @@ export interface LiveState {
    * never opens while this is so. Live's own reading is NOT this: it is `phase === 'reading'`.
    */
   readonly voiceBusy: boolean;
-  /** The send in flight is the person's own, by hand (not Live's turn): its answer starts the reply watch, never a turn record. */
+  /** The send in flight is the person's own, pressed while a reply was being read: it starts the reply watch, never a turn record. */
   readonly outside: boolean;
   /** The tab is hidden now (kept in every phase: a reply that lands while away pauses instead of listening). */
   readonly hidden: boolean;
@@ -214,8 +223,6 @@ export type LiveEffect =
   | { readonly type: 'stopSpeaking' }
   /** Cut the page's voice, whoever holds it: Live is about to open the microphone on the person's say-so. */
   | { readonly type: 'silenceVoice' }
-  /** Arm the reply feed (and take the reader's baseline) for a message sent by hand, before its answer is known. */
-  | { readonly type: 'armReply' }
   | { readonly type: 'recordTurn'; readonly numbers: TurnNumbers };
 
 export type LiveEvent =
@@ -251,6 +258,10 @@ export type LiveEvent =
   | { readonly type: 'timer'; readonly kind: LiveTimerKind; readonly atMs: number }
   | { readonly type: 'hold' }
   | { readonly type: 'send-now'; readonly atMs: number }
+  /** The person pressed the composer's own Send. */
+  | { readonly type: 'person-send'; readonly atMs: number }
+  /** The send Live approved was taken back before the composer started it. */
+  | { readonly type: 'send-withdrawn' }
   | { readonly type: 'resume' }
   | { readonly type: 'end' }
   | { readonly type: 'typing' }
@@ -263,13 +274,6 @@ export type LiveEvent =
   /** The person stopped the reading (tap, Space, Esc, S). */
   | { readonly type: 'skip' }
   | { readonly type: 'repeat' }
-  /**
-   * A message is being sent by hand (not by Live): a reading in progress belongs to an older turn. Its fate follows:
-   * `outside-sent` (the send was accepted) or `outside-failed` (it was not: nothing was sent, the draft is still there).
-   */
-  | { readonly type: 'outside-send'; readonly atMs: number }
-  | { readonly type: 'outside-sent'; readonly atMs: number }
-  | { readonly type: 'outside-failed' }
   /** The page's voice started or stopped being held by something that is not Live's own reading. */
   | { readonly type: 'voice'; readonly busy: boolean };
 
@@ -683,6 +687,7 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
   // Something else took, or let go of, the page's one voice. While Live reads, the voice is Live's own: the reader
   // reports a takeover as `taken`, and this flag is set from that.
   if (event.type === 'voice') return reduceVoice(state, event.busy);
+  if (event.type === 'person-send') return personSent(state, event.atMs);
   // A refusal of the one-Live-tab lock ends Live in EVERY active phase: two tabs must never both capture and send.
   if (event.type === 'locks' && !event.granted)
     return phase === 'off' ? step(state) : toOff(state, { kind: 'blocked', block: 'other-tab' });
@@ -764,14 +769,6 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
           return step({ ...state, ...FRESH_TURN, phase: 'hold', holdReason: 'user', readKind: null }, [
             { type: 'stopSpeaking' },
           ]);
-        case 'outside-send':
-          // A message sent by hand: this reading belongs to an older turn, and the voice stops now. The send is
-          // IN FLIGHT, not sent: Live waits for its answer (`outside-sent` follows it, `outside-failed` lands On hold).
-          // The reply feed is armed first, as for Live's own send, so a fast turn cannot slip past.
-          return step(
-            { ...state, ...FRESH_TURN, phase: 'sending', readKind: null, sendInFlight: true, outside: true },
-            [{ type: 'stopSpeaking' }, { type: 'armReply' }],
-          );
         default:
           return step(state);
       }
@@ -817,6 +814,44 @@ function reduceVoice(state: LiveState, busy: boolean): LiveStep {
   return step(seen);
 }
 
+/**
+ * The person sent the box with the composer's own Send. Whatever Live was doing about this turn is over: nothing counts
+ * down, nothing is worked out, the microphone is shut, and the send is "in flight" — the answer (`sent` / `send-failed`)
+ * comes from that press, not from Live. While Live works the press is a separate message and changes nothing; while Live
+ * reads aloud it stops the reading (it belongs to an older turn) and Live follows the new message.
+ */
+function personSent(state: LiveState, atMs: number): LiveStep {
+  const { phase } = state;
+  if (phase === 'off' || phase === 'working') return step(state);
+  if (phase === 'sending' && state.sendInFlight) return step(state);
+  // A message sent by hand while a reply is read: that reading belongs to an older turn, and the voice stops now. The
+  // send is IN FLIGHT, not sent — the runner arms the reply feed and the press's answer (`sent` / `send-failed`) decides.
+  if (phase === 'reading')
+    return step({ ...state, ...FRESH_TURN, phase: 'sending', readKind: null, sendInFlight: true, outside: true }, [
+      { type: 'stopSpeaking' },
+    ]);
+  return step(
+    {
+      ...state,
+      phase: 'sending',
+      countdown: null,
+      countdownElapsed: true,
+      sendInFlight: true,
+      sendWhenReady: false,
+      sendNow: true,
+      wordsReady: true,
+      wordsReadyAtMs: atMs,
+      endReason: 'user',
+      endedAtMs: atMs,
+      speechEndedAtMs: atMs,
+      park: null,
+      holdReason: null,
+      pauseReason: null,
+    },
+    [{ type: 'cancelCountdown' }, { type: 'cancelTimers' }, { type: 'closeMic' }],
+  );
+}
+
 /** A hidden tab before the microphone ever opened: nothing to close but the take that was being opened. */
 function stepToPaused(state: LiveState): LiveStep {
   return step({ ...state, ...FRESH_TURN, words: '', phase: 'paused', pauseReason: 'hidden' }, [
@@ -859,22 +894,26 @@ function reduceOpen(state: LiveState, event: LiveEvent): LiveStep {
 
 function reduceSending(state: LiveState, event: LiveEvent): LiveStep {
   if (state.sendInFlight) {
-    if (state.outside) {
-      // The person's own send: its answer, and only its answer, ends the wait.
-      if (event.type === 'outside-sent') return sentOutside(state, event.atMs);
-      if (event.type === 'outside-failed')
-        return step({ ...state, ...FRESH_TURN, phase: 'hold', holdReason: 'send-failed', pauseReason: null }, [
-          { type: 'stopWatchReply' },
-        ]);
-      return step(state);
-    }
-    if (event.type === 'sent') return sentTurn(state, event.atMs);
+    // The person's own send pressed while a reply was read is not one of Live's turns: nothing is recorded for it.
+    if (event.type === 'sent') return state.outside ? sentOutside(state, event.atMs) : sentTurn(state, event.atMs);
+    // Taken back before the composer started it: the words stand on screen, ready, and nothing has gone. The stop
+    // that caused it follows at once; until it does the turn is parked, so no timer or press can send it.
+    if (event.type === 'send-withdrawn')
+      return step({
+        ...state,
+        sendInFlight: false,
+        sendNow: false,
+        countdown: null,
+        countdownElapsed: true,
+        park: { phase: 'hold', reason: 'user' },
+      });
     if (event.type === 'send-failed')
       return step({
         ...state,
         phase: 'hold',
         holdReason: 'send-failed',
         sendInFlight: false,
+        outside: false,
         sendNow: false,
         countdown: null,
         countdownElapsed: false,

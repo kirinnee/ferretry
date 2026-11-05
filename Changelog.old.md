@@ -1,3 +1,9 @@
+## [4.283.0](https://github.com/kirinnee/ferretry/compare/v4.282.0...v4.283.0) (2026-11-05)
+
+### Features
+
+* **pwa:** pick the fastest safe speech path per device, finish a take early, and measure it (F137 3b) ([#1495](https://github.com/kirinnee/ferretry/issues/1495)) ([444c44e](https://github.com/kirinnee/ferretry/commit/444c44e7d43aadb1662fd6234a7d658a9c8e3ca3))
+
 ## [4.282.0](https://github.com/kirinnee/ferretry/compare/v4.281.0...v4.282.0) (2026-11-05)
 
 ### Features

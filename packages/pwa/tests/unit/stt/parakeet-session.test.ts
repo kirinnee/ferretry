@@ -834,4 +834,26 @@ describe('ParakeetRecognitionSession — closing the microphone while the early 
     await tick();
     should(w.failures).deepEqual([]);
   });
+
+  it('stops watching the page once the capture is closed, and a hide already on its way cancels nothing', async () => {
+    const w = await recordingWorld();
+    const decode = stalledDecode(w);
+    const take = w.session.beginFinish();
+    should(w.unwatched()).equal(0);
+    w.session.closeCapture();
+    should(w.unwatched()).equal(1);
+    // The page fans a hide out to a copy of its watchers: this one was already queued.
+    w.hide();
+    await tick();
+    should(w.events).not.containEql('abort');
+    decode.resolve('saved words');
+    should(await take?.text).equal('saved words');
+    should(w.recording.cancels).equal(0);
+  });
+
+  it('dictation without a closed capture still cancels on a hidden page', async () => {
+    const w = await recordingWorld();
+    w.hide();
+    should(w.events).containEql('abort');
+  });
 });

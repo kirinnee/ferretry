@@ -1106,6 +1106,116 @@ describe('liveReduce — Listening needs the microphone AND the lock', () => {
   });
 });
 
+describe('liveReduce — a send can be taken back until the composer starts it', () => {
+  const IN_FLIGHT = run([...WORDS, { type: 'countdown-done', atMs: 6_500 }]);
+
+  it('the approved send is in flight with the words ready', () => {
+    should(IN_FLIGHT.state.phase).equal('sending');
+    should(IN_FLIGHT.state.sendInFlight).be.true();
+    should(types(IN_FLIGHT.effects)).containEql('send');
+  });
+
+  it('send-withdrawn puts it back to "words ready, nothing sent"; the stop that follows lands where a stop in the ring does', () => {
+    const withdrawn = run([{ type: 'send-withdrawn' }], IN_FLIGHT.state);
+    should(withdrawn.state.sendInFlight).be.false();
+    should(withdrawn.state.wordsReady).be.true();
+    should(withdrawn.state.words).equal('Fix the bug.');
+    should(withdrawn.effects).deepEqual([]);
+    for (const [stop, landing] of [
+      [{ type: 'hold' }, 'hold'],
+      [{ type: 'typing' }, 'hold'],
+      [{ type: 'visibility', visible: false }, 'paused'],
+    ] as const) {
+      const stopped = run([stop], withdrawn.state);
+      should(stopped.state.phase).equal(landing);
+      should(stopped.state.words).equal('Fix the bug.');
+      should(stopped.state.shown).be.true();
+      should(types(stopped.all)).not.containEql('send');
+      should(types(stopped.effects)).containEql('closeMic');
+    }
+    // Nothing the room or the clock does sends it afterwards.
+    for (const event of [
+      { type: 'countdown-done', atMs: 7_000 },
+      { type: 'timer', kind: 'settle', atMs: 7_000 },
+    ] as const)
+      should(types(run([event], withdrawn.state).effects)).not.containEql('send');
+  });
+
+  it('send-withdrawn means nothing when no send is in flight', () => {
+    const state = run(WORDS).state;
+    should(run([{ type: 'send-withdrawn' }], state).state).deepEqual(state);
+  });
+});
+
+describe("liveReduce — the person pressing the composer's own Send", () => {
+  const PRESS: LiveEvent = { type: 'person-send', atMs: 7_000 };
+  const RETIRED: readonly string[] = ['cancelCountdown', 'cancelTimers', 'closeMic'];
+
+  it('retires the attempt from every phase before a send: the send is in flight, the mic is shut, and Live sends nothing itself', () => {
+    const phases: Record<string, LiveState> = {
+      starting: run([START]).state,
+      listening: run(LISTENING).state,
+      hearing: run(HEARING).state,
+      'sending (ring running, words not ready)': run(SENDING).state,
+      'sending (words ready)': run(WORDS).state,
+      hold: run([...LISTENING, { type: 'hold' }]).state,
+      'hold (typing)': run([...LISTENING, { type: 'typing' }]).state,
+      'parked turn': run([...SENDING, { type: 'hold' }]).state,
+      paused: run([...LISTENING, { type: 'visibility', visible: false }]).state,
+    };
+    for (const [name, state] of Object.entries(phases)) {
+      const pressed = run([PRESS], state);
+      should(pressed.state.phase).equal('sending', name);
+      should(pressed.state.sendInFlight).be.true(name);
+      should(pressed.state.countdown).equal(null);
+      should(pressed.state.park).equal(null);
+      should(pressed.effects.map(effect => effect.type)).deepEqual([...RETIRED], name);
+      should(micIsOpen(pressed.state)).be.false(name);
+      // Late answers from the retired attempt are ignored: the decode, the ring, the settle timer.
+      for (const late of [
+        { type: 'turn-words', attempt: pressed.state.attempt, atMs: 7_100, text: 'Late words.' },
+        { type: 'countdown-done', atMs: 8_000 },
+        { type: 'timer', kind: 'settle', atMs: 8_000 },
+        { type: 'speech-start' },
+      ] as const) {
+        const after = run([late], pressed.state);
+        should(types(after.effects)).not.containEql('send');
+        should(after.state.words).equal(pressed.state.words);
+        should(after.state.sendInFlight).be.true();
+      }
+    }
+  });
+
+  it('goes the same way as a send: sent → working with the reply watched; a failure → On hold with the words kept', () => {
+    const pressed = run([PRESS], run(WORDS).state);
+    const sent = run([{ type: 'sent', atMs: 7_050 }], pressed.state);
+    should(sent.state.phase).equal('working');
+    should(types(sent.effects)).deepEqual(['recordTurn', 'watchReply']);
+    const failed = run([{ type: 'send-failed' }], pressed.state);
+    should(failed.state.phase).equal('hold');
+    should(failed.state.holdReason).equal('send-failed');
+    should(failed.state.words).equal('Fix the bug.');
+  });
+
+  it('changes nothing while the ferret works, when Live is off, or when its own send is already on the way', () => {
+    for (const state of [INITIAL_LIVE_STATE, WORKING, run([...WORDS, { type: 'countdown-done', atMs: 6_500 }]).state]) {
+      const pressed = liveReduce(state, PRESS);
+      should(pressed.state).equal(state);
+      should(pressed.effects).deepEqual([]);
+    }
+  });
+
+  it('is never the reason Live sends', () => {
+    for (const state of [
+      run(LISTENING).state,
+      run(HEARING).state,
+      run(WORDS).state,
+      run([...LISTENING, { type: 'hold' }]).state,
+    ])
+      should(types(liveReduce(state, PRESS).effects)).not.containEql('send');
+  });
+});
+
 describe('liveReduce — totality', () => {
   const EVENTS: readonly LiveEvent[] = [
     START,
@@ -1143,7 +1253,8 @@ describe('liveReduce — totality', () => {
     { type: 'speak-done', id: 9, end: 'failed' },
     { type: 'skip' },
     { type: 'repeat' },
-    { type: 'outside-send', atMs: 10 },
+    { type: 'person-send', atMs: 10 },
+    { type: 'send-withdrawn' },
   ];
   const PHASES: Record<LivePhase, LiveState> = {
     off: INITIAL_LIVE_STATE,

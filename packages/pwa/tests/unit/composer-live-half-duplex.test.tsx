@@ -391,7 +391,7 @@ describe('Live is half-duplex against every speaker on the page', () => {
     await r.composer.unmount();
   });
 
-  it('a message sent by hand that goes stops the reading, and Live stays On hold until Resume', async () => {
+  it('a message sent by hand that goes stops the reading, and Live follows the new message (the press is the end of the hold)', async () => {
     const r = await rig();
     await r.reading();
     await typeInto(r.textarea(), 'one more thing', 'textarea');
@@ -400,7 +400,7 @@ describe('Live is half-duplex against every speaker on the page', () => {
     await flush();
     expect(r.sent.messages).toEqual(['Fix the bug.', 'one more thing']);
     expect(r.audible()).toBe(false);
-    expect(r.phase()).toBe('hold');
+    expect(r.phase()).toBe('working');
     expect(r.micOpen()).toBe(false);
     expect(r.overlaps).toEqual([]);
     await r.composer.unmount();

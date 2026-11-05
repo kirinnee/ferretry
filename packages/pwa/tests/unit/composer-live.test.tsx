@@ -452,6 +452,264 @@ describe('Composer Live voice', () => {
   });
 });
 
+const pressAction = async (container: HTMLElement, action: string): Promise<void> => {
+  const button = must(
+    [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      b => b.getAttribute('data-live-action') === action,
+    ),
+    `the ${action} button`,
+  );
+  await interact(() => button.click());
+  await flush();
+};
+
+/** A keystroke, the way the browser makes one: the value changes and `input` fires, with no act in between. */
+const typeNow = (textarea: HTMLTextAreaElement, value: string): void => {
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+const phaseOf = (container: HTMLElement): string | null =>
+  container.querySelector('[data-live-phase]')?.getAttribute('data-live-phase') ?? null;
+
+describe('Composer Live voice — THE SURPRISE-SEND RULE through the real composer', () => {
+  beforeEach(() => {
+    writeMdComposePref('off');
+    unitClock.hold();
+  });
+  afterEach(() => writeMdComposePref('on'));
+
+  const start = async () => {
+    const world = await rig();
+    await interact(() => must(liveButton(world.composer.container), 'the Live button').click());
+    await flush();
+    return world;
+  };
+
+  it("the composer's own Send during a slow decode sends the preview ONCE; the pending take cannot re-insert and send it again, and the mic stays shut", async () => {
+    const { composer, fake, sent } = await start();
+    fake.decodeMs.current = 2_000;
+    await interact(() => fake.listeners[0]?.onLive('Fix the bug.'));
+    await speakTurn(fake);
+    expect(textareaOf(composer.container).value).toBe('Fix the bug.');
+    const send = must(composer.container.querySelector<HTMLButtonElement>('button[type=submit]'), 'the Send button');
+    await interact(() => send.click());
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    // The first real turn: Live is working, the microphone is off, the take is gone.
+    expect(phaseOf(composer.container)).toBe('working');
+    expect(fake.takes[0]?.cancelled).toBe(true);
+    // The slow decode answers and the countdown would have run out: nothing comes back, nothing goes twice.
+    await interact(() => fake.advance(2_500));
+    await flush();
+    await interact(() => fake.advance(5_000));
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    expect(textareaOf(composer.container).value).toBe('');
+    expect(phaseOf(composer.container)).toBe('working');
+    expect(fake.takes.length).toBe(1);
+    await composer.unmount();
+  });
+
+  it('Enter in the box is the same press, and a typed message is retired the same way', async () => {
+    const { composer, fake, sent } = await start();
+    const textarea = textareaOf(composer.container);
+    await interact(async () => typeNow(textarea, 'typed by hand'));
+    await flush();
+    expect(phaseOf(composer.container)).toBe('hold');
+    await interact(() => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await flush();
+    expect(sent.messages).toEqual(['typed by hand']);
+    expect(phaseOf(composer.container)).toBe('working');
+    await interact(() => fake.advance(60_000));
+    expect(sent.messages).toEqual(['typed by hand']);
+    await composer.unmount();
+  });
+
+  it('a press that fails is On hold with the words kept, and Live does not send them itself', async () => {
+    const { composer, fake, sent } = await start();
+    sent.fail = true;
+    await speakTurn(fake);
+    const send = must(composer.container.querySelector<HTMLButtonElement>('button[type=submit]'), 'the Send button');
+    await interact(() => send.click());
+    await flush();
+    expect(phaseOf(composer.container)).toBe('hold');
+    expect(textareaOf(composer.container).value).toBe('Fix the bug.');
+    await interact(() => fake.advance(60_000));
+    expect(sent.messages).toEqual([]);
+    await composer.unmount();
+  });
+
+  it('typing the instant the countdown ends — before React commits the send — sends NOTHING, and the typed words stay', async () => {
+    const { composer, fake, sent } = await start();
+    const textarea = textareaOf(composer.container);
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      typeNow(textarea, 'UNFINISHED REPLACEMENT');
+    });
+    await flush();
+    expect(sent.messages).toEqual([]);
+    expect(textarea.value).toBe('UNFINISHED REPLACEMENT');
+    expect(phaseOf(composer.container)).toBe('hold');
+    await interact(() => fake.advance(60_000));
+    await flush();
+    expect(sent.messages).toEqual([]);
+    await composer.unmount();
+  });
+
+  it('End before React commits the send sends nothing', async () => {
+    const { composer, fake, sent } = await start();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      must(liveButton(composer.container), 'the Live button').click();
+    });
+    await flush();
+    expect(sent.messages).toEqual([]);
+    expect(liveButton(composer.container)?.getAttribute('aria-pressed')).toBe('false');
+    expect(textareaOf(composer.container).value).toBe('Fix the bug.');
+    await composer.unmount();
+  });
+
+  it('Hold, and a hidden tab, before React commits the send send nothing and keep the words', async () => {
+    for (const stop of ['hold', 'hidden'] as const) {
+      const { composer, fake, sent } = await start();
+      await speakTurn(fake);
+      await interact(async () => {
+        fake.advance(1_500);
+        if (stop === 'hold') {
+          const hold = must(
+            [...composer.container.querySelectorAll<HTMLButtonElement>('button')].find(
+              b => b.getAttribute('data-live-action') === 'Hold',
+            ),
+            'the Hold button',
+          );
+          hold.click();
+        } else fake.setVisible(false);
+      });
+      await flush();
+      expect(sent.messages).toEqual([]);
+      expect(phaseOf(composer.container)).toBe(stop === 'hold' ? 'hold' : 'paused');
+      expect(textareaOf(composer.container).value).toBe('Fix the bug.');
+      await composer.unmount();
+    }
+  });
+
+  it('the page leaving before React commits the send sends nothing', async () => {
+    const { composer, fake, sent } = await start();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      await composer.unmount();
+    });
+    await flush();
+    expect(sent.messages).toEqual([]);
+  });
+
+  it('a box edited by anything but a keystroke (the words changed under the approval) is not sent either', async () => {
+    const { composer, fake, sent } = await start();
+    await speakTurn(fake);
+    // The approved send is queued; the box changes without an input event Live can hear first.
+    await interact(async () => {
+      fake.advance(1_500);
+      const textarea = textareaOf(composer.container);
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        textarea,
+        'Fix the bug. Also deploy.',
+      );
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    expect(sent.messages).not.toContain('Fix the bug. Also deploy.');
+    await composer.unmount();
+  });
+});
+
+describe('Composer Live voice — a new take never replaces a finished one', () => {
+  beforeEach(() => {
+    writeMdComposePref('off');
+    unitClock.hold();
+  });
+  afterEach(() => writeMdComposePref('on'));
+
+  const second = (fake: FakeLive): void => {
+    fake.outcome.current = { kind: 'words', text: 'And run tests.', raw: 'and run tests', cleaned: true };
+  };
+
+  it('Hold, Resume, speak again: the held sentence stays and the new one follows it; the countdown then sends both, once', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await pressAction(composer.container, 'Hold');
+    expect(textarea.value).toBe('Fix the bug.');
+    await pressAction(composer.container, 'Resume');
+    second(fake);
+    await speakTurn(fake);
+    expect(textarea.value).toBe('Fix the bug. And run tests.');
+    expect(sent.messages).toEqual([]);
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug. And run tests.']);
+    await composer.unmount();
+  });
+
+  it('a hidden tab, then back: the same — the first sentence is not written over', async () => {
+    const { composer, fake } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await interact(() => fake.setVisible(false));
+    await flush();
+    expect(phaseOf(composer.container)).toBe('paused');
+    await interact(() => fake.setVisible(true));
+    await pressAction(composer.container, 'Resume');
+    second(fake);
+    await speakTurn(fake);
+    expect(textarea.value).toBe('Fix the bug. And run tests.');
+    await composer.unmount();
+  });
+
+  it("what the person typed stays theirs: typed words are never counted as Live's, so a take after them still waits for the person", async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await typeInto(textarea, 'Please', 'textarea');
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    expect(textarea.value).toBe('Please Fix the bug.');
+    await interact(() => fake.advance(60_000));
+    await flush();
+    expect(sent.messages).toEqual([]);
+    await composer.unmount();
+  });
+
+  it('a held sentence the person then edits becomes theirs: the next take is added after their edit', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await pressAction(composer.container, 'Hold');
+    await typeInto(textarea, 'Fix the bug please.', 'textarea');
+    await pressAction(composer.container, 'Resume');
+    second(fake);
+    await speakTurn(fake);
+    expect(textarea.value).toBe('Fix the bug please. And run tests.');
+    await interact(() => fake.advance(60_000));
+    expect(sent.messages).toEqual([]);
+    await composer.unmount();
+  });
+});
+
 describe('Composer Live voice — reading the reply (slice 5)', () => {
   beforeEach(() => {
     writeMdComposePref('off');

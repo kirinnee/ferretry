@@ -11,6 +11,7 @@ import type {
   ReadWhat,
   ReplySignal,
   SendOutcome,
+  SendTicket,
   TakeHandle,
   TakeListener,
   TakeOutcome,
@@ -23,6 +24,12 @@ export interface FakeLive {
   readonly listeners: TakeListener[];
   readonly shown: string[];
   readonly sends: number[];
+  /** The exact words each send carried (`SendTicket.text`), in order. */
+  readonly sentTexts: string[];
+  /** The tickets the runner handed to `send`, newest last. */
+  readonly tickets: SendTicket[];
+  /** While set, `send` waits for it before it commits (the composer's render between approval and send). */
+  readonly sendGate: { current: Promise<void> | null };
   readonly log: string[];
   readonly lock: { granted: boolean };
   /** The text in the box that Live did not put there (a person typed it): what `SendPort.typed` answers. */
@@ -58,6 +65,9 @@ export const fakeLive = (options: { reader?: boolean } = {}): FakeLive => {
   const listeners: TakeListener[] = [];
   const shown: string[] = [];
   const sends: number[] = [];
+  const sentTexts: string[] = [];
+  const tickets: SendTicket[] = [];
+  const sendGate: FakeLive['sendGate'] = { current: null };
   const log: string[] = [];
   const lock = { granted: true };
   const typed = { current: '' };
@@ -117,10 +127,16 @@ export const fakeLive = (options: { reader?: boolean } = {}): FakeLive => {
     send: {
       show: text => void shown.push(text),
       clear: () => void shown.push('<cleared>'),
+      seal: () => void log.push('seal'),
       shown: () => shown.at(-1) ?? '',
       typed: () => typed.current,
-      send: async () => {
+      // The composer: waits for its render, then commits the ticket just before it sends — or sends nothing.
+      send: async ticket => {
+        tickets.push(ticket);
+        if (sendGate.current !== null) await sendGate.current;
+        if (!ticket.commit()) return { kind: 'failed', reason: 'revoked' };
         sends.push(now);
+        sentTexts.push(ticket.text);
         return sendResult.current;
       },
     },
@@ -180,6 +196,9 @@ export const fakeLive = (options: { reader?: boolean } = {}): FakeLive => {
     listeners,
     shown,
     sends,
+    sentTexts,
+    tickets,
+    sendGate,
     log,
     lock,
     typed,

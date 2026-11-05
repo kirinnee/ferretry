@@ -23,6 +23,7 @@ import {
   type LivePageInputs,
 } from '../../../src/lib/voice-chat/live-assembly.ts';
 import type { LiveSession, LiveSessionCallbacks } from '../../../src/lib/voice-chat/live-take.ts';
+import type { SendTicket } from '../../../src/lib/voice-chat/ports.ts';
 
 const callbacks: LiveSessionCallbacks = {
   onStart: () => undefined,
@@ -131,6 +132,8 @@ describe('createLiveSession — the engine the person chose', () => {
   });
 });
 
+const ticket: SendTicket = { text: 'the box', revoked: false, commit: () => true };
+
 describe('assembleLivePorts', () => {
   const bridge = (submitted: boolean): LiveComposerBridge & { calls: string[] } => {
     const calls: string[] = [];
@@ -138,6 +141,8 @@ describe('assembleLivePorts', () => {
       calls,
       show: words => void calls.push(`show:${words}`),
       clear: () => void calls.push('clear'),
+      seal: () => void calls.push('seal'),
+      observe: () => () => undefined,
       draft: () => 'the box',
       typed: () => 'typed first',
       lastShown: () => null,
@@ -168,10 +173,11 @@ describe('assembleLivePorts', () => {
     const ports = assemble(sent);
     ports.send.show('hello');
     ports.send.clear();
+    ports.send.seal();
     should(ports.send.shown()).equal('the box');
-    should(await ports.send.send()).deepEqual({ kind: 'sent', sentAtMs: 42 });
-    should(sent.calls).deepEqual(['show:hello', 'clear', 'submit']);
-    should(await assemble(bridge(false)).send.send()).deepEqual({ kind: 'failed', reason: 'not-sent' });
+    should(await ports.send.send(ticket)).deepEqual({ kind: 'sent', sentAtMs: 42 });
+    should(sent.calls).deepEqual(['show:hello', 'clear', 'seal', 'submit']);
+    should(await assemble(bridge(false)).send.send(ticket)).deepEqual({ kind: 'failed', reason: 'not-sent' });
   });
 
   it('hands the page voice through when the page has one, and has none otherwise', () => {
@@ -255,6 +261,8 @@ describe('assembleFromPage', () => {
     composer: {
       show: () => undefined,
       clear: () => undefined,
+      seal: () => undefined,
+      observe: () => () => undefined,
       draft: () => '',
       typed: () => '',
       lastShown: () => null,

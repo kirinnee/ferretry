@@ -18,6 +18,14 @@
  * it was made in; `releaseLocks` advances it, and a grant from an older one is handed straight back, so a
  * late Web Lock can never be held by a Live that is gone.
  *
+ * ONE REVOCABLE SEND PATH. Live sends through exactly one door: a `SendTicket` carrying the words that were on
+ * screen when the machine approved the send. The composer sends them a render later and calls `commit()` the
+ * instant before it does; until then the ticket is revocable. Hold, typing (synchronously, on the input event),
+ * a hidden tab, End, a refused lock, the page leaving — each revokes it (Hold, typing and hidden first send the machine
+ * `send-withdrawn`), so a queued send can never go after a stop, never go as different words, and never go twice.
+ * The person's own Send (`personSent`) is the same path from the other side: the press is adopted as the send in
+ * flight and retires the attempt, so the countdown and the pending decode cannot send it again.
+ *
  * THE REPLY IS ARMED BEFORE THE SEND. The ferret can finish a short turn while the send is still being
  * acknowledged, so the feed takes its baseline and starts listening BEFORE the message goes
  * (`ReplyFeedPort.arm`) and is only attached to the machine once the send is acknowledged.
@@ -48,6 +56,7 @@ import type {
   ReplyFeedPort,
   ReplyWatch,
   SendPort,
+  SendTicket,
   TakeHandle,
   TakePort,
   VisibilityPort,
@@ -98,6 +107,39 @@ export const LEVEL_HISTORY = 32;
 
 const toBar = (rms: number): number => Math.min(1, Math.sqrt(Math.max(0, rms)) * 2.5);
 
+/** One approved send. Revocable until the composer commits; see the file header. */
+class LiveSendTicket implements SendTicket {
+  readonly text: string;
+  readonly #visible: () => boolean;
+  #revoked = false;
+  #committed: boolean;
+
+  constructor(text: string, visible: () => boolean, committed: boolean) {
+    this.text = text;
+    this.#visible = visible;
+    this.#committed = committed;
+  }
+
+  get revoked(): boolean {
+    return this.#revoked;
+  }
+
+  /** The send is on its way: a stop can no longer take it back. */
+  get committed(): boolean {
+    return this.#committed;
+  }
+
+  revoke(): void {
+    this.#revoked = true;
+  }
+
+  commit(): boolean {
+    if (this.#revoked || !this.#visible()) return false;
+    this.#committed = true;
+    return true;
+  }
+}
+
 export class LiveRunner {
   readonly #ports: LiveRunnerPorts;
   readonly #options: LiveRunnerOptions;
@@ -126,6 +168,8 @@ export class LiveRunner {
   #lockGen = 0;
   /** The reply feed, armed before the send and attached when it is acknowledged. */
   #armedReply: ReplyWatch | null = null;
+  /** The send in flight (Live's own, or the person's adopted press); null when none. */
+  #ticket: LiveSendTicket | null = null;
 
   constructor(ports: LiveRunnerPorts, options: LiveRunnerOptions) {
     this.#ports = ports;
@@ -158,7 +202,10 @@ export class LiveRunner {
 
   /** Call synchronously from the person's tap: the microphone prompt belongs to the gesture. */
   start(): void {
-    this.#unwatchVisibility ??= this.#ports.visibility.watch(visible => this.dispatch({ type: 'visibility', visible }));
+    this.#unwatchVisibility ??= this.#ports.visibility.watch(visible => {
+      if (!visible) this.#withdrawQueuedSend();
+      this.dispatch({ type: 'visibility', visible });
+    });
     this.#unlock();
     this.#voiceBusy = this.#ports.voice?.busy() === true;
     this.#unwatchVoice ??= this.#ports.voice?.watch(() => this.#voiceMoved()) ?? null;
@@ -181,6 +228,7 @@ export class LiveRunner {
   }
 
   hold(): void {
+    this.#withdrawQueuedSend();
     this.dispatch({ type: 'hold' });
   }
 
@@ -208,27 +256,27 @@ export class LiveRunner {
     this.dispatch({ type: 'repeat' });
   }
 
-  /**
-   * The person is sending a message by hand (not through Live): a reading in progress is stale. Say what became of it
-   * with {@link outsideSent} or {@link outsideFailed}: Live waits for the answer, it does not assume one.
-   */
-  outsideSend(): void {
-    this.dispatch({ type: 'outside-send', atMs: this.#ports.clock.now() });
-  }
-
-  /** The message sent by hand was accepted. */
-  outsideSent(): void {
-    this.dispatch({ type: 'outside-sent', atMs: this.#ports.clock.now() });
-  }
-
-  /** The message sent by hand did not go: nothing is waiting on a reply to it. */
-  outsideFailed(): void {
-    this.dispatch({ type: 'outside-failed' });
-  }
-
-  /** The person edited the composer: auto-send pauses. */
+  /** The person edited the composer: auto-send pauses, and a send queued but not yet started is taken back. */
   typing(): void {
+    this.#withdrawQueuedSend();
     this.dispatch({ type: 'typing' });
+  }
+
+  /**
+   * The person pressed the composer's own Send and `outcome` is that press (true: it went). Whatever Live was doing
+   * about the turn is retired — countdown, timers, the take and its pending decode, the microphone — and the press
+   * becomes the send in flight: `sent` starts the working/reply-watch path, a failure is On hold with the words kept.
+   * Live's own queued send, if there was one, gives way: the box can only be sent once.
+   */
+  personSent(outcome: Promise<boolean>): void {
+    this.dispatch({ type: 'person-send', atMs: this.#ports.clock.now() });
+    const { phase, sendInFlight } = this.#state;
+    if (phase !== 'sending' || !sendInFlight) return;
+    this.#ticket?.revoke();
+    this.#armedReply ??= this.#arm();
+    const ticket = new LiveSendTicket(this.#ports.send.shown(), () => true, true);
+    this.#ticket = ticket;
+    void outcome.then(sent => this.#sendDone(ticket, sent));
   }
 
   /** Close everything for good (the page is leaving). No notice, no events afterwards. */
@@ -239,6 +287,7 @@ export class LiveRunner {
     this.#unwatchVisibility = null;
     this.#unwatchVoice?.();
     this.#unwatchVoice = null;
+    this.#revokeTicket();
     this.#closeMic();
     this.#clearCountdown();
     this.#clearTimers();
@@ -260,6 +309,9 @@ export class LiveRunner {
         this.#state = step.state;
         for (const effect of step.effects) this.#perform(effect);
         this.#cue(before, step.state);
+        // A send is revocable only while the machine still has it in flight: once it has ended (End, a refused lock,
+        // the ferret stopping, a failure) the ticket is dead, whatever the composer is still about to do with it.
+        if (!(step.state.phase === 'sending' && step.state.sendInFlight)) this.#revokeTicket();
         for (const listener of this.#listeners) listener();
       }
     } finally {
@@ -326,9 +378,6 @@ export class LiveRunner {
       case 'silenceVoice':
         this.#ports.voice?.silence();
         break;
-      case 'armReply':
-        this.#armFeed();
-        break;
       case 'recordTurn':
         this.#options.onTurn?.(effect.numbers);
         break;
@@ -381,6 +430,8 @@ export class LiveRunner {
   }
 
   #openMic(): void {
+    // A new take never writes over the words an earlier one left in the box (a Hold, a pause): they are final now.
+    this.#ports.send.seal();
     this.#closeMic();
     // The last line of defence, whatever sequence of events brought us here: the microphone never opens over speech.
     // The machine hears it and waits On hold.
@@ -551,24 +602,45 @@ export class LiveRunner {
 
   #send(): void {
     // The feed is armed (baseline taken, listening) BEFORE the message goes: a fast turn can finish while the
-    // send is still being acknowledged. The reader's baseline is taken at the same moment.
-    const armed = this.#armFeed();
-    void this.#ports.send.send().then(outcome => {
-      if (outcome.kind === 'sent') this.dispatch({ type: 'sent', atMs: this.#ports.clock.now() });
-      else {
-        if (this.#armedReply === armed) this.#armedReply = null;
-        armed.cancel();
-        this.dispatch({ type: 'send-failed' });
-      }
-    });
+    // send is still being acknowledged.
+    this.#armedReply?.cancel();
+    this.#armedReply = this.#arm();
+    // What is on screen at this moment is what is approved; the composer sends exactly that or nothing.
+    const ticket = new LiveSendTicket(this.#ports.send.shown(), () => this.#ports.visibility.visible(), false);
+    this.#ticket = ticket;
+    void this.#ports.send.send(ticket).then(outcome => this.#sendDone(ticket, outcome.kind === 'sent'));
   }
 
-  /** Arm the feed for the message that is going (replacing an earlier arming). */
-  #armFeed(): ReplyWatch {
+  /** The send's answer. Only the CURRENT send speaks: a taken-back or replaced one is silent. */
+  #sendDone(ticket: LiveSendTicket, sent: boolean): void {
+    if (this.#ticket !== ticket) return;
+    this.#ticket = null;
+    if (sent) {
+      this.dispatch({ type: 'sent', atMs: this.#ports.clock.now() });
+      return;
+    }
     this.#armedReply?.cancel();
-    const armed = this.#arm();
-    this.#armedReply = armed;
-    return armed;
+    this.#armedReply = null;
+    this.dispatch({ type: 'send-failed' });
+  }
+
+  /** Revoke the ticket of a send that is still in flight. Idempotent. */
+  #revokeTicket(): void {
+    this.#ticket?.revoke();
+    this.#ticket = null;
+  }
+
+  /**
+   * A stop arrived while Live's send was approved but the composer had not started it: take it back, so the stop
+   * lands as it would in the countdown. A send already started (committed) is on the wire and stands.
+   */
+  #withdrawQueuedSend(): void {
+    const ticket = this.#ticket;
+    if (ticket === null || ticket.committed) return;
+    this.#revokeTicket();
+    this.#armedReply?.cancel();
+    this.#armedReply = null;
+    this.dispatch({ type: 'send-withdrawn' });
   }
 
   /** Arm the feed and remember what the page holds, as the message goes. */

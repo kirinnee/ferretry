@@ -19,6 +19,7 @@ import type {
   ReplyFeedPort,
   ReplySignal,
   SendOutcome,
+  SendTicket,
   TakeHandle,
   TakeListener,
   TakeOutcome,
@@ -99,10 +100,18 @@ interface Rig {
   /** `ms` of a level, one frame per 20 ms, advancing the clock and the frames together. */
   talk(rms: number, ms: number): void;
   settle(): Promise<void>;
-  setVisible(visible: boolean): void;
+  /** `silent`: the page is hidden but the browser's event has not been delivered yet. */
+  setVisible(visible: boolean, silent?: boolean): void;
   signal(signal: ReplySignal): void;
   sendResult: { current: SendOutcome | 'pending' };
   releaseSend(outcome: SendOutcome): void;
+  /** When each `SendPort.seal` happened (a new take was opened). */
+  readonly sealed: number[];
+  /** Every ticket `send` was handed, newest last. */
+  readonly tickets: SendTicket[];
+  /** `queued`: the composer has not rendered the words yet — `startQueuedSend` is its commit-and-send. */
+  readonly composer: { queued: boolean };
+  startQueuedSend(index?: number): void;
   lock: { granted: boolean };
   /** The text a person typed in the box (what `SendPort.typed` answers). */
   typed: { current: string };
@@ -167,6 +176,10 @@ const rig = (
   const typed = { current: '' };
   const sendResult: Rig['sendResult'] = { current: { kind: 'sent', sentAtMs: 0 } };
   let releaseSend: (outcome: SendOutcome) => void = () => undefined;
+  const tickets: SendTicket[] = [];
+  const sealed: number[] = [];
+  const composer = { queued: false };
+  const queuedStarts: (() => void)[] = [];
   const lock = { granted: true };
   const lockControl = { pending: false };
   const lockAnswers: ((granted: boolean) => void)[] = [];
@@ -226,16 +239,26 @@ const rig = (
     send: {
       show: text => void shown.push(text),
       clear: () => void shown.push('<cleared>'),
+      seal: () => void sealed.push(clock.now()),
       shown: () => shown.at(-1) ?? '',
       typed: () => typed.current,
-      send: () => {
-        log.push('send');
-        sends.push(clock.now());
-        if (sendResult.current === 'pending')
-          return new Promise<SendOutcome>(resolve => {
-            releaseSend = resolve;
-          });
-        return Promise.resolve(sendResult.current);
+      send: ticket => {
+        tickets.push(ticket);
+        // The composer commits the ticket the instant before it sends; until then the send is only queued.
+        const go = (): Promise<SendOutcome> => {
+          if (!ticket.commit()) return Promise.resolve({ kind: 'failed', reason: 'revoked' });
+          log.push('send');
+          sends.push(clock.now());
+          if (sendResult.current === 'pending')
+            return new Promise<SendOutcome>(resolve => {
+              releaseSend = resolve;
+            });
+          return Promise.resolve(sendResult.current);
+        };
+        if (!composer.queued) return go();
+        return new Promise<SendOutcome>(resolve => {
+          queuedStarts.push(() => resolve(go()));
+        });
       },
     },
     reply: options.reply ?? {
@@ -352,13 +375,17 @@ const rig = (
     settle: async () => {
       for (let i = 0; i < 6; i += 1) await Promise.resolve();
     },
-    setVisible: next => {
+    setVisible: (next, silent = false) => {
       visible = next;
-      for (const listener of visibilityListeners) listener(next);
+      if (!silent) for (const listener of visibilityListeners) listener(next);
     },
     signal: signal => replyListener?.(signal),
     sendResult,
     releaseSend: outcome => releaseSend(outcome),
+    tickets,
+    sealed,
+    composer,
+    startQueuedSend: (index = 0) => queuedStarts[index]?.(),
     lock,
     typed,
     lockControl,
@@ -1331,6 +1358,309 @@ describe('LiveRunner — dispose', () => {
   });
 });
 
+describe('LiveRunner — ONE REVOCABLE SEND PATH (the approved words, taken back until the composer starts them)', () => {
+  /** A turn ended and its countdown ran out: the send is approved and queued, the composer has not started it. */
+  const queued = async (r: Rig): Promise<void> => {
+    r.composer.queued = true;
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.runner.state.phase).equal('sending');
+    should(r.runner.state.sendInFlight).be.true();
+    should(r.tickets.length).equal(1);
+  };
+
+  it('hands the composer a ticket with exactly the words on screen when the send was approved', async () => {
+    const r = await listening();
+    await queued(r);
+    const ticket = r.tickets[0] as SendTicket;
+    should(ticket.text).equal('Fix the bug.');
+    should(ticket.revoked).be.false();
+    r.startQueuedSend();
+    await r.settle();
+    should(r.sends.length).equal(1);
+    should(r.runner.state.phase).equal('working');
+  });
+
+  const STOPS: readonly (readonly [string, (r: Rig) => void, 'hold' | 'paused'])[] = [
+    ['typing', r => r.runner.typing(), 'hold'],
+    ['Hold', r => r.runner.hold(), 'hold'],
+    ['a hidden tab', r => r.setVisible(false), 'paused'],
+  ];
+  for (const [name, stop, landing] of STOPS) {
+    it(`${name} before the composer starts the send takes it back: it lands on ${landing}, the words stay, NOTHING is sent`, async () => {
+      const r = await listening();
+      await queued(r);
+      stop(r);
+      should(r.runner.state.phase).equal(landing);
+      should(r.tickets[0]?.revoked).be.true();
+      should(r.takes[0]?.cancelled).be.true();
+      should(r.log).containEql('reply.cancel');
+      // The composer's render lands afterwards: the ticket is dead, the send does not start.
+      r.startQueuedSend();
+      await r.settle();
+      r.clock.advance(60_000);
+      await r.settle();
+      should(r.sends).deepEqual([]);
+      should(r.runner.state.phase).equal(landing);
+      should(r.runner.state.words).equal('Fix the bug.');
+    });
+  }
+
+  it('End before the composer starts the send: Live is off and the send never starts', async () => {
+    const r = await listening();
+    await queued(r);
+    r.runner.end();
+    should(r.runner.state.phase).equal('off');
+    should(r.tickets[0]?.revoked).be.true();
+    r.startQueuedSend();
+    await r.settle();
+    should(r.sends).deepEqual([]);
+    should(r.runner.state.phase).equal('off');
+  });
+
+  it('the page leaving revokes the queued send too', async () => {
+    const r = await listening();
+    await queued(r);
+    r.runner.dispose();
+    should(r.tickets[0]?.revoked).be.true();
+    r.startQueuedSend();
+    await r.settle();
+    should(r.sends).deepEqual([]);
+  });
+
+  it('a hidden tab whose event has not arrived yet is still refused at the commit', async () => {
+    const r = await listening();
+    await queued(r);
+    r.setVisible(false, true);
+    r.startQueuedSend();
+    await r.settle();
+    should(r.sends).deepEqual([]);
+    // The composer said "not sent": the words are On hold, kept.
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('send-failed');
+  });
+
+  it('a send the composer already started is on the wire: a stop does not take it back and the answer still counts', async () => {
+    const r = await listening();
+    r.sendResult.current = 'pending';
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.sends.length).equal(1);
+    should(r.tickets[0]?.revoked).be.false();
+    r.runner.typing();
+    r.runner.hold();
+    r.setVisible(false);
+    should(r.tickets[0]?.revoked).be.false();
+    should(r.runner.state.phase).equal('sending');
+    r.releaseSend({ kind: 'sent', sentAtMs: 1 });
+    await r.settle();
+    should(r.runner.state.phase).equal('working');
+    should(r.sends.length).equal(1);
+  });
+
+  it('a taken-back send that fails late cannot fail the NEXT send', async () => {
+    const r = await listening();
+    await queued(r);
+    r.runner.hold();
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.tickets.length).equal(2);
+    should(r.runner.state.sendInFlight).be.true();
+    // The first, revoked one answers "not sent" now: it is nobody's any more.
+    r.startQueuedSend(0);
+    await r.settle();
+    should(r.runner.state.phase).equal('sending');
+    should(r.runner.state.sendInFlight).be.true();
+    r.startQueuedSend(1);
+    await r.settle();
+    should(r.sends.length).equal(1);
+    should(r.runner.state.phase).equal('working');
+  });
+
+  it('a send the composer refuses is On hold with the words kept', async () => {
+    const r = await listening();
+    r.sendResult.current = { kind: 'failed', reason: 'not-sent' };
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('send-failed');
+  });
+});
+
+describe("LiveRunner — the person pressing the composer's own Send retires the attempt", () => {
+  const pressSend = (r: Rig, outcome: Promise<boolean> = Promise.resolve(true)): void => r.runner.personSent(outcome);
+
+  it('during a slow decode: the preview goes ONCE, the countdown and the pending take are gone, the mic is off, and Live watches the reply', async () => {
+    const r = await listening();
+    const take = r.takes[0] as FakeTake;
+    let answer: (outcome: TakeOutcome) => void = () => undefined;
+    take.outcome = new Promise(resolve => {
+      answer = resolve;
+    });
+    r.listeners[0]?.onLive('fix the bug');
+    await speakTurn(r);
+    should(r.runner.state.phase).equal('sending');
+    should(r.runner.state.countdown).not.equal(null);
+
+    pressSend(r);
+    await r.settle();
+    should(r.runner.state.phase).equal('working');
+    should(take.cancelled).be.true();
+    should(r.clock.live).equal(0);
+    should(r.log).containEql('reply.arm');
+    should(r.log).containEql('reply.watch');
+    should(r.turns.length).equal(1);
+
+    // The slow decode finally answers, and the countdown would have finished: neither puts anything on screen or sends.
+    answer({ kind: 'words', text: 'Fix the bug.', raw: 'fix the bug', cleaned: true });
+    r.clock.advance(60_000);
+    await r.settle();
+    should(r.sends).deepEqual([]);
+    should(r.shown).deepEqual(['fix the bug']);
+    should(r.runner.state.phase).equal('working');
+    // The first real turn: the microphone opens again only when the ferret is done.
+    should(r.takes.length).equal(1);
+    r.signal({ kind: 'done' });
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.takes.length).equal(2);
+  });
+
+  it('from every phase before a send, and not while the ferret works', async () => {
+    const heard = await listening();
+    heard.talk(LOUD, 600);
+    should(heard.runner.state.phase).equal('hearing');
+    pressSend(heard);
+    await heard.settle();
+    should(heard.runner.state.phase).equal('working');
+    should(heard.takes[0]?.cancelled).be.true();
+
+    const typing = await listening();
+    typing.runner.typing();
+    should(typing.runner.state.phase).equal('hold');
+    pressSend(typing);
+    await typing.settle();
+    should(typing.runner.state.phase).equal('working');
+
+    const starting = rig();
+    starting.runner.start();
+    pressSend(starting);
+    await starting.settle();
+    should(starting.runner.state.phase).equal('working');
+    should(starting.takes[0]?.cancelled).be.true();
+
+    const hidden = await listening();
+    hidden.setVisible(false);
+    should(hidden.runner.state.phase).equal('paused');
+    pressSend(hidden);
+    await hidden.settle();
+    should(hidden.runner.state.phase).equal('working');
+
+    // The ferret is working: a second message is the person's own business, Live changes nothing.
+    const working = await listening();
+    await speakTurn(working);
+    working.clock.advance(1_500);
+    await working.settle();
+    should(working.runner.state.phase).equal('working');
+    const before = working.runner.state;
+    pressSend(working);
+    should(working.runner.state).equal(before);
+
+    // Reading aloud: the press stops the reading (it belongs to an older turn) and is the send in flight.
+    const reading = await listening({ speaker: true });
+    await speakTurn(reading);
+    reading.clock.advance(1_500);
+    await reading.settle();
+    reading.signal({ kind: 'done' });
+    should(reading.runner.state.phase).equal('reading');
+    pressSend(reading);
+    should(reading.runner.state.phase).equal('sending');
+    should(reading.speaker.stopped).be.above(0);
+    await reading.settle();
+    should(reading.runner.state.phase).equal('working');
+
+    const off = rig();
+    pressSend(off);
+    should(off.runner.state.phase).equal('off');
+    should(off.log).deepEqual([]);
+  });
+
+  it('a press that fails is On hold with the words kept, and Live never sends them itself', async () => {
+    const r = await listening();
+    await speakTurn(r);
+    await r.settle();
+    pressSend(r, Promise.resolve(false));
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('send-failed');
+    should(r.log).containEql('reply.cancel');
+    r.clock.advance(60_000);
+    await r.settle();
+    should(r.sends).deepEqual([]);
+  });
+
+  it('a send Live queued but the composer has not started gives way to the press: one message, not two', async () => {
+    const r = await listening();
+    r.composer.queued = true;
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.tickets.length).equal(1);
+    pressSend(r);
+    should(r.tickets[0]?.revoked).be.true();
+    await r.settle();
+    should(r.runner.state.phase).equal('working');
+    // The composer's deferred render arrives: Live's ticket is dead.
+    r.startQueuedSend();
+    await r.settle();
+    should(r.sends).deepEqual([]);
+    should(r.runner.state.phase).equal('working');
+  });
+
+  it('a stop while the press is on the wire changes nothing: it already went', async () => {
+    const r = await listening();
+    await speakTurn(r);
+    let finish: (sent: boolean) => void = () => undefined;
+    pressSend(
+      r,
+      new Promise<boolean>(resolve => {
+        finish = resolve;
+      }),
+    );
+    r.runner.typing();
+    r.runner.hold();
+    r.setVisible(false);
+    should(r.runner.state.phase).equal('sending');
+    finish(true);
+    await r.settle();
+    should(r.runner.state.phase).equal('working');
+  });
+});
+
+describe('LiveRunner — a new take never writes over an earlier one', () => {
+  it('seals the box when the microphone opens: at the tap, on Resume and when the ferret is done', async () => {
+    const r = rig();
+    r.runner.start();
+    await r.settle();
+    should(r.sealed.length).equal(1);
+    await speakTurn(r);
+    r.runner.hold();
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    r.runner.resume();
+    await r.settle();
+    should(r.sealed.length).equal(2);
+    should(r.takes.length).equal(2);
+  });
+});
+
 describe('LiveRunner — reading the reply (slice 5)', () => {
   const working = async (r: Rig): Promise<void> => {
     await speakTurn(r);
@@ -1412,7 +1742,9 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
     const r = await worked();
     r.signal({ kind: 'done' });
     const watching = r.log.filter(entry => entry === 'reply.watch').length;
-    r.runner.outsideSend();
+    let answer: (sent: boolean) => void = () => undefined;
+    // The composer's own Send press: Live hears it the instant it starts, and the press's answer comes later.
+    r.runner.personSent(new Promise<boolean>(resolve => (answer = resolve)));
     should(r.speaker.stopped).be.above(0);
     // In flight: not Working. The feed is armed (and the page's baseline taken) before the answer is known.
     should(r.runner.state.phase).equal('sending');
@@ -1420,7 +1752,8 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
     should(r.speaker.marked).equal(2);
     should(r.log.filter(entry => entry === 'reply.arm').length).equal(2);
     should(r.log.filter(entry => entry === 'reply.watch').length).equal(watching);
-    r.runner.outsideSent();
+    answer(true);
+    await r.settle();
     should(r.runner.state.phase).equal('working');
     should(r.log.filter(entry => entry === 'reply.watch').length).equal(watching + 1);
     r.signal({ kind: 'done' });
@@ -1431,9 +1764,11 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
   it('a message sent by hand that FAILS lands On hold: the armed feed is dropped and Live never watches a turn that did not begin', async () => {
     const r = await worked();
     r.signal({ kind: 'done' });
-    r.runner.outsideSend();
+    let answer: (sent: boolean) => void = () => undefined;
+    r.runner.personSent(new Promise<boolean>(resolve => (answer = resolve)));
     const cancels = r.log.filter(entry => entry === 'reply.cancel').length;
-    r.runner.outsideFailed();
+    answer(false);
+    await r.settle();
     should(r.runner.state.phase).equal('hold');
     should(r.runner.state.holdReason).equal('send-failed');
     should(r.log.filter(entry => entry === 'reply.cancel').length).be.above(cancels - 1);
