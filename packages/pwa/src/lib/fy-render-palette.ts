@@ -63,6 +63,12 @@ export type ThemeToken = (typeof THEME_TOKENS)[number];
 export interface ResolvedTheme {
   readonly mode: 'light' | 'dark';
   readonly font: string;
+  /**
+   * What the illustration actually sits on: the first opaque background painted by the block or an ancestor,
+   * else `--bg`. A diagram's edge-label boxes are painted in it so they vanish into the page behind them and
+   * only mask the edge line. `""` when nothing could be resolved.
+   */
+  readonly backdrop: string;
   /** The theme's smallest corner (`--radius-xs`) in px: a bar is square in a square family. */
   readonly radius: number;
   readonly colors: Readonly<Record<ThemeToken, string>>;
@@ -105,7 +111,7 @@ const fnv1a = (value: string): string => {
  * The shape (`<mode>:<8 hex>`) is what the sandbox wire admits.
  */
 export const paletteKey = (theme: ResolvedTheme): string =>
-  `${theme.mode}:${fnv1a(JSON.stringify([theme.font, theme.radius, THEME_TOKENS.map(token => theme.colors[token])]))}`;
+  `${theme.mode}:${fnv1a(JSON.stringify([theme.font, theme.radius, theme.backdrop, THEME_TOKENS.map(token => theme.colors[token])]))}`;
 
 /** The one shape a palette key has, checked where the sandbox echoes it back. */
 export const PALETTE_KEY = /^(?:dark|light):[0-9a-f]{8}$/u;
@@ -209,7 +215,7 @@ export function mermaidThemeVariables(theme: ResolvedTheme): MermaidThemeVariabl
     background: c.bg,
     clusterBkg: c['surface-2'],
     clusterBorder: c['border-strong'],
-    edgeLabelBackground: c.surface,
+    edgeLabelBackground: theme.backdrop || c.bg,
     errorBkgColor: c['err-bg'],
     errorTextColor: c.err,
     git0: c['viz-1'],

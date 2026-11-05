@@ -30,7 +30,48 @@ One self-contained \`<svg>…</svg>\` (CSS animation welcome). No \`<script>\` o
 
 ### html
 
-A fragment with inline CSS — tables, lists, \`<details>\`/\`<summary>\`, code, inline SVG, \`<style>\` — drawn straight into the message; nothing in it runs. Add a \`<script>\` or \`on…=\` handler only when the reader must do something — interactive means a visual with state or parameters the reader changes (sliders, toggles, inputs) that redraws as they do, never a stepper: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline \`<style>\` and \`<script>\`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). Theme tokens such as \`var(--fg)\` work; the fragment's styles cannot reach the app and the app's cannot reach it. ≤ 200 KiB, bounded in height, scrollable past that.
+A fragment with inline CSS — tables, lists, \`<details>\`/\`<summary>\`, code, inline SVG, \`<style>\` — drawn straight into the message; nothing in it runs. Add a \`<script>\` or \`on…=\` handler only when the reader must do something: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline \`<style>\` and \`<script>\`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). ≤ 200 KiB. The fragment's styles cannot reach the app and the app's cannot reach it.
+
+**Interactive means a visualization the reader changes.** Draw something — bars, a curve, a grid, a diagram — and give it parameters (sliders, toggles, a select, segmented buttons); every change redraws it at once. Never a stepper, a slideshow, a quiz or Next/Back pages: a sequence is prose.
+
+**It looks native when it uses the app's theme.** The page sits on the chat or agenda surface, so leave its background transparent and set no colour of your own unless the colour is the content (a swatch). Every colour comes from a theme token; light, dark and a theme switch while it runs follow by themselves.
+
+- Tokens, as \`var(--name)\`, the same in a static fragment: ink \`--fg\` \`--fg-soft\` \`--muted\` \`--faint\`; surfaces \`--bg\` \`--surface\` \`--surface-2\` \`--surface-3\`; lines \`--border\` \`--border-soft\` \`--border-strong\`; accent \`--accent\` \`--accent-soft\` \`--accent-fg\`; status \`--ok\` \`--warn\` \`--err\` and \`--ok-bg\` \`--warn-bg\` \`--err-bg\`; series \`--viz-1\` … \`--viz-8\`; type \`--font-body\` \`--font-mono\` \`--text-xs\` \`--text-sm\` \`--text-base\` \`--text-lg\`; shape \`--radius-sm\` \`--radius-md\` \`--radius-pill\`; space \`--gap-xs\` \`--gap-sm\` \`--gap-md\`.
+- Plain \`<button>\`, \`<input>\`, \`<select>\`, \`<table>\`, headings and text are already styled in a live page. Classes add the rest, live or static: \`fy-btn\` (\`fy-btn--primary\`, \`fy-btn--quiet\`; \`aria-pressed="true"\` marks one on), \`fy-segmented\` (a row of \`fy-btn\`), \`fy-range\` (a slider), \`fy-toggle\` (\`<label class="fy-toggle"><input type="checkbox"> Label</label>\`), \`fy-input\`, \`fy-select\`, \`fy-field\` (\`<label class="fy-field">Rate <input class="fy-range" type="range"> <output>3</output></label>\`), \`fy-card\`, \`fy-row\`, \`fy-stack\`, \`fy-grid\`, \`fy-muted\`, \`fy-num\`, \`fy-chip\`, \`fy-stat\` (\`<div class="fy-stat">Cost <b>$42</b></div>\`), \`fy-table\`, \`fy-legend\` with \`fy-swatch\`.
+- Bars without a library: \`fy-bars\` holds \`fy-bar\` elements, each \`style="--v:40"\` (0–100, its height in percent) with optional \`data-value\` and \`data-label\`; \`fy-meter\` with \`style="--v:70"\` is one horizontal bar. \`data-tone\` is \`1\`–\`8\` (the series) or \`accent\`, \`good\`, \`warn\`, \`bad\`, \`muted\`, on a bar, swatch, meter, chip, or an inline-SVG shape (it sets \`fill\`, or \`stroke\` on \`fill="none"\`).
+- Size: the frame grows to the page's height, up to 1200px, and never scrolls inside. Nothing may be wider than the column — a phone is about 360px — so let rows wrap (\`fy-row\` does) and give an SVG a \`viewBox\` with \`width="100%"\`. Fonts the app downloads are not available inside, so \`--font-body\` falls back to the reader's installed ones.
+
+A slider that redraws bars:
+
+\`\`\`html
+<div class="fy-stack">
+  <label class="fy-field"
+    >Growth <input class="fy-range" id="g" type="range" min="0" max="50" value="20" /> <output id="o"></output
+  ></label>
+  <div class="fy-bars" id="bars"></div>
+  <div class="fy-legend">
+    <span><i class="fy-swatch"></i>Revenue, year 1 = 1.00</span>
+  </div>
+</div>
+<script>
+  const g = document.getElementById('g'),
+    o = document.getElementById('o'),
+    bars = document.getElementById('bars');
+  function draw() {
+    const values = [1, 2, 3, 4, 5].map(year => Math.pow(1 + g.value / 100, year - 1));
+    const top = Math.max(...values);
+    o.textContent = g.value + '%';
+    bars.innerHTML = values
+      .map(
+        (v, i) =>
+          \`<div class="fy-bar" style="--v:\${(v / top) * 100}" data-value="\${v.toFixed(2)}" data-label="Y\${i + 1}"></div>\`,
+      )
+      .join('');
+  }
+  g.addEventListener('input', draw);
+  draw();
+</script>
+\`\`\`
 
 ### chart
 

@@ -806,9 +806,10 @@
   margin-top: 6px;
   min-width: 0;
 }
-/* A drawing or chart is at most its natural size (480px), never stretched to the card: a viewBox-only svg would
-   otherwise fill the width and print its labels at several times the body size. A diagram keeps its own sizing. */
-.fy-card .fy-render :is(.fy-render-image:not([data-fy-render-sized='true']), .fy-render-chart) {
+/* A drawing is at most its natural size (480px), never stretched to the card: a viewBox-only svg would
+   otherwise fill the width and print its labels at several times the body size. A diagram keeps its own sizing,
+   and a CHART fills its column: Chart.js redraws at any width, so there is no natural size to protect. */
+.fy-card .fy-render .fy-render-image:not([data-fy-render-sized='true']) {
   max-width: min(100%, 480px);
 }
 .fy-card__section-body .fy-attn-points {

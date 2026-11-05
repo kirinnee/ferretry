@@ -13,12 +13,12 @@ import { afterEach, beforeEach, describe, test } from 'bun:test';
 import type { ReactElement } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
-import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
+import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from '../../src/components/fy-render-html-frame.tsx';
 import type { FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
 import {
   FY_RENDER_SANDBOX_LIMITS,
-  type FyRenderBlock as ParsedBlock,
   isFyRenderEmbedBlock,
+  type FyRenderBlock as ParsedBlock,
   parseFyRender,
 } from '../../src/lib/fy-render.ts';
 // Registers happy-dom, which is what gives this file a `window` to dispatch on.
@@ -113,18 +113,14 @@ const recorder = () => {
   };
 };
 
-/** The column's paint, as `FyRenderBlock` reads it from the computed style. */
+/** The column's paint, as `FyRenderBlock` reads it from the computed style: the mode and the theme tokens. */
 const DARK_PAINT: FyRenderHtmlPaint = {
-  background: 'rgb(15, 17, 21)',
-  color: 'rgb(230, 230, 235)',
-  font: 'Inter, sans-serif',
   scheme: 'dark',
+  tokens: { accent: 'rgb(120, 160, 255)', fg: 'rgb(230, 230, 235)', 'page-font': 'Inter, sans-serif' },
 };
 const LIGHT_PAINT: FyRenderHtmlPaint = {
-  background: 'rgb(250, 250, 252)',
-  color: 'rgb(20, 20, 24)',
-  font: 'Inter, sans-serif',
   scheme: 'light',
+  tokens: { accent: 'rgb(40, 80, 200)', fg: 'rgb(20, 20, 24)', 'page-font': 'Inter, sans-serif' },
 };
 
 const mounted: ReactTestRenderer[] = [];
@@ -146,6 +142,7 @@ const frameElement = (
     readonly block?: ParsedBlock;
     readonly deadlines?: { readonly readyMs: number; readonly hardMs: number; readonly stallMs?: number };
     readonly fullscreen?: boolean;
+    readonly initialHeight?: number | null;
     readonly onHeight?: (height: number) => void;
     readonly paint?: FyRenderHtmlPaint;
     readonly ready?: boolean;
@@ -155,6 +152,7 @@ const frameElement = (
     block={options.block ?? htmlBlock()}
     deadlines={options.deadlines ?? PATIENT}
     fullscreen={options.fullscreen ?? false}
+    initialHeight={options.initialHeight ?? null}
     onEscape={calls.onEscape}
     onFailed={calls.onFailed}
     onRendered={calls.onRendered}
@@ -199,6 +197,12 @@ const settle = async (ms: number): Promise<void> => {
 const inlineHeight = (tree: ReactTestRenderer): string => {
   const style = tree.root.findByType('iframe').props.style as { height?: string } | undefined;
   return style?.height ?? 'none';
+};
+
+/** The frame element's own `color-scheme`, which must match the page's for the page to stay transparent. */
+const frameScheme = (tree: ReactTestRenderer): string => {
+  const style = tree.root.findByType('iframe').props.style as { colorScheme?: string } | undefined;
+  return style?.colorScheme ?? 'none';
 };
 
 describe('FyRenderHtmlFrame frame element', () => {
@@ -307,7 +311,9 @@ describe('FyRenderHtmlFrame handshake trust', () => {
 
     // Assert — the authored bytes travel as DATA, never as a URL or markup, and
     // the column's paint travels with them as the page's default.
-    should(received).eql([{ kind: 'render-html', paint: LIGHT_PAINT, source: PAGE, theme: 'light' }]);
+    should(received).eql([
+      { kind: 'render-html', layout: { fullscreen: false }, paint: LIGHT_PAINT, source: PAGE, theme: 'light' },
+    ]);
   });
 
   test('should repaint a running page over the port rather than remount it', async () => {
@@ -362,6 +368,53 @@ describe('FyRenderHtmlFrame port messages', () => {
 
     // Assert
     should(heights).eql([200, FY_RENDER_SANDBOX_LIMITS.htmlInlineMaxHeightPx]);
+  });
+
+  test('should take the height it last had before the page reports one', async () => {
+    // Arrange — a frame coming back after it was parked, or a block seen before in this session.
+    const node = frameMock();
+
+    // Act
+    const tree = mountFrame(frameElement(recorder(), { initialHeight: 312 }), node);
+
+    // Assert — the reserved height is in place from the first paint, so the column does not jump.
+    should(inlineHeight(tree)).equal('312px');
+  });
+
+  test('should give the frame element the page scheme in both themes, so the page stays transparent', () => {
+    // Arrange
+    const calls = recorder();
+    const node = frameMock();
+
+    // Act
+    const tree = mountFrame(frameElement(calls, { paint: DARK_PAINT }), node);
+    const dark = frameScheme(tree);
+    run(() => tree.update(frameElement(calls, { paint: LIGHT_PAINT })));
+
+    // Assert — a frame element whose scheme differs from its document's gets an opaque backdrop.
+    should(dark).equal('dark');
+    should(frameScheme(tree)).equal('light');
+  });
+
+  test('should tell the page when it may scroll: fullscreen only', async () => {
+    // Arrange
+    const calls = recorder();
+    const node = frameMock();
+    const tree = mountFrame(frameElement(calls), node);
+    const { received } = handshake(node);
+    await settle(20);
+
+    // Act
+    run(() => tree.update(frameElement(calls, { fullscreen: true })));
+    await settle(20);
+    const opened = received.at(-1);
+    run(() => tree.update(frameElement(calls, { fullscreen: false })));
+    await settle(20);
+
+    // Assert — a message on the live port each way, never a remount.
+    should(opened).eql({ kind: 'layout', layout: { fullscreen: true } });
+    should(received.at(-1)).eql({ kind: 'layout', layout: { fullscreen: false } });
+    should(node.assigned.length).equal(1);
   });
 
   test('should leave the height to the stylesheet while fullscreen', async () => {

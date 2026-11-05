@@ -41,6 +41,7 @@ import {
   fyRenderMediaMime,
   fyRenderRasterRefusal,
 } from '../lib/fy-render.ts';
+import { FY_RENDER_HTML_COMPONENT_CSS } from '../lib/fy-render-html-kit.ts';
 import { fragmentParsingPolicy } from '../lib/trusted-types.ts';
 
 /** Elements a static explanation never needs and that could run, frame, submit or retarget. */
@@ -80,6 +81,9 @@ const FORBID_ATTR = ['action', 'formaction', 'srcset', 'ping', 'background', 'po
 
 const SANITIZE: Config = {
   ALLOW_DATA_ATTR: false,
+  // The three the theme kit's components read (`lib/fy-render-html-kit.ts`): plain words a selector
+  // matches and `attr()` prints, never a URL or a handler.
+  ADD_ATTR: ['data-tone', 'data-label', 'data-value'],
   FORBID_ATTR,
   FORBID_TAGS,
   // `style` is allowed and contained; `<style>` too, both rewritten below.
@@ -179,8 +183,8 @@ export const sanitizeFyRenderFragment = (source: string): DocumentFragment => {
 const BASE_STYLE = `
 :host { display: block; color: var(--fg); font: inherit; line-height: inherit; }
 img, svg { max-width: 100%; height: auto; }
-table { border-collapse: collapse; max-width: 100%; display: block; overflow-x: auto; }
-th, td { border: 1px solid var(--border-strong); padding: 4px 8px; text-align: left; }
+table { border-collapse: collapse; max-width: 100%; }
+th, td { border: 1px solid var(--border-strong); padding: 4px 8px; text-align: left; overflow-wrap: anywhere; }
 code, pre { font-family: var(--font-mono); font-size: var(--code-font-size); }
 pre { white-space: pre-wrap; }
 a { color: var(--accent); }
@@ -209,7 +213,8 @@ export function FyRenderFragment({ source, alt, readWorkspaceMedia }: FyRenderFr
     rootRef.current ??= host.attachShadow({ mode: 'closed' });
     const root = rootRef.current;
     const style = document.createElement('style');
-    style.textContent = BASE_STYLE;
+    // The kit's components too, so a `.fy-card` or `.fy-bars` looks the same here as in a live page.
+    style.textContent = BASE_STYLE + FY_RENDER_HTML_COMPONENT_CSS;
     root.replaceChildren(style, sanitizeFyRenderFragment(source));
 
     // `media:` pictures, read as the reader and shown as a `blob:` this page minted.

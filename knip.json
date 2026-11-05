@@ -131,6 +131,8 @@
         "harness/agenda-tabs-screenshot.ts",
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",
+        "harness/native-hypermedia-screenshot.ts",
+        "harness/native-hypermedia-page.tsx",
         "harness/live-card-page.tsx",
         "harness/agenda-layout-page.tsx",
         "harness/inbox-page.tsx",

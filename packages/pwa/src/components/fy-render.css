@@ -178,13 +178,13 @@
   cursor: default;
 }
 
-/* A QUIET PLANE where a picture, a player or a first diagram will be, so the
-   prose under it does not jump twice. The faintest surface the theme has. */
+/* AN INVISIBLE PLANE where a picture, a player or a first diagram will be, so the
+   prose under it does not jump twice. It paints nothing: a grey box that later
+   "renders" is exactly what made a block look bolted on. Its height is the one the
+   block last drew at when the block has drawn before (set inline), else this. */
 .fy-render-placeholder {
   height: 160px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  opacity: 0.6;
+  background: transparent;
 }
 
 /* OFF STAGE: Mermaid compiles here and hands back an image. Hidden rather than
