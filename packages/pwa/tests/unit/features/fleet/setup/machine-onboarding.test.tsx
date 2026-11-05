@@ -309,8 +309,7 @@ describe('MachineOnboarding · the rail', () => {
       expect(screen.all('[data-onboarding-foot] button[data-variant="primary"]').length).toBeLessThanOrEqual(1);
     }
     await screen.rail('speedups');
-    // The fixture already stores a key and none is being typed: the one primary is Continue (a revisit).
-    expect(screen.text('[data-onboarding-foot] [data-onboarding-primary]')).toBe('Continue');
+    expect(screen.text('[data-onboarding-foot] [data-onboarding-primary]')).toBe('Save keys');
     await screen.rail('defaults');
     expect(screen.text('[data-onboarding-foot] [data-onboarding-primary]')).toBe('Use these');
     await screen.rail('start');
