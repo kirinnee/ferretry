@@ -30,6 +30,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { CloneMachine } from '../../src/features/fleet/setup/clone.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
@@ -87,6 +88,8 @@ const answerFor = machine => (path, init) => {
   if (path.startsWith('/v1/config/file')) return method === 'GET' ? file(decodeURIComponent(path.split('=')[1] ?? 'warden.yaml')) : { path: 'x', etag: 'e', outcome: 'applied' };
   if (path === '/v1/secrets') return secrets(isWork ? ['ZAI_API_KEY', 'GITHUB_TOKEN'] : held);
   if (isWork && path === '/v1/fleet/export') return BUNDLE;
+  // A machine that predates the review: no such route, so a clone copies its settings whole (and says so).
+  if (path === '/v1/fleet/clone/review') throw new FyHttpError('no route POST ' + path, 404, 'unknown_route');
   if (isWork && path.startsWith('/v1/secrets/exports/'))
     return { bundle: { v: 1, importId: IMPORT_ID, sourceDaemonId: SOURCE_ID, targetDaemonId: OFFER.daemonId, expiresAt: AT, names: ['ZAI_API_KEY'], ephemeralKey: 'ZXBo', nonce: 'bm9uY2U', ciphertext: 'Y2lwaGVy' }, names: ['ZAI_API_KEY'] };
   if (!isWork) {

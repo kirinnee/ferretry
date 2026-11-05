@@ -7,11 +7,16 @@
  * so no real harness setup, login or fleet is read. Every credential is a placeholder.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FleetLayout } from '@ferretry/fleet';
-import type { StoredCredentialMaterialReader } from '@ferretry/fleet/adapters';
+import {
+  type FleetApplyLockOptions,
+  fleetApplyLockFor,
+  type StoredCredentialMaterialReader,
+} from '@ferretry/fleet/adapters';
 import should from 'should';
 import {
   fileFleetSetupDeps,
@@ -20,6 +25,7 @@ import {
   readTextFolder,
   skillItemsIn,
 } from '../../../src/adapters/fleet/setup-files.ts';
+import { documentRevision } from '../../../src/adapters/fleet/account-model-files.ts';
 import type { SetupCatalogDeps } from '../../../src/lib/fleet/setup-service.ts';
 
 const NOW = 1_800_000_000_000;
@@ -190,7 +196,7 @@ const credentials: StoredCredentialMaterialReader & {
   material: async () => ({ outcome: 'absent' }),
 };
 
-async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> {
+async function machine(options: { codexHome?: boolean; lockOptions?: FleetApplyLockOptions } = {}): Promise<Machine> {
   const root = await temporary();
   const userHome = path.join(root, 'person');
   const fleetDirectory = path.join(root, 'fy', 'fleet');
@@ -209,6 +215,7 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
   const catalog = {
     layout,
     locate: (name: string) => (name === 'claude' ? '/fake/bin/claude' : undefined),
+    documentRevision,
     now: () => NOW,
     ...(options.codexHome === false ? {} : { hostCodexHome: path.join(userHome, '.codex') }),
   } as unknown as SetupCatalogDeps;
@@ -225,9 +232,15 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
     catalog,
     daemonId: () => 'daemon-source',
     credentials,
+    ...(options.lockOptions === undefined ? {} : { lockOptions: options.lockOptions }),
     tools: { plans: () => [], install: async () => [] },
     secrets: {
-      list: async () => [...secrets.keys()].map(name => ({ name })),
+      list: async () =>
+        [...secrets.keys()].map(name => ({
+          name,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+        })),
       put: async (name, value) => {
         secrets.set(name, value);
       },
@@ -289,10 +302,185 @@ describe('the setup service collaborators over a temporary machine', () => {
     // Act
     await deps.secrets.put('NOTES_TOKEN', 'placeholder-two');
     const names = await deps.secrets.names();
+    const held = await deps.secrets.held();
 
     // Assert
     should(names).deepEqual(['OPENAI_API_KEY', 'NOTES_TOKEN']);
+    should(held).deepEqual([
+      { name: 'OPENAI_API_KEY', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z' },
+      { name: 'NOTES_TOKEN', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z' },
+    ]);
     should(secrets.get('NOTES_TOKEN')).equal('placeholder-two');
+  });
+
+  describe('the record of what was last copied', () => {
+    const recordPath = (layout: FleetLayout): string => path.join(layout.fleetDirectory, 'setup', 'clone-base.json');
+
+    it('should read an absent record as nothing and write what an update answers, once', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+
+      // Act
+      const before = await deps.cloneBase.read(recordPath(layout));
+      const wrote = await deps.cloneBase.update(recordPath(layout), current => `${current ?? 'none'}+one`);
+      const after = await deps.cloneBase.read(recordPath(layout));
+
+      // Assert
+      should(before).be.undefined();
+      should(wrote).be.true();
+      should(after).equal('none+one');
+    });
+
+    it('should leave the record as it is, and say so, when the update answers nothing', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      await deps.cloneBase.update(recordPath(layout), () => 'kept');
+
+      // Act
+      const wrote = await deps.cloneBase.update(recordPath(layout), () => undefined);
+
+      // Assert
+      should(wrote).be.false();
+      should(await deps.cloneBase.read(recordPath(layout))).equal('kept');
+    });
+
+    it('should give each of two updates started together the record the other left, so neither is lost', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      const add = async (name: string): Promise<boolean> =>
+        await deps.cloneBase.update(recordPath(layout), current => `${current ?? ''}${name};`);
+
+      // Act
+      const wrote = await Promise.all([add('A_KEY'), add('B_KEY')]);
+
+      // Assert
+      should(wrote).deepEqual([true, true]);
+      // Which update takes the claim first is not promised; that each saw the other's record is.
+      const kept = (await deps.cloneBase.read(recordPath(layout)))?.split(';').filter(name => name !== '');
+      should(kept?.slice().sort()).deepEqual(['A_KEY', 'B_KEY']);
+    });
+
+    it('should run the next update after one whose change raised', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      const failed = deps.cloneBase
+        .update(recordPath(layout), () => {
+          throw new Error('cannot change');
+        })
+        .catch((error: unknown) => error);
+
+      // Act
+      const wrote = await deps.cloneBase.update(recordPath(layout), () => 'after');
+
+      // Assert
+      should(await failed).be.instanceOf(Error);
+      should(wrote).be.true();
+      should(await deps.cloneBase.read(recordPath(layout))).equal('after');
+    });
+
+    it('should wait for a running fleet apply, then change the record that apply left, so neither is lost', async () => {
+      // Arrange — an apply holds the claim (the very one the provisioner takes); this update starts meanwhile
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      await writeFile(recordPath(layout), 'first;');
+      const claim = fleetApplyLockFor(layout.manifestPath);
+      const token = await claim.acquire();
+      const seen: (string | undefined)[] = [];
+      let settled = false;
+      const update = deps.cloneBase
+        .update(recordPath(layout), current => {
+          seen.push(current);
+          return `${current ?? ''}recorded;`;
+        })
+        .finally(() => {
+          settled = true;
+        });
+
+      // Act — the update gets no turn while the apply runs; the apply publishes its record and finishes
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const waitedForTheApply = !settled && seen.length === 0;
+      writeFileSync(recordPath(layout), 'first;applied;');
+      await claim.release(token);
+      const wrote = await update;
+
+      // Assert — it read what the apply published, once, and wrote on top of it
+      should(waitedForTheApply).be.true();
+      should(wrote).be.true();
+      should(seen).deepEqual(['first;applied;']);
+      should(await deps.cloneBase.read(recordPath(layout))).equal('first;applied;recorded;');
+    });
+
+    it('should hold the fleet apply claim while it changes the record, and free it afterwards', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      const claim = fleetApplyLockFor(layout.manifestPath);
+      let heldDuring = false;
+
+      // Act
+      await deps.cloneBase.update(recordPath(layout), () => {
+        heldDuring = existsSync(claim.path);
+        return 'written;';
+      });
+      const token = await claim.acquire();
+      const released = await claim.release(token);
+
+      // Assert — an apply could not have started during the change, and can start straight after it
+      should(heldDuring).be.true();
+      should(released).be.undefined();
+      should(await deps.cloneBase.read(recordPath(layout))).equal('written;');
+    });
+
+    it('should refuse, writing nothing, when a fleet apply keeps the claim past the wait', async () => {
+      // Arrange
+      const { deps, layout } = await machine({ lockOptions: { waitMs: 40, pollMs: 5 } });
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      await writeFile(recordPath(layout), 'kept;');
+      const claim = fleetApplyLockFor(layout.manifestPath);
+      const token = await claim.acquire();
+      let called = false;
+
+      // Act
+      const failed = await deps.cloneBase
+        .update(recordPath(layout), () => {
+          called = true;
+          return 'overwritten;';
+        })
+        .catch((error: unknown) => error);
+      await claim.release(token);
+
+      // Assert
+      should(failed).be.instanceOf(Error);
+      should(String((failed as Error).message)).match(/another fleet apply holds/u);
+      should(called).be.false();
+      should(await deps.cloneBase.read(recordPath(layout))).equal('kept;');
+    });
+
+    it('should say so when the claim could not be cleared after the record was written', async () => {
+      // Arrange — something replaces the claim with a directory that is not this update's own while it runs
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      const lockPath = fleetApplyLockFor(layout.manifestPath).path;
+
+      // Act
+      const failed = await deps.cloneBase
+        .update(recordPath(layout), () => {
+          rmSync(lockPath, { recursive: true, force: true });
+          mkdirSync(lockPath);
+          writeFileSync(path.join(lockPath, 'someone-elses-claim'), 'x');
+          return 'written;';
+        })
+        .catch((error: unknown) => error);
+
+      // Assert
+      should(failed).be.instanceOf(Error);
+      should(String((failed as Error).message)).match(/could not be cleared/u);
+      should(await deps.cloneBase.read(recordPath(layout))).equal('written;');
+    });
   });
 
   it('should read the skill items from the asset tree and the folders it is asked for', async () => {

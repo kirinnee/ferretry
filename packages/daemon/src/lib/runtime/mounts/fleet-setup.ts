@@ -19,6 +19,8 @@ import {
   FleetCloneBundleSchema,
   FleetCloneForgetRequestSchema,
   FleetCloneForgetResultSchema,
+  FleetCloneKeysRecordRequestSchema,
+  FleetCloneKeysRecordResultSchema,
   FleetCloneReviewRequestSchema,
   FleetCloneReviewSchema,
   FleetSetupScanSchema,
@@ -36,7 +38,7 @@ import { FleetSetupRefusal, type FleetSetupService } from '../../fleet/setup-ser
 /** First-run scan, tool install, the clone export and the clone review. */
 export type FleetSetupSubsystem = Pick<
   FleetSetupService,
-  'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'executors'
+  'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
 >;
 
 /** `403` for a caller the grants refuse; `409` for every other refusal, as the fleet's own answer. */
@@ -99,7 +101,7 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, FleetCloneReviewRequestSchema);
-        return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request));
+        return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request, context.governance));
       },
     },
     {
@@ -116,6 +118,20 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
         return await answer(FleetCloneForgetResultSchema, async () => ({
           forgotten: await subsystem.forgetCloneSource(request.source),
         }));
+      },
+    },
+    {
+      // The sealed copy of the keys has landed here; this remembers when each side last changed them. It
+      // writes only `keys` of the record (timestamps), and person-only like the review it follows.
+      method: 'POST',
+      path: '/v1/fleet/clone/keys',
+      minimum: 'operator',
+      caller: 'person',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetCloneKeysRecordRequestSchema);
+        return await answer(FleetCloneKeysRecordResultSchema, () => subsystem.recordCloneKeys(request));
       },
     },
   ];

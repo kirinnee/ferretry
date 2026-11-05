@@ -10,14 +10,16 @@ import {
   cloneLoginTargets,
   cloneNeeds,
   controlsChange,
+  filedKeyStamps,
   keysToCopy,
   type MatchableLogin,
   needsAfterCopy,
   needsSentence,
+  newerKeys,
   outcomeSentence,
   providersNeededBy,
-  signInLink,
   type SourceSettingsFile,
+  signInLink,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
 import { bundle, machineView } from './setup-support.ts';
@@ -611,5 +613,35 @@ describe('the Done screen sign-in needs', () => {
     expect(needsAfterCopy([ghost, secret], new Map(), after)).toEqual([ghost, secret]);
     expect(signInLink(ghost, new Map(), after)).toBeUndefined();
     expect(signInLink(signIn('codex-here'), new Map(), after)).toBe('codex-here');
+  });
+});
+
+describe('keys that are newer on the source', () => {
+  const outcomes = [
+    { name: 'A_KEY', outcome: 'missing' },
+    { name: 'B_KEY', outcome: 'newer' },
+    { name: 'C_KEY', outcome: 'both' },
+    { name: 'D_KEY', outcome: 'same' },
+  ];
+
+  it('should report only the newer and the changed-on-both-sides, not the missing or the same', () => {
+    expect(newerKeys(outcomes)).toEqual([
+      { name: 'B_KEY', outcome: 'newer' },
+      { name: 'C_KEY', outcome: 'both' },
+    ]);
+  });
+
+  it('should have nothing that selects a reported key for copying: it is a report', () => {
+    expect(Object.keys(newerKeys(outcomes)[0] ?? {}).toSorted()).toEqual(['name', 'outcome']);
+  });
+
+  it('should remember the source’s instant for each key that was filed, and for no other', () => {
+    const stamps = new Map([
+      ['B_KEY', '2026-10-20T08:00:00.000Z'],
+      ['C_KEY', '2026-10-21T08:00:00.000Z'],
+    ]);
+    expect(filedKeyStamps(['B_KEY', 'GONE_KEY'], stamps)).toEqual([
+      { name: 'B_KEY', sourceUpdatedAt: '2026-10-20T08:00:00.000Z' },
+    ]);
   });
 });

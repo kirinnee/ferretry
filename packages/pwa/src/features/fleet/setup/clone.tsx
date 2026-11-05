@@ -26,13 +26,19 @@
  * now, and **Copy secrets from <source>…** for anything else, picked by name.
  */
 
+import { isSignInSecretName } from '@ferretry/protocol';
 import type {
   CloneLoginTarget,
+  CloneSettingsDoc,
+  ConfigStatusView,
   CloneRunnable,
+  CloneKeyChoice,
   FleetCloneBundle,
+  FleetCloneReview,
   FleetCredentialView,
   SpeedupsView,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
@@ -42,6 +48,7 @@ import {
   configInvalidBody,
   confirmConfigChange,
   readConfigFile,
+  readConfigStatus,
   writeConfigFile,
 } from '../../config-files/config-files-api.ts';
 import { copySecrets as sealSecretsAcross } from '../../secrets/secret-clone-api.ts';
@@ -52,7 +59,7 @@ import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { readFleetMachine, readFleetProfiles } from '../catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
-import { readFleetExport } from '../setup-api.ts';
+import { readFleetExport, recordCloneKeys, reviewFleetClone } from '../setup-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { type MachineReach, readMachineReach } from '../shell/machine-reach.ts';
@@ -76,6 +83,21 @@ import {
   runnableTitle,
 } from './clone-model.ts';
 import {
+  defaultRuntimeToPicker,
+  keepItemsDecisions,
+  pickId,
+  refusedDocuments,
+  reviewedFor,
+  type SettingsPicks,
+  settingsDecisions,
+  settingsDocOf,
+  settingsToSend,
+  undecidedKeys,
+  withoutDefaultRuntimePick,
+  withoutDefaultRuntime,
+} from './clone-settings-merge.ts';
+import { CloneSettingsKeys } from './clone-settings-keys.tsx';
+import {
   CloneItemsChoices,
   CloneLoginsSection,
   CloneNeedsList,
@@ -96,16 +118,19 @@ import {
   cloneLoginTargets,
   cloneNeeds,
   controlsChange,
+  filedKeyStamps,
   keysToCopy,
+  type NewerKey,
+  newerKeys,
   needsAfterCopy,
   signInLink,
   type SourceSettingsFile,
   sourceItemSummary,
 } from './clone-settings-model.ts';
 import { machineItemHash } from './settings-route.ts';
-import { useSetupAccess } from './setup-access.ts';
+import { type Guarded, useSetupAccess } from './setup-access.ts';
 import { RadioChoices, SetupCommand, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
-import { countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
+import { closedSentence, countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 export interface CloneMachineProps extends MachineTabProps {
   /** Every OTHER machine this browser has paired. */
@@ -137,6 +162,20 @@ interface CloneResult {
 function Foot({ children }: { readonly children: ReactNode }) {
   return <div className="mt-4 flex flex-wrap gap-2">{children}</div>;
 }
+
+/**
+ * How asking this machine to review the settings ended. `unsupported` is a machine that positively has no such
+ * route (an older version): the only case the settings are copied whole, and the screen says so first. Every other
+ * failure is `failed`: nothing is copied until it is reviewed.
+ */
+type SettingsReview =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'reviewed'; readonly review: FleetCloneReview }
+  | { readonly kind: 'unsupported' }
+  | { readonly kind: 'failed'; readonly sentence: string };
+
+const isUnknownRoute = (error: unknown): boolean =>
+  error instanceof FyHttpError && error.status === 404 && error.code === 'unknown_route';
 
 const reasonOf = (error: unknown): string => {
   const invalid = configInvalidBody(error);
@@ -176,6 +215,10 @@ export function CloneMachine(props: CloneMachineProps) {
   const [held, setHeld] = useState<readonly string[]>([]);
   // The names the SOURCE holds (never values), so only a key it really has is asked for; `null` when unread.
   const [sourceSecrets, setSourceSecrets] = useState<readonly string[] | null>(null);
+  // When the SOURCE last changed each key it holds (its own list's `updatedAt`; instants, never values).
+  const [sourceStamps, setSourceStamps] = useState<ReadonlyMap<string, string>>(new Map());
+  // The keys the source changed since the last copy (this machine decides from timestamps): reported, never copied.
+  const [offeredKeys, setOfferedKeys] = useState<readonly NewerKey[]>([]);
   const [copyKeys, setCopyKeys] = useState(true);
   const [chosen, setChosen] = useState<readonly CloneItemId[]>(ALL_CLONE_ITEMS);
   const [sourceIssue, setSourceIssue] = useState<string | null>(null);
@@ -184,6 +227,13 @@ export function CloneMachine(props: CloneMachineProps) {
   const [profiles, setProfiles] = useState(0);
   const [mode, setMode] = useState<CloneMode>('alongside');
   const [skip, setSkip] = useState<readonly string[]>([]);
+  // This machine's review of the settings the source sent, key by key (design §5): what differs, and what is picked.
+  const [review, setReview] = useState<FleetCloneReview | null>(null);
+  // Why there is no review although settings were ticked: this machine cannot review (older), or the review failed.
+  const [reviewIssue, setReviewIssue] = useState<Exclude<SettingsReview, { kind: 'none' | 'reviewed' }> | null>(null);
+  const [picks, setPicks] = useState<SettingsPicks>(new Map());
+  // The review is being made again (a settings item was ticked or unticked): the apply names one review, so wait.
+  const [reviewing, setReviewing] = useState(false);
   // What the person picked for "Default runtime for new agents": a source runtime name, null for none, undefined until they pick.
   const [defaultPick, setDefaultPick] = useState<string | null | undefined>(undefined);
   const [result, setResult] = useState<CloneResult | null>(null);
@@ -250,6 +300,26 @@ export function CloneMachine(props: CloneMachineProps) {
   const next = (): void => setStepper(stepForward(state));
   const preview = bundle === null ? null : clonePreview(bundle, machine, skip);
   const pickedReach = picked === null ? undefined : reach.get(picked);
+  // The settings items the daemon reviewed, and what still stops the copy: a setting changed on both machines with
+  // no pick, or a document it will not copy. Nothing is picked for the person.
+  const perKeyItems =
+    review === null ? [] : chosen.filter(id => review.settings.some(document => settingsDocOf(id) === document.path));
+  const reviewedAll = review === null ? [] : reviewedFor(review, chosen);
+  // With the fleet copied, the default runtime is the picker's, not a row: see `defaultRuntimeToPicker`.
+  const reviewedSettings = copiesFleet ? defaultRuntimeToPicker(reviewedAll) : reviewedAll;
+  const shownSettings = copiesFleet ? withoutDefaultRuntime(reviewedAll) : reviewedAll;
+  const settingsPicks = copiesFleet ? withoutDefaultRuntimePick(picks) : picks;
+  const undecided = undecidedKeys(reviewedSettings, settingsPicks);
+  const refused = refusedDocuments(reviewedSettings);
+  const blockedBy = reviewing
+    ? 'Checking what differs…'
+    : reviewIssue?.kind === 'failed'
+      ? `Couldn’t check what differs in the settings you ticked, so none of them is copied yet: ${closedSentence(reviewIssue.sentence)}`
+      : refused.length > 0
+        ? `${refused[0]?.why ?? ''} Untick it to copy the rest.`
+        : undecided.length > 0
+          ? `Choose for ${countWords(undecided.length, 'setting')} changed on both machines: ${undecided.join(', ')}.`
+          : null;
   const sourceMachine = pickedReach?.kind === 'online' ? pickedReach.machine : null;
   // The person's name for the source (`Liftoff EC2`); the bundle's own `machine` is only what it called itself, often a hostname.
   const sourceName = pickedRecord === undefined ? (bundle?.machine ?? '') : daemonDisplayName(pickedRecord);
@@ -264,6 +334,69 @@ export function CloneMachine(props: CloneMachineProps) {
           sourceDefault: chosen.includes('controls') ? (sourceMachine?.defaultRuntime ?? undefined) : undefined,
           picked: defaultPick,
         });
+
+  /**
+   * What the ticked settings would change here, key by key. The apply names this review's fingerprint, so it is made
+   * with exactly what the apply will send; ticking another settings item reviews again. A machine that has no such
+   * route (an older daemon) is the one case the settings are copied whole as they always were, and the screen says so;
+   * any other failure blocks the copy until the review is made.
+   */
+  const reviewSettings = async (
+    exported: FleetCloneBundle,
+    read: ReadonlyMap<string, SourceSettingsFile>,
+    ticked: readonly CloneItemId[],
+    sourceView: typeof sourceMachine,
+  ): Promise<SettingsReview> => {
+    const settings = settingsToSend(ticked, read, sourceView);
+    if (settings.length === 0 || pickedRecord === undefined) return { kind: 'none' };
+    try {
+      const client = await createClient(connection);
+      const made = await reviewFleetClone(client, {
+        bundle: { ...exported },
+        source: { daemonId: String(pickedRecord.daemonId) },
+        names: { source: sourceName, target: machineName },
+        settings: [...settings],
+      });
+      return { kind: 'reviewed', review: made };
+    } catch (error) {
+      return isUnknownRoute(error)
+        ? { kind: 'unsupported' }
+        : { kind: 'failed', sentence: changeRefusalSentence(error) };
+    }
+  };
+
+  /** Keep what a review answered: its rows, or why there are none. */
+  const keepReview = (answer: SettingsReview): void => {
+    setReview(answer.kind === 'reviewed' ? answer.review : null);
+    setReviewIssue(answer.kind === 'unsupported' || answer.kind === 'failed' ? answer : null);
+  };
+
+  /** Review the ticked settings again (an item was ticked, or the last review failed and the person retries). */
+  const reviewAgain = (ticked: readonly CloneItemId[]): void => {
+    if (bundle === null) return;
+    setReviewing(true);
+    void reviewSettings(bundle, files, ticked, sourceMachine).then(next => {
+      keepReview(next);
+      setReviewing(false);
+    });
+  };
+
+  const offeredFor = async (
+    exported: FleetCloneBundle,
+    stamps: readonly { readonly name: string; readonly updatedAt: string }[] | null,
+  ): Promise<readonly NewerKey[]> => {
+    if (stamps === null || stamps.length === 0 || pickedRecord === undefined) return [];
+    // `read` turns any failure (a review that is refused, a list too long to send) into a refusal: none offered.
+    const reviewed = await target.read(client =>
+      reviewFleetClone(client, {
+        bundle: { ...exported },
+        source: { daemonId: String(pickedRecord.daemonId) },
+        names: { source: sourceName, target: machineName },
+        sourceSecrets: [...stamps],
+      }),
+    );
+    return reviewed.kind === 'done' ? newerKeys(reviewed.value.keys) : [];
+  };
 
   const readSource = (): void => {
     setSourceIssue(null);
@@ -292,13 +425,27 @@ export function CloneMachine(props: CloneMachineProps) {
           ? sourceList.value.secrets.map(secret => secret.name)
           : null,
       );
+      const stamps =
+        sourceList.kind === 'done' && sourceList.value.health === 'ready'
+          ? sourceList.value.secrets
+              .filter(secret => !isSignInSecretName(secret.name))
+              .map(({ name, updatedAt }) => ({ name, updatedAt }))
+          : null;
+      setSourceStamps(new Map((stamps ?? []).map(({ name, updatedAt }) => [name, updatedAt])));
+      // Which keys are newer on the source is this machine's call, from timestamps alone. A review that cannot be
+      // read (or a source list too long to send) offers none: the keys the logins need still copy as they always did.
+      const offered = await offeredFor(exported.value, stamps);
+      setOfferedKeys(offered);
       setCopyKeys(true);
       setFiles(read);
       setBundle(exported.value);
       // A fresh read is a fresh review: nothing it lists has been left out yet, and every item it can copy is ticked.
       setSkip([]);
       setDefaultPick(undefined);
-      setChosen(ALL_CLONE_ITEMS.filter(id => itemReadable(id, read, pickedReach)));
+      const ticked = ALL_CLONE_ITEMS.filter(id => itemReadable(id, read, pickedReach));
+      setChosen(ticked);
+      setPicks(new Map());
+      keepReview(await reviewSettings(exported.value, read, ticked, sourceMachine));
       setReading(false);
       setStepper(current => stepForward(withSteps(current, steps)));
     })();
@@ -322,7 +469,17 @@ export function CloneMachine(props: CloneMachineProps) {
   const sealKeys = async (names: readonly string[]): Promise<CloneItemOutcome> => {
     if (pickedRecord === undefined) return { kind: 'refused', reason: 'No source machine is picked.' };
     try {
-      await sealSecretsAcross(await createClient(pickedRecord), await createClient(connection), names);
+      const landed = await sealSecretsAcross(await createClient(pickedRecord), await createClient(connection), names);
+      // Remember when the source last changed each key that was just filed (a key this machine already held was
+      // kept, not filed, and is not remembered), so the next copy can tell "newer there" from "same". Bookkeeping:
+      // a refusal here costs only that, never the copy that already landed.
+      const stamps = filedKeyStamps(landed.imported, sourceStamps);
+      if (landed.filedAt !== undefined && stamps.length > 0) {
+        const { filedAt } = landed;
+        await target.read(client =>
+          recordCloneKeys(client, { source: { daemonId: String(pickedRecord.daemonId) }, filedAt, keys: stamps }),
+        );
+      }
       return { kind: 'copied' };
     } catch (error) {
       return { kind: 'refused', reason: `${copyRefusalSentence(error)} Copy them from the list below.` };
@@ -338,6 +495,33 @@ export function CloneMachine(props: CloneMachineProps) {
       const item = (id: CloneItemId): CloneItem => CLONE_ITEMS.find(candidate => candidate.id === id) as CloneItem;
       // This machine's logins BEFORE the copy: the sign-ins it already has, which the copy matches against.
       const before = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
+      // Settings the daemon reviewed key by key go first, in one update that decides settings and nothing else; the
+      // files and controls it handled are not written again below.
+      const merged = new Set<CloneItemId>();
+      if (review !== null && perKeyItems.length > 0) {
+        const applied = await changes.apply({
+          kind: 'clone.import' as const,
+          mode: 'update',
+          bundle: { ...bundle },
+          source: { daemonId: String(pickedRecord.daemonId) },
+          names: { source: sourceName, target: machineName },
+          reviewed: review.fingerprint,
+          decisions: keepItemsDecisions(review.items),
+          settings: [...settingsToSend(chosen, files, sourceMachine)],
+          settingsDecisions: settingsDecisions(reviewedSettings, settingsPicks),
+        });
+        if (applied.kind === 'refused') {
+          setCopying(false);
+          return;
+        }
+        summary = applied.outcome.outcome === 'executed' ? applied.outcome.summary : applied.staged.summary;
+        // A file that loosens is written but HELD, and the update's answer is only a count: read which are waiting.
+        const status = await target.read(client => readConfigStatus(client));
+        for (const id of perKeyItems) {
+          merged.add(id);
+          outcomes.push({ item: item(id), outcome: mergedOutcome(settingsDocOf(id), status) });
+        }
+      }
       if (copiesFleet) {
         const applied = await changes.apply({
           kind: 'clone.import' as const,
@@ -359,10 +543,10 @@ export function CloneMachine(props: CloneMachineProps) {
       }
       for (const settings of CLONE_SETTINGS_FILES) {
         const file = files.get(settings.file);
-        if (!chosen.includes(settings.id) || file === undefined) continue;
+        if (!chosen.includes(settings.id) || file === undefined || merged.has(settings.id)) continue;
         outcomes.push({ item: settings, outcome: await copyFile(settings.file, file.text) });
       }
-      if (chosen.includes('controls') && sourceMachine !== null) {
+      if (chosen.includes('controls') && sourceMachine !== null && !merged.has('controls')) {
         // The fleet copy already decided this machine's default; read it back so the controls do not undo it.
         const decided = copiesFleet ? await target.read(client => readFleetMachine(client)) : null;
         const applied = await changes.apply(
@@ -437,7 +621,7 @@ export function CloneMachine(props: CloneMachineProps) {
         submitLabel={label}
         busyLabel="Copying…"
         variant={variant}
-        disabled={chosen.length === 0}
+        disabled={chosen.length === 0 || blockedBy !== null}
         onSubmit={copy}
       />
     </div>
@@ -547,14 +731,52 @@ export function CloneMachine(props: CloneMachineProps) {
             summaries={summaries}
             unavailable={unavailable}
             source={sourceName}
-            onToggle={(id, on) =>
-              setChosen(current =>
-                on
-                  ? ALL_CLONE_ITEMS.filter(candidate => candidate === id || current.includes(candidate))
-                  : current.filter(candidate => candidate !== id),
-              )
-            }
+            onToggle={(id, on) => {
+              const ticked = on
+                ? ALL_CLONE_ITEMS.filter(candidate => candidate === id || chosen.includes(candidate))
+                : chosen.filter(candidate => candidate !== id);
+              setChosen(ticked);
+              // The apply names one review, and a review is of exactly the settings that will be sent.
+              if (settingsDocOf(id) !== undefined) reviewAgain(ticked);
+            }}
           />
+          {shownSettings.length === 0 ? null : (
+            <CloneSettingsKeys
+              review={shownSettings}
+              picks={picks}
+              source={sourceName}
+              machineName={machineName}
+              onPick={(path, key, choice: CloneKeyChoice) =>
+                setPicks(current => new Map(current).set(pickId(path, key), choice))
+              }
+            />
+          )}
+          {blockedBy === null ? null : (
+            <SetupNote live tone="warn" name="settings-undecided">
+              <span>{blockedBy}</span>
+              {reviewIssue?.kind === 'failed' && !reviewing ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 min-h-[44px] min-w-[96px] self-start"
+                  data-clone-review-retry=""
+                  onClick={() => reviewAgain(chosen)}
+                >
+                  Check again
+                </Button>
+              ) : null}
+            </SetupNote>
+          )}
+          {reviewIssue?.kind === 'unsupported' ? (
+            <SetupNote tone="warn" name="settings-whole" title={`${machineName} can’t compare settings one by one`}>
+              <span>
+                {machineName} runs a version that predates the key-by-key check, so the settings you ticked are copied
+                whole and replace what is there, including any change you made on {machineName}. Untick them to leave
+                them alone, or update Ferretry on {machineName} first.
+              </span>
+            </SetupNote>
+          ) : null}
           {copiesFleet ? (
             <>
               <SetupSection title="Profiles and runtimes copy" name="copies">
@@ -596,6 +818,7 @@ export function CloneMachine(props: CloneMachineProps) {
             keys={keysToCopy(needs, sourceSecrets)}
             copyKeys={copyKeys}
             onCopyKeys={setCopyKeys}
+            newer={offeredKeys}
           />
           <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
           <SetupSection title="Doesn’t copy" name="not-copied">
@@ -672,7 +895,7 @@ export function CloneMachine(props: CloneMachineProps) {
             </SetupNote>
           ) : hasSetup ? (
             <Foot>
-              <Button type="button" variant="primary" data-step-next="" onClick={next}>
+              <Button type="button" variant="primary" data-step-next="" disabled={blockedBy !== null} onClick={next}>
                 Next
               </Button>
             </Foot>
@@ -735,6 +958,17 @@ export function CloneMachine(props: CloneMachineProps) {
     </MachineStepper>
   );
 }
+
+/** How one merged settings item ended, from the machine's own list of the edits it is holding. */
+const mergedOutcome = (document: CloneSettingsDoc | undefined, status: Guarded<ConfigStatusView>): CloneItemOutcome => {
+  // The controls are one reviewed change of the copy itself: nothing of theirs is held back as a file.
+  if (document === undefined || document === 'controls') return { kind: 'copied' };
+  if (status.kind === 'refused') return { kind: 'unchecked', reason: status.sentence };
+  const held = status.value.pending.find(pending => pending.path === document);
+  return held === undefined
+    ? { kind: 'copied' }
+    : { kind: 'pending', path: held.path, etag: held.etag, changes: held.changes };
+};
 
 /** Whether the source shared an item: its export always, its files when they were read, its controls when it answered. */
 const itemReadable = (
@@ -858,7 +1092,7 @@ function DoneStep({
       <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.sourceName}`}>
         <span>{result.summary ?? `${countWords(result.outcomes.length, 'item')} copied.`}</span>
       </SetupNote>
-      <CloneOutcomes outcomes={result.outcomes} onConfirm={onConfirm} />
+      <CloneOutcomes outcomes={result.outcomes} machineName={machineName} onConfirm={onConfirm} />
       <CloneNeedsList
         needs={needsAfterCopy(needs, result.logins, result.after)}
         machineName={machineName}

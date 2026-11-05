@@ -101,9 +101,29 @@ describe('a sealed bundle', () => {
     expect(SecretImportCompleteRequestSchema.parse({ bundle: BUNDLE }).bundle).toEqual(BUNDLE);
   });
 
-  it('should answer an import with the names that arrived and those that replaced one', () => {
-    const result = { importId: IMPORT_ID, sourceDaemonId: SOURCE, imported: [API_KEY], replaced: [] };
-    expect(SecretImportResultSchema.parse(result)).toEqual(result);
+  it('should answer an import with the names it filed and those it kept, and when it filed them', () => {
+    const filed = {
+      importId: IMPORT_ID,
+      sourceDaemonId: SOURCE,
+      imported: [API_KEY],
+      filedAt: AT,
+      kept: [],
+    };
+    const keptOnly = { importId: IMPORT_ID, sourceDaemonId: SOURCE, imported: [], kept: [API_KEY] };
+    expect(SecretImportResultSchema.parse(filed)).toEqual(filed);
+    expect(SecretImportResultSchema.parse(keptOnly)).toEqual(keptOnly);
+  });
+
+  it('should have no way to ask an import to overwrite a key, and no field in its answer for one that was', () => {
+    // A copy only adds: a `replace` list (or any other field) is refused when the request is parsed.
+    expect(SecretImportCompleteRequestSchema.safeParse({ bundle: BUNDLE, replace: [API_KEY] }).success).toBe(false);
+    expect(SecretImportCompleteRequestSchema.safeParse({ bundle: BUNDLE, replace: [] }).success).toBe(false);
+    expect(Object.keys(SecretImportCompleteRequestSchema.shape)).toEqual(['bundle']);
+    const answer = { importId: IMPORT_ID, sourceDaemonId: SOURCE, imported: [], kept: [], replaced: [API_KEY] };
+    expect(SecretImportResultSchema.safeParse(answer).success).toBe(false);
+    expect(Object.keys(SecretImportResultSchema.shape).toSorted()).toEqual(
+      ['filedAt', 'imported', 'importId', 'kept', 'sourceDaemonId'].toSorted(),
+    );
   });
 });
 
