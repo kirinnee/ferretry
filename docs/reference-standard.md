@@ -86,7 +86,9 @@ no tombstone, and no live owner to ask — the proof is the transcript itself (s
 - **The grammar**: `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}` that does **not end** in `.` or `-`. The last rule is why
   `see %attachment:shot.png.` links `shot.png` and keeps the full stop, and why `%attachment:shot.png-` is not a
   reference at all rather than a link to some other file called `shot`. A file whose delivered name cannot be
-  written this way (it ends in `.`, or is longer than 128 characters) has no token and no **+**.
+  written this way (it ends in `.` or `-` — `My file (1)` is delivered as `My-file-1-` — or is longer than 128
+  characters) has no token and no **+**. Only ONE trailing full stop belongs to the sentence, so a token followed
+  by an ellipsis (`%attachment:shot.png...`) stays prose.
 - **Case matters**: `%attachment:Shot.PNG` and `%attachment:shot.png` are two files. The `attachment` kind word,
   like `terminal`, is case-folded.
 - **Where it comes from**: the **+** on a file in the conversation (below) writes it. A person can type one by
@@ -107,7 +109,7 @@ names its session's composer. A surface with a composer slot of its own — an a
 instead by wrapping the gallery the same way; the agenda card view draws no stored files today, so that is wiring
 for when it does, not a behaviour to look for. The **+** is disabled, with the reason, while no message box is open (a question
 has replaced it) or the open one cannot be written to (it is disabled, or a send is in flight) — the composer publishes
-that as `writable` and the registry re-announces it when it flips, and the composer refuses the insert and the chip
+that as `blocked` (`disabled` or `sending`, and the copy says which) and the registry re-announces it when it flips, and the composer refuses the insert and the chip
 itself as well; it is not drawn at all outside a session. When the composer is at its attachment limit the
 token is still written and the chip is refused, because the sentence needs the token. **Inline** pictures and
 **transcript-record** images (a tool's screenshot) have no stored attachment id, so they have no **+**.
@@ -155,7 +157,10 @@ never rewritten.
 
 A proved `%attachment:` chip — a file icon and the token — **scrolls to the tile and rings it**, for images as
 well as documents (one behaviour; the tile's own tap opens the image viewer from there). The tile in the SAME
-message as the clicked chip wins; failing that, the newest tile of that file on the page. A message that has
+message as the clicked chip wins — a message marks its words and tiles with `data-attachment-message`, wherever it
+is drawn (a turn, a combined part, a peer's message) — and failing that the newest tile of that file. Both are looked
+up inside the clicked chip's own session, because an attachment id is a content hash and one file has the same id in
+every session. A message that has
 scrolled out of the loaded transcript has no tile to reach, and the click then does nothing rather than guess.
 
 The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
@@ -333,7 +338,8 @@ third answer, because a stored file is not a live surface.
 > reference resolves to the file of that name on the **same message** first, otherwise to the **newest** one in
 > the session ("newest" follows the transcript's chronology — the time the carrying row landed — so a queued send
 > ranks by when it was sent, not by the order its document was read; a row with no known time falls back to the
-> document name: `turn-<n>` counts up, and a queued send is behind a turn). A combined delivery keeps the full list
+> document name: `turn-<n>` counts up, and a queued send, not delivered yet, is newer than any turn; time ranks
+> the files of a name only when every one of them has it, so the answer never depends on the order the rows were read). A combined delivery keeps the full list
 > of the turn's files as same-message proof for every part, though the tiles are drawn once. An older file of the same name is reachable only through its own message's references. The
 > **+** re-attaches the exact file, so the ferret still receives the one the person meant even when the token
 > alone would resolve to the newer. The envelope carries the stored attachment id, so a click re-proves the

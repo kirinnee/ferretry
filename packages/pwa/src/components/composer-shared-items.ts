@@ -277,14 +277,14 @@ export function useSharedComposerItems({
   const storedLocal = useMemo(
     () =>
       attachments.entries.flatMap((entry): SharedDraftAttachment[] =>
-        entry.view !== undefined && entry.file.size === 0 && entry.size !== undefined
+        entry.view !== undefined && entry.stored === true
           ? [
               {
                 kind: 'attachment',
                 id: entry.view.id,
                 name: entry.view.filename,
                 mime: entry.view.mime,
-                bytes: entry.size,
+                bytes: entry.size ?? 0,
               },
             ]
           : [],
@@ -315,7 +315,7 @@ export function useSharedComposerItems({
       }),
     );
     const own = attachments.entries.map((entry): PendingAttachment => {
-      const picture = entry.view !== undefined && entry.file.size === 0 ? previews.get(entry.view.id) : undefined;
+      const picture = entry.view !== undefined && entry.stored === true ? previews.get(entry.view.id) : undefined;
       return picture === undefined || entry.objectUrl !== undefined ? entry : { ...entry, objectUrl: picture };
     });
     return [...own, ...remote, ...placeholders];
@@ -348,7 +348,7 @@ export function useSharedComposerItems({
       // A file this session already stored (another device's, or one the + put back) holds no bytes of its own.
       const storedId = entry.localId.startsWith(REMOTE_PREFIX)
         ? entry.localId.slice(REMOTE_PREFIX.length)
-        : entry.file.size === 0 && entry.size !== undefined
+        : entry.stored === true
           ? entry.view?.id
           : undefined;
       if (storedId === undefined) {

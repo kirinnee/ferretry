@@ -264,6 +264,7 @@ describe('useSharedComposerItems', () => {
       localId: 'local-1',
       file: new File([], 'shot.png', { type: 'image/png' }),
       size: 2048,
+      stored: true,
       status: 'ready',
       view: view('att_1', 'shot.png'),
     };
@@ -274,6 +275,32 @@ describe('useSharedComposerItems', () => {
     await settleUntil(() => shown.length === 1, 'the file from the daemon', runAsync);
 
     expect(shown.map(file => [file.name, file.size])).toEqual([['shot.png', 2]]);
+    run(() => root.unmount());
+  });
+
+  test('opens a genuine empty upload from its own file, not from the daemon', async () => {
+    const shown: File[] = [];
+    const empty: PendingAttachment = {
+      localId: 'local-2',
+      file: new File([], 'empty.txt', { type: 'text/plain' }),
+      size: 0,
+      status: 'ready',
+      view: view('att_2', 'empty.txt'),
+    };
+    let fetched = 0;
+    const { items, root } = mount({
+      entries: [empty],
+      fetcher: async () => {
+        fetched += 1;
+        return download('att_2');
+      },
+    });
+    await settle();
+
+    await runAsync(async () => items().open(items().entries[0] as PendingAttachment, file => shown.push(file)));
+
+    expect(shown).toEqual([empty.file]);
+    expect(fetched).toBe(0);
     run(() => root.unmount());
   });
 

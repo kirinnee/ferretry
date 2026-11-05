@@ -230,20 +230,23 @@ export function HandoffBody({
   useRecordAttachments(handoff.name, files, at);
   return (
     <AttachmentReferenceSurface local={files}>
-      {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
-      {!showFiles || stored.length === 0 ? null : (
-        <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
-      )}
-      {!showFiles || named.length === 0 ? null : (
-        <ul className="fy-handoff-chips">
-          {named.map(file => (
-            <li className="fy-handoff-chip" key={`${file.filename}\u0000${file.mime}`} title={file.mime}>
-              <FileText aria-hidden="true" size={14} />
-              <span>{file.filename}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* Marks the message that owns these words and tiles, so a reference chip reveals ITS message's tile. */}
+      <div className="fy-attachment-message" data-attachment-message={handoff.name}>
+        {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
+        {!showFiles || stored.length === 0 ? null : (
+          <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
+        )}
+        {!showFiles || named.length === 0 ? null : (
+          <ul className="fy-handoff-chips">
+            {named.map(file => (
+              <li className="fy-handoff-chip" key={`${file.filename}\u0000${file.mime}`} title={file.mime}>
+                <FileText aria-hidden="true" size={14} />
+                <span>{file.filename}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </AttachmentReferenceSurface>
   );
 }

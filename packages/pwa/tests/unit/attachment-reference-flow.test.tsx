@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { SessionHandoff } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
-import { AttachmentGalleryProvider, TranscriptAttachmentGallery } from '../../src/components/attachment-gallery.tsx';
+import {
+  AttachmentGalleryProvider,
+  REFERENCE_DISABLED_COPY,
+  REFERENCE_SENDING_COPY,
+  TranscriptAttachmentGallery,
+} from '../../src/components/attachment-gallery.tsx';
 import { AttachmentReferences } from '../../src/components/attachment-reference-surface.tsx';
 import { AttachmentReferenceTarget } from '../../src/components/attachment-reference-target.tsx';
 import { Composer } from '../../src/components/composer.tsx';
@@ -120,6 +125,52 @@ describe('the + on an attachment tile', () => {
     await interact(() => must(plusOf(view.container), 'the + button').click());
 
     expect(composer.calls).toEqual(['attach att_1', 'insert %attachment:shot.png']);
+    expect(view.container.querySelector('[role="status"].sr-only')?.textContent).toBe(
+      'Referenced shot.png; it could not be attached again',
+    );
+    await interact(() => composer.dispose());
+    await view.unmount();
+  });
+
+  it('says the file is already attached when the chip was there, and says it again on a second identical tap', async () => {
+    const composer = fakeComposer({ attachExisting: () => 'present' });
+    const view = await mount(
+      <AttachmentReferenceTarget scope={scope}>
+        <TranscriptAttachmentGallery daemon={daemon} images={[stored()]} />
+      </AttachmentReferenceTarget>,
+    );
+    const status = must(view.container.querySelector('[role="status"].sr-only'), 'the live text');
+    // The live text must pass through empty between two taps, or a screen reader hears nothing the second time.
+    const heard: string[] = [];
+    // What each change wrote: the text node it added, or nothing when it emptied the region.
+    const watch = new MutationObserver(records => {
+      for (const record of records) heard.push([...record.addedNodes].map(node => node.textContent).join(''));
+    });
+    watch.observe(status, { childList: true, characterData: true, subtree: true });
+
+    await interact(() => must(plusOf(view.container), 'the + button').click());
+    await interact(() => must(plusOf(view.container), 'the + button').click());
+    const said = 'shot.png is already attached to your message';
+
+    expect(status.textContent).toBe(said);
+    expect(heard.filter(text => text === said)).toHaveLength(2);
+    expect(heard.filter(text => text === '').length).toBeGreaterThanOrEqual(1);
+    watch.disconnect();
+    await interact(() => composer.dispose());
+    await view.unmount();
+  });
+
+  it('does not claim the file was added when the message box cannot attach files at all', async () => {
+    const composer = fakeComposer({ attachExisting: undefined as unknown as ComposerQuoteTarget['attachExisting'] });
+    const view = await mount(
+      <AttachmentReferenceTarget scope={scope}>
+        <TranscriptAttachmentGallery daemon={daemon} images={[stored()]} />
+      </AttachmentReferenceTarget>,
+    );
+
+    await interact(() => must(plusOf(view.container), 'the + button').click());
+
+    expect(composer.calls).toEqual(['insert %attachment:shot.png']);
     expect(view.container.querySelector('[role="status"].sr-only')?.textContent).toBe(
       'Referenced shot.png; it could not be attached again',
     );
@@ -262,7 +313,7 @@ describe('the + against a real composer', () => {
       );
       const plus = (): HTMLButtonElement => must(plusOf(view.container), 'the + button');
       expect(plus().disabled).toBe(true);
-      expect(plus().title).toBe("Open this session's message box to reference this file");
+      expect(plus().title).toBe(REFERENCE_DISABLED_COPY);
 
       expect(referenceAttachmentInComposer(file, scope)).toEqual({ state: 'no-composer' });
       // Reached around the + (a stale handle): the composer itself refuses to take the file or the words.
@@ -303,6 +354,7 @@ describe('the + against a real composer', () => {
       });
       expect(must(view.container.querySelector('[data-composer-send]'), 'send').getAttribute('data-sending')).toBe('');
       expect(plus().disabled).toBe(true);
+      expect(plus().title).toBe(REFERENCE_SENDING_COPY);
 
       expect(referenceAttachmentInComposer(file, scope)).toEqual({ state: 'no-composer' });
       expect(composerQuoteTarget(scope)?.attachExisting?.(file)).toBe('refused');
@@ -402,6 +454,35 @@ describe('a proved %attachment: in a message', () => {
     const chip = must(view.container.querySelector<HTMLAnchorElement>('a[data-fy-attachment-ref]'), 'the chip');
     expect(chip.getAttribute('href')).toContain('att_turn');
     expect(chip.getAttribute('href')).not.toContain('att_newer');
+    await view.unmount();
+  });
+
+  it("scrolls to the combined part's own tile, not to a later message that carries the same file id", async () => {
+    // One delivery (turn-003) split in two parts; the tile sits under the last. A LATER turn names the same
+    // attachment id (the same file sent again), and its tile is the newest in the document.
+    const same = [{ attachmentId: 'att_1', filename: 'shot.png', mime: 'image/png' }];
+    const first: SessionHandoff = { name: 'turn-003', message: 'part one: %attachment:shot.png', attachments: same };
+    const last: SessionHandoff = { name: 'turn-003', message: 'part two', attachments: same };
+    const later: SessionHandoff = { name: 'turn-009', message: 'again', attachments: same };
+    const view = await mount(
+      <AttachmentGalleryProvider load={async () => new Blob()}>
+        <HandoffSourceProvider source={handoffs}>
+          <AttachmentReferences daemonId={daemon.daemonId} sessionId="ref-session">
+            <HandoffBody at={1} handoff={first} showFiles={false} source={handoffs} />
+            <HandoffBody at={1} handoff={last} source={handoffs} />
+            <HandoffBody at={9} handoff={later} source={handoffs} />
+          </AttachmentReferences>
+        </HandoffSourceProvider>
+      </AttachmentGalleryProvider>,
+    );
+    const tiles = [...view.container.querySelectorAll<HTMLElement>('[data-attachment-id="att_1"]')];
+    expect(tiles).toHaveLength(2);
+    const chip = must(view.container.querySelector<HTMLAnchorElement>('a[data-fy-attachment-ref]'), 'the chip');
+
+    await interact(() => chip.click());
+
+    expect(tiles[0]?.hasAttribute('data-attachment-flash')).toBe(true);
+    expect(tiles[1]?.hasAttribute('data-attachment-flash')).toBe(false);
     await view.unmount();
   });
 

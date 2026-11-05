@@ -114,6 +114,12 @@ export interface PendingAttachment {
    * which this one only names.
    */
   readonly size?: number;
+  /**
+   * `true` for a chip made from a file the session ALREADY stored (the + on an attachment put it back): `file`
+   * holds no bytes, only the name and type, and they are read from the daemon by `view.id` when needed. An
+   * explicit flag, because an upload of a genuinely empty file also has a zero-byte `file`.
+   */
+  readonly stored?: true;
   /** `false` for a placeholder this device cannot remove: another device's upload still on its way. */
   readonly removable?: false;
 }

@@ -14,10 +14,12 @@
  * exact file, so the ferret still receives the one the reader meant.
  *
  * "Newest" follows the transcript's own chronology: the time the row landed (`TranscriptEntry.at`), which a
- * delivered turn and a queued send both have. A row with no time falls back to its document's name — `turn-<n>`
- * counts up — and is ranked against a timed one by the time alone when both know it, else a turn is older than
- * a queued send (which cannot have a turn number). Equal chronology breaks the same way every time: the higher
- * turn, then the later name. Two files on one message are ranked by the order the message lists them.
+ * delivered turn and a queued send both have. Time ranks the files of one name only when EVERY one of them
+ * knows it — mixing timed and untimed rows in one comparison is not a consistent order, so "newest" would
+ * depend on the record order. Otherwise the document's name decides: `turn-<n>` counts up, and a queued send
+ * (which has no turn number, and is not delivered yet) is newer than any turn. Equal chronology breaks the
+ * same way every time: the higher turn, then the later name. Two files on one message are ranked by the order
+ * the message lists them.
  */
 
 import type { DaemonId } from './daemon-connection.ts';
@@ -43,14 +45,18 @@ const turnOf = (message: string): number | undefined => {
   return turn?.[1] === undefined ? undefined : Number(turn[1]);
 };
 
-/** Positive when `a` is the later message, negative when `b` is, zero only for the same message. */
-const compareMessages = (a: Entry, b: Entry): number => {
+/**
+ * Positive when `a` is the later message, negative when `b` is, zero only for the same message. `byTime` is
+ * true only when every message being ranked has a time; it is chosen once for the whole set so the order stays
+ * transitive.
+ */
+const compareMessages = (a: Entry, b: Entry, byTime: boolean): number => {
   if (a.message === b.message) return 0;
-  if (a.at !== undefined && b.at !== undefined && a.at !== b.at) return a.at - b.at;
+  if (byTime && a.at !== b.at) return (a.at ?? 0) - (b.at ?? 0);
   const turnA = turnOf(a.message);
   const turnB = turnOf(b.message);
   if (turnA !== undefined && turnB !== undefined) return turnA - turnB;
-  // A turn is delivered in order; a queued send has no number, so beside a turn of unknown time it is the later.
+  // A turn is delivered in order; a queued send has no number and is not delivered yet, so it is the later.
   if (turnA !== undefined) return -1;
   if (turnB !== undefined) return 1;
   return a.message < b.message ? -1 : 1;
@@ -100,12 +106,13 @@ export class AttachmentIndex {
   find(name: string, local: readonly IndexedAttachment[] = []): IndexedAttachment | undefined {
     const here = local.findLast(file => file.filename === name);
     if (here !== undefined) return here;
+    const named = this.#entries.filter(entry => entry.filename === name);
+    const byTime = named.every(entry => entry.at !== undefined);
     let best: Entry | undefined;
-    for (const entry of this.#entries) {
-      if (entry.filename !== name) continue;
+    for (const entry of named) {
       if (best === undefined) best = entry;
       else {
-        const by = compareMessages(entry, best);
+        const by = compareMessages(entry, best, byTime);
         if (by > 0 || (by === 0 && entry.order > best.order)) best = entry;
       }
     }
@@ -138,9 +145,12 @@ const ATTACHMENT_FLASH_MS = 1_900;
 
 /**
  * Scrolls to the tile that shows a stored attachment and rings it for a moment. The tile in the SAME message as
- * the chip that was clicked wins, so a reference to a file its own message carries goes nowhere else; failing
- * that, the newest tile on the page. Answers whether a tile was found — a message scrolled out of the loaded
- * transcript has no tile to reach.
+ * the chip that was clicked wins (a message marks itself with `data-attachment-message`, which holds its text
+ * and its tiles alike, wherever it is drawn: a hand-off, a combined part, a peer's message), so a reference to a
+ * file its own message carries goes nowhere else; failing that, the newest tile. Both are looked up inside the
+ * clicked chip's own session (`[data-session]`) because an id is a content hash — one file has the same id in
+ * every session. Answers whether a tile was found — a message scrolled out of the loaded transcript has no tile
+ * to reach.
  */
 export const revealAttachmentTile = (
   root: ParentNode,
@@ -149,9 +159,16 @@ export const revealAttachmentTile = (
   timers: Pick<typeof globalThis, 'setTimeout'> = globalThis,
 ): boolean => {
   const selector = `[data-attachment-id="${attachmentId.replaceAll('"', '')}"]`;
+  const scope: ParentNode = opener?.closest('[data-session]') ?? root;
+  const message = opener?.closest('[data-attachment-message]')?.getAttribute('data-attachment-message');
+  const tiles = [...scope.querySelectorAll<HTMLElement>(selector)];
   const tile =
-    opener?.closest('[data-handoff]')?.querySelector<HTMLElement>(selector) ??
-    [...root.querySelectorAll<HTMLElement>(selector)].at(-1);
+    (message === null || message === undefined
+      ? undefined
+      : tiles.find(
+          candidate =>
+            candidate.closest('[data-attachment-message]')?.getAttribute('data-attachment-message') === message,
+        )) ?? tiles.at(-1);
   if (tile === undefined || tile === null) return false;
   tile.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   tile.setAttribute('data-attachment-flash', '');

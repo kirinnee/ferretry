@@ -247,6 +247,36 @@ describe('AttachmentIndex', () => {
     should(backward.find('a.png')?.attachmentId).equal('att_qb');
   });
 
+  test('should name the same newest file whatever order rows with and without a time were recorded in', () => {
+    // Arrange: turn-1@200, turn-3 untimed and queued@100 would form a cycle if time were compared pairwise.
+    const rows: [string, string, number | undefined][] = [
+      ['turn-1', 'att_1', 200],
+      ['turn-3', 'att_3', undefined],
+      ['queued-z', 'att_q', 100],
+    ];
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ];
+
+    // Act
+    const winners = orders.map(order => {
+      const index = new AttachmentIndex();
+      for (const at of order) {
+        const [message, attachmentId, time] = rows[at] ?? ['', '', undefined];
+        index.record(message, [{ attachmentId, filename: 'a.png' }], time);
+      }
+      return index.find('a.png')?.attachmentId;
+    });
+
+    // Assert
+    should(new Set(winners)).eql(new Set(['att_q']));
+  });
+
   test('should re-rank a message whose time becomes known, and say so to subscribers', () => {
     // Arrange
     const index = new AttachmentIndex();
@@ -349,8 +379,8 @@ describe('revealAttachmentTile', () => {
   test("should ring the tile and answer true, preferring the tile in the clicked chip's own message", () => {
     // Arrange
     const root = dom(
-      '<div data-handoff="turn-2"><div data-attachment-id="att_1" id="one"></div><a id="chip"></a></div>' +
-        '<div data-handoff="turn-9"><div data-attachment-id="att_1" id="two"></div></div>',
+      '<div data-attachment-message="turn-2"><div data-attachment-id="att_1" id="one"></div><a id="chip"></a></div>' +
+        '<div data-attachment-message="turn-9"><div data-attachment-id="att_1" id="two"></div></div>',
     );
     const chip = root.querySelector('#chip');
 
@@ -365,6 +395,38 @@ describe('revealAttachmentTile', () => {
     should(root.querySelector('#two')?.hasAttribute('data-attachment-flash')).be.false();
     for (const run of clock.pending) run();
     should(root.querySelector('#one')?.hasAttribute('data-attachment-flash')).be.false();
+  });
+
+  test("should find the tile by the clicked chip's message wherever it is drawn, not only in a hand-off", () => {
+    // Arrange: a combined delivery's first part holds the chip; its tile sits under the last part; a later message
+    // carries the SAME attachment id (ids are content hashes).
+    const root = dom(
+      '<div data-attachment-message="turn-2"><a id="chip"></a></div>' +
+        '<div data-attachment-message="turn-2"><div data-attachment-id="att_1" id="own"></div></div>' +
+        '<div data-attachment-message="turn-9"><div data-attachment-id="att_1" id="later"></div></div>',
+    );
+
+    // Act
+    revealAttachmentTile(root, 'att_1', root.querySelector('#chip'), timers);
+
+    // Assert
+    should(root.querySelector('#own')?.hasAttribute('data-attachment-flash')).be.true();
+    should(root.querySelector('#later')?.hasAttribute('data-attachment-flash')).be.false();
+  });
+
+  test("should look only inside the clicked chip's own session, because one file has one id in every session", () => {
+    // Arrange: the other session's tile is NEWER in document order.
+    const root = dom(
+      '<div data-session="s1"><a id="chip"></a><div data-attachment-id="att_1" id="mine"></div></div>' +
+        '<div data-session="s2"><div data-attachment-id="att_1" id="theirs"></div></div>',
+    );
+
+    // Act
+    revealAttachmentTile(root, 'att_1', root.querySelector('#chip'), timers);
+
+    // Assert
+    should(root.querySelector('#mine')?.hasAttribute('data-attachment-flash')).be.true();
+    should(root.querySelector('#theirs')?.hasAttribute('data-attachment-flash')).be.false();
   });
 
   test('should fall back to the newest tile and answer false when the file is not on the page', () => {

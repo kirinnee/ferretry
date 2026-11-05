@@ -28,6 +28,7 @@
 
 import { Download, ExternalLink, FileText, ImageOff, Plus } from 'lucide-react';
 import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
 import {
   type AttachmentBlobUrlPort,
@@ -49,6 +50,7 @@ import { cn } from '../lib/class-names.ts';
 import { referenceAttachmentInComposer, referenceToken } from '../lib/composer-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
+import type { ComposerAvailability } from '../lib/quote.ts';
 import { useDaemonFetch } from '../lib/store.tsx';
 import {
   loadTranscriptImageBlob,
@@ -56,7 +58,7 @@ import {
   transcriptImageErrorMessage,
   transcriptImageHandleOf,
 } from '../lib/transcript-image-source.ts';
-import { useAttachmentReferenceTarget, useComposerOpen } from './attachment-reference-target.tsx';
+import { useAttachmentReferenceTarget, useComposerAvailability } from './attachment-reference-target.tsx';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 
 /** The browser's own object-URL pair, isolated so tests never touch it. */
@@ -493,6 +495,17 @@ const GalleryViewer = ({ daemon, entries, index, onIndexChange, onClose }: Galle
 /** What the + says while no message box is open to take the reference. */
 export const REFERENCE_NO_COMPOSER_COPY = "Open this session's message box to reference this file";
 
+/** What the + says while the message box is there but cannot be written to: a send in flight, or switched off. */
+export const REFERENCE_SENDING_COPY = 'Wait for the message to send, then reference this file';
+export const REFERENCE_DISABLED_COPY = 'The message box cannot take a reference right now';
+
+const unavailableCopy = (availability: ComposerAvailability): string =>
+  availability === 'sending'
+    ? REFERENCE_SENDING_COPY
+    : availability === 'disabled'
+      ? REFERENCE_DISABLED_COPY
+      : REFERENCE_NO_COMPOSER_COPY;
+
 /**
  * The + on a stored attachment: puts the file back in the message box as a chip — by its id, no re-upload —
  * and writes `%attachment:<name>` at the caret, so a message can point at a file an earlier one carried.
@@ -503,8 +516,14 @@ export const REFERENCE_NO_COMPOSER_COPY = "Open this session's message box to re
  */
 function AttachmentReferenceButton({ attachment }: { readonly attachment: StoredTranscriptAttachment }) {
   const scope = useAttachmentReferenceTarget();
-  const open = useComposerOpen(scope);
+  const availability = useComposerAvailability(scope);
+  const open = availability === 'open';
   const [said, setSaid] = useState('');
+  /** Clears the live text first so the same words said twice are announced twice. */
+  const say = (text: string): void => {
+    flushSync(() => setSaid(''));
+    setSaid(text);
+  };
   if (scope === null || referenceToken({ kind: 'attachment', name: attachment.filename }) === null) return null;
   const label = `Reference ${attachment.filename} in your message`;
   return (
@@ -513,7 +532,7 @@ function AttachmentReferenceButton({ attachment }: { readonly attachment: Stored
         type="button"
         className="fy-attachment-add"
         aria-label={label}
-        title={open ? label : REFERENCE_NO_COMPOSER_COPY}
+        title={open ? label : unavailableCopy(availability)}
         disabled={!open}
         data-attachment-add=""
         onClick={() => {
@@ -526,10 +545,10 @@ function AttachmentReferenceButton({ attachment }: { readonly attachment: Stored
             },
             scope,
           );
-          if (outcome.state !== 'referenced') setSaid(REFERENCE_NO_COMPOSER_COPY);
-          else if (outcome.chip === 'refused')
-            setSaid(`Referenced ${attachment.filename}; it could not be attached again`);
-          else setSaid(`Added ${attachment.filename} to your message`);
+          if (outcome.state !== 'referenced') say(unavailableCopy(availability));
+          else if (outcome.chip === 'present') say(`${attachment.filename} is already attached to your message`);
+          else if (outcome.chip === 'added') say(`Added ${attachment.filename} to your message`);
+          else say(`Referenced ${attachment.filename}; it could not be attached again`);
         }}
       >
         <span className="fy-attachment-add-mark">

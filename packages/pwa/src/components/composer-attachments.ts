@@ -219,6 +219,7 @@ export function useComposerAttachments(
       localId: `local-${sequence.current}`,
       file: new File([], file.filename, { type: file.mime }),
       size,
+      stored: true,
       status: 'ready',
       view: { id: file.id, filename: file.filename, mime: file.mime, size },
     };

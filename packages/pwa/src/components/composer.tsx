@@ -45,6 +45,7 @@ import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import {
   announceComposerTargetChange,
+  type ComposerBlock,
   type ExistingAttachment,
   type ExistingAttachmentOutcome,
   registerComposerQuoteTarget,
@@ -764,16 +765,16 @@ export function Composer({
   // WRITABLE: a disabled or sending composer is still mounted (a quote reads its draft) but a reference must not
   // edit it — an insert would change a draft the reader cannot touch, and a send in flight would clear a chip
   // added meanwhile. Published to the registry and re-announced whenever it flips, so the + disables itself.
-  const writable = !disabled && !sending;
-  const writableRef = useRef(writable);
-  writableRef.current = writable;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `writable` is the trigger -- the registry is told when it flips
+  const blocked: ComposerBlock | null = sending ? 'sending' : disabled ? 'disabled' : null;
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `blocked` is the trigger -- the registry is told when it flips
   useEffect(() => {
     announceComposerTargetChange();
-  }, [writable]);
+  }, [blocked]);
   const attachExistingRef = useRef<(file: ExistingAttachment) => ExistingAttachmentOutcome>(() => 'refused');
   attachExistingRef.current = file => {
-    if (!canAttach || !writableRef.current) return 'refused';
+    if (!canAttach || blockedRef.current !== null) return 'refused';
     // Every chip this composer shows counts — another device's too — so the same file is never named twice.
     if (sharedItems.entries.some(entry => entry.view?.id === file.id || entry.localId === `shared:${file.id}`))
       return 'present';
@@ -792,9 +793,9 @@ export function Composer({
             ...scope,
             draft: () => draftRef.current,
             attachExisting: file => attachExistingRef.current(file),
-            writable: () => writableRef.current,
+            blocked: () => blockedRef.current,
             insertAtCaret: text => {
-              if (!writableRef.current) return;
+              if (blockedRef.current !== null) return;
               const input = inputRef.current;
               const value = draftRef.current;
               // The caret a field keeps while it is not focused is the one the reader left it at; with no field
