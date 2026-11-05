@@ -1,7 +1,10 @@
 import { describe, it } from 'bun:test';
+import { launchInstructions } from '@ferretry/fleet';
 import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
-import { outdatedSections } from '../../../../src/lib/session/launch/outdated.ts';
+import { outdatedSections, relaunchInstructionEnvironment } from '../../../../src/lib/session/launch/outdated.ts';
+import { sessionPaneEnvironment } from '../../../../src/lib/session/lifecycle/policy.ts';
+import { parseSessionId } from '../../../../src/lib/session-id.ts';
 
 type Section = SessionLaunchInstructions['sections'][number];
 
@@ -64,5 +67,26 @@ describe('outdatedSections', () => {
       { id: 'hypermedia', chars: 4, digest: 'h' },
     ]);
     should(outdatedSections(record(base), now)).deepEqual(['tools', 'hypermedia', 'learning']);
+  });
+});
+
+describe('relaunchInstructionEnvironment', () => {
+  const id = parseSessionId('00000000-0000-4000-8000-000000000154');
+
+  it('should give an interactive ferret with no stored switch the hypermedia default a launch gives it', () => {
+    const env = relaunchInstructionEnvironment(id, {}, 'interactive');
+    should(env.FY_HYPERMEDIA).equal('1');
+    should(launchInstructions('fy', env).sections.map(section => section.id)).containEql('hypermedia');
+  });
+
+  it('should leave a restarted interactive ferret current on the hypermedia section', () => {
+    const launched = launchInstructions('fy', sessionPaneEnvironment(id, {}, 'interactive'));
+    const now = launchInstructions('fy', relaunchInstructionEnvironment(id, {}, 'interactive'));
+    should(outdatedSections(launched, now)).deepEqual([]);
+  });
+
+  it('should keep an explicit stored switch, and default an auto ferret to off', () => {
+    should(relaunchInstructionEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive').FY_HYPERMEDIA).equal('0');
+    should(relaunchInstructionEnvironment(id, {}, 'auto').FY_HYPERMEDIA).equal('0');
   });
 });
