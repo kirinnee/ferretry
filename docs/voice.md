@@ -407,17 +407,17 @@ defaults are not guesses.
 `endpointerFeed(state, { atMs, rms })` returns the next state and the events that frame caused. Each
 frame carries its own time, so a test feeds synthetic frames and asserts exact milliseconds.
 
-| Rule                        | Value                                                                     | Why                                                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Loud / quiet                | quiet is under 2.8 × the 10th-percentile level of the last 10 s, clamped  | the same floor rule as near-live (`lib/stt/energy.ts`, shared); a fan raises the bar instead of reading as speech              |
-| Highest the bar may rise to | RMS **0.03** (near-live uses 0.015)                                       | measured below: 0.015 loses fans from about 0.012 up, 0.05 does no better                                                      |
-| Speech starts after         | 200 ms of loud time                                                       | a click or a cough is shorter                                                                                                  |
-| A turn can end only after   | 400 ms of loud time in total                                              | a lone "uh" is retracted (`speech-cancel`), never sent                                                                         |
-| Hangover                    | 250 ms                                                                    | a breath between words is not a pause                                                                                          |
-| **Pause that ends a turn**  | **1.5 s Normal** · 0.9 s Quick · 2.5 s Thinker · any 0.8–4 s              | counted from the last loud frame; see the trade-off below                                                                      |
-| Engine hint                 | 600 ms of quiet ends a turn early, only after a pause is already detected | Web Speech "final" or Vosk "committed" can only **shorten** a pause; it never ends a turn while the level says you are talking |
-| Longest turn                | 120 s                                                                     | same as the dictation limit; the turn ends there whatever the level says                                                       |
-| Stalled stream              | frames more than 500 ms apart restart the quiet count                     | a throttled tab can delay the end of a turn, never cause one                                                                   |
+| Rule                        | Value                                                                                      | Why                                                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Loud / quiet                | quiet is under 2.8 × the 10th-percentile level of the last 10 s, clamped                   | the same floor rule as near-live (`lib/stt/energy.ts`, shared); a fan raises the bar instead of reading as speech                                    |
+| Highest the bar may rise to | RMS **0.03** (near-live uses 0.015)                                                        | measured below: 0.015 loses fans from about 0.012 up, 0.05 does no better                                                                            |
+| Speech starts after         | 200 ms of loud time                                                                        | a click or a cough is shorter                                                                                                                        |
+| A turn can end only after   | 400 ms of loud time in total                                                               | a lone "uh" is retracted (`speech-cancel`), never sent                                                                                               |
+| Hangover                    | 250 ms                                                                                     | a breath between words is not a pause                                                                                                                |
+| **Pause that ends a turn**  | **1.5 s Normal** · 0.9 s Quick · 2.5 s Thinker · any 0.8–4 s                               | counted from the last loud frame; see the trade-off below                                                                                            |
+| Engine hint                 | 600 ms of quiet ends a turn early, only after a pause is already detected                  | Web Speech "final" or Vosk "committed" can only **shorten** a pause; it never ends a turn while the level says you are talking                       |
+| Longest turn                | 120 s                                                                                      | same as the dictation limit; the turn ends there whatever the level says, but never under the 400 ms minimum (a shorter run is retracted at the cap) |
+| Stalled stream              | frames more than 500 ms apart restart the quiet count, and cancel a run still under 400 ms | a throttled tab can delay the end of a turn, never cause one; sparse loud frames across gaps never add up to a turn                                  |
 
 Events: `speech-start`, `speech-cancel` (a burst too short to be a turn), `pause` (quiet longer than the
 hangover), `resume` (the voice came back, so the pause is withdrawn) and `turn-end` (with the reason:
@@ -429,12 +429,13 @@ The `lib/stt/energy.ts` module (RMS, frame levels, noise floor, quiet threshold)
 
 ### How it was measured
 
-`packages/pwa/harness/turn-endpointer-noise.ts` (manual, never in CI; about 5 minutes) **generates** its
+`packages/pwa/harness/turn-endpointer-noise.ts` (manual, never in CI; about 6 minutes for the full run) **generates** its
 audio, so there is nothing to download and no recording of any person anywhere:
 
 ```sh
 cd packages/pwa && bun harness/turn-endpointer-noise.ts --turns 200 --seed 7 --explain
 # options: --max-quiet <rms>  --beds room,fan  --noise-minutes <n>  --no-fixtures
+# the judging rules live in harness/turn-endpointer-scoring.ts and are unit-tested
 ```
 
 - **Speech** is synthetic: harmonic voices with vowel formants, syllable envelopes with shallow valleys,
@@ -448,41 +449,54 @@ cd packages/pwa && bun harness/turn-endpointer-noise.ts --turns 200 --seed 7 --e
   **invented** to span those habits.
 - Each turn is 1.5 s of bed, the turn mixed into it, then 6 s of bed. The audio is cut into 20 ms
   frames by the shipped `energy.ts` and fed to the real endpointer with all three presets.
-- **False send (noise)** — the turn ended although the person had really been quiet for less than the
-  pause (speech lost under the threshold). This is the endpointer's own error and what the 2 % target is
-  about. **Cut-off (by design)** — the person really paused at least as long as the setting, then spoke.
-  Nothing is wrong; it is the price of a setting, and it depends only on the invented pause habits.
+- **False send (noise)** — the turn ended although the person had really been quiet for **less than the
+  configured pause**. This is scored **strictly**: a real gap of 1,400 ms at Normal (1,500 ms) is a false
+  send, not a cut-off. It is the endpointer's own error and what the 2 % target is about. A word's onset
+  or tail can sit under the loudness threshold, so a **second, tolerant column** forgives a real gap within
+  **150 ms** of the setting (a "near miss"); both rates are published, and the strict one is the headline.
+  **Cut-off (by design)** — the person really paused at least as long as the setting, then spoke. Nothing
+  is wrong; it is the price of a setting, and it depends only on the invented pause habits.
   **Late** — the turn ended more than 1 s after the last word plus the pause. **Missed** — it never ended
-  in the 6 s after the last word.
+  in the 6 s after the last word. The nobody-talking rate runs exactly 10 minutes of bed per row and is
+  divided by the audio actually fed.
 
-**Normal (1.5 s), 200 turns per row, seed 7, 0.03 ceiling:**
+**Normal (1.5 s), 200 turns per row, seed 7, 0.03 ceiling, strict scoring:**
 
-| Bed (RMS)  | False sends (noise) | Cut-offs (by design, _coding_) | Late > 1 s | Missed | Ended vs. last word + 1.5 s, p50 / p95 | False starts per hour, nobody talking |
-| ---------- | ------------------: | -----------------------------: | ---------: | -----: | -------------------------------------: | ------------------------------------: |
-| room 0.002 |                0.0% |                          22.5% |       0.0% |   0.0% |                            +5 / +16 ms |                                     0 |
-| fan 0.004  |                0.0% |                          17.5% |       0.0% |   0.0% |                            −2 / +13 ms |                                     0 |
-| fan 0.008  |                0.0% |                          25.0% |       0.0% |   0.5% |                           −16 / +11 ms |                                     0 |
-| fan 0.012  |                0.5% |                          23.0% |       0.0% |   2.5% |                            −22 / +5 ms |                                     0 |
-| fan 0.02   |                0.5% |                          24.0% |       0.5% |   0.5% |                           −20 / +10 ms |                                     0 |
-| café 0.008 |                0.0% |                           2.0% |      13.0% |  64.0% |                        +762 / +3036 ms |                                   258 |
-| café 0.015 |                0.0% |                           4.5% |      21.0% |  54.5% |                       +1117 / +3904 ms |                                   258 |
-| café 0.025 |                0.0% |                           0.0% |       0.0% | 100.0% |                                      – |                                    78 |
-| TV 0.01    |                0.0% |                           0.5% |       0.5% |  97.0% |                        +595 / +3528 ms |                                    66 |
-| TV 0.02    |                0.0% |                           0.5% |       2.0% |  96.5% |                       +1786 / +2473 ms |                                    66 |
+| Bed (RMS)  | False sends, strict | False sends, ±150 ms forgiven | Cut-offs (by design, _coding_) | Late > 1 s | Missed | Ended vs. last word + 1.5 s, p50 / p95 | False starts per hour, nobody talking |
+| ---------- | ------------------: | ----------------------------: | -----------------------------: | ---------: | -----: | -------------------------------------: | ------------------------------------: |
+| room 0.002 |                0.0% |                          0.0% |                          22.5% |       0.0% |   0.0% |                            +5 / +16 ms |                                     0 |
+| fan 0.004  |                0.0% |                          0.0% |                          17.5% |       0.0% |   0.0% |                            −2 / +13 ms |                                     0 |
+| fan 0.008  |                1.5% |                          0.0% |                          23.5% |       0.0% |   0.5% |                           −16 / +11 ms |                                     0 |
+| fan 0.012  |                1.0% |                          0.5% |                          22.5% |       0.0% |   2.5% |                            −22 / +5 ms |                                     0 |
+| fan 0.02   |                1.0% |                          0.5% |                          23.5% |       0.5% |   0.5% |                           −20 / +10 ms |                                     0 |
+| café 0.008 |                0.0% |                          0.0% |                           2.0% |      13.0% |  64.0% |                        +762 / +3036 ms |                                   222 |
+| café 0.015 |                0.0% |                          0.0% |                           4.5% |      21.0% |  54.5% |                       +1117 / +3904 ms |                                   246 |
+| café 0.025 |                0.0% |                          0.0% |                           0.0% |       0.0% | 100.0% |                                      – |                                    48 |
+| TV 0.01    |                0.0% |                          0.0% |                           0.5% |       0.5% |  97.0% |                        +595 / +3528 ms |                                    36 |
+| TV 0.02    |                0.0% |                          0.0% |                           0.5% |       2.0% |  96.5% |                       +1786 / +2473 ms |                                    36 |
 
-**Fan-like noise meets the target, café and TV do not.**
+**Is the < 2 % false-send target met at Normal? Yes for the room and fan beds, under strict scoring — with
+little margin.** Across the five room and fan rows the endpointer cut someone off early in **7 of 1,000**
+turns (0.7 %; the 95 % upper bound is about 1.4 %); the worst single row is 1.5 % (fan 0.008). The
+tolerant column (forgiving a real gap within 150 ms of the setting) gives **2 of 1,000** (0.2 %). An earlier
+version of this page reported only the tolerant figure, with the slack undocumented; the strict figure is
+the honest one. Of the 7, five were near misses (a real gap of 1,440–1,495 ms against a 1,500 ms
+setting), and two were soft talkers (RMS 0.036–0.038) under the two loudest fans, where a voice about as
+loud as the noise is not separable by loudness. The target is **not** met in café and TV babble (see
+below), though there it fails by waiting, not by cutting off.
 
-- In the five room and fan rows at Normal the endpointer cut someone off by mistake in **2 of 1,000**
-  turns (0.2 %; the 95 % upper bound is about 0.7 %). Both were soft talkers (RMS 0.036–0.038) under the
-  two loudest fans, which is the real limit: a voice about as loud as the noise is not separable by
-  loudness. Ending lands within about ±25 ms of the ideal, and at most 0.5 % of turns are late.
-- **Quick is not as safe** (false sends 3.0 % at fan 0.012, 2.5 % at fan 0.02, same cause); Thinker is
-  safer (0.5 % and 0 %). The 2 % target is for Normal.
-- **The ceiling.** With near-live's 0.015 ceiling a 0.012 fan ended 30 % of turns more than a second
-  late and a 0.02 fan never ended one (150 turns each). At 0.05 a 0.02 fan left 24 % of turns
-  unfinished and false sends crept to 1.3 %. 0.03 was the best of the three.
+- Ending lands within about ±25 ms of the ideal in the room and fan rows, and at most 0.5 % of those turns
+  are late.
+- **Quick is not as safe**: strict false sends are 7.0 % at fan 0.012 and 5.5 % at fan 0.02 (2.9 % across
+  the five room and fan rows; about 60 % are near misses). Thinker is 0.6 % across the same rows (worst
+  row 1.5 %). The 2 % target is for Normal.
+- **The ceiling** (fans only, 150 turns per row, Normal, strict scoring). With near-live's 0.015 ceiling a
+  0.012 fan ended 30 % of turns more than a second late and a 0.02 fan never ended one (100 % missed). At
+  0.05 a 0.02 fan left 24 % of turns unfinished and strict false sends rose to 2.7 % (1.3 % at fan 0.008
+  and 0.012). At 0.03 the same fans were 1.0 % false sends with 0.5 % missed at fan 0.02, so 0.03 is the
+  best of the three.
 - **Café and TV babble is a known gap.** Babble is speech-shaped, so no loudness rule can tell it from
-  you: turns end late (13–21 % over a second) or never (55–100 %), and an unattended room starts 66–258
+  you: turns end late (13–21 % over a second) or never (55–100 %), and an unattended room starts 36–246
   phantom "speech" an hour. It fails in the **safe direction**: it does not send early, it
   waits, and the 120 s cap, **Send now** and the **End** button still work. A real fix needs a speech
   detector rather than a loudness one (a small Silero VAD in the speech worker, plan §4.1) or a spoken
@@ -492,14 +506,14 @@ cd packages/pwa && bun harness/turn-endpointer-noise.ts --turns 200 --seed 7 --e
 
 | Fixture (fan 0.008)           | Quick 0.9 s | Normal 1.5 s | Thinker 2.5 s |
 | ----------------------------- | ----------: | -----------: | ------------: |
-| _steady_ (prepared sentence)  |       10.5% |         0.0% |          0.0% |
-| _coding_ (thinking pauses)    |       54.5% |        25.0% |          6.0% |
-| _hesitant_ (long hesitations) |       81.5% |        53.5% |         27.0% |
+| _steady_ (prepared sentence)  |        9.0% |         0.0% |          0.0% |
+| _coding_ (thinking pauses)    |       54.0% |        23.5% |          5.5% |
+| _hesitant_ (long hesitations) |       79.0% |        51.5% |         26.0% |
 
 Cut-offs here are **properties of the three invented scripts, not measurements of people**; read them
-as the shape of the trade-off. Quick cuts off more than half of the _coding_ turns, which is why it is
-not the default. Thinker costs one extra second on **every** turn to bring the _coding_ cut-offs from 25 % to
-6 %, and Normal is the point where a prepared sentence is never cut (0 %). A cut-off is
+as the shape of the trade-off. Quick cuts off more than half of the _coding_ turns (54 %), which is why it is
+not the default. Thinker costs one extra second on **every** turn to bring the _coding_ cut-offs from 23.5 % to
+5.5 %, and Normal is the point where a prepared sentence is never cut (0 %). A cut-off is
 also recoverable: after the pause comes the 1.5 s send countdown (**Hold** / **Send now**), and
 speaking again during it cancels the send. Total time from your last word to "sent" is therefore the
 pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the defaults.

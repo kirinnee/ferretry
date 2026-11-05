@@ -39,11 +39,17 @@ export function rms(samples: Float32Array, from: number, to: number): number {
   return Number.isFinite(level) ? level : 0;
 }
 
-/** One RMS level per whole frame of `frameSamples` in `samples[from, to)`. */
+/**
+ * One RMS level per whole frame of `frameSamples` in `samples[from, to)`. Total: a non-finite bound or
+ * frame size has no frames (never an endless loop), and the stretch is clamped to the buffer first,
+ * so the loop is bounded by `samples.length`.
+ */
 export function frameLevels(samples: Float32Array, from: number, to: number, frameSamples: number): number[] {
   const levels: number[] = [];
-  if (!(frameSamples >= 1)) return levels;
-  for (let at = from; at + frameSamples <= to; at += frameSamples) levels.push(rms(samples, at, at + frameSamples));
+  if (![from, to, frameSamples].every(Number.isFinite) || frameSamples < 1) return levels;
+  const frame = Math.floor(frameSamples);
+  const end = Math.min(samples.length, Math.floor(to));
+  for (let at = Math.max(0, Math.ceil(from)); at + frame <= end; at += frame) levels.push(rms(samples, at, at + frame));
   return levels;
 }
 

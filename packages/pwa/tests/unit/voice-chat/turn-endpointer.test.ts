@@ -326,6 +326,50 @@ describe('the longest turn', () => {
   });
 });
 
+describe('the longest turn never sends under the minimum', () => {
+  it('200 ms of speech then one loud frame at the cap is retracted, not sent', () => {
+    const early = framesOf([loud(200)]);
+    const { events, state } = play(endpointerStart(), [...early, { atMs: MAX_TURN_MS + 20, rms: LOUD }]);
+    should(events.some(e => e.kind === 'turn-end')).be.false();
+    should(kinds(events)).eql(['speech-start', 'speech-cancel']);
+    should(state.phase).not.equal('ended');
+  });
+
+  it('an under-minimum run reaching the cap without a stall is cancelled, never ended', () => {
+    // Defensive: build the state a run would be in if the stall rule were not there.
+    const early = play(endpointerStart(), framesOf([loud(220)])).state;
+    should(early.voicedMs).equal(220);
+    const aged: EndpointerState = { ...early, lastAtMs: MAX_TURN_MS - 20 };
+    const step = endpointerFeed(aged, { atMs: MAX_TURN_MS, rms: LOUD });
+    should(step.events.some(e => e.kind === 'turn-end')).be.false();
+    should(step.events.map(e => e.kind)).eql(['speech-cancel']);
+    should(step.state.phase).equal('listening');
+    should(step.state.voicedMs).equal(0);
+  });
+
+  it('sparse loud frames across stalls never add up to a turn', () => {
+    const frames: LevelFrame[] = [];
+    for (let index = 1; index <= 30; index += 1) frames.push({ atMs: index * 1_000, rms: LOUD });
+    const { events, state } = play(endpointerStart(), frames);
+    should(events).eql([]);
+    should(state.voicedMs).equal(STEP);
+    should(state.phase).equal('listening');
+  });
+
+  it('a stall cancels a started but unconfirmed run, and a later loud frame cannot confirm it', () => {
+    const frames = [...framesOf([loud(220)]), { atMs: 220 + 5_000, rms: LOUD }, { atMs: 220 + 10_000, rms: LOUD }];
+    const { events } = play(endpointerStart(), frames);
+    should(kinds(events)).eql(['speech-start', 'speech-cancel']);
+  });
+
+  it('a stall does not cancel a confirmed turn', () => {
+    const frames = [...framesOf([loud(500)]), { atMs: 500 + 5_000, rms: LOUD }];
+    const { events, state } = play(endpointerStart(), frames);
+    should(kinds(events)).eql(['speech-start']);
+    should(state.phase).equal('speaking');
+  });
+});
+
 describe('the adaptive noise floor', () => {
   const steady = (level: number, ms: number, from = 0): LevelFrame[] => framesOf([[level, ms]], from);
 

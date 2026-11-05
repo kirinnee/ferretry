@@ -64,6 +64,31 @@ describe('frameLevels', () => {
   });
 });
 
+describe('frameLevels with invalid bounds', () => {
+  it('returns no frames, and returns, for non-finite bounds or frame sizes', () => {
+    const samples = new Float32Array(320);
+    should(frameLevels(samples, -Infinity, 320, 320)).eql([]);
+    should(frameLevels(samples, 0, Infinity, 320)).eql([]);
+    should(frameLevels(samples, 0, Number.NaN, 320)).eql([]);
+    should(frameLevels(samples, Number.NaN, 320, 320)).eql([]);
+    should(frameLevels(samples, 0, 320, Infinity)).eql([]);
+    should(frameLevels(samples, 0, 320, -Infinity)).eql([]);
+    should(frameLevels(samples, 0, 320, -5)).eql([]);
+  });
+
+  it('clamps the stretch to the buffer before iterating', () => {
+    const samples = new Float32Array(100).fill(1);
+    should(frameLevels(samples, -1_000_000, 1_000_000_000, 10)).have.length(10);
+    should(frameLevels(samples, 95, 1_000_000_000, 10)).eql([]);
+    should(frameLevels(samples, 50, 20, 10)).eql([]);
+  });
+
+  it('floors a fractional frame size and rounds the stretch inward', () => {
+    const samples = new Float32Array(100).fill(1);
+    should(frameLevels(samples, 0.5, 100, 10.9)).have.length(9);
+  });
+});
+
 describe('noiseFloor', () => {
   it('is the 10th-percentile level', () => {
     const levels = [9, 1, 8, 2, 7, 3, 6, 4, 5, 10];

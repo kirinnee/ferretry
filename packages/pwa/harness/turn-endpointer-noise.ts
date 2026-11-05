@@ -19,7 +19,9 @@
  *
  *   - FALSE SENDS (noise): the turn ended although the person had been quiet for LESS than the
  *     pause — speech lost under the noise threshold, or a floor that rose. This is the endpointer's
- *     own error and the number the 2 % target is about.
+ *     own error and the number the 2 % target is about. Scored STRICTLY against the configured
+ *     pause (see turn-endpointer-scoring.ts); a second column forgives gaps within 150 ms of it
+ *     (word onsets and tails under the threshold), so both rates are published.
  *   - CUT-OFFS (by design): the turn ended after the person really was quiet for at least the
  *     pause, and then said more. Nothing is wrong with the endpointer; it is what a setting costs a
  *     person who pauses longer than it. This depends ONLY on the invented pause lengths below, so
@@ -35,20 +37,17 @@
 import { FRAME_MS, frameLevels } from '../src/lib/stt/energy.ts';
 import {
   ENDPOINTER_MAX_QUIET_RMS,
-  type EndpointerState,
   endpointerFeed,
   endpointerStart,
-  type PausePreset,
   PAUSE_PRESETS,
+  type PausePreset,
 } from '../src/lib/voice-chat/turn-endpointer.ts';
+import { judge, NEAR_MISS_MS, type Word } from './turn-endpointer-scoring.ts';
 
 const RATE = 16_000;
 const FRAME_SAMPLES = (RATE * FRAME_MS) / 1_000;
 const LEAD_MS = 1_500;
 const TRAIL_MS = 6_000;
-const LATE_MS = 1_000;
-/** A scripted pause this much shorter than the setting still counts as "the person paused that long". */
-const ONSET_SLACK_MS = 150;
 
 // ───────────────────────────── arguments ─────────────────────────────
 
@@ -167,11 +166,6 @@ function fricative(rng: Rng, durationMs: number): Float32Array {
     previous = white;
   }
   return out;
-}
-
-interface Word {
-  readonly startMs: number;
-  readonly endMs: number;
 }
 
 interface Speech {
@@ -356,82 +350,6 @@ function noiseBed(rng: Rng, kind: Bed, level: number, seconds: number, pool: Map
 
 const PRESETS: readonly PausePreset[] = ['quick', 'normal', 'thinker'];
 
-interface Outcome {
-  /** The preset's turn ended mid-speech although the quiet before it was shorter than the pause. */
-  falseSend: boolean;
-  /** The turn ended after a real pause of at least the preset's length, and the talker said more. */
-  cutOff: boolean;
-  /** Ended after the last word, but more than {@link LATE_MS} past the pause. */
-  late: boolean;
-  /** Never ended in the trailing silence. */
-  missed: boolean;
-  /** Noise-only turns that ended before the talker spoke. */
-  falseTurns: number;
-  /** How far past (last word + pause) the correct end came, ms; null unless ended after the last word. */
-  lateByMs: number | null;
-  note?: string;
-}
-
-/** Run one preset over the frames and judge the first turn that contains speech. */
-function judge(levels: readonly number[], words: readonly Word[], offsetMs: number, preset: PausePreset): Outcome {
-  const pauseMs = PAUSE_PRESETS[preset];
-  const scripted = words.map(word => ({ startMs: word.startMs + offsetMs, endMs: word.endMs + offsetMs }));
-  const lastEndMs = (scripted.at(-1) as Word).endMs;
-  const overlaps = (fromMs: number, toMs: number): boolean =>
-    scripted.some(word => word.startMs < toMs && word.endMs > fromMs);
-  const result: Outcome = {
-    falseSend: false,
-    cutOff: false,
-    late: false,
-    missed: false,
-    falseTurns: 0,
-    lateByMs: null,
-  };
-
-  let state: EndpointerState = endpointerStart(preset, { maxQuietRms: MAX_QUIET });
-  let startedAt: number | null = null;
-  for (const [index, rms] of levels.entries()) {
-    const step = endpointerFeed(state, { atMs: (index + 1) * FRAME_MS, rms });
-    state = step.state;
-    for (const event of step.events) {
-      if (event.kind === 'speech-start') startedAt = event.sinceMs;
-      if (event.kind === 'speech-cancel') startedAt = null;
-      if (event.kind !== 'turn-end') continue;
-      const spoke = overlaps(startedAt ?? 0, event.speechEndedAtMs + FRAME_MS);
-      if (!spoke) {
-        // Noise alone made a "turn". The loop would find no words and listen again.
-        result.falseTurns += 1;
-        state = endpointerStart(preset, { maxQuietRms: MAX_QUIET, floorLevels: state.levels });
-        startedAt = null;
-        continue;
-      }
-      if (event.atMs < lastEndMs) {
-        // Cut off mid-turn. How long did the person REALLY stay quiet around the middle of the quiet
-        // the endpointer measured? 0 when that middle falls inside a word: speech read as quiet.
-        const middle = event.atMs - pauseMs / 2;
-        const inside = scripted.some(word => word.startMs <= middle && middle < word.endMs);
-        const before = scripted.filter(word => word.endMs <= middle).at(-1);
-        const after = scripted.find(word => word.startMs > middle);
-        const gap = inside || after === undefined ? 0 : after.startMs - (before?.endMs ?? 0);
-        // A word's onset or tail can sit under the threshold, so a pause within ONSET_SLACK_MS of the
-        // setting counts as the person pausing as long as the setting, not as the endpointer erring.
-        if (gap >= pauseMs - ONSET_SLACK_MS) result.cutOff = true;
-        else {
-          result.falseSend = true;
-          result.note = `cut at ${event.atMs} ms, real pause ${Math.round(gap)} ms of a ${pauseMs} ms setting, last word ends ${Math.round(lastEndMs)} ms (${scripted.length} words)`;
-        }
-      } else {
-        const lateBy = event.atMs - (lastEndMs + pauseMs);
-        result.lateByMs = lateBy;
-        if (lateBy > LATE_MS) result.late = true;
-      }
-      return result;
-    }
-  }
-  result.missed = true;
-  return result;
-}
-
 // ───────────────────────────── the experiment ─────────────────────────────
 
 interface Row {
@@ -462,6 +380,8 @@ const quantile = (values: readonly number[], q: number): number | null => {
 interface Tally {
   turns: number;
   falseSends: number;
+  /** Of {@link falseSends}: the real gap was within the near-miss tolerance of the pause. */
+  nearMisses: number;
   cutOffs: number;
   late: number;
   missed: number;
@@ -473,6 +393,7 @@ interface Tally {
 const emptyTally = (): Tally => ({
   turns: 0,
   falseSends: 0,
+  nearMisses: 0,
   cutOffs: 0,
   late: 0,
   missed: 0,
@@ -493,11 +414,12 @@ function runRow(row: Row, pool: Map<string, Float32Array>, script: ScriptName): 
     mixInto(audio, speech.samples, samplesOf(LEAD_MS));
     const levels = frameLevels(audio, 0, audio.length, FRAME_SAMPLES);
     for (const preset of PRESETS) {
-      const outcome = judge(levels, speech.words, LEAD_MS, preset);
+      const outcome = judge(levels, speech.words, LEAD_MS, preset, MAX_QUIET);
       const tally = tallies[preset];
       tally.turns += 1;
       if (outcome.falseSend) {
         tally.falseSends += 1;
+        if (outcome.nearMiss) tally.nearMisses += 1;
         tally.notes.push(`turn ${turn} talker ${level.toFixed(3)}: ${outcome.note}`);
       }
       if (outcome.cutOff) tally.cutOffs += 1;
@@ -521,7 +443,8 @@ function noiseOnly(row: Row, pool: Map<string, Float32Array>): { starts: number;
   let state = endpointerStart('normal', { maxQuietRms: MAX_QUIET });
   let atFrame = 0;
   for (let at = 0; at < seconds; at += chunk) {
-    const audio = noiseBed(rng, row.bed, row.level, chunk, pool);
+    // The last chunk is trimmed so the run is exactly the minutes asked for.
+    const audio = noiseBed(rng, row.bed, row.level, Math.min(chunk, seconds - at), pool);
     for (const rms of frameLevels(audio, 0, audio.length, FRAME_SAMPLES)) {
       atFrame += 1;
       const step = endpointerFeed(state, { atMs: atFrame * FRAME_MS, rms });
@@ -535,7 +458,9 @@ function noiseOnly(row: Row, pool: Map<string, Float32Array>): { starts: number;
       }
     }
   }
-  return { starts, turns, perHour: (starts * 3_600) / seconds };
+  // Divide by the audio really fed, not the amount asked for.
+  const heardSeconds = (atFrame * FRAME_MS) / 1_000;
+  return { starts, turns, perHour: heardSeconds > 0 ? (starts * 3_600) / heardSeconds : Number.NaN };
 }
 
 const t0 = Date.now();
@@ -553,16 +478,16 @@ const rowName = (row: Row): string => `${row.bed} ${row.level}`;
 for (const preset of PRESETS) {
   console.log(`## ${preset} (${PAUSE_PRESETS[preset]} ms)`);
   console.log(
-    '| bed (RMS) | turns | false sends (noise) | cut-offs (by design) | late > 1 s | missed | late-by p50 / p95 ms | noise-only false starts / h |',
+    `| bed (RMS) | turns | false sends, strict | false sends, ±${NEAR_MISS_MS} ms forgiven | cut-offs (by design) | late > 1 s | missed | late-by p50 / p95 ms | noise-only false starts / h |`,
   );
-  console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
+  console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
   for (const { row, tallies, quiet } of normalResults) {
     const t = tallies[preset];
     const p50 = quantile(t.lateBy, 0.5);
     const p95 = quantile(t.lateBy, 0.95);
     if (EXPLAIN && t.notes.length > 0) for (const note of t.notes) console.log(`  [${preset} ${rowName(row)}] ${note}`);
     console.log(
-      `| ${rowName(row)} | ${t.turns} | ${percent(t.falseSends, t.turns)} | ${percent(t.cutOffs, t.turns)} | ${percent(t.late, t.turns)} | ${percent(t.missed, t.turns)} | ${p50 === null ? '–' : Math.round(p50)} / ${p95 === null ? '–' : Math.round(p95)} | ${Number.isNaN(quiet.perHour) ? '–' : quiet.perHour.toFixed(0)} |`,
+      `| ${rowName(row)} | ${t.turns} | ${percent(t.falseSends, t.turns)} | ${percent(t.falseSends - t.nearMisses, t.turns)} | ${percent(t.cutOffs, t.turns)} | ${percent(t.late, t.turns)} | ${percent(t.missed, t.turns)} | ${p50 === null ? '–' : Math.round(p50)} / ${p95 === null ? '–' : Math.round(p95)} | ${Number.isNaN(quiet.perHour) ? '–' : quiet.perHour.toFixed(0)} |`,
     );
   }
   console.log('');

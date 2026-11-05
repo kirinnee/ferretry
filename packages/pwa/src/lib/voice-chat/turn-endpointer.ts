@@ -30,10 +30,13 @@
  *     pause that is already detected: with the hint, quiet of {@link HINT_QUIET_MS} ends the turn
  *     early. It never ends a turn while the level says the person is speaking, and it never
  *     starts one.
- *   - A TURN NEVER RUNS PAST {@link MAX_TURN_MS}: it ends there whatever the level says.
+ *   - A TURN NEVER RUNS PAST {@link MAX_TURN_MS}: it ends there whatever the level says — but never
+ *     under {@link MIN_SPEECH_MS} of loud time: a run that short is retracted at the cap instead.
  *   - FRAMES MORE THAN {@link STALL_MS} APART mean the stream stalled (a throttled tab, a
  *     suspended microphone). The audio in the gap is unknown, so quiet is counted afresh from the
- *     frame after it: a stall can delay the end of a turn, never cause one.
+ *     frame after it: a stall can delay the end of a turn, never cause one. A run that has not yet
+ *     reached {@link MIN_SPEECH_MS} is cancelled by a stall, so sparse loud frames across gaps never
+ *     add up to a turn.
  */
 
 import { FRAME_MS, noiseFloor, quietThreshold } from '../stt/energy.ts';
@@ -177,19 +180,26 @@ function endingReason(state: EndpointerState, quietMs: number): 'pause' | 'engin
 }
 
 /** Feed one frame. Frames must come oldest first; an older or unusable one changes nothing. */
-export function endpointerFeed(state: EndpointerState, frame: LevelFrame): EndpointerStep {
-  if (state.phase === 'ended' || !isUsable(frame)) return unchanged(state);
-  if (state.lastAtMs !== null && frame.atMs <= state.lastAtMs) return unchanged(state);
+export function endpointerFeed(incoming: EndpointerState, frame: LevelFrame): EndpointerStep {
+  if (incoming.phase === 'ended' || !isUsable(frame)) return unchanged(incoming);
+  if (incoming.lastAtMs !== null && frame.atMs <= incoming.lastAtMs) return unchanged(incoming);
 
-  const previous = state.lastAtMs;
+  const previous = incoming.lastAtMs;
   const stalled = previous === null || frame.atMs - previous > STALL_MS;
+  const events: EndpointerEvent[] = [];
+  // A stall cannot confirm speech: an unconfirmed run (under the minimum) is cancelled, so sparse
+  // loud frames that straddle gaps never add up to a turn. A confirmed turn survives and just waits.
+  let state = incoming;
+  if (stalled && previous !== null && incoming.runStartMs !== null && incoming.voicedMs < MIN_SPEECH_MS) {
+    if (incoming.phase === 'speaking') events.push({ kind: 'speech-cancel', atMs: frame.atMs });
+    state = forgetRun(incoming);
+  }
   // The interval this frame speaks for. After a stall nothing is known about the gap, so one frame.
   const spanMs = stalled ? FRAME_MS : frame.atMs - (previous as number);
   const intervalStartMs = frame.atMs - spanMs;
 
   const levels = [...state.levels.slice(1 - FLOOR_WINDOW_FRAMES), frame.rms];
   const loud = frame.rms >= quietThreshold(noiseFloor(levels), state.maxQuietRms);
-  const events: EndpointerEvent[] = [];
   let next: EndpointerState = { ...state, lastAtMs: frame.atMs, levels };
 
   if (loud) {
@@ -241,13 +251,19 @@ export function endpointerFeed(state: EndpointerState, frame: LevelFrame): Endpo
   }
 
   if (next.phase === 'speaking' && next.runStartMs !== null && frame.atMs - next.runStartMs >= MAX_TURN_MS) {
-    events.push({
-      kind: 'turn-end',
-      atMs: frame.atMs,
-      speechEndedAtMs: next.lastLoudAtMs ?? frame.atMs,
-      reason: 'max-turn',
-    });
-    next = { ...next, phase: 'ended' };
+    if (next.voicedMs < MIN_SPEECH_MS) {
+      // The cap never sends what the minimum would have retracted.
+      events.push({ kind: 'speech-cancel', atMs: frame.atMs });
+      next = forgetRun(next);
+    } else {
+      events.push({
+        kind: 'turn-end',
+        atMs: frame.atMs,
+        speechEndedAtMs: next.lastLoudAtMs ?? frame.atMs,
+        reason: 'max-turn',
+      });
+      next = { ...next, phase: 'ended' };
+    }
   }
   return { state: next, events };
 }
