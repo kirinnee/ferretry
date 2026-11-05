@@ -88,4 +88,14 @@ mkdir -p "${HOME}"
 
 export TMPDIR="${run_tmp}"
 export FERRETRY_TEST=1
+
+# THE DAEMON'S GARBAGE-COLLECTOR MARKER COUNT, for the test process itself. Integration and SIT suites
+# boot the daemon INSIDE `bun test` (they import fyd's `start`), so the process the daemon runs in is
+# this one, and the engine reads `BUN_JSC_*` only as it starts. Without it a test daemon ran on the
+# engine default, where parallel marking can wedge a worker thread for good (see
+# packages/protocol/src/lib/daemon-runtime-tuning.ts): the transcript parse worker stopped answering and
+# a journey waited out its 120 s request timeout. The value is read from that one source, not repeated.
+gc_markers="$(bun -e "import { DAEMON_RUNTIME_TUNING } from '${root_dir}/packages/protocol/src/lib/daemon-runtime-tuning.ts'; process.stdout.write(DAEMON_RUNTIME_TUNING.BUN_JSC_numberOfGCMarkers ?? '')")"
+[[ -z ${gc_markers} ]] && echo "❌ DAEMON_RUNTIME_TUNING names no BUN_JSC_numberOfGCMarkers" >&2 && exit 1
+export BUN_JSC_numberOfGCMarkers="${gc_markers}"
 "$@"
