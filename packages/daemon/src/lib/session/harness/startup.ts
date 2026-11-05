@@ -1,4 +1,4 @@
-import type { RuntimeModelChoice } from '@ferretry/protocol';
+import type { RuntimeControlRequest, RuntimeModelChoice } from '@ferretry/protocol';
 import type { HarnessKind } from '../../core/inventory.ts';
 import { harnessQuirks } from './quirks.ts';
 
@@ -30,6 +30,10 @@ export function startupModelArguments(model: string): readonly string[] {
  * the host's. `-c model_reasoning_effort=…` has no such window: Codex reads it as configuration before
  * it draws anything, and it is the form every relaunch already uses.
  *
+ * That is a NEW session's start (`fy new`, the app's New ferret). A FORK still applies its target's model
+ * and effort through the startup picker hook, and that drive tolerates a slow startup because frames
+ * showing Codex's `Waiting for startup` line are not charged to its budget (`CODEX_STARTUP_WAIT_OBSERVATIONS`).
+ *
  * Claude keeps `/effort` here: it is a command Claude answers locally, it opens no picker, and its
  * start has never been seen to lose one.
  */
@@ -37,9 +41,15 @@ export type StartupEffort =
   | { readonly kind: 'argv'; readonly effort: string }
   | { readonly kind: 'command'; readonly effort: string };
 
-/** The way this harness's start carries `effort`, or `undefined` when none was asked for. */
+/**
+ * The way this harness's start carries `effort`, or `undefined` when none was asked for.
+ *
+ * The level is trimmed and lowercased, as `launchReasoningEffort` does for a relaunch, so a start and a
+ * relaunch can never disagree about the spelling that reaches the argv or the catalog check. An `argv`
+ * answer also tells the caller it must read the login's catalog before `planStartupEffort`.
+ */
 export function startupEffort(harness: HarnessKind, effort: string | undefined): StartupEffort | undefined {
-  const level = effort?.trim();
+  const level = effort?.trim().toLowerCase();
   if (level === undefined || level.length === 0) return undefined;
   return harnessQuirks(harness).effortIsRuntimeCommand
     ? { kind: 'command', effort: level }
@@ -52,19 +62,55 @@ export function startupEffort(harness: HarnessKind, effort: string | undefined):
  * The same three refusals the picker drive made, made BEFORE a pane exists instead of after it: a
  * level on the argv is not checked by anybody else, and a level the model does not take would only
  * surface as a failed first turn. `choices` is the login's live catalog (its app-server's
- * `model/list`); `undefined` means it could not be read, which refuses — exactly as the picker drive
- * did — because nothing then says the level is real.
+ * `model/list`); an `Error` is the probe's own failure and `undefined` that it was not read at all — both
+ * refuse, exactly as the picker drive did, because nothing then says the level is real. The probe's message
+ * is put in the refusal so the person sees WHY, and the remedy is named.
  */
 export function codexStartupEffortRefusal(
   model: string,
   effort: string,
-  choices: readonly RuntimeModelChoice[] | undefined,
+  choices: readonly RuntimeModelChoice[] | Error | undefined,
 ): string | undefined {
-  if (choices === undefined)
-    return `the Codex model catalog could not be read, so reasoning level ${effort} cannot be checked for ${model}`;
+  if (choices === undefined || choices instanceof Error) {
+    const why = choices === undefined || choices.message.trim() === '' ? '' : ` (${choices.message.trim()})`;
+    return `the Codex model catalog could not be read${why}, so reasoning level ${effort} cannot be checked for ${model}; retry, or start without --effort`;
+  }
   const advertised = choices.find(choice => choice.value === model);
   if (advertised === undefined) return `model ${model} is not in this Codex login's current catalog`;
   if (!advertised.reasoningEfforts.some(choice => choice.value === effort))
     return `${effort} is not advertised for Codex model ${model}`;
   return undefined;
+}
+
+/** What a start does about its reasoning level: refuse, or launch with these. */
+export type StartupEffortPlan =
+  | { readonly kind: 'refused'; readonly reason: string }
+  | {
+      readonly kind: 'planned';
+      /** The level for the launch argv (Codex). */
+      readonly argvEffort?: string;
+      /** The runtime command to apply before turn one (Claude). */
+      readonly startupRuntime?: RuntimeControlRequest;
+    };
+
+/**
+ * The whole decision of how a start carries `effort`, with nothing read or typed.
+ *
+ * `catalog` is what the caller read for a Codex level — the login's models, or the `Error` its probe threw —
+ * and is only consulted for an `argv` start (`startupEffort` says whether the caller must read it). No level
+ * plans nothing; a Codex level is checked against the catalog (`codexStartupEffortRefusal`) and then rides the
+ * argv; a Claude level becomes an `effort` runtime command.
+ */
+export function planStartupEffort(
+  harness: HarnessKind,
+  model: string,
+  effort: string | undefined,
+  catalog: readonly RuntimeModelChoice[] | Error | undefined,
+): StartupEffortPlan {
+  const carried = startupEffort(harness, effort);
+  if (carried === undefined) return { kind: 'planned' };
+  if (carried.kind === 'command')
+    return { kind: 'planned', startupRuntime: { action: 'effort', effort: carried.effort } };
+  const reason = codexStartupEffortRefusal(model, carried.effort, catalog);
+  return reason === undefined ? { kind: 'planned', argvEffort: carried.effort } : { kind: 'refused', reason };
 }

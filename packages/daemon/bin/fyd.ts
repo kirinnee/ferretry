@@ -864,7 +864,6 @@ import {
   claimStartName,
   classifyPaneProcesses,
   codexModelProvider,
-  codexStartupEffortRefusal,
   combinedMcpOAuthServers,
   combinedReferences,
   combinedValues,
@@ -1332,6 +1331,7 @@ import {
   sessionScopedAttachments,
   shareLinkTarget,
   stampedProjectOf,
+  planStartupEffort,
   startupEffort,
   suggestedOllamaModel,
   supersededCarrierKeys,
@@ -2693,10 +2693,11 @@ function createSessionControlSubsystem(
   /** The session's own private directory, which is the string a Codex rollout is correlated by. */
   sessionDirectory: (id: SessionId) => string,
   /**
-   * The STARTUP half of the one runtime subsystem, applying effort before turn one is delivered.
+   * The STARTUP half of the one runtime subsystem, applying a Claude start's effort (and a fork's target
+   * model and effort) before turn one is delivered. A Codex start does not use it: its level rides the argv.
    *
    * Not the mounted control, and for the same reason a fork does not use it: at this point the
-   * session is `starting`, which the public path refuses by design. A start and a fork occupy the
+   * session is `starting`, which the public path refuses by design. A Claude start and a fork occupy the
    * identical window and go through the identical entry point.
    */
   runtime: SessionRuntimeStartupHeldPort,
@@ -2928,17 +2929,20 @@ function createSessionControlSubsystem(
       // THE REQUESTED LEVEL: on the argv for Codex, a command before turn one for Claude (`startupEffort`).
       // A Codex level on the argv is checked here against the login's live catalog, the check the picker
       // drive used to make after the pane existed; a refusal releases the callsign like the ones above.
-      const effortAtStart = startupEffort(account.kind, request.effort);
-      if (effortAtStart?.kind === 'argv') {
-        const choices = await fast.codexChoices(executable, cwd).catch(() => undefined);
-        const refusal = codexStartupEffortRefusal(plan.model, effortAtStart.effort, choices);
-        if (refusal !== undefined) {
-          await releaseCallsign();
-          throw new SessionControlError('unservable_model', refusal);
-        }
+      // The catalog is read only when the level rides the argv, and a failed read is passed on AS the error,
+      // so the refusal can say why the probe failed.
+      const catalog =
+        startupEffort(account.kind, request.effort)?.kind === 'argv'
+          ? await fast
+              .codexChoices(executable, cwd)
+              .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
+          : undefined;
+      const effortPlan = planStartupEffort(account.kind, plan.model, request.effort, catalog);
+      if (effortPlan.kind === 'refused') {
+        await releaseCallsign();
+        throw new SessionControlError('unservable_model', effortPlan.reason);
       }
-      const startupRuntime: RuntimeControlRequest | undefined =
-        effortAtStart?.kind === 'command' ? { action: 'effort', effort: effortAtStart.effort } : undefined;
+      const startupRuntime: RuntimeControlRequest | undefined = effortPlan.startupRuntime;
       // The remote-control arguments are added only when the caller asked for the surface, because
       // they are what makes the harness publish one — adding them anyway would open a control channel
       // for a session whose own document records that it has none.
@@ -2955,7 +2959,7 @@ function createSessionControlSubsystem(
             transcript: transcript.launchArguments,
             readableFolders: readableHandoffs(id),
             model: plan.model,
-            ...(effortAtStart?.kind === 'argv' ? { effort: effortAtStart.effort } : {}),
+            ...(effortPlan.argvEffort === undefined ? {} : { effort: effortPlan.argvEffort }),
             ...(request.fast === undefined ? {} : { fast: request.fast }),
             ...(launchCompactAt === undefined ? {} : { compactAt: launchCompactAt }),
             ...(request.fast === undefined && launchCompactAt === undefined ? {} : { fixedSettings }),

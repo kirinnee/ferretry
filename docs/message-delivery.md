@@ -312,14 +312,18 @@ cancel` as the pane's last line, and is sent when startup ends. Escape cancels t
   that line as **delivered** (`paneShowsStartupWait`): a turn for a message, the TUI's own for a slash
   command. Pressing Enter again would key a harness that has already taken the payload — and a `/model`
   whose picker opened between the frame and the key would have its first row chosen.
-- **A start no longer types `/model` at all.** It used to set a Codex start's reasoning level by
+- **A NEW session's start no longer types `/model` at all** (`fy new`, the app's New ferret). It used to set a Codex start's reasoning level by
   driving the picker the instant the composer appeared, which on 0.166 meant typing into a Codex that
   could not run it yet; the picker driver's bounded wait then failed the start with "Codex did not
   reach a model list" whenever startup outlasted it. The level now rides the launch command
   (`-c model_reasoning_effort="<level>"`), checked against the login's catalog before the pane exists
-  (`startupEffort`, `codexStartupEffortRefusal`). A live switch still drives the picker, and a frame
-  showing the park is not charged to its budget (`CODEX_STARTUP_WAIT_OBSERVATIONS`, which outlasts
-  Codex's own startup timeout).
+  (`planStartupEffort`, `codexStartupEffortRefusal`). A live switch and a **fork** (which applies its
+  target's model and effort through the startup picker hook) still drive the picker, and that drive
+  tolerates a slow startup because a frame showing the park is not charged to its budget
+  (`CODEX_STARTUP_WAIT_OBSERVATIONS`, which outlasts Codex's own startup timeout).
+- The captures were taken through the real fleet wrapper, which configures the ferretry MCP server, and
+  once with that server deliberately delayed 8 s; no line was drawn below the wait line, and MCP
+  start-up did not hold startup.
 
 ## Measured Claude Code behaviour
 

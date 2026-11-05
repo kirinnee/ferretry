@@ -164,6 +164,11 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // Enter again — into a harness that has already accepted it, and that may open a picker or start the
   // turn between that frame and the key. What follows is what the payload would have done unparked: a
   // slash command is the TUI's own, anything else is a turn.
+  //
+  // A parked slash command is reported handled-local BEFORE Codex has run it. If Codex then exits on its
+  // startup timeout, the command never ran, and the session's exit is what tells. That is accepted: a
+  // start no longer types a command into a booting Codex, and a live control on a session that is still
+  // starting is rare.
   if (paneShowsStartupWait(frame.visible))
     return { kind: 'delivered', outcome: text.trimStart().startsWith('/') ? 'handled-local' : 'turn-started' };
   // Exact `/model` opens Codex's native picker. The pane often keeps `› /model` above it, which
@@ -232,6 +237,16 @@ export function composerState(frame: DeliveryFrame): ComposerState {
 export function occupiedComposer(frame: DeliveryFrame): string | undefined {
   const composer = readComposer(frame.visible, frameCursor(frame));
   return composer?.placeholder === false && composer.text !== '' ? composer.text : undefined;
+}
+
+/**
+ * The unsent draft that makes a pane a lost cause to wait on, or `undefined` when waiting may still help.
+ *
+ * A composer under Codex's `Waiting for startup` line (`paneShowsStartupWait`) is not a draft: its text is a
+ * submission Codex already accepted and will send when startup ends, so the wait just goes on.
+ */
+export function draftBlockingReadiness(frame: DeliveryFrame): string | undefined {
+  return paneShowsStartupWait(frame.visible) ? undefined : occupiedComposer(frame);
 }
 
 /**

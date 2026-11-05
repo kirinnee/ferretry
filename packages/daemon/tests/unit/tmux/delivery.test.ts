@@ -12,6 +12,7 @@ import {
   composerState,
   composerTransport,
   type DeliveryFrame,
+  draftBlockingReadiness,
   frameCursor,
   harnessExitReason,
   landingDeadlineMs,
@@ -850,6 +851,15 @@ describe('a submission Codex 0.166 parks until its startup ends', () => {
 
   it('should hold a draft whose park was cancelled: the same text, no longer taken', () => {
     should(classifySubmit(capture('startup-queued-cancelled'), 'say hello', 'chars')).deepEqual({ kind: 'holding' });
+  });
+
+  it('should not count a parked composer as an unsent draft that readiness would wait on forever', () => {
+    // The text is drawn in the composer with the cursor after it, which `occupiedComposer` alone calls a draft.
+    should(occupiedComposer(capture('startup-queued-message'))).equal('say hello');
+    should(draftBlockingReadiness(capture('startup-queued-message'))).be.undefined();
+    should(draftBlockingReadiness(capture('startup-queued-slash'))).be.undefined();
+    // The same text with the park cancelled is an ordinary draft again.
+    should(draftBlockingReadiness(capture('startup-queued-cancelled'))).equal('say hello');
   });
 
   it('should never read a parked composer as an idle prompt', () => {
