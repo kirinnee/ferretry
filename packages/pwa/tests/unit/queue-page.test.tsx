@@ -166,6 +166,16 @@ describe('QueuePageView', () => {
     expect(mounted.root.findByProps({ 'data-queue-empty': '' })).toBeDefined();
   });
 
+  test('the empty card offers the way back to every queue', () => {
+    let all = 0;
+    mounted = view({ groups: [], onShowAll: () => all++ });
+    run(() => buttons(mounted!.root.findByProps({ 'data-queue-empty': '' }), 'See all queues')[0]?.props.onClick());
+    expect(all).toBe(1);
+    mounted.unmount();
+    mounted = view({ groups: [] });
+    expect(buttons(mounted.root.findByProps({ 'data-queue-empty': '' }), 'See all queues')).toHaveLength(0);
+  });
+
   test('says when nothing waits, and when it is still reading', () => {
     mounted = view({ groups: [] });
     expect(text(mounted.root.findByProps({ 'data-queue-empty': '' }))).toContain('Nothing is waiting');
