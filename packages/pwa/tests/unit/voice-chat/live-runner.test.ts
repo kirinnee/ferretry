@@ -61,6 +61,7 @@ class FakeTake implements TakeHandle {
   endTurns = 0;
   resumes = 0;
   cancelled = false;
+  stopped = false;
   outcome: Promise<TakeOutcome> = Promise.resolve({
     kind: 'words',
     text: 'Fix the bug.',
@@ -75,6 +76,9 @@ class FakeTake implements TakeHandle {
   resume(): Promise<boolean> {
     this.resumes += 1;
     return Promise.resolve(this.resumeResult);
+  }
+  stopRecording(): void {
+    this.stopped = true;
   }
   cancel(): void {
     this.cancelled = true;
@@ -100,6 +104,8 @@ interface Rig {
   sendResult: { current: SendOutcome | 'pending' };
   releaseSend(outcome: SendOutcome): void;
   lock: { granted: boolean };
+  /** The text a person typed in the box (what `SendPort.typed` answers). */
+  typed: { current: string };
   /** `pending`: the lock is not decided until `answerLock` says so (like the browser's asynchronous queue). */
   lockControl: { pending: boolean };
   /** Decide the `index`th lock request. */
@@ -109,6 +115,15 @@ interface Rig {
   openMeter(): void;
   meterReleased: number;
   speaker: Speaker;
+  /** The page's one voice, when the rig has one: whether something speaks now, and how often it was cut. */
+  voice: PageVoice;
+}
+
+/** The fake page voice: `speaking` is what `busy()` answers, `say` moves it and tells the watcher. */
+interface PageVoice {
+  speaking: boolean;
+  silenced: number;
+  say(speaking: boolean): void;
 }
 
 /** The fake reader's record: what was read, how it can be ended, and the taps it was told about. */
@@ -128,6 +143,8 @@ interface Speaker {
 const rig = (
   options: {
     speaker?: boolean;
+    /** Give the runner the page's one voice (`ports.voice`): the microphone then never opens while it speaks. */
+    voice?: boolean;
     canSend?: boolean;
     graceMs?: unknown;
     reply?: ReplyFeedPort;
@@ -147,6 +164,7 @@ const rig = (
   let visible = true;
   const visibilityListeners = new Set<(visible: boolean) => void>();
   let replyListener: ((signal: ReplySignal) => void) | null = null;
+  const typed = { current: '' };
   const sendResult: Rig['sendResult'] = { current: { kind: 'sent', sentAtMs: 0 } };
   let releaseSend: (outcome: SendOutcome) => void = () => undefined;
   const lock = { granted: true };
@@ -156,6 +174,15 @@ const rig = (
   const meterOpen: Rig['meterOpen'] = { mode: 'ok' };
   let pendingMeter: (() => void) | null = null;
   let meterReleased = 0;
+  const voiceWatchers = new Set<() => void>();
+  const voice: PageVoice = {
+    speaking: false,
+    silenced: 0,
+    say: speaking => {
+      voice.speaking = speaking;
+      for (const watcher of [...voiceWatchers]) watcher();
+    },
+  };
   const speaker: Speaker = {
     spoke: 0,
     stopped: 0,
@@ -200,6 +227,7 @@ const rig = (
       show: text => void shown.push(text),
       clear: () => void shown.push('<cleared>'),
       shown: () => shown.at(-1) ?? '',
+      typed: () => typed.current,
       send: () => {
         log.push('send');
         sends.push(clock.now());
@@ -246,6 +274,21 @@ const rig = (
           },
         }
       : null,
+    ...(options.voice === true
+      ? {
+          voice: {
+            busy: () => voice.speaking,
+            watch: onChange => {
+              voiceWatchers.add(onChange);
+              return () => void voiceWatchers.delete(onChange);
+            },
+            silence: () => {
+              voice.silenced += 1;
+              voice.say(false);
+            },
+          },
+        }
+      : {}),
     ...(options.cues === undefined
       ? {}
       : {
@@ -317,6 +360,7 @@ const rig = (
     sendResult,
     releaseSend: outcome => releaseSend(outcome),
     lock,
+    typed,
     lockControl,
     answerLock: async (index, granted) => {
       lockAnswers[index]?.(granted);
@@ -329,6 +373,7 @@ const rig = (
       return meterReleased;
     },
     speaker,
+    voice,
   } as Rig;
   return rigResult;
 };
@@ -511,6 +556,8 @@ describe('LiveRunner — races', () => {
     const r = await listening();
     r.talk(LOUD, 400);
     r.setVisible(false);
+    // What was said is kept: the words are worked out first, then the phase pauses and the take closes.
+    await r.settle();
     should(r.runner.state.phase).equal('paused');
     should(r.takes[0]?.cancelled).be.true();
     r.runner.resume();
@@ -568,6 +615,8 @@ describe('LiveRunner — a stop is sticky (THE SURPRISE-SEND RULE, with the real
         should(r.meterReleased).equal(metersReleased + 1);
         should(r.runner.levels()).deepEqual([]);
         should(take.cancelled).be.false();
+        // The take's OWN recording closes now too (a decode still pending must not hold the microphone open).
+        should(take.stopped).be.true();
         should(r.runner.state.phase).equal('sending');
 
         // The room speaks again, pauses, speaks again and pauses again: a second pause would auto-send.
@@ -622,6 +671,166 @@ describe('LiveRunner — a stop is sticky (THE SURPRISE-SEND RULE, with the real
     await r.settle();
     should(r.runner.state.phase).equal('listening');
     should(r.sends.length).equal(0);
+  });
+});
+
+describe('LiveRunner — a stop in the middle of a spoken turn keeps what was said', () => {
+  const STOPS: readonly (readonly [string, (r: Rig) => void, 'hold' | 'paused'])[] = [
+    ['Hold', r => r.runner.hold(), 'hold'],
+    ['typing', r => r.runner.typing(), 'hold'],
+    ['a hidden tab', r => r.setVisible(false), 'paused'],
+  ];
+
+  for (const [name, stop, landing] of STOPS) {
+    it(`${name} before the pause: capture closes now, the words are worked out and put in the box, then it lands on ${landing}`, async () => {
+      const r = await listening();
+      const take = r.takes[0] as FakeTake;
+      let answer: (outcome: TakeOutcome) => void = () => undefined;
+      take.outcome = new Promise(resolve => {
+        answer = resolve;
+      });
+      r.talk(LOUD, 600);
+      await r.settle();
+      should(r.runner.state.phase).equal('hearing');
+      const metersReleased = r.meterReleased;
+
+      stop(r);
+      should(r.runner.state.phase).equal('sending');
+      should(r.meterReleased).equal(metersReleased + 1);
+      should(take.stopped).be.true();
+      should(take.cancelled).be.false();
+      should(take.endTurns).equal(1);
+      should(r.runner.state.countdown).equal(null);
+      should(r.clock.live).equal(0);
+
+      // Nothing the room says afterwards does anything.
+      r.talk(LOUD, 900);
+      r.talk(QUIET, 1_800);
+      r.clock.advance(10_000);
+      await r.settle();
+      should(r.sends.length).equal(0);
+      should(take.endTurns).equal(1);
+
+      answer({ kind: 'words', text: 'Fix the bug.', raw: 'fix the bug', cleaned: true });
+      await r.settle();
+      should(r.runner.state.phase).equal(landing);
+      should(r.shown.at(-1)).equal('Fix the bug.');
+      should(take.cancelled).be.true();
+      should(r.sends.length).equal(0);
+      should(r.clock.live).equal(0);
+    });
+  }
+
+  it('Hold before the pause with an engine that finds no words lands On hold with the box untouched', async () => {
+    const r = await listening();
+    const take = r.takes[0] as FakeTake;
+    take.outcome = Promise.resolve({ kind: 'empty' });
+    r.talk(LOUD, 600);
+    await r.settle();
+    r.runner.hold();
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.shown.at(-1)).not.equal('Fix the bug.');
+    should(r.sends.length).equal(0);
+  });
+});
+
+describe('LiveRunner — typing pauses auto-send for good (THE SURPRISE-SEND RULE)', () => {
+  const sendFirstTurn = async (r: Rig): Promise<void> => {
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.sends.length).equal(1);
+    should(r.runner.state.phase).equal('working');
+  };
+
+  it('typing while the ferret works holds Live when the reply lands: the mic stays shut, room speech sends nothing, Resume listens', async () => {
+    const r = await listening();
+    await sendFirstTurn(r);
+    r.runner.typing();
+    should(r.runner.state.phase).equal('working');
+    r.signal({ kind: 'done' });
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('typing');
+    should(r.takes.length).equal(1);
+    // Room speech has no microphone to reach, and no timer is left to send.
+    r.talk(LOUD, 900);
+    r.talk(QUIET, 1_800);
+    r.clock.advance(10_000);
+    await r.settle();
+    should(r.sends.length).equal(1);
+    should(r.runner.state.phase).equal('hold');
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.takes.length).equal(2);
+  });
+
+  it('typing while the microphone and the lock are still being opened holds Live: nothing listens or sends on readiness', async () => {
+    const r = rig();
+    r.lockControl.pending = true;
+    r.runner.start();
+    await r.settle();
+    r.runner.typing();
+    should(r.runner.state.phase).equal('hold');
+    should(r.takes[0]?.cancelled).be.true();
+    await r.answerLock(0, true);
+    r.talk(LOUD, 900);
+    r.talk(QUIET, 1_800);
+    r.clock.advance(10_000);
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.sends.length).equal(0);
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('a typing hold whose lock is still unanswered asks again on Resume, and the late answer is the one that counts', async () => {
+    const r = rig();
+    r.lockControl.pending = true;
+    r.runner.start();
+    await r.settle();
+    r.runner.typing();
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('starting');
+    await r.answerLock(0, true);
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('text in the box that Live did not put there is never sent by itself: the turn ends On hold with its words in the box', async () => {
+    const r = await listening();
+    r.typed.current = 'UNFINISHED typed instruction';
+    await speakTurn(r);
+    should(r.runner.state.countdown).equal(null);
+    r.clock.advance(10_000);
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.shown.at(-1)).equal('Fix the bug.');
+    should(r.sends.length).equal(0);
+    should(r.clock.live).equal(0);
+  });
+
+  it('an engine that ends the take by itself while typed text is in the box also holds', async () => {
+    const r = await listening();
+    r.typed.current = 'draft';
+    r.talk(LOUD, 600);
+    await r.settle();
+    r.listeners[0]?.onEnded();
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.sends.length).equal(0);
+  });
+
+  it('whitespace in the box is not text', async () => {
+    const r = await listening();
+    r.typed.current = '  \n ';
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.sends.length).equal(1);
   });
 });
 
@@ -1199,16 +1408,55 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
     should(r.runner.state.phase).equal('listening');
   });
 
-  it('a message sent by hand while reading stops the reading and follows the new turn', async () => {
+  it('a message sent by hand while reading stops the reading, arms the feed, and follows the new turn only once it WENT', async () => {
     const r = await worked();
     r.signal({ kind: 'done' });
+    const watching = r.log.filter(entry => entry === 'reply.watch').length;
     r.runner.outsideSend();
     should(r.speaker.stopped).be.above(0);
-    should(r.runner.state.phase).equal('working');
+    // In flight: not Working. The feed is armed (and the page's baseline taken) before the answer is known.
+    should(r.runner.state.phase).equal('sending');
+    should(r.runner.state.sendInFlight).be.true();
     should(r.speaker.marked).equal(2);
+    should(r.log.filter(entry => entry === 'reply.arm').length).equal(2);
+    should(r.log.filter(entry => entry === 'reply.watch').length).equal(watching);
+    r.runner.outsideSent();
+    should(r.runner.state.phase).equal('working');
+    should(r.log.filter(entry => entry === 'reply.watch').length).equal(watching + 1);
     r.signal({ kind: 'done' });
     should(r.runner.state.phase).equal('reading');
     should(r.speaker.spoke).equal(2);
+  });
+
+  it('a message sent by hand that FAILS lands On hold: the armed feed is dropped and Live never watches a turn that did not begin', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    r.runner.outsideSend();
+    const cancels = r.log.filter(entry => entry === 'reply.cancel').length;
+    r.runner.outsideFailed();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('send-failed');
+    should(r.log.filter(entry => entry === 'reply.cancel').length).be.above(cancels - 1);
+    should(r.takes.filter(take => !take.cancelled).length).equal(0);
+    // A reply signal from the feed means nothing now.
+    r.signal({ kind: 'done' });
+    should(r.runner.state.phase).equal('hold');
+  });
+
+  it('typing and Hold while reading stop the speech and stand: the end of the speech reopens nothing', async () => {
+    for (const stop of ['typing', 'hold'] as const) {
+      const r = await worked();
+      r.signal({ kind: 'done' });
+      const endReading = r.speaker.end;
+      r.runner[stop]();
+      should(r.runner.state.phase).equal('hold');
+      should(r.speaker.stopped).be.above(0);
+      endReading('stopped');
+      endReading('finished');
+      await r.settle();
+      should(r.runner.state.phase).equal('hold');
+      should(r.takes.filter(take => !take.cancelled).length).equal(0);
+    }
   });
 
   it('the tab hiding while reading stops the speech and pauses Live', async () => {
@@ -1295,5 +1543,99 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
     await q.settle();
     q.runner.end();
     should(quiet.played.filter(entry => entry !== 'tone:unlock')).deepEqual([]);
+  });
+});
+
+describe('LiveRunner — half-duplex against the page voice', () => {
+  const open = (r: Rig): number => r.takes.filter(take => !take.cancelled).length;
+
+  it('speech starting elsewhere while Live listens closes the microphone at once and waits On hold; it ending reopens nothing', async () => {
+    const r = await listening({ voice: true });
+    should(open(r)).equal(1);
+    r.voice.say(true);
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('speaking');
+    should(open(r)).equal(0);
+    r.voice.say(false);
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(open(r)).equal(0);
+    // Listen is the person's say-so.
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(open(r)).equal(1);
+  });
+
+  it('Listen while the other speech is still going cuts it first, then opens the microphone', async () => {
+    const r = await listening({ voice: true });
+    r.voice.say(true);
+    r.runner.resume();
+    should(r.voice.silenced).equal(1);
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(open(r)).equal(1);
+  });
+
+  it('starting Live while something speaks cuts it before the microphone opens', async () => {
+    const r = rig({ voice: true });
+    r.voice.say(true);
+    r.runner.start();
+    should(r.voice.silenced).equal(1);
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('speech starting while the microphone is still opening holds instead of listening', async () => {
+    const r = rig({ voice: true });
+    r.runner.start();
+    r.voice.say(true);
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('speaking');
+    should(open(r)).equal(0);
+  });
+
+  it('a reply that finishes while another message is being read is not heard over it: Live holds instead of listening', async () => {
+    const r = await listening({ voice: true });
+    await speakTurn(r);
+    await r.settle();
+    r.clock.advance(1_500);
+    await r.settle();
+    r.voice.say(true);
+    r.signal({ kind: 'done' });
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('speaking');
+    should(open(r)).equal(0);
+  });
+
+  it('the last line of defence: a microphone about to open under speech the machine had not heard of waits On hold', async () => {
+    const r = await listening({ voice: true });
+    r.runner.hold();
+    // The voice moves without telling the machine (a watcher that was late): the open itself looks first.
+    r.voice.speaking = true;
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('speaking');
+    should(open(r)).equal(0);
+  });
+
+  it('only a change of "someone speaks" is an event: a sentence moving on tells the machine nothing', async () => {
+    const r = await listening({ voice: true });
+    let repaints = 0;
+    r.runner.subscribe(() => {
+      repaints += 1;
+    });
+    r.voice.say(false);
+    r.voice.say(false);
+    should(repaints).equal(0);
+  });
+
+  it('stops listening to the voice when the runner is disposed', async () => {
+    const r = await listening({ voice: true });
+    r.runner.dispose();
+    r.voice.say(true);
+    should(r.runner.state.phase).equal('listening');
   });
 });

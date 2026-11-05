@@ -327,6 +327,17 @@ describe('liveView — reading (slice 5)', () => {
     for (const key of ['Enter', 'h', 'H', 'x']) should(liveKeyAction(key, view)).equal(null);
   });
 
+  it('another message taking the voice is On hold with a Listen button: it says why, and Listen is the way back', () => {
+    const taken = run([{ type: 'speak-done', id: 1, end: 'taken' }], reading);
+    const view = liveView(taken, 0);
+    should(view.stateWord).equal('On hold');
+    should(view.detail).equal('Another message is being read aloud. Listen stops it and talks.');
+    should(view.big).deepEqual({ label: 'Listen', action: 'resume' });
+    should(view.canResume).be.true();
+    should(view.micOpen).be.false();
+    should(liveKeyAction('Escape', view)).equal('end');
+  });
+
   it('S and R mean nothing outside a reading, and Esc ends Live again', () => {
     const listening = liveView(run(LISTENING), 0);
     should(liveKeyAction('s', listening)).equal(null);

@@ -32,7 +32,7 @@ import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
 import { type AudioContextConstructor, navigatorHaptics, webAudioEarcons } from '../lib/voice-chat/earcons.ts';
 import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '../lib/voice-chat/live-assembly.ts';
 import { INITIAL_LIVE_STATE } from '../lib/voice-chat/live-machine.ts';
-import { createLiveReader, type LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
+import { createLiveReader, type LiveReadingSource, pageVoice } from '../lib/voice-chat/live-reader.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
 import { DEFAULT_LIVE_VOICE_SETTINGS } from '../lib/voice-chat/live-settings.ts';
 import { LiveTurnLog } from '../lib/voice-chat/live-turn-log.ts';
@@ -95,8 +95,12 @@ export interface LiveVoiceHandle {
   end(): void;
   skip(): void;
   repeat(): void;
-  /** A message was sent by hand (not by Live): a reading in progress belongs to an older turn. */
+  /** A message is being sent by hand (not by Live): a reading in progress belongs to an older turn. */
   outsideSend(): void;
+  /** The message sent by hand was accepted: Live follows its reply. */
+  outsideSent(): void;
+  /** The message sent by hand did not go: Live lands On hold, the draft is still there. */
+  outsideFailed(): void;
 }
 
 const NO_LEVELS: readonly number[] = [];
@@ -170,6 +174,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     const assembled = assembleFromPage(read, {
       composer: current.composer,
       reply: current.reply,
+      voice: pageVoice(spoken.current.reader),
       reader:
         current.reading === undefined
           ? null
@@ -226,7 +231,8 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   useEffect(() => {
     const live = runnerRef.current;
     if (live === null || live.state.phase === 'off') return;
-    if (draft !== composer.lastShown()) live.typing();
+    // Nothing shown (or the box emptied by a send) expects an empty box: only a different text is a keystroke.
+    if (draft !== (composer.lastShown() ?? '')) live.typing();
   }, [draft]);
 
   // Live ends when it can no longer be offered (the composer was disabled, the session went), and with the page.
@@ -273,5 +279,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     skip: () => runnerRef.current?.skip(),
     repeat: () => runnerRef.current?.repeat(),
     outsideSend: () => runnerRef.current?.outsideSend(),
+    outsideSent: () => runnerRef.current?.outsideSent(),
+    outsideFailed: () => runnerRef.current?.outsideFailed(),
   };
 }

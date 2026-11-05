@@ -963,6 +963,8 @@ export function Composer({
     locating.current += 1;
     setLocation(null);
     setDraft(left);
+    // The box is empty again: what Live last showed is gone with it, so the emptying is not mistaken for typing.
+    if (left === '') liveWords.current = null;
     // The next message starts as text, not as commands.
     setVim(initialVimState);
     if (left === '') draftStore.clear(sentScope);
@@ -971,8 +973,12 @@ export function Composer({
 
   /** Live's own send is in progress: it is not "a message sent by hand". */
   const liveOwnSend = useRef(false);
-  /** Tells Live a message went by hand; set once the Live control exists. */
-  const liveOutsideSend = useRef<(() => void) | null>(null);
+  /**
+   * Tells Live about a message sent by hand, in three steps that follow the send itself: it began, it was accepted, it
+   * failed. Set once the Live control exists. Live stops a reading at the first and acts on the others — it never
+   * assumes a send that has not been answered.
+   */
+  const liveOutside = useRef<{ begin(): void; sent(): void; failed(): void } | null>(null);
   const submit = async (interrupt = false): Promise<boolean> => {
     if (!canSubmit || submitLock.current) return false;
     // The word a phone keyboard is still composing is part of the message: the composition ends here,
@@ -982,8 +988,10 @@ export function Composer({
       return false;
     }
     submitLock.current = true;
-    // A message sent by hand while Live is reading a reply: that reading is about an older turn.
-    if (!liveOwnSend.current) liveOutsideSend.current?.();
+    // A message sent by hand while Live is reading a reply: that reading is about an older turn. Live is told it BEGAN
+    // here and told how it ended below; a hand send of its own that Live did not start is the only kind reported.
+    const byHand = !liveOwnSend.current;
+    if (byHand) liveOutside.current?.begin();
     onSending?.();
     // What this press sends, remembered against everything typed before it lands.
     const mark = shared.markSend();
@@ -1060,9 +1068,11 @@ export function Composer({
           ? (sent as { sendId: string }).sendId
           : undefined);
       finishSent(mark, sentScope, { words: typed, sendId, disposition }, requestId);
+      if (byHand) liveOutside.current?.sent();
       return true;
     } catch (cause) {
       shared.abandonSend(mark);
+      if (byHand) liveOutside.current?.failed();
       onSendFailed?.();
       const held = occupiedDraftOf(cause);
       const typed = unconfirmedSendOf(cause);
@@ -1493,6 +1503,11 @@ export function Composer({
         if (held !== null && held.shown === draftRef.current) put(held.base, held.base);
       },
       draft: () => draftRef.current,
+      typed: () => {
+        const held = liveWords.current;
+        const current = draftRef.current;
+        return held !== null && held.shown === current ? held.base : current;
+      },
       lastShown: () => liveWords.current?.shown ?? null,
       submit: () =>
         new Promise<boolean>(resolve => {
@@ -1539,7 +1554,11 @@ export function Composer({
     ...(liveVoiceSeams === undefined ? {} : { seams: liveVoiceSeams }),
   });
 
-  liveOutsideSend.current = liveControl.live.outsideSend;
+  liveOutside.current = {
+    begin: liveControl.live.outsideSend,
+    sent: liveControl.live.outsideSent,
+    failed: liveControl.live.outsideFailed,
+  };
 
   const dictation = dictationSettings ? (
     <DictationControl

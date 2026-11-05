@@ -86,6 +86,7 @@ const HOLD_COPY = {
   'send-failed': "Couldn't send. Your words are in the message box.",
   'needs-input': 'Your ferret is asking you something.',
   listen: 'The reply has been read. Tap Listen to talk.',
+  speaking: 'Another message is being read aloud. Listen stops it and talks.',
 } as const;
 
 /** The line under a hold or a pause; a take that failed while the stop waited for its words says so first. */
@@ -211,11 +212,11 @@ export function liveView(
     case 'hold': {
       const reason = state.holdReason ?? 'user';
       // The reply was read and the microphone waits for a tap: it is the person's turn, not a hold they asked for.
-      if (reason === 'listen')
+      if (reason === 'listen' || reason === 'speaking')
         return {
           ...base,
-          stateWord: 'Your turn',
-          detail: heldDetail(state, HOLD_COPY.listen),
+          stateWord: reason === 'speaking' ? 'On hold' : 'Your turn',
+          detail: heldDetail(state, HOLD_COPY[reason]),
           tone: 'calm',
           big: { label: 'Listen', action: 'resume' },
           canResume: true,

@@ -35,6 +35,7 @@ import type {
   SendPort,
   ReaderPort,
   VisibilityPort,
+  VoicePort,
   WakeLockPort,
 } from './ports.ts';
 import { type ReplySource, sessionReplyFeed } from './reply-feed.ts';
@@ -47,6 +48,8 @@ export interface LiveComposerBridge {
   clear(): void;
   /** What the box holds now. */
   draft(): string;
+  /** The text in the box that is not Live's words (typed by a person, before or during Live); '' when none. */
+  typed(): string;
   /** What `show` last put in the box; null before the first. A draft that is not this was edited by a person. */
   lastShown(): string | null;
   /** The composer's own send, on exactly what the box holds: true once it is on its way. */
@@ -87,6 +90,8 @@ export interface LiveAssemblyDeps {
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
   readonly reader: ReaderPort | null;
+  /** The page's one voice: the microphone never opens while anything speaks. */
+  readonly voice?: VoicePort | null;
   readonly earcons?: EarconPort | null;
   readonly haptics?: HapticsPort | null;
   readonly clock: ClockPort;
@@ -101,6 +106,7 @@ export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
     show: words => deps.composer.show(words),
     clear: () => deps.composer.clear(),
     shown: () => deps.composer.draft(),
+    typed: () => deps.composer.typed(),
     send: async () => {
       const sent = await deps.composer.submit();
       return sent ? { kind: 'sent', sentAtMs: deps.clock.now() } : { kind: 'failed', reason: 'not-sent' };
@@ -116,6 +122,7 @@ export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
     send,
     reply,
     reader: deps.reader,
+    voice: deps.voice ?? null,
     earcons: deps.earcons ?? null,
     haptics: deps.haptics ?? null,
     wakeLock: deps.wakeLock,
@@ -143,6 +150,8 @@ export interface LiveEnvironment {
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
   readonly reader: ReaderPort | null;
+  /** The page's one voice: the microphone never opens while anything speaks. */
+  readonly voice?: VoicePort | null;
   readonly earcons?: EarconPort | null;
   readonly haptics?: HapticsPort | null;
   readonly clock: ClockPort;

@@ -14,6 +14,7 @@ import should from 'should';
 import {
   createLiveReader,
   MAX_WAIT_MS,
+  pageVoice,
   QUIET_MS,
   type LiveReadingSource,
 } from '../../../src/lib/voice-chat/live-reader.ts';
@@ -264,11 +265,41 @@ describe('createLiveReader — how a reading ends', () => {
     should(s.ends).deepEqual(['stopped']);
   });
 
-  it('another reading taking the voice (a Read aloud button) ends this one as stopped', () => {
+  it('another reading taking the voice (a Read aloud button) ends this one as TAKEN: that is not the end of speech', () => {
     const s = setup();
     reply(s);
     s.controller.read('some-other-message', 'Other words.');
+    should(s.ends).deepEqual(['taken']);
+    // The thief keeps the voice: taking it is not a reason to stop it.
+    should(s.controller.getState().status).equal('reading');
+    should(s.controller.getState().key).equal('some-other-message');
+  });
+
+  it('the voice going quiet under this reading (dismissed, or another reading with nothing to say) is a plain stop', () => {
+    const s = setup();
+    reply(s);
+    s.controller.dismiss();
     should(s.ends).deepEqual(['stopped']);
+  });
+
+  it('the page voice is busy while ANYTHING is read, tells when that changes, and silences whoever holds it', () => {
+    const s = setup();
+    const voice = pageVoice(s.controller);
+    let told = 0;
+    const unwatch = voice.watch(() => {
+      told += 1;
+    });
+    should(voice.busy()).be.false();
+    s.controller.read('some-other-message', 'Other words.');
+    should(voice.busy()).be.true();
+    should(told).be.above(0);
+    voice.silence();
+    should(voice.busy()).be.false();
+    should(s.controller.getState().status).equal('stopped');
+    unwatch();
+    const after = told;
+    s.controller.read('again', 'More words.');
+    should(told).equal(after);
   });
 
   it('nothing to say at all ends as finished, at once', () => {

@@ -63,6 +63,8 @@ const READING = run([{ type: 'reply', signal: 'done' }], WORKING);
 const ASKING = run([{ type: 'reply', signal: 'needs-input' }], WORKING);
 const HELD_ON_QUESTION = run([{ type: 'speak-done', id: 1, end: 'finished' }], ASKING);
 const LISTEN = run([{ type: 'speak-done', id: 1, end: 'finished' }], run([{ type: 'reply', signal: 'done' }], WORKING_PHONE));
+// Another message took the voice while Live read: Live gave it up and waits On hold (the microphone stays shut).
+const TAKEN = run([{ type: 'speak-done', id: 1, end: 'taken' }], READING);
 const READ_FAILED = run([{ type: 'speak-done', id: 1, end: 'failed' }, LOCKED, { type: 'listening' }], READING);
 const NO_VOICE = run([{ type: 'speak-done', id: 1, end: 'unavailable' }, LOCKED, { type: 'listening' }], READING);
 
@@ -92,7 +94,7 @@ const entries = [
   { id: 'a1', kind: 'assistant', text: asking ? QUESTION_REPLY : REPLY, label: 'Janella', at: AT },
 ];
 
-const CURRENT_SENTENCE = { reading: 2, 'reading-start': 0 };
+const CURRENT_SENTENCE = { reading: 2, 'reading-start': 0, 'another-voice': 1 };
 const quiet = (current) => {
   let hear = null;
   return {
@@ -118,6 +120,7 @@ const VIEWS = {
   'question-reading': liveView(ASKING, 0),
   'question-prompt': liveView(HELD_ON_QUESTION, 0),
   listen: liveView(LISTEN, 0),
+  'another-voice': liveView(TAKEN, 0),
   'read-failed': liveView(READ_FAILED, 0),
   'no-voice': liveView(NO_VOICE, 0),
 };
@@ -125,7 +128,7 @@ const view = VIEWS[scene];
 
 function Driver() {
   useEffect(() => {
-    if (scene === 'reading' || scene === 'reading-start') controller.read('a1', REPLY);
+    if (scene === 'reading' || scene === 'reading-start' || scene === 'another-voice') controller.read('a1', REPLY);
     else if (scene === 'question-reading') controller.read('auto-read:question', 'The ferret asks. Push the fix to main?');
     document.body.dataset.ready = '1';
   }, []);
@@ -236,6 +239,7 @@ const SCENES = [
   'question-reading',
   'question-prompt',
   'listen',
+  'another-voice',
   'read-failed',
   'no-voice',
   'settings-on',
@@ -268,6 +272,8 @@ try {
         const page = await context.newPage();
         const layout = plan.name.startsWith('phone') ? 'phone' : 'desktop';
         for (const scene of SCENES) {
+          // `SCENE_ONLY=another-voice` re-shoots one scene: a change to one state re-shoots that state only.
+          if (process.env.SCENE_ONLY !== undefined && process.env.SCENE_ONLY !== scene) continue;
           // Settings is not about the Live bar's layout or reduced motion twice: shoot it in the plain runs.
           if (scene.startsWith('settings') && plan.reduced) continue;
           await page.goto(

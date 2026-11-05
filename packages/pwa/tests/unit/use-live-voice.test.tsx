@@ -25,6 +25,7 @@ const bridge = (lastShown: string | null = null): LiveComposerBridge => ({
   show: () => undefined,
   clear: () => undefined,
   draft: () => '',
+  typed: () => '',
   lastShown: () => lastShown,
   submit: async () => true,
 });

@@ -15,6 +15,7 @@ import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { LIVE_VOICE_TOGGLE_EVENT } from '../../src/lib/voice-chat/live-command.ts';
+import type { MicLockPort } from '../../src/lib/voice-chat/ports.ts';
 import type { ReplySnapshot, ReplySource } from '../../src/lib/voice-chat/reply-feed.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { typeInto } from '../support/dom-form.ts';
@@ -57,7 +58,14 @@ interface Sent {
 }
 
 const rig = async (
-  options: { live?: boolean; disabled?: boolean; compact?: boolean; reader?: boolean; onLiveActive?: boolean[] } = {},
+  options: {
+    live?: boolean;
+    disabled?: boolean;
+    compact?: boolean;
+    reader?: boolean;
+    onLiveActive?: boolean[];
+    micLock?: MicLockPort;
+  } = {},
 ) => {
   const fake = fakeLive({ reader: options.reader === true });
   // Everything but the send is a fake: the words go through the composer's own send.
@@ -84,7 +92,7 @@ const rig = async (
       {...(options.onLiveActive === undefined
         ? {}
         : { onLiveActiveChange: (on: boolean) => options.onLiveActive?.push(on) })}
-      liveVoiceSeams={{ ports }}
+      liveVoiceSeams={{ ports: options.micLock === undefined ? ports : { ...ports, micLock: options.micLock } }}
     />,
   );
   return { composer, fake, sent };
@@ -140,7 +148,7 @@ describe('Composer Live voice', () => {
     await composer.unmount();
   });
 
-  it('keeps what was typed before Live in front of the words', async () => {
+  it('keeps what was typed before Live in front of the words, and NEVER sends it by itself: it waits On hold for the person', async () => {
     const { composer, fake, sent } = await rig();
     const textarea = textareaOf(composer.container);
     await typeInto(textarea, 'Please', 'textarea');
@@ -148,16 +156,40 @@ describe('Composer Live voice', () => {
     await flush();
     await speakTurn(fake);
     expect(textarea.value).toBe('Please Fix the bug.');
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
     await interact(async () => {
-      fake.advance(1_500);
+      fake.advance(10_000);
       await Promise.resolve();
     });
+    await flush();
+    expect(sent.messages).toEqual([]);
+    const sendNow = must(
+      [...composer.container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+        /send now/i.test(button.textContent ?? ''),
+      ),
+      'the Send now button',
+    );
+    await interact(() => sendNow.click());
     await flush();
     expect(sent.messages).toEqual(['Please Fix the bug.']);
     await composer.unmount();
   });
 
-  it('takes the preview words out again when the turn came to nothing, leaving what was typed', async () => {
+  it('takes the preview words out again when the turn came to nothing, leaving the box empty and Live listening', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    fake.outcome.current = { kind: 'empty' };
+    await interact(() => fake.listeners[0]?.onLive('hmm'));
+    await speakTurn(fake);
+    expect(textarea.value).toBe('');
+    expect(composer.container.textContent).toContain('Listening');
+    expect(sent.messages).toEqual([]);
+    await composer.unmount();
+  });
+
+  it('takes the preview words out again, leaving what was typed, and holds for it (a turn of nothing with typed text)', async () => {
     const { composer, fake, sent } = await rig();
     const textarea = textareaOf(composer.container);
     await typeInto(textarea, 'Please', 'textarea');
@@ -167,7 +199,7 @@ describe('Composer Live voice', () => {
     await interact(() => fake.listeners[0]?.onLive('hmm'));
     await speakTurn(fake);
     expect(textarea.value).toBe('Please');
-    expect(composer.container.textContent).toContain('Listening');
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
     expect(sent.messages).toEqual([]);
     await composer.unmount();
   });
@@ -252,6 +284,154 @@ describe('Composer Live voice', () => {
     });
     await flush();
     expect(sent.messages).toEqual(['Fix the bug.']);
+    await composer.unmount();
+  });
+
+  /** Press the bar's Resume. */
+  const resume = async (container: HTMLElement): Promise<void> => {
+    const button = must(
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find(candidate =>
+        /resume/i.test(candidate.textContent ?? ''),
+      ),
+      'the Resume button',
+    );
+    await interact(() => button.click());
+    await flush();
+  };
+
+  it('after the ferret answers a normal turn Live listens again: the box the send emptied is not typing', async () => {
+    const { composer, fake, sent } = await rig();
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    expect(composer.container.querySelector('[data-live-phase=working]')).not.toBeNull();
+    await interact(() => fake.signal({ kind: 'done' }));
+    await flush();
+    expect(composer.container.querySelector('[data-live-phase=listening]')).not.toBeNull();
+    await composer.unmount();
+  });
+
+  it('THE SURPRISE-SEND RULE: typing while the ferret works holds Live when it answers, and the unfinished draft never rides along with a voice send', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+
+    await typeInto(textarea, 'UNFINISHED typed instruction', 'textarea');
+    await flush();
+    // The reply watch carries on: Live is still working, nothing was cancelled.
+    expect(composer.container.querySelector('[data-live-phase=working]')).not.toBeNull();
+    await interact(() => fake.signal({ kind: 'done' }));
+    await flush();
+
+    // The reply landed: Live is ON HOLD, the microphone is not reopened, the draft is untouched.
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
+    expect(composer.container.querySelector('[data-live-phase=listening]')).toBeNull();
+    expect(fake.takes.length).toBe(1);
+    expect(textarea.value).toBe('UNFINISHED typed instruction');
+
+    // Room speech and every clock tick afterwards send nothing.
+    fake.outcome.current = { kind: 'words', text: 'background speech', raw: 'background speech', cleaned: false };
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(60_000);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    expect(textarea.value).toBe('UNFINISHED typed instruction');
+
+    // Resume is the person's word: the microphone reopens, but a draft in the box still means no auto-send.
+    await resume(composer.container);
+    expect(composer.container.querySelector('[data-live-phase=listening]')).not.toBeNull();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(60_000);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
+    expect(textarea.value).toBe('UNFINISHED typed instruction background speech');
+    await composer.unmount();
+  });
+
+  it('THE SURPRISE-SEND RULE: typing while Live is still starting (the lock is pending) holds it; nothing listens or sends when the lock arrives', async () => {
+    let grant: (granted: boolean) => void = () => undefined;
+    const micLock: MicLockPort = {
+      acquire: () =>
+        new Promise<boolean>(resolve => {
+          grant = resolve;
+        }),
+      release: () => undefined,
+    };
+    const { composer, fake, sent } = await rig({ micLock });
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    expect(composer.container.querySelector('[data-live-phase=starting]')).not.toBeNull();
+
+    await typeInto(textarea, 'half a thought', 'textarea');
+    await flush();
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
+
+    await interact(async () => {
+      grant(true);
+      await Promise.resolve();
+    });
+    await flush();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(60_000);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual([]);
+    expect(textarea.value).toBe('half a thought');
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
+    await composer.unmount();
+  });
+
+  it('Hold in the middle of a sentence keeps the words: they appear in the box and nothing is sent', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await interact(async () => {
+      fake.hear(0.1, 600);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(composer.container.querySelector('[data-live-phase=hearing]')).not.toBeNull();
+    const hold = must(
+      [...composer.container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+        /^hold/i.test((button.textContent ?? '').trim()),
+      ),
+      'the Hold button',
+    );
+    await interact(() => hold.click());
+    await flush();
+    expect(textarea.value).toBe('Fix the bug.');
+    expect(composer.container.querySelector('[data-live-phase=hold]')).not.toBeNull();
+    expect(fake.takes[0]?.stopped).toBe(true);
+    await interact(async () => {
+      fake.advance(60_000);
+      await Promise.resolve();
+    });
+    expect(sent.messages).toEqual([]);
     await composer.unmount();
   });
 

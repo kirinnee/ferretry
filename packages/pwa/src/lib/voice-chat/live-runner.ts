@@ -51,6 +51,7 @@ import type {
   TakeHandle,
   TakePort,
   VisibilityPort,
+  VoicePort,
   WakeLockPort,
 } from './ports.ts';
 import { type EndpointerState, endpointerFeed, endpointerStart, type LevelFrame } from './turn-endpointer.ts';
@@ -62,6 +63,11 @@ export interface LiveRunnerPorts {
   readonly reply: ReplyFeedPort;
   /** Reads a finished turn aloud. Null where nothing can be read: a finished reply then goes straight to listening. */
   readonly reader: ReaderPort | null;
+  /**
+   * The page's one voice. With it the microphone never opens while anything is speaking, whoever started it (a Read aloud
+   * tap, the settings preview, Live's own reading). Absent: Live trusts that its own reading is the only speech.
+   */
+  readonly voice?: VoicePort | null;
   /** Short tones for listening / sent / reply ready / stopped. Absent: silent. */
   readonly earcons?: EarconPort | null;
   /** A short buzz for sent / reply ready. Absent: none. */
@@ -110,6 +116,9 @@ export class LiveRunner {
   #countdownCancel: (() => void) | null = null;
   #replyCancel: (() => void) | null = null;
   #unwatchVisibility: (() => void) | null = null;
+  #unwatchVoice: (() => void) | null = null;
+  /** What the machine was last told about the voice: only a change is an event (every sentence moves the controller). */
+  #voiceBusy = false;
   #screenMayTurnOff = false;
   #lockHeld = false;
   #lockAsked = false;
@@ -151,8 +160,11 @@ export class LiveRunner {
   start(): void {
     this.#unwatchVisibility ??= this.#ports.visibility.watch(visible => this.dispatch({ type: 'visibility', visible }));
     this.#unlock();
+    this.#voiceBusy = this.#ports.voice?.busy() === true;
+    this.#unwatchVoice ??= this.#ports.voice?.watch(() => this.#voiceMoved()) ?? null;
     this.dispatch({
       type: 'start',
+      voiceBusy: this.#voiceBusy,
       atMs: this.#ports.clock.now(),
       canSend: this.#options.canSend,
       visible: this.#ports.visibility.visible(),
@@ -196,9 +208,22 @@ export class LiveRunner {
     this.dispatch({ type: 'repeat' });
   }
 
-  /** The person sent a message by hand (not through Live): a reading in progress is stale. */
+  /**
+   * The person is sending a message by hand (not through Live): a reading in progress is stale. Say what became of it
+   * with {@link outsideSent} or {@link outsideFailed}: Live waits for the answer, it does not assume one.
+   */
   outsideSend(): void {
     this.dispatch({ type: 'outside-send', atMs: this.#ports.clock.now() });
+  }
+
+  /** The message sent by hand was accepted. */
+  outsideSent(): void {
+    this.dispatch({ type: 'outside-sent', atMs: this.#ports.clock.now() });
+  }
+
+  /** The message sent by hand did not go: nothing is waiting on a reply to it. */
+  outsideFailed(): void {
+    this.dispatch({ type: 'outside-failed' });
   }
 
   /** The person edited the composer: auto-send pauses. */
@@ -212,6 +237,8 @@ export class LiveRunner {
     this.#queue.length = 0;
     this.#unwatchVisibility?.();
     this.#unwatchVisibility = null;
+    this.#unwatchVoice?.();
+    this.#unwatchVoice = null;
     this.#closeMic();
     this.#clearCountdown();
     this.#clearTimers();
@@ -296,6 +323,12 @@ export class LiveRunner {
       case 'stopSpeaking':
         this.#ports.reader?.stop();
         break;
+      case 'silenceVoice':
+        this.#ports.voice?.silence();
+        break;
+      case 'armReply':
+        this.#armFeed();
+        break;
       case 'recordTurn':
         this.#options.onTurn?.(effect.numbers);
         break;
@@ -339,8 +372,23 @@ export class LiveRunner {
 
   // — the microphone ————————————————————————————————————————————————————
 
+  /** The page's voice may have changed hands: the machine hears only whether it is held. */
+  #voiceMoved(): void {
+    const busy = this.#ports.voice?.busy() === true;
+    if (busy === this.#voiceBusy) return;
+    this.#voiceBusy = busy;
+    this.dispatch({ type: 'voice', busy });
+  }
+
   #openMic(): void {
     this.#closeMic();
+    // The last line of defence, whatever sequence of events brought us here: the microphone never opens over speech.
+    // The machine hears it and waits On hold.
+    if (this.#ports.voice?.busy() === true) {
+      this.#voiceBusy = true;
+      this.dispatch({ type: 'voice', busy: true });
+      return;
+    }
     const gen = this.#micGen;
     const handle = this.#ports.take.start({
       onLive: text => {
@@ -398,13 +446,21 @@ export class LiveRunner {
     const meter = this.#meter;
     this.#meter = null;
     meter?.release();
+    // The take's own recording closes too: a decode still pending must not keep the microphone open.
+    this.#handle?.stopRecording();
+  }
+
+  /** The message box holds text Live did not put there: an unfinished typed instruction never rides along with a voice send. */
+  #typed(): boolean {
+    return this.#ports.send.typed().trim() !== '';
   }
 
   /** The engine ended the take by itself: its own limit, or the browser gave up. */
   #takeEnded(): void {
     const { phase } = this.#state;
     const now = this.#ports.clock.now();
-    if (phase === 'hearing') this.dispatch({ type: 'turn-end', atMs: now, speechEndedAtMs: now, reason: 'max-turn' });
+    if (phase === 'hearing')
+      this.dispatch({ type: 'turn-end', atMs: now, speechEndedAtMs: now, reason: 'max-turn', typed: this.#typed() });
     else if (phase === 'listening') this.#resumeListening();
   }
 
@@ -419,7 +475,7 @@ export class LiveRunner {
           this.dispatch({ type: 'speech-start' });
           break;
         case 'speech-cancel':
-          this.dispatch({ type: 'speech-cancel', atMs: event.atMs });
+          this.dispatch({ type: 'speech-cancel', atMs: event.atMs, typed: this.#typed() });
           break;
         case 'turn-end':
           this.dispatch({
@@ -427,6 +483,7 @@ export class LiveRunner {
             atMs: event.atMs,
             speechEndedAtMs: event.speechEndedAtMs,
             reason: event.reason,
+            typed: this.#typed(),
           });
           // Keep listening for the voice coming back while the countdown runs.
           this.#endpointer = endpointerStart(this.#options.pauseMs, { floorLevels: this.#meter?.recent() ?? [] });
@@ -495,9 +552,7 @@ export class LiveRunner {
   #send(): void {
     // The feed is armed (baseline taken, listening) BEFORE the message goes: a fast turn can finish while the
     // send is still being acknowledged. The reader's baseline is taken at the same moment.
-    this.#armedReply?.cancel();
-    const armed = this.#arm();
-    this.#armedReply = armed;
+    const armed = this.#armFeed();
     void this.#ports.send.send().then(outcome => {
       if (outcome.kind === 'sent') this.dispatch({ type: 'sent', atMs: this.#ports.clock.now() });
       else {
@@ -506,6 +561,14 @@ export class LiveRunner {
         this.dispatch({ type: 'send-failed' });
       }
     });
+  }
+
+  /** Arm the feed for the message that is going (replacing an earlier arming). */
+  #armFeed(): ReplyWatch {
+    this.#armedReply?.cancel();
+    const armed = this.#arm();
+    this.#armedReply = armed;
+    return armed;
   }
 
   /** Arm the feed and remember what the page holds, as the message goes. */

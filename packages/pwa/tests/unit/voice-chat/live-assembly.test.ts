@@ -139,6 +139,7 @@ describe('assembleLivePorts', () => {
       show: words => void calls.push(`show:${words}`),
       clear: () => void calls.push('clear'),
       draft: () => 'the box',
+      typed: () => 'typed first',
       lastShown: () => null,
       submit: async () => {
         calls.push('submit');
@@ -171,6 +172,27 @@ describe('assembleLivePorts', () => {
     should(await ports.send.send()).deepEqual({ kind: 'sent', sentAtMs: 42 });
     should(sent.calls).deepEqual(['show:hello', 'clear', 'submit']);
     should(await assemble(bridge(false)).send.send()).deepEqual({ kind: 'failed', reason: 'not-sent' });
+  });
+
+  it('hands the page voice through when the page has one, and has none otherwise', () => {
+    const voice = { busy: () => false, watch: () => () => undefined, silence: () => undefined };
+    const withVoice = assembleLivePorts({
+      engine: () => engineDeps({ engine: null }),
+      cleanup: () => {
+        throw new Error('not used here');
+      },
+      meter: null,
+      composer: bridge(true),
+      reply: { current: () => null, subscribe: () => () => undefined },
+      reader: null,
+      voice,
+      clock: { now: () => 42, after: () => () => undefined },
+      visibility: { visible: () => true, watch: () => () => undefined },
+      micLock: { acquire: async () => true, release: () => undefined },
+      wakeLock: { acquire: async () => true, release: () => undefined },
+    });
+    should(withVoice.voice).equal(voice);
+    should(assemble(bridge(true)).voice).equal(null);
   });
 
   it('has no reader unless the page gives one, and a take that refuses without an engine', async () => {
@@ -234,6 +256,7 @@ describe('assembleFromPage', () => {
       show: () => undefined,
       clear: () => undefined,
       draft: () => '',
+      typed: () => '',
       lastShown: () => null,
       submit: async () => true,
     },

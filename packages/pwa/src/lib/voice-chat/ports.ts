@@ -51,6 +51,12 @@ export interface TakeHandle {
   endTurn(): Promise<TakeOutcome>;
   /** The speaker is back: record on. Resolves once recording is open again (false: it could not be). */
   resume(): Promise<boolean>;
+  /**
+   * Close the microphone NOW and keep what was already asked for: the early finish's snapshot and its pending
+   * decode still answer `endTurn`. A decode that stalls can no longer leave the person's microphone open.
+   * Idempotent; after it the take cannot record on (`resume` answers false).
+   */
+  stopRecording(): void;
   /** Stop and forget everything, microphone included. Idempotent. */
   cancel(): void;
 }
@@ -89,6 +95,8 @@ export interface SendPort {
   clear(): void;
   /** What the box holds right now: what `send` will send. */
   shown(): string;
+  /** The text in the box that is NOT this turn's Live words: whatever a person typed, '' when there is none. */
+  typed(): string;
   send(): Promise<SendOutcome>;
 }
 
@@ -116,8 +124,11 @@ export interface ReplyFeedPort {
   arm(): ReplyWatch;
 }
 
-/** How one reading of a reply ended. `stopped` is a stop (the person's, or another reading replacing this one). */
-export type ReadEnd = 'finished' | 'stopped' | 'failed' | 'unavailable';
+/**
+ * How one reading of a reply ended. `stopped` is a stop (the person's, or the voice going quiet under it).
+ * `taken` is NOT an end of speech: another message took the page's one voice and is speaking now.
+ */
+export type ReadEnd = 'finished' | 'stopped' | 'failed' | 'unavailable' | 'taken';
 
 /** What Live reads when a turn ends: the ferret's reply, or the question it is waiting on. */
 export type ReadWhat = 'reply' | 'question';
@@ -134,10 +145,24 @@ export interface ReaderPort {
   unlock(): void;
   /** A message is about to be sent: remember what the page holds, so the reply is the first thing after it. */
   mark(): void;
-  /** Read the turn's reply or question. Replaces a reading still going (which is told `stopped`). */
+  /** Read the turn's reply or question. Replaces a reading still going (which is told `stopped`). Another message taking the voice mid-reading is told `taken`. */
   read(what: ReadWhat, onEnd: (end: ReadEnd) => void): void;
   /** Stop at once. The reading in progress hears `stopped`; with none, nothing happens. */
   stop(): void;
+}
+
+/**
+ * The page's ONE voice, as Live must respect it: a device speaks with one voice, and Live's microphone never opens while
+ * anything — a reading Live started, a Read aloud tap on an older message, the settings preview — is speaking, or it
+ * would hear the speaker and send the ferret's own words back to the ferret.
+ */
+export interface VoicePort {
+  /** Something is speaking now. Never throws. */
+  busy(): boolean;
+  /** Told whenever `busy()` may have changed; returns its cancel. */
+  watch(onChange: () => void): () => void;
+  /** Silence the voice at once, whoever holds it. */
+  silence(): void;
 }
 
 export interface WakeLockPort {
