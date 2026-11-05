@@ -409,7 +409,9 @@ export type CloneItemOutcome =
   | { readonly kind: 'copied' }
   /** Written, but it loosens something, so it waits for the owner; the tighter version is in effect. */
   | { readonly kind: 'pending'; readonly path: string; readonly etag: string; readonly changes: readonly string[] }
-  | { readonly kind: 'refused'; readonly reason: string };
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** Written, but this app could not read back whether it is waiting for the owner. */
+  | { readonly kind: 'unchecked'; readonly reason: string };
 
 /** The Done line for one item's outcome. */
 export const outcomeSentence = (item: CloneOutcomeItem, outcome: CloneItemOutcome): string => {
@@ -420,5 +422,7 @@ export const outcomeSentence = (item: CloneOutcomeItem, outcome: CloneItemOutcom
       return `${item.label}: copied, and waiting for your confirmation because it loosens something: ${outcome.changes.join('; ')}.`;
     case 'refused':
       return `${item.label}: not copied. ${outcome.reason}`;
+    case 'unchecked':
+      return `${item.label}: copied, but this app could not check whether it is waiting for your confirmation. ${outcome.reason} Run fy config confirm on the machine if it is.`;
   }
 };

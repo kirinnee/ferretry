@@ -124,6 +124,33 @@ export const settingsDecisions = (
 export const keepItemsDecisions = (items: readonly CloneReviewItem[]): Record<string, 'keep' | 'skip'> =>
   Object.fromEntries(items.map(item => [item.ref, item.outcome === 'new' ? 'skip' : 'keep'] as const));
 
+// ── The default runtime ──────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_RUNTIME = 'defaultRuntime';
+
+/**
+ * When the fleet is copied, the default runtime is the "Default runtime for new agents" picker's: it may name a
+ * runtime the copy is about to bring (or add as `-2`), which the settings-only update that runs first could not
+ * yet resolve. The row is left as it is there ("keep"), so the update never names a runtime this machine lacks.
+ */
+export const defaultRuntimeToPicker = (documents: readonly ReviewedSettings[]): readonly ReviewedSettings[] =>
+  documents.map(document =>
+    document.path === 'controls'
+      ? {
+          ...document,
+          keys: document.keys.map(row => (row.key === DEFAULT_RUNTIME ? { ...row, choice: 'keep' as const } : row)),
+        }
+      : document,
+  );
+
+/** The same documents without that row, for the screen: the picker below them is where it is decided. */
+export const withoutDefaultRuntime = (documents: readonly ReviewedSettings[]): readonly ReviewedSettings[] =>
+  documents.map(document =>
+    document.path === 'controls'
+      ? { ...document, keys: document.keys.filter(row => row.key !== DEFAULT_RUNTIME) }
+      : document,
+  );
+
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────
 
 const OUTCOME_WORDS: Readonly<Record<CloneOutcome, (source: string) => string>> = {

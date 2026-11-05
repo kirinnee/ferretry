@@ -2386,6 +2386,61 @@ intervalMinutes: 5
     should(refusal.message).containEql('Settings were decided, but no settings were sent');
   });
 
+  describe('review findings on the merge', () => {
+    const SIGNED_IN_SECRETS = { CLAUDE_TOKEN: 'sk-ant-oat01-fixture-not-real', JEV_API_KEY: 'jev-fixture-not-real' };
+    /** The fixture secret store as bytes, to prove a settings merge leaves a signed-in login's secrets alone (§14.4). */
+    const secretBytes = (w: World): string => JSON.stringify([...w.secrets].toSorted());
+    const writesLogins = (w: World): boolean =>
+      w.applied.some(batch => batch.documents.some(document => document.path.includes('/logins/')));
+    const EMPTIED = WARDEN.replace(/layers:\n {2}jev: false # off on purpose\n {2}llm: false\n/u, 'layers: {}\n');
+
+    it('should list an emptied mapping as ONE row and keep the children unless the person takes it', async () => {
+      const own = files({ 'warden.yaml': WARDEN });
+      const w = await copied(own);
+      for (const [name, value] of Object.entries(SIGNED_IN_SECRETS)) w.secrets.set(name, value);
+      const before = secretBytes(w);
+      const bundle = await sourceAt();
+      const settings = [{ path: 'warden.yaml' as const, text: EMPTIED }];
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+      should(review.settings[0]?.keys.map(key => [key.key, key.outcome])).deepEqual([['layers', 'both']]);
+      // Nothing chosen for it: the apply is refused until the person decides.
+      await catalogRefusal(apply(w, bundle, settings, undefined, callerFor(REMOTE)), 'fleet_change_refused');
+      await apply(w, bundle, settings, { 'warden.yaml': { layers: 'keep' } }, callerFor(REMOTE));
+      should(own.writes).deepEqual([]);
+      should(own.held.get('warden.yaml')).equal(WARDEN);
+      await apply(w, bundle, settings, { 'warden.yaml': { layers: 'take' } }, callerFor(AT_THE_MACHINE));
+      should(own.writes).have.length(1);
+      should(own.held.get('warden.yaml')).containEql('layers: {}');
+      // §14.4: a signed-in login and its secrets are byte-identical across the keep and the take.
+      should(secretBytes(w)).equal(before);
+      should(writesLogins(w)).equal(false);
+    });
+
+    it('should refuse a configuration file of THIS machine that holds a raw secret, and show and record none of it', async () => {
+      const token = 'sk-ant-api03-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE';
+      const own = files({ 'warden.yaml': `${WARDEN}investigation:\n  token: ${token}\n` });
+      const w = await copied(own);
+      for (const [name, value] of Object.entries(SIGNED_IN_SECRETS)) w.secrets.set(name, value);
+      const before = secretBytes(w);
+      const bundle = await sourceAt();
+      const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+      should(review.settings[0]?.refused).containEql('Your warden.yaml');
+      should(review.settings[0]?.keys).deepEqual([]);
+      should(JSON.stringify(review)).not.containEql(token);
+      should(JSON.stringify(review)).not.containEql(sha256Hex(token));
+      const refusal = await catalogRefusal(
+        apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+        'fleet_change_refused',
+      );
+      should(refusal.message).not.containEql(token);
+      should(own.writes).deepEqual([]);
+      should(own.held.get('warden.yaml')).containEql(token);
+      should(secretBytes(w)).equal(before);
+      should(w.applied).deepEqual([]);
+    });
+  });
+
   describe('the controls', () => {
     const controls = (patch: object) => [
       {
@@ -2452,6 +2507,65 @@ intervalMinutes: 5
       );
       should(refusal.message).containEql('cannot say whether this caller may widen what agents may control');
       should(w.applied).deepEqual([]);
+    });
+
+    /** The app's settings-only update: every item the review lists is left to the fleet copy (new ones skipped). */
+    async function settingsOnlyUpdate(
+      w: World,
+      bundle: unknown,
+      settings: { path: 'controls'; text: string }[],
+      choice: 'take' | 'keep',
+    ): Promise<string> {
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, undefined);
+      const change = request(bundle, {
+        reviewed: review.fingerprint,
+        decisions: Object.fromEntries(review.items.map(item => [item.ref, item.outcome === 'new' ? 'skip' : 'keep'])),
+        settings,
+        settingsDecisions: { controls: { defaultRuntime: choice } },
+      });
+      const caller = callerFor(AT_THE_MACHINE);
+      await w.service.executors.clone.describe(change, caller);
+      return await w.service.executors.clone.execute(change, caller);
+    }
+
+    it('should follow the runtime to its new name when it clashes with one already here', async () => {
+      const w = await copied(files({}));
+      const bundle = await sourceAt();
+      await settingsOnlyUpdate(w, bundle, controls({ defaultRuntime: 'claude-default' }), 'keep');
+      const copy = {
+        kind: 'clone.import',
+        mode: 'alongside',
+        bundle,
+        defaultRuntime: 'claude-default',
+      } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+      await w.service.executors.clone.describe(copy);
+      await w.service.executors.clone.execute(copy);
+      should(machineOf(w.applied.at(-1)?.documents ?? []).defaultRuntime).equal('claude-default-2');
+    });
+
+    it('should take a first copy: the settings-only update leaves the default to the fleet copy, which then sets it', async () => {
+      const own = files({});
+      const first = world({ overrides: { daemonId: () => 'daemon-target', configFiles: own.port } });
+      first.state.emails = async () => [];
+      const bundle = await sourceAt();
+      const settings = controls({ defaultRuntime: 'claude-default' });
+      const settingsOnly = (choice: 'take' | 'keep') => settingsOnlyUpdate(first, bundle, settings, choice);
+      // Taking the default now would name a runtime this machine does not have yet: the model is refused.
+      const refusal = await catalogRefusal(settingsOnly('take'), 'fleet_change_refused');
+      should(refusal.message).containEql('setup it cannot read');
+      // Kept for the picker, as the app sends it while it copies the fleet: the update goes through.
+      await settingsOnly('keep');
+      should(machineOf(first.applied[0]?.documents ?? []).defaultRuntime).be.undefined();
+      // The fleet copy that follows brings the runtime and sets the default beside it.
+      const copy = {
+        kind: 'clone.import',
+        mode: 'alongside',
+        bundle,
+        defaultRuntime: 'claude-default',
+      } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+      await first.service.executors.clone.describe(copy);
+      await first.service.executors.clone.execute(copy);
+      should(machineOf(first.applied.at(-1)?.documents ?? []).defaultRuntime).equal('claude-default');
     });
 
     it('should refuse controls that would leave the machine with a setup it cannot read', async () => {

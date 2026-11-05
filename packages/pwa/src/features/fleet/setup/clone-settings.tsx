@@ -352,7 +352,13 @@ export function CloneOutcomes({
           <SetupNote
             key={item.id}
             name={`clone-outcome-${item.id}`}
-            tone={outcome.kind === 'refused' ? 'err' : outcome.kind === 'pending' && !done ? 'warn' : 'ok'}
+            tone={
+              outcome.kind === 'refused'
+                ? 'err'
+                : (outcome.kind === 'pending' && !done) || outcome.kind === 'unchecked'
+                  ? 'warn'
+                  : 'ok'
+            }
           >
             <span data-clone-outcome={item.id} data-outcome={done ? 'copied' : outcome.kind}>
               {done ? outcomeSentence(item, { kind: 'copied' }) : outcomeSentence(item, outcome)}
