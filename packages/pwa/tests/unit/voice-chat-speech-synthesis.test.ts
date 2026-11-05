@@ -275,6 +275,19 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(synth.spoken).toHaveLength(1);
   });
 
+  test('an engine whose cancel throws still speaks and still stops', () => {
+    const synth = new FakeSynth();
+    synth.cancel = () => {
+      throw new Error('already quiet');
+    };
+    const speaker = speakerOver(synth);
+    const { events, onEvent } = record();
+    expect(() => speaker.speak({ segments: ['One.'], rate: 1 }, onEvent)).not.toThrow();
+    expect(synth.spoken).toHaveLength(1);
+    expect(() => speaker.stop()).not.toThrow();
+    expect(events).toEqual([{ type: 'stopped' }]);
+  });
+
   test('the real-browser factory is an unsupported speaker where there is no speechSynthesis', () => {
     expect(browserSpeaker().supported).toBe(false);
     expect(browserSpeaker().voices()).toEqual([]);
