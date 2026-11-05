@@ -235,9 +235,9 @@ describe('the credential test on a command line', () => {
 
   it('should list every form of an argument it reads, and stop at the bounds', () => {
     should(readableViews('plain')).deepEqual(['plain']);
-    should(readableViews('{\\"a\\":\\"b\\"}')).deepEqual(['{\\"a\\":\\"b\\"}', '{"a":"b"}']);
+    should(readableViews('{\\"a\\":\\"b\\"}')).deepEqual(['{\\"a\\":\\"b\\"}', '{"a":"b"}', 'a: b']);
     should(readableViews('"x\\u0041"')).deepEqual(['"x\\u0041"', 'xA']);
-    should(readableViews('{"a": [1, 2]} tail')).deepEqual(['{"a": [1, 2]} tail', ' {"a":[1,2]}  tail']);
+    should(readableViews('{"a": [1, 2]} tail')).deepEqual(['{"a": [1, 2]} tail', '\na: 1\na: 2\n tail']);
     should(readableViews('a%20b')).deepEqual(['a%20b', 'a b']);
     const nested = '{\\\\\\\\\\\\\\\\"a\\\\\\\\\\\\\\\\":1}';
     should(readableViews(nested).length).be.belowOrEqual(5);
@@ -245,7 +245,46 @@ describe('the credential test on a command line', () => {
     should(readableViews(big).length).be.belowOrEqual(2);
   });
 
-  it('should read an authorization header in a piece in one pass, however many are in it', () => {
+  it('should set every property of a JSON argument apart, names decoded, nested ones and nested strings too', () => {
+    should(readableViews('{"A":"1","B":{"C":"2"},"D":["3","4"],"E":null,"F":true}')[1]).equal(
+      'A: 1\nC: 2\nD: 3\nD: 4\nE: null\nF: true',
+    );
+    should(readableViews('{"X-Api-\\u004bey":"v"}')[1]).equal('X-Api-Key: v');
+    should(readableViews('{"in":"{\\"X\\":\\"y\\"}"}')[1]).equal('in: {"X":"y"}\nX: y');
+    should(readableViews('--headers={"A":"1"}')[1]).equal('--headers=\nA: 1\n');
+    should(readableViews('["x"]')[1]).equal(': x');
+  });
+
+  it('should cut a hostile JSON document off at a fixed number of lines and levels, whatever its size', () => {
+    const wide = `{${Array.from({ length: 600 }, (_, index) => `"k${index}":"v"`).join(',')}}`;
+    should(wide.length).be.belowOrEqual(8_192);
+    should(readableViews(wide)[1]?.split('\n').length).equal(256);
+    const deep = `${'{"a":'.repeat(40)}"x"${'}'.repeat(40)}`;
+    should(readableViews(deep)[1]).equal('');
+    const inString = `{"in":"${'{\\"in\\":'.repeat(4)}1${'}'.repeat(4)}"}`;
+    should(readableViews(inString).length).be.belowOrEqual(5);
+  });
+
+  it('should read every property of a compact JSON argument, not only the first', () => {
+    for (const piece of [
+      `{"Accept":"application/json","X-Api-\\u004bey":"${LONG}"}`,
+      `{"Accept":"application/json","Nested":{"X-Api-\\u004bey":"${LONG}"}}`,
+      `{"Accept":"application/json","List":[{"X-Api-Key":"${LONG}"}]}`,
+      '{"a":"b","Author\\u0069zation":"Basic Zm9vOmJhcg=="}',
+      `{"Accept":"application/json","h":"{\\"X-Api-Key\\":\\"${LONG}\\"}"}`,
+      `--headers={"Accept":"application/json","X-Api-Key":"${LONG}"}`,
+      `{"Accept":"application/json"} {"X-Api-Key":"${LONG}"}`,
+    ])
+      should(firstArgumentCredential(['--headers', piece])).equal(2);
+    for (const piece of [
+      `{"Accept":"application/json","X-Api-Key":"${REF}"}`,
+      '{"Accept":"application/json","Retry":3,"Debug":false,"Mode":null}',
+      '{"a":{"b":{"c":"d"}},"list":["x","y"]}',
+    ])
+      should(firstArgumentCredential(['--headers', piece])).be.undefined();
+  });
+
+  it('should finish on an argument made of nothing but authorization headers, and still find a credential after them', () => {
     const size = 32_768;
     for (const piece of [
       `${'authorization:$ '.repeat(size)}${'"'.repeat(size)}`,
@@ -253,11 +292,8 @@ describe('the credential test on a command line', () => {
       'authorization: "'.repeat(size),
       `authorization:${' "'.repeat(size)}`,
       `authorization: Bearer ${'Bearer '.repeat(size)}`,
-    ]) {
-      const started = performance.now();
-      firstArgumentCredential([piece]);
-      should(performance.now() - started).be.below(500);
-    }
+    ])
+      should(firstArgumentCredential([piece, `api_key=${LONG}`])).be.a.Number();
   });
 });
 

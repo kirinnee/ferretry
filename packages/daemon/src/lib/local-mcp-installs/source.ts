@@ -26,6 +26,7 @@ import {
   SecretNameSchema,
   SessionMcpEnvNameSchema,
 } from '@ferretry/protocol';
+import { foldedForScan } from '../catalog-installs/conservative-changes.ts';
 import { firstArgumentCredential, readableViews } from '../local-skill-installs/credentials.ts';
 import { type McpComponentRecord, type McpSourceServer, mcpSetupOf } from '../shared-catalogs/mcp-source.ts';
 
@@ -91,8 +92,24 @@ function pairLooksLikeKey(pair: string): boolean | null {
   if (names === null || values === null) return null;
   const spellings = names.flatMap(decodedName => values.map(decodedValue => [decodedName, decodedValue] as const));
   return spellings.some(
-    ([decodedName, decodedValue]) => announcesKey(decodedName) || holdsRawKey(`${decodedName} ${decodedValue}`),
+    ([decodedName, decodedValue]) => announcesName(decodedName) || holdsKey(`${decodedName} ${decodedValue}`),
   );
+}
+
+/** Whether `text` holds a raw key, as written or with look-alike and invisible characters folded (the contract reads it raw). */
+const holdsKey = (text: string): boolean => holdsRawKey(text) || holdsRawKey(foldedForScan(text));
+
+const announcesName = (name: string): boolean => announcesKey(name) || announcesKey(foldedForScan(name));
+
+/**
+ * Whether a piece of an address (a host, a path segment, an identifier) holds a key in any spelling it can be read
+ * as: percent-decoded, JSON- or Unicode-unescaped, look-alikes folded. A piece that cannot be read is refused, never
+ * kept: nobody can say what it holds.
+ */
+function pieceHoldsKey(piece: string): boolean {
+  const forms = decodedForms(piece);
+  if (forms === null) return true;
+  return forms.flatMap(form => readableViews(form)).some(holdsKey);
 }
 
 /** The address without its credentials, and what was left out. A query piece that announces or holds a key goes. */
@@ -101,9 +118,11 @@ function cleanAddress(url: string): {
   readonly problems: readonly CatalogSourceProblem[];
   /** Whether a query piece or the fragment was left out as a key: the credential kinds, not a user name. */
   readonly holdsKey: boolean;
+  /** Whether the host or a path segment holds a key. It cannot be left out (it is where the server is), so the copy is refused. */
+  readonly addressKey: boolean;
 } {
   const match = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/iu.exec(url);
-  if (match === null) return { url, problems: [], holdsKey: false };
+  if (match === null) return { url, problems: [], holdsKey: false, addressKey: false };
   const [, written = '', authority = '', rest = ''] = match;
   const scheme = written.toLowerCase();
   const problems: CatalogSourceProblem[] = [];
@@ -117,6 +136,7 @@ function cleanAddress(url: string): {
   const hashAt = tail.indexOf('#');
   const query = tail.startsWith('?') ? tail.slice(1, hashAt === -1 ? undefined : hashAt) : '';
   const fragment = hashAt === -1 ? '' : tail.slice(hashAt);
+  const addressKey = pieceHoldsKey(host) || path.split('/').some(pieceHoldsKey);
   const pairs = query === '' ? [] : query.split('&');
   let keyLike = 0;
   let unreadable = 0;
@@ -137,8 +157,7 @@ function cleanAddress(url: string): {
       reason: `${unreadable} query parameter${unreadable === 1 ? '' : 's'} with a malformed percent-encoding ${unreadable === 1 ? 'was' : 'were'} left out of the address, not copied`,
     });
   const fragmentForms = fragment === '' ? [] : decodedForms(fragment.slice(1));
-  const keptFragment =
-    fragmentForms?.some(form => holdsRawKey(form) || holdsRawKey(`#${form}`)) === false ? fragment : '';
+  const keptFragment = fragmentForms?.some(form => holdsKey(form) || holdsKey(`#${form}`)) === false ? fragment : '';
   if (keptFragment !== fragment)
     problems.push({
       subject: 'url',
@@ -148,6 +167,7 @@ function cleanAddress(url: string): {
     url: `${scheme}${host}${path}${kept.length === 0 ? '' : `?${kept.join('&')}`}${keptFragment}`,
     problems,
     holdsKey: keyLike > 0 || unreadable > 0 || keptFragment !== fragment,
+    addressKey,
   };
 }
 
@@ -223,10 +243,40 @@ const ADDRESS_IN_TEXT = /https?:\/\/\S*/giu;
 function firstAddressKey(pieces: readonly string[]): number | undefined {
   const at = pieces.findIndex(piece =>
     readableViews(piece).some(view =>
-      [...view.matchAll(ADDRESS_IN_TEXT)].some(address => cleanAddress(address[0]).holdsKey),
+      [...view.matchAll(ADDRESS_IN_TEXT)].some(address => {
+        const cleaned = cleanAddress(address[0]);
+        return cleaned.holdsKey || cleaned.addressKey;
+      }),
     ),
   );
   return at === -1 ? undefined : at + 1;
+}
+
+/**
+ * Every address and client identifier the server holds, as it reaches the written config: the declaration's and the
+ * component record's (both are read, as for the command lines). A direct address is not an argument, so it is read
+ * here: its host and path segments, and the identifier, in every spelling they can be read as.
+ */
+function directFields(server: LocalMcpInventoryServer): {
+  readonly urls: readonly string[];
+  readonly ids: readonly string[];
+} {
+  const { declaration, component } = server;
+  const urls: string[] = [];
+  const ids: string[] = [];
+  if (declaration !== null && declaration.transport !== 'stdio') {
+    urls.push(declaration.url);
+    if (declaration.oauth !== undefined) ids.push(declaration.oauth.clientId);
+  }
+  if (component?.url !== undefined) urls.push(component.url);
+  if (component?.oauth !== undefined) ids.push(component.oauth.clientId);
+  return { urls, ids };
+}
+
+/** Whether a direct address's host or path, or an OAuth client identifier, holds a key. Said whole, never stripped. */
+function directFieldsHoldKey(server: LocalMcpInventoryServer): boolean {
+  const { urls, ids } = directFields(server);
+  return urls.some(url => cleanAddress(url).addressKey) || ids.some(pieceHoldsKey);
 }
 
 /** The place of the first command piece that holds a credential: in the text, or in the query of an address. */
@@ -256,6 +306,12 @@ export function copiableMcp(server: LocalMcpInventoryServer): CopiableMcp {
     return {
       ok: false,
       reason: `${credential === 1 ? 'Its command' : `Its argument ${credential - 1}`} holds what looks like a password or key, and an argument is copied as it stands. Take it out of that server, then copy it.`,
+    };
+  if (directFieldsHoldKey(server))
+    return {
+      ok: false,
+      reason:
+        'Its address (the host or the path) or its OAuth client identifier holds what looks like a key, and those are copied as they stand. Take it out of that server, then copy it.',
     };
   const { bare, envNames, addressProblems } = stripped(server);
   const converted = mcpSetupOf(bare);

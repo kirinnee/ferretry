@@ -988,6 +988,12 @@ It writes through the same paths a catalog MCP install does, and the writing its
   name and value (several rounds, bounded), so `api%5Fkey=…` and an encoded provider-prefixed value are dropped
   like their plain spelling. The WHOLE original pair is dropped and listed in `skipped`. A pair that does not
   decode (malformed `%` escape) cannot be judged, so it fails closed: dropped and listed too.
+- **Every string that reaches the written config is read in every spelling.** A JSON argument is set apart property by
+  property (nested properties and JSON inside a string too, names decoded, bounded in lines and depth), so a key
+  after a harmless first property is found like a lone one. A direct address's host and each path segment, and an
+  OAuth client identifier, are read percent-decoded, unescaped and with look-alike characters folded; one that holds
+  a key (or cannot be read) REFUSES the copy, naming only where it is: unlike a query pair, a host or path cannot
+  be left out of an address. Both representations a row carries are read, whichever scope is copied.
 - **No secret value is copied or shown.** Nothing in an inventory says which environment value is a secret, so
   **every environment variable of the source becomes a placeholder** (`${secret:NAME}`, the variable's own
   name) and its value is dropped. An address's user name and password, and query parameters or a fragment that

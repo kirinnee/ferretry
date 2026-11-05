@@ -406,6 +406,42 @@ describe('a command whose arguments hold a credential is refused, never copied',
       'Its argument 1',
     ],
     ['a percent-encoded header name', 'npx', [`--header=%58-Api-Key:${OPAQUE}`], 'Its argument 1'],
+    [
+      'a Unicode-escaped key name after another property',
+      'npx',
+      ['--headers', `{"Accept":"application/json","X-Api-\\u004bey":"${OPAQUE}"}`],
+      'Its argument 2',
+    ],
+    [
+      'a nested Unicode-escaped key name after other properties',
+      'npx',
+      ['--headers', `{"Accept":"application/json","h":{"X-Api-\\u004bey":"${OPAQUE}"}}`],
+      'Its argument 2',
+    ],
+    [
+      'a key in the last of several headers, as JSON in a string',
+      'npx',
+      ['--headers', JSON.stringify(`{"Accept":"a/b","Cache":"no","X-Api-Key":"${OPAQUE}"}`)],
+      'Its argument 2',
+    ],
+    [
+      'a key under a header list',
+      'npx',
+      ['--headers', `{"Accept":"a/b","list":[{"Proxy-Authorization":"Basic Zm9vOmJhcg=="}]}`],
+      'Its argument 2',
+    ],
+    [
+      'a percent-encoded key in the path of an address argument',
+      'node',
+      ['s.js', `https://mcp.example.com/mcp/sk%2Dlive%2D${OPAQUE}`],
+      'Its argument 2',
+    ],
+    [
+      'an upper-case scheme and an encoded key in the path of an address argument',
+      'node',
+      [`HTTPS://mcp.example.com/mcp/sk%2dlive%2d${OPAQUE}`],
+      'Its argument 1',
+    ],
   ];
   for (const [title, command, args, where] of hidden) {
     it(`should refuse ${title}, in either scope, naming the place and not the value`, () => {
@@ -528,5 +564,96 @@ describe('a command whose arguments hold a credential is refused, never copied',
         stdioServer({ scope: 'component', declaration: null, component: { url: 'https://mcp.example.com/mcp' } }),
       ).ok,
     ).be.true();
+  });
+});
+
+describe('a direct address or client identifier that holds a key is refused, never copied or stripped', () => {
+  const OPAQUE = 'dummy0123456789abcdefghij';
+  const MESSAGE = /^Its address/u;
+  const userScope = (url: string): LocalMcpInventoryServer => http(url);
+  const componentScope = (url: string, clientId?: string): LocalMcpInventoryServer =>
+    stdioServer({
+      scope: 'component',
+      declaration: null,
+      component: { url, ...(clientId === undefined ? {} : { auth: 'oauth' as const, oauth: { clientId } }) },
+    });
+
+  const paths = [
+    `https://mcp.example.com/mcp/sk%2Dlive%2D${OPAQUE}`,
+    `https://mcp.example.com/mcp/sk%252Dlive%252D${OPAQUE}`,
+    `HTTPS://mcp.example.com/mcp/sk%2dlive%2d${OPAQUE}`,
+    `https://mcp.example.com/sk-live-${OPAQUE}/mcp`,
+    `https://mcp.example.com/mcp/token%3D${OPAQUE}`,
+    `https://mcp.example.com/mcp/%73k-live-${OPAQUE}`,
+    `https://mcp.example.com/mcp/ｓｋ-live-${OPAQUE}`,
+    `https://mcp.example.com/mcp/sk-live-${OPAQUE}?x=1`,
+    `https://mcp.example.com/mcp/sk-live-${OPAQUE}#frag`,
+    `https://sk%2Dlive%2D${OPAQUE}.example.com/mcp`,
+    `https://u@mcp.example.com/mcp/sk%2Dlive%2D${OPAQUE}`,
+    'https://mcp.example.com/mcp/100%',
+    'https://mcp.example.com/%E0%A4%A',
+  ];
+  for (const url of paths) {
+    it(`should refuse ${url.slice(0, 48)}…, in either scope, without echoing it`, () => {
+      for (const result of [copiableMcp(userScope(url)), copiableMcp(componentScope(url))]) {
+        should(result.ok).be.false();
+        if (result.ok) return;
+        should(result.reason).match(MESSAGE);
+        should(result.reason).not.match(/dummy0123|sk-live|sk%2D|%E0/u);
+      }
+    });
+  }
+
+  it('should refuse a key in the address of either representation a row carries', () => {
+    const leaking = `https://mcp.example.com/mcp/sk%2Dlive%2D${OPAQUE}`;
+    const row = stdioServer({
+      declaration: { name: 'remote', transport: 'http', url: 'https://mcp.example.com/mcp', headers: {} },
+      scope: 'component',
+      component: { url: leaking },
+    });
+    should(copiableMcp(row).ok).be.false();
+    const other = stdioServer({
+      declaration: { name: 'remote', transport: 'http', url: leaking, headers: {} },
+      component: { url: 'https://mcp.example.com/mcp' },
+    });
+    should(copiableMcp(other).ok).be.false();
+  });
+
+  it('should refuse a key-like OAuth client identifier in any spelling, and keep an ordinary one', () => {
+    for (const clientId of [`sk-live-${OPAQUE}`, `sk%2Dlive%2D${OPAQUE}`, `"sk-live-${OPAQUE}"`, 'bad%']) {
+      const declaration: LocalMcpInventoryServer = http('https://mcp.example.com/mcp', {
+        declaration: {
+          name: 'remote',
+          transport: 'http',
+          url: 'https://mcp.example.com/mcp',
+          headers: {},
+          oauth: { clientId },
+        },
+      });
+      for (const result of [
+        copiableMcp(declaration),
+        copiableMcp(componentScope('https://mcp.example.com/mcp', clientId)),
+      ]) {
+        should(result.ok).be.false();
+        if (result.ok) return;
+        should(result.reason).match(MESSAGE);
+        should(result.reason).not.match(/dummy0123|sk-live|sk%2D/u);
+      }
+    }
+    const ordinary = copiableMcp(componentScope('https://mcp.example.com/mcp', 'my-client-id'));
+    should(ordinary.ok && ordinary.setup).containEql({ oauth: { clientId: 'my-client-id' } });
+  });
+
+  it('should copy addresses whose host and path hold no key, however they are spelled', () => {
+    for (const url of [
+      'https://mcp.example.com/mcp',
+      'HTTPS://mcp.example.com/auth/callback-handler/v1',
+      'https://mcp.example.com/a%20b/c+d',
+      'https://mcp.example.com:8443/mcp/token/short',
+      'https://mcp.example.com',
+    ]) {
+      should(copiableMcp(userScope(url)).ok).be.true();
+      should(copiableMcp(componentScope(url)).ok).be.true();
+    }
   });
 });

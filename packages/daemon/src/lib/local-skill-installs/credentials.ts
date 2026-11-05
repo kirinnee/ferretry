@@ -350,25 +350,64 @@ const MAX_DECODED_CHARS = 8192;
 const UNICODE_ESCAPE = /\\u([0-9A-Fa-f]{4})/gu;
 const QUOTE_ESCAPE = /\\(["'\\])/gu;
 
-/** The JSON a text IS, or that sits inside it (`--headers={…}`), written plainly again; undefined when there is none. Never throws. */
+/** The most name/value lines read out of one JSON text, and the deepest nesting followed: a hostile document is cut off, never walked to its end. */
+const MAX_JSON_LINES = 256;
+const MAX_JSON_DEPTH = 8;
+
+const tryParse = (candidate: string): unknown => {
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Every property of a parsed JSON value as a line of its own, `name: value`, names as decoded (a `\\u004b` is a K).
+ * A compact object is one whitespace word, which the scanners read only to its first name, so each property is
+ * set apart here, nested ones too, and a string value that is itself JSON is read the same way. Bounded in lines
+ * and depth, and total.
+ */
+function jsonLines(value: unknown, name: string, depth: number, lines: string[]): void {
+  if (lines.length >= MAX_JSON_LINES) return;
+  if (Array.isArray(value)) {
+    if (depth < MAX_JSON_DEPTH) for (const item of value) jsonLines(item, name, depth + 1, lines);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    if (depth < MAX_JSON_DEPTH)
+      for (const [key, inner] of Object.entries(value)) jsonLines(inner, key, depth + 1, lines);
+    return;
+  }
+  if (typeof value !== 'string') {
+    lines.push(`${name}: ${String(value)}`);
+    return;
+  }
+  lines.push(`${name}: ${value}`);
+  const trimmedValue = value.trim();
+  if (
+    depth < MAX_JSON_DEPTH &&
+    (trimmedValue.startsWith('{') || trimmedValue.startsWith('[') || trimmedValue.startsWith('"'))
+  )
+    jsonLines(tryParse(trimmedValue), name, depth + 1, lines);
+}
+
+/** The JSON a text IS, or that sits inside it (`--headers={…}`), as one `name: value` line per property; undefined when there is none. Never throws. */
 function plainJson(text: string): string | undefined {
-  const tryParse = (candidate: string): unknown => {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      return undefined;
-    }
+  const lines = (value: unknown): string => {
+    const found: string[] = [];
+    jsonLines(value, '', 0, found);
+    return found.join('\n');
   };
   const whole = tryParse(text);
   if (typeof whole === 'string') return whole;
-  if (whole !== null && typeof whole === 'object') return JSON.stringify(whole);
+  if (whole !== null && typeof whole === 'object') return lines(whole);
   const open = text.search(/[{[]/u);
   const close = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
   if (open === -1 || close <= open) return undefined;
   const inner = tryParse(text.slice(open, close + 1));
   if (inner === null || typeof inner !== 'object') return undefined;
-  const plain = JSON.stringify(inner);
-  return plain === text.slice(open, close + 1) ? undefined : `${text.slice(0, open)} ${plain} ${text.slice(close + 1)}`;
+  return `${text.slice(0, open)}\n${lines(inner)}\n${text.slice(close + 1)}`;
 }
 
 /** One layer of encoding off `text`: JSON read as JSON, else `\uXXXX` made real and an escaped quote or backslash made plain, else percent-decoded. */
