@@ -3,7 +3,7 @@ import { LINK_ITEM_CATALOG_ID, type CatalogInstallPreview } from '@ferretry/prot
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
 import { CatalogInstallRefusalError } from '../../../src/lib/catalog-installs/ports.ts';
-import { linkSequenceKey } from '../../../src/lib/catalog-installs/store.ts';
+import { CatalogInstallStateSchema, linkSequenceKey } from '../../../src/lib/catalog-installs/store.ts';
 import {
   LINK_ID,
   LINK_NOT_AFTER,
@@ -284,6 +284,20 @@ describe('catalog install from a link: replacing, downgrading and conflicts', ()
       ),
     );
     should(error.code).equal('catalog_install_conflict');
+  });
+
+  it('should lose no record when one of two installs of the same link is replaced', async () => {
+    const r = rig();
+    const project = await installLink(r, { sequence: 1 });
+    const runtime = await installLink(r, { sequence: 1 }, runtimeTarget());
+    const updated = await installLink(r, { sequence: 2, itemVersion: 2 });
+    const ids = r.store.state.installs.map(install => install.installId);
+    should(updated.preview.replaces?.installId).equal(project.installed.install.installId);
+    should(ids).have.length(2);
+    should(ids).containEql(runtime.installed.install.installId);
+    should(ids).containEql(updated.installed.install.installId);
+    should(ids).not.containEql(project.installed.install.installId);
+    should(CatalogInstallStateSchema.safeParse(r.store.state).success).be.true();
   });
 
   it('should install the same link at another place as a fresh install', async () => {

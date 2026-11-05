@@ -2,7 +2,9 @@ import { join } from 'node:path';
 import type { FileSystemPort, FoundationPaths } from '../../lib/index.ts';
 import {
   CATALOG_INSTALLS_SCHEMA_VERSION,
+  CATALOG_INSTALLS_DUPLICATE_INSTALL,
   CATALOG_INSTALLS_SCHEMA_VERSION_LINKS,
+  CATALOG_INSTALLS_UNPINNED_LINK,
   CatalogInstallStateError,
   type CatalogInstallState,
   CatalogInstallStateSchema,
@@ -49,10 +51,18 @@ export class FileCatalogInstallStore implements CatalogInstallStore {
       throw new CatalogInstallStateError(`${CATALOG_INSTALLS_DOCUMENT} is not JSON, so no install was changed`);
     }
     const parsed = CatalogInstallStateSchema.safeParse(decoded);
-    if (!parsed.success)
-      throw new CatalogInstallStateError(
-        `${CATALOG_INSTALLS_DOCUMENT} is not a record of installs this daemon writes, so no install was changed`,
+    if (!parsed.success) {
+      // Only the daemon's own fixed reasons are repeated; no word of the file reaches a message.
+      const reasons = new Set(parsed.error.issues.map(issue => issue.message));
+      const contradiction = [CATALOG_INSTALLS_DUPLICATE_INSTALL, CATALOG_INSTALLS_UNPINNED_LINK].filter(reason =>
+        reasons.has(reason),
       );
+      throw new CatalogInstallStateError(
+        contradiction.length > 0
+          ? `${CATALOG_INSTALLS_DOCUMENT} contradicts itself (${contradiction.join('; ')}), so no install was changed`
+          : `${CATALOG_INSTALLS_DOCUMENT} is not a record of installs this daemon writes, so no install was changed`,
+      );
+    }
     return parsed.data;
   }
 

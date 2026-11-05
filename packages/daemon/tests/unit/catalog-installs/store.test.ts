@@ -8,6 +8,8 @@ import {
   CatalogInstallStateSchema,
   CatalogInstallStateV1Schema,
   CatalogInstallStateV2Schema,
+  CATALOG_INSTALLS_DUPLICATE_INSTALL,
+  CATALOG_INSTALLS_UNPINNED_LINK,
   EMPTY_CATALOG_INSTALL_STATE,
   linkSequenceKey,
 } from '../../../src/lib/catalog-installs/store.ts';
@@ -142,8 +144,90 @@ describe('the file of installs', () => {
       },
     };
     const base = { ...EMPTY_CATALOG_INSTALL_STATE, installs: [link] };
-    should(CatalogInstallStateV2Schema.safeParse({ ...base, schemaVersion: 2, linkSequences: {} }).success).be.true();
+    const pinned = { [linkSequenceKey(DAEMON, link.provenance.link.linkId)]: 2 };
+    should(
+      CatalogInstallStateV2Schema.safeParse({ ...base, schemaVersion: 2, linkSequences: pinned }).success,
+    ).be.true();
     should(CatalogInstallStateV1Schema.safeParse(base).success).be.false();
+  });
+
+  describe('a version 2 document that contradicts itself', () => {
+    const linkRecord = (installId: string, key: string, sequence: number, linkId = `lnk_${'a'.repeat(22)}`) => ({
+      ...record,
+      installId,
+      key,
+      provenance: {
+        publisher: DAEMON,
+        publisherName: 'kirin-box',
+        link: { linkId, kind: 'public', sequence },
+        itemId: record.provenance.itemId,
+        kind: 'skill',
+        name: 'pdf-tools',
+        version: 1,
+        digest: `sha256:${SHA}`,
+      },
+    });
+    const idOf = (letter: string) => `cin_${letter.repeat(22)}`;
+    const pinKey = linkSequenceKey(DAEMON, `lnk_${'a'.repeat(22)}`);
+    const v2 = (installs: unknown[], linkSequences: Record<string, number>) => ({
+      ...EMPTY_CATALOG_INSTALL_STATE,
+      schemaVersion: 2,
+      installs,
+      linkSequences,
+    });
+    const reasons = (document: unknown): string[] => {
+      const parsed = CatalogInstallStateSchema.safeParse(document);
+      return parsed.success ? [] : parsed.error.issues.map(issue => issue.message);
+    };
+
+    it('refuses a link install whose sequence pin is missing', () => {
+      const document = v2([linkRecord(idOf('a'), 'k1', 3)], {});
+      should(CatalogInstallStateV2Schema.safeParse(document).success).be.false();
+      should(reasons(document)).containEql(CATALOG_INSTALLS_UNPINNED_LINK);
+    });
+
+    it('refuses a link install whose sequence pin is below its own sequence, and takes one at or above it', () => {
+      should(reasons(v2([linkRecord(idOf('a'), 'k1', 3)], { [pinKey]: 2 }))).containEql(CATALOG_INSTALLS_UNPINNED_LINK);
+      should(reasons(v2([linkRecord(idOf('a'), 'k1', 3)], { [pinKey]: 3 }))).deepEqual([]);
+      should(reasons(v2([linkRecord(idOf('a'), 'k1', 3)], { [pinKey]: 7 }))).deepEqual([]);
+    });
+
+    it('checks every retained link record, not only the first', () => {
+      const installs = [linkRecord(idOf('a'), 'k1', 1), linkRecord(idOf('b'), 'k2', 5)];
+      should(reasons(v2(installs, { [pinKey]: 4 }))).containEql(CATALOG_INSTALLS_UNPINNED_LINK);
+      should(reasons(v2(installs, { [pinKey]: 5 }))).deepEqual([]);
+    });
+
+    it('does not ask a pin of a catalog install, and lets a pin outlive its installs', () => {
+      should(reasons(v2([record], {}))).deepEqual([]);
+      should(reasons(v2([], { [pinKey]: 9 }))).deepEqual([]);
+    });
+
+    it('refuses two installs with one install id at different places', () => {
+      const document = v2([linkRecord(idOf('a'), 'k1', 1), linkRecord(idOf('a'), 'k2', 1)], { [pinKey]: 1 });
+      should(reasons(document)).deepEqual([CATALOG_INSTALLS_DUPLICATE_INSTALL]);
+    });
+
+    it('refuses two installs at one place under different ids', () => {
+      const document = v2([linkRecord(idOf('a'), 'k1', 1), linkRecord(idOf('b'), 'k1', 1)], { [pinKey]: 1 });
+      should(reasons(document)).deepEqual([CATALOG_INSTALLS_DUPLICATE_INSTALL]);
+    });
+
+    it('takes distinct ids at distinct places', () => {
+      const document = v2([linkRecord(idOf('a'), 'k1', 1), linkRecord(idOf('b'), 'k2', 1)], { [pinKey]: 1 });
+      should(reasons(document)).deepEqual([]);
+    });
+
+    it('says both things when both are wrong', () => {
+      const document = v2([linkRecord(idOf('a'), 'k1', 4), linkRecord(idOf('a'), 'k1', 4)], {});
+      should(reasons(document)).deepEqual([CATALOG_INSTALLS_DUPLICATE_INSTALL, CATALOG_INSTALLS_UNPINNED_LINK]);
+    });
+
+    it('does not hold a version 1 file to either rule: it has no pins and is upgraded, not refused', () => {
+      const v1 = { ...EMPTY_CATALOG_INSTALL_STATE, installs: [record, { ...record, key: 'other' }] };
+      should(CatalogInstallStateV1Schema.safeParse(v1).success).be.true();
+      should(CatalogInstallStateSchema.safeParse(v1).success).be.true();
+    });
   });
 
   it('refuses a link sequence below one, above the signed maximum, or under an empty key', () => {

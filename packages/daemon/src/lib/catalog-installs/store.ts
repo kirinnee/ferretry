@@ -21,6 +21,7 @@ import {
   CatalogSecretBindingsSchema,
   DaemonIdSchema,
   InstantSchema,
+  isLinkProvenance,
   SharedCatalogIdSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -91,14 +92,54 @@ export const CatalogInstallStateV1Schema = z.strictObject({
   ...installStateFields,
 });
 
+/** The key of a link in `linkSequences`. */
+export const linkSequenceKey = (publisher: string, linkId: string): string => `${publisher}/${linkId}`;
+
+/** Why a version 2 document is refused. Fixed words: nothing from the file is in them. */
+export const CATALOG_INSTALLS_DUPLICATE_INSTALL = 'two installs share one install id or one place';
+export const CATALOG_INSTALLS_UNPINNED_LINK = 'a link install has no sequence pin at or above its own sequence';
+
+/**
+ * A version 2 document that contradicts itself is damaged, not "old". Two rules, both fail closed:
+ *  - an install id and a place (`key`) each belong to ONE record, or replacing either would drop the other;
+ *  - every link install is covered by a pin at or above its own sequence, or an older signed copy of that link
+ *    would pass the sequence check and the next apply would write the pin back down.
+ * Version 1 is not held to these: it has no pins, and is upgraded, never refused for lacking them.
+ */
+const refuseInconsistentState = (
+  state: {
+    readonly installs: readonly CatalogInstallRecord[];
+    readonly linkSequences: Readonly<Record<string, number>>;
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  const ids = new Set<string>();
+  const keys = new Set<string>();
+  let duplicated = false;
+  let unpinned = false;
+  for (const install of state.installs) {
+    if (ids.has(install.installId) || keys.has(install.key)) duplicated = true;
+    ids.add(install.installId);
+    keys.add(install.key);
+    const { provenance } = install;
+    if (!isLinkProvenance(provenance)) continue;
+    const pinned = state.linkSequences[linkSequenceKey(provenance.publisher, provenance.link.linkId)];
+    if (pinned === undefined || pinned < provenance.link.sequence) unpinned = true;
+  }
+  if (duplicated) ctx.addIssue({ code: 'custom', message: CATALOG_INSTALLS_DUPLICATE_INSTALL });
+  if (unpinned) ctx.addIssue({ code: 'custom', message: CATALOG_INSTALLS_UNPINNED_LINK });
+};
+
 /** The file once a link has been installed from. */
-export const CatalogInstallStateV2Schema = z.strictObject({
-  schemaVersion: z.literal(CATALOG_INSTALLS_SCHEMA_VERSION_LINKS),
-  installs: z.array(CatalogInstallRecordSchema),
-  ...installStateFields,
-  /** `<publisher>/<linkId>` → the highest signed sequence an install came from. A lower one is never accepted. */
-  linkSequences: z.record(z.string().min(1).max(256), z.number().int().min(1).max(0xffffffff)),
-});
+export const CatalogInstallStateV2Schema = z
+  .strictObject({
+    schemaVersion: z.literal(CATALOG_INSTALLS_SCHEMA_VERSION_LINKS),
+    installs: z.array(CatalogInstallRecordSchema),
+    ...installStateFields,
+    /** `<publisher>/<linkId>` → the highest signed sequence an install came from. A lower one is never accepted. */
+    linkSequences: z.record(z.string().min(1).max(256), z.number().int().min(1).max(0xffffffff)),
+  })
+  .superRefine(refuseInconsistentState);
 
 /** Either version, as found on disk. */
 export const CatalogInstallStateSchema = z.union([CatalogInstallStateV1Schema, CatalogInstallStateV2Schema]);
@@ -112,9 +153,6 @@ export interface CatalogInstallState {
   readonly revisions: Readonly<Record<string, number>>;
   readonly linkSequences?: Readonly<Record<string, number>>;
 }
-
-/** The key of a link in `linkSequences`. */
-export const linkSequenceKey = (publisher: string, linkId: string): string => `${publisher}/${linkId}`;
 
 export const EMPTY_CATALOG_INSTALL_STATE: CatalogInstallState = {
   schemaVersion: CATALOG_INSTALLS_SCHEMA_VERSION,

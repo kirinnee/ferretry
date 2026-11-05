@@ -1768,6 +1768,12 @@ from a link never has a version 2 file.
 
 - The exact old text is first saved, `0600`, as `<FY_HOME>/state/catalog-installs.v1.json` (once; a later write
   never touches it).
+- **A version 2 file must agree with itself, or it is damaged.** Every link install needs a `linkSequences` pin at or
+  above its own recorded sequence, and no two installs share an install id or a place (`key`). A file that breaks
+  either rule is refused on read (`500 catalog_installs_unreadable`, "contradicts itself", no word of the file in the
+  message) and is never repaired or reset: otherwise a pin wiped from a damaged file would let an older signed copy of
+  a link in, and the apply would write the pin back down; and two records with one id would make replacing either
+  one drop the other. Version 1 is not held to these (it has no pins); it is upgraded, never refused for lacking them.
 - A daemon that only knows version 1 refuses a version 2 file as damaged (`500 catalog_installs_unreadable`) rather
   than reading it as empty.
 - **Rolling back** to such a daemon is `mv catalog-installs.v1.json catalog-installs.json` with the daemon stopped. It
