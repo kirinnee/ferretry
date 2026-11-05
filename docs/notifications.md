@@ -210,8 +210,9 @@ It decides from the board, not from what changed, so a new way for an item to st
 without a new rule. **The owner's answer does not wait for it**: the clear is started when the board commits and the
 request is answered without it (`DetachedAgendaObserver`) — it is a web push to every device after reading the whole
 notification ledger, and an answer that waited for it took hundreds of milliseconds longer (up to the push's 10 s
-timeout). It still runs on the item's alert lane, in commit order, and a clear a restart interrupted is taken down by
-the start-up sweep. The **stop's line** ("N need you") comes down only once no item it could count is left on the
+timeout). It still runs on the item's alert lane, in commit order. If the daemon stops before the clear is recorded,
+the start-up sweep takes the alert down (it rechecks alerts with no clear recorded). A clear that was recorded but whose
+push never went out is not retried by the sweep — as before, when the request awaited the push. The **stop's line** ("N need you") comes down only once no item it could count is left on the
 owner's turn, because until then its words are still true.
 
 **When the owner opens the item.** Opening an item's card anywhere in the app takes its alerts down too: the Inbox

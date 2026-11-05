@@ -270,12 +270,33 @@ export interface LandedRowReader {
 /**
  * The client's `landed` hook over the fleet: an answer that landed re-reads its conversation's row at once, so every
  * badge and the Inbox agree with the board. A read that fails leaves the fleet feed to catch up; the answer has landed.
+ *
+ * The fleet store coalesces a GET for one session that is already in flight, so a landing that arrives mid-read would
+ * join a request issued BEFORE its answer was accepted and publish a stale row. So each conversation remembers whether
+ * a read this hook started is still out; a landing during it only marks the conversation dirty, and when that read
+ * settles (either way) ONE more read starts with the latest connection. However many landings arrive, there is at most
+ * one trailing read per settle.
  */
-export const rereadRowOnLanding =
-  (fleet: LandedRowReader) =>
-  (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
-    void fleet.fetchSession(daemon, scope).catch(() => undefined);
+export const rereadRowOnLanding = (fleet: LandedRowReader) => {
+  /** Sessions with a read of ours in flight → the newest landing seen since it started (none when clean). */
+  const reading = new Map<string, { daemon: DaemonConnection; scope: DaemonSessionScope } | null>();
+
+  const read = (key: string, daemon: DaemonConnection, scope: DaemonSessionScope): void => {
+    reading.set(key, null);
+    const settled = (): void => {
+      const pending = reading.get(key);
+      reading.delete(key);
+      if (pending) read(key, pending.daemon, pending.scope);
+    };
+    new Promise<unknown>(resolve => resolve(fleet.fetchSession(daemon, scope))).then(settled, settled);
   };
+
+  return (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
+    const key = daemonSessionKey(scope);
+    if (reading.has(key)) reading.set(key, { daemon, scope });
+    else read(key, daemon, scope);
+  };
+};
 
 interface ConnectionBinding {
   readonly baseUrl: string;

@@ -43,7 +43,9 @@ export class AgendaChangeFanout implements AgendaChangeObserver {
  * An observer the owner's answer does NOT wait for: it is started when the board changes and the request is answered
  * without it. For presentation work that talks to the network or re-reads large files — taking an item's alerts down
  * on every device is a web push per device (p50 136 ms, a 10 s timeout) after two reads of the whole notification
- * ledger — and that already has its own recovery (the alert clearer's start-up sweep). The board is committed before
+ * ledger. Its recovery is partial, as it was when the request awaited it: if the daemon stops before the clear is
+ * recorded, the alert clearer's start-up sweep takes the alert down (it rechecks alerts with no clear recorded); a clear
+ * that was recorded but whose push never went out is not retried. The board is committed before
  * any observer runs, so nothing the owner sees depends on it. Never for one that `requiresAcceptance`: its failure must
  * hold the change pending, and a detached observer cannot fail anything.
  *

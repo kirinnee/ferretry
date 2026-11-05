@@ -11118,7 +11118,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           agendaBuzz,
           // An item that no longer needs the owner takes its alerts down on every device. DETACHED: that is a web push
           // to every device after two reads of the whole notification ledger, and the owner's answer used to wait for
-          // it; a clear lost to a restart is taken down by the clearer's start-up sweep.
+          // it. If the daemon stops before the clear is recorded, the start-up sweep takes the alert down (it rechecks
+          // alerts with no clear recorded). A clear that was recorded but whose push never went out is NOT retried by
+          // the sweep — as before, when the request awaited the push.
           new DetachedAgendaObserver(alertClearer),
           // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
           new AgendaItemDraftDiscard({
