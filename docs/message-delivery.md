@@ -931,8 +931,10 @@ went", so `send()` threw before it told the tracker. The deliverer saw a ledger 
    lock and the send lock through a readiness wait of about half a minute, and a refusal used to bring the
    message back on the next `lookMs` look. A pane that showed neither a prompt nor work then looped for as
    long as it stayed that way. After an `untilPrompt` refusal the deliverer keeps the message waiting on its
-   reason until the pane or the record shows a prompt, the pane goes away, or `recheckMs` (60 s) has passed.
-   The last case is a safety net, in case a prompt is drawn but not recognised.
+   reason until the pane shows a prompt, the record's readiness flag changes to ready, the pane goes away, or
+   `recheckMs` (60 s) has passed. A record flag that was already true when the pane was refused is the
+   stale reading that was refused, so it ends nothing; it counts only after it has been seen false and
+   turned true again. The last case is a safety net, in case a prompt is drawn but not recognised.
 
 2. **A send that throws with its row open always tells the tracker.** `send()` and `reattempt()` schedule
    a tracker look whenever they throw and the send's row is still open, or the ledger cannot be read to rule

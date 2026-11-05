@@ -390,6 +390,50 @@ describe('handing over a queue', () => {
     should(world.queue.map(entry => entry.state)).eql(['delivered', 'delivered']);
   });
 
+  it('should keep waiting when the record still says ready for a pane that showed no prompt (stale flag)', async () => {
+    // The record's readiness flag was already true when the pane was refused for having no prompt: still
+    // true on the next look is the very reading that was refused, so the backoff must hold, not end.
+    const world = new World(message('a', 'human'));
+    world.target = { ...world.target, promptReady: true };
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'busy', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    for (let look = 0; look < 3; look += 1) {
+      world.nowMs += defaultQueueDeliverySettings.lookMs;
+      await world.deliverer.changed(ID);
+    }
+
+    should(world.handed).eql(['a']);
+    should(world.state('a')?.waitReason).equal('busy');
+
+    // The flag falling and rising again is a real readiness change after the refusal: the queue goes.
+    world.target = { ...world.target, promptReady: false };
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a']);
+    world.target = { ...world.target, promptReady: true };
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+    should(world.state('a')?.state).equal('delivered');
+  });
+
+  it('should go at once when the record turns ready after a refusal made while it was not', async () => {
+    const world = new World(message('a', 'human'));
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'busy', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a']);
+
+    world.target = { ...world.target, promptReady: true };
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+  });
+
   it('should try a promptless pane again once `recheckMs` has passed, in case its prompt is not recognised', async () => {
     const world = new World(message('a', 'human'));
     world.pane = pane({ activeWork: false });

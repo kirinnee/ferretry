@@ -116,8 +116,15 @@ export class QueueDeliverer {
   private readonly running = new Set<Promise<void>>();
   /** When each session's tracker was last asked to look at a hand-over stuck `accepted`. */
   private readonly rechecked = new Map<SessionId, number>();
-  /** Sessions whose last hand-over found no prompt: when, and the reason the queue waits on meanwhile. */
-  private readonly promptless = new Map<SessionId, { readonly at: number; readonly reason: QueueWaitReason }>();
+  /**
+   * Sessions whose last hand-over found no prompt: when, the reason the queue waits on meanwhile, and whether
+   * the record's own readiness flag was already true at the refusal (`staleReady`) — a flag that still
+   * says "ready" for a pane that showed none is the very thing that was refused, not a new prompt.
+   */
+  private readonly promptless = new Map<
+    SessionId,
+    { readonly at: number; readonly reason: QueueWaitReason; staleReady: boolean }
+  >();
   private stopped = false;
 
   constructor(
@@ -298,7 +305,11 @@ export class QueueDeliverer {
       }),
     );
     if (outcome.kind === 'refused' && outcome.untilPrompt === true)
-      this.promptless.set(id, { at: Date.parse(this.ports.clock.now()), reason: outcome.reason });
+      this.promptless.set(id, {
+        at: Date.parse(this.ports.clock.now()),
+        reason: outcome.reason,
+        staleReady: view.target.promptReady === true,
+      });
     else this.promptless.delete(id);
     switch (outcome.kind) {
       case 'landed':
@@ -326,7 +337,12 @@ export class QueueDeliverer {
     const last = this.promptless.get(id);
     if (last === undefined) return undefined;
     const { target, pane } = view;
-    const prompt = pane.promptReady || target.promptReady === true || !pane.alive || pane.dead;
+    // The record's flag counts only as a CHANGE since the refusal: one already true then, and true still, is
+    // the stale reading that was refused, and would end the backoff on the very next look. Seeing it false
+    // re-arms it, so a later true is a real readiness change.
+    if (target.promptReady !== true) last.staleReady = false;
+    const recordReady = target.promptReady === true && !last.staleReady;
+    const prompt = pane.promptReady || recordReady || !pane.alive || pane.dead;
     if (prompt || Date.parse(this.ports.clock.now()) - last.at >= this.settings.recheckMs) {
       this.promptless.delete(id);
       return undefined;
