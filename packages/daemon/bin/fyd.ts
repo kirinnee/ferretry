@@ -11951,6 +11951,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: new KeyedSerialExecutor(),
         launch: createSessionLaunch(storage),
       });
+      // READ-ONLY account variables for the out-of-date check, which runs on every roster poll: no token renewal and
+      // no project step, because both write (an OAuth refresh; the runtime's `.claude.json`) and a poll must not.
+      // The instruction switches are profile bindings, which this still resolves.
+      const accountSwitches = new FleetLaunchEnvironment(accounts, secretVault);
       // What a launch now would say to a ferret, against what it was launched with: the very renderer a relaunch
       // uses, over the very environment a relaunch builds, so "outdated" cannot disagree with what a restart fixes.
       const outdatedFor = async (id: string): Promise<ReturnType<typeof outdatedSections>> => {
@@ -11963,9 +11967,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The account's own variables (an `FY_HYPERMEDIA=0` an account carries) are merged under the session's
         // exactly as both launchers do, or a ferret launched with them reads as outdated for good.
         // A profile the launch itself would refuse (a missing secret) leaves nothing honest to compare against.
-        const account = await accountLaunchEnvironment
-          .forWrapper(config.data.agent, config.data.cwd)
-          .catch(() => undefined);
+        const account = await accountSwitches.forWrapper(config.data.agent).catch(() => undefined);
         if (account === undefined) return [];
         return outdatedSections(
           state.data.launchInstructions,
