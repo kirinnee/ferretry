@@ -17,12 +17,12 @@ export interface LocksLike {
   ): Promise<unknown>;
 }
 
-export function webMicLock(locks: LocksLike | undefined): MicLockPort {
+export function webMicLock(locks: LocksLike | null | undefined): MicLockPort {
   let held = false;
   let release: (() => void) | null = null;
   return {
     acquire: () => {
-      if (held || locks === undefined) return Promise.resolve(true);
+      if (held || locks === undefined || locks === null) return Promise.resolve(true);
       return new Promise<boolean>(resolve => {
         const request = locks.request(LIVE_LOCK_NAME, { ifAvailable: true }, lock => {
           if (lock === null) {

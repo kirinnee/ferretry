@@ -12,11 +12,15 @@ import {
 } from '../../../src/lib/stt/browser-recognition.ts';
 import type { OnDeviceVoice } from '../../../src/lib/stt/on-device-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../../src/lib/stt/stt-settings.ts';
+import { DEFAULT_VOICE_CLEANUP } from '../../../src/lib/stt/voice-cleanup.ts';
 import {
+  assembleFromPage,
   assembleLivePorts,
   createLiveSession,
   type LiveComposerBridge,
   type LiveEngineDeps,
+  type LiveEnvironment,
+  type LivePageInputs,
 } from '../../../src/lib/voice-chat/live-assembly.ts';
 import type { LiveSession, LiveSessionCallbacks } from '../../../src/lib/voice-chat/live-take.ts';
 
@@ -209,5 +213,76 @@ describe('assembleLivePorts', () => {
     const take = ports.take.start({ onLive: () => undefined, onEnded: () => undefined, onFailed: () => undefined });
     take.cancel();
     should(asked).equal(0);
+  });
+});
+
+describe('assembleFromPage', () => {
+  const page = (patch: Partial<LivePageInputs> = {}): LivePageInputs => ({
+    settings: settings('browser'),
+    recognition: recognition(true),
+    voice: null,
+    cleanup: DEFAULT_VOICE_CLEANUP,
+    keys: null,
+    daemon: {} as never,
+    fetchImpl: async () => new Response(),
+    readContext: () => ['one message'],
+    meter: null,
+    ...patch,
+  });
+  const environment = (): LiveEnvironment => ({
+    composer: {
+      show: () => undefined,
+      clear: () => undefined,
+      draft: () => '',
+      lastShown: () => null,
+      submit: async () => true,
+    },
+    reply: { current: () => null, subscribe: () => () => undefined },
+    speaker: null,
+    clock: { now: () => 0, after: () => () => undefined },
+    visibility: { visible: () => true, watch: () => () => undefined },
+    micLock: { acquire: async () => true, release: () => undefined },
+    wakeLock: { acquire: async () => true, release: () => undefined },
+  });
+
+  it('reads the page afresh for every take and for the clean-up of each', async () => {
+    let reads = 0;
+    let current = page({ settings: settings(null) });
+    const ports = assembleFromPage(() => {
+      reads += 1;
+      return current;
+    }, environment());
+    const events: string[] = [];
+    const listener = {
+      onLive: () => undefined,
+      onEnded: () => undefined,
+      onFailed: (block: string) => void events.push(block),
+    };
+    ports.take.start(listener);
+    should(events).deepEqual(['engine-not-chosen']);
+    // The person chose an engine since: the next take reads that.
+    current = page({ settings: settings('browser') });
+    const take = ports.take.start({ ...listener, onFailed: () => undefined });
+    should(reads).be.aboveOrEqual(3);
+    take.cancel();
+  });
+
+  it('ends a turn through the engine and the clean-up settings of the page', async () => {
+    const session = {
+      start: () => undefined,
+      cancel: () => undefined,
+      finish: async () => 'hello wold',
+    } as unknown as LiveSession;
+    const ports = assembleFromPage(
+      () =>
+        page({
+          settings: { ...settings('parakeet'), enhancement: false },
+          voice: voice(true, () => session),
+        }),
+      environment(),
+    );
+    const take = ports.take.start({ onLive: () => undefined, onEnded: () => undefined, onFailed: () => undefined });
+    should(await take.endTurn()).deepEqual({ kind: 'words', text: 'hello wold', raw: 'hello wold', cleaned: false });
+    take.cancel();
   });
 });

@@ -14,13 +14,13 @@ export interface WakeLockApiLike {
   request(type: 'screen'): Promise<WakeSentinelLike>;
 }
 
-export function screenWakeLock(api: WakeLockApiLike | undefined, visibility: VisibilityPort): WakeLockPort {
+export function screenWakeLock(api: WakeLockApiLike | null | undefined, visibility: VisibilityPort): WakeLockPort {
   let wanted = false;
   let sentinel: WakeSentinelLike | null = null;
   let unwatch: (() => void) | null = null;
 
   const request = async (): Promise<boolean> => {
-    if (api === undefined) return false;
+    if (api === undefined || api === null) return false;
     try {
       const next = await api.request('screen');
       if (!wanted) {

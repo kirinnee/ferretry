@@ -1,0 +1,234 @@
+/**
+ * Live voice through the REAL composer: the words of a turn appear in the box, the composer's own send
+ * sends exactly what is shown after the countdown, typing pauses auto-send, a failed send is On hold with
+ * the words kept, and a device that may not send gets no Live button. The speech engine, the clock and the
+ * microphone are fakes (`support/live-ports.ts`); the machine, the runner, the hook, the control, the bar and
+ * the composer are the real ones.
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { IFyApiClient } from '@ferretry/protocol';
+import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
+import { Composer } from '../../src/components/composer.tsx';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
+import { LIVE_VOICE_TOGGLE_EVENT } from '../../src/lib/voice-chat/live-command.ts';
+import type { ReplySnapshot, ReplySource } from '../../src/lib/voice-chat/reply-feed.ts';
+import { interact, mount, must } from '../support/dom.ts';
+import { typeInto } from '../support/dom-form.ts';
+import { fakeRecognitionProvider } from '../support/browser-recognition.ts';
+import { type FakeLive, fakeLive } from '../support/live-ports.ts';
+
+beforeEach(() => {
+  writeMdComposePref('off');
+  unitClock.hold();
+});
+afterEach(() => writeMdComposePref('on'));
+
+const daemon = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://daemon-a.example.test',
+  deviceId: 'token-a',
+});
+const BROWSER_VOICE = { ...DEFAULT_STT_SETTINGS, engine: 'browser' } as const;
+
+const memoryStorage = (): DraftStorage => {
+  const entries = new Map<string, string>();
+  return {
+    getItem: key => entries.get(key) ?? null,
+    setItem: (key, value) => {
+      entries.set(key, value);
+    },
+  };
+};
+
+const replySource = (): ReplySource => {
+  const snapshot: ReplySnapshot = { turnState: 'your-turn', turnStateAt: 't0', status: 'running' };
+  return { current: () => snapshot, subscribe: () => () => undefined };
+};
+
+const textareaOf = (container: HTMLElement): HTMLTextAreaElement =>
+  must(container.querySelector('textarea'), 'the composer textarea');
+const liveButton = (container: HTMLElement): HTMLButtonElement | null =>
+  container.querySelector<HTMLButtonElement>('button[aria-label="Live voice"]');
+const flush = async (): Promise<void> => {
+  for (let turn = 0; turn < 10; turn += 1) await interact(async () => await Promise.resolve());
+};
+
+interface Sent {
+  readonly messages: string[];
+  fail: boolean;
+}
+
+const rig = async (options: { live?: boolean; disabled?: boolean } = {}) => {
+  const fake = fakeLive();
+  // Everything but the send is a fake: the words go through the composer's own send.
+  const { send: _send, ...ports } = fake.ports;
+  const sent: Sent = { messages: [], fail: false };
+  const api: Pick<IFyApiClient, 'send'> = {
+    send: async (_id, input) => {
+      if (sent.fail) throw new Error('daemon unreachable');
+      sent.messages.push(input.message);
+      return {} as never;
+    },
+  };
+  const composer = await mount(
+    <Composer
+      api={api}
+      daemon={daemon}
+      dictationRecognition={fakeRecognitionProvider({ endsOnStop: true })}
+      dictationSettings={BROWSER_VOICE}
+      draftStore={new DaemonDraftStore(memoryStorage())}
+      sessionId="live"
+      {...(options.live === false ? {} : { liveReply: replySource() })}
+      {...(options.disabled === true ? { disabled: true } : {})}
+      liveVoiceSeams={{ ports }}
+    />,
+  );
+  return { composer, fake, sent };
+};
+
+/** One spoken turn: speech, then enough quiet for the endpointer to end it. */
+const speakTurn = async (fake: FakeLive): Promise<void> => {
+  await interact(async () => {
+    fake.hear(0.1, 600);
+    fake.hear(0.001, 1_520);
+    await Promise.resolve();
+  });
+  await flush();
+};
+
+describe('Composer Live voice', () => {
+  it('offers no Live button without a session to watch, or to a composer that may not send', async () => {
+    const noReply = await rig({ live: false });
+    expect(liveButton(noReply.composer.container)).toBeNull();
+    await noReply.composer.unmount();
+    const disabled = await rig({ disabled: true });
+    expect(liveButton(disabled.composer.container)).toBeNull();
+    await disabled.composer.unmount();
+  });
+
+  it('shows the words, counts down, sends exactly what is shown, and waits for the ferret', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    expect(composer.container.querySelector('[aria-label="Live voice"][data-live-phase]')).not.toBeNull();
+
+    await speakTurn(fake);
+    // The words of the turn are in the box, where the person can see and edit them.
+    expect(textarea.value).toBe('Fix the bug.');
+    expect(sent.messages).toEqual([]);
+
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    expect(textarea.value).toBe('');
+    expect(composer.container.textContent).toContain('Working');
+    await composer.unmount();
+  });
+
+  it('keeps what was typed before Live in front of the words', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await typeInto(textarea, 'Please', 'textarea');
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    expect(textarea.value).toBe('Please Fix the bug.');
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Please Fix the bug.']);
+    await composer.unmount();
+  });
+
+  it('pauses when the person types, and sends only on their word', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await typeInto(textarea, 'Fix the bug. And the tests.', 'textarea');
+    await flush();
+    expect(composer.container.textContent).toContain('On hold');
+    await interact(async () => {
+      fake.advance(5_000);
+      await Promise.resolve();
+    });
+    expect(sent.messages).toEqual([]);
+    const sendNow = must(
+      [...composer.container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+        /send now/i.test(button.textContent ?? ''),
+      ),
+      'the Send now button',
+    );
+    await interact(() => sendNow.click());
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug. And the tests.']);
+    await composer.unmount();
+  });
+
+  it('puts the words on hold, kept in the box, when the send fails', async () => {
+    const { composer, fake, sent } = await rig();
+    sent.fail = true;
+    const textarea = textareaOf(composer.container);
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(composer.container.textContent).toContain('On hold');
+    expect(textarea.value).toBe('Fix the bug.');
+    await composer.unmount();
+  });
+
+  it('toggles from the request of the command palette, and not while the mic is recording', async () => {
+    const { composer, fake } = await rig();
+    await interact(() => void document.dispatchEvent(new Event(LIVE_VOICE_TOGGLE_EVENT)));
+    await flush();
+    expect(liveButton(composer.container)?.getAttribute('aria-pressed')).toBe('true');
+    await interact(() => void document.dispatchEvent(new Event(LIVE_VOICE_TOGGLE_EVENT)));
+    await flush();
+    expect(liveButton(composer.container)?.getAttribute('aria-pressed')).toBe('false');
+    expect(fake.takes.length).toBe(1);
+    // With the mic recording, Live waits: the button is held back and the request does nothing.
+    const mic = must(
+      composer.container.querySelector<HTMLButtonElement>('button[aria-label="Dictate a message"]'),
+      'the mic button',
+    );
+    await interact(() => mic.click());
+    await flush();
+    expect(liveButton(composer.container)?.disabled).toBe(true);
+    await interact(() => void document.dispatchEvent(new Event(LIVE_VOICE_TOGGLE_EVENT)));
+    await flush();
+    expect(fake.takes.length).toBe(1);
+    await composer.unmount();
+  });
+
+  it('holds the mic back while Live is on, and ends from the button', async () => {
+    const { composer, fake } = await rig();
+    const button = must(liveButton(composer.container), 'the Live button');
+    await interact(() => button.click());
+    await flush();
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    const mic = composer.container.querySelector<HTMLButtonElement>('button[aria-label="Dictate a message"]');
+    expect(mic?.disabled).toBe(true);
+    await interact(() => button.click());
+    await flush();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(fake.takes[0]?.cancelled).toBe(true);
+    unitClock.advance(0);
+    await composer.unmount();
+  });
+});

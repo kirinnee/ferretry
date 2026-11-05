@@ -14,9 +14,13 @@ import {
   type BrowserRecognitionProvider,
   browserRecognitionErrorFrom,
 } from '../stt/browser-recognition.ts';
+import type { DaemonConnection } from '../daemon-connection.ts';
 import type { MicMeterPort } from '../stt/level-monitor.ts';
 import type { OnDeviceVoice } from '../stt/on-device-voice.ts';
+import type { RemoteEnhancementFetch } from '../stt/remote-enhancement.ts';
+import type { DeviceSpeedupKeys } from '../stt/speedup-keys.ts';
 import { isOnDeviceEngine, type SttSettings } from '../stt/stt-settings.ts';
+import type { VoiceCleanup } from '../stt/voice-cleanup.ts';
 import { meterLevelFrames } from './level-frames.ts';
 import { cleanLiveTurn, type LiveCleanupDeps } from './live-cleanup.ts';
 import type { LiveRunnerPorts } from './live-runner.ts';
@@ -31,8 +35,7 @@ import type {
   VisibilityPort,
   WakeLockPort,
 } from './ports.ts';
-import type { ReplySource } from './reply-feed.ts';
-import { sessionReplyFeed } from './reply-feed.ts';
+import { type ReplySource, sessionReplyFeed } from './reply-feed.ts';
 
 /** The composer, as Live drives it. `composer.tsx` implements it; nothing else sends from voice. */
 export interface LiveComposerBridge {
@@ -114,4 +117,55 @@ export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
     micLock: deps.micLock,
     clock: deps.clock,
   };
+}
+
+/** Everything the page holds that a Live take reads, gathered at the moment it is read. */
+export interface LivePageInputs {
+  readonly settings: SttSettings;
+  readonly recognition: BrowserRecognitionProvider;
+  readonly voice: OnDeviceVoice | null;
+  readonly cleanup: VoiceCleanup;
+  readonly keys: DeviceSpeedupKeys | null;
+  readonly daemon: DaemonConnection;
+  readonly fetchImpl: RemoteEnhancementFetch;
+  readonly readContext: (needsEvidence: boolean) => readonly string[];
+  readonly meter: MicMeterPort | null;
+}
+
+/** The environment Live runs in: the composer, the session, and the page's clock and locks. */
+export interface LiveEnvironment {
+  readonly composer: LiveComposerBridge;
+  readonly reply: ReplySource;
+  readonly speaker: SpeakerPort | null;
+  readonly clock: ClockPort;
+  readonly visibility: VisibilityPort;
+  readonly micLock: MicLockPort;
+  readonly wakeLock: WakeLockPort;
+}
+
+/**
+ * The ports over what the page holds, read through `read` at the moment each is needed — so a setting
+ * changed mid-Live applies to the next take, and nothing here is captured stale.
+ */
+export function assembleFromPage(read: () => LivePageInputs, environment: LiveEnvironment): LiveRunnerPorts {
+  return assembleLivePorts({
+    ...environment,
+    engine: () => {
+      const page = read();
+      return { settings: page.settings, recognition: page.recognition, voice: page.voice };
+    },
+    cleanup: () => {
+      const page = read();
+      return {
+        settings: page.settings,
+        cleanup: page.cleanup,
+        keys: page.keys,
+        daemon: page.daemon,
+        fetchImpl: page.fetchImpl,
+        readContext: page.readContext,
+      };
+    },
+    // Ports are built when Live starts, so the meter is the one the page has then.
+    meter: read().meter,
+  });
 }

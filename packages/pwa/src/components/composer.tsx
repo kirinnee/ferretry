@@ -76,7 +76,7 @@ import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { useSharedComposerItems } from './composer-shared-items.ts';
 import { ContextRing } from './context-ring.tsx';
 import { DictationControl } from './dictation-control.tsx';
-import { useLiveVoiceControl } from './live-voice-control.tsx';
+import { type LiveVoiceControlProps, useLiveVoiceControl } from './live-voice-control.tsx';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { type LocationDraft, PendingLocationChip } from './location-chip.tsx';
@@ -197,6 +197,8 @@ export interface ComposerProps {
    * Live button: the page that holds the session offers it.
    */
   readonly liveReply?: ReplySource;
+  /** Test/visual seam: the ports, clock and engines Live voice runs over. Production uses the page's own. */
+  readonly liveVoiceSeams?: LiveVoiceControlProps['seams'];
   /** One already-read daemon fleet slice, shared with transcript references. */
   readonly autocompleteSessions?: readonly SessionView[];
   /** The session's unresolved Agenda items, shared with reference proof. */
@@ -468,6 +470,7 @@ export function Composer({
   dictationRecognition,
   dictationConversation,
   liveReply,
+  liveVoiceSeams,
   autocompleteSessions,
   autocompleteAgenda,
   autocompleteTasks,
@@ -1495,6 +1498,7 @@ export function Composer({
     compact,
     busyElsewhere: dictating,
     onActiveChange: setLiveActive,
+    ...(liveVoiceSeams === undefined ? {} : { seams: liveVoiceSeams }),
   });
 
   const dictation = dictationSettings ? (

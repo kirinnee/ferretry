@@ -109,6 +109,8 @@ describe('webMicLock', () => {
 
   it('grants without the API, and when the browser refuses the request', async () => {
     should(await webMicLock(undefined).acquire()).be.true();
+    // A browser that exposes the property as null (some embedded webviews) has no locks either.
+    should(await webMicLock(null).acquire()).be.true();
     const lock = webMicLock({ request: () => Promise.reject(new Error('insecure')) });
     should(await lock.acquire()).be.true();
   });
@@ -181,6 +183,7 @@ describe('screenWakeLock', () => {
   it('answers false without the API or when the request is refused', async () => {
     const view = visibility();
     should(await screenWakeLock(undefined, view.port).acquire()).be.false();
+    should(await screenWakeLock(null, view.port).acquire()).be.false();
     const refused = screenWakeLock({ request: () => Promise.reject(new Error('battery saver')) }, view.port);
     should(await refused.acquire()).be.false();
   });

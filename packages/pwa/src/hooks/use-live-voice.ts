@@ -29,7 +29,7 @@ import type { DeviceSpeedupKeys } from '../lib/stt/speedup-keys.ts';
 import { isOnDeviceEngine, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
-import { assembleLivePorts, type LiveComposerBridge } from '../lib/voice-chat/live-assembly.ts';
+import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '../lib/voice-chat/live-assembly.ts';
 import { INITIAL_LIVE_STATE } from '../lib/voice-chat/live-machine.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
 import { LiveTurnLog } from '../lib/voice-chat/live-turn-log.ts';
@@ -63,8 +63,8 @@ export interface UseLiveVoiceOptions {
   readonly enhancementFetch?: RemoteEnhancementFetch;
   readonly voice?: OnDeviceVoice | null;
   readonly speedupKeys?: DeviceSpeedupKeys | null;
-  /** Replaces every port (tests): the machine and runner are still the real ones. */
-  readonly ports?: LiveRunnerPorts;
+  /** Replaces the ports it names (tests): the machine and runner, and every port left out, are the real ones. */
+  readonly ports?: Partial<LiveRunnerPorts>;
 }
 
 export interface LiveVoiceHandle {
@@ -127,28 +127,27 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
 
   const buildPorts = useCallback((): LiveRunnerPorts => {
     const current = latest.current;
-    if (current.ports !== undefined) return current.ports;
     const clock = browserClock(globalThis as unknown as ClockGlobalLike);
     const visibility = documentVisibility(document);
     const nav = navigator as Navigator & {
       locks?: Parameters<typeof webMicLock>[0];
       wakeLock?: Parameters<typeof screenWakeLock>[0];
     };
-    return assembleLivePorts({
-      engine: () => ({
-        settings: latest.current.settings,
-        recognition: latest.current.recognition ?? ambient.current.recognition,
+    const read = (): LivePageInputs => {
+      const page = latest.current;
+      return {
+        settings: page.settings,
+        recognition: page.recognition ?? ambient.current.recognition,
         voice: voiceRef.current(),
-      }),
-      cleanup: () => ({
-        settings: latest.current.settings,
-        cleanup: latest.current.voiceCleanup ?? DEFAULT_VOICE_CLEANUP,
-        keys: latest.current.speedupKeys === undefined ? ambient.current.keys : latest.current.speedupKeys,
-        daemon: latest.current.daemon,
-        fetchImpl: latest.current.enhancementFetch ?? ambient.current.fetch,
-        readContext: needsEvidence => latest.current.readContext(needsEvidence),
-      }),
-      meter: current.meter === undefined ? ambient.current.meter : current.meter,
+        cleanup: page.voiceCleanup ?? DEFAULT_VOICE_CLEANUP,
+        keys: page.speedupKeys === undefined ? ambient.current.keys : page.speedupKeys,
+        daemon: page.daemon,
+        fetchImpl: page.enhancementFetch ?? ambient.current.fetch,
+        readContext: needsEvidence => page.readContext(needsEvidence),
+        meter: page.meter === undefined ? ambient.current.meter : page.meter,
+      };
+    };
+    const assembled = assembleFromPage(read, {
       composer: current.composer,
       reply: current.reply,
       speaker: null,
@@ -157,6 +156,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
       micLock: webMicLock(nav.locks),
       wakeLock: screenWakeLock(nav.wakeLock, visibility),
     });
+    return current.ports === undefined ? assembled : { ...assembled, ...current.ports };
   }, []);
 
   const stop = useCallback((): void => {
@@ -195,7 +195,9 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
 
   // Live ends when it can no longer be offered (the composer was disabled, the session went), and with the page.
   useEffect(() => {
-    if (!enabled) stop();
+    if (enabled) return;
+    stop();
+    repaint();
   }, [enabled, stop]);
   useEffect(() => stop, [stop]);
 
