@@ -234,14 +234,19 @@ export class FileMutationJournal {
   }
 
   /**
-   * Whether `candidate` is moved-aside evidence THIS batch minted — as opposed to a reserved name an earlier,
-   * interrupted batch left behind. A sweep of a folder the fleet owns outright uses this to tell the one it must
-   * keep (a rollback needs it) from the one it must clear (nothing ever will, and a runtime that scans the folder
-   * loads it as a real entry).
+   * Whether `candidate`, a reserved name met while sweeping a folder the plan owns outright, is residue an earlier
+   * apply left and nothing will ever clear — as opposed to evidence something still needs.
+   *
+   * Kept: a backup THIS batch minted (a rollback needs it until the commit discards it), and anything a rollback
+   * displaced (`.fy-fleet-displaced-`), which holds state that changed under a failed apply and is reported to the
+   * person rather than swept. Residue is the rest: a moved-aside copy of an entry this plan regenerates wholesale
+   * whose discard never ran, or a staged replacement that never got published. A runtime that scans the folder
+   * loads it as a real entry for as long as it stays.
    */
-  minted(candidate: string): boolean {
+  isStaleResidue(candidate: string): boolean {
     const resolved = path.resolve(candidate);
-    return this.#entries.some(entry => entry.kind === 'restore' && entry.backup === resolved);
+    if (path.basename(resolved).startsWith(DISPLACED_PREFIX)) return false;
+    return !this.#entries.some(entry => entry.kind === 'restore' && entry.backup === resolved);
   }
 
   /**
