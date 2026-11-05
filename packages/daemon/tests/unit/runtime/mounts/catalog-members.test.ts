@@ -234,7 +234,13 @@ describe('the route table', () => {
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual(table.map(([m, p]) => `${m} ${p}`));
   });
 
-  const generic = new Set(['GET /v1/catalog-shares', 'GET /v1/catalog-members', 'PATCH /v1/catalog-members/:memberId']);
+  const generic = new Set([
+    'GET /v1/catalog-shares',
+    'GET /v1/catalog-members',
+    'PATCH /v1/catalog-members/:memberId',
+    // Removing a browser can reopen join admission (joinNeed), so it is not a pure narrowing.
+    'DELETE /v1/catalog-members/:memberId/keys/:keyId',
+  ]);
 
   for (const [method, path] of table) {
     const demand: { capability: string; axis: string; narrowing?: true } = generic.has(`${method} ${path}`)

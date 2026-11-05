@@ -31,7 +31,9 @@ import { grantSubsystem } from './support.ts';
  * THE MEMBER ROUTES AT THE BOUNDARY: the REAL step-up service, security settings and dispatcher around the real route
  * table, with only the passkey verdict and the members service replaced. A mint and the "new passkey" mark ask for the
  * one `share-catalog` passkey and must still get it when the step-up window is zero minutes (the boundary must not
- * spend the proof the handler is about to claim); every route that only takes access away asks nothing beyond the unlock.
+ * spend the proof the handler is about to claim) AND must spend the general step-up themselves, so a zero-minute window
+ * admits that one act and not the next; every route that only takes access away asks nothing beyond the unlock, except
+ * removing a person's browser, which can reopen join admission and keeps the generic per-act demand.
  */
 
 const T0 = Date.parse('2026-10-14T09:00:00.000Z');
@@ -113,6 +115,10 @@ class FakeMembers {
   }
   async revokeMember() {
     this.calls.push('revokeMember');
+    return { memberId: MEMBER };
+  }
+  async renameMember() {
+    this.calls.push('renameMember');
     return { memberId: MEMBER };
   }
   async removeKey() {
@@ -291,7 +297,6 @@ describe('a governed device that asks for a passkey on every act', () => {
     ['DELETE', `/v1/catalog-shares/${SHARE}/new-passkey`, 'unmark'],
     ['DELETE', `/v1/catalog-shares/${SHARE}`, 'endShare'],
     ['DELETE', `/v1/catalog-members/${MEMBER}`, 'revokeMember'],
-    ['DELETE', `/v1/catalog-members/${MEMBER}/keys/${KEY}`, 'removeKey'],
     ['DELETE', `/v1/catalog-members/${MEMBER}/catalogs/${CAT}`, 'removeCatalog'],
   ] as const;
 
@@ -319,6 +324,122 @@ describe('a governed device that asks for a passkey on every act', () => {
     // Assert
     should(answer.status).equal(401);
     should(world.members.calls).be.empty();
+  });
+});
+
+describe('a mint or the mark followed by another governed act', () => {
+  const ACT_ON = { stepUpOnActions: true, stepUpWindowMinutes: 0 } as const;
+  const RENAME = { label: 'Bob' };
+
+  it.each([
+    ['minting a share', 'mint'],
+    ['marking an invite', 'mark'],
+  ] as const)(
+    'should not leave %s a held step-up that admits a rename, with a zero-minute window',
+    async (_t, call) => {
+      // Arrange
+      const world = await machine(ACT_ON);
+      await world.unlock();
+      await world.prove();
+
+      // Act
+      const first = await world[call]();
+      const rename = await world.ask('PATCH', `/v1/catalog-members/${MEMBER}`, RENAME);
+
+      // Assert
+      should(first.status).equal(call === 'mint' ? 201 : 200);
+      should([rename.status, codeOf(rename)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+      should(world.members.calls).deepEqual([call]);
+    },
+  );
+
+  it('should still admit the rename on its own proof afterwards', async () => {
+    // Arrange
+    const world = await machine(ACT_ON);
+    await world.unlock();
+    await world.prove();
+    await world.mint();
+
+    // Act
+    await world.prove(STEP_UP_ACTS.shareCatalog);
+    const rename = await world.ask('PATCH', `/v1/catalog-members/${MEMBER}`, RENAME);
+
+    // Assert
+    should(rename.status).equal(200);
+    should(world.members.calls).deepEqual(['mint', 'renameMember']);
+  });
+
+  it('should keep the held step-up inside a default window, where it covers every act in it', async () => {
+    // Arrange
+    const world = await machine({});
+    await world.unlock();
+    await world.prove();
+
+    // Act
+    const minted = await world.mint();
+    const rename = await world.ask('PATCH', `/v1/catalog-members/${MEMBER}`, RENAME);
+
+    // Assert
+    should([minted.status, rename.status]).deepEqual([201, 200]);
+  });
+
+  it('should leave the held step-up for a retry when the proof for the mint was never made', async () => {
+    // Arrange
+    const world = await machine(ACT_ON);
+    await world.unlock();
+
+    // Act
+    const refused = await world.mint();
+    await world.prove();
+    const served = await world.mint();
+
+    // Assert
+    should([refused.status, served.status]).deepEqual([403, 201]);
+  });
+});
+
+describe("removing a person's browser", () => {
+  const KEY_PATH = `/v1/catalog-members/${MEMBER}/keys/${KEY}`;
+
+  it('should ask for a per-act step-up under a zero-minute window, because it can reopen join admission', async () => {
+    // Arrange
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+
+    // Act: the unlock's own step-up admits one act and is then spent; the next needs a proof of its own
+    const first = await world.ask('DELETE', KEY_PATH);
+    const unproved = await world.ask('DELETE', KEY_PATH);
+    await world.prove();
+    const proved = await world.ask('DELETE', KEY_PATH);
+    const again = await world.ask('DELETE', KEY_PATH);
+
+    // Assert
+    should(first.status).equal(200);
+    should([unproved.status, codeOf(unproved)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should([proved.status, again.status]).deepEqual([200, 403]);
+    should(world.members.calls).deepEqual(['removeKey', 'removeKey']);
+  });
+
+  it('should refuse before the unlock', async () => {
+    // Arrange
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+
+    // Act
+    const answer = await world.ask('DELETE', KEY_PATH);
+
+    // Assert
+    should(answer.status).equal(401);
+  });
+
+  it('should be refused to a ferret', async () => {
+    // Arrange
+    const world = await machine({});
+
+    // Act
+    const answer = await world.askAsFerret('DELETE', KEY_PATH);
+
+    // Assert
+    should([answer.status, codeOf(answer)]).deepEqual([403, 'owner_only']);
   });
 });
 

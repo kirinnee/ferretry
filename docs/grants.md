@@ -352,14 +352,17 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) Â
    "They need a new passkey" on an invite ([catalogs.md](catalogs.md#lost-devices-they-need-a-new-passkey)):
    `PUT /v1/catalog-shares/:shareId/new-passkey` is `sharing.use` for a person caller only (a ferret is refused) and,
    because it widens who a code can add, takes a fresh `share-catalog` passkey from a governed caller, claimed like
-   a mint's. `DELETE` on the same path only narrows, so it takes no step-up. The mint, the mark and every route that
-   only takes access away (ending a share, revoking a person, removing a browser or a catalog) ask the grant and the
-   unlock at the door as a [narrowing](#narrowing-never-asks-again) demand; the mint and the mark then claim their
-   `share-catalog` proof themselves, so a zero-minute step-up window cannot spend it first. **One known exception:**
-   removing a member's last passkey-bearing browser (`DELETE /v1/catalog-members/:memberId/keys/:keyId`) is not purely a removal while
-   another browser of theirs still has its registration window open, because a spare invite minted before the person
-   joined then stops needing their passkey and admits its holder as a first browser. The join rule predates this
-   change ([catalogs.md](catalogs.md#the-decisions-behind-it)); hardening it is a tracked follow-up. The mint accepts an optional
+   a mint's. `DELETE` on the same path only narrows, so it takes no step-up. The mint, the mark and the routes that
+   only take access away (ending a share, revoking a person, removing a catalog) ask the grant and the unlock at the
+   door as a [narrowing](#narrowing-never-asks-again) demand; the mint and the mark then claim their `share-catalog`
+   proof themselves, so a zero-minute step-up window cannot spend it first, and they spend the general step-up after
+   a successful claim, so under that window the proof buys exactly that one act and a rename right after is asked
+   again. **Removing a person's browser** (`DELETE /v1/catalog-members/:memberId/keys/:keyId`) is deliberately NOT a
+   narrowing and keeps the generic `sharing.use` step-up: it can reopen join admission. With a spare single-use
+   invite minted before the person joined, a last passkey-bearing browser A and another browser B still inside its
+   registration window, removing A turns the invite's join rule from "prove a passkey" into "first browser, nothing
+   needed" ([catalogs.md](catalogs.md#the-decisions-behind-it), `joinNeed`), so it must take a per-act proof like a
+   widening. The mint accepts an optional
    `newPasskey` under the same step-up it already needs, and its answer carries an optional `noPasskeyLeft` that
    only pre-ticks the app's box; no route sets the mark by itself. A later join of an existing person proves one of
    their passkeys over the sealed `join-options`/`join` records, which are no route and carry no grant
