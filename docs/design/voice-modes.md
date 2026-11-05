@@ -1,9 +1,9 @@
 # Voice modes and the daemon speech engine
 
-Status: **plan, not built.** Nothing in this document is implemented by the change that adds it. It
-plans two cards: **&F1268 Live Chat Voice Mode** and **&F1269 Daemon Streams Voice Engine**, on top of
-the &F137 live-voice slices already merged or in review. Section 10 lists the choices only the owner
-makes; everything else here is a proposal a slice may correct when it measures something.
+Status: **approved plan, being built.** The owner approved the shape on !A410 and answered the six
+decisions on !A415 (2026-11-05); section 10 records them. It plans two cards: **&F1268 Live Chat Voice
+Mode** and **&F1269 Daemon Streams Voice Engine**, on top of the &F137 live-voice slices. Anything not
+recorded as decided is a proposal a slice may correct when it measures something.
 
 The owner's words (2026-11-05, !A410), verbatim — first the request, then the refinement that sets the
 shape of this plan:
@@ -85,7 +85,8 @@ else is an estimate and says so.
   the dictated span, with **Undo**, and is skipped if you edited that span.
 - **Which engines can do which real-time style:** on this device, Vosk and Phone/browser voice stream;
   Parakeet and Whisper chunk (Parakeet's near-live already ships; Whisper's is new); the sherpa batch
-  models chunk. On my machine, Chunked is Parakeet; Streaming is a streaming Zipformer if installed (D1).
+  models chunk. On my machine, Chunked runs the chosen batch model; Streaming runs the chosen streaming
+  model, if one is installed (§2.2).
 - **Retired:** the per-device "Live words (experimental)" switch. "In real time · Chunked" is that
   feature finished.
 
@@ -126,7 +127,7 @@ sent to the daemon, so with a device key the browser still calls the provider.
 
 - **It needs the machine to be reachable.** Away from home that is the relay or WebRTC, which is fine
   on most networks; offline it is impossible.
-- **It needs the engine installed** (~490 MB once) and the memory to load it (~1 GB).
+- **It needs the engine installed** (~490 MB once for the default model; more for a heavier one) and the memory to load it (~1 GB for the default).
 - **It uses data:** about 190 MB an hour on a phone's connection (PCM; §3.1), about a quarter of that
   once B6's Opus lands.
 - **The relay sees that a voice chat is happening** and roughly when turns are sent (§3.4) — never
@@ -140,7 +141,7 @@ sent to the daemon, so with a device key the browser still calls the provider.
 | the connection drops mid-chat                               | "Lost **<machine>** — trying again." Any countdown is cancelled (§1.5). Reconnected within 30 s: listening resumes. Otherwise voice chat ends and the composer returns with the unsent words offered back. |
 | the engine is not installed / the device lacks `voice.use`  | "Voice chat needs speech on **<machine>**." **Install** (or "ask the machine's owner") — the grant's way-back sentence.                                                                                    |
 | busy (`429 voice_busy`), another device holds this ferret   | "Busy: **<device>** is in voice chat with this ferret." / "**<machine>** is already serving 2 voice chats."                                                                                                |
-| not enough memory to load (`503 voice_no_memory`)           | "**<machine>** doesn't have ~1.5 GB free to load speech."                                                                                                                                                  |
+| not enough memory to load (`503 voice_no_memory`)           | "**<machine>** doesn't have enough free memory to load **<model>** (about <n> GB).""                                                                                                                       |
 | the engine falls behind (`engine_behind`, `engine_timeout`) | "**<machine>** is too busy to keep up — that turn was lost. Say it again." Three in a row: voice chat ends and says the machine is overloaded.                                                             |
 
 Dictation on my machine follows the same rule: an unreachable or busy machine is an error that names
@@ -201,27 +202,52 @@ B2 reuses that shape from `ac6b8a35a^`. What it lacked, and is **new work** here
 `process.execPath` on a **source `.ts` path** and loaded the addon from `node_modules` — neither exists
 beside a compiled `fyd`; it was batch only; downloads did not resume; and it ran uncapped.
 
-### 2.2 Which models
+### 2.2 Which models: a chooser, like the device's
 
-| Candidate                                        | Used for                                                       | Accuracy (published / measured here)                                                             | Disk                                                | Memory (approx.) | Languages    |
-| ------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------------- | ------------ |
-| **Parakeet TDT 0.6B v3, int8** (sherpa-onnx)     | voice chat; dictation after stop; dictation real time, chunked | the most accurate measured in this app (`research-numbers.ts`)                                   | 487,170,055-byte archive (sherpa-onnx `asr-models`) | ~1 GB            | multilingual |
-| Parakeet TDT 0.6B v2, int8                       | (alternative to v3)                                            | similar; English only                                                                            | 482,468,385-byte archive                            | ~1 GB            | English      |
-| Streaming Zipformer (sherpa-onnx, English, int8) | dictation real time, streaming                                 | lower; the 20M variant dropped the first second of 26 of 33 utterances through this app's worker | tens of MB (per variant¹)                           | ~100–300 MB      | English      |
-| whisper.cpp base.en / small.en                   | not proposed: a second native runtime for no gain              | good; hallucinates on silence without a VAD                                                      | 140–470 MB¹                                         | ~0.3–1 GB        | per model    |
-| Silero VAD (sherpa-onnx)                         | a **trial** beside the loudness endpointer                     | a candidate for café clatter; it cannot tell the owner's voice from a TV's, which is speech      | ~2 MB¹                                              | small            | any          |
+**Decided (D1 (a) and the owner's note):** _"like the other mode, let users choose what model they want
+-- suggest some! this can now allow for much heavier models, since machines can have strong cores"._ So
+Settings › Voice › **On my machine** gets a model chooser built like the on-device one — compact rows
+with a stats summary, reusing the &F1266 compact picker — with **Parakeet v3 as the recommended
+default**, and heavier choices a strong machine can run. One batch model serves voice chat and dictation
+(after stop, and real time by chunking); a streaming model is a separate, optional install used only
+when dictation's real-time style is **Streaming**.
 
-¹ Not measured in this repository; B2 measures and pins exact sizes and hashes. The two Parakeet sizes
-are the release assets' byte counts on `k2-fsa/sherpa-onnx`'s `asr-models` release.
+**All run on the one runtime, sherpa-onnx**, so a new model is a catalog row, not new native code.
+Sizes are the archive byte counts on `k2-fsa/sherpa-onnx`'s `asr-models` release (checked
+2026-11-05); languages are from each model's card. **Speed, accuracy and memory are not guessed**: each
+row shows numbers measured on _this machine_ (§2.2.1) once installed, and the research figure where one
+exists.
 
-**Parakeet v3 is the default (D1).** It is the model the browser already ships and measured best, it is
-multilingual, and the expensive part of chunking — a full re-decode every pass — is what a native
-multi-threaded runtime is good at. The browser runs it on **one WebAssembly thread** (1.76 s for 5 s of
-speech, measured, `docs/voice.md` › Speed); native ONNX Runtime uses SIMD and several threads, so a pass
-every ~0.5 s should be affordable (B2 measures it). The streaming Zipformer is an optional second
-install for the "Streaming" style (D1), not the default, because of the dropped-first-second result.
-Silero is kept only if it passes the existing café/TV harness (`turn-endpointer-noise.ts`) with no rise
-in false sends.
+| Model (sherpa-onnx archive)                          | Role                    | Download | Languages                    | Why offer it                                                          |
+| ---------------------------------------------------- | ----------------------- | -------: | ---------------------------- | --------------------------------------------------------------------- |
+| **Parakeet TDT 0.6B v3, int8** — recommended default | batch                   |   487 MB | 25 European                  | the most accurate the app has measured (`research-numbers.ts`)        |
+| Parakeet TDT 0.6B v2, fp16                           | batch                   | 1,121 MB | English                      | the same family at full precision, for a machine with memory to spare |
+| Whisper turbo                                        | batch                   |   564 MB | ~100                         | broad languages at moderate cost                                      |
+| Whisper large-v3                                     | batch, heavy            | 1,068 MB | ~100                         | the heaviest Whisper; for strong CPUs                                 |
+| Qwen3-ASR 0.6B, int8                                 | batch                   |   879 MB | multilingual, strong Chinese | languages Parakeet lacks                                              |
+| Cohere Transcribe (14 languages), int8               | batch, heaviest         | 1,700 MB | 14                           | the largest model on the list, for the strongest machines             |
+| Canary 180M flash, int8                              | batch, light            |   154 MB | en, es, de, fr               | for small machines                                                    |
+| **Nemotron speech streaming 0.6B (560 ms), int8**    | streaming — recommended |   464 MB | English                      | a real streaming model far larger than the rejected Zipformer 20M     |
+| Parakeet unified 0.6B streaming, int8                | streaming               |   501 MB | English                      | Parakeet's own streaming variant                                      |
+
+- **The catalog is data** (pinned URL, SHA-256, byte size, languages, role, sherpa model type, declared
+  peak memory), owned by one daemon module and served to the PWA, so a row is added without UI work.
+- **CPU only in v1** for every row; the GPU column says so. B7 revisits GPU after the measurements.
+- **Memory follows the model.** The worker's `MemoryMax` and watchdog are the chosen model's measured
+  peak × 1.25 (floor 1.5 GB), not one fixed figure (§2.5); the chooser greys out a model this machine's
+  memory cannot hold, with the reason.
+- **Silero VAD** stays a separate ~2 MB trial beside the loudness endpointer, kept only if it passes the
+  existing café/TV harness (`turn-endpointer-noise.ts`) with no rise in false sends.
+- whisper.cpp is not offered: sherpa-onnx already runs Whisper, and a second native runtime would double
+  the native surface.
+
+#### 2.2.1 Measured on this machine
+
+Installing a model runs a short benchmark on the machine itself (`fy voice bench`, also run by
+**Install**): bundled synthetic and LibriSpeech-style clips through the real worker under its real caps,
+recording load time, real-time factor at C threads, peak memory, and word error rate. Rows show those
+numbers — "on this machine: 9× faster than speaking, 1.1 GB, 2.4 % WER" — so "much heavier models" is
+a choice made from evidence on the owner's own hardware. Numbers only, no words; kept in the state home.
 
 ### 2.3 How the native code gets onto the machine, and how the worker runs
 
@@ -274,7 +300,7 @@ voice-worker` with Bun's advanced IPC — not a source path, which a compiled in
   models but is unproven for Parakeet's int8 graph. A Parakeet decode on a modern CPU is expected to be
   a small fraction of real time already (B2 measures it), so a GPU buys little for one speaker. Unlike
   the browser, the machine's GPU breaks nothing in the page.
-- **Memory:** ~1 GB while loaded (Parakeet). The worker loads on the first stream — warm-up begins the
+- **Memory:** ~1 GB while loaded for Parakeet v3; a heavier model needs more (its measured peak, §2.2.1). The worker loads on the first stream — warm-up begins the
   moment voice chat or the mic opens, so loading overlaps speaking — and **exits after 10 minutes with
   no stream**, which frees all of it, as the WebRTC engine already hands its threads back when idle. It
   **does not load** when the host's available memory is under the model's size plus 1 GB of headroom
@@ -294,7 +320,7 @@ user@UID.service
 ├── <product>-fleet.slice               agents (I36)
 │   └── <product>-agent-<id>-<n>.scope
 └── <product>-voice.slice               the speech worker; CPUWeight per D3 (against fleet.slice)
-    └── <product>-voice-<n>.scope       CPUQuota = C × 100 %, MemoryMax = 1.5 GB
+    └── <product>-voice-<n>.scope       CPUQuota = C × 100 %, MemoryMax = model peak × 1.25 (≥ 1.5 GB)
 ```
 
 **One number, C, the voice cores:** `min(4, max(1, floor(cores / 4)))` — 2 on an 8-core laptop, 4 on the
@@ -312,18 +338,22 @@ count alone does not bound the process: idle pools may spin. Two things do:
 2. **On Linux, the kernel enforces it.** When `cgroupsSupported` (Linux and the unified hierarchy; that
    function does not check that a user manager answers, so the launch itself is the test), the scope
    gets a hard `CPUQuota` of C cores — whatever threads exist, the worker gets at most C cores of CPU
-   time — and a `MemoryMax` of 1.5 GB. **Who wins under contention (D3) is a weight on the slice, not the
+   time — and a `MemoryMax` of the chosen model's measured peak × 1.25 (floor 1.5 GB, §2.2). **Who wins under contention (D3) is a weight on the slice, not the
    scope**: siblings share CPU by their own weights, and the scope is the only child of
-   `<product>-voice.slice`, so a weight on it would decide nothing. D3 (a) sets `<product>-voice.slice`
-   to `CPUWeight=50` against the fleet slice's default 100; (b) sets it to 200. The fleet slice and
-   `app.slice` keep their weights, so the daemon's share is unchanged. B2's contention test runs
+   `<product>-voice.slice`, so a weight on it would decide nothing. **Decided, D3 (b): voice gets the CPU
+   under load** — `<product>-voice.slice` gets `CPUWeight=200` against the fleet slice's default 100,
+   so a talking owner is served first and builds slow a little. **Ferrets are never starved to failure**:
+   the hard quota still stops voice at C cores (at most 4, and a quarter of the machine), so the fleet
+   always keeps the rest. The fleet slice and `app.slice` keep their weights, so the daemon's share is
+   unchanged. B2's contention test runs
    against these real units. A worker over its memory is killed by the kernel; the daemon sees the exit, says so on the stream, and
    the next stream starts a fresh worker.
 
 **Where cgroups cannot be used** (macOS; Linux without cgroup v2; a user manager that refuses
 `systemd-run`): the worker still starts — unlike an agent launch, which fails — with the thread count,
-`setpriority` nice +5 and an RSS watchdog in the daemon that stops it over 1.5 GB. **These are best
-effort, not hard reservations**: nice only lowers priority, and a watchdog acts after the fact. Settings
+the daemon's own priority (nice 0 — D3 (b): voice is not pushed behind the agents) and an RSS watchdog
+in the daemon that stops it over the model's memory cap. **These are best effort, not hard
+reservations**: nothing stops voice using its C threads flat out, and a watchdog acts after the fact. Settings
 and `fyd --check` say "not hard-capped on this machine" with the reason. (Refusing voice instead is a
 one-line change if the owner prefers it.) macOS's `taskpolicy -b` is not used: it throttles far below
 real time.
@@ -671,16 +701,21 @@ voice chat on it; C is the on-device speed opt-in and is independent of B.
 
 ### Phase B — the machine engine and voice chat (cards &F1269, &F1268)
 
-| #      | Outcome (one line)                                                                                                                                                                                                                                                     | How the owner tries it                                                                                                                                      |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **B0** | The endpointer, energy math and Live machine move to `@ferretry/protocol`; no behaviour change.                                                                                                                                                                        | Nothing visible.                                                                                                                                            |
-| **B1** | The `voice` capability (person-only routes, Sharing's predicate pinned, upgrade test), `voice.yaml` engine block, **Install on my machine** (pinned, hashed, resumable), `fy voice status`, `fyd --check` voice line.                                                  | Settings › Voice › On my machine › Install. `fy voice status` says installed, with sizes.                                                                   |
-| **B2** | The worker: `fyd voice-worker`, sherpa from the install dir, C threads, `<product>-voice.slice` (Linux) / best effort elsewhere, idle exit, contention and over-memory tests, Silero trial; `fy voice test <file.wav>`; numbers on Linux x64, arm64 and Apple Silicon. | `fy voice test clip.wav` prints the words and the time. `systemctl --user status <product>-voice.slice` shows the caps while it runs.                       |
-| **B3** | `/v1/voice/stream` (fixed-shape units, bounds) and **dictation on my machine, after stop**; relay §10 and the privacy wording updated; forwarded-loopback test.                                                                                                        | On the phone over the relay, pick On my machine, dictate, Stop: the review box shows the words.                                                             |
-| **B4** | **Dictation on my machine, in real time** (chunked Parakeet; streaming Zipformer if installed).                                                                                                                                                                        | In real time with On my machine: words appear as you pause, as fast on the phone as on the desktop.                                                         |
-| **B5** | **Voice chat on the machine**: the panel replaces the composer; the daemon endpoints, counts down and sends (nonce freshness, stable send id); §1.4's states; the on-device take path removed from voice chat; "preview" dropped.                                      | Voice chat: talk, watch the countdown, hear the reply. Airplane mode early in a countdown: nothing is sent, and the words are offered back when you reopen. |
-| B6     | Constant-bitrate Opus uplink where WebCodecs has it (about 7× less uplink).                                                                                                                                                                                            | Settings › Machine › Performance shows the voice stream's bytes per minute drop.                                                                            |
-| B7     | Optional machine GPU (CUDA / CoreML), only if B2's numbers say it matters.                                                                                                                                                                                             | —                                                                                                                                                           |
+| #       | Outcome (one line)                                                                                                                                                                                                                                                               | How the owner tries it                                                                                                                                      |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **B0**  | The endpointer, energy math and Live machine move to `@ferretry/protocol`; no behaviour change.                                                                                                                                                                                  | Nothing visible.                                                                                                                                            |
+| **B1a** | The `voice` capability: Sharing's predicate pinned, the D5 one-time repair, upgrade tests.                                                                                                                                                                                       | Settings › Devices shows Voice; your phone has it after the update.                                                                                         |
+| **B1b** | The machine model catalog (§2.2) and **Install**: runtime + model download, pinned, hashed, resumable; `fy voice install / remove / status`; `voice.yaml` engine block.                                                                                                          | Settings › Voice › On my machine › Install. `fy voice status` says installed, with sizes.                                                                   |
+| **B2a** | The worker host: `fyd voice-worker`, queue, caps, idle exit (no engine).                                                                                                                                                                                                         | `fyd --check` shows the voice line.                                                                                                                         |
+| **B2b** | The sherpa-onnx recognizer from the install dir (batch and streaming), C threads, `<product>-voice.slice` (Linux) / best effort elsewhere, idle exit, contention and over-memory tests, Silero trial; `fy voice test <file.wav>`; numbers on Linux x64, arm64 and Apple Silicon. | `fy voice test clip.wav` prints the words and the time. `systemctl --user status <product>-voice.slice` shows the caps while it runs.                       |
+| **B2c** | `fy voice bench`: each installed model measured on this machine (§2.2.1); numbers shown on its row.                                                                                                                                                                              | Install Whisper turbo: its row says how fast it runs here.                                                                                                  |
+| **B2d** | The machine **model chooser** in Settings › Voice › On my machine, using the &F1266 compact picker rows.                                                                                                                                                                         | Pick a heavier model, Install, see its measured numbers.                                                                                                    |
+| **B3a** | The wire format in `@ferretry/protocol` and `docs/voice-stream.md`.                                                                                                                                                                                                              | Nothing visible.                                                                                                                                            |
+| **B3**  | `/v1/voice/stream` (fixed-shape units, bounds) and **dictation on my machine, after stop**; relay §10 and the privacy wording updated; forwarded-loopback test.                                                                                                                  | On the phone over the relay, pick On my machine, dictate, Stop: the review box shows the words.                                                             |
+| **B4**  | **Dictation on my machine, in real time** (chunked with the batch model; the streaming model if installed).                                                                                                                                                                      | In real time with On my machine: words appear as you pause, as fast on the phone as on the desktop.                                                         |
+| **B5**  | **Voice chat on the machine**: the panel replaces the composer; the daemon endpoints, counts down and sends (nonce freshness, stable send id); §1.4's states; the on-device take path removed from voice chat; "preview" dropped.                                                | Voice chat: talk, watch the countdown, hear the reply. Airplane mode early in a countdown: nothing is sent, and the words are offered back when you reopen. |
+| B6      | Constant-bitrate Opus uplink where WebCodecs has it (about 7× less uplink).                                                                                                                                                                                                      | Settings › Machine › Performance shows the voice stream's bytes per minute drop.                                                                            |
+| B7      | Optional machine GPU (CUDA / CoreML), only if B2's numbers say it matters.                                                                                                                                                                                                       | —                                                                                                                                                           |
 
 ### Phase C — Faster on this device (card &F1269)
 
@@ -697,8 +732,11 @@ B6, B7 and C3 are optional; the plan is complete at B5 plus C2.
 ## 9. Declared gaps and risks
 
 - **NixOS** cannot load the downloaded Linux prebuilds without `nix-ld` or a Nix-built sherpa-onnx (§2.3).
-- **CPU and memory caps are hard only on Linux with a working user manager.** Elsewhere: thread count,
-  nice and a watchdog — best effort, and said so in Settings and `fyd --check`.
+- **CPU and memory caps are hard only on Linux with a working user manager.** Elsewhere: thread count
+  and a watchdog — best effort, and said so in Settings and `fyd --check`.
+- **Heavier models are only as good as this machine.** A model that runs slower than speech here makes
+  voice chat fail its turns (`engine_behind`); the chooser shows the measured speed before it is picked
+  for voice chat, and warns when it is under real time.
 - **iOS** keeps the &F137 limits: no background mic, half-duplex, Listen tap after each reply.
 - **Babble** (café, TV) still fails the loudness endpointer, on device and on the machine; Silero is a
   trial for café clatter only.
@@ -713,36 +751,13 @@ B6, B7 and C3 are optional; the plan is complete at B5 plus C2.
 
 ---
 
-## 10. Owner decisions
+## 10. Owner decisions — decided 2026-11-05 (!A415)
 
-Short. Each has a recommendation; none is decided by this plan.
-
-**D1 — Which speech models go on your machine?**
-
-- (a) **Parakeet v3 (487 MB) for everything; a small streaming model only if you pick "Streaming" for dictation.** ← **recommended**: one accurate model does voice chat and most dictation; the streaming one is there for whoever wants words mid-sentence.
-- (b) Parakeet only; real-time dictation is always chunked.
-
-**D2 — How does the engine get onto your machine?**
-
-- (a) **Downloaded when you press Install** (pinned and checked). ← **recommended**: only people who use it pay for it; `fyd` gains a little code, no model and no native library.
-- (b) Built into every `fyd` release (bigger for everyone, and needs a custom static build).
-
-**D3 — When the machine is busy, who gets the CPU?**
-
-- (a) **Your ferrets.** Voice gets a smaller share under load (a weight on its slice), so voice chat may lag during heavy builds; it is limited to C cores (2 on a laptop, 4 on the big box) either way. ← **recommended**: matches "don't affect the main agent".
-- (b) Your voice. Builds slow slightly while you talk.
-
-**D4 — What do ferrets write for the spoken part?**
-
-- (a) **`<say>…</say>`** ← **recommended**: reads as "say this"; no clash with the "voice" feature name.
-- (b) `<voice>…</voice>`.
-
-**D5 — Should devices you already paired get `voice` turned on?**
-
-- (a) **Yes, once, only for devices that already hold every other capability** (the same one-time, journalled repair Sharing got; a device anyone restricted by hand is left alone). ← **recommended**: your phone works on day one; restricted devices stay restricted.
-- (b) No: each device starts off; turn it on in Settings › Devices or with `fy device grant <device> voice --use`.
-
-**D6 — How does "Several cores" switch on for just one device?**
-
-- (a) **The app's own service worker adds the headers for that device, after one reload.** ← **recommended**: same address, same pairing, one switch to undo.
-- (b) A separate `/fast/` part of the site (links and the installed app's start page must stay inside it).
+| #   | Decision                                                                                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | **(a)** Parakeet v3 is the default for everything; a streaming model only for real-time "Streaming" dictation. **Plus:** the machine gets a model chooser with heavier suggestions (§2.2). |
+| D2  | **(a)** Runtime and model are downloaded on Install, pinned and checked.                                                                                                                   |
+| D3  | **(b)** Your voice gets the CPU under load (slice weight 200 vs 100); voice stays capped at C cores so ferrets are never starved to failure (§2.5). Not the plan's recommendation.         |
+| D4  | **(a)** `<say>…</say>`.                                                                                                                                                                    |
+| D5  | **(a)** Existing devices get `voice` once, only those holding every other capability.                                                                                                      |
+| D6  | **(a)** Per-device isolation through the app's own signed service worker, after one reload.                                                                                                |
