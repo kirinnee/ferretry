@@ -167,7 +167,9 @@ describe('copying secrets between machines', () => {
       importId: offer.importId,
       sourceDaemonId: sourceIdentity.daemonId,
       imported: ['API_KEY'],
+      filed: ['API_KEY'],
       replaced: [],
+      kept: [],
     });
     should((await target.directory.list()).map(secret => secret.name)).deepEqual(['API_KEY']);
     should(await new SecretVault(target.documents, new FakeSecretCipher()).values()).deepEqual(
@@ -175,7 +177,7 @@ describe('copying secrets between machines', () => {
     );
   });
 
-  it('should say which copied secrets replaced one the target already held', async () => {
+  it('should say which copied secrets replaced one the target already held, when the request named them', async () => {
     // Arrange
     const { source, target } = await pair();
     await target.directory.put('API_KEY', 'old-value-here');
@@ -183,11 +185,88 @@ describe('copying secrets between machines', () => {
     const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'DB_PASSWORD') });
 
     // Act
-    const result = await target.imports.complete(offer.importId, bundle);
+    const result = await target.imports.complete(offer.importId, bundle, named('API_KEY'));
 
     // Assert
     should(result.imported).deepEqual(['API_KEY', 'DB_PASSWORD']);
+    should(result.filed).deepEqual(['API_KEY', 'DB_PASSWORD']);
     should(result.replaced).deepEqual(['API_KEY']);
+    should(result.kept).deepEqual([]);
+  });
+
+  describe('replacing a key this machine already holds', () => {
+    const OLD_API = 'old-api-value-here';
+    const OLD_DB = 'old-db-value-here';
+    const OLD_OTHER = 'untouched-other-value';
+
+    /** A target that holds three keys; the source holds two of them under new values. */
+    async function held() {
+      const clock = new Clock();
+      const { source, target } = await pair(clock);
+      await target.directory.put('API_KEY', OLD_API);
+      await target.directory.put('DB_PASSWORD', OLD_DB);
+      await target.directory.put('OTHER_KEY', OLD_OTHER);
+      clock.ms += 60_000;
+      const offer = await target.imports.open();
+      const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'DB_PASSWORD') });
+      const values = async () => await new SecretVault(target.documents, new FakeSecretCipher()).values();
+      return { target, offer, bundle, values, clock };
+    }
+
+    it('should leave every held key exactly as it was when the request names none', async () => {
+      // Arrange
+      const { target, offer, bundle, values } = await held();
+      const before = [...(await values())];
+      const listed = await target.directory.list();
+
+      // Act
+      const result = await target.imports.complete(offer.importId, bundle);
+
+      // Assert — nothing was written: not a value, not an `updatedAt`.
+      should([...(await values())]).deepEqual(before);
+      should(await target.directory.list()).deepEqual(listed);
+      should(result.kept).deepEqual(['API_KEY', 'DB_PASSWORD']);
+      should(result.filed).deepEqual([]);
+      should(result.replaced).deepEqual([]);
+    });
+
+    it('should overwrite the named keys and nothing else', async () => {
+      // Arrange
+      const { target, offer, bundle, values } = await held();
+      const before = await target.directory.list();
+
+      // Act
+      const result = await target.imports.complete(offer.importId, bundle, named('API_KEY'));
+
+      // Assert
+      const after = await values();
+      should(after.get('API_KEY')).equal(VALUE);
+      should(after.get('DB_PASSWORD')).equal(OLD_DB);
+      should(after.get('OTHER_KEY')).equal(OLD_OTHER);
+      should(result.replaced).deepEqual(['API_KEY']);
+      should(result.kept).deepEqual(['DB_PASSWORD']);
+      should(result.filed).deepEqual(['API_KEY']);
+      const stamp = (name: string, list: typeof before) => list.find(secret => secret.name === name)?.updatedAt;
+      const now = await target.directory.list();
+      should(stamp('DB_PASSWORD', now)).equal(stamp('DB_PASSWORD', before));
+      should(stamp('OTHER_KEY', now)).equal(stamp('OTHER_KEY', before));
+      should(stamp('API_KEY', now)).not.equal(stamp('API_KEY', before));
+    });
+
+    it('should file a name that is new here whether or not it is listed, and ignore a listed name it does not carry', async () => {
+      // Arrange
+      const { source, target } = await pair();
+      const offer = await target.imports.open();
+      const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
+
+      // Act
+      const result = await target.imports.complete(offer.importId, bundle, named('API_KEY', 'DB_PASSWORD'));
+
+      // Assert
+      should(result.filed).deepEqual(['API_KEY']);
+      should(result.replaced).deepEqual([]);
+      should((await target.directory.list()).map(secret => secret.name)).deepEqual(['API_KEY']);
+    });
   });
 
   it('should refuse a replayed bundle: an import is accepted once', async () => {

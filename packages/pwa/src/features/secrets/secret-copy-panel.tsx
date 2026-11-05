@@ -100,7 +100,12 @@ export function SecretCopyPanel(props: SecretCopyPanelProps) {
     if (source === null || target === null || picks.length === 0) return;
     setPhase({ kind: 'copying' });
     try {
-      const result = await copySecrets(await createClient(source), await createClient(target), picks);
+      // The rows say "replaces" for a key the target holds; ticking it is the person's word, so those names — and
+      // only those — are sent as the ones the copy may overwrite.
+      const replace = picks.filter(
+        name => lists.kind === 'ready' && lists.rows.some(row => row.name === name && row.onTarget),
+      );
+      const result = await copySecrets(await createClient(source), await createClient(target), picks, replace);
       setPhase({ kind: 'done', result });
       onCopied?.(result);
     } catch (error) {

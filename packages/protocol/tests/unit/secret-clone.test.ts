@@ -102,8 +102,27 @@ describe('a sealed bundle', () => {
   });
 
   it('should answer an import with the names that arrived and those that replaced one', () => {
-    const result = { importId: IMPORT_ID, sourceDaemonId: SOURCE, imported: [API_KEY], replaced: [] };
+    const result = {
+      importId: IMPORT_ID,
+      sourceDaemonId: SOURCE,
+      imported: [API_KEY],
+      filed: [],
+      replaced: [],
+      kept: [API_KEY],
+    };
     expect(SecretImportResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('should name the keys it may overwrite in a replace list, and refuse a sign-in token there', () => {
+    const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    expect(SecretImportCompleteRequestSchema.parse({ bundle: BUNDLE, replace: [API_KEY] }).replace).toEqual([API_KEY]);
+    expect(SecretImportCompleteRequestSchema.parse({ bundle: BUNDLE }).replace).toBeUndefined();
+    expect(SecretImportCompleteRequestSchema.safeParse({ bundle: BUNDLE, replace: [signIn] }).success).toBe(false);
+    expect(SecretImportCompleteRequestSchema.safeParse({ bundle: BUNDLE, replace: [API_KEY, API_KEY] }).success).toBe(
+      false,
+    );
+    expect(SecretImportCompleteRequestSchema.safeParse({ bundle: BUNDLE, replace: [] }).success).toBe(false);
+    expect(SecretImportCompleteRequestSchema.safeParse({ bundle: BUNDLE, replace: ['lower'] }).success).toBe(false);
   });
 });
 

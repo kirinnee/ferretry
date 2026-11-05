@@ -938,7 +938,52 @@ all of them** — so the cloned runtime works on arrival. Unticking the box copi
 preview's needs list still offers a field for each. If the passkey is declined the clone is kept, the Done page
 says the keys were not copied, and the _Copy secrets from…_ list offers them again. Only keys the sending machine
 actually holds and the receiving one does not are asked for; a key already on the receiving machine is never
-replaced by Clone.
+replaced by Clone **unless the person ticks it as newer on the source** — below.
+
+#### A key that is newer on the source
+
+A copy from a machine you copied from before offers a key again only when the sending machine has changed it
+since. Each key a copy filed is remembered by two instants in the receiving machine's `clone-base.json` (the
+record of what was last copied, `docs/design/account-model.md` §3.8): when the **source** last changed it and when
+**this** machine did, both read from the secrets lists' `updatedAt`, the second taken right after the sealed copy
+landed. A later copy compares those two with what each list says now:
+
+| The source…                     | This machine…            | Outcome   | In the Clone preview                                                    |
+| ------------------------------- | ------------------------ | --------- | ----------------------------------------------------------------------- |
+| holds it, this machine does not | —                        | `missing` | Copied with its login, as always                                        |
+| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_; copy it?** — ticked                   |
+| changed it since the copy       | changed it too           | `both`    | The same row, **unticked**, saying _You changed it on this machine too_ |
+| has not changed it              | (anything)               | `same`    | Nothing is offered                                                      |
+
+A key both machines hold that no earlier copy recorded is `same`: nothing says the source moved on.
+
+**Metadata only.** The comparison is of timestamps. **No value, and no digest of a value, is ever compared, stored or
+returned** — not by the review route (`POST /v1/fleet/clone/review`, which answers key _names_ and an outcome), not by the
+record, not in a log. The browser sends the sending machine's list of names and instants and nothing else; the receiving
+machine reads its own list for its half. A browser that lied about an instant could only make a key look `same` (nothing
+offered) or `newer` (offered, and still needing the passkey): it cannot make a value move.
+
+**Replacing a key needs all three of:**
+
+1. **the passkey on the source** — the same sealed copy as above, one passkey for all of its keys;
+2. **the import naming the key in its `replace` list** — `POST /v1/secrets/imports/:importId` takes `{ bundle, replace? }`.
+   The receiving machine's filing step overwrites **only the names in `replace`**. A name it already holds that is not
+   listed is left exactly as it is, byte for byte (it comes back as `kept`, and is not written, not even its
+   `updatedAt`); a name in `replace` that the bundle does not carry or this machine does not hold changes nothing. An
+   absent `replace` replaces nothing. `replace` is made of `CloneableSecretName`, so a sign-in token's name is refused
+   when the request is parsed, before anything is filed. The Clone preview puts a key in `replace` only if the person
+   ticked its row; the **Copy secrets** panel puts in the names its rows mark _replaces_, which the person ticked;
+3. **`secrets.configure` on the receiving machine** — filing is the `configure` axis of the `secrets` capability like
+   every other write to the store, so a governed device without it is refused before the filing step runs, and one with it
+   steps up (`docs/grants.md`).
+
+Only names in `replace` can be overwritten, and only keys of the secret store can be named there. A sign-in token
+is unrepresentable; a saved login's stored credential, the account defaults and the 2FA factors live in other stores a
+bundle cannot name, so no `replace` list reaches them; and a login's own configuration (including which
+`${secret:NAME}` it references) is never touched by a key copy. A key that is not named is not touched — including every
+other key an API-key login uses. After the sealed copy lands, the browser reports the keys it filed
+(`POST /v1/fleet/clone/keys`, `fleet.configure`) with the sending machine's instant for each; the receiving machine
+adds its own instant from its own list, and only for a key it holds and a source it already has a record of.
 
 ### How it works
 
@@ -957,11 +1002,13 @@ structurally unable to read what it carries.
 3. **The receiving machine opens it once** (`POST /v1/secrets/imports/:importId`) and files the values in
    its own store. The import is spent by the first attempt, success or not, so a replayed, tampered,
    re-pointed or late bundle is refused and no bundle can be tried twice against the same key. It checks
-   that every value fits before writing any: a half-copied set is worse than none.
+   that every value fits before writing any: a half-copied set is worse than none. A name it already holds is
+   overwritten **only if the request's `replace` list names it**; every other held name is kept untouched, and the
+   answer says which names were `filed`, `replaced` and `kept`.
 
 Both ends write the **same import id** to their security log — `secrets.used` (`clone-export`) on the
 sending machine and `secrets.changed` (`clone-import`) on the receiving one — with the names, never a
-value. The three wire shapes are `packages/protocol/src/lib/secret-clone.ts`; the two halves are
+value. The receiving one records the names it actually `filed`, not the ones it kept. The three wire shapes are `packages/protocol/src/lib/secret-clone.ts`; the two halves are
 `SecretImportService` and `SecretExportService` in `packages/daemon/src/lib/secrets/clone.ts`.
 
 **The export is the sixth vault holder**, and it keeps the rule the other five keep: it returns nothing

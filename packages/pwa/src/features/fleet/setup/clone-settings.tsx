@@ -20,6 +20,7 @@ import {
   type CloneLogin,
   type CloneNeed,
   type CloneOutcomeItem,
+  type NewerKey,
   needsSentence,
   outcomeSentence,
 } from './clone-settings-model.ts';
@@ -85,6 +86,56 @@ export function CloneItemsChoices({
   );
 }
 
+/**
+ * One API key the source changed since the last copy: "A newer X exists on <source>; copy it?". Ticked when only
+ * the source changed it; unticked, and saying so, when this machine changed it too. Copying it replaces the one
+ * here and asks for the passkey on the source, in the same sealed copy as the other keys.
+ */
+function NewerKeyRow({
+  keyName,
+  both,
+  picked,
+  onToggle,
+  machineName,
+  sourceName,
+}: {
+  readonly keyName: string;
+  readonly both: boolean;
+  readonly picked: boolean;
+  readonly onToggle: (on: boolean) => void;
+  readonly machineName: string;
+  readonly sourceName: string;
+}) {
+  const boxId = useId();
+  return (
+    <label
+      htmlFor={boxId}
+      className="kt-panel relative flex min-h-control min-w-0 cursor-pointer items-start gap-3 p-panel has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+      data-clone-newer-key={keyName}
+    >
+      <input
+        id={boxId}
+        type="checkbox"
+        className="mt-1 shrink-0 accent-[var(--accent)]"
+        checked={picked}
+        onChange={event => onToggle(event.currentTarget.checked)}
+        data-clone-newer-key-copy=""
+      />
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="text-row font-semibold text-fg">
+          A newer <span className="font-mono">{keyName}</span> exists on {sourceName}; copy it?
+        </span>
+        <span className="text-cell text-muted">
+          {both
+            ? `You changed it on ${machineName} too, so it is not ticked. Copying replaces yours. `
+            : `Copying replaces the one on ${machineName}. `}
+          {sourceName} asks for your passkey.
+        </span>
+      </span>
+    </label>
+  );
+}
+
 /** The row's verdict in words, above its reason: the status mark alone is only spoken. */
 function LoginDetail({ word, tone, text }: { readonly word: string; readonly tone: string; readonly text: string }) {
   return (
@@ -107,6 +158,9 @@ export function CloneLoginsSection({
   keys,
   copyKeys,
   onCopyKeys,
+  newer = [],
+  newerPicks = [],
+  onToggleNewer,
 }: {
   readonly logins: readonly CloneLogin[];
   readonly machineName: string;
@@ -115,9 +169,13 @@ export function CloneLoginsSection({
   readonly keys: readonly string[];
   readonly copyKeys: boolean;
   readonly onCopyKeys: (on: boolean) => void;
+  /** Keys the source changed since the last copy, each offered on its own: copying one replaces the one here. */
+  readonly newer?: readonly NewerKey[];
+  readonly newerPicks?: readonly string[];
+  readonly onToggleNewer?: (name: string, on: boolean) => void;
 }) {
   const boxId = useId();
-  if (logins.length === 0 && keys.length === 0) return null;
+  if (logins.length === 0 && keys.length === 0 && newer.length === 0) return null;
   const sending = copyKeys && keys.length > 0;
   return (
     <SetupSection title="Logins and keys" name="clone-logins">
@@ -166,6 +224,17 @@ export function CloneLoginsSection({
           />
         ),
       )}
+      {newer.map(key => (
+        <NewerKeyRow
+          key={key.name}
+          keyName={key.name}
+          both={key.outcome === 'both'}
+          picked={newerPicks.includes(key.name)}
+          onToggle={on => onToggleNewer?.(key.name, on)}
+          machineName={machineName}
+          sourceName={sourceName}
+        />
+      ))}
       {keys.length === 0 ? null : (
         <label
           htmlFor={boxId}

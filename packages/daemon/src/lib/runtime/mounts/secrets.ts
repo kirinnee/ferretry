@@ -978,9 +978,9 @@ async function openImport(imports: SecretImportService, context: RouteContext): 
 async function completeImport(imports: SecretImportService, context: RouteContext): Promise<ApiResponse> {
   ownerOnly(context, 'file secrets into the store');
   const importId = pathImportId(context);
-  const { bundle } = await parseBody(context.request, SecretImportCompleteRequestSchema);
+  const { bundle, replace } = await parseBody(context.request, SecretImportCompleteRequestSchema);
   try {
-    return jsonResponse(SecretImportResultSchema.parse(await imports.complete(importId, bundle)));
+    return jsonResponse(SecretImportResultSchema.parse(await imports.complete(importId, bundle, replace)));
   } catch (error) {
     return reraise(error);
   }

@@ -15,6 +15,7 @@ import {
   builtInPresets,
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
+  serializeCloneBase,
   parseCloneBase,
   serializeCloneBase,
   originKeyOfId,
@@ -33,6 +34,8 @@ import {
   DEFAULT_LEARNING_CONFIG,
   DEFAULT_VOICE_CONFIG,
   DEFAULT_WARDEN_CONFIG,
+  CloneableSecretNameSchema,
+  mcpOAuthSecretNames,
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
@@ -164,6 +167,8 @@ interface World {
     folders: Record<string, FolderReading>;
     skillItems: () => Promise<readonly string[]>;
     secretNames: () => Promise<readonly string[]>;
+    /** When each secret last changed, by name; one fixed instant for a name not listed. */
+    secretUpdatedAt: Record<string, string>;
     putSecret: (name: string, value: string) => Promise<void>;
     apply: () => Promise<unknown>;
     emails: () => Promise<FleetCredentialView[]>;
@@ -200,6 +205,7 @@ function world(
     },
     skillItems: async () => [],
     secretNames: async () => [...secrets.keys()],
+    secretUpdatedAt: {},
     putSecret: async (name, value) => {
       secrets.set(name, value);
     },
@@ -276,6 +282,11 @@ function world(
     },
     secrets: {
       names: async () => await state.secretNames(),
+      held: async () =>
+        (await state.secretNames()).map(name => ({
+          name,
+          updatedAt: state.secretUpdatedAt[name] ?? '2026-11-01T00:00:00.000Z',
+        })),
       put: async (name, value) => await state.putSecret(name, value),
     },
     readFolder: async path => state.folders[path] ?? { files: [], skipped: [] },
@@ -2647,5 +2658,164 @@ intervalMinutes: 5
 describe('createFleetSetupSubsystem', () => {
   it('should build the service the composition root mounts', () => {
     should(world().service).be.instanceOf(FleetSetupService);
+  });
+});
+
+describe('API keys newer on the source', () => {
+  const SOURCE = 'daemon-source';
+  const KEY_API = 'cccccccccccccccccccccccccc';
+  const T0 = '2026-10-01T08:00:00.000Z';
+  const T1 = '2026-10-10T08:00:00.000Z';
+  const T2 = '2026-10-20T08:00:00.000Z';
+  const FAKE_VALUE = 'sk-live-0123456789abcdef';
+  const OTHER_VALUE = 'correct-horse-battery-staple';
+
+  /** A bundle whose one API-key login names GLM_API_KEY, from a source whose id the browser verified. */
+  const bundle = (): Record<string, unknown> =>
+    FleetCloneBundleSchema.parse({
+      format: 'ferretry-clone',
+      version: 2,
+      daemon: SOURCE,
+      keys: { 'login/glm': KEY_API },
+      machine: 'source',
+      exportedAt: '2026-10-13T07:00:00.000Z',
+      credentials: [
+        { id: 'glm', harness: 'claude', store: 'environment', env: { ANTHROPIC_AUTH_TOKEN: '${secret:GLM_API_KEY}' } },
+      ],
+      components: {},
+      profiles: { default: { layers: [] } },
+      runtimes: { agent: { credential: 'glm', profile: 'default', agent: false } },
+      files: [],
+      notCopied: [],
+    }) as unknown as Record<string, unknown>;
+
+  const recordOf = (keys?: Record<string, { sourceUpdatedAt: string; targetUpdatedAt: string }>) =>
+    serializeCloneBase({
+      version: 1,
+      sources: {
+        [SOURCE]: {
+          name: 'Studio Mac',
+          verified: 'browser',
+          lastCopiedAt: T0,
+          items: { [KEY_API]: { kind: 'login', sourceName: 'glm', digest: 'f'.repeat(64), bytes: 1, login: 'glm' } },
+          ...(keys === undefined ? {} : { keys }),
+        },
+      },
+    });
+
+  /** A target that holds these keys (with these timestamps) and already has a record of the source. */
+  const target = (held: Record<string, string>, keys?: Parameters<typeof recordOf>[0]): World => {
+    const w = world({ overrides: { daemonId: () => 'daemon-target' } });
+    for (const [name, at] of Object.entries(held)) {
+      w.secrets.set(name, name === 'GLM_API_KEY' ? FAKE_VALUE : OTHER_VALUE);
+      w.state.secretUpdatedAt[name] = at;
+    }
+    w.state.assets[BASE_PATH] = recordOf(keys);
+    return w;
+  };
+  const review = async (w: World, sourceSecrets: { name: string; updatedAt: string }[] | undefined) =>
+    await w.service.reviewClone({
+      bundle: bundle(),
+      source: { daemonId: SOURCE },
+      ...(sourceSecrets === undefined ? {} : { sourceSecrets }),
+    });
+
+  it('should call a key the bundle names, that the source holds and this machine does not, missing', async () => {
+    const answer = await review(target({}), [{ name: 'GLM_API_KEY', updatedAt: T1 }]);
+    should(answer.keys).deepEqual([{ name: 'GLM_API_KEY', outcome: 'missing' }]);
+  });
+
+  it('should call it newer when the source changed it since the last copy and this machine did not', async () => {
+    const w = target({ GLM_API_KEY: T1 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T2 }])).keys).deepEqual([
+      { name: 'GLM_API_KEY', outcome: 'newer' },
+    ]);
+  });
+
+  it('should call it both when this machine changed it too, and same when the source did not', async () => {
+    const w = target({ GLM_API_KEY: T2 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T2 }])).keys).deepEqual([
+      { name: 'GLM_API_KEY', outcome: 'both' },
+    ]);
+    should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T1 }])).keys).deepEqual([
+      { name: 'GLM_API_KEY', outcome: 'same' },
+    ]);
+  });
+
+  it('should answer no keys when the caller gave no list from the source, and never name a sign-in', async () => {
+    const w = target({ GLM_API_KEY: T1 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    should((await review(w, undefined)).keys).deepEqual([]);
+    const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    const answer = await review(w, [
+      { name: signIn, updatedAt: T2 },
+      { name: 'GLM_API_KEY', updatedAt: T1 },
+    ]);
+    should(answer.keys.map(key => key.name)).deepEqual(['GLM_API_KEY']);
+  });
+
+  it('should read no value, change nothing and answer no value or digest of one', async () => {
+    const w = target({ GLM_API_KEY: T1, OTHER_KEY: T1 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    const before = recordOf({ GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    const answer = await review(w, [{ name: 'GLM_API_KEY', updatedAt: T2 }]);
+    const text = JSON.stringify(answer);
+    should(text).not.containEql(FAKE_VALUE);
+    should(text).not.containEql(OTHER_VALUE);
+    should(w.state.baseWrites).deepEqual([]);
+    should(w.state.assets[BASE_PATH]).equal(before);
+  });
+
+  describe('recording the timestamps once the sealed copy has landed', () => {
+    it("should record the source's instant and this machine's own, read from its own list", async () => {
+      // Arrange
+      const w = target({ GLM_API_KEY: T2 });
+
+      // Act
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        keys: [{ name: CloneableSecretNameSchema.parse('GLM_API_KEY'), sourceUpdatedAt: T1 }],
+      });
+
+      // Assert
+      should(answer).deepEqual({ recorded: 1 });
+      const written = parseCloneBase(w.state.baseWrites[0]);
+      should(written.sources[SOURCE]?.keys).deepEqual({ GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T2 } });
+      should(w.state.baseWrites[0]).not.containEql(FAKE_VALUE);
+      // The rest of the record is exactly as it was.
+      should(written.sources[SOURCE]?.items).deepEqual(parseCloneBase(recordOf()).sources[SOURCE]?.items);
+    });
+
+    it('should skip a key this machine does not hold, and write nothing when none is left', async () => {
+      const w = target({});
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        keys: [{ name: CloneableSecretNameSchema.parse('GLM_API_KEY'), sourceUpdatedAt: T1 }],
+      });
+      should(answer).deepEqual({ recorded: 0 });
+      should(w.state.baseWrites).deepEqual([]);
+    });
+
+    it('should record nothing for a source this machine has no record of', async () => {
+      const w = target({ GLM_API_KEY: T2 });
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: 'daemon-stranger' },
+        keys: [{ name: CloneableSecretNameSchema.parse('GLM_API_KEY'), sourceUpdatedAt: T1 }],
+      });
+      should(answer).deepEqual({ recorded: 0 });
+      should(w.state.baseWrites).deepEqual([]);
+    });
+
+    it('should make the next review see the key as the same, until the source changes it again', async () => {
+      const w = target({ GLM_API_KEY: T2 });
+      await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        keys: [{ name: CloneableSecretNameSchema.parse('GLM_API_KEY'), sourceUpdatedAt: T1 }],
+      });
+      should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T1 }])).keys).deepEqual([
+        { name: 'GLM_API_KEY', outcome: 'same' },
+      ]);
+      should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: '2026-10-25T08:00:00.000Z' }])).keys).deepEqual([
+        { name: 'GLM_API_KEY', outcome: 'newer' },
+      ]);
+    });
   });
 });

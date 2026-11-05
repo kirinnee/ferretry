@@ -127,16 +127,33 @@ export const SecretExportResponseSchema = z.strictObject({
 });
 export type SecretExportResponse = z.infer<typeof SecretExportResponseSchema>;
 
-/** Completing an import on the target. */
-export const SecretImportCompleteRequestSchema = z.strictObject({ bundle: SealedSecretBundleSchema });
+/**
+ * Completing an import on the target.
+ *
+ * `replace` is the ONLY way a copy overwrites a secret this machine already holds: the names listed there,
+ * and no others. A name held here and not listed is left exactly as it is (it comes back in `kept`), so a
+ * bundle can never overwrite what the person did not name. It is made of {@link CloneableSecretNameSchema},
+ * so a sign-in's name is refused when the request is parsed. Absent means none.
+ */
+export const SecretImportCompleteRequestSchema = z.strictObject({
+  bundle: SealedSecretBundleSchema,
+  replace: SecretCloneNamesSchema.optional(),
+});
 export type SecretImportCompleteRequest = z.infer<typeof SecretImportCompleteRequestSchema>;
 
-/** What arrived: every name copied, and which of those replaced a secret this machine already held. */
+/**
+ * What arrived: every name the bundle carried; `replaced` — the ones that overwrote a secret this machine
+ * held, because the request named them in `replace`; `kept` — the ones this machine already held that the
+ * request did not name, so they were left as they were. A name in neither was new here and was filed.
+ */
 export const SecretImportResultSchema = z.strictObject({
   importId: SecretImportIdSchema,
   sourceDaemonId: DaemonIdSchema,
   imported: SecretCloneNamesSchema,
+  /** Every name that was written here: new, or named in `replace`. What the security log records. */
+  filed: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
   replaced: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
+  kept: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
 });
 export type SecretImportResult = z.infer<typeof SecretImportResultSchema>;
 

@@ -140,7 +140,7 @@ export interface FileFleetSetupOptions {
   readonly daemonId: () => string | undefined;
   /** The secret store's management side. */
   readonly secrets: {
-    list(): Promise<readonly { readonly name: string }[]>;
+    list(): Promise<readonly { readonly name: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<unknown>;
   };
 }
@@ -174,6 +174,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     tools: options.tools,
     secrets: {
       names: async () => (await options.secrets.list()).map(secret => secret.name),
+      held: async () => (await options.secrets.list()).map(({ name, updatedAt }) => ({ name, updatedAt })),
       put: async (name, value) => {
         await options.secrets.put(name, value);
       },

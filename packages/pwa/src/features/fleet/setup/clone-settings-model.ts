@@ -384,6 +384,51 @@ export const keysToCopy = (needs: readonly CloneNeed[], source: readonly string[
         )
         .map(need => need.secretName);
 
+// ── Keys that are newer on the source ───────────────────────────────────────────────────────────
+
+/** A key the source changed since the last copy: `both` means this machine changed it too. */
+export interface NewerKey {
+  readonly name: string;
+  readonly outcome: 'newer' | 'both';
+}
+
+/**
+ * The keys to offer again, from the review's outcomes (decided on this machine from `updatedAt` timestamps
+ * alone — no value is compared). `missing` keys are not here: they are copied with the logins, as always.
+ */
+export const newerKeys = (keys: readonly { readonly name: string; readonly outcome: string }[]): readonly NewerKey[] =>
+  keys.flatMap(key =>
+    key.outcome === 'newer' || key.outcome === 'both' ? [{ name: key.name, outcome: key.outcome }] : [],
+  );
+
+/** Which offered keys start ticked: the ones only the source changed. A key changed here too starts unticked. */
+export const startingNewerPicks = (offered: readonly NewerKey[]): readonly string[] =>
+  offered.filter(key => key.outcome === 'newer').map(key => key.name);
+
+/**
+ * What the sealed copy carries: the keys the logins need (`missing` here) and the newer ones the person ticked.
+ * `replace` is ONLY the newer ones ticked — the one list of names the copy may overwrite on this machine; a held
+ * key the person did not tick is never in it. A name that was not offered is never in either.
+ */
+export const keysToSeal = (
+  missing: readonly string[],
+  offered: readonly NewerKey[],
+  picked: readonly string[],
+): { readonly names: readonly string[]; readonly replace: readonly string[] } => {
+  const replace = offered.filter(key => picked.includes(key.name)).map(key => key.name);
+  return { names: [...new Set([...missing, ...replace])], replace };
+};
+
+/** The instants to remember for the keys a sealed copy filed: the source's `updatedAt` for each, when it listed one. */
+export const filedKeyStamps = (
+  filed: readonly string[],
+  stamps: ReadonlyMap<string, string>,
+): readonly { readonly name: string; readonly sourceUpdatedAt: string }[] =>
+  filed.flatMap(name => {
+    const sourceUpdatedAt = stamps.get(name);
+    return sourceUpdatedAt === undefined ? [] : [{ name, sourceUpdatedAt }];
+  });
+
 /** "JEV_API_KEY, GROQ_API_KEY, Claude Code login (claude-work)" — what is not held yet, or `null`. */
 export const needsSentence = (needs: readonly CloneNeed[]): string | null => {
   const missing = needs.filter(need => !need.held);

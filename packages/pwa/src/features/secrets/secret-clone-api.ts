@@ -56,10 +56,16 @@ export async function exportSecrets(
   );
 }
 
-/** On the TARGET: file the bundle into its store, once. */
+/**
+ * On the TARGET: file the bundle into its store, once.
+ *
+ * `replace` names the keys this machine already holds that the copy may overwrite — and no others: a held key
+ * that is not named stays exactly as it is. Parsed here too, so a sign-in token's name cannot be put on this wire.
+ */
 export async function completeSecretImport(
   target: SecretCloneClient,
   bundle: SealedSecretBundle,
+  replace: readonly string[] = [],
 ): Promise<SecretImportResult> {
   return await target.request(
     `${SECRET_IMPORTS_URL}/${encodeURIComponent(bundle.importId)}`,
@@ -67,7 +73,10 @@ export async function completeSecretImport(
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ bundle }),
+      body: JSON.stringify({
+        bundle,
+        ...(replace.length === 0 ? {} : { replace: SecretCloneNamesSchema.parse(replace) }),
+      }),
     },
   );
 }
@@ -77,8 +86,9 @@ export async function copySecrets(
   source: SecretCloneClient,
   target: SecretCloneClient,
   names: readonly string[],
+  replace: readonly string[] = [],
 ): Promise<SecretImportResult> {
   const offer = await openSecretImport(target);
   const { bundle } = await exportSecrets(source, offer, names);
-  return await completeSecretImport(target, bundle);
+  return await completeSecretImport(target, bundle, replace);
 }

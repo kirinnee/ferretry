@@ -10,13 +10,17 @@ import {
   cloneLoginTargets,
   cloneNeeds,
   controlsChange,
+  filedKeyStamps,
   keysToCopy,
+  keysToSeal,
   type MatchableLogin,
   needsAfterCopy,
   needsSentence,
+  newerKeys,
   outcomeSentence,
   providersNeededBy,
   signInLink,
+  startingNewerPicks,
   type SourceSettingsFile,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
@@ -611,5 +615,46 @@ describe('the Done screen sign-in needs', () => {
     expect(needsAfterCopy([ghost, secret], new Map(), after)).toEqual([ghost, secret]);
     expect(signInLink(ghost, new Map(), after)).toBeUndefined();
     expect(signInLink(signIn('codex-here'), new Map(), after)).toBe('codex-here');
+  });
+});
+
+describe('keys that are newer on the source', () => {
+  const outcomes = [
+    { name: 'A_KEY', outcome: 'missing' },
+    { name: 'B_KEY', outcome: 'newer' },
+    { name: 'C_KEY', outcome: 'both' },
+    { name: 'D_KEY', outcome: 'same' },
+  ];
+
+  it('should offer only the newer and the changed-on-both-sides, not the missing or the same', () => {
+    expect(newerKeys(outcomes)).toEqual([
+      { name: 'B_KEY', outcome: 'newer' },
+      { name: 'C_KEY', outcome: 'both' },
+    ]);
+  });
+
+  it('should start the newer one ticked and the one changed here too unticked', () => {
+    expect(startingNewerPicks(newerKeys(outcomes))).toEqual(['B_KEY']);
+  });
+
+  it('should seal the missing keys and the newer ones ticked, and let only the ticked ones overwrite', () => {
+    const offered = newerKeys(outcomes);
+    expect(keysToSeal(['A_KEY'], offered, ['B_KEY'])).toEqual({ names: ['A_KEY', 'B_KEY'], replace: ['B_KEY'] });
+    expect(keysToSeal([], offered, [])).toEqual({ names: [], replace: [] });
+  });
+
+  it('should never let a name that was not offered overwrite anything', () => {
+    const offered = newerKeys(outcomes);
+    expect(keysToSeal(['A_KEY'], offered, ['A_KEY', 'D_KEY', 'ANYTHING'])).toEqual({ names: ['A_KEY'], replace: [] });
+  });
+
+  it('should remember the source’s instant for each key that was filed, and for no other', () => {
+    const stamps = new Map([
+      ['B_KEY', '2026-10-20T08:00:00.000Z'],
+      ['C_KEY', '2026-10-21T08:00:00.000Z'],
+    ]);
+    expect(filedKeyStamps(['B_KEY', 'GONE_KEY'], stamps)).toEqual([
+      { name: 'B_KEY', sourceUpdatedAt: '2026-10-20T08:00:00.000Z' },
+    ]);
   });
 });

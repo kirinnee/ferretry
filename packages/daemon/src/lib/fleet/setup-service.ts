@@ -48,6 +48,9 @@ import {
   parseAccountModel,
   planCloneSettings,
   reviewCloneSettings,
+  classifyCloneKeys,
+  CloneSourceIdSchema,
+  recordCloneKeys,
   assignOriginKeys,
   type AccountModel,
   type CloneAnalysis,
@@ -107,10 +110,13 @@ import {
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetCloneFile,
+  type FleetCloneKeysRecordRequest,
+  type FleetCloneKeysRecordResult,
   type FleetCloneReview,
   type FleetCloneReviewRequest,
   type FleetSetupRefusalCode,
   type FleetSetupScan,
+  secretReferencesIn,
   type FleetSetupTool,
   type FleetToolInstallRequest,
   type FleetToolInstallResult,
@@ -235,6 +241,8 @@ export interface FleetSetupServiceDeps {
   /** The secret store's management side: names in, values in, never a value out. */
   readonly secrets: {
     names(): Promise<readonly string[]>;
+    /** Each secret's name and when it last changed: what a repeat copy compares. Never a value. */
+    held(): Promise<readonly { readonly name: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<void>;
   };
   /** One folder, read as text: a host skill folder, or a folder of the asset tree. */
@@ -860,7 +868,10 @@ export class FleetSetupService {
     const reading = await this.#read();
     try {
       const found = await this.#analyseUpdate(request, reading);
-      const review = reviewCloneUpdate(found.analysis);
+      const review = {
+        ...reviewCloneUpdate(found.analysis),
+        keys: [...(await this.#reviewKeys(request, found))],
+      };
       if (found.settings === undefined) return review;
       // A settings file this caller may not write is listed as refused, with the sentence the apply would give.
       const settings = reviewCloneSettings(found.settings.analysis).map(entry => {
@@ -874,6 +885,47 @@ export class FleetSetupService {
       }
       throw error;
     }
+  }
+
+  /**
+   * How each API key the copy concerns stands, from `updatedAt` alone (docs/secrets.md): the keys the bundle's
+   * logins name and the ones the last copy from this source recorded, against what the source listed. Nothing
+   * is answered without a list from the source, and no value is read to answer.
+   */
+  async #reviewKeys(request: FleetCloneReviewRequest, found: UpdateAnalysis): Promise<FleetCloneReview['keys']> {
+    if (request.sourceSecrets === undefined) return [];
+    const wanted = found.bundle.credentials.flatMap(credential =>
+      secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}])),
+    );
+    return classifyCloneKeys({
+      source: request.sourceSecrets,
+      target: await this.deps.secrets.held().catch(() => []),
+      wanted,
+      recorded: found.source === undefined ? undefined : cloneBaseFor(found.record, found.source)?.keys,
+    });
+  }
+
+  /**
+   * `POST /v1/fleet/clone/keys`: a sealed copy has filed these keys here; remember when the source last changed
+   * each and when this machine did (read from its own store, never from the caller). Only the `keys` of a source
+   * this machine already has a record of change; a source with no record, a key this machine does not hold and a
+   * name no copy can carry are skipped. Timestamps only: nothing here reads a secret.
+   */
+  async recordCloneKeys(request: FleetCloneKeysRecordRequest): Promise<FleetCloneKeysRecordResult> {
+    if (!CloneSourceIdSchema.safeParse(request.source.daemonId).success) return { recorded: 0 };
+    const held = new Map((await this.deps.secrets.held()).map(secret => [secret.name, secret.updatedAt] as const));
+    const recorded = request.keys.flatMap(key => {
+      const targetUpdatedAt = held.get(key.name);
+      return targetUpdatedAt === undefined
+        ? []
+        : [{ name: key.name, sourceUpdatedAt: key.sourceUpdatedAt, targetUpdatedAt }];
+    });
+    const path = this.#cloneBasePath();
+    const before = parseCloneBase(await this.deps.cloneBase.read(path));
+    const after = recordCloneKeys(before, request.source.daemonId, recorded);
+    if (after === before) return { recorded: 0 };
+    await this.deps.cloneBase.write(path, serializeCloneBase(after));
+    return { recorded: recorded.length };
   }
 
   /** The three-way comparison of a bundle against this machine, from what is on disk now. */

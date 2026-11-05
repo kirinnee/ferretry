@@ -227,7 +227,7 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
     credentials,
     tools: { plans: () => [], install: async () => [] },
     secrets: {
-      list: async () => [...secrets.keys()].map(name => ({ name })),
+      list: async () => [...secrets.keys()].map(name => ({ name, updatedAt: '2026-11-01T00:00:00.000Z' })),
       put: async (name, value) => {
         secrets.set(name, value);
       },

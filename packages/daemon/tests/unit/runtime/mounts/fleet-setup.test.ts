@@ -7,13 +7,15 @@
  * refusal becomes, and that a write is handed the caller's governance rather than deciding it.
  */
 import { describe, it } from 'bun:test';
-import type {
-  FleetCloneBundle,
-  FleetCloneReview,
-  FleetCloneReviewRequest,
-  FleetSetupScan,
-  FleetToolInstallRequest,
-  FleetToolInstallResult,
+import {
+  type FleetCloneBundle,
+  type FleetCloneKeysRecordRequest,
+  type FleetCloneReview,
+  type FleetCloneReviewRequest,
+  type FleetSetupScan,
+  type FleetToolInstallRequest,
+  type FleetToolInstallResult,
+  mcpOAuthSecretNames,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
@@ -97,6 +99,7 @@ function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetS
         calls.forgets.push(source);
         return source === 'studio';
       },
+      recordCloneKeys: async () => ({ recorded: 0 }),
       executors: {} as FleetSetupSubsystem['executors'],
       ...overrides,
     },
@@ -218,6 +221,45 @@ describe('the fleet setup mount', () => {
       should(bad.status).equal(400);
     }
     should(calls.reviews).equal(0);
+  });
+
+  it('should record the keys a sealed copy filed through the shared schema, and refuse a sign-in token by name', async () => {
+    // Arrange
+    const seen: FleetCloneKeysRecordRequest[] = [];
+    const { subsystem } = stub({
+      recordCloneKeys: async request => {
+        seen.push(request);
+        return { recorded: request.keys.length };
+      },
+    });
+    const body = {
+      source: { daemonId: 'daemon-source' },
+      keys: [{ name: 'GLM_API_KEY', sourceUpdatedAt: '2026-10-10T08:00:00.000Z' }],
+    };
+    const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+
+    // Act
+    const answered = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/keys', JSON.stringify(body)));
+    const refused = await dispatcher(subsystem).dispatch(
+      post(
+        '/v1/fleet/clone/keys',
+        JSON.stringify({ ...body, keys: [{ name: signIn, sourceUpdatedAt: body.keys[0]?.sourceUpdatedAt }] }),
+      ),
+    );
+    const extra = await dispatcher(subsystem).dispatch(
+      post(
+        '/v1/fleet/clone/keys',
+        JSON.stringify({ ...body, keys: [{ ...body.keys[0], value: 'sk-live-0123456789' }] }),
+      ),
+    );
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(answered)).deepEqual({ recorded: 1 });
+    should(seen).have.length(1);
+    should(refused.status).equal(400);
+    should(extra.status).equal(400);
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {

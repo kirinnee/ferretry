@@ -122,7 +122,7 @@ async function machine(
       } as never,
       tools: { plans: () => [], install: async () => [] },
       secrets: {
-        list: async () => [...secrets.keys()].map(secret => ({ name: secret })),
+        list: async () => [...secrets.keys()].map(secret => ({ name: secret, updatedAt: '2026-11-01T00:00:00.000Z' })),
         put: async (secret, value) => {
           secrets.set(secret, value);
         },

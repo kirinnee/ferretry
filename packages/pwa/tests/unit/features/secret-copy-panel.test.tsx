@@ -84,6 +84,8 @@ const RESULT = (imported: readonly string[], replaced: readonly string[] = []): 
   importId: IMPORT_ID,
   sourceDaemonId: SOURCE_ID,
   imported: named(...imported),
+  filed: named(...imported),
+  kept: [],
   replaced: named(...replaced),
 });
 
@@ -324,6 +326,11 @@ describe('the secret copy panel', () => {
     expect(picking).toContain('replaces laptop’s');
     expect(text(renderer)).toContain('1 of them replaced the one already there.');
     expect(calls.filter(call => call.machine === 'laptop').map(call => call.path)).toContain('/v1/secrets/imports');
+    // The row said "replaces", so the person's tick is the word that lets the copy overwrite — that name, only.
+    expect(calls.find(call => call.path === `/v1/secrets/imports/${IMPORT_ID}`)?.body).toEqual({
+      bundle: BUNDLE,
+      replace: ['API_KEY'],
+    });
   });
 
   it('should keep the picks and say why when the copy is refused', async () => {

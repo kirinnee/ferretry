@@ -64,6 +64,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/fleet/export operator any',
   'POST /v1/fleet/clone/review operator person',
   'POST /v1/fleet/clone/forget operator person',
+  'POST /v1/fleet/clone/keys operator person',
   'POST /v1/fleet/login operator person',
   'GET /v1/fleet/login/:flowId operator person',
   'POST /v1/fleet/login/:flowId operator person',

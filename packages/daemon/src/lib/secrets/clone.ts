@@ -236,7 +236,11 @@ export class SecretImportService {
    * retried against the same key would be an oracle somebody could query. Whatever happens below the
    * lookup, this import id is never accepted again.
    */
-  async complete(importId: SecretImportId, bundle: SealedSecretBundle): Promise<SecretImportResult> {
+  async complete(
+    importId: SecretImportId,
+    bundle: SealedSecretBundle,
+    replace: readonly CloneableSecretName[] = [],
+  ): Promise<SecretImportResult> {
     const nowMs = Date.parse(this.deps.clock.now());
     if (this.#spent.has(importId))
       throw new SecretCloneError('import_spent', 'this import was already used; open a new one to copy again');
@@ -253,7 +257,7 @@ export class SecretImportService {
     if (open.expiresAtMs <= nowMs)
       throw new SecretCloneError('offer_expired', 'this import timed out before the secrets arrived; open a new one');
     const entries = await this.#openBundle(open, bundle);
-    return await this.#file(importId, bundle.sourceDaemonId, entries);
+    return await this.#file(importId, bundle.sourceDaemonId, entries, new Set(replace));
   }
 
   async #openBundle(open: OpenImport, bundle: SealedSecretBundle): Promise<readonly [CloneableSecretName, string][]> {
@@ -288,11 +292,18 @@ export class SecretImportService {
     return parsed.data.entries;
   }
 
-  /** Files every value, after checking ALL of them fit — a half-copied set is worse than none. */
+  /**
+   * Files every value, after checking ALL of them fit — a half-copied set is worse than none.
+   *
+   * A name this machine already holds is overwritten ONLY when `replace` names it; every other held name is
+   * left exactly as it is, byte for byte (it comes back as `kept`). A name in `replace` that the bundle does
+   * not carry, or that this machine does not hold, changes nothing: the list can only narrow what is written.
+   */
   async #file(
     importId: SecretImportId,
     sourceDaemonId: DaemonId,
     entries: readonly [CloneableSecretName, string][],
+    replace: ReadonlySet<CloneableSecretName>,
   ): Promise<SecretImportResult> {
     const held = new Set((await this.deps.directory.list()).map(secret => secret.name));
     const added = entries.filter(([name]) => !held.has(name)).length;
@@ -301,9 +312,18 @@ export class SecretImportService {
         'full',
         `copying these would take this machine past ${MAX_SECRETS_PER_DAEMON} secrets; nothing was copied`,
       );
-    for (const [name, value] of entries) await this.deps.directory.put(name, value);
+    const kept = entries.map(([name]) => name).filter(name => held.has(name) && !replace.has(name));
+    const skipped = new Set(kept);
+    for (const [name, value] of entries) if (!skipped.has(name)) await this.deps.directory.put(name, value);
     const imported = entries.map(([name]) => name);
-    return { importId, sourceDaemonId, imported, replaced: imported.filter(name => held.has(name)) };
+    return {
+      importId,
+      sourceDaemonId,
+      imported,
+      filed: imported.filter(name => !skipped.has(name)),
+      replaced: imported.filter(name => held.has(name) && replace.has(name)),
+      kept,
+    };
   }
 
   /** Forgets expired imports, and spent ids that could no longer be presented. */
