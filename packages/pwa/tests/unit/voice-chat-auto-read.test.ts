@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   armOnSend,
+  arrivalsAfter,
   IDLE_WATCH,
   LEGACY_QUIET_MS,
   observeTurn,
@@ -19,6 +20,7 @@ const look = (watch: TurnWatch, input: Partial<WatchInput>) =>
     quietMs: 10_000,
     visible: true,
     fresh: 0,
+    sentRow: false,
     ...input,
   });
 /** The daemon's clock for a short, readable scenario. */
@@ -27,7 +29,7 @@ const at = (ms: number): number => T + ms;
 describe('observeTurn: a turn we saw end', () => {
   test("working arms the watch with the daemon's own start time", () => {
     const step = look(IDLE_WATCH, { turn: 'working', turnAt: T - 5000 });
-    expect(step.watch.armed).toEqual({ startedAt: T - 5000, after: T - 5000, floor: null });
+    expect(step.watch.armed).toEqual({ startedAt: T - 5000, after: T - 5000, floor: null, row: true, working: true });
     expect(step.fire).toBeNull();
   });
 
@@ -79,25 +81,47 @@ describe('observeTurn: a turn we saw end', () => {
 });
 
 describe('armOnSend: our own send is a token taken at its initiation', () => {
-  test('a send with nothing seen compares with the send time; the stale your-turn is ignored, the real one reads', () => {
+  test('a send with nothing seen has no floor and no proof; nothing is compared with the browser clock', () => {
     const armed = armOnSend(IDLE_WATCH, T);
-    expect(armed.armed).toEqual({ startedAt: T, after: T, floor: null });
-    expect(look(armed, { turn: 'your-turn', turnAt: T - 8000 }).fire).toBeNull();
-    expect(look(armed, { turn: 'your-turn', turnAt: T + 6000 }).fire).toEqual({ startedAt: T, outcome: 'your-turn' });
+    expect(armed.armed).toEqual({ startedAt: T, after: null, floor: null, row: false, working: false });
+    // A stale your-turn is no transition; it is the old turn, and never consumes the token.
+    const stale = look(armed, { turn: 'your-turn', turnAt: T - 8000 });
+    expect(stale.fire).toBeNull();
+    expect(stale.watch.armed).not.toBeNull();
+    // With the send's own row, the next dated completion is the reply.
+    expect(look(armed, { turn: 'your-turn', turnAt: T + 6000, sentRow: true }).fire).toEqual({
+      startedAt: T,
+      outcome: 'your-turn',
+    });
   });
 
-  test("seeing working re-bases the start on the daemon's clock", () => {
+  test("seeing working after the floor proves the turn and re-bases the start on the daemon's clock", () => {
     const armed = armOnSend(IDLE_WATCH, T);
     const working = look(armed, { turn: 'working', turnAt: T - 30_000 });
-    expect(working.watch.armed).toEqual({ startedAt: T - 30_000, after: T - 30_000, floor: null });
+    expect(working.watch.armed).toEqual({
+      startedAt: T - 30_000,
+      after: T - 30_000,
+      floor: null,
+      row: false,
+      working: true,
+    });
+    expect(look(working.watch, { turn: 'your-turn', turnAt: T - 20_000 }).fire?.outcome).toBe('your-turn');
   });
 
   test('a non-finite time arms with none', () => {
-    expect(armOnSend(IDLE_WATCH, Number.NaN).armed).toEqual({ startedAt: null, after: null, floor: null });
+    expect(armOnSend(IDLE_WATCH, Number.NaN).armed).toEqual({
+      startedAt: null,
+      after: null,
+      floor: null,
+      row: false,
+      working: false,
+    });
   });
 
-  test('with no usable turn time on the reply, it fires once settled', () => {
-    expect(look(armOnSend(IDLE_WATCH, T), { turn: 'your-turn', turnAt: null }).fire?.outcome).toBe('your-turn');
+  test('with no usable turn time on the reply, it fires once settled and proven', () => {
+    const armed = armOnSend(IDLE_WATCH, T);
+    expect(look(armed, { turn: 'your-turn', turnAt: null }).fire).toBeNull();
+    expect(look(armed, { turn: 'your-turn', turnAt: null, sentRow: true }).fire?.outcome).toBe('your-turn');
   });
 
   test('REGRESSION (round 1, #2): a newer send drops the pending reading of the older turn', () => {
@@ -108,7 +132,7 @@ describe('armOnSend: our own send is a token taken at its initiation', () => {
     const resent = armOnSend(pending.watch, at(3000));
     // The stale completion@2000, long since settled, is not the reply to the new send.
     expect(look(resent, { turn: 'your-turn', turnAt: at(2000), quietMs: 9000 }).fire).toBeNull();
-    // Nor does a replayed snapshot of the old working@1000 move the new turn's start.
+    // Nor does a replayed snapshot of the old working@1000 move the new turn's start or prove anything.
     expect(look(resent, { turn: 'working', turnAt: at(1000) }).watch.armed).toEqual(resent.armed);
     // The new turn does.
     const next = look(resent, { turn: 'working', turnAt: at(3500) }).watch;
@@ -118,16 +142,48 @@ describe('armOnSend: our own send is a token taken at its initiation', () => {
     });
   });
 
-  test('a fast reply that arrives before anything else was looked at is still the reply to the send', () => {
+  test('a fast reply is the reply to the send once the send’s own row is there, even before working is seen', () => {
     const seen = look(IDLE_WATCH, { turn: 'your-turn', turnAt: at(2000) }).watch;
     const armed = armOnSend(seen, at(3000));
-    expect(armed.armed).toEqual({ startedAt: at(3000), after: at(2000), floor: at(2000) });
+    expect(armed.armed).toEqual({ startedAt: at(3000), after: at(2000), floor: at(2000), row: false, working: false });
     // The daemon's clock runs behind the browser's: its next your-turn is dated 2500, before the send time.
-    expect(look(armed, { turn: 'your-turn', turnAt: at(2500) }).fire).toEqual({
+    expect(look(armed, { turn: 'your-turn', turnAt: at(2500), sentRow: true }).fire).toEqual({
       startedAt: at(3000),
       outcome: 'your-turn',
     });
-    expect(look(armed, { turn: 'your-turn', turnAt: at(2000) }).fire).toBeNull();
+    // The state it was already in is never a completion.
+    expect(look(armed, { turn: 'your-turn', turnAt: at(2000), sentRow: true }).fire).toBeNull();
+  });
+
+  test('the send’s row, once seen, stays seen while a turn still working', () => {
+    const armed = armOnSend(IDLE_WATCH, at(3000));
+    // A working at or before the floor is the old turn; the row alone proves the send.
+    const withRow = look(armed, { turn: 'working', turnAt: null, sentRow: true });
+    expect(withRow.watch.armed).toEqual({ ...armed.armed!, row: true });
+    expect(look(withRow.watch, { turn: 'your-turn', turnAt: at(4000) }).fire?.outcome).toBe('your-turn');
+  });
+
+  test('REGRESSION (round 2, #4): the previous turn’s completion arriving late, after the send, is not the reply', () => {
+    // Last snapshot your-turn@1000; the previous completion@2000 arrives delayed; the send is pressed at 3000.
+    const seen = look(IDLE_WATCH, { turn: 'your-turn', turnAt: at(1000) }).watch;
+    const armed = armOnSend(seen, at(3000));
+    const delayed = look(armed, { turn: 'your-turn', turnAt: at(2000), quietMs: 9000 });
+    expect(delayed.fire).toBeNull();
+    // It did not consume the token; the floor moved up to it.
+    expect(delayed.watch.armed).toEqual({ ...armed.armed!, floor: at(2000), after: at(2000) });
+    // Seen again, even with the row now there, it is the state it was already in.
+    expect(look(delayed.watch, { turn: 'your-turn', turnAt: at(2000), sentRow: true }).fire).toBeNull();
+    // The new turn proves itself and its own completion is read.
+    const next = look(delayed.watch, { turn: 'working', turnAt: at(3500) }).watch;
+    expect(look(next, { turn: 'your-turn', turnAt: at(5000) }).fire?.outcome).toBe('your-turn');
+  });
+
+  test('REGRESSION (round 2, #2): pressing send reads nothing by itself, however long the session was idle', () => {
+    const idle = look(IDLE_WATCH, { turn: 'your-turn', turnAt: at(1000) }).watch;
+    const armed = armOnSend(idle, at(60_000));
+    const step = look(armed, { turn: 'your-turn', turnAt: at(1000), quietMs: 60_000 });
+    expect(step.fire).toBeNull();
+    expect(step.watch.armed).not.toBeNull();
   });
 });
 
@@ -158,7 +214,13 @@ describe('observeTurn: consumed is consumed', () => {
   test('a send after a reading compares with the newest state it consumed', () => {
     const working = look(IDLE_WATCH, { turn: 'working', turnAt: at(1000) }).watch;
     const fired = look(working, { turn: 'your-turn', turnAt: at(2000) }).watch;
-    expect(armOnSend(fired, at(1500)).armed).toEqual({ startedAt: at(1500), after: at(2000), floor: at(2000) });
+    expect(armOnSend(fired, at(1500)).armed).toEqual({
+      startedAt: at(1500),
+      after: at(2000),
+      floor: at(2000),
+      row: false,
+      working: false,
+    });
   });
 });
 
@@ -194,7 +256,7 @@ describe('observeTurn: a completion seen while the tab is hidden is never read',
 describe('observeTurn: an old daemon with no turnState', () => {
   test('after a new record, working arms with no date; not working fires only after 3 s of quiet', () => {
     const armed = look(IDLE_WATCH, { turn: 'working', turnAt: null, legacy: true, fresh: 1 }).watch;
-    expect(armed.armed).toEqual({ startedAt: null, after: null, floor: null });
+    expect(armed.armed).toEqual({ startedAt: null, after: null, floor: null, row: true, working: true });
     const early = look(armed, { turn: 'your-turn', legacy: true, quietMs: 1200, fresh: 1 });
     expect(early.fire).toBeNull();
     expect(early.recheckInMs).toBe(LEGACY_QUIET_MS - 1200);
@@ -213,10 +275,26 @@ describe('observeTurn: an old daemon with no turnState', () => {
     expect(idle.watch.armed).toBeNull();
   });
 
-  test('a send still arms an old daemon, and reads with no new-record proof', () => {
+  test('a send arms an old daemon, and reads only once its own row has shown AND the guess was seen working', () => {
     const armed = armOnSend(IDLE_WATCH, T);
-    expect(look(armed, { turn: 'working', legacy: true }).watch.armed).toEqual(armed.armed);
-    expect(look(armed, { turn: 'your-turn', legacy: true, quietMs: LEGACY_QUIET_MS }).fire?.outcome).toBe('your-turn');
+    const idle = { turn: 'your-turn' as const, legacy: true, quietMs: LEGACY_QUIET_MS };
+    // REGRESSION (round 2, #2): pre-send idle is not a completion; nothing fires at the press.
+    expect(look(armed, idle).fire).toBeNull();
+    expect(look(armed, { ...idle, sentRow: true }).fire).toBeNull();
+    // Working seen, but the row has not shown: still nothing.
+    const working = look(armed, { turn: 'working', legacy: true });
+    expect(working.watch.armed).toEqual({ ...armed.armed!, working: true });
+    expect(look(working.watch, idle).fire).toBeNull();
+    // Both: the quiet counts and it reads.
+    const both = look(working.watch, { turn: 'working', legacy: true, sentRow: true });
+    expect(look(both.watch, idle).fire?.outcome).toBe('your-turn');
+    expect(look(both.watch, { ...idle, quietMs: 1000 }).recheckInMs).toBe(LEGACY_QUIET_MS - 1000);
+  });
+
+  test('a legacy completion with no proof does not move any floor', () => {
+    const armed = armOnSend(IDLE_WATCH, T);
+    const step = look(armed, { turn: 'your-turn', legacy: true, turnAt: T + 5 });
+    expect(step.watch.armed).toEqual(armed.armed);
   });
 
   test('a legacy reading uses up its records: a flicker of the pane arms nothing new', () => {
@@ -229,6 +307,21 @@ describe('observeTurn: an old daemon with no turnState', () => {
 
   test('a legacy guess ignores any stray turn time', () => {
     const armed = look(IDLE_WATCH, { turn: 'working', turnAt: T, legacy: true, fresh: 1 }).watch;
-    expect(armed.armed).toEqual({ startedAt: null, after: null, floor: null });
+    expect(armed.armed).toEqual({ startedAt: null, after: null, floor: null, row: true, working: true });
+  });
+});
+
+describe('arrivalsAfter: live records are those APPENDED after the ones held at open', () => {
+  test('counts rows after the anchor, whatever their dates; history prepended before it counts nothing', () => {
+    expect(arrivalsAfter(['a', 'b', 'c'], 'b')).toBe(1);
+    expect(arrivalsAfter(['a', 'b', 'c'], 'c')).toBe(0);
+    expect(arrivalsAfter(['old2', 'old1', 'a', 'b'], 'b')).toBe(0);
+  });
+
+  test('is total: no anchor, or an anchor that is gone, counts none', () => {
+    expect(arrivalsAfter(['a', 'b'], undefined)).toBe(0);
+    expect(arrivalsAfter(['a', 'b'], null)).toBe(0);
+    expect(arrivalsAfter(['a', 'b'], 'zzz')).toBe(0);
+    expect(arrivalsAfter([], 'a')).toBe(0);
   });
 });

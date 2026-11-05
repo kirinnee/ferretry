@@ -72,6 +72,12 @@ export interface TurnStart {
 
 const isPersonsRow = (row: PickerRow): boolean => row.kind === 'user' && row.peer === undefined;
 
+/** The person's own row for a send: one of theirs that was NOT among `knownIds`, the rows the page held when send was pressed. */
+export const hasRowSince = (rows: readonly PickerRow[], knownIds: readonly string[]): boolean => {
+  const known = new Set(knownIds);
+  return rows.some(row => isPersonsRow(row) && !known.has(row.id));
+};
+
 /** The index of the row that begins the turn (-1: the whole conversation is the turn). */
 const boundaryOf = (rows: readonly PickerRow[], start: TurnStart, startedAt: number | null): number => {
   if (start.knownIds !== undefined) {

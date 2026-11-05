@@ -519,17 +519,25 @@ speakable rules above), and one reading stops at the **longest reading** setting
 1. It follows a turn **it saw**: the daemon's `turnState` was `working` (with a date) while the page was open, or this page just sent
    something. A session already at `your-turn` when the page opens, or when the switch is turned on, reads nothing.
 2. **A send is a token taken when the press happens**, before the request is awaited, remembering the newest turn state the page had
-   seen. The reply is judged against that token, never against "now": a turn that ends before the send is acknowledged is still read, a
-   newer send drops whatever was waiting on the older one, and a replayed snapshot of the earlier turn cannot move the new turn's start.
-3. It fires on the move to `your-turn` or `needs-input` with `turnStateAt` **later than the token** — the old `your-turn` still
-   showing in the moment after a send is not the reply.
+   seen. The reply is judged against that token, never against "now" or a browser clock: a turn that ends before the send is acknowledged is
+   still read, a newer send drops whatever was waiting on the older one, and a replayed snapshot of the earlier turn cannot move the new
+   turn's start. The press itself reads nothing, however long the session sat idle. The acknowledgement of a press the composer already
+   announced changes nothing — above all it does not stop a fast reply that is already being read.
+3. It fires on the move to `your-turn` or `needs-input` with `turnStateAt` **later than the token AND with evidence of the send's own
+   turn**: the person's own row that was not held at the press, or a `working` the daemon dated after the token. A `your-turn` that
+   merely turns up first (the previous turn's completion arriving late, the old one still showing) is the old turn: it only raises the
+   token's floor and is never read. (If the reply's `your-turn` is seen before the person's row has shown, that send is not read — silent,
+   never the wrong reply.)
 4. **Consumed is consumed:** each reading (or skip) moves a per-conversation watermark, so replaying the same working → your-turn pair after a
    reconnect reads nothing again.
 5. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
    nothing new before it reads.
-6. **Old daemon** (no `turnState`): it waits for 3 seconds with no new records and not working. That is a guess, and the setting says so.
-   An idle old daemon reads as "working" for a moment when the page opens, which proves nothing, so it only follows a send or a conversation
-   that gained a record after the page opened.
+6. **Old daemon** (no `turnState`): it waits for 3 seconds with no new records and not working, counted from the press at the earliest.
+   That is a guess, and the setting says so. An idle old daemon reads as "working" for a moment when the page opens, which proves nothing,
+   so it only follows a send (read once the person's row has shown _and_ the guess has been seen working since the press) or a
+   conversation that gained a live record after the page opened — a record _appended_ after the ones held at open, counted by position and
+   never by comparing a timestamp with the browser's clock, so history that hydrates late or a daemon clock running ahead cannot pass for
+   live.
 7. A turn that ends while the tab is **hidden** is never read: it is judged when it is seen (and the moment the tab hides cancels a
    pending reading), not when the timer would have fired, so coming back changes nothing.
 

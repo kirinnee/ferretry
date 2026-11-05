@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   NO_MESSAGE_WORDS,
+  hasRowSince,
   needsInputOf,
   type PickerRow,
   pickQuestion,
@@ -275,5 +276,17 @@ describe('needsInputOf: every needs-input prompt becomes read-only question data
     expect(
       pickQuestion(needsInputOf({ permissionRequest: { question: '   ' }, harnessDialog: { title: '' } })).markdown,
     ).toBe(QUESTION_ON_SCREEN_WORDS);
+  });
+});
+
+describe('hasRowSince: the send’s own row', () => {
+  test('is a row of the person’s that was not held when send was pressed — theirs only, never an agent’s or a peer’s', () => {
+    const held = [row('u1', 'user', 'first', 1), row('a1', 'assistant', 'reply', 2)];
+    const known = held.map(entry => entry.id);
+    expect(hasRowSince(held, known)).toBe(false);
+    expect(hasRowSince([...held, row('a2', 'assistant', 'more', 3)], known)).toBe(false);
+    expect(hasRowSince([...held, row('u9', 'user', 'from a ferret', 3, { peer: { from: 'x' } })], known)).toBe(false);
+    expect(hasRowSince([...held, row('u2', 'user', 'second', 3)], known)).toBe(true);
+    expect(hasRowSince([row('u2', 'user', 'second')], [])).toBe(true);
   });
 });

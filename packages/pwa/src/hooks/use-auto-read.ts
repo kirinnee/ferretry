@@ -26,17 +26,34 @@
  * before anything is awaited: that stops a reading under way, drops whatever was pending for an earlier
  * send, remembers the newest turn state and the rows the page already held, and arms the watch. The reply
  * is then judged against that token — never against "now" — so a turn that ends before the send is
- * acknowledged is still read, and the reply is cut at the person's own row, not at a clock.
+ * acknowledged is still read, and the reply is cut at the person's own row, not at a clock. The press reads
+ * nothing by itself (the quiet clock restarts at the press), and the send's acknowledgement — which arrives
+ * after the request — only stops a reading when no press announced it: otherwise it would cut off the fast
+ * reply it belongs to. What the page held at open (the last row) is the anchor for an old daemon's "live
+ * record"; records appended after it count, whatever their timestamps say.
  *
  * One reading at a time is the controller's own guarantee: starting this one replaces any other.
  * Nothing here logs, stores or sends the words it hands the controller.
  */
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
-import { armOnSend, IDLE_WATCH, observeTurn, type TurnWatch, type WatchedTurn } from '../lib/voice-chat/auto-read.ts';
+import {
+  armOnSend,
+  arrivalsAfter,
+  IDLE_WATCH,
+  observeTurn,
+  type TurnWatch,
+  type WatchedTurn,
+} from '../lib/voice-chat/auto-read.ts';
 import { readOptionsOf } from '../lib/voice-chat/live-settings.ts';
 import { IDLE } from '../lib/voice-chat/read-aloud.ts';
-import { type PickerRow, pickQuestion, pickReply, type QuestionLike } from '../lib/voice-chat/reply-picker.ts';
+import {
+  hasRowSince,
+  type PickerRow,
+  pickQuestion,
+  pickReply,
+  type QuestionLike,
+} from '../lib/voice-chat/reply-picker.ts';
 import { useDocumentVisible } from './use-document-visible.ts';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from './use-live-voice-settings.ts';
 import { useReadAloudController } from './use-read-aloud.ts';
@@ -90,8 +107,12 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   latest.current = { ...input, settings, visible };
   const watch = useRef<TurnWatch>(IDLE_WATCH);
   const token = useRef<SendToken | null>(null);
-  /** When this conversation was opened, and the records that came after it (an old daemon's only proof of a turn). */
-  const openedAt = useRef(now());
+  /**
+   * The last row the conversation held when it was opened (undefined: not seen yet): records APPENDED after
+   * it are what an old daemon's guess needs as proof of a turn. By position, not by timestamp, so neither
+   * clock skew nor history that hydrates late counts as live.
+   */
+  const anchor = useRef<string | undefined>(undefined);
   const changedAt = useRef(now());
   const seen = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,6 +139,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       return;
     }
     const at = now();
+    if (anchor.current === undefined) anchor.current = current.entries.at(-1)?.id;
     const step = observeTurn(watch.current, {
       now: at,
       turn: current.turn,
@@ -125,7 +147,11 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       legacy: current.legacy,
       quietMs: at - changedAt.current,
       visible: current.visible,
-      fresh: current.entries.filter(row => row.at !== undefined && row.at > openedAt.current).length,
+      fresh: arrivalsAfter(
+        current.entries.map(row => row.id),
+        anchor.current,
+      ),
+      sentRow: fired.knownIds !== undefined && hasRowSince(current.entries, fired.knownIds),
     });
     watch.current = step.watch;
     if (step.watch.armed === null) token.current = null;
@@ -151,7 +177,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     watch.current = IDLE_WATCH;
     token.current = null;
     mine.current = null;
-    openedAt.current = now();
+    anchor.current = undefined;
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
       timer.current = null;
@@ -181,6 +207,8 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     if (!current.settings.autoRead || !controller.supported) return;
     token.current = { knownIds: current.entries.map(row => row.id) };
     watch.current = armOnSend(watch.current, now());
+    // Quiet counts from the press, not from whenever the conversation last changed before it.
+    changedAt.current = now();
     evaluate();
   }, [controller, evaluate, now, stop]);
 
@@ -192,14 +220,18 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   useEffect(() => {
     if (sendSignal === firstSend.current) return;
     firstSend.current = sendSignal;
-    stop();
+    // The acknowledgement of a press `beginSend` already announced: that send is armed, and a fast reply to it
+    // may already be being read. It changes nothing, and above all stops nothing.
     if (acknowledged.current < begun.current) {
       acknowledged.current += 1;
       return;
     }
-    if (latest.current.settings.autoRead) {
-      token.current = null;
+    stop();
+    const current = latest.current;
+    if (current.settings.autoRead) {
+      token.current = { knownIds: current.entries.map(row => row.id) };
       watch.current = armOnSend(watch.current, now());
+      changedAt.current = now();
       evaluate();
     }
   }, [sendSignal]);

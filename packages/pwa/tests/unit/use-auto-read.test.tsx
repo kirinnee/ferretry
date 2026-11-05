@@ -209,12 +209,21 @@ describe('useAutoRead', () => {
     await settle();
     expect(said(r)).toBe('First reply.');
     expect(r.controller.getState().status).toBe('stopped');
-    // The reply to the new message ends its own turn later than the send.
+    // The new turn starts (the daemon dates it), and the reply to the new message ends it later than the send.
+    const again: PickerRow = { id: 'u2', kind: 'user', text: 'and this', at: AT + 13_000 };
+    await mounted.render(
+      tree(r, {
+        ...working(),
+        entries: [user, reply('First reply.'), again],
+        sendSignal: 1,
+        turnStateAt: new Date(AT + 14_000).toISOString(),
+      }),
+    );
     const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Second reply.', at: AT + 15_000 };
     await mounted.render(
       tree(
         r,
-        ended([user, reply('First reply.'), second], {
+        ended([user, reply('First reply.'), again, second], {
           sendSignal: 1,
           turnStateAt: new Date(AT + 20_000).toISOString(),
         }),
@@ -404,6 +413,15 @@ describe('useAutoRead', () => {
     const treeAt = (input: AutoReadInput): ReactElement => tree(r, { ...input, now });
     mounted = await mount(treeAt(ended([user, reply('First reply.')])));
     await mounted.render(treeAt(ended([user, reply('First reply.')], { sendSignal: 1 })));
+    // The daemon starts the answer's turn, then ends it.
+    await mounted.render(
+      treeAt({
+        ...working(),
+        entries: [user, reply('First reply.')],
+        sendSignal: 1,
+        turnStateAt: new Date(AT + 14_000).toISOString(),
+      }),
+    );
     const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Answer reply.', at: AT + 15_000 };
     await mounted.render(
       tree(
@@ -416,6 +434,142 @@ describe('useAutoRead', () => {
     );
     await settle();
     expect(said(r)).toBe('Answer reply.');
+  });
+
+  test('REGRESSION (round 2, #1): the late acknowledgement of a send already being read stays reading', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, BASE));
+    await interact(() => handle?.beginSend());
+    const input = ended([
+      user,
+      { id: 'u2', kind: 'user', text: 'new request', at: AT + 2000 },
+      reply('A long reply, still being spoken.'),
+    ]);
+    await mounted.render(tree(r, input));
+    await settle();
+    expect(r.controller.getState().status).toBe('reading');
+    await mounted.render(tree(r, { ...input, sendSignal: 1 }));
+    // Not stopped, not re-armed: it is still reading, and reads exactly once.
+    expect(r.controller.getState()).toMatchObject({ status: 'reading', key: 'a1' });
+    expect(handle?.reading).toBe(true);
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+  });
+
+  test('REGRESSION (round 2, #1): a genuinely unannounced send still stops a reading under way', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('First reply.')])));
+    await settle();
+    expect(handle?.reading).toBe(true);
+    await mounted.render(tree(r, ended([user, reply('First reply.')], { sendSignal: 1 })));
+    expect(r.controller.getState().status).toBe('stopped');
+    expect(handle?.reading).toBe(false);
+  });
+
+  test('REGRESSION (round 2, #2): pressing send on an idle old daemon says nothing, even after a long quiet', async () => {
+    const r = rig(true);
+    const now = clockFrom(AT + 30_000);
+    const input = { ...BASE, now, legacy: true, turnStateAt: undefined, entries: [user, reply('Earlier answer.')] };
+    mounted = await mount(tree(r, input));
+    await settle(3100);
+    expect(r.synth.spoken).toHaveLength(0);
+    await interact(() => handle?.beginSend());
+    expect(r.synth.spoken).toHaveLength(0);
+    // Even a settle later (3 s of quiet counted from the press) nothing: no row of this send, no working.
+    await settle(3100);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 2, #2): an old daemon reads a send only after its row, a working guess and 3 s of quiet from the press', async () => {
+    const r = rig(true);
+    const now = clockFrom(AT + 30_000);
+    const idle = { ...BASE, now, legacy: true, turnStateAt: undefined };
+    const asked: PickerRow = { id: 'u2', kind: 'user', text: 'again', at: AT + 29_000 };
+    const answer: PickerRow = { id: 'a2', kind: 'assistant', text: 'Legacy answer.', at: AT + 29_500 };
+    mounted = await mount(tree(r, { ...idle, entries: [user, reply('Earlier answer.')] }));
+    await interact(() => handle?.beginSend());
+    await mounted.render(tree(r, { ...idle, entries: [user, reply('Earlier answer.'), asked], turn: 'working' }));
+    await mounted.render(
+      tree(r, { ...idle, entries: [user, reply('Earlier answer.'), asked, answer], turn: 'working' }),
+    );
+    await mounted.render(tree(r, { ...idle, entries: [user, reply('Earlier answer.'), asked, answer] }));
+    await settle(1200);
+    expect(r.synth.spoken).toHaveLength(0);
+    await settle(2200);
+    expect(said(r)).toBe('Legacy answer.');
+  });
+
+  test('REGRESSION (round 2, #3): history dated ahead of the browser clock is never read on an old daemon', async () => {
+    const r = rig(true);
+    const now = clockFrom(AT);
+    const input = {
+      ...BASE,
+      now,
+      legacy: true,
+      turnStateAt: undefined,
+      turn: 'working' as const,
+      entries: [
+        { ...user, at: AT + 5000 },
+        { ...reply('Historical answer on an ahead daemon.'), at: AT + 6000 },
+      ],
+    };
+    mounted = await mount(tree(r, input));
+    await mounted.render(tree(r, { ...input, turn: 'your-turn' }));
+    await settle(3100);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 2, #3): history that arrives after the page opens (late hydration, or older pages) is not live', async () => {
+    const r = rig(true);
+    const old = (n: number): PickerRow => ({ id: `old${n}`, kind: 'assistant', text: 'old', at: AT - n });
+    const legacy = (rows: readonly PickerRow[], turn: 'working' | 'your-turn'): AutoReadInput => ({
+      ...BASE,
+      entries: rows,
+      turn,
+      turnStateAt: undefined,
+      legacy: true,
+    });
+    mounted = await mount(tree(r, legacy([], 'working')));
+    // The history hydrates all at once; then an older page is prepended.
+    await mounted.render(tree(r, legacy([user, reply('Historic reply.')], 'working')));
+    await mounted.render(tree(r, legacy([old(2), old(1), user, reply('Historic reply.')], 'working')));
+    await mounted.render(tree(r, legacy([old(2), old(1), user, reply('Historic reply.')], 'your-turn')));
+    await settle(3600);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 2, #4): the previous turn’s completion arriving late, after a send, is not read for it', async () => {
+    const r = rig(true);
+    const now = clockFrom(AT + 30_000);
+    mounted = await mount(tree(r, { ...BASE, now }));
+    await interact(() => handle?.beginSend());
+    // Dated after the last snapshot, but with no row of this send and no working after the press.
+    await mounted.render(tree(r, { ...ended([user, reply('Reply to an earlier request.')]), now }));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    // The send's turn then starts and ends: that one is read, and only that one.
+    const asked: PickerRow = { id: 'u2', kind: 'user', text: 'new', at: AT + 11_000 };
+    await mounted.render(
+      tree(r, {
+        ...working(),
+        now,
+        entries: [user, reply('Reply to an earlier request.'), asked],
+        turnStateAt: new Date(AT + 11_500).toISOString(),
+      }),
+    );
+    const answer: PickerRow = { id: 'a2', kind: 'assistant', text: 'The real answer.', at: AT + 12_000 };
+    await mounted.render(
+      tree(r, {
+        ...ended([user, reply('Reply to an earlier request.'), asked, answer], {
+          turnStateAt: new Date(AT + 12_500).toISOString(),
+        }),
+        now,
+      }),
+    );
+    await settle();
+    expect(said(r)).toBe('The real answer.');
+    expect(r.synth.spoken).toHaveLength(1);
   });
 
   test('a send while Auto-read is off, or on a device with no speech, arms nothing', async () => {

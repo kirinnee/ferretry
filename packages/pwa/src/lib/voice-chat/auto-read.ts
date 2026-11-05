@@ -10,12 +10,14 @@
  *      `your-turn` when the page opens, or when the setting is switched on, reads nothing.
  *   2. A SEND IS A TOKEN, TAKEN AT ITS INITIATION. `armOnSend` is called when the person presses send —
  *      before the request is awaited — and remembers the newest turn state the page had already seen (the
- *      FLOOR). Only a completion dated after that floor is the reply to the send, so a fast turn that ends
- *      before the send is acknowledged is still read, and a snapshot of the previous turn replayed later
- *      is not. A NEWER SEND REPLACES the token: whatever was pending for the older one is dropped.
- *   3. It fires on the transition to `your-turn` or `needs-input` dated AFTER the floor. The same state
- *      seen again (a re-render, an old `your-turn` still showing in the moment after a send) is not a
- *      transition, and a `working` at or before the floor does not move the turn's start.
+ *      FLOOR). A NEWER SEND REPLACES the token: whatever was pending for the older one is dropped.
+ *   3. A COMPLETION BELONGS TO THE SEND ONLY ON EVIDENCE OF ITS TURN, never on a date alone. The token is
+ *      "proven" by the send's own boundary — the person's row that was not held when send was pressed
+ *      (`sentRow`) — or by a `working` the daemon dated after the floor. Until then, a `your-turn` that
+ *      merely shows up (the previous turn's completion arriving late, an idle session at the moment of the
+ *      press) is the OLD turn: it moves the floor up to itself and is not read, and it cannot consume the
+ *      token. Pressing send reads nothing by itself. No browser clock is ever compared with a daemon date.
+ *      A completion dated at or before the floor, or the state the turn was already in, is no transition.
  *   4. CONSUMED IS CONSUMED. Whatever fires (or is deliberately skipped) moves a per-conversation
  *      WATERMARK to its date: a replay of the same working → your-turn pair after a reconnect arms
  *      nothing and fires nothing.
@@ -27,9 +29,12 @@
  *   7. OLD DAEMON. One that sends no `turnState` gives only working / not working (the page's own guess)
  *      and dates nothing. That guess alone proves nothing — an idle old daemon reads as working for one
  *      pane read when the page opens — so it arms a watch only after a SEND, or after the conversation
- *      produced a record the page had not seen at open (`fresh` grows past the last consumed count). Then
- *      it waits for `LEGACY_QUIET_MS` (3 s) of no new records AND not working. The reading is timed by a
- *      guess, which the settings page says in words.
+ *      gained a live record the page had not seen at open (`fresh`: records APPENDED after the ones held
+ *      at open — counted by position, never by a timestamp against the browser's clock; grows past the last
+ *      consumed count). A send is then read only once the person's own row has shown AND the guess has been
+ *      seen `working` since the press. It waits for `LEGACY_QUIET_MS` (3 s) of no new records AND not
+ *      working, counted from the press at the earliest. The reading is timed by a guess, which the
+ *      settings page says in words.
  *   8. A session that is not live (finished, parked) ends the watch without a reading.
  */
 
@@ -48,10 +53,15 @@ interface ArmedTurn {
   /** A completion must be dated AFTER this to be the end of THIS turn. Null: nothing to compare with. */
   readonly after: number | null;
   /**
-   * The newest turn state seen when the send was made (the daemon's clock): a `working` at or before it is
-   * the turn that was already running, not the reply to the send. Null for a turn seen without a send.
+   * The newest turn state seen when the send was made (the daemon's clock), raised to any older completion
+   * that turns up before the send is proven: a `working` at or before it is the turn that was already
+   * running, not the reply to the send. Null for a turn seen without a send.
    */
   readonly floor: number | null;
+  /** The send's own row (the person's, not held when send was pressed) has shown. A turn seen `working` has it by construction. */
+  readonly row: boolean;
+  /** The turn was seen `working` after the press: dated after the floor, or any `working` for an old daemon. */
+  readonly working: boolean;
 }
 
 export interface TurnWatch {
@@ -86,6 +96,11 @@ export interface WatchInput {
    * guess needs it: no new record, no proof that a turn is happening.
    */
   readonly fresh: number;
+  /**
+   * The send's own boundary: a row of the person's that was NOT among the rows held when the armed send was
+   * pressed is in the conversation now. False when no send is armed.
+   */
+  readonly sentRow: boolean;
 }
 
 export interface WatchStep {
@@ -109,7 +124,15 @@ const newest = (a: number | null, b: number | null): number | null => {
 export const armOnSend = (watch: TurnWatch, sentAt: number): TurnWatch => {
   const floor = newest(watch.seen, watch.consumed.at);
   const at = finite(sentAt) ? sentAt : null;
-  return { ...watch, armed: { startedAt: at, after: floor ?? at, floor } };
+  // `after` is the daemon's floor only: the press time is on the browser's clock and is never compared with it.
+  return { ...watch, armed: { startedAt: at, after: floor, floor, row: false, working: false } };
+};
+
+/** How many rows were APPENDED after `anchor` (the last row held when the page opened). Total: an unknown anchor counts none. */
+export const arrivalsAfter = (ids: readonly string[], anchor: string | null | undefined): number => {
+  if (anchor === null || anchor === undefined) return 0;
+  const index = ids.lastIndexOf(anchor);
+  return index === -1 ? 0 : ids.length - 1 - index;
 };
 
 const consume = (watch: TurnWatch, input: WatchInput): TurnWatch => ({
@@ -130,28 +153,42 @@ export const observeTurn = (before: TurnWatch, input: WatchInput): WatchStep => 
   if (turn === 'working') {
     const { armed } = watch;
     if (armed !== null) {
+      const row = armed.row || input.sentRow;
       // The daemon's own start time replaces a send time on the browser's clock: it is the clock its
       // `your-turn` will be dated by. A `working` at or before the floor is the turn that was already
-      // running when the person sent, so it cannot move the start.
-      if (at === null || (armed.floor !== null && !(at > armed.floor))) return quiet(watch);
-      return quiet({ ...watch, armed: { ...armed, startedAt: at, after: at } });
+      // running when the person sent, so it proves nothing and cannot move the start.
+      if (input.legacy) return quiet({ ...watch, armed: { ...armed, row, working: true } });
+      if (at === null || (armed.floor !== null && !(at > armed.floor)))
+        return quiet({ ...watch, armed: { ...armed, row } });
+      return quiet({ ...watch, armed: { ...armed, row, working: true, startedAt: at, after: at } });
     }
     if (input.legacy) {
       // The page's own guess proves nothing by itself: a new record must have come since the last reading.
       return input.fresh > watch.consumed.fresh
-        ? quiet({ ...watch, armed: { startedAt: null, after: null, floor: null } })
+        ? quiet({ ...watch, armed: { startedAt: null, after: null, floor: null, row: true, working: true } })
         : quiet(watch);
     }
     if (at === null || (watch.consumed.at !== null && !(at > watch.consumed.at))) return quiet(watch);
-    return quiet({ ...watch, armed: { startedAt: at, after: at, floor: null } });
+    return quiet({ ...watch, armed: { startedAt: at, after: at, floor: null, row: true, working: true } });
   }
 
   if (watch.armed === null) return quiet(watch);
 
-  const { startedAt, after } = watch.armed;
+  const row = watch.armed.row || input.sentRow;
+  const armed: ArmedTurn = { ...watch.armed, row };
+  const { startedAt, after } = armed;
   if (!input.legacy && at !== null && after !== null && !(at > after)) {
     // The state it was already in: not the end of the turn we are waiting for.
-    return quiet(watch);
+    return quiet({ ...watch, armed });
+  }
+
+  // NO EVIDENCE OF THIS TURN, NO COMPLETION. A send is proven by its own row or a `working` after the
+  // floor (an old daemon: both). Anything else that "ends" is the turn that was already over or running.
+  if (!(input.legacy ? armed.row && armed.working : armed.row || armed.working)) {
+    return quiet({
+      ...watch,
+      armed: at === null ? armed : { ...armed, floor: newest(armed.floor, at), after: newest(armed.after, at) },
+    });
   }
 
   // The end of the turn we are waiting for, observed. If nobody is looking it is gone for good.
@@ -159,7 +196,11 @@ export const observeTurn = (before: TurnWatch, input: WatchInput): WatchStep => 
 
   const needed = input.legacy ? LEGACY_QUIET_MS : TEXT_SETTLED_MS;
   if (input.quietMs < needed) {
-    return { watch, fire: null, recheckInMs: Math.max(1, Math.ceil(needed - Math.max(0, input.quietMs))) };
+    return {
+      watch: { ...watch, armed },
+      fire: null,
+      recheckInMs: Math.max(1, Math.ceil(needed - Math.max(0, input.quietMs))),
+    };
   }
   return { watch: consume(watch, input), fire: { startedAt, outcome: turn }, recheckInMs: null };
 };
