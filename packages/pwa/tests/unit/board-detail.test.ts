@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgendaRef, AgendaSnapshot, BoardTaskEvent, PrLink } from '@ferretry/protocol';
-import { MAX_BOARD_NOTE_LENGTH } from '@ferretry/protocol';
 
 import {
   activityText,
   askOrigin,
   askSessions,
   askWords,
-  assignedMessage,
   collectAsks,
-  commentNote,
-  commentTag,
-  ferretComment,
   type HistoryContext,
   hasLinks,
   historyRows,
@@ -20,13 +15,9 @@ import {
   laneCategoryOf,
   laneNameOf,
   linkLabel,
-  NEW_CARD_PROBLEM_TEXT,
-  newCardProblems,
   nonBlockingAsks,
-  OWNER_CARD_SOURCE,
   prLine,
   type SessionAgenda,
-  startBrief,
   testSteps,
   written,
 } from '../../src/lib/board-detail.ts';
@@ -314,55 +305,6 @@ describe('nonBlockingAsks', () => {
     const task = { openAsks: open, waitingOnOwner: [{ sessionId: 's', id: 'A1' }] };
     expect(nonBlockingAsks(task)).toEqual([{ sessionId: 's', id: 'A2' }]);
     expect(nonBlockingAsks({ openAsks: open, waitingOnOwner: [] })).toEqual(open);
-  });
-});
-
-describe('messages the owner sends', () => {
-  it('tags a comment with the card', () => {
-    expect(commentTag({ id: 'F412' })).toBe('[re &F412]');
-    expect(ferretComment({ id: 'F412' }, '  look at this  ')).toBe('[re &F412] look at this');
-  });
-
-  it('trims a history note and bounds its length', () => {
-    expect(commentNote('  hi  ')).toBe('hi');
-    expect(commentNote('x'.repeat(MAX_BOARD_NOTE_LENGTH + 50))).toHaveLength(MAX_BOARD_NOTE_LENGTH);
-  });
-
-  it('briefs a started ferret with the title and the ask', () => {
-    const brief = startBrief({ title: ' Try it ', ask: ' do it ' });
-    expect(brief.startsWith('Try it\n\ndo it\n\n')).toBe(true);
-    expect(brief).toContain('board card');
-  });
-
-  it('tells a started ferret which card is its own', () => {
-    expect(assignedMessage({ id: 'F9', title: 'Try it' })).toBe(
-      '[re &F9] The owner assigned this card to you: Try it. Keep it current as you work.',
-    );
-  });
-});
-
-describe('newCardProblems', () => {
-  it('is empty for a ready card', () => {
-    expect(newCardProblems({ title: 'Try it', ask: 'do it' }, 's')).toEqual([]);
-  });
-
-  it('lists what is missing in the order the form shows it', () => {
-    expect(newCardProblems({ title: ' ', ask: ' ' }, null)).toEqual(['title-empty', 'ask-empty', 'assignee-missing']);
-  });
-
-  it('allows five words in a title and no more', () => {
-    expect(newCardProblems({ title: 'one two three four five', ask: 'x' }, 's')).toEqual([]);
-    expect(newCardProblems({ title: 'one two three four five six', ask: 'x' }, 's')).toEqual(['title-long']);
-  });
-
-  it('has words for every problem', () => {
-    expect(Object.keys(NEW_CARD_PROBLEM_TEXT).sort()).toEqual([
-      'ask-empty',
-      'assignee-missing',
-      'title-empty',
-      'title-long',
-    ]);
-    expect(OWNER_CARD_SOURCE).toBe('owner (board)');
   });
 });
 

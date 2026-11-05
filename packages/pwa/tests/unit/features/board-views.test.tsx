@@ -27,9 +27,7 @@ const envOf = (model: BoardModel, extra: Partial<BoardCardEnv> = {}): BoardCardE
   showMachine: false,
   hrefFor: entry => `/d/laptop/board/${entry.task.id}`,
   onNavigate: () => undefined,
-  movesFor: () => undefined,
   places: cardPlaces(model),
-  dragging: null,
   ...extra,
 });
 
@@ -47,13 +45,7 @@ describe('KanbanView', () => {
   it('draws a lane per lane of the set, with its cards, "Nothing here" when empty and an Unplaced lane', async () => {
     const model = await boardModelOf(cards);
     view = await mount(
-      <KanbanView
-        env={envOf(model)}
-        hideClosed={false}
-        model={model}
-        onDropCard={() => undefined}
-        projectName={() => 'ferretry'}
-      />,
+      <KanbanView env={envOf(model)} hideClosed={false} model={model} projectName={() => 'ferretry'} />,
     );
     const root = view.container;
     expect([...root.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).toEqual([
@@ -74,15 +66,7 @@ describe('KanbanView', () => {
 
   it('hides the Closed lane when closed work is hidden', async () => {
     const model = await boardModelOf(cards);
-    view = await mount(
-      <KanbanView
-        env={envOf(model)}
-        hideClosed
-        model={model}
-        onDropCard={() => undefined}
-        projectName={() => 'ferretry'}
-      />,
-    );
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'ferretry'} />);
     expect([...view.container.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).not.toContain(
       'Closed',
     );
@@ -95,7 +79,6 @@ describe('KanbanView', () => {
         env={envOf(model)}
         hideClosed
         model={{ ...model, multiMachine: true }}
-        onDropCard={() => undefined}
         projectName={group => (group.projectId === OTHER_PROJECT ? 'other' : 'ferretry')}
       />,
     );
@@ -105,74 +88,23 @@ describe('KanbanView', () => {
     ]);
   });
 
-  it('takes a drop on a lane of the board the card came from, never on its own lane', async () => {
+  it('is read-only: no card is draggable, no lane takes a drop, no Done target, no Lanes editor link', async () => {
     const model = await boardModelOf(cards);
-    const group = must(model.groups[0], 'the group');
-    const dropped: string[] = [];
-    const env = envOf(model, { dragging: { cardKey: must(model.cards[1], 'F2').key, groupKey: group.key } });
-    view = await mount(
-      <KanbanView
-        env={env}
-        hideClosed={false}
-        model={model}
-        onDropCard={(key, lane) => void dropped.push(`${key === group.key}:${lane}`)}
-        projectName={() => 'p'}
-      />,
-    );
-    const lanes = [...view.container.querySelectorAll<HTMLElement>('.fy-board-lane')];
-    expect(lanes.filter(lane => lane.dataset.drop === 'ready').length).toBe(7);
-    const implement = must(
-      lanes.find(lane => lane.getAttribute('aria-label')?.startsWith('Implement')),
-      'Implement',
-    );
-    expect(implement.dataset.drop).toBeUndefined();
-    const review = must(
-      lanes.find(lane => lane.getAttribute('aria-label')?.startsWith('Review')),
-      'Review',
-    );
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: {} });
-    await interact(() => review.dispatchEvent(drop));
-    expect(dropped).toEqual(['true:review']);
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'p'} />);
+    const root = view.container;
+    expect(root.querySelectorAll('[draggable="true"]')).toHaveLength(0);
+    expect(root.querySelectorAll('[data-drop], [data-variant="target"]')).toHaveLength(0);
+    expect(root.querySelector('.fy-board-card__more, [role="menu"], [data-board-lanes]')).toBeNull();
+    const over = new Event('dragover', { bubbles: true, cancelable: true });
+    await interact(() => must(root.querySelector('.fy-board-lane'), 'a lane').dispatchEvent(over));
+    expect(over.defaultPrevented).toBe(false);
   });
 
-  it('does not take a drop from another board', async () => {
-    const model = await boardModelOf(cards);
-    const env = envOf(model, { dragging: { cardKey: 'x', groupKey: 'another' } });
-    view = await mount(
-      <KanbanView env={env} hideClosed={false} model={model} onDropCard={() => undefined} projectName={() => 'p'} />,
-    );
-    expect(view.container.querySelectorAll('[data-drop]').length).toBe(0);
-  });
-
-  it('shows a "Done" target while dragging with closed work hidden', async () => {
-    const model = await boardModelOf(cards);
-    const group = must(model.groups[0], 'the group');
-    const dropped: string[] = [];
-    const env = envOf(model, { dragging: { cardKey: must(model.cards[1], 'F2').key, groupKey: group.key } });
-    view = await mount(
-      <KanbanView
-        env={env}
-        hideClosed
-        model={model}
-        onDropCard={(_key, lane) => void dropped.push(lane)}
-        projectName={() => 'p'}
-      />,
-    );
-    const target = must(view.container.querySelector<HTMLElement>('[data-variant="target"]'), 'the target');
-    expect(target.getAttribute('aria-label')).toBe('Done, 0 cards');
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: {} });
-    await interact(() => target.dispatchEvent(drop));
-    expect(dropped).toEqual(['closed']);
-  });
-
-  it('shows no target when nothing is dragged', async () => {
-    const model = await boardModelOf(cards);
-    view = await mount(
-      <KanbanView env={envOf(model)} hideClosed model={model} onDropCard={() => undefined} projectName={() => 'p'} />,
-    );
-    expect(view.container.querySelector('[data-variant="target"]')).toBeNull();
+  it('draws no Lanes editor link beside a project heading when several are on the board', async () => {
+    const model = await boardModelOf([card('F1'), card('F2', { projectId: OTHER_PROJECT })]);
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'p'} />);
+    expect(view.container.querySelector('.fy-board-project__head')).not.toBeNull();
+    expect(view.container.querySelector('.fy-board-project__lanes, [data-board-lanes]')).toBeNull();
   });
 });
 
@@ -241,14 +173,6 @@ describe('TableView', () => {
     expect(root.querySelector('.fy-board-summary__act, [data-col="done"]')).toBeNull();
     expect(root.textContent).not.toMatch(/Not good|Reopen/u);
     expect([...root.querySelectorAll('button')].map(button => button.textContent)).not.toContain('Done');
-  });
-
-  it('says a refused lane move under its row', async () => {
-    const model = await boardModelOf(cards);
-    view = await mount(
-      table(model, { env: envOf(model, { answerFor: () => ({ pressed: null, error: 'No such lane.' }) }) }),
-    );
-    expect(view.container.querySelector('[data-task="F1"] [data-answer-error]')?.textContent).toBe('No such lane.');
   });
 
   it('draws the information rows lighter than the action rows', async () => {

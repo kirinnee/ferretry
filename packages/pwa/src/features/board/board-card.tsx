@@ -8,21 +8,17 @@
  * `density` is the only thing that differs: `side` keeps one short line by dropping the summary and the
  * segments that are marked optional (who, shipped-in, machine).
  *
- * A card is a real link to its detail (`/d/<id>/board/<taskId>`). When the page can move cards it is also
- * draggable, and a "Move to…" menu does the same job from the keyboard; both end in the same `onMove`.
+ * A card is a real link to its detail (`/d/<id>/board/<taskId>`) and nothing more: it is not draggable and has no
+ * lane menu, no Done, no Not good, no Reopen. The board runs itself and the owner answers a card where it asks, in
+ * the agenda; the card only says where the work stands. The one control is "Add to chat" (the per-chat Tasks tab),
+ * which puts the card's `&F18` in the chat's draft — it writes to no card.
  *
- * `touch` is the phone: thumb-sized targets and no drag (a finger scrolls, it does not drag).
- *
- * A card has no owner buttons: no Done, no Not good, no Reopen. The owner answers a card where it asks, in the
- * agenda; the card only says where the work stands. While a lane move is in flight (`answer.pressed`) the ⋯ menu is
- * disabled, and a refusal is said on the card itself.
+ * `touch` is the phone: thumb-sized targets.
  */
 
 import { formatTaskRef, type LaneCategory } from '@ferretry/protocol';
-import { ChevronLeft, EllipsisVertical, MessageSquarePlus } from 'lucide-react';
-import { type CSSProperties, type KeyboardEvent, useId, useState } from 'react';
-import { ANSWER_AT_REST, type BoardAnswerState } from '../../lib/board-done.ts';
-import type { MoveChoice } from '../../lib/board-move.ts';
+import { MessageSquarePlus } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { cardSegments, type FerretNames } from '../../lib/board-present.ts';
 import type { BoardCardOf } from '../../lib/board-view.ts';
 import { plainPreview } from '../../lib/plain-label.ts';
@@ -30,14 +26,6 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { BoardIcon } from './board-icons.tsx';
 
 export type BoardDensity = 'page' | 'side';
-
-export interface BoardCardMoves {
-  /** Every lane the card could go to, for the "Move to…" menu. */
-  readonly choices: readonly MoveChoice[];
-  readonly onMove: (card: BoardCardOf, laneId: string) => void;
-  readonly onDragStart: (card: BoardCardOf) => void;
-  readonly onDragEnd: () => void;
-}
 
 export interface BoardCardProps {
   readonly card: BoardCardOf;
@@ -50,19 +38,14 @@ export interface BoardCardProps {
   /** Where the card opens. */
   readonly href: string;
   readonly onNavigate?: (to: string) => void;
-  /** Present when the owner can move this card; absent for a read-only list. */
-  readonly moves?: BoardCardMoves;
-  readonly dragging?: boolean;
   /** The lane's name, shown first on the meta line (List and Tree, where cards are not under a lane header). */
   readonly lane?: string;
   /** Nesting under a lead, for the Tree. */
   readonly depth?: number;
   /** Present where a card can be pointed at from a chat (the per-chat Tasks tab): puts the card's `&F18` in the draft. */
   readonly onAddToChat?: (card: BoardCardOf) => void;
-  /** A phone: bigger targets, no drag. */
+  /** A phone: bigger targets. */
   readonly touch?: boolean;
-  /** The lane move in flight on this card, and the last refusal; at rest when absent. */
-  readonly answer?: BoardAnswerState;
 }
 
 export function BoardCard({
@@ -74,13 +57,10 @@ export function BoardCard({
   showMachine,
   href,
   onNavigate,
-  moves,
-  dragging = false,
   lane,
   depth,
   onAddToChat,
   touch = false,
-  answer = ANSWER_AT_REST,
 }: BoardCardProps) {
   const { task } = card;
   const preview = plainPreview(task.summary);
@@ -97,23 +77,10 @@ export function BoardCard({
       data-category={category ?? 'unplaced'}
       data-density={density}
       data-depth={depth}
-      data-dragging={dragging ? '' : undefined}
       data-kind={task.kind}
       data-task={task.id}
-      data-settling={answer.pressed === null ? undefined : answer.pressed}
       data-touch={touch ? '' : undefined}
-      draggable={moves !== undefined && !touch && density === 'page' && answer.pressed === null}
       style={depth === undefined ? undefined : ({ '--fy-board-depth': depth } as CSSProperties)}
-      onDragEnd={moves?.onDragEnd}
-      onDragStart={
-        moves === undefined || density !== 'page'
-          ? undefined
-          : event => {
-              event.dataTransfer.effectAllowed = 'move';
-              event.dataTransfer.setData('text/plain', card.key);
-              moves.onDragStart(card);
-            }
-      }
     >
       <RouteLink
         className="fy-board-card__main"
@@ -156,79 +123,6 @@ export function BoardCard({
           <MessageSquarePlus aria-hidden="true" size={12} />
         </button>
       )}
-      {moves !== undefined && moves.choices.length > 0 ? (
-        <BoardMoveMenu answer={answer} card={card} moves={moves} />
-      ) : null}
-      {answer.error === null ? null : (
-        <p className="fy-board-card__error" data-answer-error="" role="alert">
-          {answer.error}
-        </p>
-      )}
     </li>
-  );
-}
-
-/** The keyboard route to moving a card: a menu of lanes, a move back marked as needing a reason. */
-function BoardMoveMenu({
-  answer,
-  card,
-  moves,
-}: {
-  readonly answer: BoardAnswerState;
-  readonly card: BoardCardOf;
-  readonly moves: BoardCardMoves;
-}) {
-  const [open, setOpen] = useState(false);
-  const menuId = useId();
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Escape' && open) {
-      event.stopPropagation();
-      setOpen(false);
-    }
-  };
-  return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: the wrapper only listens for Escape on behalf of its buttons
-    <div
-      className="fy-board-card__menu"
-      onBlur={event => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-      }}
-      onKeyDown={onKeyDown}
-    >
-      <button
-        aria-controls={open ? menuId : undefined}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`Move ${card.task.title} to…`}
-        className="fy-board-card__more"
-        disabled={answer.pressed !== null}
-        onClick={() => setOpen(value => !value)}
-        title="Move to…"
-        type="button"
-      >
-        <EllipsisVertical aria-hidden="true" size={12} />
-      </button>
-      {open ? (
-        <div aria-label="Move to…" className="fy-board-menu" id={menuId} role="menu">
-          {moves.choices.map(choice => (
-            <button
-              className="fy-board-menu__item"
-              data-backward={choice.backward ? '' : undefined}
-              key={choice.laneId}
-              onClick={() => {
-                setOpen(false);
-                moves.onMove(card, choice.laneId);
-              }}
-              role="menuitem"
-              title={choice.backward ? 'Moving back asks for a reason' : undefined}
-              type="button"
-            >
-              {choice.backward ? <ChevronLeft aria-hidden="true" size={11} /> : null}
-              {choice.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }

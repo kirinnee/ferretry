@@ -72,7 +72,7 @@ makes one only under a card on that same board that the lead may adopt under and
 (`BoardService.mayAdoptUnder`): the first card the brief names, else the lead's focus. A brief that merely mentions
 somebody else's card, a closed or dropped one, or one on another board gives no card.
 
-Not asked: the owner (a paired device, the Board page), the admin token, and the daemon's own writes — gates, PRs,
+Not asked: the owner (a paired device, the admin CLI), the admin token, and the daemon's own writes — gates, PRs,
 releases. Moves, links, notes and closes of a card a ferret holds are unchanged.
 
 **GAP: the same user is the owner.** The admin token (`fy --as-owner task create`, an old `fy` without the session
@@ -855,7 +855,8 @@ even when `askedBy: agent`: no verbatim owner message matched its ask. The app r
 `visibility` decides what is private by it; the rule above is what an older daemon leaves the app to use. `origin` is derived at read time by one pure rule, `cardOrigin` in
 `packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
 
-1. the owner made it (the Board page, a paired device, the admin CLI);
+1. the owner made it (a paired device, the admin CLI; the Board page no longer has an "Add card", but a card an older
+   app wrote carries the source `owner (board)`, which still counts);
 2. its ask's source names the owner (`owner`, "owner via lead jaeda", "the owner (fy task reopen)"), whoever wrote
    it down; or
 3. a ferret recorded it from a session the owner started: the source's `session:<id>`, else the recording ferret
@@ -1045,7 +1046,29 @@ Status, its How to test) and no answer. The owner answers a card only on its age
 ([below](#cards-show-progress-their-asks-ride-the-agenda)) on the Inbox deck, a to-test row in the Inbox list and the
 Answer-quickly run, which move the card.
 
-The owner's two answers about a card, on those agenda surfaces:
+### The owner's Board is read-only
+
+The Board page and the card view are for **reading**. The owner has no hand control on them (the owner, 2026-11-04, on
+!A358: _"Remove them all"_). Gone from the PWA — the Kanban, Table, Tree, Dependencies and Archive views, the per-chat
+Tasks tab (side and expanded), and the card drawer / phone card page:
+
+- the lane pill dropdown ("Review/CI ▾") and every "Move to…" menu — the card ⋯ menu, the drawer's lane menu — and
+  **drag-and-drop between lanes**, including the "Done" drop target; the lane is now plain text or a badge;
+- **Add dependency** and the × on a dependency chip (the chips stay, and open the other card);
+- the **"Comment to <ferret>…" box** — the owner talks to a ferret in its own chat, which the card's **Open chat** opens;
+- the drawer's **⋯ More actions** menu: Move to…, **Reparent…** and **Drop…**;
+- the **Add card** button (header and phone floating button) and its new-card form, and the **Lanes ✎** links to the
+  lane editor (the editor itself stays at the project's page).
+
+Cards stay fully readable: the lane, the Status, links, history, sub-cards, dependencies and the agenda asks — each ask
+is a link that opens its item in the ferret's chat, with no answer buttons. What stays, because it reads or navigates
+and writes to no card: **Open chat**, **Copy link**, **Add to chat** (puts the card's `&F18` in that chat's draft), the
+view switches, the filters, **Show private**, the scope toggle, the theme switch, and the ticks on How to test steps
+(a reading aid on that screen only, never saved). The daemon routes and the `fy` commands that make, move, link, edit, reparent,
+drop and comment on a card are unchanged: ferrets and the CLI still use them, and the owner's only way to move a card is
+to answer where it asks, in the agenda.
+
+The owner's two answers about a card, on the agenda surfaces:
 
 - **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
 - **Not good** opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
@@ -1474,7 +1497,8 @@ A write that fails answers with one of these codes: `invalid`, `not-found`, `for
 `owner-gate`, `blocked-by`, `cycle`, `unknown-lane`, `no-lane-set`, `version-conflict`.
 
 The PWA shows the board as kanban, list, tree, dependencies and archive views, and opens a card from `&F412`
-wherever it appears ([reference-standard.md](reference-standard.md)).
+wherever it appears ([reference-standard.md](reference-standard.md)). It is **read-only for the owner**
+([The owner's Board is read-only](#the-owners-board-is-read-only)); these routes stay for ferrets and the CLI.
 
 ## Gaps and work in flight
 

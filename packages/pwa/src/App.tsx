@@ -1245,11 +1245,8 @@ function SessionRoute({
   const daemonFetch = useDaemonFetch();
   useRenderTiming(store.performance, 'session');
   const itemOpened = useAgendaItemOpened();
-  // What the chat's Tasks tab needs to open a card over the chat, the same two the Board page is given.
-  const boardTasks = useMemo(
-    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch) }),
-    [store.attention, store.clients, daemonFetch],
-  );
+  // What the chat's Tasks tab needs to open a card over the chat, the same agenda the Board page is given.
+  const boardTasks = useMemo(() => ({ agenda: store.attention }), [store.attention]);
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell. Every attach is a
   // stream session the router opens on whichever carrier reaches the daemon, so there is no measured
@@ -2432,11 +2429,6 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
-  const daemonFetch = useDaemonFetch();
-  const ports = useMemo(
-    () => boardPorts(daemon => store.clients.client(daemon), daemonFetch),
-    [store.clients, daemonFetch],
-  );
   return (
     <BoardPage
       agenda={store.attention}
@@ -2446,7 +2438,6 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
       onNavigate={navigate}
       onSearch={onSearch}
       openCard={taskId === undefined ? null : { daemonId: connection.daemonId, taskId }}
-      ports={ports}
       origin={origin}
       search={window.location.search}
       store={store.board}

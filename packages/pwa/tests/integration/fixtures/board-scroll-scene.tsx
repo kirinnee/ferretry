@@ -107,7 +107,7 @@ function Scene() {
         >
           <div className="contents" data-page-scroll-region="">
             <BoardPage
-              agenda={{ respond: async () => undefined }}
+              agenda={{}}
               callsigns={new Map([[FERRET, 'denisha']])}
               machines={MACHINES}
               now={NOW}

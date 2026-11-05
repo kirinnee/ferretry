@@ -46,7 +46,6 @@ import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { ChatTasks } from '../../features/board/chat-tasks.tsx';
-import type { BoardDetailPorts } from '../../features/board/detail/board-detail.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -361,11 +360,10 @@ export interface SessionChatPageProps {
    */
   readonly board?: DaemonBoardStore;
   /**
-   * What the Tasks tab needs to act on its cards where they are: the agenda client (a card's waiting-on-you
-   * questions) and the port to speak to a ferret. Absent: the tab still draws the cards, but a card cannot
-   * be opened over the chat.
+   * What the Tasks tab needs to open a card over the chat: the agenda client (a card's waiting-on-you
+   * questions, read only). Absent: the tab still draws the cards, but a card cannot be opened over the chat.
    */
-  readonly boardTasks?: { readonly agenda: DaemonAgendaClient; readonly ports: BoardDetailPorts };
+  readonly boardTasks?: { readonly agenda: DaemonAgendaClient };
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */

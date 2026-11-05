@@ -99,7 +99,7 @@ const OPEN = [
     title: 'Board system',
     laneId: 'plan',
     owner: LEAD,
-    summary: 'Cards, lanes and a page to move them on.',
+    summary: 'Cards and lanes on one page.',
     brief:
       '1. Cards and lanes live in one board per project.\n2. A gate lane stops a card until the owner answers.\n3. The task panel shows only the cards waiting on you.',
     lastTouchedAt: ago(3),
@@ -347,7 +347,6 @@ const agenda = {
       updatedAt: ago(1),
     });
   },
-  respond: async () => undefined,
 };
 const requested = params.get('view');
 boardSideView.set(requested === 'list' ? requested : 'kanban');
@@ -384,7 +383,6 @@ function Harness() {
         onAgents={tasks.setAgents}
         onExpand={() => tasks.setExpanded(!isExpanded)}
         phone={compact}
-        ports={{ sendMessage: async () => undefined }}
         scope={scope}
         store={store}
       />

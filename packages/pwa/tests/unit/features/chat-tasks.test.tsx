@@ -19,13 +19,10 @@ import {
   laptop,
   originCard,
 } from '../board-support.ts';
-import { sendBack, plainSendBackEditor } from './send-back-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const SELF = 's1';
 const KID = 'c1';
-
-plainSendBackEditor();
 
 let view: Mounted | null = null;
 beforeEach(() => boardSideView.set('kanban'));
@@ -74,7 +71,6 @@ const open = async (
   extra: {
     readonly withPorts?: boolean;
     readonly extraCards?: readonly ReturnType<typeof card>[];
-    readonly refuse?: string;
     readonly chat?: BoardChat;
     readonly expanded?: boolean;
     readonly taskNames?: ReadonlyMap<string, string>;
@@ -93,7 +89,6 @@ const open = async (
   );
   store.act = async (_daemon, id, request) => {
     acts.push({ id, request });
-    if (extra.refuse !== undefined) return { ok: false, error: { code: 'refused', message: extra.refuse } } as never;
     return boardOk(card(id));
   };
   const agendaStore = new DaemonAgendaStore();
@@ -119,9 +114,7 @@ const open = async (
           agenda: {
             store: agendaStore,
             hydrate: async () => undefined,
-            respond: async () => undefined,
           } as never,
-          ports: { sendMessage: async () => undefined },
         }),
   };
   view = await mount(<ChatTasks {...props} />);
@@ -201,90 +194,50 @@ describe('ChatTasks — opening a card', () => {
   });
 });
 
-describe('ChatTasks — no owner buttons', () => {
-  it('draws no Done, Not good or Reopen on a card, at the side density or on a closed card', async () => {
+describe('ChatTasks — read-only', () => {
+  const drag = (type: string) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { effectAllowed: '', dropEffect: '', setData: () => undefined },
+    });
+    return event;
+  };
+
+  it('draws no Done, Not good, Reopen or lane menu on a card, at the side density or on a closed card', async () => {
     const { root, acts } = await open();
     expect(root.querySelector('[data-task="F22"][data-density="side"]')).not.toBeNull();
     expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
-    await interact(() =>
-      must(root.querySelector<HTMLElement>('[data-task="F22"] .fy-board-card__more'), 'menu').click(),
-    );
-    const items = [...root.querySelectorAll('[data-task="F22"] [role="menuitem"]')].map(item => item.textContent ?? '');
-    expect(items.length).toBeGreaterThan(0);
-    expect(items.some(item => /done|reopen|not good/iu.test(item))).toBe(false);
-    expect(root.querySelector('[data-task="F23"] .fy-board-card__more')).toBeNull();
-    expect(acts).toEqual([]);
-  });
-});
-
-describe('ChatTasks — the reason box', () => {
-  const pickMenu = async (root: HTMLElement, task: string, name: string): Promise<void> => {
-    await interact(() =>
-      must(root.querySelector<HTMLElement>(`[data-task="${task}"] .fy-board-card__more`), 'menu').click(),
-    );
-    await interact(() =>
-      must(
-        [...root.querySelectorAll<HTMLElement>(`[data-task="${task}"] [role="menuitem"]`)].find(
-          item => item.textContent === name,
-        ),
-        name,
-      ).click(),
-    );
-  };
-  const askReason = async (extra: Parameters<typeof open>[0] = {}) => {
-    const opened = await open(extra);
-    await pickMenu(opened.root, 'F22', 'Implement');
-    return opened;
-  };
-  const box = () => must(document.body.querySelector<HTMLElement>('form[role="dialog"], [role="dialog"]'), 'box');
-  const typeReason = (reason: string): Promise<void> => sendBack(box(), reason);
-
-  it('opens the Board composer before a move back sends the card', async () => {
-    const { acts } = await askReason();
-    expect(box().hasAttribute('data-board-send-back')).toBe(true);
-    expect(box().textContent).toContain('Move Try the board back to Implement');
+    expect(root.querySelector('.fy-board-card__more, [role="menu"], [role="menuitem"]')).toBeNull();
     expect(acts).toEqual([]);
   });
 
-  it('sends the card back with the reason and closes the box', async () => {
-    const { acts } = await askReason();
-    await typeReason('It still crashes');
-    expect(acts).toHaveLength(1);
-    expect(acts[0]?.id).toBe('F22');
-    expect(JSON.stringify(acts[0]?.request)).toContain('It still crashes');
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  it('keeps "Add to chat" on every card: it writes to the chat draft, not to the card', async () => {
+    const { root } = await open();
+    expect(root.querySelector('[data-task="F22"] [data-add-to-chat="F22"]')).not.toBeNull();
   });
 
-  it('keeps the box open and says why when the daemon refuses the move', async () => {
-    await askReason({ refuse: 'Not allowed right now' });
-    await typeReason('Try again');
-    expect(box().textContent).toContain('Not allowed right now');
+  it('draws no drag handle and takes no drop, in the panel or expanded', async () => {
+    for (const expanded of [false, true]) {
+      const { root, acts } = await open({ expanded });
+      expect(root.querySelector('[draggable="true"], [data-dragging], [data-drop]')).toBeNull();
+      const lane = must(root.querySelector<HTMLElement>('.fy-board-lane'), 'a lane');
+      const over = drag('dragover');
+      await interact(() => lane.dispatchEvent(over));
+      expect(over.defaultPrevented).toBe(false);
+      await interact(() => lane.dispatchEvent(drag('drop')));
+      expect(acts).toEqual([]);
+      await view?.unmount();
+      view = null;
+    }
   });
 
-  it('puts the card back untouched on Cancel', async () => {
-    const { acts } = await askReason();
-    const cancel = [...box().querySelectorAll('button')].find(button => button.textContent === 'Cancel');
-    await interact(() => must(cancel, 'Cancel').click());
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
-    expect(acts).toEqual([]);
-  });
-});
-
-describe('ChatTasks — a card in a lane the project does not have', () => {
-  it('tells the owner instead of moving it', async () => {
+  it('shows a card in a lane the project does not have, with no way to move it', async () => {
     const { root, acts } = await open({
       extraCards: [card('F40', { owner: SELF, laneId: 'ghost', title: 'Lost card' })],
     });
     const lost = must(root.querySelector<HTMLElement>('[data-task="F40"]'), 'the card in a missing lane');
-    expect(lost.querySelector('.fy-board-done')).toBeNull();
-    await interact(() => must(lost.querySelector<HTMLElement>('.fy-board-card__more'), 'menu').click());
-    const choice = must(
-      lost.querySelector<HTMLElement>('[role="menuitem"]:not([data-done])') ??
-        lost.querySelector<HTMLElement>('[data-move]'),
-      'a move choice',
-    );
-    await interact(() => choice.click());
-    expect(root.querySelector('[data-board-side-notice]')?.textContent).toContain('ghost');
+    expect(lost.querySelector('.fy-board-card__more, [role="menu"]')).toBeNull();
+    expect(root.querySelector('[data-board-side-notice]')).toBeNull();
     expect(acts).toEqual([]);
   });
 });
@@ -437,45 +390,6 @@ describe('ChatTasks — Internal and Expand', () => {
     );
     await interact(() => flush());
     expect(document.body.querySelector('.fy-board-detail__scrim')).not.toBeNull();
-  });
-
-  const drag = (type: string) => {
-    const event = new Event(type, { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'dataTransfer', {
-      value: { effectAllowed: '', dropEffect: '', setData: () => undefined },
-    });
-    return event;
-  };
-  const laneNamed = (root: HTMLElement, name: string) =>
-    must(
-      [...root.querySelectorAll<HTMLElement>('.fy-board-lane')].find(lane =>
-        lane.getAttribute('aria-label')?.startsWith(name),
-      ),
-      name,
-    );
-
-  it('moves a card dragged to another lane of its board when expanded', async () => {
-    const { root, acts } = await open({ expanded: true });
-    await interact(() => must(root.querySelector('[data-task="F18"]'), 'F18').dispatchEvent(drag('dragstart')));
-    expect(root.querySelector('[data-task="F18"]')?.hasAttribute('data-dragging')).toBe(true);
-    await interact(() => laneNamed(root, 'Review').dispatchEvent(drag('drop')));
-    await interact(() => flush());
-    expect(acts).toEqual([{ id: 'F18', request: { action: 'move', to: 'review' } }]);
-    expect(root.querySelector('[data-dragging]')).toBeNull();
-  });
-
-  it('takes no drop on the lane the card is already in, and clears the drag when it ends', async () => {
-    const { root, acts } = await open({ expanded: true });
-    await interact(() => must(root.querySelector('[data-task="F18"]'), 'F18').dispatchEvent(drag('dragstart')));
-    await interact(() => laneNamed(root, 'Plan').dispatchEvent(drag('drop')));
-    await interact(() => must(root.querySelector('[data-task="F18"]'), 'F18').dispatchEvent(drag('dragend')));
-    expect(root.querySelector('[data-dragging]')).toBeNull();
-    expect(acts).toEqual([]);
-  });
-
-  it('draws no drag handle in the panel', async () => {
-    const { root } = await open();
-    expect(root.querySelector('[data-task="F18"]')?.getAttribute('draggable')).toBe('false');
   });
 });
 

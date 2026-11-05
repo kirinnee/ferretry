@@ -1533,7 +1533,7 @@ export function AgendaInboxPage({
       filterToTest(inbox.toTestSnoozed, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
     [inbox.toTestSnoozed, machineFilter, query, from, kind],
   );
-  const toTestAnswers = useToTestAnswers(toTestHost, phone);
+  const toTestAnswers = useToTestAnswers(toTestHost);
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');

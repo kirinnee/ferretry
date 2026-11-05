@@ -1,38 +1,27 @@
 /**
  * THE BOARD PAGE (`/d/<id>/board`): every task on every paired machine as lanes.
  *
- * It owns what the views must not: the reads (the U10 board store, once per kind of read), the filters in
- * the URL, the drag in the air and the move flow. A move forward is sent as dropped; a move BACK opens the
- * send-back composer (the words, and pictures where the machine takes them) and is sent only with its words.
- * Each card's answer in flight is tracked here, so the pressed button spins, the card's other answers wait,
- * and a refusal is said on the card it belongs to. Everything drawn is `BoardCard`, `BoardLane`,
- * `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
+ * It owns what the views must not: the reads (the U10 board store, once per kind of read) and the filters in
+ * the URL. The page is READ-ONLY for the owner: no drag between lanes, no lane menu, no "Add card", no
+ * "Lanes ✎" editor link — the board runs itself and the owner answers in the agenda. What stays are the
+ * reading aids: the view switch, the filters, "Show private", the scope toggle and the theme switch. Everything
+ * drawn is `BoardCard`, `BoardLane`, `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '@ferretry/protocol';
-import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
-import {
-  useBoard,
-  useBoardActions,
-  useBoardFilters,
-  useBoardProjects,
-  type BoardMachine,
-} from '../../hooks/use-board.ts';
+import { useBoard, useBoardFilters, useBoardProjects, type BoardMachine } from '../../hooks/use-board.ts';
 import { useNow } from '../../hooks/use-now.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch, NO_BOARD_FILTERS } from '../../lib/board-model.ts';
-import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
   archivePage,
   archiveRows,
   BOARD_VIEW_LABEL,
   BOARD_VIEWS,
-  type BoardCardOf,
-  type BoardCardPlace,
   type BoardGroupOf,
   type BoardViewId,
   cardPlaces,
@@ -40,24 +29,21 @@ import {
   parseBoardView,
 } from '../../lib/board-view.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { daemonBoardCardPath, daemonBoardPath, daemonProjectLanesPath } from '../../lib/pages/routes.ts';
+import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
-import type { BoardCardMoves } from './board-card.tsx';
 import { BoardCountsBar } from './board-counts.tsx';
 import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '../../lib/board-summary.ts';
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
 import { BoardNotice } from './board-notice.tsx';
 import { PhoneKanban } from './board-phone.tsx';
-import { useBoardAnswers } from './board-answers.tsx';
-import type { SendBackPorts } from './board-send-back.tsx';
-import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
-import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
+import { type BoardAgenda, BoardDetail } from './detail/board-detail.tsx';
 import { TableView } from './board-table.tsx';
 import { ArchiveView, type BoardCardEnv, DependenciesView, KanbanView, TreeView } from './board-views.tsx';
 
 export interface BoardPageProps {
   readonly store: DaemonBoardStore;
-  readonly agenda: Pick<BoardAgenda, 'respond'> & Partial<Pick<BoardAgenda, 'hydrate' | 'store'>>;
+  /** What the card drawer reads its asks from; without it a card cannot be opened as a drawer. */
+  readonly agenda: Partial<BoardAgenda>;
   /** Every paired machine, in the order the shell shows them. */
   readonly machines: readonly BoardMachine[];
   /** Ferret callsigns by session id; a ferret not listed is named by the start of its id. */
@@ -71,8 +57,6 @@ export interface BoardPageProps {
   readonly now?: number;
   /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
   readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
-  /** Speaking to ferrets and starting one; without them the detail cannot comment and there is no "+ Card". */
-  readonly ports?: BoardDetailPorts & NewCardPorts & SendBackPorts;
   /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
   readonly phone?: boolean;
   /**
@@ -130,7 +114,6 @@ export function BoardPage({
   onNavigate,
   now: fixedNow,
   openCard = null,
-  ports,
   phone = false,
   origin = null,
 }: BoardPageProps) {
@@ -206,7 +189,6 @@ export function BoardPage({
 
   const connections = useMemo(() => machines.map(machine => machine.connection), [machines]);
   const projects = useBoardProjects(store, connections);
-  const actions = useBoardActions(store, agenda, connections);
   const now = useNow(fixedNow);
   const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
 
@@ -227,47 +209,8 @@ export function BoardPage({
     return new Map([...cardPlaces(closed.model), ...cardPlaces(dropped.model)]);
   }, [archive, model, closed.model, dropped.model]);
 
-  // ----- moving -------------------------------------------------------------------------------------
-  const [dragging, setDragging] = useState<{ cardKey: string; groupKey: string } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [composing, setComposing] = useState(false);
   // A phone can dismiss a machine's error; it comes back if the machine says something else.
   const [dismissedErrors, setDismissedErrors] = useState<ReadonlySet<string>>(() => new Set());
-
-  const { requestMove, answerFor, composer } = useBoardAnswers({
-    actions,
-    ports,
-    connectionOf: daemonId => machines.find(machine => machine.connection.daemonId === daemonId)?.connection,
-    phone,
-    onNotice: setNotice,
-  });
-
-  const movesFor = useCallback(
-    (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
-      const { group } = place;
-      if (group.laneSet === null || place.category === 'closed') return undefined;
-      return {
-        choices: moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId) => requestMove(target, group, laneId),
-        onDragStart: target => setDragging({ cardKey: target.key, groupKey: group.key }),
-        onDragEnd: () => setDragging(null),
-      };
-    },
-    [requestMove],
-  );
-
-  const onDropCard = useCallback(
-    (groupKey: string, laneId: string): void => {
-      const air = dragging;
-      setDragging(null);
-      if (air === null || air.groupKey !== groupKey) return;
-      const group = model.groups.find(candidate => candidate.key === groupKey);
-      const card = model.cards.find(candidate => candidate.key === air.cardKey);
-      if (group === undefined || card === undefined) return;
-      requestMove(card, group, laneId);
-    },
-    [dragging, model, requestMove],
-  );
 
   // ----- what the views are given -------------------------------------------------------------------
   const env = useMemo<BoardCardEnv>(
@@ -278,24 +221,9 @@ export function BoardPage({
       touch: phone,
       hrefFor: card => daemonBoardCardPath(card.daemonId, card.task.id),
       onNavigate,
-      movesFor: archive ? () => undefined : movesFor,
       places,
-      dragging,
-      answerFor,
     }),
-    [
-      names,
-      now,
-      model.multiMachine,
-      machines.length,
-      onNavigate,
-      archive,
-      movesFor,
-      places,
-      dragging,
-      phone,
-      answerFor,
-    ],
+    [names, now, model.multiMachine, machines.length, onNavigate, places, phone],
   );
 
   const [archiveQuery, setArchiveQuery] = useState('');
@@ -345,7 +273,6 @@ export function BoardPage({
             })),
     [detailRead.model.cards, detailPlaces, openCard],
   );
-  const composeMachine = detailMachine ?? machines[0];
   // CALLED ON `agenda`, NEVER COPIED OFF IT. The app passes the agenda client itself, a class whose methods
   // read its own private fields; `{ hydrate: agenda.hydrate }` detached them from it, so the drawer's first
   // hydrate threw "Receiver must be an instance of class" during render and every card — opened from the
@@ -356,18 +283,12 @@ export function BoardPage({
     if (hydrate === undefined || agendaStore === undefined) return null;
     return {
       hydrate: (daemon, scope) => hydrate.call(agenda, daemon, scope),
-      respond: (...args) => agenda.respond(...args),
       store: agendaStore,
     };
   }, [agenda]);
   const closeDetail = useCallback(() => {
     if (openCard !== null) onNavigate(daemonBoardPath(openCard.daemonId));
   }, [openCard, onNavigate]);
-  const editLanes = useCallback(
-    (group: BoardGroupOf): void => onNavigate(daemonProjectLanesPath(group.daemonId, group.projectId)),
-    [onNavigate],
-  );
-  const onlyGroup = model.groups.length === 1 ? model.groups[0] : undefined;
 
   // A count pressed on a phone opens the matching cards as a list (pressed again, it lifts the filter).
   const pressCount = (activity: BoardActivityFilter | null): void => {
@@ -380,26 +301,6 @@ export function BoardPage({
     writeParams(next);
   };
 
-  const canCompose = ports !== undefined && machines.length > 0;
-  const cardButton = !canCompose ? null : (
-    <button className="kt-btn fy-board__add" data-board-add="header" onClick={() => setComposing(true)} type="button">
-      <Plus aria-hidden="true" size={14} />
-      Add card
-    </button>
-  );
-  const cardFab = !canCompose ? null : (
-    <div className="fy-board__fab">
-      <button
-        aria-label="Add card"
-        className="fy-board__fab-button"
-        data-board-add="fab"
-        onClick={() => setComposing(true)}
-        type="button"
-      >
-        <Plus aria-hidden="true" size={24} />
-      </button>
-    </div>
-  );
   const scopeToggle =
     scopeFerret === null ? null : (
       <ScopeToggle
@@ -408,13 +309,6 @@ export function BoardPage({
         scoped={scoped}
       />
     );
-  const lanesLink =
-    onlyGroup === undefined ? null : (
-      <button className="fy-board__lanes" data-board-lanes="header" onClick={() => editLanes(onlyGroup)} type="button">
-        Lanes ✎
-      </button>
-    );
-
   // `?highlight=F11` (Info's "Open board"): the card is marked and scrolled to, and the mark follows it through refreshes.
   const highlight = params.get('highlight');
   const pageRef = useRef<HTMLElement | null>(null);
@@ -457,8 +351,6 @@ export function BoardPage({
         {phone ? null : (
           <div className="fy-board__tools">
             {scopeToggle}
-            {cardButton}
-            {lanesLink}
             <PageThemeSwitch />
           </div>
         )}
@@ -480,7 +372,6 @@ export function BoardPage({
             onActivity={pressCount}
             onOpenArchive={() => setView('archive')}
           />
-          {lanesLink}
         </div>
       ) : (
         <>
@@ -500,11 +391,6 @@ export function BoardPage({
             splitsAgents={model.splitsAgents}
           />
         </>
-      )}
-      {notice === null ? null : (
-        <BoardNotice compact={phone} onDismiss={() => setNotice(null)}>
-          {notice}
-        </BoardNotice>
       )}
       {board.machines
         .filter(machine => machine.status === 'error')
@@ -548,14 +434,7 @@ export function BoardPage({
             projectName={projectName}
           />
         ) : (
-          <KanbanView
-            env={env}
-            hideClosed={hideClosed}
-            model={model}
-            onDropCard={onDropCard}
-            onEditLanes={editLanes}
-            projectName={projectName}
-          />
+          <KanbanView env={env} hideClosed={hideClosed} model={model} projectName={projectName} />
         )
       ) : view === 'list' ? (
         <TableView closed={closed.model} env={env} model={model} onWindow={setWindow} window={window} />
@@ -578,10 +457,8 @@ export function BoardPage({
           total={archiveAll.length}
         />
       )}
-      {composer}
-      {openCard === null || detailMachine === undefined || ports === undefined || detailAgenda === null ? null : (
+      {openCard === null || detailMachine === undefined || detailAgenda === null ? null : (
         <BoardDetail
-          actions={actions}
           agenda={detailAgenda}
           machine={detailMachine}
           names={names}
@@ -589,30 +466,11 @@ export function BoardPage({
           onClose={closeDetail}
           onNavigate={onNavigate}
           phone={phone}
-          ports={ports}
           projectName={id => projectNames.get(id) ?? id.slice(0, 8)}
           siblings={siblings}
           store={store}
           taskId={openCard.taskId}
         />
-      )}
-      {phone ? cardFab : null}
-      {!composing || ports === undefined || composeMachine === undefined ? null : (
-        <div className="fy-board__scrim">
-          <BoardNewCard
-            actions={actions}
-            assignees={choices.ferrets.map(ferret => ({ sessionId: ferret.id, name: ferret.name }))}
-            connection={composeMachine.connection}
-            machineName={composeMachine.name}
-            onCancel={() => setComposing(false)}
-            onCreated={task => {
-              setComposing(false);
-              onNavigate(daemonBoardCardPath(composeMachine.connection.daemonId, task.id));
-            }}
-            ports={ports}
-            projects={choices.projects}
-          />
-        </div>
       )}
     </section>
   );
