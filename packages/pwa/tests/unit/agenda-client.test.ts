@@ -262,136 +262,24 @@ describe('DaemonAgendaClient', () => {
     should(client.store.status(scopeA)).equal('error');
   });
 
-  it('re-reads exactly the landed session through the fleet, and swallows a failed read', async () => {
+  it('forwards a landing to the fleet store, and swallows a throw from it', () => {
     // Arrange
-    const read: string[] = [];
+    const asked: string[] = [];
+    let explode = false;
     const landed = rereadRowOnLanding({
-      fetchSession: async (daemon, scope) => {
-        read.push(`${daemon.daemonId}/${scope.sessionId}`);
-        throw new Error('offline');
+      refreshSession: (daemon, scope) => {
+        asked.push(`${daemon.daemonId}/${scope.sessionId}`);
+        if (explode) throw new Error('no fleet');
       },
     });
 
     // Act
     landed(daemonA, scopeA);
-    await tick();
+    explode = true;
+    landed(daemonB, scopeB);
 
-    // Assert — one read for that row; the rejection reaches nobody
-    should(read).deepEqual(['daemon-a/same/session']);
-  });
-
-  describe('rereadRowOnLanding trailing read', () => {
-    const gatedReader = () => {
-      const started: string[] = [];
-      const gates: Array<{ resolve: () => void; reject: () => void }> = [];
-      const fleet = {
-        fetchSession: (daemon: { daemonId: string }, scope: { sessionId: string }): Promise<unknown> => {
-          started.push(`${daemon.daemonId}/${scope.sessionId}`);
-          return new Promise<unknown>((resolve, reject) => {
-            gates.push({ resolve: () => resolve(undefined), reject: () => reject(new Error('offline')) });
-          });
-        },
-      };
-      return { started, gates, fleet };
-    };
-
-    it('starts exactly one trailing read when a landing arrives while a read is in flight', async () => {
-      const { started, gates, fleet } = gatedReader();
-      const landed = rereadRowOnLanding(fleet);
-
-      landed(daemonA, scopeA);
-      landed(daemonA, scopeA);
-      await tick();
-      should(started).have.length(1);
-
-      gates[0]?.resolve();
-      await tick();
-      should(started).have.length(2);
-
-      gates[1]?.resolve();
-      await tick();
-      should(started).have.length(2);
-    });
-
-    it('collapses three landings during one read into one trailing read', async () => {
-      const { started, gates, fleet } = gatedReader();
-      const landed = rereadRowOnLanding(fleet);
-
-      landed(daemonA, scopeA);
-      landed(daemonA, scopeA);
-      landed(daemonA, scopeA);
-      landed(daemonA, scopeA);
-      gates[0]?.resolve();
-      await tick();
-      gates[1]?.resolve();
-      await tick();
-
-      should(started).have.length(2);
-    });
-
-    it('still starts the trailing read when the first read is rejected, and swallows both failures', async () => {
-      const { started, gates, fleet } = gatedReader();
-      const landed = rereadRowOnLanding(fleet);
-
-      landed(daemonA, scopeA);
-      landed(daemonA, scopeA);
-      gates[0]?.reject();
-      await tick();
-      should(started).have.length(2);
-      gates[1]?.reject();
-      await tick();
-
-      should(started).have.length(2);
-    });
-
-    it('reads again for a landing after everything settled', async () => {
-      const { started, gates, fleet } = gatedReader();
-      const landed = rereadRowOnLanding(fleet);
-
-      landed(daemonA, scopeA);
-      gates[0]?.resolve();
-      await tick();
-      landed(daemonA, scopeA);
-
-      should(started).have.length(2);
-    });
-
-    it('keeps sessions apart: a landing for another session neither waits nor marks the first dirty', async () => {
-      const { started, gates, fleet } = gatedReader();
-      const landed = rereadRowOnLanding(fleet);
-
-      landed(daemonA, scopeA);
-      landed(daemonB, scopeB);
-      should(started).deepEqual(['daemon-a/same/session', 'daemon-b/same/session']);
-      gates[0]?.resolve();
-      gates[1]?.resolve();
-      await tick();
-
-      should(started).have.length(2);
-    });
-
-    it('passes the latest daemon connection to the trailing read', async () => {
-      const seen: string[] = [];
-      const gates: Array<() => void> = [];
-      const landed = rereadRowOnLanding({
-        fetchSession: daemon => {
-          seen.push(daemon.baseUrl);
-          return new Promise<unknown>(resolve => gates.push(() => resolve(undefined)));
-        },
-      });
-      const repaired = daemonConnection({
-        daemonId: 'daemon-a',
-        baseUrl: 'https://a2.example.test',
-        deviceId: 'token-a2',
-      });
-
-      landed(daemonA, scopeA);
-      landed(repaired, scopeA);
-      gates[0]?.();
-      await tick();
-
-      should(seen).deepEqual(['https://a.example.test', 'https://a2.example.test']);
-    });
+    // Assert — both reached the store; the throw reached nobody
+    should(asked).deepEqual(['daemon-a/same/session', 'daemon-b/same/session']);
   });
 
   it('answers the owner even when the row re-read cannot start', async () => {

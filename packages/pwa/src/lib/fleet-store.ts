@@ -153,6 +153,11 @@ interface DaemonEntry {
   readonly deviceId: string;
   listInflight: Promise<readonly SessionView[]> | null;
   readonly sessionInflight: Map<string, Promise<SessionView>>;
+  /**
+   * Sessions whose in-flight GET began BEFORE a caller asked for a fresher read (`refreshSession`), with the newest
+   * connection that asked. When that GET settles, exactly one more starts — if this entry is still the current one.
+   */
+  readonly sessionDirty: Map<string, { readonly daemon: DaemonConnection; readonly scope: DaemonSessionScope }>;
   /** How many list reads this connection has started, and the newest one whose answer was published. */
   listStarted: number;
   listCommitted: number;
@@ -349,10 +354,38 @@ export class DaemonFleetStore {
       })
       .finally(() => {
         entry.sessionInflight.delete(key);
+        const dirty = entry.sessionDirty.get(key);
+        if (dirty === undefined) return;
+        entry.sessionDirty.delete(key);
+        // An unpair or a re-pair replaced this entry: the trailing read must not be issued under the old connection.
+        if (this.#isCurrent(entry)) this.#readQuietly(dirty.daemon, dirty.scope);
       });
 
     entry.sessionInflight.set(key, request);
     return request;
+  }
+
+  /**
+   * "A read of this session that STARTS AFTER NOW will be published." For a caller that just changed the session on
+   * the daemon (an accepted answer) and needs the row to agree.
+   *
+   * Nothing in flight: a read starts now. A GET already in flight began before the change and would otherwise be
+   * joined by coalescing, publishing a stale row — so the session is marked dirty and ONE more GET starts when it
+   * settles, however many refreshes arrive meanwhile. It acts only when this exact connection is the store's current
+   * entry: it never creates or drops an entry, so an unpaired or re-paired daemon is left alone.
+   */
+  refreshSession(daemon: DaemonConnection, scope: DaemonSessionScope): void {
+    const entry = this.#entries.get(daemon.daemonId);
+    if (
+      entry === undefined ||
+      entry.baseUrl !== daemon.baseUrl ||
+      entry.deviceId !== daemon.deviceId ||
+      scope.daemonId !== daemon.daemonId
+    )
+      return;
+    const key = daemonSessionKey(scope);
+    if (entry.sessionInflight.has(key)) entry.sessionDirty.set(key, { daemon, scope });
+    else this.#readQuietly(daemon, scope);
   }
 
   /**
@@ -422,6 +455,7 @@ export class DaemonFleetStore {
       deviceId: daemon.deviceId,
       listInflight: null,
       sessionInflight: new Map(),
+      sessionDirty: new Map(),
       listStarted: 0,
       listCommitted: 0,
       writeClock: 0,
@@ -429,6 +463,11 @@ export class DaemonFleetStore {
     };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
+  }
+
+  /** A session read nobody awaits: a throw or a rejection is swallowed, the next poll catches up. */
+  #readQuietly(daemon: DaemonConnection, scope: DaemonSessionScope): void {
+    new Promise<unknown>(resolve => resolve(this.fetchSession(daemon, scope))).catch(() => undefined);
   }
 
   #isCurrent(entry: DaemonEntry): boolean {
