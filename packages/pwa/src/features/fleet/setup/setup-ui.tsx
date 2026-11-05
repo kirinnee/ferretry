@@ -11,6 +11,12 @@ import { Badge } from '../../../shell/primitives.tsx';
 import { AccountStatus } from '../shell/account-status.tsx';
 import type { RowTone } from './harness-import-model.ts';
 
+/**
+ * The one touch-target size for a button in the copy flow: at least 44 x 44 CSS px at every width and pointer.
+ * `min-h-control` only reaches 44px on a coarse pointer, so a desktop browser drew these at 28px.
+ */
+export const TOUCH_BUTTON = 'min-h-[44px] min-w-[96px]';
+
 export function SetupSection({
   title,
   children,
@@ -253,7 +259,7 @@ export function SetupDisclosure({
 }) {
   return (
     <details className="group min-w-0" data-setup-disclosure={name}>
-      <summary className="flex min-h-control cursor-pointer list-none items-center gap-1 text-cell font-semibold text-accent [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1 text-cell font-semibold text-accent [&::-webkit-details-marker]:hidden">
         <ChevronRight size={14} aria-hidden="true" className="transition-transform group-open:rotate-90" />
         {label}
       </summary>

@@ -151,7 +151,7 @@ import {
 } from './clone-settings-model.ts';
 import { machineItemHash } from './settings-route.ts';
 import { type Guarded, useSetupAccess } from './setup-access.ts';
-import { RadioChoices, SetupCommand, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
+import { RadioChoices, SetupCommand, SetupNote, SetupRow, SetupSection, TOUCH_BUTTON } from './setup-ui.tsx';
 import { closedSentence, countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 export interface CloneMachineProps extends MachineTabProps {
@@ -184,7 +184,7 @@ interface CloneResult {
 }
 
 function Foot({ children }: { readonly children: ReactNode }) {
-  return <div className="mt-4 flex flex-wrap gap-2">{children}</div>;
+  return <div className="mt-4 flex flex-wrap gap-3">{children}</div>;
 }
 
 /**
@@ -733,6 +733,7 @@ export function CloneMachine(props: CloneMachineProps) {
         busy={changes.busy || copying}
         refusal={changes.refusal}
         submitLabel={label}
+        submitClassName={TOUCH_BUTTON}
         busyLabel="Copying…"
         variant={variant}
         disabled={chosen.length === 0 || blockedBy !== null}
@@ -783,7 +784,7 @@ export function CloneMachine(props: CloneMachineProps) {
               type="button"
               size="sm"
               variant="outline"
-              className="mt-2 min-h-[44px] min-w-[96px] self-start"
+              className={`mt-2 self-start ${TOUCH_BUTTON}`}
               data-clone-review-retry=""
               onClick={() => reviewAgain(chosen)}
             >
@@ -819,7 +820,13 @@ export function CloneMachine(props: CloneMachineProps) {
       </SetupNote>
     ) : null;
     const reviewAgainButton = stale ? (
-      <Button type="button" data-review-again="" disabled={reading} onClick={() => readSource(false)}>
+      <Button
+        type="button"
+        className={TOUCH_BUTTON}
+        data-review-again=""
+        disabled={reading}
+        onClick={() => readSource(false)}
+      >
         {reading ? 'Reviewing…' : 'Review again'}
       </Button>
     ) : null;
@@ -834,7 +841,7 @@ export function CloneMachine(props: CloneMachineProps) {
           </SetupNote>
           {matched === 0 ? (
             <Foot>
-              <Button type="button" variant="primary" data-clone-finish="" onClick={onDone}>
+              <Button type="button" variant="primary" className={TOUCH_BUTTON} data-clone-finish="" onClick={onDone}>
                 Done
               </Button>
             </Foot>
@@ -855,6 +862,7 @@ export function CloneMachine(props: CloneMachineProps) {
                 busy={changes.busy || copying}
                 refusal={stale ? null : changes.refusal}
                 submitLabel={`Finish and link ${countWords(matched, 'item')}`}
+                submitClassName={TOUCH_BUTTON}
                 busyLabel="Linking…"
                 onSubmit={() => copy(true)}
               >
@@ -958,6 +966,7 @@ export function CloneMachine(props: CloneMachineProps) {
               busy={changes.busy || copying}
               refusal={stale ? null : changes.refusal}
               submitLabel={updateLabel(count)}
+              submitClassName={TOUCH_BUTTON}
               busyLabel="Updating…"
               disabled={unchosen.length > 0 || blockedBy !== null}
               onSubmit={() => copy()}
@@ -1029,6 +1038,7 @@ export function CloneMachine(props: CloneMachineProps) {
             <Button
               type="button"
               variant="primary"
+              className={TOUCH_BUTTON}
               data-step-next=""
               disabled={pickedState?.kind !== 'ready' || reading || source.changes.authority === null}
               onClick={() => readSource(true)}
@@ -1206,7 +1216,7 @@ export function CloneMachine(props: CloneMachineProps) {
             )
           ) : hasSetup ? (
             <Foot>
-              <Button type="button" variant="primary" data-step-next="" disabled={blockedBy !== null} onClick={next}>
+              <Button type="button" variant="primary" className={TOUCH_BUTTON} data-step-next="" disabled={blockedBy !== null} onClick={next}>
                 Next
               </Button>
             </Foot>
@@ -1259,7 +1269,7 @@ export function CloneMachine(props: CloneMachineProps) {
         />
         {updating ? (
           <Foot>
-            <Button type="button" variant="primary" data-step-next="" onClick={next}>
+            <Button type="button" variant="primary" className={TOUCH_BUTTON} data-step-next="" onClick={next}>
               Next
             </Button>
           </Foot>
@@ -1354,7 +1364,7 @@ function RunsHere({
             data-clone-runnable={runnable.reference}
             data-copy={copy ? 'yes' : 'no'}
           >
-            <label className="relative flex min-h-control min-w-0 cursor-pointer items-center gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus">
+            <label className="relative flex min-h-[44px] min-w-0 cursor-pointer items-center gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus">
               <input
                 type="checkbox"
                 checked={copy}
@@ -1430,7 +1440,7 @@ function DoneStep({
           return target === undefined ? null : (
             <a
               href={machineItemHash(machineName, 'sign-ins', target)}
-              className="inline-flex min-h-control items-center gap-1 font-semibold text-accent underline"
+              className="inline-flex min-h-[44px] items-center gap-1 font-semibold text-accent underline"
               data-clone-need-sign-in={target}
             >
               Sign in
@@ -1446,7 +1456,7 @@ function DoneStep({
               key={slot.id}
               href={machineItemHash(machineName, 'sign-ins', slot.id)}
               data-clone-slot={slot.id}
-              className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
+              className="kt-panel flex min-h-[44px] min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
             >
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">
@@ -1484,14 +1494,14 @@ function DoneStep({
         </SetupNote>
       )}
       <Foot>
-        <Button type="button" data-clone-finish="" onClick={onDone}>
+        <Button type="button" className={TOUCH_BUTTON} data-clone-finish="" onClick={onDone}>
           {doneLabel}
         </Button>
         {busiest === undefined ? null : (
           <a
             href={machineItemHash(machineName, 'sign-ins', busiest.id)}
             data-clone-sign-in={busiest.id}
-            className="kt-btn"
+            className={`kt-btn ${TOUCH_BUTTON}`}
             data-variant="primary"
           >
             Sign in once for {countWords(busiest.usedBy.length, 'runtime')}

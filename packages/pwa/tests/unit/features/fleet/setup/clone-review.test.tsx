@@ -34,6 +34,11 @@ import {
 
 const WORK_RECORD: DaemonConnectionRecord = { ...WORK, label: 'work-linux', pairedAt: 0, lastSelectedAt: 0 };
 const EXECUTED = { outcome: 'executed', executor: 'clone', summary: 'Updated studio-mac from work-linux' };
+/** A tappable control is at least 44 x 44 CSS px at every width, not only on a coarse pointer. */
+const expectTouchTarget = (control: Element | null | undefined, what: string): void => {
+  expect(control, what).toBeTruthy();
+  expect(control?.className, what).toContain('min-h-[44px]');
+};
 const TARGET_MACHINE = machineView({ runtimeCount: 2 });
 const STACKS = {
   format: 'version-2',
@@ -260,6 +265,12 @@ describe('CloneMachine · Update · Changes', () => {
       expect(screen.text('[data-setup-disclosure="review-same"] summary')).toContain(
         '6 things already the same (2 matched by name)',
       );
+      expectTouchTarget(screen.q('[data-setup-disclosure="review-same"] summary'), 'the already-the-same disclosure');
+      expectTouchTarget(
+        screen.q('[data-review-pick="settings/shared:keep"]')?.closest('label'),
+        'a both-changed choice',
+      );
+      expectTouchTarget(screen.q('[data-review-pick="mcp/notes"]')?.closest('label'), 'a tick row');
       // Names only, behind the fold.
       expect(screen.text('[data-review-same-names]')).toContain('runtime/claude-default');
       expect(screen.text('[data-review-same-names]')).not.toContain('Be kind');
@@ -359,6 +370,7 @@ describe('CloneMachine · Update · Changes', () => {
       await toChanges(screen);
       await click(screen.q('[data-review-pick="settings/shared:take"]'), 'Use theirs');
       expect(screen.submit()?.textContent).toBe('Update 3 things');
+      expectTouchTarget(screen.submit(), 'Update N things');
 
       await click(screen.q('[data-review-pick="mcp/notes"]'), 'untick notes');
       expect(screen.submit()?.textContent).toBe('Update 2 things');
@@ -453,6 +465,7 @@ describe('CloneMachine · Update · Changes', () => {
       expect(note.textContent).toBe('Everything from work-linux is already here. Nothing to copy.');
       expect(screen.q('[data-setup-section]')).toBeNull();
       expect(screen.q('[data-change-submit]')).toBeNull();
+      expectTouchTarget(screen.q('[data-clone-finish]'), 'Done');
       await click(screen.q('[data-clone-finish]'), 'Done');
       expect(done).toBe(1);
       expect(changeBodies(calls.target)).toEqual([]);
@@ -481,6 +494,8 @@ describe('CloneMachine · Update · Changes', () => {
       expect(note.textContent).toContain('Something changed since you reviewed. Review again.');
       expect(screen.q('[data-change-refusal]')).toBeNull();
       expect(reviews).toBe(1);
+      expectTouchTarget(screen.q('[data-review-again]'), 'Review again');
+      expectTouchTarget(screen.submit(), 'Update beside Review again');
 
       await click(screen.q('[data-review-again]'), 'Review again');
       expect(reviews).toBe(2);
@@ -535,6 +550,7 @@ describe('CloneMachine · Update · Logins', () => {
       expect(ask.textContent).toContain('Use Main');
       expect(ask.textContent).toContain('Use Spare');
       expect(ask.textContent).toContain('Add an empty slot');
+      for (const option of options) expectTouchTarget(option.closest('label'), 'a login choice');
       expect(options.map(option => option.checked)).toEqual([false, false, true]);
       // Nothing is picked for the person, and the help says so; picking one says what happens instead.
       expect(ask.querySelector('[data-review-login-help]')?.textContent).toContain('none is picked for you');

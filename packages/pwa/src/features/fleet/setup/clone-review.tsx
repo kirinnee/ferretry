@@ -57,7 +57,7 @@ export function RunnableEntries({
           <dd className="m-0 min-w-0">
             {entry.document ? (
               <details className="min-w-0">
-                <summary className="min-h-control cursor-pointer text-cell text-fg">
+                <summary className="min-h-[44px] cursor-pointer text-cell text-fg">
                   Show all {documentSize(entry.text)}
                 </summary>
                 <SetupCommand>{entry.text}</SetupCommand>
@@ -126,7 +126,7 @@ function FileChange({
       </span>
       {theirs === undefined || file.change === 'removed' ? null : (
         <details className="min-w-0">
-          <summary className="min-h-control cursor-pointer text-cell font-semibold text-accent">
+          <summary className="min-h-[44px] cursor-pointer text-cell font-semibold text-accent">
             {diff === null ? 'Show the whole file' : 'See the change'}
           </summary>
           <div className="flex min-w-0 flex-col gap-2">
@@ -134,7 +134,7 @@ function FileChange({
             {diff === null ? null : (
               <button
                 type="button"
-                className="min-h-control self-start text-cell font-semibold text-accent underline"
+                className="min-h-[44px] self-start text-cell font-semibold text-accent underline"
                 data-review-whole=""
                 onClick={() => setWhole(current => !current)}
               >
@@ -308,7 +308,7 @@ function ReviewItemRow({
           ).map(([value, label]) => (
             <label
               key={value}
-              className="relative flex min-h-control min-w-0 cursor-pointer items-center gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+              className="relative flex min-h-[44px] min-w-0 cursor-pointer items-center gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
             >
               <input
                 type="radio"
@@ -329,7 +329,7 @@ function ReviewItemRow({
           <div className="flex min-w-0 flex-col gap-1">{detail}</div>
         </>
       ) : ticks === undefined ? null : (
-        <label className="relative flex min-w-0 cursor-pointer items-start gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus">
+        <label className="relative flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus">
           <input
             type="checkbox"
             className="mt-1 shrink-0 accent-[var(--accent)]"
@@ -405,7 +405,7 @@ function LoginRow({
             <span className="font-mono">{name}</span>: use which login on {machineName}?
           </legend>
           {options.map(([id, label]) => (
-            <label key={id} className="relative flex min-h-control min-w-0 cursor-pointer items-center gap-3">
+            <label key={id} className="relative flex min-h-[44px] min-w-0 cursor-pointer items-center gap-3">
               <input
                 type="radio"
                 name={group}

@@ -23,7 +23,7 @@ import {
   needsSentence,
   outcomeSentence,
 } from './clone-settings-model.ts';
-import { CheckChoices, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
+import { CheckChoices, SetupNote, SetupRow, SetupSection, TOUCH_BUTTON } from './setup-ui.tsx';
 import { countWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 /** The checkboxes: every item, its one-line summary from the source, and why one cannot be picked. */
@@ -208,7 +208,7 @@ export function CloneKeysBox({
   return (
     <label
       htmlFor={boxId}
-      className="kt-panel relative flex min-h-control min-w-0 cursor-pointer items-start gap-3 p-panel has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+      className="kt-panel relative flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
       data-clone-keys=""
     >
       <input
@@ -281,14 +281,14 @@ function NeedRow({
       ) : need.secretName === undefined ? (
         <span className="text-meta text-muted">Add it in Settings › Speed-ups</span>
       ) : (
-        <span className="flex min-w-0 flex-[1_1_16rem] flex-wrap items-center gap-2">
+        <span className="flex min-w-0 flex-[1_1_16rem] flex-wrap items-center gap-3">
           <label htmlFor={fieldId} className="sr-only">
             {need.secretName}
           </label>
           <input
             id={fieldId}
             type="password"
-            className="kt-input min-w-0 flex-1 font-mono"
+            className="kt-input !min-h-[44px] min-w-0 flex-1 font-mono"
             autoComplete="off"
             spellCheck={false}
             placeholder="paste value"
@@ -299,6 +299,7 @@ function NeedRow({
           <Button
             type="button"
             size="sm"
+            className={TOUCH_BUTTON}
             data-clone-need-add={need.secretName}
             disabled={busy || value.trim() === ''}
             onClick={() => add(need.secretName as string)}
@@ -414,7 +415,7 @@ export function CloneOutcomes({
                     type="button"
                     size="sm"
                     variant="primary"
-                    className="min-h-[44px] min-w-[96px]"
+                    className={TOUCH_BUTTON}
                     data-clone-confirm={outcome.path}
                     onClick={() =>
                       void onConfirm(outcome.path, outcome.etag).then(failure => {

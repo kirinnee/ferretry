@@ -565,7 +565,7 @@ first because it decides what Changes shows (below).
   three-choice step, every group, both-changed unchosen and chosen, two conflicts with this machine's value
   beside the source's, nothing to copy, an identical old copy that finishes by linking, only kept items with
   a settings file ticked, a login to ask, a relocated item, a stale review, Done with a held setting) at 390px
-  and 1440px in the light and dark themes, with invented data only
+  and 1280px in the light and dark themes, with invented data only
   (`tests/unit/features/fleet/setup/clone-review-support.ts`), and fails on any sideways scroll.
 
 ### 4.8 Other flows the prototype covers

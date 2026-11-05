@@ -90,6 +90,8 @@ describe('MachineStepper', () => {
     expect(text(view.container, '[data-stepper-step="credential"] .kt-step__num')).toBe('');
     expect(view.container.querySelector('[data-stepper-step="credential"] .kt-step__num svg')).not.toBeNull();
     expect(text(view.container, '[data-stepper-segment-name="credential"]')).toBe('Credential ✓');
+    expect(view.container.querySelector('[data-stepper-back]')?.className).toContain('min-h-[44px]');
+    expect(view.container.querySelector('[data-stepper-cancel]')?.className).toContain('min-h-[44px]');
     await click(view.container, '[data-stepper-back]');
     expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2 · Credential');
     await view.unmount();
@@ -199,6 +201,8 @@ describe('MachineStepper embedded in a step', () => {
     expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
     await click(view.container, '[data-body]');
     expect(section.getAttribute('data-step')).toBe('profile');
+    // Back is a real touch target even on a desktop pointer.
+    expect(view.container.querySelector('[data-stepper-back]')?.className).toContain('min-h-[44px]');
     await click(view.container, '[data-stepper-back]');
     expect(section.getAttribute('data-step')).toBe('credential');
     expect(view.container.querySelector('[data-stepper-back]')).toBeNull();

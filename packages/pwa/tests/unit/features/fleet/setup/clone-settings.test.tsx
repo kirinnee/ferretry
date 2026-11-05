@@ -206,6 +206,8 @@ describe('CloneNeedsList', () => {
     const input = must(q(view, '[data-clone-need-value="JEV_API_KEY"]'), 'field') as HTMLInputElement;
     const add = must(q(view, '[data-clone-need-add="JEV_API_KEY"]'), 'add') as HTMLButtonElement;
     expect(input.type).toBe('password');
+    expect(add.className).toContain('min-h-[44px]');
+    expect(input.className).toContain('min-h-[44px]');
     expect(add.disabled).toBe(true);
     await type(input, '   ');
     expect(add.disabled).toBe(true);
@@ -356,6 +358,7 @@ describe('CloneOutcomes', () => {
     );
     expect(view.container.querySelectorAll('[data-clone-confirm]')).toHaveLength(1);
     expect(q(view, '[data-clone-confirm="warden.yaml"]')).not.toBeNull();
+    expect(q(view, '[data-clone-confirm="warden.yaml"]')?.className).toContain('min-h-[44px]');
     expect(text(view)).toContain('Or run fy config confirm on the machine.');
   });
 
@@ -391,6 +394,7 @@ describe('CloneOutcomes', () => {
     await interact(() => (must(q(view, '[data-clone-confirm]'), 'confirm') as HTMLElement).click());
     expect(must(q(view, '[role="alert"]'), 'alert').textContent).toBe('A passkey is needed to confirm.');
     expect(q(view, '[data-clone-confirm="warden.yaml"]')).not.toBeNull();
+    expect(q(view, '[data-clone-confirm="warden.yaml"]')?.className).toContain('min-h-[44px]');
     expect(must(q(view, '[data-clone-outcome="warden"]'), 'warden').getAttribute('data-outcome')).toBe('pending');
     expect(text(view)).not.toContain('Or run fy config confirm');
   });

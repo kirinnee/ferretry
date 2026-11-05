@@ -517,6 +517,9 @@ describe('CloneMachine · Preview', () => {
       const signIn = must(screen.q('[data-clone-sign-in]'), 'sign in');
       expect(signIn.getAttribute('data-clone-sign-in')).toBe('claude-work');
       expect(signIn.textContent).toBe('Sign in once for 2 runtimes');
+      expect(signIn.className).toContain('min-h-[44px]');
+      expect(screen.q('[data-clone-finish]')?.className).toContain('min-h-[44px]');
+      expect(screen.q('[data-clone-slot]')?.className).toContain('min-h-[44px]');
 
       await click(screen.q('[data-clone-finish]'), 'Go to Runtimes');
       expect(finished).toBe(1);

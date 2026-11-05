@@ -1,6 +1,6 @@
 /**
  * Copy from another machine, the Update review (docs/design/account-model.md §4.7; smart re-copy design §6):
- * every state of the sheet, each at a 390px phone and a 1440px desktop, in the light and the dark studio
+ * every state of the sheet, each at a 390px phone and a 1280px desktop, in the light and the dark studio
  * theme. Review evidence for the owner; nothing compares the PNGs.
  *
  *   bun harness/clone-review-screenshot.tsx [out-dir]   # writes <out-dir>/<scheme>/<state>-<viewport>.png
@@ -257,7 +257,7 @@ const PHONE_UA =
 
 const VIEWPORTS = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: PHONE_UA },
-  desktop: { viewport: { width: 1440, height: 900 } },
+  desktop: { viewport: { width: 1280, height: 900 } },
 } as const;
 
 const SCHEMES = { light: 'studio-light', dark: 'studio-dark' } as const;
@@ -274,6 +274,44 @@ const shot = async (page: Page, state: string, scheme: string, vp: string): Prom
       .slice(0, 3);
   });
   if (wide.length > 0) fail(`${state} ${scheme} ${vp} has content past the right edge: ${wide.join(', ')}`);
+  // Every tappable control is at least 44px tall (a button also 44px wide), with 8px or more to the next button.
+  const measured = await page.evaluate(() => {
+    const frame = document.querySelector('[data-machine-stepper]') as HTMLElement;
+    const controls = [
+      ...frame.querySelectorAll<HTMLElement>('button, a[href], summary, label:has(input), input[type="password"]'),
+    ].filter(element => element.getClientRects().length > 0 && !element.matches('.sr-only'));
+    const name = (element: HTMLElement) =>
+      element.tagName.toLowerCase() + '[' + (element.textContent ?? '').trim().slice(0, 24) + ']';
+    const buttons = controls.filter(element => element.matches('button, a.kt-btn'));
+    const short = controls.flatMap(element => {
+      const rect = element.getBoundingClientRect();
+      const narrow = buttons.includes(element) && rect.width < 43.5;
+      return rect.height < 43.5 || narrow
+        ? [name(element) + ' ' + rect.width.toFixed(0) + 'x' + rect.height.toFixed(0)]
+        : [];
+    });
+    const tight = buttons.flatMap((one, index) =>
+      buttons.slice(index + 1).flatMap(two => {
+        const p = one.getBoundingClientRect();
+        const q = two.getBoundingClientRect();
+        const sameRow = Math.min(p.bottom, q.bottom) > Math.max(p.top, q.top);
+        const sameColumn = Math.min(p.right, q.right) > Math.max(p.left, q.left);
+        const gap = sameRow
+          ? Math.max(q.left - p.right, p.left - q.right)
+          : sameColumn
+            ? Math.max(q.top - p.bottom, p.top - q.bottom)
+            : Infinity;
+        return gap < 8 ? [name(one) + ' / ' + name(two) + ' gap ' + gap.toFixed(1) + 'px'] : [];
+      }),
+    );
+    return { count: controls.length, short, tight };
+  });
+  if (measured.short.length > 0) fail(`${state} ${scheme} ${vp} has controls under 44px: ${measured.short.join('; ')}`);
+  if (measured.tight.length > 0)
+    fail(`${state} ${scheme} ${vp} has buttons closer than 8px: ${measured.tight.join('; ')}`);
+  process.stdout.write(
+    `📏 ${state} ${scheme} ${vp}: ${String(measured.count)} controls, all >= 44px, buttons >= 8px apart\n`,
+  );
   const box = await page.evaluate(() => {
     const frame = document.querySelector('[data-machine-stepper]') as HTMLElement;
     const rect = frame.getBoundingClientRect();
@@ -446,7 +484,7 @@ try {
       }
     }
   }
-  process.stdout.write(`✅ The update review does not scroll sideways at 390px or 1440px: ${outDir}\n`);
+  process.stdout.write(`✅ The update review does not scroll sideways at 390px or 1280px: ${outDir}\n`);
 } finally {
   await browser.close();
   server.stop();
