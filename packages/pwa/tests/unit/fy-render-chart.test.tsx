@@ -38,6 +38,7 @@ const theme = (mode: 'light' | 'dark', shade = 1): ResolvedTheme => ({
   ) as Record<ThemeToken, string>,
   font: 'system-ui',
   mode,
+  backdrop: '',
   radius: 0,
 });
 

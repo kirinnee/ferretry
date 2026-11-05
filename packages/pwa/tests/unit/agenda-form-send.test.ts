@@ -35,6 +35,8 @@ describe('form picks', () => {
   test('start on the recommendation, and a pick-one holds one value while a pick-many toggles', () => {
     expect(recommendedPicks(FIELDS)).toEqual({ '1': ['EU'] });
     expect(toggled(['EU'], 'US', false)).toEqual(['US']);
+    // Picking the held one again takes it back: every field is optional, a recommended one too (&F922).
+    expect(toggled(['EU'], 'EU', false)).toEqual([]);
     expect(toggled(['Page'], 'Mail', true)).toEqual(['Page', 'Mail']);
     expect(toggled(['Page', 'Mail'], 'Page', true)).toEqual(['Mail']);
     expect(withPick({ '1': ['EU'] }, '1', [])).toEqual({});
@@ -50,9 +52,7 @@ describe('form picks', () => {
     store.set('a', FIELDS, '1', ['US']);
     expect(store.picks('a', FIELDS)).toEqual({ '1': ['US'] });
     expect(store.picks('b', FIELDS)).toEqual({ '1': ['EU'] });
-    store.markAsked('a', '3');
     store.set('a', FIELDS, '3', ['Yes']);
-    expect(store.asked('a')).toBeUndefined();
     expect(store.changes('a')).toBe(2);
     expect(store.changes('b')).toBe(0);
     store.forget('a');
@@ -73,39 +73,32 @@ describe('planning the one Send of a form', () => {
     ]);
   });
 
-  test('a pick-many with something ticked is answered, so the ask never names it', () => {
+  test('every field is optional: any subset goes at once, nothing asked first (&F922)', () => {
     const picks = { '1': ['EU'], '2': ['Page', 'Mail'], '3': ['Yes'] };
-    const plan = planFormSend(item, picks, '', undefined);
-    expect(plan.kind).toBe('send');
-    const alone = planFormSend({ fields: [FIELDS[1] as AgendaFormField] }, { '2': ['Mail'] }, '', undefined);
-    expect(alone.kind).toBe('send');
-    const none = planFormSend(item, { '1': ['EU'], '3': ['Yes'] }, '', undefined);
-    if (none.kind !== 'ask') throw new Error('expected an ask');
-    expect(none.message).toContain('2. Alerts');
+    expect(planFormSend(item, picks, '').kind).toBe('send');
+    const part = planFormSend(item, { '1': ['EU'] }, '');
+    if (part.kind !== 'send' || part.action.kind !== 'respond') throw new Error('expected a send');
+    expect(part.action.response).toEqual({ kind: 'form', answers: [{ id: '1', picked: 'EU' }] });
   });
 
-  test('says there is nothing to send when nothing is filled in', () => {
-    const plan = planFormSend({ fields: FIELDS.slice(1) }, {}, '', undefined);
-    expect(plan).toEqual({ kind: 'nothing', message: 'Fill in at least one field before you send the form.' });
+  test('words with nothing picked still go, as the owner’s own words: the shape an older app reads', () => {
+    const plan = planFormSend({ fields: FIELDS.slice(0, 3) }, {}, ' none of these fit ');
+    expect(plan).toEqual({
+      kind: 'send',
+      action: { kind: 'respond', label: 'Form', response: { kind: 'open-question', answer: 'none of these fit' } },
+    });
   });
 
-  test('asks once about required fields left empty, then sends as it stands', () => {
-    const first = planFormSend(item, { '1': ['EU'] }, '', undefined);
-    if (first.kind !== 'ask') throw new Error('expected an ask');
-    expect(first.message).toContain('Not answered yet:');
-    expect(first.message).toContain('2. Alerts');
-    expect(first.message).toContain('Press Send again');
-    const second = planFormSend(item, { '1': ['EU'] }, '', first.signature);
-    expect(second.kind).toBe('send');
+  test('says there is nothing to send when nothing is picked and nothing typed', () => {
+    const plan = planFormSend({ fields: FIELDS.slice(1) }, {}, '  ');
+    expect(plan).toEqual({
+      kind: 'nothing',
+      message: 'Pick an answer or type something before you send the form.',
+    });
   });
 
   test('sends a form answer, with the typed words as the note when the form has no text field', () => {
-    const plan = planFormSend(
-      { fields: FIELDS.slice(0, 3) },
-      { '1': ['EU'], '2': ['Page'], '3': ['No'] },
-      'also this',
-      undefined,
-    );
+    const plan = planFormSend({ fields: FIELDS.slice(0, 3) }, { '1': ['EU'], '2': ['Page'], '3': ['No'] }, 'also this');
     expect(plan).toEqual({
       kind: 'send',
       action: {
@@ -126,24 +119,22 @@ describe('planning the one Send of a form', () => {
 });
 
 describe('sendForm', () => {
-  test('throws the plain sentence once, then schedules the answer and forgets the picks', () => {
+  test('schedules what is filled in on the first Send and forgets the picks', () => {
     const scheduled: InboxAction[] = [];
     const schedule = (action: InboxAction) => scheduled.push(action);
-    expect(() => sendForm('k', item, '', schedule)).toThrow('Not answered yet');
-    expect(scheduled).toHaveLength(0);
     sendForm('k', item, '', schedule);
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0]).toMatchObject({
       kind: 'respond',
       response: { kind: 'form', answers: [{ id: '1', picked: 'EU' }] },
     });
-    expect(agendaForms.asked('k')).toBeUndefined();
+    expect(agendaForms.changes('k')).toBe(0);
   });
 
   test('throws when there is nothing to send', () => {
     const scheduled: InboxAction[] = [];
     expect(() => sendForm('k', { fields: [FIELDS[3] as AgendaFormField] }, '  ', a => scheduled.push(a))).toThrow(
-      'Fill in at least one field',
+      'Pick an answer or type something',
     );
     expect(scheduled).toHaveLength(0);
   });
@@ -163,9 +154,9 @@ describe('withFormSend', () => {
 
   test('lets the form’s one error line through the composer’s send', () => {
     const wrapped = withFormSend({ send: (_text: string) => 'chat' }, () => {
-      throw new Error('Not answered yet');
+      throw new Error('Pick an answer or type something');
     });
-    expect(() => wrapped.send('x')).toThrow('Not answered yet');
+    expect(() => wrapped.send('x')).toThrow('Pick an answer or type something');
   });
 });
 

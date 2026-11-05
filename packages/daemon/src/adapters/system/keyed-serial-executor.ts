@@ -30,6 +30,22 @@ export class KeyedSerialExecutor implements YieldingSerialExecutor {
     }
   }
 
+  async runAcross<T>(keys: readonly string[], work: () => Promise<T>): Promise<T> {
+    const held = [...new Set(keys)];
+    const ahead = [this.barrier, ...held.map(key => this.keyTails.get(key) ?? Promise.resolve())];
+    const result = Promise.all(ahead.map(item => item.catch(() => undefined))).then(work);
+    const settled = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    for (const key of held) this.keyTails.set(key, settled);
+    try {
+      return await result;
+    } finally {
+      for (const key of held) if (this.keyTails.get(key) === settled) this.keyTails.delete(key);
+    }
+  }
+
   /**
    * Runs observation work only when the key is idle now.
    *

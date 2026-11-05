@@ -1,19 +1,17 @@
 /**
- * GATES ASK THE OWNER — the pure half (docs/board.md § Gates ask the owner). When an owner-asked card enters a lane
- * whose stage is a gate, the daemon raises ONE agenda item for it; this file decides, from the card and its lanes
- * alone, whether a card is waiting at a gate now, which entry put it there, what the item says, and where the
- * owner's answer sends the card. `GateItems` (`gate-items.ts`) does the reading and writing around it.
+ * CARD ASKS — the pure half (docs/board.md § Cards show progress; their asks ride the agenda). When an owner-asked card
+ * enters a lane whose stage is a gate, the daemon puts ONE card ask on the agenda that carries it; this file decides,
+ * from the card and its lanes alone, whether a card is at a gate now, which entry put it there, what a new card agenda
+ * says, and where the owner's answer sends the card. `GateItems` (`gate-items.ts`) does the reading and writing.
  */
 import {
-  type AgendaCardAnswer,
   type AgendaGate,
   type AgendaGateOption,
   type BoardTask,
   clipAtWord,
   formatTaskRef,
-  gateAnswers,
-  gateAskOptions,
-  gateReference,
+  cardAgendaReference,
+  cardAskStage,
   isSubCard,
   type GateOption,
   type GateOutcomeError,
@@ -28,6 +26,7 @@ import {
   MAX_AGENDA_TITLE_LENGTH,
   type TaskWorkflow,
 } from '@ferretry/protocol';
+import { CARD_AGENDA_HOW_TO_RESOLVE, type RaiseAgendaRequest } from '../agenda/state-machine.ts';
 import type { CardAudience } from './authority.ts';
 
 /** Where an option leads, or why it leads nowhere on this board. */
@@ -162,57 +161,43 @@ const openPullRequests = (task: Pick<BoardTask, 'links'>): string | null => {
   return open.length === 0 ? null : open.map(pr => `A new PR is open for this card: ${pr.url}`).join('\n');
 };
 
-/** Markdown cut to `limit` characters with its lines kept, marked … when it was cut. */
-const clipProse = (text: string, limit: number): string =>
-  text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
-
-/** What the gate item is raised with (`RaiseAgendaRequest`, minus who raises it). */
-export interface GateRaise {
-  readonly source: 'task';
-  readonly sourceRef: string;
-  readonly title: string;
-  readonly kind: 'choice';
-  readonly subject: string;
-  readonly why: string;
-  readonly howToResolve: string;
-  readonly context: string | null;
-  readonly premise?: string;
-  readonly body?: string;
-  readonly ask: { readonly kind: 'multiple-choice'; readonly options: { readonly label: string }[] };
-  readonly answers: AgendaCardAnswer[];
-  readonly task: { readonly id: string };
-  readonly gate: AgendaGate;
-}
+/** The card's How to test as written (Markdown keeps its lines), absent when it has none, and never a cut-off copy: too long for a body, it is a pointer to the card. */
+export const howToTestOf = (task: Pick<BoardTask, 'id' | 'howToTest'>): string | undefined => {
+  const steps = task.howToTest?.trim() ?? '';
+  if (steps === '') return undefined;
+  return steps.length <= MAX_AGENDA_BODY_LENGTH
+    ? steps
+    : `How to test is ${steps.length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_AGENDA_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatTaskRef(task)}) for the full steps.`;
+};
 
 /**
- * The gate item for a card waiting at `gate`: the card's title, the lane's ask, and the gate's options as a choice
- * whose labels ARE the options, so an app that knows nothing of gates answers it by label.
+ * The agenda the daemon opens for a card that no open agenda carries yet (docs/agenda.md § Card asks): named after
+ * the card, on its ferret's behalf (`card-agenda:<card>`), carrying the card's ask with its How to test. It asks
+ * nothing of its own but a reply; the card ask's buttons are what move the card.
  */
-export const gateRaise = (
+export const cardAgendaRaise = (
   gate: AgendaGate,
   task: Pick<BoardTask, 'id' | 'title' | 'summary' | 'howToTest' | 'links'>,
-): GateRaise => {
-  const labels = gateAskOptions(gate).map(option => option.label);
+  at: string,
+): RaiseAgendaRequest => {
   const where = gate.projectName === undefined ? gate.laneName : `${gate.laneName} on ${gate.projectName}`;
   const summary = task.summary.trim();
-  const howToTest = task.howToTest?.trim() ?? '';
+  const howToTest = howToTestOf(task);
   return {
     source: 'task',
-    sourceRef: gateReference(gate),
+    sourceRef: cardAgendaReference(task.id),
     title: clipAtWord(task.title, MAX_AGENDA_TITLE_LENGTH),
-    kind: 'choice',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
     subject: gateSubject(gate, task),
-    why: `${formatTaskRef(task)} reached ${where}, which waits on you.`,
-    howToResolve: `Choose ${labels.join(' or ')}; the card moves when you answer.`,
+    why: `${formatTaskRef(task)} reached ${where}.`,
+    howToResolve: CARD_AGENDA_HOW_TO_RESOLVE,
     // A PR still open while the card waits: the card stays at the gate, so the owner is told to wait or say Not good.
     context: openPullRequests(task),
     ...(summary === '' ? {} : { premise: clipAtWord(summary, MAX_AGENDA_REASON_LENGTH) }),
-    // The card's How to test, as written: Markdown keeps its lines. Never `steps`, which make a choice a mix.
-    ...(howToTest === '' ? {} : { body: clipProse(howToTest, MAX_AGENDA_BODY_LENGTH) }),
-    ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
-    answers: gateAnswers(gate),
     task: { id: task.id },
-    gate,
+    stage: cardAskStage(gate),
+    cardAsks: [{ gate, at, ...(howToTest === undefined ? {} : { howToTest }) }],
   };
 };
 

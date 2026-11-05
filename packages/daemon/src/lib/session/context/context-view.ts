@@ -1,6 +1,7 @@
 import type { SessionContext, SessionView } from '@ferretry/protocol';
 import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
 import { contextPercent, knownContextWindowForSession } from '../../core/context-window.ts';
+import { createViewMemo } from '../directory/view-memo.ts';
 
 /**
  * Puts `context: { usedTokens, windowTokens, percent, at }` on the session views whose context size AND
@@ -67,11 +68,18 @@ export function withContext(reader: SessionDirectorySubsystem, ports: ContextVie
     cached = { at: ports.now(), declared };
     return declared;
   };
+  // The mark is a function of the view and the window it resolved to, so the resolved window is the fact kept.
+  const memo = createViewMemo<number>();
   const mark = (view: SessionView, declared: DeclaredWindows): SessionView => {
-    const context = sessionContextOf(view, declared(view), ports.overrides);
+    const declaredWindow = declared(view);
+    const context = sessionContextOf(view, declaredWindow, ports.overrides);
     return context === undefined
       ? view
-      : { ...view, state: { ...view.state, contextPercent: context.percent }, context };
+      : memo(view, context.windowTokens, () => ({
+          ...view,
+          state: { ...view.state, contextPercent: context.percent },
+          context,
+        }));
   };
   return {
     list: async () => {

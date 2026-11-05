@@ -77,12 +77,14 @@ describe('a thread with a gate attached', () => {
     expect(acted[1]?.gate).toBeUndefined();
   });
 
-  test('names the card by its title, and says it is ready to test', async () => {
+  test('names the card by its title, says it is ready to test, inside What I need from you', async () => {
     const root = await draw(
       thread({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
     );
     const lead = must(root.querySelector<HTMLElement>('.fy-card__gate-lead'), 'the lead');
-    expect(lead.textContent).toBe('&F12 Badge colour is ready to test. Answer it here too.');
+    expect(lead.textContent).toBe('Badge colour is ready to test.');
+    // It is answered inside the item, in What I need from you: never docked, never a separate item.
+    expect(lead.closest('[data-agenda-part="needs"]')).not.toBeNull();
   });
 
   test('keeps the arrows and the swipe on the thread own pair only: the gate buttons are tap only', async () => {

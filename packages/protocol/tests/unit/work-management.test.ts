@@ -173,6 +173,11 @@ const resolvedAgenda = {
 };
 
 const agendaCases: SchemaCase[] = [
+  {
+    name: 'edit request with a revision (agenda.patch.1)',
+    schema: agenda.AgendaEditRequestSchema,
+    value: { action: 'edit', id: 'A1', revision: '1kvr35710qfik6', why: 'Ship it this week?', clear: ['detail'] },
+  },
   { name: 'attention source', schema: agenda.AgendaSourceSchema, value: 'agent-raised' },
   { name: 'card kind', schema: agenda.AgendaKindSchema, value: 'yesno' },
   { name: 'swipe direction', schema: agenda.AgendaDirectionSchema, value: 'up' },
@@ -213,6 +218,8 @@ const agendaCases: SchemaCase[] = [
     },
   },
   { name: 'form answer', schema: agenda.AgendaFormAnswerSchema, value: { id: 'alerts', picked: ['Page', 'Mail'] } },
+  { name: 'tab', schema: agenda.AgendaTabSchema, value: { id: 'risks', name: 'Risks', body: 'The export may slip.' } },
+  { name: 'tab edit', schema: agenda.AgendaTabEditSchema, value: { tab: 'Risks', rename: 'Open risks', position: 1 } },
   {
     name: 'brief term',
     schema: agenda.AgendaTermSchema,
@@ -280,9 +287,15 @@ const agendaCases: SchemaCase[] = [
     value: { reason: 'snoozed', at: INSTANT, until: LATER_INSTANT },
   },
   { name: 'replied park', schema: agenda.AgendaParkedSchema, value: { reason: 'replied', at: INSTANT } },
+  {
+    name: 'owner answer on an open item',
+    schema: agenda.AgendaOwnerAnswerSchema,
+    value: { at: INSTANT, response: { kind: 'open-question', answer: 'EU' }, note: 'keep it near', request: 2 },
+  },
   { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
+  { name: 'stored attention item', schema: agenda.StoredAgendaItemSchema, value: agendaItem },
   { name: 'agenda query', schema: agenda.AgendaOpenQuerySchema, value: { after: 'session-1', limit: 50 } },
   {
     name: 'agenda roll-up session',
@@ -314,6 +327,43 @@ const agendaCases: SchemaCase[] = [
       options: [{ id: 'done', label: 'Done', outcome: 'close' }],
     },
   },
+  {
+    name: 'card ask answer',
+    schema: agenda.AgendaCardAskAnswerSchema,
+    value: {
+      at: '2026-07-30T10:00:00.000Z',
+      response: { kind: 'multiple-choice', choice: 'Done' },
+      note: 'works for me',
+      receipt: 'd'.repeat(64),
+      askVersion: 2,
+    },
+  },
+  {
+    name: 'card ask woke',
+    schema: agenda.AgendaCardAskWokeSchema,
+    value: {
+      waitingSince: '2026-07-30T09:00:00.000Z',
+      parked: { reason: 'replied', at: '2026-07-30T09:00:00.000Z' },
+      resting: { sub: 'waiting-on-ferret', at: '2026-07-30T09:00:00.000Z' },
+    },
+  },
+  {
+    name: 'card ask',
+    schema: agenda.AgendaCardAskSchema,
+    value: {
+      gate: {
+        cardId: 'F412',
+        laneId: 'released',
+        laneName: 'Released',
+        entry: 7,
+        projectId: 'p-1',
+        options: [{ id: 'done', label: 'Done', outcome: 'close' }],
+      },
+      at: '2026-07-30T10:00:00.000Z',
+      howToTest: 'Open the app and add a card.',
+      notYet: { at: '2026-07-30T11:00:00.000Z', note: 'tomorrow' },
+    },
+  },
   { name: 'attention paste plan pointer', schema: agenda.AgendaCopyPlanRefSchema, value: { planId: 'b'.repeat(32) } },
   { name: 'attention task plan pointer', schema: agenda.AgendaTaskPlanRefSchema, value: { planId: 'c'.repeat(32) } },
   {
@@ -337,6 +387,7 @@ const agendaCases: SchemaCase[] = [
     value: { rule: `sr_${'b'.repeat(24)}` },
   },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
+  { name: 'stored resolved attention', schema: agenda.StoredResolvedAgendaItemSchema, value: resolvedAgenda },
   {
     name: 'card a notice is about',
     schema: agenda.AgendaCardRowSchema,
@@ -413,6 +464,22 @@ const agendaCases: SchemaCase[] = [
       why: 'Blocked',
       howToResolve: 'Reply',
     },
+  },
+  {
+    name: 'conversation entry',
+    schema: agenda.AgendaConversationEntrySchema,
+    value: {
+      at: '2026-05-01T10:00:00.000Z',
+      by: 'owner',
+      text: 'use eu-west',
+      via: 'chat-log',
+      fromChat: { messageId: 'm1', at: '2026-05-01T09:59:00.000Z' },
+    },
+  },
+  {
+    name: 'split item',
+    schema: agenda.SplitAgendaItemSchema,
+    value: { subject: 'Another ask', why: 'It grew', howToResolve: 'Reply' },
   },
   {
     name: 'direct notification',

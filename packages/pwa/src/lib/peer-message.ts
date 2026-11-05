@@ -22,9 +22,14 @@ export interface PeerMessage {
 /**
  * Splits a message into its sender and body. A paste block the harness wrapped it in is taken off
  * first, which is what lets a Claude transcript's peer message be recognised at all.
+ *
+ * A COMBINED delivery is several messages; this answers its FIRST, which is the one the send ledger's
+ * single row (the oldest member's) stands for. The rest are read with `readUserMessage`.
  */
 export const peerFrom = (text: string): PeerMessage => {
   const message = readUserMessage(text);
   if (message.kind === 'peer') return { from: message.from, body: message.body };
+  const first = message.kind === 'combined' ? message.parts[0] : undefined;
+  if (first !== undefined) return first;
   return { from: null, body: unwrapPastedContent(text) };
 };

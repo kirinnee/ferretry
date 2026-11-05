@@ -58,6 +58,8 @@ export const MAX_BOARD_PREMISE_LENGTH = 4 * 1024;
 export const MAX_BOARD_CONTEXT_LENGTH = 16 * 1024;
 /** The owner's test steps: a short checklist, sized like the context. */
 export const MAX_BOARD_HOW_TO_TEST_LENGTH = 16 * 1024;
+/** Each part of a card's status (Now, Done so far, Next): the three together are at most 24 KiB. */
+export const MAX_BOARD_STATUS_PART_LENGTH = 8 * 1024;
 export const MAX_BOARD_BRIEF_LENGTH = 64 * 1024;
 export const MAX_BOARD_REASON_LENGTH = 2 * 1024;
 export const MAX_BOARD_NOTE_LENGTH = 2 * 1024;
@@ -276,6 +278,7 @@ export const BoardEditableFieldSchema = z.enum([
   'terms',
   'brief',
   'howToTest',
+  'status',
 ]);
 export type BoardEditableField = z.infer<typeof BoardEditableFieldSchema>;
 
@@ -362,6 +365,10 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     to: SessionIdSchema.nullable(),
     /** Present when the card's assignee handed it down to one of its own descendants; the actor is that assignee. */
     handedDown: z.literal(true).optional(),
+    /** Present when the daemon returned the card to a live lead because this ferret, its assignee, ended: the one that finished. */
+    returnedFrom: SessionIdSchema.optional(),
+    /** Present when the card's assignee took it from a lead of its own (`fy task claim`): the lead that held it. The actor is the claimer. */
+    claimedFrom: SessionIdSchema.optional(),
   }),
   z.object({
     ...EventBase,
@@ -421,6 +428,50 @@ export const LegacyTaskRefSchema = z.string().regex(/^[^\s:]+:[BFIC][1-9][0-9]{0
 export const BoardTaskAskedBySchema = z.enum(['person', 'agent']);
 export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
 
+/**
+ * Whether a card is on the board by default. `public` is what the owner asked for; `private` is the ferrets' own
+ * bookkeeping: sub-cards, helper cards and cards a ferret made for itself (docs/board.md § Public and private cards).
+ */
+export const BoardTaskVisibilitySchema = z.enum(['public', 'private']);
+export type BoardTaskVisibility = z.infer<typeof BoardTaskVisibilitySchema>;
+
+/**
+ * Where a stored visibility came from: `default` is the one the daemon derived from who asked and where the card
+ * sits, and re-derives when those facts change; `chosen` was set by a person or a ferret and is never re-derived.
+ */
+export const BoardTaskVisibilitySourceSchema = z.enum(['default', 'chosen']);
+export type BoardTaskVisibilitySource = z.infer<typeof BoardTaskVisibilitySourceSchema>;
+
+/**
+ * A card's status: its current state in three Markdown parts, kept current by the ferret that holds the card. An edit
+ * names the parts it replaces and the daemon merges them in the card's own write. A part with nothing to say is ''.
+ * The field itself is optional on a card: absent means no status yet, and no reader invents one.
+ */
+export const BoardStatusSchema = z.strictObject({
+  /** What is happening on the card at this moment. */
+  now: z.string().max(MAX_BOARD_STATUS_PART_LENGTH),
+  /** What is implemented, one bullet each, with the PR link where there is one. */
+  doneSoFar: z.string().max(MAX_BOARD_STATUS_PART_LENGTH),
+  /** What comes after, in order. */
+  next: z.string().max(MAX_BOARD_STATUS_PART_LENGTH),
+});
+export type BoardStatus = z.infer<typeof BoardStatusSchema>;
+
+/** The three parts of a status in reading order, each with the label every surface draws it under. */
+export const BOARD_STATUS_PARTS = [
+  { key: 'now', label: 'Now' },
+  { key: 'doneSoFar', label: 'Done so far' },
+  { key: 'next', label: 'Next' },
+] as const satisfies readonly { readonly key: keyof BoardStatus; readonly label: string }[];
+
+/** The parts of a status that say something, in reading order; none for an absent status or one with every part empty. */
+export const writtenStatusParts = (
+  status: BoardStatus | undefined,
+): readonly { readonly key: keyof BoardStatus; readonly label: string; readonly text: string }[] =>
+  status === undefined
+    ? []
+    : BOARD_STATUS_PARTS.map(part => ({ ...part, text: status[part.key] })).filter(part => part.text.trim() !== '');
+
 const BoardTaskShape = {
   v: z.literal(BOARD_TASK_SCHEMA_VERSION),
   id: BoardTaskIdSchema,
@@ -446,6 +497,8 @@ const BoardTaskShape = {
    * to do, what they should see. Empty until the ferret writes it; a card stored before it existed reads empty.
    */
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
+  /** The card's current state, rewritten whole by its holder; absent until a ferret writes one. */
+  status: BoardStatusSchema.optional(),
   /** The accountable ferret: the creator by default, the lead for a delegated card. */
   owner: SessionIdSchema,
   /** The ferret doing it now; `null` reads as the owner. */
@@ -479,6 +532,18 @@ const BoardTaskShape = {
    * Absent on a card stored before it existed; a reader then falls back to the ask's source.
    */
   askedBy: BoardTaskAskedBySchema.optional(),
+  /**
+   * Whether the card shows on the board by default. Stored once (at creation, or at the first boot that finds the
+   * card without it) and changed only by `visibility` actions the daemon authorises. A card that has none reads by
+   * the rule in the daemon's `cardVisibility`: public when a person asked and it has no parent, otherwise private.
+   * The VIEW always carries it; absent only on a card stored before it existed.
+   */
+  visibility: BoardTaskVisibilitySchema.optional(),
+  /**
+   * Whether the stored visibility is the daemon's `default` (it follows the card's asker and parent) or was
+   * `chosen`. Absent beside a stored visibility reads `chosen`: a value of unknown origin is never undone.
+   */
+  visibilitySource: BoardTaskVisibilitySourceSchema.optional(),
   /**
    * The owner's Yes this card was made on where its board is off (docs/board.md § The board is opt-in): an item on
    * the creating ferret's agenda. One Yes makes one card. Absent on every other card.
@@ -537,9 +602,11 @@ export const isSubCard = (card: { readonly parent: TaskRef | null }): boolean =>
 
 /**
  * How a card is doing, derived from session liveness and the board (`board-design.md` §3.3): `active`
- * (an attributed session is working), `idle`, `stale` (idle past its lane's threshold), `waiting` (on the
- * owner, the outside world or another card — someone else's clock, so never stale) or `orphaned` (its
- * ferrets are gone with the card still in an active or review lane).
+ * (an attributed session is working), `idle`, `stale` (idle past its lane's threshold) or `orphaned` (its
+ * ferrets are gone with the card still in an active or review lane). A card that is blocked, depends on an
+ * unfinished card, or whose agenda carries its open ask is `idle` and never stale: someone else's clock.
+ * `waiting` is DEPRECATED (docs/agenda.md § Card asks): a card never waits on the owner itself, so no daemon that
+ * reports `agenda.card-asks.1` derives it; it stays in the enum so an app still reads an older daemon's board.
  */
 export const BoardTaskActivitySchema = z.enum(['active', 'idle', 'stale', 'waiting', 'orphaned']);
 export type BoardTaskActivity = z.infer<typeof BoardTaskActivitySchema>;
@@ -585,9 +652,12 @@ const BoardTaskViewShape = {
   rollup: RollupSchema,
   /** The lane the children suggest moving to; `null` when they suggest nothing. */
   suggestedLane: LaneIdSchema.nullable(),
-  /** Open, blocking agenda items raised against this card. */
-  waitingOnOwner: z.array(AgendaRefSchema),
-  /** Every open agenda item raised against this card, blocking or not. */
+  /**
+   * DEPRECATED (docs/agenda.md § Card asks): a card never waits on the owner itself, its ask rides its agenda. A
+   * daemon that reports `agenda.card-asks.1` sends it empty, so an app that predates card asks still parses the card.
+   */
+  waitingOnOwner: z.array(AgendaRefSchema).optional(),
+  /** The open agendas that carry this card: about it, or carrying one of its asks. */
   openAsks: z.array(AgendaRefSchema),
   /** Dependencies not yet done and not overridden. */
   blockedBy: z.array(TaskRefSchema),
@@ -610,7 +680,7 @@ const agendaKey = (ref: AgendaRef): string => `${ref.sessionId}/${ref.id}`;
 export const BoardTaskViewSchema = z.object(BoardTaskViewShape).superRefine((value, context) => {
   refineBoardTask(value, context);
   const open = new Set(value.openAsks.map(agendaKey));
-  if (value.waitingOnOwner.some(ref => !open.has(agendaKey(ref)))) {
+  if ((value.waitingOnOwner ?? []).some(ref => !open.has(agendaKey(ref)))) {
     context.addIssue({ code: 'custom', message: 'every blocking ask is also an open ask', path: ['waitingOnOwner'] });
   }
 });
@@ -623,7 +693,11 @@ export type BoardTaskView = z.infer<typeof BoardTaskViewSchema>;
 export const BoardPrStateFilterSchema = z.enum(['none', 'draft', 'open', 'ci_red', 'merged', 'released']);
 export type BoardPrStateFilter = z.infer<typeof BoardPrStateFilterSchema>;
 
-/** The activity states, plus the views the Board's one-tap pills open. */
+/**
+ * The activity states, plus the views the Board's one-tap pills open. `to_test` and `waiting_on_you` are DEPRECATED
+ * (docs/agenda.md § Card asks): an older app still sends them, and a daemon that reports `agenda.card-asks.1` matches
+ * no card to either; the owner's asks are on the agenda.
+ */
 export const BoardActivityFilterSchema = z.enum([
   ...BoardTaskActivitySchema.options,
   'to_test',
@@ -646,6 +720,13 @@ export const isInBoardState = (filter: BoardStateFilter, category: LaneCategory,
   return filter === 'closed' ? category === 'closed' : filter === 'open' && category !== 'closed';
 };
 
+/**
+ * Which cards a board read selects by visibility: `public`, `private` or `all`. Absent reads `all`, so an app that
+ * sends no filter keeps every card it relies on; the Board page and `fy board` ask for `public` themselves.
+ */
+export const BoardVisibilityFilterSchema = z.enum(['public', 'private', 'all']);
+export type BoardVisibilityFilter = z.infer<typeof BoardVisibilityFilterSchema>;
+
 export const BoardQuerySchema = z.strictObject({
   /** One project's board; absent reads every project's. */
   project: BoardProjectIdSchema.optional(),
@@ -655,6 +736,8 @@ export const BoardQuerySchema = z.strictObject({
   prState: BoardPrStateFilterSchema.optional(),
   activity: BoardActivityFilterSchema.optional(),
   state: BoardStateFilterSchema.default('open'),
+  /** Public cards, private ones, or both (absent). It scopes the board, so the header counts follow it. */
+  visibility: BoardVisibilityFilterSchema.optional(),
   /** Free text over id, title, summary and ask. */
   query: z.string().trim().min(1).max(MAX_BOARD_QUERY_LENGTH).optional(),
   cursor: z.string().min(1).max(MAX_BOARD_LINK_LENGTH).optional(),
@@ -669,8 +752,10 @@ export const BoardCountsSchema = z.strictObject({
   stale: NonNegativeIntegerSchema,
   orphaned: NonNegativeIntegerSchema,
   active: NonNegativeIntegerSchema,
-  toTest: NonNegativeIntegerSchema,
-  waitingOnYou: NonNegativeIntegerSchema,
+  /** DEPRECATED (docs/agenda.md § Card asks): sent as 0 by a daemon that reports `agenda.card-asks.1`. */
+  toTest: NonNegativeIntegerSchema.optional(),
+  /** DEPRECATED (docs/agenda.md § Card asks): sent as 0 by a daemon that reports `agenda.card-asks.1`. */
+  waitingOnYou: NonNegativeIntegerSchema.optional(),
 });
 export type BoardCounts = z.infer<typeof BoardCountsSchema>;
 
@@ -754,6 +839,7 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   terms: BoardTermsSchema.default([]),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).default(''),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
+  status: BoardStatusSchema.optional(),
   workflow: TaskWorkflowSchema.default('quick'),
   /** The board; absent means the creating session's project. */
   projectId: BoardProjectIdSchema.optional(),
@@ -774,11 +860,17 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   approval: AgendaIdSchema.optional(),
   /** The caller's own open agenda thread this card carries out: only linked to it (the thread's `task`), nothing else. */
   thread: AgendaIdSchema.optional(),
+  /**
+   * `public` or `private`; absent takes the default (public when a person asked and it has no parent). A ferret may
+   * choose for its own agent-asked card, and never hides a person's ask or publishes a sub-card.
+   */
+  visibility: BoardTaskVisibilitySchema.optional(),
 });
 export type BoardTaskCreateRequest = z.infer<typeof BoardTaskCreateRequestSchema>;
 export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestSchema>;
 
-const editFields = {
+/** The text fields `fy task edit` (and `fy task patch`, `board-patch.ts`) changes, each with its wire schema. */
+export const BoardTaskEditFields = {
   title: TaskTitleSchema.optional(),
   summary: oneLine(MAX_BOARD_SUMMARY_LENGTH).optional(),
   premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets).optional(),
@@ -786,6 +878,12 @@ const editFields = {
   terms: BoardTermsSchema.optional(),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).optional(),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
+  /**
+   * The parts of the status to replace: each part named replaces that part, each part left out keeps the card's (an
+   * empty part for a card with no status yet). The daemon merges them in the card's own write, so two ferrets
+   * rewriting different parts at once never undo each other.
+   */
+  status: BoardStatusSchema.partial().optional(),
 };
 
 /**
@@ -845,11 +943,25 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
       'a link names exactly one of pr, branch, commit or doc',
     ),
   z.strictObject({ action: z.literal('assign'), assignee: SessionIdSchema.nullable() }),
+  /** A ferret takes a card its own lead holds: the daemon reads who is asking, so the request names nobody. */
+  z.strictObject({ action: z.literal('claim') }),
   z.strictObject({ action: z.literal('note'), text: z.string().trim().min(1).max(MAX_BOARD_NOTE_LENGTH) }),
   z
-    .strictObject({ action: z.literal('edit'), ...editFields })
+    .strictObject({
+      action: z.literal('edit'),
+      ...BoardTaskEditFields,
+      /**
+       * READ BEFORE WRITE (`board.patch.1`, `fy task patch`): the card's revision as the writer read it
+       * (`boardTaskRevision`, the seq of its newest history event). A card that has changed since is refused
+       * `version-conflict` and nothing is written: read it again.
+       */
+      revision: PositiveIntegerSchema.optional(),
+      /** Changes the card's visibility in the same mutation as its text, so one request is one outcome. */
+      visibility: BoardTaskVisibilitySchema.optional(),
+    })
     .refine(
-      value => BoardEditableFieldSchema.options.some(field => value[field] !== undefined),
+      value =>
+        value.visibility !== undefined || BoardEditableFieldSchema.options.some(field => value[field] !== undefined),
       'an edit changes at least one field',
     ),
   z.strictObject({
@@ -859,6 +971,8 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
     reason: reason.optional(),
   }),
   z.strictObject({ action: z.literal('order'), order: NonNegativeIntegerSchema.nullable() }),
+  /** Show the card on the board by default (`public`) or fold it with the ferrets' bookkeeping (`private`). */
+  z.strictObject({ action: z.literal('visibility'), visibility: BoardTaskVisibilitySchema, reason: reason.optional() }),
   /** Put the card aside until `until`, or wake it now with `null`. The owner's own, like Done. */
   z.strictObject({ action: z.literal('snooze'), until: InstantSchema.nullable() }),
   /** Move the card under another card (or to the top level with `parent: null`); the reason goes in its history. */

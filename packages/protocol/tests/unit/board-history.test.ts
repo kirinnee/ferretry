@@ -155,6 +155,20 @@ describe('describeBoardEvent', () => {
     );
   });
 
+  it('should say a card was claimed, and from whom', () => {
+    // Act + Assert
+    should(say({ type: 'assigned', from: DENISHA, to: KIRIN, claimedFrom: DENISHA })).equal(
+      'claimed by kirin from denisha',
+    );
+  });
+
+  it("should say a finished ferret's card went back to its lead", () => {
+    // Act + Assert
+    should(say({ type: 'assigned', from: DENISHA, to: KIRIN, returnedFrom: DENISHA })).equal(
+      'returned to kirin: denisha finished',
+    );
+  });
+
   it('should describe dependencies, with the owner override when there is one', () => {
     // Act + Assert
     should(say({ type: 'depended', task: { id: 'F2' }, until: 'shipped' })).equal('depends on &F2 until shipped');

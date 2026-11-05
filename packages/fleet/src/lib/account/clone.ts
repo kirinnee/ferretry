@@ -607,6 +607,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
         if (reference?.kind === 'profile') return `profile/${profileNames.get(reference.name) as string}`;
         return componentNames.get(layer) as string;
       }) as LayeredProfile['layers'],
+      ...(profile.compactAt === undefined ? {} : { compactAt: profile.compactAt }),
       ...keyed(`profile/${name}`),
     };
   }
@@ -626,6 +627,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       profile: profileNames.get(runtime.profile) as string,
       agent: runtime.agent,
       ...(runtime.harness === undefined ? {} : { harness: runtime.harness }),
+      ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
       ...keyed(`runtime/${name}`),
     };
     loginRuntimes.set(runtime.credential, [...(loginRuntimes.get(runtime.credential) ?? []), free]);

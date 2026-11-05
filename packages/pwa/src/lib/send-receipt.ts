@@ -189,3 +189,27 @@ export const RECEIPT_LEGEND: readonly ReceiptLegendRow[] = [
     meaning: 'You took it back. The message says what that did on the agent’s screen.',
   },
 ];
+
+/**
+ * THE RECEIPT OF THE OWNER'S WORDS ON AN AGENDA ITEM (the item's conversation, `agenda-item-history.tsx`), with the
+ * chat's own marks so the two read the same. A send the chat's ledger recorded is drawn exactly as the chat draws it.
+ * Without one, the mark claims only what the item view can prove:
+ *
+ * | what is known                                   | receipt    | mark                |
+ * | ----------------------------------------------- | ---------- | ------------------- |
+ * | a row of the ferret's transcript (or logged by it) | `read`  | four accent ticks   |
+ * | stored on the item, and the ferret spoke after  | `answered` | three accent ticks  |
+ * | stored on the item, nothing after it yet        | `queued`   | two ticks           |
+ */
+export const itemWordsReceipt = (reached: {
+  readonly via: 'transcript' | 'item';
+  readonly answered: boolean;
+  readonly send?: LedgerSendRecord;
+}): SendReceipt => {
+  if (reached.send !== undefined) return sendReceipt(reached.send, reached.answered);
+  if (reached.via === 'transcript')
+    return { kind: 'read', name: 'Read', detail: 'the ferret’s transcript shows it as a message from you' };
+  if (reached.answered)
+    return { kind: 'answered', name: 'Answered', detail: 'kept on this item; the ferret has replied since' };
+  return { kind: 'queued', name: 'On the machine', detail: 'kept on this item; the ferret has not replied to it yet' };
+};

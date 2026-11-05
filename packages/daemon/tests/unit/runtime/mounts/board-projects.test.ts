@@ -321,7 +321,7 @@ describe('the board projects mount', () => {
 
     should(refused.status).equal(403);
     should(JSON.stringify(jsonBody(refused))).containEql(
-      "Sub-ferrets don't edit the board lanes; tell your lead: fy send koen",
+      "You are a sub-ferret, so you can't edit the board lanes. You may read the board and its lanes. For anything else ask your lead: fy send koen",
     );
     should(allowed.status).equal(200);
     should(subsystem.applied.map(call => call.actor)).deepEqual([

@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import { type AgendaId, type AgendaItem, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -67,8 +67,11 @@ import {
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
+import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
+import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
+import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
@@ -115,6 +118,7 @@ import {
   type GateItem,
   gateAnswerAction,
   gateAsksWords,
+  gateWhySubject,
   gateWordsFor,
   isGateItem,
 } from '../../lib/gate-items.ts';
@@ -152,6 +156,7 @@ import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { InboxFindResults } from './inbox-find-results.tsx';
 import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers, wordsOf } from './to-test-rows.tsx';
 import { ToTestStep } from './to-test-step.tsx';
+import { useItemLifecycle } from './use-item-lifecycle.ts';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -352,7 +357,6 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
       }
       hooks={{ 'data-inbox-who': '' }}
     >
-      <CardKindChip kind={itemCardKind(card.item)} />
       {joinMeta(
         <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
           {who.ferret}
@@ -389,6 +393,7 @@ function OpenItem({
   skip,
   place,
   canSnooze,
+  askTap,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
@@ -396,9 +401,26 @@ function OpenItem({
   readonly skip: () => void;
   readonly place: OpenItemPlace;
   readonly canSnooze: boolean;
+  /** A tapped notification opened it: it opens at its ask, and each tap is a new number. */
+  readonly askTap?: number;
 }) {
   const entries = useItemConversation(card, readConversation);
-  const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
+  const connection = inbox.connectionFor(card.daemonId);
+  const lifecycle = useItemLifecycle({
+    connection,
+    scope: scopeOf(card),
+    client: inbox.agendaClient,
+    item: card.item,
+    board: inbox.boardOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
+    records: inbox.recordsOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
+  });
+  const history = useMemo(
+    () =>
+      lifecycle.conversation === null
+        ? itemHistory(card.item, entries)
+        : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
+    [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
+  );
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
@@ -422,8 +444,13 @@ function OpenItem({
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
+          itemKey={card.key}
+          {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
+          {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
+          {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
+          {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
+          howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
-          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
           onAct={act}
           onClose={place.onClose}
@@ -583,11 +610,14 @@ function GateWhy({
   daemon,
   error,
   optional,
+  subject,
   ports,
   onSend,
   onCancel,
 }: {
   readonly card: InboxCard;
+  /** What the answer is about, as the heading names it: the card being tried (`gateWhySubject`). */
+  readonly subject: string;
   /** The card's machine; a machine that has gone has nowhere to send the answer, so no box is drawn for it. */
   readonly daemon: DaemonConnection | undefined;
   readonly error: string | null;
@@ -614,11 +644,7 @@ function GateWhy({
         error={error}
         // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
         files={optional ? null : files}
-        heading={
-          optional
-            ? `Not yet: anything to add about ${card.item.subject ?? card.item.id}?`
-            : `Not good: what went wrong with ${card.item.subject ?? card.item.id}?`
-        }
+        heading={optional ? `Not yet: anything to add about ${subject}?` : `Not good: what went wrong with ${subject}?`}
         submitLabel={optional ? 'Not yet' : 'Send back'}
         wordsOptional={optional}
         placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
@@ -634,6 +660,7 @@ function GateWhy({
 }
 
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
+const NO_BOARD: readonly AgendaItem[] = [];
 
 /** What was said about the card's item in its conversation; nothing until it is read, and nothing when it cannot be. */
 function useItemConversation(
@@ -1096,10 +1123,21 @@ export interface AgendaInboxPageProps {
   readonly clearPort?: ClearPort;
   /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
   readonly toTestHost?: ToTestHost;
+  /**
+   * An item was opened here (it is the deck's top card): its alerts come down on this device and the owner's others
+   * (docs/notifications.md § When an alert is cleared). Called once each time a different item opens. Absent: nothing.
+   */
+  readonly onItemOpened?: (card: InboxCard) => void;
 }
 
 /** How long a tapped notification's item may take to appear among the open ones before its chat opens instead. */
 const OPEN_WAIT_MS = 5_000;
+
+/** How soon after the last input on this page a card coming up on top still counts as the owner opening it. */
+const ATTENDED_MS = 60_000;
+
+/** What counts as someone at the page: a press, a key, a tap, or the page coming back into view. */
+const ATTENDED_INPUTS = ['pointerdown', 'keydown', 'click', 'touchstart', 'visibilitychange'] as const;
 
 /** Everything a row needs besides the card itself. */
 interface RowEnv {
@@ -1368,16 +1406,27 @@ const RUN_MOVES: readonly RunKey[] = [
   { key: 'Esc', word: 'Close' },
 ];
 
-/** The arrows an agenda card answers by, in the words of its own answers, then Skip. */
-const agendaRunKeys = (card: InboxCard): readonly RunKey[] => {
+/**
+ * The arrows an agenda card answers by, in its buttons' own words (`agendaAnswerText`), then Skip. Each is cut for the
+ * row the open card draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
+ * changes is on it, and "Done · closes" is on it when the item offers one (`doneClose`).
+ */
+export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
   const targets = swipeTargets(card.item);
+  const { slots } = answerRowLayout(cardModel(card.item), { requestChanges: true, doneClose });
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: targets.left.label }]),
-    ...(targets.up === undefined ? [] : [{ key: '↑', word: targets.up.label }]),
-    ...(targets.right === undefined ? [] : [{ key: '→', word: targets.right.label }]),
+    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
+    ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label, slots) }]),
+    ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label, slots) }]),
     ...RUN_MOVES,
   ];
 };
+
+/** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
+function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
+  const doneClose = useDoneClose(card.daemonId, card.item) !== undefined;
+  return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
+}
 
 /** A task card's two answers by arrow, then Skip. */
 const toTestRunKeys = (row: ToTestCard): readonly RunKey[] => {
@@ -1445,11 +1494,15 @@ export function AgendaInboxPage({
   renderComposer,
   clearPort,
   toTestHost,
+  onItemOpened,
 }: AgendaInboxPageProps) {
   const headingId = useId();
   useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
+  // The card a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
+  const [askAt, setAskAt] = useState<{ readonly key: string; readonly tap: number } | null>(null);
+  const askTaps = useRef(0);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
   const [machine, setMachine] = useState<DaemonId | null>(null);
@@ -1480,7 +1533,7 @@ export function AgendaInboxPage({
       filterToTest(inbox.toTestSnoozed, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
     [inbox.toTestSnoozed, machineFilter, query, from, kind],
   );
-  const toTestAnswers = useToTestAnswers(toTestHost, phone);
+  const toTestAnswers = useToTestAnswers(toTestHost);
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
@@ -1615,10 +1668,14 @@ export function AgendaInboxPage({
   const openCardKey = openCard?.key;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `openAt` and the host callback are re-made every render; the target and what it resolves to are the inputs
   useEffect(() => {
+    // The request is gone from the address once it was honoured: a later tap for the same item is a new one.
+    if (wantedKey === null) openedFor.current = null;
     if (wantedKey === null || openedFor.current === wantedKey) return;
     if (openCardKey !== undefined) {
       openedFor.current = wantedKey;
       setFilter('open');
+      askTaps.current += 1;
+      setAskAt({ key: openCardKey, tap: askTaps.current });
       openAt(openCardKey);
       onOpenSettled?.(true);
       return;
@@ -1634,6 +1691,12 @@ export function AgendaInboxPage({
     const timer = setTimeout(giveUp, OPEN_WAIT_MS);
     return () => clearTimeout(timer);
   }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+
+  // Paging away or closing the deck leaves the item the tap was for: opening one from the list starts at its top.
+  const askedKey = askAt?.key;
+  useEffect(() => {
+    if (askedKey !== undefined && (!deckOpen || deckPlace !== askedKey)) setAskAt(null);
+  }, [askedKey, deckOpen, deckPlace]);
 
   // A reply moves the deck on by itself (the card leaves, `nextSelection` deals the one after it). Undo brings the card
   // back and the deck opens it, so the owner sees the words it restored.
@@ -1660,6 +1723,42 @@ export function AgendaInboxPage({
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
+  // Opening an item is the owner seeing it: its alerts come down here and on their other devices. Only while someone is
+  // at this page (review round 9): a deck that moved on by itself on a screen nobody is at — its card was answered
+  // elsewhere — or a hidden tab is not an open, or it would take the next card's alert off the phone in the owner's
+  // hand. The card on top is told when it comes up within `ATTENDED_MS` of an input on a visible page (coming to the
+  // page counts), or else at the next one.
+  const openedCard = cardOpen ? deckSelected : undefined;
+  const opened = useRef({ card: openedCard, tell: onItemOpened });
+  opened.current = { card: openedCard, tell: onItemOpened };
+  const readClock = clock ?? Date.now;
+  const lastInput = useRef(readClock());
+  const toldKey = useRef<string | null>(null);
+  const tellOpened = useRef((): void => undefined);
+  tellOpened.current = () => {
+    const { card, tell } = opened.current;
+    if (card === undefined || toldKey.current === card.key) return;
+    if (document.visibilityState === 'hidden' || readClock() - lastInput.current > ATTENDED_MS) return;
+    toldKey.current = card.key;
+    tell?.(card);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different item on top is the only trigger; the card object and the host callback are re-made every render
+  useEffect(() => {
+    if (openedCard === undefined) toldKey.current = null;
+    tellOpened.current();
+  }, [openedCard?.key]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the clock is read through `readClock` each time
+  useEffect(() => {
+    const input = (): void => {
+      if (document.visibilityState === 'hidden') return;
+      lastInput.current = readClock();
+      tellOpened.current();
+    };
+    for (const type of ATTENDED_INPUTS) document.addEventListener(type, input, true);
+    return () => {
+      for (const type of ATTENDED_INPUTS) document.removeEventListener(type, input, true);
+    };
+  }, []);
 
   // The desktop run's keys. ←, ↑, → and ↓ answer or skip an agenda card inside the deck; a task card is answered here.
   // j and k move between cards, Esc closes. Never while the reader is in a field, a menu or a dialog.
@@ -1925,10 +2024,11 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
+                    key={card.key}
+                    {...(askAt?.key === card.key ? { askTap: askAt.tap } : {})}
                     canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}
-                    key={card.key}
                     place={{
                       index: Math.max(0, index),
                       total: runOrder.length,
@@ -1948,6 +2048,7 @@ export function AgendaInboxPage({
                   card={deck[0]}
                   daemon={inbox.connectionFor(deck[0].daemonId)}
                   optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
+                  subject={gateWhySubject(deck[0].item, gateWhy.action)}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
                   ports={toTestHost?.ports}
                   onCancel={() => setGateWhy(null)}
@@ -1960,7 +2061,9 @@ export function AgendaInboxPage({
                       gateAnswerAction(
                         label,
                         sent.reason,
-                        gateWhy.action.kind === 'respond' && gateWhy.action.gate === true,
+                        gateWhy.action.kind === 'respond' && gateWhy.action.gate === true
+                          ? (gateWhy.action.cardAsk ?? deck[0].item.gateAttached ?? true)
+                          : false,
                         from === null || sent.attachmentIds.length === 0
                           ? undefined
                           : { from, ids: [...sent.attachmentIds] },
@@ -1989,7 +2092,7 @@ export function AgendaInboxPage({
                   )}
                 </div>
               )}
-              {phone || deck[0] === undefined ? null : <RunKeysHint keys={agendaRunKeys(deck[0])} />}
+              {phone || deck[0] === undefined ? null : <AgendaRunKeysHint card={deck[0]} />}
             </div>
           </div>
         )}

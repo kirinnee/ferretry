@@ -70,6 +70,8 @@ import {
   isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
+import { fyRenderHeightKey, recallFyRenderHeight, rememberFyRenderHeight } from '../lib/fy-render-height-memory.ts';
+import { FY_RENDER_HTML_PAGE_TOKENS, FY_RENDER_HTML_TOKENS } from '../lib/fy-render-html-kit.ts';
 import { flowsDown, isNarrowColumn, verticalizeMermaid } from '../lib/fy-render-mermaid-layout.ts';
 import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from '../lib/fy-render-palette.ts';
 import { MERMAID_LEGIBLE_SCALE, svgNaturalSize, viewBoxSize } from '../lib/fy-render-viewport.ts';
@@ -91,6 +93,13 @@ const SETTLE_MS = 400;
 
 /** "Near" is about one phone screen above and below — far enough that a block is drawn before it arrives. */
 const NEAR_MARGIN = '800px 0px';
+
+/**
+ * "Held" is about three screens: an interactive page keeps running until it is this far away. Parking it
+ * at the near edge reran it — its state lost, its frame drawn again — every time a reader scrolled a
+ * little past and back, which is what made a live page feel like a box re-rendering.
+ */
+const HELD_MARGIN = '2400px 0px';
 
 /** How long a press must last before it counts as a long press on touch. */
 const LONG_PRESS_MS = 450;
@@ -114,27 +123,30 @@ const prefersReducedMotion = (): boolean => {
 /** The app's theme name: what a theme switch changes, and so what a repaint is keyed on. */
 const themeName = documentThemeName;
 
-const TRANSPARENT = new Set(['', 'transparent', 'rgba(0, 0, 0, 0)']);
+const PAGE_TOKENS: ReadonlySet<string> = new Set(FY_RENDER_HTML_PAGE_TOKENS);
 
 /**
  * WHAT AN INTERACTIVE PAGE PAINTS ITSELF WITH, so a frameless page reads as part of the message rather
- * than as a window into another one: the first painted ancestor's background (the column may sit on
- * any surface), the column's own colour and font, and the reader's mode. Three CSS values handed to the
- * shell as data — nothing of the app beyond what is already on screen.
+ * than as a window into another one: the reader's mode and the app's theme tokens (`lib/fy-render-html-kit.ts`
+ * names them) as computed where the block sits — so a swatch preview's own family is the one sent — plus the
+ * column's ink and font. Values handed to the shell as data, re-read on every theme switch; nothing of the app
+ * beyond what is already on screen. No background: the page is transparent on the column's own surface.
  */
-const paintFrom = (element: HTMLElement | null, scheme: FyRenderSandboxTheme): FyRenderHtmlPaint => {
-  const unpainted = { background: '', color: '', font: '', scheme };
+export const paintFrom = (element: Element | null, scheme: FyRenderSandboxTheme): FyRenderHtmlPaint => {
+  const unpainted: FyRenderHtmlPaint = { scheme, tokens: {} };
   if (element === null) return unpainted;
   try {
     const own = getComputedStyle(element);
-    let background = '';
-    for (let at: Element | null = element; at !== null && background === ''; at = at.parentElement) {
-      const value = getComputedStyle(at).backgroundColor;
-      if (!TRANSPARENT.has(value)) background = value;
+    const tokens: Record<string, string> = { 'page-fg': own.color, 'page-font': own.fontFamily };
+    for (const name of FY_RENDER_HTML_TOKENS) {
+      if (PAGE_TOKENS.has(name)) continue;
+      const value = own.getPropertyValue(`--${name}`).trim();
+      if (value !== '') tokens[name] = value;
     }
-    return { background, color: own.color, font: own.fontFamily, scheme };
+    for (const name of Object.keys(tokens)) if (tokens[name] === '') delete tokens[name];
+    return { scheme, tokens };
   } catch {
-    // Not a laid-out element — the page then keeps the shell's own system colours.
+    // Not a laid-out element — the page then keeps the kit's own fallbacks.
     return unpainted;
   }
 };
@@ -165,23 +177,36 @@ const svgDataUrl = (payload: string): string => `data:image/svg+xml,${encodeURIC
  * `IntersectionObserver`, a block is treated as on screen rather than never
  * rendering anything.
  */
-const useViewportPresence = (ref: RefObject<HTMLElement | null>): { near: boolean; visible: boolean } => {
-  const [presence, setPresence] = useState({ near: false, visible: false });
+const useViewportPresence = (
+  ref: RefObject<HTMLElement | null>,
+): { near: boolean; visible: boolean; held: boolean } => {
+  const [presence, setPresence] = useState({ held: false, near: false, visible: false });
   useEffect(() => {
     const element = ref.current;
     if (element === null || typeof IntersectionObserver === 'undefined') {
-      setPresence({ near: true, visible: true });
+      setPresence({ held: true, near: true, visible: true });
       return;
     }
     const observer = new IntersectionObserver(
       entries => {
         const visible = entries.some(entry => entry.isIntersecting);
-        setPresence(previous => ({ near: previous.near || visible, visible }));
+        setPresence(previous => ({ ...previous, near: previous.near || visible, visible }));
       },
       { rootMargin: NEAR_MARGIN },
     );
+    const holder = new IntersectionObserver(
+      entries => {
+        const held = entries.some(entry => entry.isIntersecting);
+        setPresence(previous => (previous.held === held ? previous : { ...previous, held }));
+      },
+      { rootMargin: HELD_MARGIN },
+    );
     observer.observe(element);
-    return () => observer.disconnect();
+    holder.observe(element);
+    return () => {
+      observer.disconnect();
+      holder.disconnect();
+    };
   }, [ref]);
   return presence;
 };
@@ -251,7 +276,7 @@ export function FyRenderBlock({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const block = useSettledBlock(arriving, settleMs);
   const presentation = fyRenderPresentation(block);
-  const { near, visible } = useViewportPresence(hostRef);
+  const { near, visible, held } = useViewportPresence(hostRef);
   const sourcePanelId = useId();
 
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -394,10 +419,46 @@ export function FyRenderBlock({
   useEffect(() => {
     if (presentation === 'interactive' && near) setPaint(paintFrom(hostRef.current, mode));
   }, [presentation, near, theme]);
+  /**
+   * THE HEIGHT THIS BLOCK LAST DREW AT, in this mount or an earlier one (`lib/fy-render-height-memory.ts`):
+   * what its invisible plane reserves before it draws, so nothing under it jumps when it lands.
+   */
+  const heightKey = fyRenderHeightKey(block.type, block.source);
+  const remembered = recallFyRenderHeight(heightKey);
   /** The page's last reported height, so a parked page keeps its place in the column. */
-  const [pageHeight, setPageHeight] = useState<number | null>(null);
+  const [pageHeight, setPageHeight] = useState<number | null>(remembered);
   const [pageReady, setPageReady] = useState(false);
   const onPageRendered = useCallback((): void => setPageReady(true), []);
+  const onPageHeight = useCallback(
+    (height: number): void => {
+      setPageHeight(height);
+      rememberFyRenderHeight(heightKey, height);
+    },
+    [heightKey],
+  );
+
+  /**
+   * EVERY OTHER BLOCK'S DRAWN HEIGHT, read off its stage whenever it changes — but only while the stage holds
+   * the real thing: a placeholder, a fullscreen overlay or a stop note is not the height to come back to. An
+   * interactive page reports its own, above, because its stage also holds the "interactive" marker.
+   */
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (stage === null || presentation === 'interactive' || typeof ResizeObserver === 'undefined') return;
+    const record = (): void => {
+      if (fullscreenRef.current) return;
+      if (stage.querySelector(':scope > .fy-render-placeholder, :scope > .fy-render-stopped') !== null) return;
+      rememberFyRenderHeight(heightKey, stage.getBoundingClientRect().height);
+    };
+    const observer = new ResizeObserver(record);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [heightKey, presentation]);
+  /** The invisible plane's reservation: the height last drawn, or the stylesheet's default. */
+  const reserved = remembered === null ? undefined : { height: `${remembered}px` };
 
   const collapse = useCallback(() => setFullscreen(false), []);
   const focus = useDialogFocus(fullscreen, hostRef, collapse, { autoFocus: false });
@@ -471,11 +532,12 @@ export function FyRenderBlock({
   /**
    * AN INTERACTIVE PAGE RUNS ONLY WHILE IT IS ON (OR NEAR) SCREEN. Scrolled well away it is UNLOADED —
    * the frame removed, its scripts with it — and a plane of its last height holds its place; scrolled
-   * back, it starts again. A page left running a screen and more away is work nobody is watching.
+   * back, it starts again. A page left running three screens and more away is work nobody is watching;
+   * one a screen away is one the reader is scrolling back to, and keeps its state.
    * Fullscreen keeps it, because then it is the only thing on screen.
    */
   const interactive = live && presentation === 'interactive';
-  const running = interactive && (visible || fullscreen);
+  const running = interactive && (visible || held || fullscreen);
   // A parked page is a new frame when it comes back, so its first draw is awaited again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new page, a run-again or a re-entry is a new frame
   useEffect(() => setPageReady(false), [source, revision, running]);
@@ -655,7 +717,8 @@ export function FyRenderBlock({
             key={`html:${generation.current}:${revision}`}
             onEscape={collapse}
             onFailed={fail}
-            onHeight={setPageHeight}
+            initialHeight={pageHeight}
+            onHeight={onPageHeight}
             onRendered={onPageRendered}
             paint={paint}
             ready={pageReady}
@@ -709,10 +772,11 @@ export function FyRenderBlock({
             onError={onDecodeFailure(generation.current)}
             src={svgDataUrl(compiled?.svg as string)}
           />
-        ) : near || presentation === 'map' || presentation === 'chart' ? (
-          // A diagram's first draw holds a quiet plane rather than nothing, so the
-          // prose below does not jump twice. A map holds its plane from the start, for the same reason.
-          <div aria-hidden="true" className="fy-render-placeholder" />
+        ) : near || presentation === 'map' || presentation === 'chart' || remembered !== null ? (
+          // A diagram's first draw holds an INVISIBLE plane rather than nothing, so the prose below does not
+          // jump twice; one drawn before holds exactly the height it drew at. A map holds its plane from the
+          // start, for the same reason.
+          <div aria-hidden="true" className="fy-render-placeholder" style={reserved} />
         ) : null}
         {drawDiagram ? (
           /**
@@ -770,6 +834,7 @@ export function FyRenderBlock({
         >
           <div
             className="fy-render-stage"
+            ref={stageRef}
             data-fy-render-stage={media && mediaRow ? 'row' : stopped !== null ? 'note' : 'visual'}
           >
             {stage}

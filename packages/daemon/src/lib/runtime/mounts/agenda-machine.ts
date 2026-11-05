@@ -4,7 +4,7 @@ import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
-import { agendaActor } from './agenda.ts';
+import { agendaActor, servedAgendaSnapshot } from './agenda.ts';
 
 const STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   invalid: 400,
@@ -16,6 +16,8 @@ const STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   full: 409,
   corrupt: 500,
   use_input_form: 400,
+  ask_changed: 409,
+  stale: 409,
 };
 
 const OWNER_ONLY = 'only the owner answers the machine agenda';
@@ -39,7 +41,7 @@ export function agendaMachineRoutes(machine: AgendaService): readonly ApiRoute[]
         if (agendaActor(context.actor).kind !== 'human') throw new ApiError(403, OWNER_ONLY, 'forbidden');
         const listed = await machine.list(MACHINE_AGENDA_ID);
         if (!listed.ok) throw new ApiError(STATUS[listed.error.code], listed.error.message, listed.error.code);
-        return jsonResponse(listed.value);
+        return jsonResponse(servedAgendaSnapshot(context, listed.value));
       },
     },
     {
@@ -69,7 +71,7 @@ export function agendaMachineRoutes(machine: AgendaService): readonly ApiRoute[]
           );
         }
         if (!mutation.ok) throw new ApiError(STATUS[mutation.error.code], mutation.error.message, mutation.error.code);
-        return jsonResponse(mutation.snapshot);
+        return jsonResponse(servedAgendaSnapshot(context, mutation.snapshot));
       },
     },
   ];

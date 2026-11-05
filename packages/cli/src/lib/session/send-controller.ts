@@ -1,4 +1,4 @@
-import type { SendDisposition, SendRecord, SendResult } from '@ferretry/protocol';
+import type { SendDisposition, SendRecord, SendRequest, SendResult } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { SessionCommandError } from './errors.ts';
 import type { ISessionApi, ISessionFiles, SendWaitClock, SessionEnvironment } from './ports.ts';
@@ -42,11 +42,12 @@ export class SendMessageController {
     const plan = planSend({ ...flags, fileMessage }, this.environment);
 
     const attachments = await Promise.all(plan.attachmentPaths.map(path => this.api.upload(id, path)));
-    const result = await this.api.send(id, {
+    const result = await this.dispatch(id, {
       message: plan.message,
       attachmentIds: attachments.map(attachment => attachment.id),
       now: plan.now,
       ...(plan.replyExpected ? { replyExpected: true } : {}),
+      label: plan.label,
     });
 
     this.presenter.note(describeSendResult(result));
@@ -59,6 +60,25 @@ export class SendMessageController {
       });
     if (flags.wait === true) await this.wait(result);
     this.presenter.view(result, flags.json === true);
+  }
+
+  /**
+   * Sends the request, and sends it once more WITHOUT its label when an older daemon refuses the field.
+   *
+   * The wire schema is strict, so a daemon that predates labels answers 400 `invalid_request` for the new
+   * field and nothing else: no message was accepted, so sending again cannot make anyone read it twice.
+   * The note says the label was lost, because a sender that wrote `--kind fyi` expected it to be held.
+   */
+  private async dispatch(id: string, request: SendRequest): Promise<SendResult> {
+    try {
+      return await this.api.send(id, request);
+    } catch (error) {
+      if (!(error instanceof FyHttpError) || error.status !== 400 || error.code !== 'invalid_request') throw error;
+      const { label: _label, ...unlabelled } = request;
+      const result = await this.api.send(id, unlabelled);
+      this.presenter.note('this daemon does not know --kind; sent as an ordinary message');
+      return result;
+    }
   }
 
   /**

@@ -65,6 +65,16 @@ describe('startsOnInteractive', () => {
       expect(startsOnInteractive(el(html).lastElementChild ?? el(html))).toBe(true);
   });
 
+  it('is false on the title’s open-the-whole-title button: a swipe or pull from the title still moves the card', () => {
+    const title = el(
+      '<h2 data-agenda-title><button data-agenda-title-toggle type="button"><span>A long title</span></button></h2>',
+    );
+    expect(startsOnInteractive(title.querySelector('span'))).toBe(false);
+    // A real control inside the title's button would still be its own.
+    const linked = el('<button data-agenda-title-toggle type="button"><a href="#x">A</a></button>');
+    expect(startsOnInteractive(linked.querySelector('a'))).toBe(true);
+  });
+
   it('is false on plain text, an anchor with no href and a null target', () => {
     expect(startsOnInteractive(el('<p>text</p>'))).toBe(false);
     expect(startsOnInteractive(el('<a>name</a>'))).toBe(false);

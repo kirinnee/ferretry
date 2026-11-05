@@ -1,10 +1,14 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { StorageSessionParents } from '../../../src/adapters/board/session-board-adapters.ts';
-import { OWNER_TURNS_KEPT, SessionOwnerWords } from '../../../src/adapters/board/session-owner-words.ts';
+import {
+  OWNER_TURNS_KEPT,
+  SessionOwnerWords,
+  type TurnFiles,
+} from '../../../src/adapters/board/session-owner-words.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -91,7 +95,7 @@ async function fixture() {
       fate: 'accepted',
       ...extra,
     } as never);
-  return { words, ledger, open, turnOne, turn, sent, say, parents, turnsOf };
+  return { words, queue, ledger, open, turnOne, turn, sent, say, parents, turnsOf };
 }
 
 afterEach(async () => {
@@ -275,5 +279,133 @@ describe('SessionOwnerWords over a real state home', () => {
     for (const id of ids) should(await words.said(id)).eql([`words of ${id}`]);
 
     should(await words.said(ids[0] ?? '')).eql(['words of s0']);
+  });
+});
+
+describe('strict SessionOwnerWords reads', () => {
+  it('should reject invalid ids and accept an empty, readable session', async () => {
+    // Arrange
+    const { words, open } = await fixture();
+    await open('lead');
+
+    // Act + Assert
+    await should(words.said('', { strict: true })).be.rejectedWith(/invalid session id/u);
+    should(await words.said('lead', { strict: true })).eql([]);
+  });
+
+  it('should reject unreadable queue, ledger and lineage instead of returning the readable remainder', async () => {
+    // Arrange
+    const { queue, ledger, parents, turnsOf, open, turn } = await fixture();
+    await open('lead');
+    await turn('lead', 2, OWNER_ASK);
+    const broken = {
+      list: async (): Promise<never> => {
+        throw new Error('unreadable records');
+      },
+    };
+    const noLineage = {
+      parentOf: async (): Promise<never> => {
+        throw new Error('unreadable lineage');
+      },
+    };
+    const subjects = [
+      new SessionOwnerWords(broken, ledger, parents, turnsOf),
+      new SessionOwnerWords(queue, broken, parents, turnsOf),
+      new SessionOwnerWords(queue, ledger, noLineage, turnsOf),
+    ];
+
+    // Act + Assert
+    for (const subject of subjects) {
+      should(await subject.said('lead')).eql([OWNER_ASK]);
+      await should(subject.said('lead', { strict: true })).be.rejectedWith(/unreadable/u);
+    }
+  });
+
+  it('should reject an unreadable turn even after a successful cached read, then reread a repaired one', async () => {
+    // Arrange
+    const { words, open, turn, turnsOf } = await fixture();
+    await open('lead');
+    await turn('lead', 2, OWNER_ASK);
+    should(await words.said('lead')).eql([OWNER_ASK]);
+    const path = join(turnsOf('lead'), 'turn-002.md');
+    await rm(path);
+    await mkdir(path);
+
+    // Act + Assert
+    await should(words.said('lead', { strict: true })).be.rejected();
+    should(await words.said('lead')).eql([]);
+    await rm(path, { recursive: true });
+    await turn('lead', 2, OWNER_ASK);
+    should(await words.said('lead', { strict: true })).eql([OWNER_ASK]);
+  });
+
+  it('should reject an unlistable directory and stat errors while ordinary reads remain best effort', async () => {
+    // Arrange
+    const { queue, ledger, parents, open, turnsOf } = await fixture();
+    await open('lead');
+    await mkdir(join(turnsOf('lead'), '..'), { recursive: true });
+    await writeFile(turnsOf('lead'), 'a file, not a directory');
+    const subjects = [
+      new SessionOwnerWords(queue, ledger, parents, turnsOf),
+      new SessionOwnerWords(queue, ledger, parents, id => join(turnsOf(id), 'nested')),
+    ];
+
+    // Act + Assert
+    for (const subject of subjects) {
+      should(await subject.said('lead')).eql([]);
+      await should(subject.said('lead', { strict: true })).be.rejected();
+    }
+  });
+
+  it('should reject listed turns that vanish before stat without caching the incomplete result as complete', async () => {
+    // Arrange: the directory still lists the turn, but the file disappears before stat.
+    const { queue, ledger, parents, open, turn, turnsOf } = await fixture();
+    await open('lead');
+    await turn('lead', 2, OWNER_ASK);
+    const files: TurnFiles = {
+      modified: async path => (path.endsWith('.md') ? undefined : (await stat(path)).mtimeMs),
+      list: async path => await readdir(path),
+      read: async path => await readFile(path, 'utf8'),
+    };
+    const subject = new SessionOwnerWords(queue, ledger, parents, turnsOf, files);
+
+    // Act + Assert
+    should(await subject.said('lead')).eql([]);
+    await should(subject.said('lead', { strict: true })).be.rejectedWith(/turn disappeared/u);
+  });
+
+  it('should reject unreadable and invalid author sidecars, including after a lenient cached read', async () => {
+    // Arrange
+    const { words, open, turn, turnsOf } = await fixture();
+    await open('lead');
+    await turn('lead', 2, OWNER_ASK);
+    const author = join(turnsOf('lead'), 'turn-002.by.json');
+
+    // Act + Assert
+    for (const text of ['{ torn', '{"kind":"unknown"}']) {
+      await writeFile(author, text);
+      should(await words.said('lead')).eql([OWNER_ASK]);
+      await should(words.said('lead', { strict: true })).be.rejected();
+    }
+    await rm(author);
+    await mkdir(author);
+    should(await words.said('lead')).eql([OWNER_ASK]);
+    await should(words.said('lead', { strict: true })).be.rejected();
+    await rm(author, { recursive: true });
+    await writeFile(author, '{"kind":"owner"}');
+    should(await words.said('lead', { strict: true })).eql([OWNER_ASK]);
+  });
+
+  it('should surface ledger open errors other than a missing file, so strict reads cannot hide them', async () => {
+    // Arrange: ENOTDIR from open, before the ledger has a handle to read.
+    const { queue, parents, open, turn, turnsOf } = await fixture();
+    await open('lead');
+    await turn('lead', 2, OWNER_ASK);
+    const ledger = new FileSendLedger(id => join(turnsOf(id), 'turn-002.md'), new SystemClock(() => new Date(NOW)));
+    const subject = new SessionOwnerWords(queue, ledger, parents, turnsOf);
+
+    // Act + Assert
+    should(await subject.said('lead')).eql([OWNER_ASK]);
+    await should(subject.said('lead', { strict: true })).be.rejectedWith(/ENOTDIR/u);
   });
 });

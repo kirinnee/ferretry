@@ -16,6 +16,7 @@ describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', (
       'lanes:',
       'gate:',
       'gate-followup:',
+      'card-agenda:',
       'warden:',
       'warden-orphan:',
       'handover:',

@@ -59,7 +59,7 @@
   color: var(--fg);
 }
 
-/* The scrolling document: header, sections, history. The comment box below it never scrolls away. */
+/* The scrolling document: header, sections, history. */
 .fy-board-detail__content {
   display: flex;
   min-height: 0;
@@ -124,11 +124,6 @@
   align-items: center;
   gap: var(--gap-xs);
 }
-.fy-board-detail__tools .fy-board-done[data-size='primary'] {
-  min-height: 32px;
-  padding: 0 var(--gap-md);
-  border-radius: var(--radius-pill);
-}
 .fy-board-detail__meta {
   display: flex;
   flex-wrap: wrap;
@@ -143,30 +138,17 @@
   align-items: center;
   gap: var(--gap-xs);
 }
-.fy-board-detail__lane {
-  position: relative;
-}
 .fy-board-detail__pill {
   display: inline-flex;
   min-height: 24px;
   align-items: center;
   gap: var(--gap-xs);
-  padding: 0 var(--gap-sm) 0 var(--gap-md);
-  border: 0;
+  padding: 0 var(--gap-md);
   border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--fg);
-  font: inherit;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.fy-board-detail__pill[data-static] {
-  padding-inline-end: var(--gap-md);
-  cursor: default;
-}
-.fy-board-detail__pill:not([data-static]):hover {
-  background: var(--surface);
 }
 .fy-board-detail__metalink {
   color: inherit;
@@ -193,17 +175,6 @@
   font-size: var(--text-2xs);
   font-weight: var(--weight-strong);
   line-height: 1;
-}
-.fy-board-detail__menu {
-  position: relative;
-}
-.fy-board-detail__lane .fy-board-menu {
-  right: auto;
-  left: 0;
-  margin-top: var(--gap-xs);
-}
-.fy-board-detail__menu .fy-board-menu {
-  margin-top: var(--gap-xs);
 }
 
 /* ---- Sections: a small muted heading, then plain text ---------------------------------------------- */
@@ -336,8 +307,7 @@
   background: var(--accent-soft);
   font-size: var(--text-sm);
 }
-.fy-board-chip__open,
-.fy-board-chip__x {
+.fy-board-chip__open {
   padding: var(--gap-xs) var(--gap-sm);
   border: 0;
   background: transparent;
@@ -345,17 +315,25 @@
   font: inherit;
   cursor: pointer;
 }
-.fy-board-chip__x {
-  padding-inline-start: 0;
-  color: var(--muted);
+/* A touch screen's 44px floor would blow the round chip into a blob; the tap area is laid over it instead. */
+@media (pointer: coarse) {
+  :root .fy-board-chip__open {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+  }
+  .fy-board-chip__open::after {
+    content: '';
+    position: absolute;
+    inset: -8px -4px;
+  }
 }
 .fy-board-detail__chips {
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
 }
-fieldset.fy-board-detail__chiprow,
-fieldset.fy-board-detail__verdict {
+fieldset.fy-board-detail__chiprow {
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -368,14 +346,14 @@ fieldset.fy-board-detail__verdict {
   gap: var(--gap-xs);
 }
 
-/* The card's own reading (premise and context, the ask, How to test, the verdict, the brief, the terms) keeps the
+/* The card's own reading (premise and context, the ask, How to test, the brief, the terms) keeps the
    page's rhythm inside the term layer that holds it. */
 .fy-board-detail .fy-terms-layer {
   gap: calc(var(--space-unit) * 4);
 }
 
-/* A picture or chart is drawn at its natural size, as on an agenda card, never stretched across a wide drawer. */
-.fy-board-detail .fy-render :is(.fy-render-image:not([data-fy-render-sized='true']), .fy-render-chart) {
+/* A picture is drawn at its natural size, as on an agenda card, never stretched across a wide drawer; a chart fills the column. */
+.fy-board-detail .fy-render .fy-render-image:not([data-fy-render-sized='true']) {
   max-width: min(100%, 480px);
 }
 
@@ -420,13 +398,6 @@ fieldset.fy-board-detail__verdict {
   color: var(--faint);
 }
 
-/* ---- Verdict -------------------------------------------------------------------------------------- */
-.fy-board-detail__verdict {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-sm);
-}
-
 /* ---- Timeline: avatar dot, who and what and how long ago, the note muted below --------------------- */
 .fy-board-timeline {
   display: flex;
@@ -464,20 +435,7 @@ fieldset.fy-board-detail__verdict {
   font-weight: var(--weight-normal);
 }
 
-/* ---- Forms, the notice and the pinned comment box -------------------------------------------------- */
-.fy-board-detail__form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--gap-xs);
-}
-.fy-board-detail__form > .fy-board-reason__input {
-  min-width: 0;
-  flex: 1 1 10rem;
-}
-.fy-board-detail__form > .fy-board-reason__error {
-  flex-basis: 100%;
-}
+/* ---- The ask rows and the notice ------------------------------------------------------------------ */
 /* An ask row opens the item's view in its ferret's chat: the whole line is the button. */
 .fy-board-detail__askrow {
   min-width: 0;
@@ -497,81 +455,12 @@ fieldset.fy-board-detail__verdict {
   outline: var(--focus-ring-width, 2px) solid var(--accent);
   outline-offset: 2px;
 }
-.fy-board-detail__foot {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
-  background: var(--bg);
-}
 .fy-board-detail__notice {
   margin: 0;
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.fy-board-detail__composer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-}
-.fy-board-detail__composer-input {
-  min-width: 0;
-  max-height: 8rem;
-  flex: 1 1 10rem;
-  padding: var(--gap-xs) var(--gap-sm);
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--text-input);
-  line-height: var(--leading-base);
-  field-sizing: content;
-  resize: none;
-}
-.fy-board-detail__composer-input:focus-visible {
-  outline: none;
-}
-.fy-board-detail__composer:focus-within {
-  border-color: var(--accent);
-}
-.fy-board-detail__composer > .fy-board-reason__error {
-  flex-basis: 100%;
-  margin: 0;
-}
 
-/* ---- "+ Card" ------------------------------------------------------------------------------------- */
-.fy-board-newcard {
-  display: flex;
-  width: min(32rem, 100%);
-  max-height: 100%;
-  flex-direction: column;
-  gap: var(--gap-sm);
-  padding: var(--gap-md);
-  overflow-y: auto;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-}
-.fy-board-newcard label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: var(--text-xs);
-}
-.fy-board-newcard textarea {
-  padding-block: var(--gap-xs);
-}
-.fy-board-newcard__check {
-  flex-direction: row !important;
-  align-items: center;
-  gap: var(--gap-xs) !important;
-}
 /* The error a card threw, verbatim, so the reader can say what failed (CardErrorBoundary). */
 .fy-board-detail__error {
   margin-top: var(--gap-xs);

@@ -157,3 +157,43 @@ describe('a queue line on disk', () => {
     ).be.false();
   });
 });
+
+describe('a combined delivery in the fold', () => {
+  const batchMove = (id: string, batch: string, seconds: number): QueueEvent => ({
+    v: 1,
+    kind: 'moved',
+    at: at(seconds),
+    id,
+    state: 'typing',
+    batch,
+  });
+
+  it('should record the delivery id on every member that moved to typing with it, and keep it as they settle', () => {
+    const folded = foldQueue([
+      enqueued({ id: 'a', sender: 'agent' }),
+      enqueued({ id: 'b', sender: 'agent' }),
+      batchMove('a', 'a', 1),
+      batchMove('b', 'a', 1),
+      moved('a', 'delivered', 2),
+      moved('b', 'delivered', 2),
+    ]);
+
+    should(folded.map(entry => [entry.state, entry.deliveredAs])).eql([
+      ['delivered', 'a'],
+      ['delivered', 'a'],
+    ]);
+  });
+
+  it('should forget the delivery id when a member goes back to queued', () => {
+    const folded = foldQueue([enqueued({ id: 'a', sender: 'agent' }), batchMove('a', 'a', 1), moved('a', 'queued', 2)]);
+
+    should(folded[0]).not.have.property('deliveredAs');
+  });
+
+  it('should leave a plain move without a delivery id, and parse old lines unchanged', () => {
+    const folded = foldQueue([enqueued(), moved('m1', 'typing', 1)]);
+
+    should(folded[0]).not.have.property('deliveredAs');
+    should(QueueEventSchema.parse(moved('m1', 'typing', 1))).not.have.property('batch');
+  });
+});

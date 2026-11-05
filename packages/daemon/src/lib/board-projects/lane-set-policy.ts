@@ -355,8 +355,8 @@ export const describeLaneSetFailure = (
   }
 };
 
-/** The merged lane's name: what the owner reads, whatever the two lanes were called. */
-export const RELEASED_TO_TEST_NAME = 'Released · to test';
+/** The merged lane's name: what the owner reads, whatever the two lanes were called. A progress name: the card's agenda carries its ask. */
+export const RELEASED_TO_TEST_NAME = 'Released';
 
 /** What merging a set's Released and To test lanes comes to: the set to store, and where cards move. */
 export interface ReleaseLaneMerge {
@@ -397,6 +397,7 @@ export const mergeReleaseLanes = (current: LaneSet): ReleaseLaneMerge | null => 
     category: 'verify',
     enterOn,
     ...(tested.ownerGate === undefined ? {} : { ownerGate: tested.ownerGate }),
+    // The mirror an app that predates card asks requires of a verify lane.
     emphasis: 'action',
   };
   const lanes = current.lanes.flatMap((lane, index) => {
@@ -475,4 +476,54 @@ export const stageLanes = (current: LaneSet): LaneSet | null => {
   if (current.lanes.every(lane => lane.stage !== undefined)) return null;
   const lanes = current.lanes.map(lane => (lane.stage === undefined ? { ...lane, stage: laneStage(lane) } : lane));
   return { ...current, lanes };
+};
+
+/**
+ * The template lane names that said a lane waits on the owner, by lane id, and the progress name each one becomes
+ * (docs/board.md § Lanes show progress): a card's ask rides its agenda now, so the lane only says where the work is.
+ */
+export const PROGRESS_LANE_NAMES: Readonly<Record<string, { readonly from: string; readonly to: string }>> = {
+  released: { from: 'Released · to test', to: 'Released' },
+  'to-test': { from: 'To test', to: 'Ready to try' },
+};
+
+/** The non-verify template lanes drawn as the owner's action, by lane id: drawn as progress now. */
+const PROGRESS_EMPHASIS: Readonly<Record<string, { readonly name: string; readonly category: Lane['category'] }>> = {
+  plan: { name: 'Plan/Design', category: 'active' },
+  review: { name: 'Review', category: 'review' },
+};
+
+/** One lane as progress: a template name that waited on the owner is renamed; one the owner chose is kept. */
+const progressLane = (lane: Lane): Lane => {
+  const renamed = PROGRESS_LANE_NAMES[lane.id];
+  const named = renamed !== undefined && lane.name === renamed.from ? { ...lane, name: renamed.to } : lane;
+  const drawn = PROGRESS_EMPHASIS[lane.id];
+  return drawn !== undefined &&
+    named.name === drawn.name &&
+    named.category === drawn.category &&
+    named.emphasis === 'action'
+    ? { ...named, emphasis: 'progress' }
+    : named;
+};
+
+const sameLanes = (left: readonly Lane[], right: readonly Lane[]): boolean =>
+  left.every((lane, index) => lane === right[index]);
+
+/**
+ * LANES SHOW PROGRESS (docs/board.md § Lanes show progress): a set's lanes still named as the TEMPLATE named a lane
+ * that waits on the owner (`released` "Released · to test", `to-test` "To test") take its progress name, and the
+ * template's Plan/Design and Review stop being drawn as the owner's action. A lane the owner renamed or redrew is
+ * left as it is; a verify lane keeps its `action` emphasis, the mirror an older app requires. Ids, categories,
+ * stages and gates are untouched, so no card moves and the owner's answer is still what moves a card past a gate.
+ * A waiting proposal is brought along the same way. The VERSION STAYS and the confirmation stands: the set means what
+ * it meant. `null` when nothing changes, so it is idempotent.
+ */
+export const progressLaneNames = (current: LaneSet): LaneSet | null => {
+  const lanes = current.lanes.map(progressLane);
+  const pending =
+    current.pending === undefined ? undefined : { ...current.pending, lanes: current.pending.lanes.map(progressLane) };
+  const pendingMoved =
+    current.pending !== undefined && pending !== undefined && !sameLanes(current.pending.lanes, pending.lanes);
+  if (sameLanes(current.lanes, lanes) && !pendingMoved) return null;
+  return { ...current, lanes, ...(pending === undefined ? {} : { pending }) };
 };

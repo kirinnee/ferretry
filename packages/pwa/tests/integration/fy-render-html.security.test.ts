@@ -433,41 +433,69 @@ describe('fy-render html — ordinary requests are refused', () => {
 });
 
 describe('fy-render html — the column paint', () => {
-  test('should paint the page with the column’s colours, and fetch nothing for a hostile paint value', async () => {
+  test('should give the page the theme tokens and the kit on a transparent root, and fetch nothing for a hostile token', async () => {
     ledger.length = 0;
     const page = await newPage();
     try {
       const base = server.url.origin;
       const read = probePage(`
+        const b = document.createElement('button');
+        b.className = 'fy-btn';
+        b.id = 'b';
+        document.body.appendChild(b);
         const root = getComputedStyle(document.documentElement);
         note('background', () => root.backgroundColor);
         note('color', () => root.color);
+        note('accent', () => root.getPropertyValue('--accent').trim());
+        note('stranger', () => root.getPropertyValue('--panel-texture').trim());
+        note('button', () => getComputedStyle(document.getElementById('b')).backgroundColor);
         note('scheme', () => document.documentElement.style.colorScheme);
+        note('overflow', () => root.overflowY);
         note('margin', () => getComputedStyle(document.body).margin);
       `);
-      // The paint `FyRenderBlock` reads from the message column.
+      // The paint `FyRenderBlock` reads from the message column: the mode and the theme tokens.
       const painted = (await page.evaluate(
-        drive(read, { paint: { background: 'rgb(1, 2, 3)', color: 'rgb(4, 5, 6)', font: 'serif', scheme: 'light' } }),
+        drive(read, {
+          paint: {
+            scheme: 'light',
+            tokens: {
+              accent: 'rgb(1, 2, 3)',
+              'page-fg': 'rgb(4, 5, 6)',
+              'page-font': 'serif',
+              'surface-2': 'rgb(7, 8, 9)',
+            },
+          },
+        }),
       )) as Drive;
-      should(painted.reports[0]?.background).equal('rgb(1, 2, 3)');
+      // Transparent: the page sits on the column's own surface and paints nothing of its own.
+      should(painted.reports[0]?.background).equal('rgba(0, 0, 0, 0)');
       should(painted.reports[0]?.color).equal('rgb(4, 5, 6)');
+      should(painted.reports[0]?.accent).equal('rgb(1, 2, 3)');
+      // The kit is in the shell and drawn in the tokens.
+      should(painted.reports[0]?.button).equal('rgb(7, 8, 9)');
       should(painted.reports[0]?.scheme).equal('light');
-      // Frameless: the page starts flush with the prose around it.
+      // Inline it never scrolls inside itself; frameless, it starts flush with the prose around it.
+      should(painted.reports[0]?.overflow).equal('hidden');
       should(painted.reports[0]?.margin).equal('0px');
 
-      // A paint value that tries to name a URL is not a colour or a font family,
-      // so `setProperty` drops it and nothing is requested.
+      // Tokens that try to name a URL, close a declaration, or are not on the list are refused by
+      // the shell's admission rule, so nothing is set and nothing is requested.
       const hostile = (await page.evaluate(
         drive(read, {
           paint: {
-            background: `url(${base}/beacon?paint-background)`,
-            color: `red; background-image: url(${base}/beacon?paint-color)`,
-            font: `x; background: url(${base}/beacon?paint-font)`,
             scheme: 'dark',
+            tokens: {
+              accent: `url(${base}/beacon?paint-accent)`,
+              fg: `red; background-image: url(${base}/beacon?paint-fg)`,
+              'page-font': `x\\75 rl(${base}/beacon?paint-font)`,
+              'panel-texture': `url(${base}/beacon?paint-texture)`,
+            },
           },
         }),
       )) as Drive;
       should(hostile.reports.length).equal(1);
+      should(hostile.reports[0]?.accent).equal('');
+      should(hostile.reports[0]?.stranger).equal('');
       should(ledger.some(hit => hit.path.includes('paint-'))).be.false();
     } finally {
       await page.close();

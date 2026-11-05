@@ -13,7 +13,7 @@
 import { type ReactNode, useState } from 'react';
 import type { MessageClock } from '../lib/message-clock.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import { sendReceipt } from '../lib/send-receipt.ts';
+import { type SendReceipt, sendReceipt } from '../lib/send-receipt.ts';
 import { ReceiptMark } from './receipt-mark.tsx';
 
 export interface MessageFooterProps {
@@ -31,6 +31,11 @@ export interface MessageFooterProps {
   readonly leadDetail?: ReactNode;
   /** A small control that ends the line, after the receipt mark — a send's "⋯" actions button. */
   readonly trailing?: ReactNode;
+  /**
+   * The mark itself, for words the ledger holds no `record` of but whose state is known another way (an agenda item's
+   * conversation, `itemWordsReceipt`). A `record` always wins.
+   */
+  readonly receipt?: SendReceipt | undefined;
 }
 
 export function MessageFooter({
@@ -41,9 +46,11 @@ export function MessageFooter({
   lead,
   leadDetail,
   trailing,
+  receipt: known,
 }: MessageFooterProps) {
   const [open, setOpen] = useState(false);
-  if (record === undefined) {
+  const receipt = record === undefined ? known : sendReceipt(record, answered);
+  if (receipt === undefined) {
     if (clock === undefined && lead === undefined) return null;
     return (
       <>
@@ -71,7 +78,6 @@ export function MessageFooter({
       </>
     );
   }
-  const receipt = sendReceipt(record, answered);
   const sent = clock === undefined ? undefined : `sent ${clock.full}`;
   return (
     <>
@@ -86,7 +92,7 @@ export function MessageFooter({
           aria-expanded={open}
           aria-label={sent === undefined ? receipt.name : `${receipt.name}, ${sent}`}
           className="fy-receipt"
-          data-send-fate={record.fate}
+          data-send-fate={record?.fate}
           data-send-receipt={receipt.kind}
           onClick={() => setOpen(current => !current)}
           title={[receipt.name, receipt.detail, sent].filter(line => line !== undefined).join('\n')}

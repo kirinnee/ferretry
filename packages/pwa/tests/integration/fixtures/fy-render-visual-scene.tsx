@@ -26,7 +26,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FyRenderBlock } from '../../../src/components/fy-render-block.tsx';
-import { parseFyRender } from '../../../src/lib/fy-render.ts';
+import { isFyRenderEmbedBlock, parseFyRender } from '../../../src/lib/fy-render.ts';
 import { FY_RENDER_VISUAL_CASES } from './fy-render-visual-cases.ts';
 
 /** `?case=` selects a fixture. */
@@ -41,6 +41,8 @@ if (theme !== null) document.documentElement.setAttribute('data-theme', theme);
 
 const parsed = parseFyRender(source);
 if (!parsed.ok) throw new Error(`fixture did not parse: ${parsed.reason}`);
+if (isFyRenderEmbedBlock(parsed.block)) throw new Error('fixture is an embed block');
+const block = parsed.block;
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene has no #root to mount into');
@@ -49,7 +51,7 @@ createRoot(root).render(
   <StrictMode>
     {/* An `.md` column, as in a transcript, so a fallback wears the ordinary fence's styling. */}
     <div className="scene-pad md">
-      <FyRenderBlock block={parsed.block} />
+      <FyRenderBlock block={block} />
     </div>
   </StrictMode>,
 );

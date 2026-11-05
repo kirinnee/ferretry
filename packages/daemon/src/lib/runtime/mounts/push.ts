@@ -25,12 +25,22 @@
  * refused: it is not a paired device, it has no browser and no push endpoint, and an enrolment filed
  * against nothing would be a row that can never be revoked with a device — the exact orphan the
  * lifetime rule exists to prevent.
+ *
+ * ## SAYING AN ITEM WAS OPENED IS `fleet.use`
+ *
+ * `POST /v1/push/seen` takes an agenda item's alerts down on every OTHER device the owner holds
+ * (docs/notifications.md § When an alert is cleared). It reveals nothing — the answer is only whether a clear
+ * went out — but it does change what the owner's other phones show, so it is `fleet.use`, which every default
+ * device holds, rather than ungoverned. The device it skips is the caller's own, read from the credential; a
+ * caller that is no device (the owner at the machine) skips none.
  */
 
 import {
   PairedDeviceIdSchema,
   PushDeviceListResponseSchema,
   PushDeviceViewSchema,
+  PushSeenRequestSchema,
+  PushSeenResponseSchema,
   RegisterPushDeviceRequestSchema,
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
@@ -51,6 +61,7 @@ import {
   grantRefusalCode,
   type RouteContext,
 } from '../../api/index.ts';
+import type { AlertSeenOutcome } from '../../notifications/index.ts';
 import { PushError } from '../../push/index.ts';
 
 export interface PushSubscriptionSubsystem {
@@ -64,6 +75,14 @@ export interface PushSubscriptionSubsystem {
   register(deviceId: string, request: RegisterPushDeviceRequest): Promise<PushDeviceView>;
   revoke(id: string): Promise<PushDeviceView>;
 }
+
+/** Taking an opened item's alerts down on the owner's other devices (`AgendaAlertClearer.seen`). */
+export interface PushAlertSubsystem {
+  seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome>;
+}
+
+/** What saying an item was opened demands: see the header. */
+const SEEN_DEMAND: CapabilityDemand = { capability: 'fleet', axis: 'use' };
 
 /** What managing ANOTHER device's enrolment demands. A device's own needs none — see the header. */
 const MANAGE_DEMAND: CapabilityDemand = { capability: 'pairing', axis: 'use' };
@@ -120,8 +139,13 @@ function callerDeviceId(actor: string | undefined): string | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: CapabilityGuard): readonly ApiRoute[] {
+export function pushRoutes(
+  subsystem: PushSubscriptionSubsystem,
+  guard: CapabilityGuard,
+  alerts?: PushAlertSubsystem,
+): readonly ApiRoute[] {
   return [
+    ...(alerts === undefined ? [] : [seenRoute(alerts)]),
     {
       /**
        * The application-server key a browser subscribes with.
@@ -207,4 +231,22 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       },
     },
   ];
+}
+
+/** `POST /v1/push/seen`: the owner opened an item; its alerts come down everywhere but the caller's device. */
+function seenRoute(alerts: PushAlertSubsystem): ApiRoute {
+  return {
+    method: 'POST',
+    path: '/v1/push/seen',
+    minimum: 'operator',
+    caller: 'person',
+    capability: SEEN_DEMAND,
+    noStore: true,
+    handle: async ({ request, actor }) => {
+      const body = await parseBody(request, PushSeenRequestSchema);
+      const outcome = await alerts.seen(body.sessionId, body.agendaId, callerDeviceId(actor));
+      if (!outcome.found) return errorResponse(404, 'no agenda item with that id on that board', 'push_not_found');
+      return jsonResponse(PushSeenResponseSchema.parse({ cleared: outcome.tags.length > 0, tags: [...outcome.tags] }));
+    },
+  };
 }

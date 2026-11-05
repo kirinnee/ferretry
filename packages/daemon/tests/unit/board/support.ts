@@ -277,6 +277,14 @@ export class FakeSessions implements SessionLivenessSource {
     this.reads += 1;
     return this.current;
   }
+
+  /** Every set of sessions a commit asked to hold, in order. */
+  readonly holds: (readonly string[])[] = [];
+
+  async settled<T>(ids: readonly string[], work: (fresh: SessionRoster) => Promise<T>): Promise<T> {
+    this.holds.push(ids);
+    return await work(this.current);
+  }
 }
 
 export class FakeFocus implements SessionFocus {

@@ -381,7 +381,7 @@ describe('the derived view', () => {
       dropped: { reason: 'no', at: NOW },
     });
     const ask = { sessionId: 'lead', id: 'A4' };
-    const asks = new Map([['F1', { open: [ask], blocking: [ask] }]]);
+    const asks = new Map([['F1', { open: [ask], asking: [ask] }]]);
     const all = [waiting, blocker, droppedDependent];
 
     // Act
@@ -390,7 +390,7 @@ describe('the derived view', () => {
 
     // Assert
     should(view.blockedBy).eql([{ id: 'F2' }]);
-    should(view.waitingOnOwner).eql([ask]);
+    should(view.waitingOnOwner).eql([]);
     should(view.openAsks).eql([ask]);
     should(view.activity).equal(UNOBSERVED.activity);
     should(view.shippedIn).be.null();
@@ -402,7 +402,7 @@ describe('the derived view', () => {
     // Arrange
     const cards = [card({ id: 'F1' }), card({ id: 'F2' })];
     const ask = { sessionId: 'lead', id: 'A9' };
-    const asks = new Map([['F1', { open: [ask], blocking: [ask] }]]);
+    const asks = new Map([['F1', { open: [ask], asking: [ask] }]]);
     const seen: ActivityInputs[] = [];
     const activity: ActivityDeriver = {
       derive: async received => {

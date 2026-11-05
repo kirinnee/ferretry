@@ -285,6 +285,18 @@ describe('findDuplicates: identical titles in one lineage', () => {
     ]);
   });
 
+  it('reports twins whose main tab differs, the live document, and closes neither (review of &F923)', () => {
+    const found = findDuplicates(
+      [
+        agenda('lead', [item('A1', { subject: 'Ship it', whereWeAre: 'Keep SQLite.' })], 'lead'),
+        agenda('kid', [item('A2', { subject: 'Ship it', whereWeAre: 'Move to Postgres.' })], 'lead'),
+      ],
+      facts(),
+    );
+    should(found.closures).deepEqual([]);
+    should(found.possible.map(each => each.why)).deepEqual(['not closed: the same title, but a different ask']);
+  });
+
   it('only reports twins that were not all raised by agents, and keeps lineages apart', () => {
     const found = findDuplicates(
       [

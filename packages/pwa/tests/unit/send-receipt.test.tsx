@@ -5,7 +5,7 @@ import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { clockOfInstant } from '../../src/lib/message-clock.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
 import { sendBadge } from '../../src/lib/send-badge.ts';
-import { RECEIPT_LEGEND, type SendReceiptKind, sendReceipt } from '../../src/lib/send-receipt.ts';
+import { itemWordsReceipt, RECEIPT_LEGEND, type SendReceiptKind, sendReceipt } from '../../src/lib/send-receipt.ts';
 import { type TranscriptEntry, transcriptItems } from '../../src/lib/session-screens.ts';
 import { render, runAsync } from '../support/react.ts';
 
@@ -456,5 +456,24 @@ describe('a queue state the ledger fate has not caught up to', () => {
   test('falls back to the ledger’s own words instead of inventing a tick', () => {
     const row = record({ fate: 'accepted', queue: { state: 'cancelled', stateAt: STATE_AT, revision: 2 } });
     expect(sendBadge(row).label).toBe('sending');
+  });
+});
+
+describe('the receipt of the owner’s words on an agenda item (itemWordsReceipt)', () => {
+  test('a send the ledger recorded is the chat’s own receipt, answered included', () => {
+    const delivered = record({ fate: 'delivered' });
+    expect(itemWordsReceipt({ via: 'item', answered: true, send: delivered })).toEqual(sendReceipt(delivered, true));
+  });
+
+  test('without a record it claims only what is known, each with the chat’s mark', () => {
+    expect(itemWordsReceipt({ via: 'transcript', answered: false }).kind).toBe('read');
+    expect(itemWordsReceipt({ via: 'item', answered: true })).toMatchObject({ kind: 'answered', name: 'Answered' });
+    expect(itemWordsReceipt({ via: 'item', answered: false })).toMatchObject({
+      kind: 'queued',
+      name: 'On the machine',
+    });
+    // Every kind it draws has a line in the legend Settings prints.
+    const legend = new Set(RECEIPT_LEGEND.map(row => row.kind));
+    for (const kind of ['read', 'answered', 'queued'] as const) expect(legend.has(kind)).toBe(true);
   });
 });

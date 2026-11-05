@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { BOARD_EVENT_TYPES, TaskRefSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
+  BOARD_ALERT_WITHHELD_EVENT,
   BOARD_CHECKED_EVENT,
   BOARD_GATE_NUDGED_EVENT,
   JournalBoardChanges,
@@ -241,6 +242,22 @@ describe('the board session adapters', () => {
 
     // Assert
     should(journal.map(entry => entry.data)).eql([{ items: ['A44'], cards: ['F412'] }]);
+  });
+
+  it('should journal a board alert held back from a session with its words, and ignore a session it does not hold', async () => {
+    // Arrange
+    const storage = await openStorage();
+    const id = await session(storage, 'lead');
+    const checks = new JournalBoardChecks(storage);
+    const message = '&F412 PR #930 CI is red. Fix it, or note on the card why it can stay red.';
+
+    // Act
+    await checks.recordWithheldAlert('lead', message);
+    await checks.recordWithheldAlert('ghost', message);
+    const journal = (await storage.replay(id)).events.filter(entry => entry.type === BOARD_ALERT_WITHHELD_EVENT);
+
+    // Assert
+    should(journal.map(entry => entry.data)).eql([{ message }]);
   });
 });
 

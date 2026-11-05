@@ -59,6 +59,19 @@ function resolveColor(value: string, canvas: CanvasRenderingContext2D | null): s
   return a === 255 ? rgb : `${rgb}${hex2(a)}`;
 }
 
+/**
+ * What `element` sits on: the first OPAQUE background painted by it or an ancestor, as a hex literal. A
+ * translucent layer is skipped rather than blended (a diagram's label box needs one solid colour to match),
+ * and `''` is the answer when the walk reaches the root with nothing — the caller falls back to `--bg`.
+ */
+function backdropOf(element: Element, canvas: CanvasRenderingContext2D | null): string {
+  for (let node: Element | null = element; node !== null; node = node.parentElement) {
+    const painted = resolveColor(getComputedStyle(node).backgroundColor, canvas);
+    if (painted.length === 7) return painted;
+  }
+  return '';
+}
+
 /** The app's theme name, from the document root. */
 export const documentThemeName = (): string =>
   typeof document === 'undefined' ? '' : (document.documentElement.getAttribute('data-theme') ?? '');
@@ -70,14 +83,20 @@ export const documentThemeName = (): string =>
 export function readTheme(element: Element | null, canvas: CanvasRenderingContext2D | null = context()): ResolvedTheme {
   const mode = documentThemeName().includes('light') ? 'light' : 'dark';
   const colors = Object.fromEntries(THEME_TOKENS.map(token => [token, ''])) as Record<ThemeToken, string>;
-  const unread: ResolvedTheme = { colors, font: '', mode, radius: 0 };
+  const unread: ResolvedTheme = { backdrop: '', colors, font: '', mode, radius: 0 };
   const target = element ?? (typeof document === 'undefined' ? null : document.documentElement);
   if (target === null || typeof getComputedStyle !== 'function') return unread;
   try {
     const style = getComputedStyle(target);
     for (const token of THEME_TOKENS) colors[token] = resolveColor(style.getPropertyValue(`--${token}`), canvas);
     const radius = Number.parseFloat(style.getPropertyValue('--radius-xs'));
-    return { colors, font: style.fontFamily, mode, radius: Number.isFinite(radius) ? Math.max(0, radius) : 0 };
+    return {
+      backdrop: backdropOf(target, canvas) || colors.bg,
+      colors,
+      font: style.fontFamily,
+      mode,
+      radius: Number.isFinite(radius) ? Math.max(0, radius) : 0,
+    };
   } catch {
     return unread;
   }

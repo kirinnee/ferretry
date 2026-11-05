@@ -30,6 +30,7 @@ import {
   RELEASED_TO_TEST_NAME,
   relocationProblems,
   stageLanes,
+  progressLaneNames,
   unfiledLaneSet,
 } from './lane-set-policy.ts';
 import type { CardRelocator, LaneProposalAgenda, LaneSetSource, LaneSetStore, RelocationAuthority } from './ports.ts';
@@ -57,6 +58,11 @@ export type QuickToTestOutcome =
 export type StageLanesOutcome =
   | { readonly projectId: BoardProjectId; readonly staged: true; readonly version: number }
   | { readonly projectId: BoardProjectId; readonly staged: false; readonly problem: string };
+
+/** What renaming one set's waiting lanes as progress came to. */
+export type ProgressLaneNamesOutcome =
+  | { readonly projectId: BoardProjectId; readonly renamed: true; readonly version: number }
+  | { readonly projectId: BoardProjectId; readonly renamed: false; readonly problem: string };
 
 /** What a card's history says when the merge moves it. */
 export const RELEASE_MERGE_REASON = `Released and To test are one lane now: ${RELEASED_TO_TEST_NAME}`;
@@ -241,6 +247,31 @@ export class LaneSetService implements LaneSetSource {
         if (version !== null) outcomes.push({ projectId, staged: true, version });
       } catch (error) {
         outcomes.push({ projectId, staged: false, problem: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return outcomes;
+  }
+
+  /**
+   * The boot migration that names a set's waiting lanes as progress ({@link progressLaneNames}): only the lanes still
+   * named as the template named them, so no card moves and the owner's own names stand. A set the next read would
+   * refuse is never written. Idempotent and total; the owner is asked nothing.
+   */
+  async progressLaneNames(): Promise<readonly ProgressLaneNamesOutcome[]> {
+    const ids = [UNFILED_PROJECT_ID, ...(await this.registry.projects()).map(project => project.id)];
+    const outcomes: ProgressLaneNamesOutcome[] = [];
+    for (const projectId of ids) {
+      try {
+        const version = await this.store.transact<number | null>(projectId, current => {
+          const next = current === null ? null : progressLaneNames(current);
+          if (next !== null && !LaneSetSchema.safeParse(next).success) {
+            throw new Error('renaming its lanes would leave them unreadable, so they are left as they are');
+          }
+          return next === null ? { result: null } : { next, result: next.version };
+        });
+        if (version !== null) outcomes.push({ projectId, renamed: true, version });
+      } catch (error) {
+        outcomes.push({ projectId, renamed: false, problem: error instanceof Error ? error.message : String(error) });
       }
     }
     return outcomes;

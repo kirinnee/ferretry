@@ -83,95 +83,155 @@ const draw = async (
 
 const root = (): HTMLElement => must(view?.container, 'the view');
 const one = <T extends Element>(selector: string): T => must(root().querySelector<T>(selector), selector);
+/** The form's Yes / No button that says `word`: picked by its words, since No sits first, as on every Yes / No row. */
+const yesNoButton = (word: 'Yes' | 'No'): HTMLButtonElement =>
+  must(
+    [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-form-yesno] button')].find(button =>
+      (button.textContent ?? '').startsWith(word),
+    ),
+    word,
+  );
 const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = one('[data-agenda-view]')) =>
   interact(() => pressKey(target, key, init));
 
 const markdown = (text: string) => <Markdown text={text} />;
 
-describe('the item view tools behind ⓘ', () => {
-  test('draws ⓘ for a host that hands it tools even when the item has no description, and puts them in its panel', async () => {
-    await draw(richItem, {
-      tools: (
-        <button data-test-tool="" type="button">
-          Skip
-        </button>
-      ),
-    });
+/** A host's quiet tools (the Inbox's Skip): what puts ⓘ in the head now the summary is drawn on the card. */
+const TOOLS = (
+  <button data-test-tool="" type="button">
+    Skip
+  </button>
+);
+
+/** Opens the head's ⋯ menu (a popover here: the test window is wider than a phone). */
+const openMenu = async (): Promise<HTMLElement> => {
+  const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-menu-toggle]');
+  if (toggle.getAttribute('aria-expanded') !== 'true') await interact(() => toggle.click());
+  return one('[data-agenda-menu="popover"]');
+};
+
+describe('the item view’s ⋯ menu', () => {
+  test('holds a host’s quiet tools even when the item has nothing else to put there', async () => {
+    await draw(agendaItem('A49', { title: 'Same', subject: 'Same' } as Partial<AgendaItem>), { tools: TOOLS });
     expect(root().querySelector('[data-test-tool]')).toBeNull();
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    expect(one('[data-test-tool]').textContent).toBe('Skip');
+    const menu = await openMenu();
+    expect(must(menu.querySelector('[data-test-tool]'), 'tool').textContent).toBe('Skip');
+  });
+
+  test('is a popover named for the item’s options, opened and closed by ⋯, and by Esc without closing the item', async () => {
+    const spy = await draw(richItem, { tools: TOOLS });
+    const toggle = one<HTMLButtonElement>('[data-agenda-menu-toggle]');
+    expect(toggle.getAttribute('aria-label')).toBe('Item options');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    const menu = await openMenu();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-controls')).toBe(menu.id);
+    expect(menu.getAttribute('role')).toBe('dialog');
+    await press('Escape', {}, must(menu.querySelector('button, select'), 'a control'));
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    expect(spy.closed).toBe(0);
+    await openMenu();
+    await interact(() => toggle.click());
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+  });
+
+  test('closes on a press outside it', async () => {
+    await draw(richItem, { tools: TOOLS });
+    await openMenu();
+    await interact(() => {
+      one('[data-agenda-description]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    });
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+  });
+
+  test('a new item opens with its ⋯ closed', async () => {
+    await draw(richItem, { tools: TOOLS });
+    await openMenu();
+    await view?.unmount();
+    view = null;
+    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>), { tools: TOOLS });
+    expect(one('[data-agenda-menu-toggle]').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test('draws no ⋯ when there is nothing to put behind it: a settled item, never edited, with no host tools', async () => {
+    await draw(agendaItem('A49', { title: 'Same', subject: 'Same', why: 'Same' } as Partial<AgendaItem>), {
+      settled: <p>Done.</p>,
+    });
+    expect(root().querySelector('[data-agenda-menu-toggle]')).toBeNull();
   });
 });
 
 describe('the item view snooze control', () => {
-  test('draws no clock when it is given nothing to snooze with', async () => {
+  test('offers no Snooze when it is given nothing to snooze with', async () => {
     await draw(richItem);
+    await openMenu();
+    expect(root().querySelector('[data-agenda-menu-group="snooze"]')).toBeNull();
     expect(root().querySelector('[data-agenda-snooze]')).toBeNull();
   });
 
-  test('puts the clock in the head’s one row, after ⓘ and before ✕ — never in the ⓘ panel — and snoozes from there; off while busy', async () => {
+  test('is the ⋯ menu’s row of times — never a clock in the head — and snoozes from there, closing the menu; off while busy', async () => {
     const snoozed: string[] = [];
-    await draw(richItem, { onSnooze: until => snoozed.push(until) });
-    const clock = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-snooze]');
-    expect(clock.className).toBe('fy-item-view__step fy-item-view__step--tight fy-card-head__snooze');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    expect(root().querySelectorAll('[data-agenda-snooze]')).toHaveLength(1);
-    expect(root().querySelector('[data-agenda-info-panel] [data-agenda-snooze]')).toBeNull();
-    await interact(() => clock.click());
-    await interact(() => must(root().querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
+    await draw(richItem, { onSnooze: until => snoozed.push(until), tools: TOOLS });
+    expect(root().querySelector('.fy-item-view__bar [data-agenda-snooze]')).toBeNull();
+    const menu = await openMenu();
+    const picks = [...menu.querySelectorAll('[data-agenda-menu-group="snooze"] [data-agenda-menu-snooze]')];
+    expect(picks.map(pick => pick.textContent)).toEqual(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']);
+    await interact(() => must(menu.querySelector<HTMLElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').click());
     expect(snoozed).toEqual([new Date(NOW + 3_600_000).toISOString()]);
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
     await view?.unmount();
     view = null;
     await draw(richItem, { onSnooze: () => undefined, busy: true });
-    expect(one<HTMLButtonElement>('[data-agenda-snooze]').disabled).toBe(true);
+    await openMenu();
+    expect(one<HTMLButtonElement>('[data-agenda-menu-snooze="hour"]').disabled).toBe(true);
   });
 
-  test('has no ⓘ for an item with nothing to say under its title, but still has its clock', async () => {
-    await draw(
-      agendaItem('A48', {
-        title: 'Same',
-        subject: 'Same',
-        why: 'Same',
-        ask: choices('Yes', 'No'),
-      } as unknown as Partial<AgendaItem>),
-      {
-        onSnooze: () => undefined,
-      },
-    );
-    expect(root().querySelector('[data-agenda-info-toggle]')).toBeNull();
-    expect(root().querySelectorAll('.fy-item-view__bar [data-agenda-snooze]')).toHaveLength(1);
+  test('opens Custom… in place, with a time field and its own Snooze', async () => {
+    const snoozed: string[] = [];
+    await draw(richItem, { onSnooze: until => snoozed.push(until) });
+    const menu = await openMenu();
+    const custom = must(menu.querySelector<HTMLButtonElement>('[data-agenda-menu-snooze="custom"]'), 'Custom…');
+    await interact(() => custom.click());
+    expect(custom.getAttribute('aria-expanded')).toBe('true');
+    expect(menu.querySelector('[data-snooze-custom] input[type="datetime-local"]')).not.toBeNull();
   });
 });
 
-describe('the v6 layout: title, ONE card, history — one column', () => {
-  test('is a dialog over the message list whose ONE scroller holds the head, the card and the History in order', async () => {
+describe('the v6 layout: title, ONE card — one column', () => {
+  test('is a dialog over the message list whose ONE scroller holds the head and the card (the conversation inside it, folded)', async () => {
     const history: HistoryEvent[] = [{ kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47: noted.' }];
-    await draw(richItem, {}, history);
+    await draw(richItem, { itemKey: 'view-test:v6-layout' }, history);
     expect(one('section').getAttribute('role')).toBe('dialog');
     const column = one('.fy-item-view__body > .fy-item-view__column');
     expect([...column.children].map(child => child.className.split(' ')[0])).toEqual([
       'fy-item-view__head',
       'fy-card',
-      'fy-hist',
       'fy-item-view__dock',
     ]);
+    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toBe('Conversation1 message');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-fold="conversation"]').click());
+    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toContain('Re !A47: noted.');
     // The answer row is in the sticky dock at the foot of the column, not a strip of its own above the composer.
     expect(one('.fy-item-view__dock [data-agenda-quick-replies]')).toBeDefined();
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
-  test('is ONE row: the title, then the status dot, the pager, ⓘ, the clock and ✕ — nothing under it until ⓘ opens', async () => {
-    await draw(richItem, { onSnooze: () => undefined });
+  test('is ONE row: the one-line title, then the urgency dot, the pager, ⋯ and ✕ — nothing under it', async () => {
+    await draw(agendaItem('A47', { ...richItem, blockingNow: true } as Partial<AgendaItem>), {
+      onSnooze: () => undefined,
+      tools: TOOLS,
+    });
     const head = one('.fy-item-view__head');
-    expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
-      'fy-item-view__bar fy-card-head',
-    ]);
+    expect([...head.children].map(child => child.className)).toEqual(['fy-item-view__bar fy-card-head']);
     const bar = one('.fy-item-view__head > .fy-item-view__bar');
     expect([...bar.children].map(child => child.className.split(' ')[0])).toEqual([
       'fy-item-view__title',
       'fy-item-view__pager',
     ]);
     expect(one('[data-agenda-title]').textContent).toBe('Database for the board');
+    // One line: no wrap mode, and no second copy of the title in the body.
+    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(false);
+    expect(root().querySelector('[data-agenda-full-title]')).toBeNull();
     const tools = [...bar.querySelectorAll('.fy-item-view__pager > *')].map(
       node => node.getAttribute('aria-label') ?? node.getAttribute('data-agenda-where') ?? node.className,
     );
@@ -181,43 +241,47 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
       'Previous item',
       '2 of 3',
       'Next item',
-      'About this item',
-      'fy-snooze',
+      'fy-item-menu',
       'Back to the chat',
     ]);
+    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-snooze]')).toBeNull();
     expect(root().querySelector('[data-agenda-ask]')).toBeNull();
   });
 
-  test('says the item’s ask behind ⓘ: a tap opens its panel under the row, another closes it', async () => {
+  test('says the item’s summary on the card under the title, whole — never behind ⋯', async () => {
     await draw(richItem);
-    const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-info-toggle]');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-controls')).toBe(one('[data-agenda-info-panel]').id);
-    expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
-    await interact(() => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    const panel = one<HTMLElement>('.fy-item-view__head > [data-agenda-info-panel]');
-    expect(panel.hidden).toBe(false);
-    expect(one('.fy-item-view__head [data-agenda-ask]').textContent).toBe(
+    expect(one('.fy-card [data-agenda-part="head"] [data-agenda-description]').textContent).toBe(
       'Which database should keep the board’s finished items?',
     );
-    await interact(() => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-agenda-menu-group="about"]')).toBeNull();
   });
 
-  test('a new item opens with its ⓘ closed', async () => {
-    await draw(richItem);
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    await view?.unmount();
-    view = null;
-    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>));
-    expect(one('[data-agenda-info-toggle]').getAttribute('aria-expanded')).toBe('false');
-  });
-
-  test('draws no ⓘ when there is nothing to say behind it', async () => {
-    await draw(agendaItem('A49', { title: 'Same', subject: 'Same', why: 'Same' } as Partial<AgendaItem>), {}, []);
-    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-info-panel]')).toBeNull();
+  test('keeps a gate item’s summary behind ⋯, since its card repeats nothing', async () => {
+    await draw(
+      agendaItem('A50', {
+        title: 'Badge colour',
+        subject: 'Try it: the badge is blue now',
+        gate: {
+          cardId: 'F12',
+          laneId: 'tested',
+          laneName: 'Try it',
+          entry: 3,
+          projectId: 'p1',
+          options: [
+            { id: 'o0', label: 'Done', outcome: 'close' },
+            { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+          ],
+        },
+      } as unknown as Partial<AgendaItem>),
+    );
+    expect(root().querySelector('[data-agenda-description]')).toBeNull();
+    const menu = await openMenu();
+    expect(must(menu.querySelector('[data-agenda-menu-group="about"] [data-agenda-ask]'), 'summary').textContent).toBe(
+      'Try it: the badge is blue now',
+    );
+    // A gate is answered on its own buttons: the menu offers no Not needed for it.
+    expect(menu.querySelector('[data-agenda-dismiss]')).toBeNull();
   });
 
   test('keeps a title that fits as plain text, and marks none as scrolling until the browser says it overflows', async () => {
@@ -236,18 +300,19 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(text).not.toMatch(/why now|what’s going on|what's going on|why it matters/iu);
   });
 
-  test('says the kind once: a host that draws the kind chip (the Inbox) gets no pill in the card', async () => {
+  test('says where the item stands once: the state is the card’s chip, and the head row says only urgency', async () => {
     await draw(richItem, { tools: <span data-test-tool="">tools</span> });
-    expect(root().querySelector('[data-agenda-type]')).toBeNull();
+    expect(root().querySelectorAll('[data-agenda-type]')).toHaveLength(1);
+    expect(one('[data-agenda-state]').textContent).toBe('Needs you');
+    expect(root().querySelector('.fy-item-view__bar [data-agenda-status]')).toBeNull();
   });
 
-  test('teaches nothing: no hint line under the type, no ⋯ menu', async () => {
+  test('teaches nothing: no hint line under the type, and ⋯ is an icon, not a word', async () => {
     await draw(richItem);
-    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Decision');
+    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Question');
     const text = root().textContent ?? '';
     expect(text).not.toContain('it is yours to decide');
     expect(text).not.toContain('⋯');
-    expect(root().querySelector('[aria-haspopup="menu"]:not([data-agenda-snooze])')).toBeNull();
   });
 });
 
@@ -304,7 +369,7 @@ describe('the question and its options', () => {
     expect(why.textContent).toContain('It can never overspend.');
   });
 
-  test('letters every option when one label is not a single word, and the buttons say the letters too', async () => {
+  test('letters every option in the list when one label is not a single word; the buttons still say the labels', async () => {
     await draw(
       agendaItem('A92', {
         ask: {
@@ -322,9 +387,9 @@ describe('the question and its options', () => {
       '**Studio disk**',
     );
     expect([...root().querySelectorAll('.fy-qr__label')].map(label => label.textContent).sort()).toEqual([
-      'A',
-      'B',
-      'C',
+      'S3',
+      'Skip',
+      'Studio disk',
     ]);
   });
 
@@ -346,20 +411,24 @@ describe('the question and its options', () => {
 });
 
 describe('Not needed', () => {
-  test('is a small pill in the card’s top bar — a button only, saying no swipe and no arrow', async () => {
+  test('is a button in the ⋯ menu — never in the card — saying no swipe and no arrow, and closes the menu', async () => {
     const spy = await draw(richItem);
-    const pill = one<HTMLButtonElement>('.fy-card__top [data-agenda-dismiss]');
-    expect(pill.textContent).toBe('Not needed');
-    expect(pill.getAttribute('aria-label')).toBe('Not needed');
-    expect(pill.querySelector('.fy-card__arrow')).toBeNull();
+    expect(root().querySelector('.fy-card [data-agenda-dismiss]')).toBeNull();
+    const menu = await openMenu();
+    const button = must(menu.querySelector<HTMLButtonElement>('[data-agenda-dismiss]'), 'Not needed');
+    expect(button.textContent).toBe('Not needed');
+    expect(button.querySelector('.fy-card__arrow')).toBeNull();
     expect(root().querySelector('.fy-qr [data-agenda-dismiss]')).toBeNull();
-    await interact(() => pill.click());
+    await interact(() => button.click());
     expect(spy.acted).toEqual([DISMISS_ACTION]);
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
   });
 
-  test('stays a button on a phone too: still no swipe wording', async () => {
-    await draw(richItem, { swipeable: true });
-    expect(one('.fy-card__top [data-agenda-dismiss]').getAttribute('aria-label')).toBe('Not needed');
+  test('is left to the host where it hands its own tools (the Inbox’s Skip and Not needed): said once', async () => {
+    await draw(richItem, { tools: TOOLS });
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-agenda-dismiss]')).toBeNull();
+    expect(menu.querySelector('[data-test-tool]')).not.toBeNull();
   });
 
   test('is never the ↓ key or the ↓ swipe on the answer row: those skip to the next item and answer nothing', async () => {
@@ -419,6 +488,7 @@ describe('Not needed', () => {
 
   test('is not offered where the item cannot be answered here', async () => {
     await draw(richItem, { settled: <p data-settled="">Snoozed</p> });
+    await openMenu();
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
     expect(one('.fy-card [data-settled]').textContent).toBe('Snoozed');
   });
@@ -433,19 +503,51 @@ describe('the version picker', () => {
       ],
     } as Partial<AgendaItem>);
     await draw(edited);
-    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    expect(root().querySelector('.fy-card [data-agenda-version-picker]')).toBeNull();
+    const picker = must(
+      (await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-slot] [data-agenda-version-picker]'),
+      'picker',
+    );
     expect([...picker.options].map(option => option.textContent)).toEqual(['v2 of 2 · 3m ago', expect.any(String)]);
     expect(picker.options[1]?.textContent).toMatch(/^v1 of 2/u);
     await interact(() => {
       picker.value = '1';
       picker.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    // Picking closes the menu, and the head says an earlier version is on screen.
+    expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
+    // The picked control went with the menu: focus is back on ⋯, never dropped on the page.
+    expect(document.activeElement).toBe(one('[data-agenda-menu-toggle]'));
+    expect(one('[data-agenda-shown-version]').textContent).toBe('Showing v1');
     expect(one('[data-agenda-situation]').textContent).toContain('Then: one');
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    await openMenu();
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
     await interact(() => one<HTMLButtonElement>('[data-agenda-latest]').click());
     expect(one('[data-agenda-situation]').textContent).toContain('Now: two engines');
     expect(root().querySelector('[data-agenda-quick-replies]')).not.toBeNull();
+  });
+
+  test('counts edits, not versions, beside the Changes control, so the two numberings never both say "v"', async () => {
+    const edited = agendaItem('A47', {
+      premise: '- Now: two engines',
+      revisions: [
+        { at: '2026-08-01T11:57:00.000Z', by: 'agent', changed: ['premise'], previous: { premise: '- Then: one' } },
+      ],
+    } as Partial<AgendaItem>);
+    await draw(edited, {
+      versions: {
+        list: { sessionId: 's', id: 'A47', latest: 2, versions: [] } as never,
+        load: async () => edited,
+      },
+    });
+    const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
+    expect(picker.getAttribute('aria-label')).toBe('Edit');
+    expect(
+      must(root().querySelector('[data-agenda-version-slot] [data-agenda-diff-toggle]'), 'Changes').textContent,
+    ).toBe('Changes');
+    expect(picker.options[0]?.textContent).toMatch(/^Edit 2 of 2/u);
+    expect(picker.options[1]?.textContent).toMatch(/^Edit 1 of 2/u);
   });
 
   test('is not drawn for an item never edited', async () => {
@@ -460,7 +562,7 @@ describe('the sections the ferret added', () => {
     expect(root().querySelectorAll('.fy-card__section')).toHaveLength(0);
   });
 
-  test('draws what else the item carries, open — decided, still open, impact, links — each under its own name', async () => {
+  test('draws what else the item carries, open, each in its part — decided and still open where we are, the rest in what it needs, links in the table', async () => {
     await draw(
       agendaItem('A7', {
         ask: { kind: 'permission' },
@@ -473,16 +575,14 @@ describe('the sections the ferret added', () => {
       } as Partial<AgendaItem>),
     );
     const titles = [...root().querySelectorAll('.fy-card__section > h4')].map(title => title.textContent);
-    expect(titles).toEqual([
-      'Why I recommend Allow it for a week',
-      'Decided so far',
-      'Still open',
-      'What it allows',
-      'Links',
-    ]);
+    // Decided and still open sit at the top of the main tab, after what it needs (&F923).
+    expect(titles).toEqual(['Why I recommend Allow it for a week', 'What it allows', 'Decided so far', 'Still open']);
+    expect(one('[data-agenda-part="tabs"] [data-agenda-section="decided"]')).toBeDefined();
+    expect(one('[data-agenda-part="needs"] [data-agenda-section="impact"]')).toBeDefined();
     expect(one('[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
     expect(one('[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe('Allow it for a week');
-    expect(one<HTMLAnchorElement>('[data-agenda-section="links"] a').href).toBe('https://example.test/pr/1');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-fold="references"]').click());
+    expect(one<HTMLAnchorElement>('[data-agenda-references] a').href).toBe('https://example.test/pr/1');
   });
 
   test('leads a to-do with its steps, tickable', async () => {
@@ -494,15 +594,16 @@ describe('the sections the ferret added', () => {
     expect(spy.progress).toEqual([[1, true]]);
   });
 
-  test('draws a review’s body as its Reasoning and any other body as More detail, both open', async () => {
+  test('draws a review’s body as its Reasoning and any other body as The full picture, both open', async () => {
     await draw(
       agendaItem('A5', { kind: 'review', ask: { kind: 'answer-review' }, body: 'Because.' } as Partial<AgendaItem>),
     );
-    expect(one('[data-agenda-section="reasoning"] h4').textContent).toBe('Reasoning');
+    expect(one('[data-agenda-part="tabs"] > h4').textContent).toBe('Reasoning');
+    expect(one('[data-agenda-part="tabs"] [data-agenda-section="reasoning"]').textContent).toBe('Because.');
     await view?.unmount();
     view = null;
     await draw(agendaItem('A6', { ask: choices('Yes', 'No'), body: 'More.' } as Partial<AgendaItem>));
-    expect(one('[data-agenda-section="more"] h4').textContent).toBe('More detail');
+    expect(one('[data-agenda-part="tabs"] > h4').textContent).toBe('The full picture');
     expect(root().querySelector('details')).toBeNull();
   });
 });
@@ -521,10 +622,19 @@ describe('terms', () => {
     expect(root().querySelector('[data-agenda-term-tip]')).toBeNull();
   });
 
-  test('are listed in an open Terms section', async () => {
-    await draw(richItem);
-    const terms = one('[data-agenda-section="terms"]');
-    expect([...terms.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
+  test('are listed in the Terms and references table — folded, with how many it holds — each with its meaning', async () => {
+    await draw(richItem, { itemKey: 'view-test:terms-table' });
+    const toggle = one<HTMLButtonElement>('[data-agenda-fold="references"]');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toBe('Terms and references2 entries');
+    expect(root().querySelector('table[data-agenda-references]')).toBeNull();
+    await interact(() => toggle.click());
+    const table = one('[data-agenda-part="references"] table[data-agenda-references]');
+    expect([...table.querySelectorAll('tbody th')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
+    expect([...table.querySelectorAll('tbody td')].map(cell => cell.textContent)).toEqual([
+      'write-ahead log',
+      'safe commits',
+    ]);
   });
 });
 
@@ -540,6 +650,83 @@ describe('an input request', () => {
     expect(one('.fy-card [data-agenda-input-form] [data-fake-input]')).toBeDefined();
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
+  });
+
+  // #B147: the card showed the ferret's prompt three times and "Type the value below." over a form that says it.
+  test('says the ferret’s prompt once, in the form, and draws no ask segment over it', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      subject: 'Type it into the terminal',
+      why: 'Type it into the terminal',
+      context: 'This follows !A7 in the same login.\nThe agent says: [sudo] password for kirin:',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(one('[data-agenda-section="context"]').textContent).toContain('This follows !A7 in the same login.');
+    expect(one('[data-agenda-section="context"]').textContent).not.toContain('The agent says');
+    expect(root().querySelector('[data-agenda-need]')).toBeNull();
+  });
+
+  test('draws no context at all when it held only the ferret’s prompt', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: [sudo] password for kirin:',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
+  });
+
+  test('keeps the prompt and the ask when the form it was given is not drawn: a settled item', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: why the deploy password is wanted',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" />, settled: <p data-settled="">Delivered.</p> });
+    expect(root().querySelector('[data-fake-input]')).toBeNull();
+    expect(one('[data-agenda-section="context"]').textContent).toContain('why the deploy password is wanted');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+  });
+
+  test('keeps each version’s prompt and the ask when an older version is selected, form given', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: the new prompt',
+      revisions: [
+        {
+          at: '2026-08-01T11:57:00.000Z',
+          by: 'daemon',
+          changed: ['context'],
+          previous: { context: 'The agent says: the first prompt' },
+        },
+      ],
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
+    const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
+    await interact(() => {
+      picker.value = '1';
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(root().querySelector('[data-fake-input]')).toBeNull();
+    expect(one('[data-agenda-section="context"]').textContent).toContain('the first prompt');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-latest]').click());
+    expect(one('[data-fake-input]')).toBeDefined();
+    expect(root().querySelector('[data-agenda-need]')).toBeNull();
+  });
+
+  test('without its form (an app that cannot draw it) keeps the context and the ask as they were', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: [sudo] password for kirin:',
+    } as Partial<AgendaItem>);
+    await draw(input);
+    expect(one('[data-agenda-section="context"]').textContent).toContain('The agent says');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
   });
 });
 
@@ -579,6 +766,22 @@ describe('the keys', () => {
       'Postgres',
       'SQLite',
     ]);
+  });
+
+  test('Yes and No are ← No · → Yes on the row and the keys, whichever order the ferret listed them in', async () => {
+    for (const listed of [choices('Yes', 'No'), choices('No', 'Yes')]) {
+      const spy = await draw(agendaItem('A70', { title: 'Restart tonight', kind: 'yesno', ask: listed } as never));
+      const row = [...root().querySelectorAll('[data-agenda-option]')];
+      expect(row.map(button => button.getAttribute('data-agenda-option'))).toEqual(['No', 'Yes']);
+      await press('ArrowLeft');
+      await press('ArrowRight');
+      expect(spy.acted.map(action => (action as { response?: { choice?: string } }).response?.choice)).toEqual([
+        'No',
+        'Yes',
+      ]);
+      await view?.unmount();
+      view = null;
+    }
   });
 
   test('do nothing while the item is busy, with a modifier, or for a key it does not own', async () => {
@@ -651,16 +854,15 @@ describe('What I need from you', () => {
     ],
   } as Partial<AgendaItem>);
 
-  test('sits directly under the premise and context, before every optional section', async () => {
-    await draw(richItem);
-    const card = one('.fy-card');
-    const order = [...card.querySelectorAll('[data-agenda-situation], [data-agenda-need], [data-agenda-section]')]
-      .map(
-        each =>
-          each.getAttribute('data-agenda-section') ?? (each.hasAttribute('data-agenda-need') ? 'need' : 'situation'),
-      )
-      .filter(name => name !== 'premise' && name !== 'context');
-    expect(order.slice(0, 2)).toEqual(['situation', 'need']);
+  test('is the fifth part: after the references, before the tabs, the conversation and the activity log', async () => {
+    await draw(agendaItem('A47', { ...richItem, body: 'A report.' } as Partial<AgendaItem>), {}, [
+      { kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47' },
+    ]);
+    const parts = [...one('.fy-card').querySelectorAll('[data-agenda-part]')].map(each =>
+      each.getAttribute('data-agenda-part'),
+    );
+    expect(parts).toEqual(['head', 'premise', 'references', 'needs', 'tabs', 'conversation', 'activity']);
+    expect(one('[data-agenda-part="needs"] [data-agenda-need]')).toBeDefined();
     expect(need().querySelector('h4')?.textContent).toBe('What I need from you');
   });
 
@@ -694,7 +896,7 @@ describe('What I need from you', () => {
     expect(wanted[0]).toContain('Monday / Friday');
     expect(wanted[0]).toContain('Suggested: Monday');
     expect(wanted[2]).toContain('Your work email?');
-    expect(lead()).toBe('Reply with your answers below, numbered.');
+    expect(lead()).toBe('Reply with your answers below, numbered. Skip any you like.');
     expect(root().querySelector('[data-agenda-pick], [data-agenda-send-answers], [data-agenda-option]')).toBeNull();
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
     await pressKey(one('.fy-item-view'), 'ArrowRight');
@@ -963,13 +1165,15 @@ describe('a question the owner replied to', () => {
     parked: { reason: 'replied', at: '2026-08-01T11:50:00.000Z' },
   } as unknown as Partial<AgendaItem>);
 
-  test('shows the ferret’s answer above its own options, which stay live, with no Got it', async () => {
+  test('says the ferret answered above its own options, which stay live; the answer opens the main tab (&F923)', async () => {
     const spy = await draw(asked, { parkedNote: <p data-parked-note="">Replied — waiting on Zoe</p> });
     const answer = one('.fy-card [data-agenda-question-answer]');
     expect(answer.textContent).toContain('Answer to your question');
     expect(answer.textContent).toContain('WAL is the write-ahead log');
+    expect(answer.closest('[data-agenda-part]')?.getAttribute('data-agenda-part')).toBe('tabs');
+    const line = one('[data-agenda-answered-line]');
     const need = one('[data-agenda-need]');
-    expect(answer.compareDocumentPosition(need) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.compareDocumentPosition(need) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(one('[data-parked-note]').textContent).toBe('Replied — waiting on Zoe');
     const buttons = [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-quick-replies] button')];
     expect(buttons.map(button => button.textContent)).toEqual(
@@ -1024,7 +1228,8 @@ describe('a form card', () => {
     expect(radios.map(radio => radio.value)).toEqual(['EU', 'US']);
     expect(radios.map(radio => radio.checked)).toEqual([true, false]);
     expect(root().querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
-    expect(root().querySelectorAll('[data-agenda-form-yesno] button')).toHaveLength(2);
+    const yesNo = [...root().querySelectorAll('[data-agenda-form-yesno] button')];
+    expect(yesNo.map(button => button.textContent?.trim())).toEqual(['No', 'Yes']);
     expect(one('[data-agenda-form-text]').textContent).toBe('Type it below.');
     expect(root().textContent).toContain('data stays in Europe');
     expect(root().textContent).toContain('Recommended');
@@ -1039,7 +1244,9 @@ describe('a form card', () => {
   test('has no answer buttons to swipe, but Not needed is still there', async () => {
     await draw(form, { formKey: 'view-test' });
     expect(root().querySelector('[data-agenda-quick-replies] button')).toBeNull();
-    expect(one('[data-agenda-dismiss]').textContent).toContain('Not needed');
+    expect(must((await openMenu()).querySelector('[data-agenda-dismiss]'), 'Not needed').textContent).toBe(
+      'Not needed',
+    );
   });
 
   test('picking changes the form: a radio replaces, a checkbox adds, Yes/No presses', async () => {
@@ -1053,26 +1260,24 @@ describe('a form card', () => {
     const [page] = [...root().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')] as [HTMLInputElement];
     await interact(() => page.click());
     expect(page.checked).toBe(true);
-    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
-    await interact(() => yes.click());
-    expect(yes.getAttribute('aria-pressed')).toBe('true');
+    const no = yesNoButton('No');
+    await interact(() => no.click());
+    expect(no.getAttribute('aria-pressed')).toBe('true');
   });
 
-  test('the picked row is filled, apart from the Recommended tag, and a required field with no pick says so', async () => {
+  test('the picked row is filled, apart from the Recommended tag, and no field says it needs an answer (&F922)', async () => {
     await draw(form, { formKey: 'view-test-state' });
     const rows = [...root().querySelectorAll<HTMLLabelElement>('label.fy-form__option')];
     expect(rows.map(row => row.hasAttribute('data-on'))).toEqual([true, false, false, false]);
-    const needed = [...root().querySelectorAll('[data-agenda-form-needed]')].map(node =>
-      node.closest('[data-agenda-form-field]')?.getAttribute('data-agenda-form-field'),
-    );
-    expect(needed).toEqual(['2', '3']);
+    // Every field is optional: nothing is flagged, and no field says "optional" either.
+    expect(root().querySelector('[data-agenda-form-needed]')).toBeNull();
+    expect(root().textContent).not.toContain('optional');
     const us = must(rows[1]?.querySelector('input'), 'US');
     await interact(() => us.click());
     expect(rows.map(row => row.hasAttribute('data-on'))).toEqual([false, true, false, false]);
-    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
-    await interact(() => yes.click());
-    expect(yes.querySelector('.fy-form__seg-check')).not.toBeNull();
-    expect(root().querySelectorAll('[data-agenda-form-needed]')).toHaveLength(1);
+    const no = yesNoButton('No');
+    await interact(() => no.click());
+    expect(no.querySelector('.fy-form__seg-check')).not.toBeNull();
   });
 
   test('a foot counts what is answered on the card and says how to send, in place of the box’s own line', async () => {
@@ -1082,10 +1287,26 @@ describe('a form card', () => {
     expect(root().querySelectorAll('[data-agenda-need-lead]')).toHaveLength(1);
     const checks = [...root().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     await interact(() => checks[0]?.click());
-    const yes = must(root().querySelector<HTMLButtonElement>('[data-agenda-form-yesno] button'), 'yes');
-    await interact(() => yes.click());
+    const no = yesNoButton('No');
+    await interact(() => no.click());
     expect(one('[data-agenda-form-progress]').textContent).toBe('All 3 answered');
     expect(one('[data-agenda-form-foot]').hasAttribute('data-done')).toBe(true);
+  });
+
+  test('a recommended pick can be taken back: Clear on a pick-one, the pressed Yes/No half again (&F922)', async () => {
+    await draw(form, { formKey: 'view-test-clear' });
+    expect(one('[data-agenda-form-progress]').textContent).toBe('1 of 3 answered');
+    const clear = one<HTMLButtonElement>('[data-agenda-form-clear]');
+    expect(clear.getAttribute('aria-label')).toBe('Clear answer 1');
+    await interact(() => clear.click());
+    const radios = [...root().querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map(radio => radio.checked)).toEqual([false, false]);
+    expect(root().querySelector('[data-agenda-form-clear]')).toBeNull();
+    expect(one('[data-agenda-form-progress]').textContent).toBe('0 of 3 answered');
+    await interact(() => yesNoButton('Yes').click());
+    expect(yesNoButton('Yes').getAttribute('aria-pressed')).toBe('true');
+    await interact(() => yesNoButton('Yes').click());
+    expect(yesNoButton('Yes').getAttribute('aria-pressed')).toBe('false');
   });
 
   test('without a form key it only reads: no controls, and it says where to answer', async () => {
@@ -1095,24 +1316,49 @@ describe('a form card', () => {
     expect(root().querySelector('[data-agenda-form-options]')).not.toBeNull();
     expect(root().textContent).toContain('Open this in the Inbox');
     expect(root().querySelector('[data-agenda-form-foot]')).toBeNull();
-    expect(root().querySelector('[data-agenda-form-needed]')).toBeNull();
   });
 });
 
-describe('which titles wrap', () => {
-  test('an ordinary item keeps its title on ONE line (it scrolls); only a gate or machine item folds', async () => {
-    await draw(
-      agendaItem('A60', { title: 'Three answers for the board’s catalog, one per catalog the skills come from' }),
-    );
-    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(false);
+describe('the title in the head', () => {
+  const LONG = 'Should the badge count snoozed items, and should a blocker that wakes one count it again right away?';
+  const proto = HTMLElement.prototype;
+  test('is ONE line on every item — never wrapped, never drawn a second time in the body', async () => {
+    await draw(agendaItem('A60', { title: LONG }));
+    const title = one('[data-agenda-title]');
+    expect(title.hasAttribute('data-wrap')).toBe(false);
+    expect(title.textContent).toBe(LONG);
+    expect(root().querySelector('[data-agenda-full-title]')).toBeNull();
   });
 
-  test('a wrapping title clamps to two lines and breaks at words', () => {
+  test('scrolls as a marquee when the browser says it overflows its one line', async () => {
+    const rect = (width: number): DOMRect => ({ width, height: 20 }) as DOMRect;
+    const realRect = proto.getBoundingClientRect;
+    const realWidth = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+    proto.getBoundingClientRect = function (this: HTMLElement) {
+      return rect(this.classList.contains('fy-item-view__title-text') ? 900 : 0);
+    };
+    Object.defineProperty(proto, 'clientWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-agenda-title') ? 200 : 0;
+      },
+    });
+    try {
+      await draw(agendaItem('A61', { title: LONG }));
+      expect(one('[data-agenda-title]').hasAttribute('data-marquee')).toBe(true);
+    } finally {
+      proto.getBoundingClientRect = realRect;
+      if (realWidth === undefined) Reflect.deleteProperty(proto, 'clientWidth');
+      else Object.defineProperty(proto, 'clientWidth', realWidth);
+    }
+  });
+
+  test('the rule keeps the head title on one line: nowrap, never a line clamp', () => {
     const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
-    const rule = css.slice(css.indexOf('.fy-item-view__title[data-wrap] {'));
+    const rule = css.slice(css.indexOf('.fy-item-view__title {'));
     const body = rule.slice(0, rule.indexOf('}'));
-    expect(body).toContain('-webkit-line-clamp: 2');
-    expect(body).toContain('white-space: normal');
-    expect(body).not.toContain('word-break: break-all');
+    expect(body).toContain('white-space: nowrap');
+    expect(css).not.toContain('.fy-item-view__title[data-wrap]');
+    expect(css).not.toContain('line-clamp: 2');
   });
 });

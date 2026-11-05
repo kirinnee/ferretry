@@ -59,19 +59,19 @@ import {
   type AnalyticsPricingRate,
   type AskToStopJobsResult,
   type AutoResumeSummary,
+  type BoardTaskStartResponse,
   CatalogMemberKeyIdSchema,
-  checkCompactAt,
-  type CompactAt,
   CONFIG_ACCEPTED_FILE,
+  type CompactAt,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
+  checkCompactAt,
   commandLabel,
   configFilePath,
-  type BoardTaskStartResponse,
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
+  type DuplicateAsk,
   daemonFeatureList,
-  terminalRulesOffered,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -82,6 +82,8 @@ import {
   ioPressureView,
   type LearningConfig,
   localOnlyNotice,
+  MACHINE_AGENDA_ID,
+  MAX_WORK_RELATED_TEXT_LENGTH,
   type MigrationConversation,
   mcpOAuthSecretNames,
   PACK_CLEAN_UP_LABEL,
@@ -110,9 +112,8 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
+  terminalRulesOffered,
   type WardenGuardConfig,
-  type DuplicateAsk,
-  MACHINE_AGENDA_ID,
 } from '@ferretry/protocol';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
@@ -129,13 +130,12 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
-import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
-import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
-import { OrphanList } from '../src/lib/warden/orphan-list.ts';
-import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
+import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
+import { SessionOwnerChat, typedWords } from '../src/adapters/agenda/session-owner-chat.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
+import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
+import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
 import {
   LedgerAgendaReceipts,
@@ -151,7 +151,9 @@ import {
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
+import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
+import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
 import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
@@ -169,10 +171,11 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
-import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.ts';
+import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
+import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -261,6 +264,7 @@ import {
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
+  ConfiguredLinkStoreLocator,
   DaemonBinder,
   DaemonHealthProbe,
   DaemonSecretsLoader,
@@ -275,17 +279,14 @@ import {
   FileCatalogBlobStore,
   FileCatalogDocumentStore,
   FileCatalogMembersStore,
-  FileLinkDocumentStore,
-  FileLinkKeyVault,
-  HttpLinkStoreClient,
-  ConfiguredLinkStoreLocator,
-  type LinkStoreSetting,
   FileCatalogSharesStore,
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
   FileLaneSetStore,
   FileLegacyWireUseStore,
+  FileLinkDocumentStore,
+  FileLinkKeyVault,
   FileLoginIndexStore,
   FileLoopbackMarkerReader,
   FileModelCatalogCache,
@@ -312,12 +313,14 @@ import {
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
+  HttpLinkStoreClient,
   HttpUsageSource,
   hostCgroupFacts,
   InlineIndexFile,
   JournalGrantAudit,
   JscStackSampler,
   KeyedSerialExecutor,
+  type LinkStoreSetting,
   LOGIN_SECRETS_DOCUMENT,
   LoadSafeWorker,
   ManifestAccountInventory,
@@ -483,6 +486,7 @@ import {
   WorkerObserverHost,
   WorkerSupervisor,
 } from '../src/adapters/session/observer/index.ts';
+import { mostRecentLiveSession } from '../src/adapters/session/owner-session.ts';
 import {
   HarnessProcessProvenance,
   processTreeFor,
@@ -514,6 +518,7 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import {
+  FileOutboxTail,
   FileSendChannel,
   FileSendLedger,
   FileSendReproofMarker,
@@ -523,7 +528,6 @@ import {
   TimerSendScheduler,
   TmuxSendTerminal,
 } from '../src/adapters/session/send/index.ts';
-import { mostRecentLiveSession } from '../src/adapters/session/owner-session.ts';
 import { sessionAddressCandidates } from '../src/adapters/session/session-address-candidates.ts';
 import {
   FileSignalArtifacts,
@@ -544,7 +548,6 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
-import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
 import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -557,8 +560,8 @@ import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader
 import {
   ManagedTerminalService,
   RedactingTerminalStreamService,
-  StorageTerminalOwnerDirectory,
   runProgram,
+  StorageTerminalOwnerDirectory,
   systemLoginShell,
   TerminalRuntimeError,
   TerminalServiceError,
@@ -616,44 +619,49 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
-import { type AgendaMutation, isAgendaSessionId } from '../src/lib/agenda/index.ts';
+import { type AgendaMutation, closestAgenda, isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
-import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
-  ThreadGateObserver,
+  AlertSurface,
+  alertFallback,
   BOARD_SWEEP_INTERVAL_MS,
+  BoardAlerts,
   BoardGateCheck,
   BoardService,
   BoardSweep,
-  alertFallback,
-  noticeRecipient,
+  type BoardThreads,
   BoardTurnCheck,
+  CardStartRefused,
   type CardWriteObserver,
   DoneDeliveryLadder,
   DuplicateSweep,
   GateItems,
   LivenessActivityDeriver,
+  noticeRecipient,
   type OwnerWords,
-  type BoardThreads,
+  ownerDelegation,
   ReopenDeliveryLadder,
   rungsOf,
-  stageGateLanes,
   SessionCards,
   type SessionLivenessSource,
-  CardStartRefused,
-  ownerDelegation,
+  stageGateLanes,
   startOnCard,
+  ThreadGateObserver,
   walkLadder,
 } from '../src/lib/board/index.ts';
-import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
-import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
+import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
+import { StuckInboxList } from '../src/lib/warden/inbox-stuck-list.ts';
+import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
+import { OrphanList } from '../src/lib/warden/orphan-list.ts';
+import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
+import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
 /** How many owner-start keys the daemon remembers (see `cardStartResults`). */
@@ -691,8 +699,8 @@ import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts'
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
-import { TidyService } from '../src/lib/tidy/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
+import { TidyService } from '../src/lib/tidy/index.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -707,8 +715,8 @@ interface AutoResumeBoot {
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
 import { FileCatalogInstallPrefsStore } from '../src/adapters/catalog-installs/prefs-file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
-import { FileLocalSkillInstallStore } from '../src/adapters/local-skill-installs/file-store.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
+import { FileLocalSkillInstallStore } from '../src/adapters/local-skill-installs/file-store.ts';
 import {
   countedFileOperations,
   instrumentChildProcesses,
@@ -716,7 +724,6 @@ import {
 } from '../src/adapters/runtime/performance-instruments.ts';
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
-import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -739,22 +746,21 @@ import {
   ActivityLedger,
   type AgendaActor,
   AgendaAgentClearer,
-  AgendaRollup,
+  AgendaAlertClearer,
   AgendaBoardUndelivered,
   AgendaBuzz,
   AgendaChangeFanout,
   AgendaConversation,
   AgendaDraftSessions,
+  AgendaHomes,
+  AgendaItemDraftDiscard,
   AgendaReplyBatcher,
   AgendaReplyDelivery,
   AgendaResurfacer,
-  AgendaHomes,
-  AgendaItemDraftDiscard,
+  AgendaRollup,
   AgendaService,
-  migrateToAgendaHomes,
-  foldNoticesIntoMachineAgenda,
-  MachineAgenda,
   AgendaTurnNudge,
+  AgendaRestNudger,
   AgendaWaker,
   type AgentCopyPagesPort,
   type AgentCopyPort,
@@ -764,6 +770,8 @@ import {
   type AgentJobControl,
   AgentJobStopper,
   type AgentPhoneApprovalPort,
+  AgentPinService,
+  AgentPinSubsystem,
   type AgentPlanPort,
   AgentSendFailureNotifier,
   AgentToolService,
@@ -793,6 +801,7 @@ import {
   type AuditSink,
   AutoResumeService,
   adoptAgendaDefault,
+  adoptedLaunchArgv,
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
   agendaBlockNotice,
@@ -847,6 +856,7 @@ import {
   type ConversionSummary as ConvertedConversationSummary,
   type CopyPageHost,
   CredentialAgentIdentities,
+  CredentialDigestLocations,
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
@@ -869,9 +879,7 @@ import {
   createSessionDirectory,
   createSessionPaths,
   createWardenPaths,
-  adoptedLaunchArgv,
   currentLaunchCompactAt,
-  launchedCompactAt,
   currentLaunchEffort,
   currentLaunchModel,
   type DaemonConfig,
@@ -892,6 +900,7 @@ import {
   decodeInitialAttachments,
   defaultAutoResumeSettings,
   defaultManagedWorktreeRoot,
+  defaultQueueDeliverySettings,
   defaultSendTrackerSettings,
   defaultSessionLifecycleSettings,
   defaultSessionMonitorSettings,
@@ -929,7 +938,6 @@ import {
   FleetReading,
   FleetRefreshService,
   FleetSecretReferences,
-  PublishedFleetInventory,
   FleetWardenAgents,
   ForeignHistoryImporter,
   type FoundationPaths,
@@ -938,6 +946,7 @@ import {
   firewallRefusal,
   firstWriteReleasedAnswerAgenda,
   fleetManifestRefusal,
+  foldNoticesIntoMachineAgenda,
   foreignAdvertisementNotice,
   HANDOVER_RESCAN_INTERVAL_MS,
   HARNESS_PICKER_COMMAND,
@@ -973,6 +982,7 @@ import {
   InputAgentNotifierAdapter,
   InputAuditAdapter,
   InputCardClosedObserver,
+  type InputClosestAgenda,
   InputLoginAdapter,
   InputLoginProbe,
   type InputPasteRules,
@@ -1016,11 +1026,14 @@ import {
   LoopbackFirewallWatch,
   type LoopWatchdogPort,
   lateSeedCards,
+  launchedCompactAt,
   launchGuardActive,
   launchReasoningEffort,
   limitedCredentials,
+  linkUsageOf,
   locateHarnessCommand,
   lookBeforeReading,
+  MachineAgenda,
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
@@ -1034,7 +1047,6 @@ import {
   MemberGateway,
   MemberJoinGate,
   MemberJoinProver,
-  renameNotice,
   MemberPasskeyService,
   MigrationPreflight,
   type MigrationReportStore,
@@ -1046,6 +1058,7 @@ import {
   mcpInventoryFolders,
   messageWithAttachments,
   migrateAgendaFiles,
+  migrateToAgendaHomes,
   migrateToAgendaMode,
   modelCatalogPricingRates,
   modelCatalogsView,
@@ -1102,6 +1115,7 @@ import {
   ProviderQuotaService,
   PublishedCarrierSet,
   type PublishedCarrierView,
+  PublishedFleetInventory,
   PublishedModelCatalogService,
   PushNewDeviceAlert,
   PushService,
@@ -1170,6 +1184,7 @@ import {
   relayCarriersNeedDiscovery,
   releasedAnswerAgendaOwnedBy,
   releasingAttachmentsOnStop,
+  renameNotice,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
@@ -1206,9 +1221,7 @@ import {
   SendUnconfirmed,
   type SerialExecutor,
   SessionAgendaModeService,
-  SessionCompactAtService,
   type SessionAgendaModeSubsystem,
-  type SessionCompactAtSubsystem,
   SessionAgendaProjection,
   type SessionAncestor,
   SessionAnswerError,
@@ -1216,6 +1229,8 @@ import {
   SessionAttachmentStore,
   SessionAttachService,
   SessionBoardResolver,
+  SessionCompactAtService,
+  type SessionCompactAtSubsystem,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -1308,6 +1323,7 @@ import {
   searchTranscriptRecords,
   secretsMatch,
   selectBrowserWorker,
+  sendRecordFor,
   sendRecordView,
   sessionHealthSettingsAt,
   sessionNameClaim,
@@ -1382,12 +1398,13 @@ import {
   type WardenBoardPort,
   WardenCallsignTakenError,
   type WardenExchangeReader,
-  type WardenStuckInputPort,
   type WardenFleetSession,
   type WardenJournal,
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
+  type WardenStuckInboxPort,
+  type WardenStuckInputPort,
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
@@ -1404,8 +1421,6 @@ import {
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
-  AgentPinService,
-  AgentPinSubsystem,
   withContext,
   withLivenessLedger,
   withOutdated,
@@ -1413,6 +1428,7 @@ import {
   withRevive,
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
+import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
 import {
   admitChild,
   CleanUpService,
@@ -1453,7 +1469,7 @@ import {
 import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
-import { SessionPackService } from '../src/lib/session/pack/index.ts';
+import { SessionPackService, SubtreeService } from '../src/lib/session/pack/index.ts';
 import { cutOffResume, resumeUnderCutOff } from '../src/lib/session/resume/cut-off.ts';
 import {
   restoreRestamped,
@@ -2300,7 +2316,13 @@ function createBoardWorld(
     attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
     activity: new LivenessActivityDeriver({ sessions, clock }),
-    agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
+    // A card's ask goes on its ferret's agenda home: the homes are read too, so a sub-ferret's card finds its agenda.
+    agenda: new AgendaCardLinks(
+      { open: agendaItems },
+      machineId,
+      diagnostics,
+      new AgendaHomes(new StorageHomeSessions(storage), undefined, boardDiagnostics),
+    ),
     changes: new JournalBoardChanges(storage),
     clock,
     diagnostics: boardDiagnostics,
@@ -2710,7 +2732,7 @@ function createSessionControlSubsystem(
    * The board card a start with a prompt gets (board-design.md §3.1), written after the record and before
    * the launch. Total: a board failure is said on stderr and never fails the start.
    */
-  cards: Pick<SessionCards, 'open'>,
+  cards: Pick<SessionCards, 'open' | 'startOn' | 'takeOver'>,
   /** The daemon's own directories: a start a session made is refused a folder inside them (`refuseStateHomeStart`). */
   stateHomes: StateHomeReach,
 ): SessionControlSubsystem {
@@ -2794,6 +2816,23 @@ function createSessionControlSubsystem(
         },
         await spawnAncestry(storage, sessions),
       );
+      // `fy start --card`: the existing card the new session takes over, judged BEFORE anything is claimed or written so a
+      // refusal leaves no session behind: the card must exist, be open work and be the caller's to hand down, and the
+      // session must be an ordinary ferret. A `fy new`'s delegation (already decided) takes precedence.
+      let startDelegation = delegation;
+      const explicitCard = delegation === undefined ? request.card : undefined;
+      if (explicitCard !== undefined) {
+        if (request.prompt === undefined)
+          throw new SessionControlError('invalid', '--card needs a prompt: the card is the work that prompt describes');
+        const handed = await cards.startOn(
+          request.parent,
+          explicitCard,
+          ordinaryFerret(stamped.label, stamped.provenance.wardenLineage),
+        );
+        if (handed.delegation === undefined)
+          throw new SessionControlError('card_refused', handed.refusal ?? `card ${explicitCard} cannot be handed over`);
+        startDelegation = handed.delegation;
+      }
       // PACK MODE'S LIMITS, before anything is claimed or written: a parent already running as many
       // sub-ferrets as it may, or one too deep to start its own, is refused here whichever command
       // asked (docs/pack-mode.md). A warden's own spawns are the Warden's to bound, not this.
@@ -3011,13 +3050,20 @@ function createSessionControlSubsystem(
         // THE CARD, after the record and before the launch (board-design.md §3.1): the agent's first turn
         // already has its focus card, and a start refused before here leaves none. A miner, a guide builder
         // or a warden is not work on a board. `open` never rejects: a board failure never fails a start.
-        if (request.prompt !== undefined && ordinaryFerret(stamped.label, stamped.provenance.wardenLineage))
+        // An EXPLICIT `--card` is the opposite: the handover must succeed, or the session is stopped and the start
+        // refused, so nothing launches on a card it was not given.
+        if (explicitCard !== undefined && startDelegation !== undefined) {
+          const taken = await cards.takeOver(startDelegation, id, async reason => {
+            await lifecycle.stop(id, reason);
+          });
+          if (taken.refusal !== undefined) throw new SessionControlError('card_refused', taken.refusal);
+        } else if (request.prompt !== undefined && ordinaryFerret(stamped.label, stamped.provenance.wardenLineage))
           await cards.open({
             sessionId: id,
             name: request.name,
             brief: request.prompt,
             parent: request.parent,
-            delegation,
+            delegation: startDelegation,
           });
         await lifecycle.start(
           id,
@@ -3028,6 +3074,11 @@ function createSessionControlSubsystem(
               },
         );
       } catch (error) {
+        // A refused card is the caller's to read, not a launch failure: the record was stopped with the reason.
+        if (error instanceof SessionControlError) {
+          if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+          throw error;
+        }
         // The record survives a failed launch with the reason in it, so the failure is answered with
         // the session that holds the evidence rather than an error the caller cannot follow up.
         const failed = storage.findSession(id) === undefined ? undefined : await view(id).catch(() => undefined);
@@ -3681,16 +3732,25 @@ function createSessionSendSubsystem(
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
             ...(request.now === true ? { interrupt: true } : {}),
+            ...(person || request.label === undefined ? {} : { label: request.label }),
           })
           .catch((error: unknown) => sendRefusal(error));
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
+        const queued = (await queue.list(id)).find(message => message.id === enqueued.message.id);
         const answer = answerOf(
           (await ledger.list(id)).find(record => record.sendId === enqueued.message.id),
-          (await queue.list(id)).find(message => message.id === enqueued.message.id),
+          queued,
         );
-        if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
+        // Still held to be combined with others: say so, so the sender does not read "queued" as stuck.
+        const held = queued?.state === 'queued' && queued.label !== undefined && queued.holdUntil !== undefined;
+        if (turn.referenced.length > 0) {
+          await conversation.settle(id, turn, typedWords(request.message), {
+            messageId: enqueued.message.id,
+            at: enqueued.message.enqueuedAt,
+          });
+        }
         if (person) await instructions.queueIfStale(id);
         return {
           ...(await view(id, 'took the message')),
@@ -3699,6 +3759,7 @@ function createSessionSendSubsystem(
           fate: answer.fate,
           ...(answer.waitReason === undefined ? {} : { waitReason: answer.waitReason }),
           ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
+          ...(held ? { label: queued.label, heldUntil: queued.holdUntil } : {}),
         };
       }
       const outcome = await service
@@ -3714,7 +3775,12 @@ function createSessionSendSubsystem(
         .catch((error: unknown) => sendRefusal(error));
       // Only once the words were accepted: an item must never close as replied for a message the
       // ferret was not given.
-      if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
+      if (turn.referenced.length > 0) {
+        await conversation.settle(id, turn, typedWords(request.message), {
+          messageId: outcome.record.sendId,
+          at: outcome.record.acceptedAt,
+        });
+      }
       if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),
@@ -3745,9 +3811,9 @@ function createSessionSendSubsystem(
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
       await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
-      const record = (await ledger.list(id)).find(entry => entry.sendId === sendId);
-      if (record === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
-      return sendRecordView(record);
+      const found = sendRecordFor(await ledger.list(id), await queue.list(id), sendId);
+      if (found === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
+      return found;
     },
     retry: async (reference, sendId, force) => {
       const id = require(reference);
@@ -4293,6 +4359,8 @@ const AGENDA_DEADLINE_SWEEP_MS = 5 * 60_000;
 /** How often the member sweep looks for browsers whose passkey window closed or that sat idle. */
 const MEMBER_SWEEP_INTERVAL_MS = 60_000;
 const LINK_RECONCILE_INTERVAL_MS = 60_000;
+/** How often a live public link is kept inside its 30-day lease and a lapsed one is put back. */
+const LINK_REFRESH_INTERVAL_MS = 6 * 60 * 60_000;
 
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
@@ -4537,6 +4605,8 @@ interface WardenParts {
     readonly orphans: OrphanList;
     /** Every ferret stuck on an unsent message of ours (`warden/input-stuck.ts`), as one machine item. */
     readonly stuckInput: StuckInputList;
+    /** Every ferret whose messages wait in Ferretry's queue far past due (`warden/inbox-stuck.ts`), as one machine item. */
+    readonly stuckInbox: StuckInboxList;
     readonly folded: Promise<void>;
   };
   readonly usage: UsageFeedPort;
@@ -4567,6 +4637,8 @@ interface WardenParts {
   readonly exchanges: WardenExchangeReader;
   /** A ferret stuck on an unsent message of ours (`warden/input-stuck.ts`), less the machine notice. */
   readonly stuckInput: Omit<WardenStuckInputPort, 'add' | 'remove'>;
+  /** A ferret whose messages wait in Ferretry's queue far past due (`warden/inbox-stuck.ts`), less the machine notice. */
+  readonly stuckInbox: Omit<WardenStuckInboxPort, 'add' | 'remove'>;
   readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly migrate: SessionMigrateSubsystem & AgentJobControl;
   /** Analytics, for pricing a finished warden from its own transcript. */
@@ -4758,6 +4830,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         ...parts.stuckInput,
         add: async notice => await parts.machine.stuckInput.add(notice),
         remove: async sessionId => await parts.machine.stuckInput.remove(sessionId),
+      },
+      stuckInbox: {
+        ...parts.stuckInbox,
+        add: async notice => await parts.machine.stuckInbox.add(notice),
+        remove: async sessionId => await parts.machine.stuckInbox.remove(sessionId),
       },
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
@@ -6629,6 +6706,8 @@ function createInputRequestService(input: {
   readonly terminals: TerminalRuntimePort;
   readonly tmux: TmuxCommandPort;
   readonly agenda: AgendaService;
+  /** The open agenda an input card belongs with, so it links its topic instead of reading as a fresh one. */
+  readonly closestAgenda?: InputClosestAgenda;
   readonly agentReplies: AgendaReplyBatcher;
   readonly audit: AuditLog;
   readonly values: EphemeralValues;
@@ -6700,7 +6779,7 @@ function createInputRequestService(input: {
       // replaces a value and lists names, never returns one.
       new SecretStoreTarget(input.secretStore),
     ),
-    agenda: new InputAgendaAdapter(input.agenda),
+    agenda: new InputAgendaAdapter(input.agenda, input.closestAgenda),
     notifier: new InputAgentNotifierAdapter(
       async (sessionId, key, message) => await input.agentReplies.add(sessionId, key, message),
     ),
@@ -6804,6 +6883,9 @@ function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
     }),
     capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
     secretsMatch,
+    new CredentialDigestLocations(),
+    // Every config this daemon writes (a rotation or a new session included) moves it; see CredentialAgentIdentities.
+    () => String(storage.configWrites()),
   );
 }
 
@@ -9720,6 +9802,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     webrtcEngine: new NodeDataChannelEngine(),
     probeWorkers: async () => [
+      await probeBundledWorker('agenda-versions'),
       await probeBundledWorker('analytics-fold'),
       await probeBundledWorker('session'),
       await probeBundledWorker('housekeeping'),
@@ -10165,18 +10248,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        */
       const queueSerial = new KeyedSerialExecutor();
       const queueStore = new FileSessionQueueStore(id => createSessionPaths(paths, id).directory);
-      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial });
+      const coalescing = {
+        coalesce: delivery.coalesce,
+        actionWindowMs: delivery.actionWindowMs,
+        fyiMaxHoldMs: delivery.fyiMaxHoldMs,
+        batchMax: delivery.batchMax,
+      };
+      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial }, coalescing);
       const deliveryView = new SendPathDeliveryView(sendRepository, sendTerminal, launchGate);
-      const queueDeliverer = new QueueDeliverer({
-        store: queueStore,
-        serial: queueSerial,
-        clock,
-        scheduler: new TimerSendScheduler(),
-        view: async id => await deliveryView.view(id),
-        transport: new SendPathQueueTransport(sends, sendLedger),
-        sessions: () => storage.listSessions().map(session => session.id),
-        sleep: async milliseconds => await Bun.sleep(milliseconds),
-      });
+      const queueDeliverer = new QueueDeliverer(
+        {
+          store: queueStore,
+          serial: queueSerial,
+          clock,
+          scheduler: new TimerSendScheduler(),
+          view: async id => await deliveryView.view(id),
+          transport: new SendPathQueueTransport(sends, sendLedger),
+          sessions: () => storage.listSessions().map(session => session.id),
+          sleep: async milliseconds => await Bun.sleep(milliseconds),
+        },
+        { ...defaultQueueDeliverySettings, ...coalescing },
+      );
       storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
       /**
        * What every producer inside this daemon sends through: with the queue on, its message is enqueued and
@@ -10288,7 +10380,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // What each click's start came to, by the key the click carried, apart from whether its ferret is still alive: a
       // retry after a lost response gets the same answer even once that ferret has finished. Bounded, oldest first.
       const cardStartResults = new Map<string, BoardTaskStartResponse>();
-      // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
+      // The gate items (docs/board.md § Cards show progress) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
       // The owner's shared drafts are built with the rest of the subsystems, further down; an item that closes
@@ -10344,6 +10436,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // the bind with the other loops, and stopped with the daemon.
       const boardSessionFacts = new StorageSessionFacts(storage);
       const boardSubFerrets = new StorageSubFerretDirectory(storage);
+      // Every board alert — stale, red CI, closed unmerged — passes here, whoever it was routed to: one for the owner's
+      // own interactive chat is journalled on it instead of typed (lib/board/alert-sends.ts).
+      const boardAlertJournal = new JournalBoardChecks(storage);
+      const alertSurface = new AlertSurface({
+        snapshot: async () => await boardWorld.board.snapshot(),
+        note: async (card, text) => {
+          await boardWorld.board.act(card, { action: 'note', text }, { kind: 'daemon' });
+        },
+        machineId: () => attachmentDaemonId,
+      });
+      const boardAlerts = new BoardAlerts({
+        mode: async sessionId => {
+          const id = tryParseSessionId(sessionId);
+          return id === undefined ? undefined : (await sendRepository.read(id))?.mode;
+        },
+        send: async (sessionId, message) => {
+          await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+        },
+        withheld: async (sessionId, message) => await boardAlertJournal.recordWithheldAlert(sessionId, message),
+        surface: async (card, message) => {
+          await alertSurface.surface(card, message).catch((error: unknown) => {
+            boardDiagnostics.warn(`could not surface a withheld alert on ${card}'s board: ${String(error)}`);
+          });
+        },
+      });
       const boardCopies = new GitWorkingCopies();
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
       // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
@@ -10385,7 +10502,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           send: async (card, message, reason) => {
             const recipient = noticeRecipient(await boardSessions.roster(), card);
             const sessionId = recipient?.sessionId ?? (await nudgeTarget(boardSubFerrets, alertFallback(card, reason)));
-            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await boardAlerts.send(sessionId, message, card.id);
           },
         },
         timers: {
@@ -10619,6 +10736,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const notificationLedger = new FileNotificationDeliveryLedger(paths, stateFiles, {
         warn: message => void process.stderr.write(`notifications: ${message}\n`),
       });
+      // Built below, once the boards it reads exist; a push that lands before then has no stale line to look for.
+      const alertClearerBox: { clearer?: AgendaAlertClearer } = {};
+      // One lane per ferret shared by its pushes and its clears, so a clear decided from one board is sent before a
+      // newer push about it is (`agendaAlertLane`).
+      const alertLanes = new KeyedSerialExecutor();
       const notificationHealth = new NotificationHealthMonitor(clock, line => void process.stderr.write(`${line}\n`));
       const notifications = new NotificationService({
         ledger: notificationLedger,
@@ -10637,8 +10759,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         push,
         serial: new KeyedSerialExecutor(),
+        lanes: alertLanes,
         clock,
         diagnostics: notificationHealth,
+        // A push that landed after its item was handled or opened is taken down as soon as it is recorded.
+        landed: sessionId => void alertClearerBox.clearer?.recheck(sessionId),
         // An input card asking for a one-time code is pushed at high priority (pushUrgencyFor).
         subjectOf: (sessionId, item) =>
           item.input === undefined
@@ -10662,10 +10787,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           log: line => process.stderr.write(`${line}\n`),
         },
       );
+      // Every version of an item, and which version each device last opened, beside the board (docs/agenda.md § Versions).
+      const agendaSessionDirectory = (id: string): string => createSessionPaths(paths, parseSessionId(id)).directory;
+      const agendaVersions = new FileAgendaVersionStore(agendaSessionDirectory);
       const agendaBoards = new FileAgendaLedgerRepository(
-        id => createSessionPaths(paths, parseSessionId(id)).directory,
+        agendaSessionDirectory,
         undefined,
         agendaFilesMigrated,
+        undefined,
+        agendaVersions,
       );
       // THE MACHINE AGENDA's ledger: its own directory, apart from every session's, written only by the daemon.
       const machineBoards = new FileAgendaLedgerRepository(
@@ -10673,6 +10803,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // A handled item's alerts come down on every device (docs/notifications.md § When an alert is cleared): answered,
+      // resolved, resting, snoozed or on the ferret's turn, on either board, or opened in the app on another device.
+      const alertClearer = new AgendaAlertClearer({
+        ledger: notificationLedger,
+        boards: {
+          read: async sessionId =>
+            await (sessionId === MACHINE_AGENDA_ID ? machineBoards : agendaBoards).read(sessionId),
+        },
+        push,
+        serial: alertLanes,
+        clock,
+      });
+      alertClearerBox.clearer = alertClearer;
+      // A board that changed while this daemon was down still takes its handled items' alerts down, in the background.
+      void agendaFilesMigrated.then(async () => await alertClearer.sweep()).catch(() => undefined);
       // Every session directory that may hold an agenda, whatever the session index still says about it.
       const agendaSessionIds = async (): Promise<readonly string[]> =>
         (await stateFiles.listDirectory(paths.sessions))
@@ -10755,16 +10900,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               );
             }
           })
+          .then(async () => await laneSets.progressLaneNames())
+          .then(outcomes => {
+            for (const outcome of outcomes) {
+              process.stderr.write(
+                outcome.renamed
+                  ? `board lanes: ${outcome.projectId} lanes now show progress (version ${String(outcome.version)})\n`
+                  : `board lanes: ${outcome.projectId} could not rename its lanes as progress: ${outcome.problem}\n`,
+              );
+            }
+          })
           .then(async () => await unfiledRefiler.run())
           .catch(() => undefined);
       });
       // Every card from before who asked was stored gets it now, from the owner's messages to the session it came
       // from. Idempotent, so every boot runs it; a card it cannot settle is reported and left for the next boot.
+      // Then every card without a visibility stores the one it reads as (public cards are the owner's asks), which
+      // needs who asked settled first, so it runs after, even when the first could not finish.
       unrefTimer(2000, () => {
         void boardWorld.board
           .backfillAskedBy()
           .then(stored => {
             if (stored > 0) process.stderr.write(`board: stored who asked for ${String(stored)} card(s)\n`);
+          })
+          .catch(() => undefined)
+          .then(async () => await boardWorld.board.backfillVisibility())
+          .then(stored => {
+            if (stored > 0) process.stderr.write(`board: stored the visibility of ${String(stored)} card(s)\n`);
           })
           .catch(() => undefined);
       });
@@ -10927,6 +11089,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
+          // An item that no longer needs the owner takes its alerts down on every device.
+          alertClearer,
           // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
           new AgendaItemDraftDiscard({
             discard: async (sessionId, item) => await sharedDraftsHolder.service?.discard(sessionId, item),
@@ -10967,6 +11131,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           resolve: async (...parameters) => await machineAgenda.resolve(...parameters),
           list: async () => await machineAgenda.list(),
         },
+        // `fy agenda log` copies the owner's words from this session's own queue and send ledger.
+        new SessionOwnerChat(sessionQueue, sendLedger),
+        agendaVersions,
+        new FileAgendaSeenStore(agendaSessionDirectory),
       );
       // The machine agenda: the same agenda machinery over its own ledger. Nothing a ferret sends reaches it (no
       // session route names it); the daemon raises through `machineAgenda`, the owner answers over /v1/machine/agenda.
@@ -10975,7 +11143,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         { has: async id => id === MACHINE_AGENDA_ID },
         notifications,
-        { changed: async sessionId => await workSearch.changed(sessionId) },
+        new AgendaChangeFanout([{ changed: async sessionId => await workSearch.changed(sessionId) }, alertClearer]),
       );
       const machineAgenda = new MachineAgenda(
         machineAgendaService,
@@ -11010,6 +11178,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         stuckInput: new StuckInputList(
           new FileMachineMembers(stateFiles, join(paths.state, 'warden-input-stuck.json')),
+          machineAgenda,
+        ),
+        stuckInbox: new StuckInboxList(
+          new FileMachineMembers(stateFiles, join(paths.state, 'warden-inbox-stuck.json')),
           machineAgenda,
         ),
       };
@@ -11070,7 +11242,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
-      // daemon starts get theirs once, in the background (docs/board.md § Gates ask the owner).
+      // daemon starts get theirs once, in the background (docs/board.md § Cards show progress).
       const gateWordsMessenger = new SendReopenMessenger(boardOwnerSends);
       gateItems = new GateItems({
         agenda,
@@ -11288,6 +11460,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         terminals,
         tmux,
         agenda,
+        // An agenda is one channel of the owner's attention: a card that strongly matches an open one links to it.
+        closestAgenda: async (sessionId, card) => {
+          const listed = await agenda.list(sessionId);
+          const title = card.prompt.trim().slice(0, MAX_WORK_RELATED_TEXT_LENGTH);
+          if (!listed.ok || title === '') return undefined;
+          const related = await workSearch.related({
+            kind: 'agenda',
+            title,
+            ask: card.ask.trim().slice(0, MAX_WORK_RELATED_TEXT_LENGTH),
+          });
+          return closestAgenda(related, sessionId, listed.value.items);
+        },
         agentReplies: agendaReplies,
         audit: auditLog,
         values: justTyped,
@@ -11399,13 +11583,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const boardSweep = new BoardSweep({
         board: boardWorld.board,
         sessions: boardSessions,
+        guard: boardSessions,
         memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
         nudges: {
           // A stale nudge was routed by the plan (assignee, else nearest live lead, else owner); a go-ahead still
           // goes to the assignee's lead when the assignee is a sub-ferret.
           send: async (sessionId, message, kind) => {
+            if (kind === 'stale') {
+              await boardAlerts.send(sessionId, message);
+              return;
+            }
             await boardSends.send({
-              id: parseSessionId(kind === 'stale' ? sessionId : await nudgeTarget(boardSubFerrets, sessionId)),
+              id: parseSessionId(await nudgeTarget(boardSubFerrets, sessionId)),
               sendId: crypto.randomUUID(),
               message,
             });
@@ -11578,6 +11767,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       armAgendaNudge(storage, attentionNudge, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
+      // The silence nudge (docs/agenda.md § States): a ferret silent on an item the owner replied to is nudged by the
+      // Warden after 30 minutes, then on a doubling backoff; one message per ferret, under the same switch.
+      new AgendaRestNudger(
+        agendaBoards,
+        agenda,
+        {
+          enabled: async () => agendaNudgeEnabled((await effectiveAccountModel())?.machine ?? { attentionNudge: true }),
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await agendaNudgeSends.send({ id, sendId, message });
+          },
+          record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
+        },
+        () => storage.listSessions().map(session => session.id),
+        new KeyedAgendaReplyTimers(),
+        () => clock.now(),
+        CLIENT_NAME,
+      ).start();
       // The board's turn-end check (board-design.md §3.4): a turn that edited, committed, pushed, started a
       // sub-ferret or opened a PR while the session had no open card gets one nudge an hour. Armed on the same
       // settled turn end as the agenda check, through the same one-check-per-session listener.
@@ -12788,6 +12995,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         agentPins,
       );
+      const subtreeOutbox = new FileOutboxTail(id => createSessionPaths(paths, id).directory);
+      const subtreeService = new SubtreeService({
+        sessions: async () => await sessions.list(),
+        board: async () => await boardWorld.board.snapshot(),
+        lastMessage: async (sessionId, to, maxBytes) => await subtreeOutbox.scan(sessionId, to, maxBytes),
+        redact: async texts => await secretRedactor.batch(scrub => texts.map(text => scrub.text(text))),
+        nowMs: () => Date.parse(clock.now()),
+      });
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -12809,6 +13024,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               view,
               async () => await stateFiles.readText(join(createSessionPaths(paths, id).directory, 'summary.md')),
             );
+          },
+          subtree: async (reference, caller) => {
+            const id = tryParseSessionId(reference);
+            return id === undefined ? undefined : await subtreeService.view(id, caller);
           },
           setSwitch: createSessionPackSwitch(
             storage,
@@ -12917,6 +13136,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         pairing,
         push,
+        pushAlerts: alertClearer,
         stepUp,
         security,
         carriers,
@@ -13518,7 +13738,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
           sends: producerSends('Warden'),
-          exchanges: { sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)) },
+          exchanges: {
+            sends: async sessionId => {
+              const id = parseSessionId(sessionId);
+              return withBatchMembers(await sendLedger.list(id), await sessionQueue.list(id));
+            },
+          },
           // B144: the send path's own verified Enter, and the health a stuck ferret is marked with.
           stuckInput: {
             sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
@@ -13536,6 +13761,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               if (view?.state.health !== 'stalled') return;
               await sendRepository.transition(id, { event: 'control.input_unstuck', health: 'healthy' });
             },
+          },
+          // B148: the queue and the ledger to read, and the daemon's own safe re-check — the tracker's look a boot
+          // makes, the verified finish of a draft of ours, and one more look by the deliverer.
+          stuckInbox: {
+            queueWrittenAt: async sessionId => {
+              const written = await stat(queueStore.file(parseSessionId(sessionId))).catch((error: unknown) => {
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+                throw error;
+              });
+              return written?.mtimeMs;
+            },
+            queue: async sessionId => await sessionQueue.list(parseSessionId(sessionId)),
+            sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
+            trackerLook: async sessionId => await sendTracker.check(parseSessionId(sessionId)),
+            finishOwnDraft: async sessionId => (await sends.finishOwnDraft(parseSessionId(sessionId))).kind,
+            deliveryLook: async sessionId => await queueDeliverer.look(parseSessionId(sessionId)),
           },
           resume,
           revive: {
@@ -13886,8 +14127,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         (error: unknown) =>
           process.stderr.write(`member sweep failed: ${error instanceof Error ? error.message : String(error)}\n`),
       ).start(MEMBER_SWEEP_INTERVAL_MS);
+      const linkDocuments = new FileLinkDocumentStore(paths, stateFiles);
       const sharedCatalogs = new SharedCatalogService({
         membership: catalogMembers,
+        linkUsage: linkUsageOf(linkDocuments),
         documents: new FileCatalogDocumentStore(paths, stateFiles),
         blobs: new FileCatalogBlobStore(paths, stateFiles),
         skillTree: new NodeSkillFolder(),
@@ -13928,7 +14171,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const linkCrypto = new WebCryptoRelayCrypto();
       const linkStoreClient = new HttpLinkStoreClient(linkCrypto, sharedCatalogIdentity);
       const catalogLinks = new CatalogLinkService({
-        documents: new FileLinkDocumentStore(paths, stateFiles),
+        documents: linkDocuments,
         vault: new FileLinkKeyVault(paths, stateFiles, new FileSecretKey(secretDocuments.keyFile, stateFiles)),
         locator: new ConfiguredLinkStoreLocator(
           () => facts().linkStore(),
@@ -13942,6 +14185,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         now: () => millisecondClock.now(),
         appOrigin: HOSTED_APP_ORIGIN,
         random: () => Math.random(),
+        audit: auditLog,
       });
       // Settles an upload or an end a crash left half done, and retries an end the store could not take.
       new MemberSweepTimer(
@@ -13950,6 +14194,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         (error: unknown) =>
           process.stderr.write(`link reconcile failed: ${error instanceof Error ? error.message : String(error)}\n`),
       ).start(LINK_RECONCILE_INTERVAL_MS);
+      // Keeps each live public link inside its 30-day lease and puts back one the store let lapse: at boot, then every 6 h.
+      new MemberSweepTimer(
+        systemSweepClock,
+        async () => await catalogLinks.refresh(),
+        (error: unknown) =>
+          process.stderr.write(`link refresh failed: ${error instanceof Error ? error.message : String(error)}\n`),
+      ).start(LINK_REFRESH_INTERVAL_MS);
       return {
         ...mounted,
         // Built after the rest because it reads three of them: the session directory, and the project

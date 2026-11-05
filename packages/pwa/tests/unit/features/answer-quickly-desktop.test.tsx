@@ -129,6 +129,20 @@ describe('Answer quickly on a wide screen — the run', () => {
     expect(keys(root)).toBe('← Left ↑ Middle → Right ↓ Skip j k Next, previous Esc Close');
   });
 
+  it('says each answer in its button’s own words: Markdown read as plain words, cut as a row of three cuts it', async () => {
+    const marked = inboxCard(
+      agendaItem('A5', {
+        subject: 'Which fix?',
+        ask: choices('**Ship** it', 'Lock the whole session row', '`Wait`'),
+      }),
+    );
+    const { root } = await open({ cards: [marked] });
+    await start(root);
+    expect(keys(root)).toBe('← Ship it ↑ Lock the whole… → Wait ↓ Skip j k Next, previous Esc Close');
+    const buttons = [...root.querySelectorAll('[data-agenda-option] .fy-qr__label')].map(label => label.textContent);
+    expect(buttons).toEqual(['Ship it', 'Lock the whole…', 'Wait']);
+  });
+
   it('says only → on a card with a single answer', async () => {
     const bare = inboxCard(agendaItem('A1', { subject: 'Have a look', waitingSince: '2026-08-01T07:00:00.000Z' }));
     const { root } = await open({ cards: [bare] });

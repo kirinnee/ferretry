@@ -41,7 +41,7 @@ import {
   type TaskKind,
   TaskKindSchema,
 } from '@ferretry/protocol';
-import { isFerretCard, splitAvailable } from './board-human.ts';
+import { isPrivateCard, splitAvailable } from './board-human.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
 // ---------------------------------------------------------------------------------------------------
@@ -125,7 +125,11 @@ export interface BoardFilters {
   readonly activity: BoardActivityFilter | null;
   /** The cards the owner created or that wait on the owner. */
   readonly mine: boolean;
-  /** "Ferret cards": cards ferrets made for their own work (sub-cards and helper cards). Off, the board is what the owner asked for. */
+  /**
+   * "Show private": the private cards, the ferrets' own bookkeeping (sub-cards and helper cards). Off, the board is
+   * what the owner asked for. The field and URL parameter keep the name `agents` it had as "Ferret cards", so a
+   * saved link still works.
+   */
   readonly agents: boolean;
   /** A lane id, or a lane name in the card's own project (case does not matter). */
   readonly lane: string | null;
@@ -169,8 +173,20 @@ const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange =
   return from === null && to === null ? NO_DATE_RANGE : { preset: null, from, to };
 };
 
-/** The URL parameter "Ferret cards" lives in, on the Board and on a ferret's Tasks tab alike. */
+/** The URL parameter "Show private" lives in, on the Board and on a ferret's Tasks tab alike. */
 export const AGENTS_PARAM = 'agents';
+
+/** What a Board link that says nothing about a filter reads as: this device's own choices. */
+export interface BoardFilterDefaults {
+  /** This device's "Show private". */
+  readonly agents: boolean;
+}
+
+const NO_FILTER_DEFAULTS: BoardFilterDefaults = Object.freeze({ agents: false });
+
+/** `1` shows private cards and `0` hides them, whatever the device chose; anything else is the device's choice. */
+const parseAgents = (value: string | null, fallback: boolean): boolean =>
+  value === '1' ? true : value === '0' ? false : fallback;
 
 const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
   if (range.preset !== null) {
@@ -185,7 +201,10 @@ const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateR
  * Reads the filters out of a URL's search string. Total: a value this app does not know is dropped, so
  * a stale or hand-edited link opens the unfiltered board rather than an error.
  */
-export const parseBoardFilters = (search: string | URLSearchParams): BoardFilters => {
+export const parseBoardFilters = (
+  search: string | URLSearchParams,
+  defaults: BoardFilterDefaults = NO_FILTER_DEFAULTS,
+): BoardFilters => {
   const params = typeof search === 'string' ? new URLSearchParams(search) : search;
   const project = BoardProjectIdSchema.safeParse(nonEmpty(params.get('project')));
   const kind = TaskKindSchema.safeParse(params.get('kind'));
@@ -202,7 +221,7 @@ export const parseBoardFilters = (search: string | URLSearchParams): BoardFilter
     state: state.success ? state.data : NO_BOARD_FILTERS.state,
     activity: activity.success ? activity.data : null,
     mine: mine === '1' || mine === 'true',
-    agents: params.get(AGENTS_PARAM) === '1',
+    agents: parseAgents(params.get(AGENTS_PARAM), defaults.agents),
     lane: nonEmpty(params.get('lane')),
     created: parseDateRange(params, 'created'),
     touched: parseDateRange(params, 'touched'),
@@ -213,7 +232,10 @@ export const parseBoardFilters = (search: string | URLSearchParams): BoardFilter
  * The URL parameters for a filter set. Defaults are left out (`state=open`, no `mine`), so the plain board
  * has a plain URL and `parseBoardFilters(boardFiltersToSearch(f))` is `f` for every filter set.
  */
-export const boardFiltersToSearch = (filters: BoardFilters): URLSearchParams => {
+export const boardFiltersToSearch = (
+  filters: BoardFilters,
+  defaults: BoardFilterDefaults = NO_FILTER_DEFAULTS,
+): URLSearchParams => {
   const params = new URLSearchParams();
   if (filters.project !== null) params.set('project', filters.project);
   if (filters.machine !== null) params.set('machine', filters.machine);
@@ -223,7 +245,7 @@ export const boardFiltersToSearch = (filters: BoardFilters): URLSearchParams => 
   if (filters.state !== NO_BOARD_FILTERS.state) params.set('state', filters.state);
   if (filters.activity !== null) params.set('activity', filters.activity);
   if (filters.mine) params.set('mine', '1');
-  if (filters.agents) params.set(AGENTS_PARAM, '1');
+  if (filters.agents !== defaults.agents) params.set(AGENTS_PARAM, filters.agents ? '1' : '0');
   if (filters.lane !== null) params.set('lane', filters.lane);
   writeDateRange(params, 'created', filters.created);
   writeDateRange(params, 'touched', filters.touched);
@@ -277,7 +299,7 @@ export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'a
 
 /** Whether the owner has a stake in the card: they raised it, or it waits on their answer. */
 export const isMine = (task: Pick<BoardTaskView, 'createdBy' | 'waitingOnOwner'>): boolean =>
-  task.createdBy.kind === 'owner' || task.waitingOnOwner.length > 0;
+  task.createdBy.kind === 'owner' || (task.waitingOnOwner ?? []).length > 0;
 
 const categoryIn = (laneSet: LaneSet | null, task: BoardTaskView): LaneCategory | null =>
   laneSet?.lanes.find(lane => lane.id === task.laneId)?.category ?? null;
@@ -287,7 +309,7 @@ const matchesActivity = (filter: BoardActivityFilter, task: BoardTaskView, categ
     case 'to_test':
       return category === 'verify';
     case 'waiting_on_you':
-      return task.waitingOnOwner.length > 0;
+      return (task.waitingOnOwner ?? []).length > 0;
     case 'blocked':
       return task.blockedBy.length > 0;
     default:
@@ -421,7 +443,7 @@ export interface BoardModel {
   readonly quarantined: readonly BoardQuarantine[];
   /** More than one machine is in the model: the page shows a machine chip. */
   readonly multiMachine: boolean;
-  /** The machines say who asked for a card, so "Ferret cards" means something; an older daemon says nothing. */
+  /** The machines say who asked for a card or whether it is private, so "Show private" means something; an older daemon says nothing. */
   readonly splitsAgents: boolean;
 }
 
@@ -439,8 +461,8 @@ const addCounts = (left: BoardCounts, right: BoardCounts): BoardCounts => ({
   stale: left.stale + right.stale,
   orphaned: left.orphaned + right.orphaned,
   active: left.active + right.active,
-  toTest: left.toTest + right.toTest,
-  waitingOnYou: left.waitingOnYou + right.waitingOnYou,
+  toTest: (left.toTest ?? 0) + (right.toTest ?? 0),
+  waitingOnYou: (left.waitingOnYou ?? 0) + (right.waitingOnYou ?? 0),
 });
 
 /** The header pills and the activity each one counts: the same rule the pill applies as a filter. */
@@ -465,7 +487,7 @@ const withoutCards = (
       ...left,
       [key]: Math.max(
         0,
-        left[key] - hidden.filter(({ task, category }) => matchesActivity(filter, task, category)).length,
+        (left[key] ?? 0) - hidden.filter(({ task, category }) => matchesActivity(filter, task, category)).length,
       ),
     }),
     counts,
@@ -508,7 +530,7 @@ export const mergeBoard = (
     }
     const byProject = new Map<BoardProjectId, BoardCard[]>();
     for (const task of data.cards) {
-      if (!showAgents && isFerretCard(task)) {
+      if (!showAgents && isPrivateCard(task)) {
         hidden.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
         continue;
       }

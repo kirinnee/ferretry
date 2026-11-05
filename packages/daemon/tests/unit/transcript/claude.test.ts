@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { portableConversationRows } from '../../../src/lib/session/transcript/index.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
 import compactionFixture from '../../fixtures/transcript/claude-compaction.jsonl' with { type: 'text' };
@@ -433,5 +434,179 @@ describe('ClaudeTranscriptParser compaction boundaries', () => {
     should(actual.events[3]).not.have.property('tokensBefore', 'many');
     should((actual.events[3] as { tokensBefore?: number }).tokensBefore).be.undefined();
     should((actual.events[4] as { trigger?: string }).trigger).be.undefined();
+  });
+});
+
+describe('ClaudeTranscriptParser: the request snapshots Claude Code writes (&B157)', () => {
+  // The shape Claude Code 2.1.317 writes after a tool run: no time, no uuid, only the message it will send again.
+  const blob = (message: unknown) => ({ type: 'api-request-blob', hash: 'f'.repeat(64), sessionId: 's1', message });
+
+  it('should draw nothing for a snapshot that repeats a tool call, a result, words or a system reminder', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const call = {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'fy send zoe "Done."' } }],
+    };
+    const lines = [
+      {
+        type: 'assistant',
+        timestamp: '2026-11-04T10:37:00.000Z',
+        uuid: 'u1',
+        message: { ...call, id: 'msg_1', model: 'claude', stop_reason: 'tool_use' },
+      },
+      {
+        type: 'user',
+        timestamp: '2026-11-04T10:37:01.000Z',
+        uuid: 'u2',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'held as an FYI' }],
+        },
+      },
+      blob(call),
+      blob({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'held as an FYI' }] }),
+      blob({
+        role: 'user',
+        content: [{ type: 'text', text: '<system-reminder> Today is Tuesday. </system-reminder>' }],
+      }),
+      blob({ role: 'assistant', content: 'Sent.' }),
+    ];
+
+    // Act
+    const actual = subject.parse({
+      text: lines.map(line => JSON.stringify(line)).join('\n'),
+      source: 'claude.jsonl',
+      observedAt: '2026-11-04T10:38:00.000Z',
+    });
+
+    // Assert — one call and one result, both timed; no untimed copy, no reminder, no input observed twice.
+    should(actual.issues).have.length(0);
+    const calls = actual.events.flatMap(event => (event.kind === 'tool-call' ? [event] : []));
+    const results = actual.events.flatMap(event => (event.kind === 'tool-result' ? [event] : []));
+    should(calls).have.length(1);
+    should(results).have.length(1);
+    // The one result answers the one call: the real one, at its real time.
+    should(results[0]?.result.callId).equal(calls[0]?.call.id);
+    should(calls[0]?.timestamp).equal('2026-11-04T10:37:00.000Z');
+    should(actual.events.filter(event => event.kind === 'message')).have.length(0);
+    should(actual.events.every(event => event.timestamp !== undefined)).be.true();
+    should(actual.observedInputs).have.length(0);
+  });
+
+  it('should draw a queued prompt with a pasted image once, from the drain, when its snapshot repeats it', () => {
+    // Arrange — a prompt queued while Claude was busy, drained as content blocks (the shape Claude 2.1.281 writes),
+    // then the request snapshot that sends it again.
+    const subject = new ClaudeTranscriptParser();
+    const prompt = [
+      { type: 'text', text: '[Image #5]' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      { type: 'text', text: 'Bug B23 fix is up.' },
+    ];
+    const lines = [
+      {
+        type: 'attachment',
+        uuid: 'q1',
+        timestamp: '2026-11-04T10:37:05.000Z',
+        attachment: {
+          type: 'queued_command',
+          prompt,
+          commandMode: 'prompt',
+          origin: { kind: 'human' },
+          imagePasteIds: [5],
+          timestamp: '2026-11-04T10:37:04.000Z',
+        },
+      },
+      blob({ role: 'user', content: prompt }),
+    ];
+
+    // Act
+    const actual = subject.parse({
+      text: lines.map(line => JSON.stringify(line)).join('\n'),
+      source: 'claude.jsonl',
+      observedAt: '2026-11-04T10:38:00.000Z',
+    });
+
+    // Assert — the words once, the picture once, both from the timed drain; the input observed once.
+    should(actual.issues).have.length(0);
+    should(actual.events.map(event => event.kind)).deepEqual(['message', 'attachment']);
+    should(actual.events).containDeep([
+      {
+        role: 'user',
+        kind: 'message',
+        text: '[Image #5]\nBug B23 fix is up.',
+        inputSource: 'native-queue',
+        timestamp: '2026-11-04T10:37:05.000Z',
+      },
+      { role: 'user', kind: 'attachment', blockIndex: 1, attachment: { kind: 'image' } },
+    ]);
+    should(actual.observedInputs.map(input => input.text)).deepEqual(['[Image #5]\nBug B23 fix is up.']);
+  });
+
+  it('should give a picture pasted before the words a point of its own, so the conversation still reads', () => {
+    // Arrange — image first, then the words: the shape that put both at block 0.
+    const subject = new ClaudeTranscriptParser();
+    const line = JSON.stringify({
+      type: 'attachment',
+      uuid: 'q1',
+      timestamp: '2026-11-04T10:37:05.000Z',
+      attachment: {
+        type: 'queued_command',
+        prompt: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+          { type: 'text', text: 'What is this?' },
+        ],
+        commandMode: 'prompt',
+        origin: { kind: 'human' },
+      },
+    });
+    const bytes = new TextEncoder().encode(`${line}\n`);
+
+    // Act
+    const parsed = subject.parse({ bytes, source: 'claude.jsonl', observedAt: '2026-11-04T10:38:00.000Z' });
+    const rows = portableConversationRows('s1', {
+      file: '/fixture/claude.jsonl',
+      reset: false,
+      cursor: { byteOffset: bytes.byteLength, pendingBytes: 0, nextLine: 2 },
+      ...parsed,
+    });
+
+    // Assert — the picture at block 0, the words at block 1, and the conversation reads them both.
+    should(parsed.events.map(event => [event.kind, event.blockIndex])).deepEqual([
+      ['message', 1],
+      ['attachment', 0],
+    ]);
+    should(rows.length).be.above(0);
+  });
+
+  it('should draw a queued prompt that is only a picture, and nothing for blocks it does not know', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const queued = (prompt: unknown) => ({
+      type: 'attachment',
+      attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' } },
+    });
+
+    // Act
+    const picture = subject.parseRecord(
+      queued([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }]),
+    );
+    const unknown = subject.parseRecord(queued([{ type: 'text', text: '  ' }, 'Go on.', null, { type: 'mystery' }]));
+
+    // Assert
+    should(picture.events.map(event => event.kind)).deepEqual(['attachment']);
+    should(unknown.events).containDeep([{ kind: 'message', text: 'Go on.' }]);
+    should(unknown.events).have.length(1);
+  });
+
+  it('should recognise a snapshot alone and say nothing about it', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord(blob({ role: 'user', content: 'Please go on.' }));
+
+    // Assert
+    should(actual).deepEqual({ events: [], issues: [], recognized: true });
   });
 });

@@ -84,14 +84,25 @@ const keeperOf = (group: readonly Entry[]): Entry => {
   return ranked.find(entry => ownerTurn(entry.item)) ?? ranked[0]!;
 };
 
-/** Whether two items ask the same thing in the same words: the ask and the body, as raised. */
-const sameWords = (one: AgendaItem, other: AgendaItem): boolean =>
-  JSON.stringify([one.ask ?? null, one.body ?? null]) === JSON.stringify([other.ask ?? null, other.body ?? null]);
+/** Whether two items ask the same thing in the same words: the ask and every tab — the main tab too — as raised. */
+const wordsOf = (item: AgendaItem): string =>
+  JSON.stringify([
+    item.ask ?? null,
+    item.whereWeAre ?? null,
+    item.questionAnswer ?? null,
+    item.decided ?? null,
+    item.stillOpen ?? null,
+    item.body ?? null,
+    item.tabs ?? null,
+  ]);
+const sameWords = (one: AgendaItem, other: AgendaItem): boolean => wordsOf(one) === wordsOf(other);
 
 /** Why an item may not be closed, or `undefined` when it may. */
 const protectedBecause = (entry: Entry, facts: DuplicateFacts): string | undefined => {
   const { item } = entry;
   if (handsOnItem(item)) return 'a hands-on card';
+  // An agenda that carries a card's ask is the card's one ask: closing it as a duplicate would drop the ask.
+  if ((item.cardAsks ?? []).length > 0) return "it carries a card's ask";
   if (item.gate !== undefined && facts.answeredGates.has(facts.gateReference(item.gate)))
     return 'a gate the owner answered';
   if (item.history !== undefined || item.infoRequests !== undefined || item.undelivered !== undefined)

@@ -46,7 +46,6 @@ import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { ChatTasks } from '../../features/board/chat-tasks.tsx';
-import type { BoardDetailPorts } from '../../features/board/detail/board-detail.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -142,7 +141,6 @@ import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
-import { sessionTaskNames } from '../to-test-inbox.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
@@ -289,6 +287,8 @@ export interface SessionChatPageProps {
    * SAME item — tapping its notification a second time, after the panel was folded, opens it again.
    */
   readonly agendaTargetKey?: string;
+  /** An agenda item's card came up in this conversation: its alerts come down (`useAgenda`'s `onItemOpened`). */
+  readonly onAgendaItemOpened?: (daemon: DaemonConnection, sessionId: string, agendaId: string) => unknown;
   /**
    * This session's live-feed state and the reader's manual reconnect.
    *
@@ -360,11 +360,10 @@ export interface SessionChatPageProps {
    */
   readonly board?: DaemonBoardStore;
   /**
-   * What the Tasks tab needs to act on its cards where they are: the agenda client (a card's waiting-on-you
-   * questions) and the port to speak to a ferret. Absent: the tab still draws the cards, but a card cannot
-   * be opened over the chat.
+   * What the Tasks tab needs to open a card over the chat: the agenda client (a card's waiting-on-you
+   * questions, read only). Absent: the tab still draws the cards, but a card cannot be opened over the chat.
    */
-  readonly boardTasks?: { readonly agenda: DaemonAgendaClient; readonly ports: BoardDetailPorts };
+  readonly boardTasks?: { readonly agenda: DaemonAgendaClient };
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
@@ -493,6 +492,7 @@ export function SessionChatPage({
   initialInfo,
   board,
   boardTasks,
+  onAgendaItemOpened,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
@@ -648,7 +648,6 @@ export function SessionChatPage({
     }
     return names;
   }, [daemonSessions]);
-  const taskNames = useMemo(() => sessionTaskNames(daemonSessions ?? []), [daemonSessions]);
   const openTasks = useCallback(() => showInfo(hasBoard ? 'tasks' : 'overview'), [showInfo, hasBoard]);
   // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
   // behaviour still — Markdown calls the surface — with these as its destinations.
@@ -708,6 +707,7 @@ export function SessionChatPage({
           : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
         cardRoute: hasBoard,
+        boardStore: board,
         ...(terminals === null ? {} : { terminals }),
         ...(browserPages.status === null ? {} : { browser: browserPages.status }),
         destinations: referenceDestinations,
@@ -729,6 +729,7 @@ export function SessionChatPage({
       composerCatalogs.skills,
       onNavigate,
       hasBoard,
+      board,
       agendaModel === undefined,
       agendaKey,
       openAgendaReference,
@@ -1221,6 +1222,7 @@ export function SessionChatPage({
     connection,
     ferret: sessionDisplayName(session),
     focus: agendaFocus,
+    ...(onAgendaItemOpened === undefined ? {} : { onItemOpened: onAgendaItemOpened }),
     repliesSlot:
       agendaReplies === undefined ||
       (agendaReplies.secondsLeft === null &&
@@ -1409,6 +1411,19 @@ export function SessionChatPage({
       },
     };
   }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient, canNavigate]);
+  // A sub-ferret's items are raised on its lead's agenda: its own tab says so and opens the lead.
+  const leadView =
+    session.config.parent === undefined
+      ? undefined
+      : daemonSessions?.find(candidate => candidate.config.id === session.config.parent);
+  const agendaLead =
+    leadView === undefined || onNavigate === undefined
+      ? undefined
+      : {
+          name: sessionDisplayName(leadView),
+          open: () => onNavigate(daemonSessionPath(connection.daemonId, leadView.config.id)),
+        };
+  const agendaCounts = agenda.counts;
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   boardFullRef.current = tasksFull;
   collapseBoardRef.current = () => tasks.setExpanded(false);
@@ -1431,8 +1446,11 @@ export function SessionChatPage({
               browser={browserPages.status}
               driving={driving}
               name={agentName}
+              agendaTab={agenda.tab(presentation === 'sheet' ? info.close : undefined, agendaLead)}
               about={{
-                agenda: agenda.section(presentation === 'sheet' ? info.close : undefined),
+                ...(agendaCounts === null
+                  ? {}
+                  : { agenda: { counts: agendaCounts(), onOpen: () => info.show('agenda') } }),
                 ...(switches === undefined
                   ? {}
                   : {
@@ -1458,7 +1476,6 @@ export function SessionChatPage({
                       tasks: (
                         <ChatTasks
                           callsigns={callsigns}
-                          taskNames={taskNames}
                           chat={cardChat}
                           machine={{ connection, name: machineName }}
                           now={Date.now()}
@@ -1757,7 +1774,6 @@ export function SessionChatPage({
         <section aria-label="Tasks" className="fy-board-full" data-board-full="">
           <ChatTasks
             callsigns={callsigns}
-            taskNames={taskNames}
             chat={cardChat}
             expanded
             machine={{ connection, name: machineName }}

@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
+import { displayModel } from '@ferretry/protocol';
 import should from 'should';
 import {
   ageLabel,
   cardCell,
   compactQuota,
-  displayModel,
   quotaLabel,
   renderSessionTable,
   renderSessionView,

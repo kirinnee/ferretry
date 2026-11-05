@@ -14,6 +14,7 @@ import {
   planImport,
   scannedMcpServers,
 } from '../../src/lib/account/import.ts';
+import { parseAccountModel } from '../../src/lib/account/schema.ts';
 import { profileScope } from '../../src/lib/account/scope.ts';
 import { FLEET_STARTER_MODELS } from '../../src/lib/defaults.ts';
 
@@ -647,6 +648,30 @@ describe('planImport — Import again (O6)', () => {
     // Assert — the claude-skills component changed (an update) and nothing was silently replaced.
     should(again.updates.map(update => update.reference)).deepEqual(['skills/claude-skills']);
     should(again.profiles).deepEqual({});
+  });
+
+  it('should keep the compactAt of the profile it extends', () => {
+    // Arrange
+    const earlier = planImport([claude({ instructions: text('/c', 'mine') })], { digest });
+    const merged = mergeImport(undefined, earlier);
+    const profileName = Object.keys(merged.profiles)[0] as string;
+    const tuned = parseAccountModel({
+      ...merged,
+      profiles: { ...merged.profiles, [profileName]: { ...merged.profiles[profileName], compactAt: 250_000 } },
+    });
+    const scans = [
+      claude({
+        instructions: text('/c', 'mine'),
+        skills: [{ item: 'fresh', source: '/f', digest: 'f' }],
+      }),
+    ];
+
+    // Act
+    const again = planImport(scans, { digest, existing: tuned, record: earlier.record });
+
+    // Assert
+    should(again.profiles[profileName]?.layers.length).be.above(merged.profiles[profileName]?.layers.length as number);
+    should(again.profiles[profileName]?.compactAt).equal(250_000);
   });
 
   it('should take the next free name beside a component the person made themselves', () => {

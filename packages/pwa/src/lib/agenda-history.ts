@@ -13,17 +13,34 @@
  *   about the item. A lead answers many things in one reply, so the rest of that reply is never this item's history;
  *   a reply with no such part says nothing here (the card itself carries the answer). Only assistant TEXT: tool
  *   calls, thinking, commands and notices are other row kinds and are never read.
- * - THE ITEM ITSELF: one "Card updated to vN" line per edit, with what the edit changed in plain words (the points
+ * - THE ITEM ITSELF: one "Updated to vN" line per edit, with what the edit changed in plain words (the points
  *   added or removed from the premise, context, decided and still-open lists, the fields reworded). Its raise is the
  *   ferret's own message citing it; nothing is made up to stand for it, so the card's words are never said twice.
+ *   The item view draws these in its folded activity log, apart from the conversation.
+ *
+ * NOTHING IS CUT: a ferret's reply about the item and every line an edit changed are kept whole (docs/agenda.md § The
+ * item view, "no size limit").
  */
 
 import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/protocol';
-import { FIELD_LABEL, POINT_FIELDS, bulletPoints, describePrevious, itemAtVersion } from './agenda-revisions.ts';
+import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELDS } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
+import type { LedgerSendRecord } from './send-ledger.ts';
 
-/** The longest ferret message kept whole; the rest is cut and marked, the chat holds the whole. */
-export const HISTORY_FERRET_CHARS = 700;
+/**
+ * HOW FAR THE OWNER'S WORDS GOT, as far as the item view can PROVE it — never further:
+ *
+ * - `transcript`: they are a row of the ferret's own transcript (or the ferret logged them from the chat), so the
+ *   ferret took them in. `send` is the delivery the chat's ledger recorded for that row, when it has one.
+ * - `item`: they are stored on the item on the machine; whether the ferret has had them is not recorded.
+ *
+ * `answered` is the chat's own rule: the ferret said something after them.
+ */
+interface OwnerReach {
+  readonly via: 'transcript' | 'item';
+  readonly answered: boolean;
+  readonly send?: LedgerSendRecord;
+}
 
 export type HistoryEvent =
   /** An edit made the card version `version`. */
@@ -44,17 +61,37 @@ export type HistoryEvent =
       /** The answer form it was sent as; absent for a plain reply. */
       readonly form?: AgendaMessagePart['kind'];
       readonly note?: string;
+      /** Copied from the owner's chat by the ferret (`fy agenda log`): drawn with a "from chat" tag. */
+      readonly fromChat?: true;
+      /** How far the words are known to have got: drawn as the chat's own receipt ticks (`ownerReceipt`). */
+      readonly reached?: OwnerReach;
     }
-  /** What the ferret said to the item. */
-  | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
+  /**
+   * WORDS NOT IN HAND: `earlier` stored entries that are not drawn here, because they are still being read
+   * (`loading`), could not be read (`failed`), or are past what one read takes (`capped`). Drawn as a line in their
+   * place, so a partial thread is never taken for the whole one.
+   */
+  | {
+      readonly kind: 'gap';
+      readonly key: string;
+      readonly at: 0;
+      readonly earlier: number;
+      readonly state: 'loading' | 'failed' | 'capped';
+    }
+  /** What the ferret said to the item; Ferretry's own words (`daemon`) are drawn under its name. */
+  | {
+      readonly kind: 'ferret';
+      readonly key: string;
+      readonly at: number;
+      readonly text: string;
+      readonly daemon?: true;
+      readonly fromChat?: true;
+    };
 
 const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
 
-const cut = (text: string): string =>
-  text.length > HISTORY_FERRET_CHARS ? `${text.slice(0, HISTORY_FERRET_CHARS).trimEnd()}…` : text;
-
 /** A plain reply without the reference the composer put in front of it: the bubble says what the owner typed. */
-const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
+export const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
   const stripped = text.replace(new RegExp(`^\\s*!${id}(?![\\w])[\\s:,—-]*`, 'u'), '');
   return stripped.trim() === '' ? text.trim() : stripped.trim();
 };
@@ -80,19 +117,38 @@ const ownerPart = (part: AgendaMessagePart): { readonly text: string; readonly n
 };
 
 /** What the owner said to the item in one user row, or nothing when the row is not about it. */
-const ownerSaid = (entry: TranscriptEntry, id: AgendaItem['id'], at: number): readonly HistoryEvent[] => {
+const ownerSaid = (
+  entry: TranscriptEntry,
+  id: AgendaItem['id'],
+  at: number,
+  answered: boolean,
+): readonly HistoryEvent[] => {
   if (entry.peer !== undefined) return [];
+  // A row of the ferret's transcript: the ferret took it in. The ledger's own record of it rides along when known.
+  const reached: OwnerReach = {
+    via: 'transcript',
+    answered,
+    ...(entry.send === undefined ? {} : { send: entry.send }),
+  };
   const message = parseAgendaMessage(entry.text);
   if (message !== undefined) {
     return message.parts
       .filter(part => part.items.some(named => named.id === id))
       .map(
-        part => ({ kind: 'owner', key: `${entry.id}:${part.raw}`, at, form: part.kind, ...ownerPart(part) }) as const,
+        part =>
+          ({
+            kind: 'owner',
+            key: `${entry.id}:${part.raw}`,
+            at,
+            form: part.kind,
+            ...ownerPart(part),
+            reached,
+          }) as const,
       )
       .filter(event => event.text !== '');
   }
   return citesPattern(id).test(entry.text)
-    ? [{ kind: 'owner', key: entry.id, at, text: withoutLeadingReference(entry.text, id) }]
+    ? [{ kind: 'owner', key: entry.id, at, text: withoutLeadingReference(entry.text, id), reached }]
     : [];
 };
 
@@ -225,29 +281,27 @@ const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): read
   const events: HistoryEvent[] = [];
   const ownerWords: string[] = [];
   let clock = 0;
-  for (const entry of entries) {
+  // The chat's rule for "answered": the ferret said something after the owner's words, about this item or not.
+  const lastReply = entries.findLastIndex(entry => entry.kind === 'assistant' && entry.text.trim() !== '');
+  for (const [index, entry] of entries.entries()) {
     clock = entry.at ?? clock;
     if (entry.kind === 'user') {
-      const said = ownerSaid(entry, id, clock);
+      const said = ownerSaid(entry, id, clock, index < lastReply);
       for (const event of said) if (event.kind === 'owner') ownerWords.push(event.text);
       events.push(...said);
       continue;
     }
     if (entry.kind !== 'assistant' || entry.text.trim() === '') continue;
     const about = aboutItem(entry.text, cites, ownerWords);
-    if (about !== '') events.push({ kind: 'ferret', key: entry.id, at: clock, text: cut(about) });
+    if (about !== '') events.push({ kind: 'ferret', key: entry.id, at: clock, text: about });
   }
   return events;
 };
 
-const LONGEST_POINT = 140;
-const MOST_LINES = 6;
 const SHOWN_AS_TEXT: ReadonlySet<string> = new Set(['title', 'subject']);
 
-const brief = (text: string): string => {
-  const flat = text.replace(/\s+/gu, ' ').trim();
-  return flat.length > LONGEST_POINT ? `${flat.slice(0, LONGEST_POINT).trimEnd()}…` : flat;
-};
+/** A point on one line, whole: the activity log never cuts what an edit said. */
+const brief = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 
 const pointsOf = (text: string | null): readonly string[] =>
   text === null || text.trim() === '' ? [] : (bulletPoints(text) ?? [text.trim()]);
@@ -276,12 +330,11 @@ const summarize = (item: AgendaItem, index: number): readonly string[] => {
     else if (SHOWN_AS_TEXT.has(field)) lines.push(`${label}: now “${brief(now)}”`);
     else lines.push(`${label}: reworded`);
   }
-  return lines.length > MOST_LINES
-    ? [...lines.slice(0, MOST_LINES), `and ${String(lines.length - MOST_LINES)} more changes`]
-    : lines;
+  return lines;
 };
 
-const versions = (item: AgendaItem): readonly HistoryEvent[] =>
+/** One event per edit, oldest first, each with what it changed: the activity log reads these from the item itself. */
+export const revisionEvents = (item: AgendaItem): readonly HistoryEvent[] =>
   (item.revisions ?? []).map(
     (revision, index) =>
       ({
@@ -298,7 +351,7 @@ const versions = (item: AgendaItem): readonly HistoryEvent[] =>
  * item and it was never edited.
  */
 export const itemHistory = (item: AgendaItem, entries: readonly TranscriptEntry[]): readonly HistoryEvent[] =>
-  [...versions(item), ...spoken(item.id, entries)]
+  [...revisionEvents(item), ...spoken(item.id, entries)]
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
     .map(({ event }) => event);

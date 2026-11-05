@@ -1186,11 +1186,12 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   }
   for (const known of new Set(Object.values(profileOf))) {
     const on = imported.filter(harness => profileOf[harness] === known);
-    const before = (existing as AccountModel).profiles[known]?.layers ?? [];
+    const current = (existing as AccountModel).profiles[known];
+    const before = current?.layers ?? [];
     const fresh = added.filter(
       reference => !before.includes(reference) && on.some(harness => fitsOn(harness)(reference)),
     );
-    if (fresh.length > 0) profiles[known] = { layers: [...before, ...ordered(fresh)] };
+    if (fresh.length > 0) profiles[known] = { ...current, layers: [...before, ...ordered(fresh)] };
   }
   for (const harness of imported) {
     if (profileOf[harness] !== undefined) continue;

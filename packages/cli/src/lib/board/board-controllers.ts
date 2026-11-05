@@ -5,13 +5,17 @@ import {
   type BoardTaskResponse,
   formatTaskRef,
   type LaneSet,
+  MAX_WORK_RELATED_HITS,
   type TaskRef,
 } from '@ferretry/protocol';
 import { resolveBoardProject } from '../board-lanes/lane-request';
+import { patchYaml } from '../patch/document';
 import { refuse } from '../tasks/errors';
 import type { ITextFileReader } from '../tasks/ports';
 import type { RelatedCheck } from '../work-search/related';
 import { explainingRefusals } from './board-refusal';
+import { mergeStatus, parseStatusFile, type StatusParts } from './board-status';
+import { cardPatchDocument, composeCardPatch, parseCardPatch } from './card-patch';
 import {
   type BoardVerb,
   renderActed,
@@ -27,6 +31,7 @@ import {
   type BoardLinkOptions,
   type BoardViewOptions,
   buildAssignAction,
+  buildClaimAction,
   buildBlockAction,
   buildBoardCreateRequest,
   buildBoardQuery,
@@ -50,6 +55,7 @@ import {
   requireCardRef,
 } from './board-request';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from './ports';
+import { SUB_CARD_ASK_WARNING, umbrellaRefusal, umbrellaSignals } from './umbrella';
 
 const asJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -107,9 +113,16 @@ export interface TaskCreateFlags extends BoardCreateOptions, BoardCommonOptions 
   readonly new?: boolean | undefined;
   /** A card to note instead of creating a new one. */
   readonly related?: string | undefined;
+  /** `--broad "<why this must be one card>"`: create a card the umbrella check would refuse. */
+  readonly broad?: string | undefined;
 }
 
 export interface TaskEditFlags extends BoardEditOptions, BoardCommonOptions {}
+
+/** `fy task patch`: the YAML or JSON document; `-` (the default) reads standard input. */
+export interface TaskPatchFlags extends BoardCommonOptions {
+  readonly file?: string | undefined;
+}
 
 export interface TaskLinkFlags extends BoardLinkOptions, BoardCommonOptions {}
 
@@ -179,12 +192,30 @@ export class BoardController {
     const label = scoped?.name ?? 'all projects';
     const render = options.md === true ? renderBoardMarkdown : renderBoard;
     this.deps.output.success(render(response, listing.projects, names, label));
+    if (query.visibility === 'public') {
+      const older = response.cards.length > 0 && response.cards.every(card => card.visibility === undefined);
+      this.deps.output.success(
+        older
+          ? 'this daemon predates public and private cards, so every card is shown; update it with: ' +
+              `${this.deps.binary} daemon update`
+          : `public cards only: ${this.deps.binary} board --private shows the ferrets' own cards, --all shows both`,
+      );
+    }
   }
 
   /** `fy task show <id>`: one card in full. */
-  async show(idText: string, options: BoardCommonOptions): Promise<void> {
+  async show(idText: string, options: BoardCommonOptions & { readonly yaml?: boolean }): Promise<void> {
     const ref = requireCardRef(idText);
     const { task, laneSet } = await this.gateway.task(ref.id);
+    if (options.yaml === true) {
+      const shown = formatTaskRef(task);
+      return this.deps.output.success(
+        patchYaml(cardPatchDocument(task), [
+          `${shown} — read every part, update what is out of date, then: ${this.deps.binary} task patch ${task.id} --file <this file>`,
+          'a key present replaces the field, an absent key leaves it, null empties it',
+        ]),
+      );
+    }
     const children =
       task.rollup.children === 0
         ? []
@@ -239,15 +270,18 @@ export class BoardController {
   }
 
   /**
-   * The related-work check of a create. `--related <card>` turns the create into a note on that card (true:
-   * nothing is created); a strong duplicate otherwise refuses; `--new` skips the check.
+   * The checks of a create, before anything is made. `--related <card>` turns the create into a note on that card
+   * (true: nothing is created). An umbrella card — many outcomes in one — is refused unless `--broad "<why>"` says why
+   * it must be one (docs/board.md § One card, one outcome). Then the related cards are listed, weak matches too, with
+   * `--related F12` offered so the work is added to one instead; a strong duplicate refuses; `--new` skips the check.
    */
   private async noteInsteadOfCreate(
-    title: string,
+    request: { readonly title: string; readonly summary?: string; readonly parent?: unknown },
     ask: string,
     as: string | undefined,
     options: TaskCreateFlags,
   ): Promise<boolean> {
+    const { title } = request;
     const related = options.related?.trim();
     if (options.new === true && related !== undefined && related !== '') {
       refuse('pass --new or --related <id>, not both');
@@ -263,9 +297,13 @@ export class BoardController {
       if (options.json !== true) this.deps.output.success(`Added to ${formatTaskRef(ref)} instead of a new card`);
       return true;
     }
-    if (options.new === true || this.deps.related === undefined) return false;
     const binary = this.deps.binary;
-    await this.deps.related.guard('task', title, ask, {
+    const signals = umbrellaSignals(request);
+    if (signals.length > 0 && (options.broad?.trim() ?? '') === '') refuse(umbrellaRefusal(signals, binary));
+    if (options.new === true || this.deps.related === undefined) return false;
+    const response = await this.deps.related.matches('task', title, ask, as);
+    if (response === undefined) return false;
+    await this.deps.related.refuseStrong(response, {
       as,
       json: options.json,
       choices: [
@@ -273,6 +311,17 @@ export class BoardController {
         `${binary} task create … --new          it really is separate; create it anyway`,
       ],
     });
+    // Nothing strong: the weaker matches are still worth a look, and adding to one beats a new card.
+    const cards = response.matches.filter(match => match.hit.kind === 'task').slice(0, MAX_WORK_RELATED_HITS);
+    if (cards.length > 0 && options.json !== true) {
+      this.deps.output.diagnostic(
+        [
+          'Related cards — prefer adding to one (a note, nothing created):',
+          ...(await this.deps.related.lines(cards, as)).map(line => `  ${line}`),
+          `  ${binary} task create … --related F12`,
+        ].join('\n'),
+      );
+    }
     return false;
   }
 
@@ -294,7 +343,9 @@ export class BoardController {
       projectId: options.project === undefined ? undefined : target?.id,
       assignee,
     });
-    if (await this.noteInsteadOfCreate(request.title, request.ask.text, as, options)) return;
+    if (await this.noteInsteadOfCreate(request, request.ask.text, as, options)) return;
+    if (options.parent !== undefined && options.ask !== undefined && options.public !== true)
+      this.deps.output.diagnostic(SUB_CARD_ASK_WARNING);
     const created = await explainingRefusals({ binary: this.deps.binary, project: target?.name }, async () => {
       return await this.gateway.create(as, request);
     });
@@ -405,6 +456,10 @@ export class BoardController {
     await this.perform('assign', ref, options, buildAssignAction(assignee));
   }
 
+  async claim(idText: string, options: BoardCommonOptions) {
+    await this.perform('claim', requireCardRef(idText), options, buildClaimAction());
+  }
+
   async note(idText: string, text: readonly string[], options: BoardCommonOptions) {
     await this.perform('note', requireCardRef(idText), options, buildNoteAction(text));
   }
@@ -434,8 +489,56 @@ export class BoardController {
   }
 
   async edit(idText: string, options: TaskEditFlags) {
-    const texts = await this.resolveTexts(options);
-    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, texts));
+    const ref = requireCardRef(idText);
+    const texts = { ...(await this.resolveTexts(options)), status: await this.resolveStatus(options) };
+    await this.perform('edit', ref, options, buildEditAction(options, texts));
+  }
+
+  /**
+   * The status parts `--status-file` and `--status-now` / `--status-done` / `--status-next` come to: the file's
+   * three parts with each named flag replacing its part, or the flags' parts alone. The daemon merges what is sent into
+   * the card's current status in the card's own write, so nothing is read here. None when the caller named no status.
+   */
+  private async resolveStatus(options: BoardEditOptions): Promise<StatusParts | undefined> {
+    const parts: StatusParts = {
+      ...(options.statusNow === undefined ? {} : { now: options.statusNow }),
+      ...(options.statusDone === undefined ? {} : { doneSoFar: options.statusDone }),
+      ...(options.statusNext === undefined ? {} : { next: options.statusNext }),
+    };
+    const path = options.statusFile?.trim();
+    const filed = path === undefined || path === '' ? undefined : path;
+    if (filed === undefined && Object.keys(parts).length === 0) return undefined;
+    const base = filed === undefined ? undefined : parseStatusFile(await this.deps.files.readText(filed), filed);
+    return mergeStatus(base, parts);
+  }
+
+  /**
+   * `fy task patch <id> --file <f>`: the card's words as ONE YAML or JSON document (docs/board.md § Patch). The values
+   * that differ from the card go as ONE edit action; a document that changes nothing sends nothing.
+   */
+  async patch(idText: string, options: TaskPatchFlags) {
+    const ref = requireCardRef(idText);
+    const path = options.file?.trim() || '-';
+    const source = path === '-' ? 'the patch on standard input' : path;
+    const parsed = parseCardPatch(await this.deps.files.readText(path), source);
+    if (!parsed.ok) {
+      refuse(
+        `task patch ${formatTaskRef(ref)} changed nothing:\n${parsed.problems.map(problem => `  ${problem}`).join('\n')}`,
+      );
+    }
+    const { task } = await this.gateway.task(ref.id);
+    const plan = composeCardPatch(task, parsed.patch);
+    if (plan.kind === 'stale') {
+      refuse(
+        `${formatTaskRef(task)} changed since you read it, so nothing was written: read it again (${this.deps.binary} task show ${task.id} --yaml), update every part that is out of date, and patch it back`,
+      );
+    }
+    if (plan.kind === 'unchanged') {
+      return this.deps.output.success(
+        `${formatTaskRef(task)}: nothing changed, so nothing was sent (every value matches the card)`,
+      );
+    }
+    await this.perform('patch', ref, options, plan.request);
   }
 
   async refile(

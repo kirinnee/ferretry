@@ -153,6 +153,7 @@ import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './ho
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
+import { useFerretCallsigns } from './hooks/use-ferret-callsigns.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
@@ -198,7 +199,6 @@ import { AgendaWireProbes, useWorkSearchOffered } from './lib/agenda-wire-react.
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { NO_BOARD_FILTERS } from './lib/board-model.ts';
-import { boardBadgeCount } from './lib/board-phone.ts';
 import { boardPorts } from './lib/board-ports.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
@@ -264,6 +264,8 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
+import { agendaItemOpenedHandler, machinePushRegistration, type PushNavigator } from './lib/push-seen.ts';
+import { postAgendaItemSeen } from './lib/push-subscriptions.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
@@ -275,7 +277,6 @@ import { joinOutbox, joinQueue, queueActions, readSessionQueue, withdrawReplyVia
 import type { CachedTranscript } from './lib/session-cache.ts';
 import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import {
-  type AppStore,
   createAppStore,
   StoreProvider,
   useAppStore,
@@ -910,7 +911,7 @@ function HomeRoute({ connection }: DaemonPageProps) {
       onNavigate={navigate}
       sessions={sessions}
       spendTodayUsd={spendTodayUsd}
-      toTest={board.status === 'ready' ? board.model.counts.toTest : null}
+      toTest={board.status === 'ready' ? (board.model.counts.toTest ?? 0) : null}
     />
   );
 }
@@ -1216,6 +1217,24 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
   random: () => Math.random(),
 };
 
+/**
+ * An item opened here — in the Inbox or a conversation: its lines come down on this device, and on the owner's others
+ * through the machine (docs/notifications.md § When an alert is cleared).
+ */
+function useAgendaItemOpened() {
+  const store = useAppStore();
+  const daemonFetch = useDaemonFetch();
+  return useMemo(
+    () =>
+      agendaItemOpenedHandler({
+        registration: machinePushRegistration(navigator as unknown as PushNavigator, window.location.origin),
+        health: async daemon => await (await store.clients.client(daemon)).health(),
+        seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
+      }),
+    [store.clients, daemonFetch],
+  );
+}
+
 function SessionRoute({
   connection,
   scope,
@@ -1225,11 +1244,9 @@ function SessionRoute({
   // The router's fetch, recorded for the Performance report like every other daemon read.
   const daemonFetch = useDaemonFetch();
   useRenderTiming(store.performance, 'session');
-  // What the chat's Tasks tab needs to open a card over the chat, the same two the Board page is given.
-  const boardTasks = useMemo(
-    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch) }),
-    [store.attention, store.clients, daemonFetch],
-  );
+  const itemOpened = useAgendaItemOpened();
+  // What the chat's Tasks tab needs to open a card over the chat, the same agenda the Board page is given.
+  const boardTasks = useMemo(() => ({ agenda: store.attention }), [store.attention]);
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell. Every attach is a
   // stream session the router opens on whichever carrier reaches the daemon, so there is no measured
@@ -1822,6 +1839,7 @@ function SessionRoute({
             browserLogin={store.browserLogin}
             attention={agenda}
             agendaReplies={agendaReplies}
+            onAgendaItemOpened={itemOpened}
             // A notification tap or an unread row names the item it opens at (`?attention=A3`).
             agendaTarget={
               agendaOverride !== undefined ? agendaOverride : agendaTargetFromSearch(window.location.search)
@@ -2269,6 +2287,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const daemonFetch = useDaemonFetch();
   const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
   const clearPort = useMemo(() => agendaClearPort(store.clients, daemonFetch), [store, daemonFetch]);
+  const itemOpened = useAgendaItemOpened();
   const pairings = useBoardMachines();
   const boardActions = useBoardActions(
     store.board,
@@ -2312,6 +2331,10 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       }
       clearPort={clearPort}
       toTestHost={toTestHost}
+      onItemOpened={card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target !== undefined) void itemOpened(target, card.view.config.id, card.item.id);
+      }}
       banner={
         <NotificationsOffBanner
           rows={machineNotifications.rows}
@@ -2367,23 +2390,6 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   );
 }
 
-/** Every ferret's callsign by session id, from the sessions every paired machine reports. */
-function useFerretCallsigns(store: AppStore): ReadonlyMap<string, string> {
-  const fleet = useSyncExternalStore(
-    listener => store.fleet.subscribe(listener),
-    () => store.fleet.getSnapshot(),
-  );
-  return useMemo(() => {
-    const names = new Map<string, string>();
-    for (const slice of fleet.daemons.values()) {
-      for (const session of slice.sessions ?? []) {
-        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
-      }
-    }
-    return names;
-  }, [fleet]);
-}
-
 /**
  * The Board across every paired machine. The query string carries the filters and the view, so a view is a
  * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
@@ -2402,18 +2408,10 @@ function useBoardMachines(): readonly BoardMachine[] {
   );
 }
 
-/**
- * The phone's bottom bar with the Board tab's number on it. It shares the Board page's own unfiltered read
- * (the same store key), so the badge costs no request of its own; only this subtree renders when it moves.
- */
-function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
-  const store = useAppStore();
-  const machines = useBoardMachines();
-  const { model } = useBoard(store.board, machines, NO_BOARD_FILTERS);
+/** The phone's bottom bar, with the shell's What's new door in More. */
+function PhoneTabBar(props: AppTabBarProps) {
   const whatsNew = useWhatsNewEntry();
-  return (
-    <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} {...(whatsNew === null ? {} : { whatsNew })} />
-  );
+  return <AppTabBar {...props} {...(whatsNew === null ? {} : { whatsNew })} />;
 }
 
 function QueueRoute({ connection, sessionId }: QueuePageProps) {
@@ -2431,11 +2429,6 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
-  const daemonFetch = useDaemonFetch();
-  const ports = useMemo(
-    () => boardPorts(daemon => store.clients.client(daemon), daemonFetch),
-    [store.clients, daemonFetch],
-  );
   return (
     <BoardPage
       agenda={store.attention}
@@ -2445,7 +2438,6 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
       onNavigate={navigate}
       onSearch={onSearch}
       openCard={taskId === undefined ? null : { daemonId: connection.daemonId, taskId }}
-      ports={ports}
       origin={origin}
       search={window.location.search}
       store={store.board}

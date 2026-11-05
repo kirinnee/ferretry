@@ -4,7 +4,7 @@
  * A card in a verify lane (Released · to test) waits for the owner's verdict, so it belongs in the Inbox beside the
  * agenda items. This reads them out of the board model the app already holds and names, for each, the two lanes the
  * verdict moves it to — Done into the project's Done lane, Not good back to its rework lane. Nothing here moves a
- * card: the moves are the board's own (`useBoardAnswers`), so no new way to close a card exists.
+ * card: the moves are `useBoardAnswers`, the one way the owner moves a card (the Board itself is read-only).
  */
 
 import type { ReleasedIn, SessionView } from '@ferretry/protocol';
@@ -79,7 +79,7 @@ export const nextWake = (rows: readonly ToTestCard[], now: number): number | nul
 };
 
 /** One card as a card to test: `null` when it is dropped, a person did not ask for it, or its project's lanes do not name where Done and Not good go. */
-export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
+const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
   if (awaitingOwner(card, group.laneSet) !== 'try') return null;
   const doneLaneId = doneLaneOf(group.laneSet);
   const notGoodLaneId = notGoodLaneOf(group.laneSet);
@@ -91,32 +91,6 @@ export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | n
     doneLaneId,
     notGoodLaneId,
     howToTest: card.task.howToTest,
-    taskName: null,
-    projectName: null,
-    since: sinceOf(card),
-    snoozedUntil: snoozedUntilOf(card),
-  };
-};
-
-/**
- * One card waiting on a plan as a row the same shell draws: Approve moves it to the lane after the gate, Send back (with
- * the owner's words) to the lane before it. `null` when it is not a plan to approve or the gate has no lane on one side.
- */
-export const toApproveOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
-  if (awaitingOwner(card, group.laneSet) !== 'approve' || group.laneSet === null) return null;
-  const lanes = group.laneSet.lanes;
-  const at = lanes.findIndex(lane => lane.id === card.task.laneId);
-  const forward = lanes[at + 1];
-  const back = at > 0 ? lanes[at - 1] : undefined;
-  if (forward === undefined || back === undefined) return null;
-  return {
-    key: toTestKey(card),
-    card,
-    group,
-    doneLaneId: forward.id,
-    notGoodLaneId: back.id,
-    howToTest: card.task.brief,
-    stage: 'approve',
     taskName: null,
     projectName: null,
     since: sinceOf(card),

@@ -23,7 +23,7 @@ import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
 import '../support/dom.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
-import { interact, type Mounted, mount } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { healthOf } from '../support/health.ts';
 import { sessionView } from '../support/sessions.ts';
 import { laptop as boardLaptop, boardModelOf, card } from './board-support.ts';
@@ -181,6 +181,25 @@ describe('useAgendaInboxModel', () => {
     expect(read.cards).toEqual([]);
   });
 
+  test('gives a card ask the card’s How to test from the board it already reads, for that machine only', async () => {
+    const { client } = fakeClient(new Map());
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const rows = toTestCards(
+      await boardModelOf([card('F1', { laneId: 'tested', howToTest: '1. Try it.' }), card('F2', { laneId: 'tested' })]),
+    );
+    view = await mount(
+      <Probe client={client} machines={[]} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
+    );
+    await settle();
+    const read = inbox as unknown as AgendaInbox;
+    const machine = must(rows[0], 'a row').card.daemonId;
+    expect(read.howToTestFor?.(machine, 'F1')).toBe('1. Try it.');
+    expect(read.howToTestFor?.(machine, 'F2')).toBe('');
+    expect(read.howToTestFor?.(machine, 'F9')).toBeNull();
+    expect(read.howToTestFor?.('another-machine' as typeof machine, 'F1')).toBeNull();
+  });
+
   describe('the health switch for gate items', () => {
     const gateItemFor = (cardId: string): AgendaItem =>
       ({
@@ -259,6 +278,74 @@ describe('useAgendaInboxModel', () => {
     test('without the flag, every to-test row stays, as before', async () => {
       const read = await run(false);
       expect(read.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
+    });
+  });
+
+  describe('the health switch for card asks', () => {
+    const run = async (advertising: readonly (typeof boardLaptop)[], upgrade = false) => {
+      const { client } = fakeClient(new Map());
+      upgraded = () =>
+        client.wires.note(boardLaptop.daemonId, {
+          kind: 'read',
+          health: healthOf('4.120.0', [DAEMON_FEATURES.agendaCardAsks]),
+        });
+      client.wires.note(boardLaptop.daemonId, { kind: 'read', health: healthOf('4.110.0') });
+      for (const machine of advertising)
+        client.wires.note(machine.daemonId, {
+          kind: 'read',
+          health: healthOf('4.120.0', [DAEMON_FEATURES.agendaCardAsks]),
+        });
+      const { timers } = manualTimers();
+      let inbox: AgendaInbox | null = null;
+      const rows = toTestCards(
+        await boardModelOf([
+          card('F1', { laneId: 'tested' }),
+          card('F2', { laneId: 'tested', snoozed: { until: '2999-01-01T00:00:00.000Z', laneId: 'tested' } }),
+        ]),
+      );
+      view = await mount(
+        <Probe
+          client={client}
+          machines={[{ connection: boardLaptop, name: 'Laptop', sessions: [] }]}
+          onInbox={value => (inbox = value)}
+          timers={timers}
+          toTest={rows}
+        />,
+      );
+      await settle();
+      if (upgrade) {
+        await interact(() => upgraded());
+        await settle();
+      }
+      return inbox as unknown as AgendaInbox;
+    };
+    let upgraded: () => void = () => undefined;
+
+    test('a machine that starts advertising card asks after the page is open drops its To-test list at once', async () => {
+      const read = await run([], true);
+      expect(read.toTest).toEqual([]);
+      expect(read.toTestSnoozed).toEqual([]);
+      expect(read.total).toBe(0);
+    });
+
+    test('on a machine that advertises card asks there is no To-test list: awake, snoozed or counted', async () => {
+      const read = await run([boardLaptop]);
+      expect(read.toTest).toEqual([]);
+      expect(read.toTestSnoozed).toEqual([]);
+      expect(read.total).toBe(0);
+    });
+
+    test('on a machine that does not, every row stays, awake and snoozed, and counts', async () => {
+      const read = await run([]);
+      expect(read.toTest.map(row => row.card.task.id)).toEqual(['F1']);
+      expect(read.toTestSnoozed.map(row => row.card.task.id)).toEqual(['F2']);
+      expect(read.total).toBe(1);
+    });
+
+    test('another machine advertising card asks takes nothing from this machine’s rows', async () => {
+      const read = await run([studio]);
+      expect(read.toTest.map(row => row.card.task.id)).toEqual(['F1']);
+      expect(read.toTestSnoozed.map(row => row.card.task.id)).toEqual(['F2']);
     });
   });
 
@@ -456,9 +543,9 @@ describe('useAgendaInboxModel', () => {
     await interact(() => fire());
     await settle();
     expect(calls.filter(call => call.method !== 'revalidate').map(call => [call.method, call.detail])).toEqual([
-      ['respond', ['A1', { kind: 'permission', decision: 'approve' }]],
-      ['dismiss', ['A2', undefined]],
-      ['resolve', ['A3', 'shipped']],
+      ['respond', ['A1', { kind: 'permission', decision: 'approve' }, undefined, undefined, undefined, 1]],
+      ['dismiss', ['A2', undefined, 1]],
+      ['resolve', ['A3', 'shipped', 1]],
       ['discuss', ['A4', 'why?']],
     ]);
   });
@@ -544,7 +631,7 @@ describe('useAgendaInboxModel', () => {
     await settle();
     expect(second?.item.id).toBe('A1');
     expect(calls.filter(call => call.method === 'resolve').map(call => call.detail)).toEqual([
-      [second?.item.id, undefined],
+      [second?.item.id, undefined, 1],
     ]);
   });
 
@@ -836,6 +923,31 @@ describe('the Resolved filter reads', () => {
     await settle();
     expect(calls.length).toBe(before + 1);
   });
+  test('hands a conversation its resolved records, so a merged-away agenda keeps its title', async () => {
+    const { client } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const latest = (): AgendaInbox => inbox as unknown as AgendaInbox;
+    view = await mount(
+      <Probe
+        client={client}
+        machines={[{ connection: studio, name: 'Studio', sessions: [waiting('a')] }]}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+      />,
+    );
+    await settle();
+    expect(latest().recordsOf?.(studio.daemonId, 'a')).toEqual([]);
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(
+      latest()
+        .recordsOf?.(studio.daemonId, 'a')
+        ?.map(record => record.id),
+    ).toEqual(['A1']);
+    expect(latest().recordsOf?.(studio.daemonId, 'unread')).toEqual([]);
+  });
+
   test('skips a board whose machine was unpaired after the read was asked for', async () => {
     const { client, calls } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
     const { timers } = manualTimers();
@@ -935,6 +1047,71 @@ describe('the roll-up lists every conversation’s parked items', () => {
       ['old', 'A4', 'root'],
     ]);
     expect(latest().parkedWhole).toBe(true);
+  });
+
+  describe('a card that says it merged another in', () => {
+    const merged = (id: string): AgendaItem => ({ ...snoozedItem(id), mergedFrom: ['A2'] }) as AgendaItem;
+    const withRecord = (): AgendaSnapshot => ({
+      ...board('old', [merged('A4')]),
+      resolved: [
+        {
+          ...item('A2', 0),
+          resolvedAt: at(3),
+          resolvedBy: 'human',
+          resolvedBySession: null,
+          resolvedByName: null,
+          resolutionNote: null,
+          disposition: 'done',
+        } as never,
+      ],
+    });
+
+    test('reads that one conversation\u2019s board once, so the merged-away agenda keeps its title', async () => {
+      const { client, calls } = fakeClient(new Map([['studio/old', withRecord()]]), {
+        studio: { old: [merged('A4')], other: [snoozedItem('A9')] },
+      });
+      client.wires.note(studio.daemonId, OPEN);
+      const latest = await mountWith(client, [
+        {
+          connection: studio,
+          name: 'Studio',
+          sessions: [root, oldBoard, sessionView('other', { config: { parent: 'root' } as never })],
+        },
+      ]);
+      await settle();
+      const reads = (): string[] =>
+        calls
+          .filter(call => call.method === 'revalidate' && call.sessionId !== 'machine-agenda')
+          .map(call => call.sessionId);
+      expect(reads()).toEqual(['old']);
+      expect(
+        latest()
+          .recordsOf?.(studio.daemonId, 'old')
+          ?.map(record => record.id),
+      ).toEqual(['A2']);
+      await settle();
+      expect(reads()).toEqual(['old']);
+    });
+
+    test('asks again when that read failed', async () => {
+      const { client, calls } = fakeClient(new Map(), { studio: { old: [merged('A4')] } });
+      client.wires.note(studio.daemonId, OPEN);
+      const asked = client.revalidate.bind(client);
+      let failures = 1;
+      client.revalidate = async (...args: Parameters<typeof asked>): Promise<void> => {
+        if (failures > 0 && args[1].sessionId === 'old') {
+          failures -= 1;
+          calls.push({ method: 'revalidate', daemonId: args[0].daemonId, sessionId: 'old' });
+          throw new Error('offline');
+        }
+        return asked(...args);
+      };
+      const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
+      await settle();
+      await interact(async () => latest().loadResolved());
+      await settle();
+      expect(calls.filter(call => call.sessionId === 'old').length).toBeGreaterThanOrEqual(2);
+    });
   });
 
   test('prefers a board this device holds over the roll-up for the same conversation', async () => {

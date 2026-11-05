@@ -188,4 +188,141 @@ describe('createSessionDirectory', () => {
     should(await subject.get('nobody')).be.undefined();
     await should(subject.get('../etc')).be.rejectedWith({ name: 'SessionReadError', failure: 'invalid' });
   });
+
+  describe('a list of documents the reader hands out again', () => {
+    /** A fleet whose documents are the same frozen values until a test replaces one, as the storage's are. */
+    const stored = (count: number) => {
+      const ids = Array.from({ length: count }, (_, n) => `live-${n}`);
+      const configs = new Map(ids.map(id => [id, Object.freeze(sessionView(id).config)]));
+      const states = new Map(ids.map(id => [id, Object.freeze(sessionView(id).state)]));
+      const index = ids.map(id => indexed(id, 'running'));
+      const subject = createSessionDirectory({
+        sessions: () => index,
+        find: id => index.find(session => session.id === id),
+        readConfig: async id => configs.get(id),
+        readState: async id => states.get(id),
+        directory: id => `/state/sessions/${id}`,
+        ended: () => false,
+        yieldToLoop: async () => undefined,
+      });
+      return { ids, configs, states, index, subject };
+    };
+
+    it('should hand out the very same views when no document moved, and parse nothing again', async () => {
+      // Arrange
+      const { subject } = stored(40);
+      const first = await subject.list();
+
+      // Act
+      const second = await subject.list();
+
+      // Assert
+      should(second).have.length(40);
+      should(second.every((view, at) => view === first[at])).be.true();
+      should(JSON.stringify(second)).equal(JSON.stringify(first));
+    });
+
+    it('should parse only the session whose document changed', async () => {
+      // Arrange
+      const { subject, states } = stored(40);
+      const first = await subject.list();
+      states.set('live-7', Object.freeze({ ...sessionView('live-7').state, status: 'stalled' }));
+
+      // Act
+      const second = await subject.list();
+
+      // Assert
+      const moved = second.flatMap((view, at) => (view === first[at] ? [] : [at]));
+      should(moved).eql([7]);
+      should(second[7]?.state.status).equal('stalled');
+      // The unchanged config of the moved session was not parsed again either: its parse is the same object.
+      should(second[7]?.config).equal(first[7]?.config);
+      should(second[7]?.state).not.equal(first[7]?.state);
+      should(second[8]).equal(first[8]);
+    });
+
+    it('should parse the session again when its config changed, and say so in the view', async () => {
+      // Arrange
+      const { subject, configs } = stored(3);
+      const first = await subject.list();
+      configs.set('live-1', Object.freeze(sessionView('live-1', { name: 'Renamed' }).config));
+
+      // Act
+      const second = await subject.list();
+
+      // Assert
+      should(second[1]?.config.name).equal('Renamed');
+      should(second[1]).not.equal(first[1]);
+      should(second[0]).equal(first[0]);
+      should(second[2]).equal(first[2]);
+    });
+
+    it('should hand out a new view when only the journal moved', async () => {
+      // Arrange
+      const { subject, index } = stored(2);
+      const first = await subject.list();
+      index[0] = { ...indexed('live-0', 'running'), lastSequence: 8 };
+
+      // Act
+      const second = await subject.list();
+
+      // Assert
+      should(second[0]?.journalSequence).equal(8);
+      should(second[0]).not.equal(first[0]);
+      should(second[1]).equal(first[1]);
+    });
+
+    it('should judge a broken session afresh, and list it again once it is repaired', async () => {
+      // Arrange
+      const { subject, configs } = stored(2);
+      const good = Object.freeze(sessionView('live-0').config);
+      configs.set('live-0', Object.freeze({ id: 'live-0' }) as never);
+      const broken = await subject.list();
+      configs.set('live-0', good);
+
+      // Act
+      const repaired = await subject.list();
+
+      // Assert
+      should(broken.map(view => view.config.id)).eql(['live-1']);
+      should(repaired.map(view => view.config.id)).eql(['live-0', 'live-1']);
+    });
+
+    it('should let go of a session the index no longer holds', async () => {
+      // Arrange
+      const { subject, index } = stored(3);
+      await subject.list();
+      const removed = index.splice(1, 1);
+
+      // Act
+      const after = await subject.list();
+
+      // Assert
+      should(after.map(view => view.config.id)).eql(['live-0', 'live-2']);
+      should(removed).have.length(1);
+    });
+
+    it('should let go of a session the index swapped for an unusable one, though the count did not change', async () => {
+      // Arrange
+      const { subject, index } = stored(2);
+      const first = await subject.list();
+      const [kept, left] = [index[0], index[1]];
+      // `live-2` is indexed but has no documents at all, so it never enters the cache: the index and the cache
+      // both hold two sessions after this swap, and only membership tells them apart.
+      index.splice(0, 2, kept as IndexedSession, indexed('live-2', 'running'));
+      const withoutLeaver = await subject.list();
+      index.splice(0, 2, kept as IndexedSession, left as IndexedSession);
+
+      // Act
+      const returned = await subject.list();
+
+      // Assert
+      should(withoutLeaver.map(view => view.config.id)).eql(['live-0']);
+      should(returned.map(view => view.config.id)).eql(['live-0', 'live-1']);
+      should(returned[0]).equal(first[0]);
+      // Same documents, but the departed session was forgotten, so its view is built anew rather than recalled.
+      should(returned[1]).not.equal(first[1]);
+      should(returned[1]).eql(first[1]);
+    });
+  });
 });

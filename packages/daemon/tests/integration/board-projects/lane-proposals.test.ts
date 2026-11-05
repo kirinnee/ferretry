@@ -199,7 +199,7 @@ describe('a ferret’s lane edit over the route', () => {
     should(board.laneSet?.lanes.some(lane => lane.id === 'released')).be.true();
     should(board.laneSet?.pending?.relocate).deepEqual({ released: 'closed' });
     should((await proposalCard(world, 2)).why).containEql(
-      'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+      'removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
     );
   });
 

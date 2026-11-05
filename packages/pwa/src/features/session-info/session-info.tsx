@@ -1,5 +1,5 @@
 /**
- * Info for one ferret: the six tabs, each bound to the read that owns its facts.
+ * Info for one ferret: the seven tabs, each bound to the read that owns its facts.
  *
  * Every read is a port the page binds once (`SessionInfoPorts`), so this file never reaches a daemon
  * and a test hands it exactly the rows a reader sees. A read starts the first time its tab is shown and
@@ -25,7 +25,7 @@ import type { ContextLoader } from '../context-rail/context-rail-ports.ts';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
 import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
 import type { InfoAboutProps } from './info-about.tsx';
-import { INFO_TABS } from './info-model.ts';
+import { INFO_TABS, INFO_TABS_WITHOUT_BOARD } from './info-model.ts';
 import { InfoOverview } from './info-overview.tsx';
 import { InfoPanel } from './info-panel.tsx';
 import type { InfoRelaunchRead } from './info-relaunch.tsx';
@@ -68,8 +68,10 @@ export interface SessionInfoProps {
   readonly onOpenSession?: (sessionId: string) => void;
   /** This ferret's card, when the host has a board: the Overview's Card row and the Tasks tab. */
   readonly card?: NonNullable<InfoAboutProps['card']> & { readonly tasks: ReactNode };
-  /** The capability switches, Restart and agenda rows of Overview's "About this ferret" block. */
+  /** The capability switches, Restart and agenda line of Overview's "About this ferret" block. */
   readonly about?: Pick<InfoAboutProps, 'switches' | 'onRestart' | 'agenda'>;
+  /** The Agenda tab's body (`useAgenda().tab`). Absent or `null`: this ferret has no agenda, and no tab is offered. */
+  readonly agendaTab?: ReactNode;
   readonly onOpenAnalytics?: () => void;
   /** The model and effort pickers, when the host has them (another surface owns them). */
   readonly runtimeControls?: ReactNode;
@@ -124,6 +126,7 @@ export function SessionInfo({
   onOpenSession,
   card,
   about,
+  agendaTab,
   onOpenAnalytics,
   runtimeControls,
   learning,
@@ -159,7 +162,9 @@ export function SessionInfo({
       onTabChange={placement.setTab}
       tab={tab}
       titleId={titleId}
-      {...(card === undefined ? {} : { tabs: INFO_TABS })}
+      tabs={(card === undefined ? INFO_TABS_WITHOUT_BOARD : INFO_TABS).filter(
+        each => each !== 'agenda' || (agendaTab !== undefined && agendaTab !== null),
+      )}
       {...(presentation === 'sheet'
         ? { sheetSize: placement.sheetSize, onSheetSizeChange: placement.setSheetSize }
         : {})}
@@ -188,6 +193,7 @@ export function SessionInfo({
             warden={<InfoWarden agentName={name} now={now} sessionId={view.config.id} verdicts={verdictsRead} />}
           />
         ),
+        agenda: () => agendaTab ?? null,
         tasks: () => card?.tasks ?? null,
         runtime: () => (
           <InfoRuntime

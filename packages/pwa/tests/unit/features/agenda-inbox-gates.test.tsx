@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { gateAskOptions, type AgendaGate, type AgendaItem } from '@ferretry/protocol';
+import { type AgendaGate, type AgendaItem, gateAskOptions, gateReference } from '@ferretry/protocol';
+import { useState } from 'react';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import {
@@ -11,15 +12,15 @@ import {
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { sessionView } from '../../support/sessions.ts';
 import { laptop } from '../board-support.ts';
 import {
   mouseIsLastPointer,
+  plainSendBackEditor,
   sendBackBox,
   sendBackSubmit,
-  plainSendBackEditor,
   writeSendBack,
 } from './send-back-support.ts';
-import { sessionView } from '../../support/sessions.ts';
 
 plainSendBackEditor();
 
@@ -97,7 +98,7 @@ const buttonNamed = (mounted: Mounted, name: string): HTMLButtonElement =>
 const tool = (mounted: Mounted, name: string): HTMLButtonElement =>
   must(mounted.container.querySelector<HTMLButtonElement>(`.fy-attn-deck__top [data-inbox-tool="${name}"]`), name);
 const openInfo = (mounted: Mounted) =>
-  press(must(mounted.container.querySelector('.fy-attn-deck__top [data-agenda-info-toggle]'), 'the (i)'));
+  press(must(mounted.container.querySelector('.fy-attn-deck__top [data-agenda-menu-toggle]'), 'the ⋯'));
 const flush = async (): Promise<void> => {
   await interact(async () => {
     await Promise.resolve();
@@ -181,11 +182,12 @@ describe('a gate item in the Inbox', () => {
     await mounted.unmount();
   });
 
-  it('lets the title wrap instead of truncating', async () => {
+  it('keeps the title on one line, as every open item does: never wrapped, never drawn twice', async () => {
     const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key }));
     expect(mounted.container.querySelector('.fy-attn-deck__top [data-agenda-title]')?.hasAttribute('data-wrap')).toBe(
-      true,
+      false,
     );
+    expect(mounted.container.querySelector('[data-agenda-full-title]')).toBeNull();
     await mounted.unmount();
   });
 
@@ -435,22 +437,22 @@ describe('the card’s plain buttons for the compass moves', () => {
     await mounted.unmount();
   });
 
-  it('Snooze is the head clock: its first choice snoozes for an hour from now, and no separate Snooze buttons are drawn', async () => {
+  it('Snooze is in the head’s ⋯: its first choice snoozes for an hour from now, and no separate Snooze buttons are drawn', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [question], { initialOpen: question.key }));
     expect(mounted.container.querySelector('[data-inbox-snooze]')).toBeNull();
-    await press(must(mounted.container.querySelector('.fy-item-view__bar [data-agenda-snooze]'), 'the head clock'));
-    await press(must(mounted.container.querySelector('[role="menuitem"]'), 'the first snooze choice'));
+    await openInfo(mounted);
+    await press(must(mounted.container.querySelector('[data-agenda-menu-snooze]'), 'the first snooze choice'));
     const action = fake.deferred.getSnapshot().pending[0]?.action;
     expect(action?.kind).toBe('snooze');
     expect(Date.parse((action as { until: string }).until)).toBe(NOW + 3_600_000);
     await mounted.unmount();
   });
 
-  it('draws no head clock where the machine cannot snooze, but keeps Skip and Not needed', async () => {
+  it('offers no Snooze where the machine cannot snooze, but keeps Skip and Not needed', async () => {
     const mounted = await mount(page(fakeInbox(), [question], { initialOpen: question.key }, () => false));
-    expect(mounted.container.querySelector('[data-agenda-snooze]')).toBeNull();
     await openInfo(mounted);
+    expect(mounted.container.querySelector('[data-agenda-menu-group="snooze"]')).toBeNull();
     expect(tool(mounted, 'skip')).toBeDefined();
     expect(tool(mounted, 'not-needed')).toBeDefined();
     await mounted.unmount();
@@ -475,5 +477,57 @@ describe('the arrow keys on a gate item', () => {
     await key(view(again), 'ArrowRight');
     expect(pending(forward)).toEqual(['Done']);
     await again.unmount();
+  });
+});
+
+describe('Not good on a card ask drawn on a thread', () => {
+  const askOf = (cardId: string): AgendaGate => ({
+    cardId,
+    laneId: 'tested',
+    laneName: 'Tested',
+    entry: 1,
+    projectId: 'p1',
+    options: [...GATE_OPTIONS.options],
+  });
+  const thread = (cardId: string): InboxCard =>
+    inboxCard(
+      agendaItem('T1', {
+        subject: 'Which colour for the badge?',
+        ask: choices('Blue', 'Green'),
+        gateAttached: askOf(cardId),
+      } as Partial<AgendaItem>),
+      owner,
+    );
+
+  it('answers the ask the owner tapped, even when the shown one changed while they typed', async () => {
+    await mouseIsLastPointer();
+    const fake = fakeInbox();
+    let swap: (cards: readonly InboxCard[]) => void = () => undefined;
+    function Swappable() {
+      const [cards, setCards] = useState<readonly InboxCard[]>([thread('F2')]);
+      swap = setCards;
+      return page(fake, cards, { initialOpen: thread('F2').key });
+    }
+    const mounted = await mount(<Swappable />);
+    await press(
+      must(
+        mounted.container.querySelector<HTMLButtonElement>(
+          '.fy-attn-deck__top [data-agenda-attached-gate] [data-agenda-option="Not good"]',
+        ),
+        'the attached Not good',
+      ),
+    );
+    await flush();
+    const why = sendBackBox(mounted.container);
+    // The ask drawn changes to the next card's while the owner types.
+    await interact(() => swap([thread('F3')]));
+    await writeSendBack(why, 'The code is blank');
+    await press(sendBackSubmit(why));
+    expect(fake.deferred.getSnapshot().pending[0]?.action).toMatchObject({
+      gate: true,
+      cardAsk: gateReference(askOf('F2')),
+      note: 'The code is blank',
+    });
+    await mounted.unmount();
   });
 });

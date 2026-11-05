@@ -6,6 +6,8 @@ import {
   type BriefFlags,
   composeAddRequest,
   composeEditRequest,
+  type EditFlags,
+  linkFlagNotices,
   parseBriefFile,
 } from '../../../src/lib/agenda/brief';
 
@@ -14,6 +16,38 @@ const add = (words: readonly string[], flags: BriefFlags = {}, file: BriefFile =
   composeAddRequest(words, { title: 'Plan approval', ...flags }, file);
 
 describe('agenda brief composition', () => {
+  it('should take a body of exactly 200,000 characters and refuse 200,001 before sending, naming the count and the remedy', () => {
+    // Arrange / Act
+    const fits = add(['pick'], { body: 'x'.repeat(200_000) });
+    const refuse = () => add(['pick'], { body: 'x'.repeat(200_001) });
+
+    // Assert
+    should(fits.body).have.length(200_000);
+    should(refuse).throw(
+      /body: the body is 200,001 characters; the most is 200,000\. Do not trim it: put the full report in a file or artifact, add it with --link/u,
+    );
+  });
+
+  it('should hold an edit’s body and question answer to the same 200,000 characters', () => {
+    // Arrange
+    const edit = (flags: EditFlags) => composeEditRequest('A1', flags, undefined);
+
+    // Act / Assert
+    should(edit({ body: 'x'.repeat(200_000), questionAnswer: 'y'.repeat(200_000) })).have.property('body');
+    should(() => edit({ body: 'x'.repeat(200_001) })).throw(/the body is 200,001 characters/u);
+    should(() => edit({ questionAnswer: 'y'.repeat(200_001) })).throw(
+      /the question answer is 200,001 characters; the most is 200,000.*add it with --link/u,
+    );
+  });
+
+  it('should refuse a step over 16,000 characters with the same remedy', () => {
+    // Arrange / Act / Assert
+    should(add(['pick'], { step: ['x'.repeat(16_000)] })).have.property('steps');
+    should(() => add(['pick'], { step: ['x'.repeat(16_001)] })).throw(
+      /a step is 16,001 characters; the most is 16,000/u,
+    );
+  });
+
   it('should compose a plain add as a titled reply with no answers', () => {
     // Arrange / Act
     const request = add(['pick', 'a', 'cluster'], {});
@@ -761,7 +795,9 @@ describe('agenda option details', () => {
         { label: 'Wait', detail: 'Later.' },
       ],
     });
-    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(/cannot change the options/u);
+    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(
+      /keeps the options unless it replaces the ask/u,
+    );
   });
 });
 
@@ -842,5 +878,181 @@ describe('agenda brief answer shapes', () => {
     // Act + Assert
     should(() => composeEditRequest('A3', { step: ['One'] }, reply)).throw(STEPS_ONLY_TODO);
     should(composeEditRequest('A3', { step: ['One'] }, todo)).containDeep({ steps: ['One'] });
+  });
+});
+
+describe('clearing the answer to the owner’s question', () => {
+  it('should refuse to set and clear the answer in one edit', () => {
+    // Assert
+    should(() => composeEditRequest('A1', { questionAnswer: 'EU', clearQuestionAnswer: true }, undefined)).throw(
+      /--question-answer and --clear-question-answer contradict/u,
+    );
+  });
+});
+
+describe('agenda --link: target, label=target and label=target=meaning', () => {
+  it('should read a bare target, label=target and label=target=meaning, with the meaning trimmed', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: [
+        '#F12',
+        'Plan=&F12',
+        'PR = https://example.invalid/pr/1 = The change that keeps the login alive ',
+        'Notes=docs/a.md=What was decided',
+      ],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { target: '#F12' },
+      { label: 'Plan', target: '&F12' },
+      { label: 'PR', target: 'https://example.invalid/pr/1', meaning: 'The change that keeps the login alive' },
+      { label: 'Notes', target: 'docs/a.md', meaning: 'What was decided' },
+    ]);
+  });
+
+  it('should keep a bare target that carries an = of its own, and a query target, whole', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: ['https://example.invalid/page?a=b', 'Run=https://example.invalid/run?id=7', 'docs/a=b.md'],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { target: 'https://example.invalid/page?a=b' },
+      { label: 'Run', target: 'https://example.invalid/run?id=7' },
+      { target: 'docs/a=b.md' },
+    ]);
+  });
+
+  it('should keep a query or an = in the target whole and take the meaning after it', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: [
+        'Run=https://ci.example.invalid/run?id=7=The run that failed',
+        'Docs=docs/a=b.md',
+        'Docs=docs/a=b.md=The notes on a and b',
+        'Plan=&F12=The plan',
+        'Notes=docs/a.md=',
+      ],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { label: 'Run', target: 'https://ci.example.invalid/run?id=7', meaning: 'The run that failed' },
+      { label: 'Docs', target: 'docs/a=b.md' },
+      { label: 'Docs', target: 'docs/a=b.md', meaning: 'The notes on a and b' },
+      { label: 'Plan', target: '&F12', meaning: 'The plan' },
+      { label: 'Notes', target: 'docs/a.md' },
+    ]);
+  });
+
+  it('should split a one-word meaning after a path, a URL or an address that has no = of its own', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: [
+        'Docs=docs/a.md=Notes',
+        'PR=https://github.com/o/r/pull/1440=Fix',
+        'Plan=x:y=Word',
+        'Plan=&F12=Plan',
+        'Docs=docs/My Notes.md=The notes',
+      ],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { label: 'Docs', target: 'docs/a.md', meaning: 'Notes' },
+      { label: 'PR', target: 'https://github.com/o/r/pull/1440', meaning: 'Fix' },
+      { label: 'Plan', target: 'x:y', meaning: 'Word' },
+      { label: 'Plan', target: '&F12', meaning: 'Plan' },
+      { label: 'Docs', target: 'docs/My Notes.md', meaning: 'The notes' },
+    ]);
+  });
+
+  it('should keep a target that holds its own =, even when a one-word meaning follows', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: [
+        'Docs=docs/a=b.md=Word',
+        'Run=https://ci.example.invalid/run?id=7=Failing',
+        'Grafana=https://g.example.invalid/d?from=now-1h&to=now=The dashboard',
+      ],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { label: 'Docs', target: 'docs/a=b.md=Word' },
+      { label: 'Run', target: 'https://ci.example.invalid/run?id=7=Failing' },
+      { label: 'Grafana', target: 'https://g.example.invalid/d?from=now-1h&to=now', meaning: 'The dashboard' },
+    ]);
+  });
+
+  it('should not pull words of a meaning that holds " = " into the target', () => {
+    // Arrange / Act
+    const request = add(['pick'], {
+      link: ['Fix=#1440=Sets retries = 3 for the job', 'Sets TIMEOUT=docs/c.md=Timeout'],
+    });
+
+    // Assert
+    should(request.links).deepEqual([
+      { label: 'Fix', target: '#1440', meaning: 'Sets retries = 3 for the job' },
+      { label: 'Sets TIMEOUT', target: 'docs/c.md', meaning: 'Timeout' },
+    ]);
+  });
+
+  it('should strip one trailing = as an empty meaning, also after a target with an = of its own', () => {
+    // Arrange / Act
+    const request = add(['pick'], { link: ['Notes=docs/a=b.md=', 'Notes=docs/a.md=', 'Plan=&F12==The plan'] });
+
+    // Assert
+    should(request.links).deepEqual([
+      { label: 'Notes', target: 'docs/a=b.md' },
+      { label: 'Notes', target: 'docs/a.md' },
+      { label: 'Plan', target: '&F12', meaning: 'The plan' },
+    ]);
+  });
+
+  it('should say when a labelled link keeps an = in its target, and stay quiet otherwise', () => {
+    // Arrange / Act
+    const notices = linkFlagNotices([
+      'Run=https://ci.example.invalid/run?id=7=Failing',
+      'Docs=docs/a=b.md',
+      'Docs=docs/a.md=Notes',
+      'Run=https://ci.example.invalid/run?id=7=The failing run',
+      'Run=https://ci.example.invalid/run?id==The run',
+      'https://host/page?a=b',
+      '#F12',
+    ]);
+
+    // Assert
+    should(notices).deepEqual([
+      'read "https://ci.example.invalid/run?id=7=Failing" as the whole target of "Run"; if "Failing" is its meaning, give the link through --json-file',
+      'read "docs/a=b.md" as the whole target of "Docs"; if "b.md" is its meaning, give the link through --json-file',
+    ]);
+    should(linkFlagNotices(undefined)).deepEqual([]);
+  });
+
+  it('should drop an empty meaning and refuse a label with no target', () => {
+    // Arrange / Act
+    const request = add(['pick'], { link: ['Plan=&F12='] });
+
+    // Assert
+    should(request.links).deepEqual([{ label: 'Plan', target: '&F12' }]);
+    should(() => add(['pick'], { link: ['Plan='] })).throw(/--link needs label=target or label=target=meaning/u);
+  });
+
+  it('should read a meaning from the JSON file, and send it on edit', () => {
+    // Arrange
+    const file = parseBriefFile(
+      JSON.stringify({ links: [{ label: 'Plan', target: '&F12', meaning: ' The plan ' }, '#F13'] }),
+    );
+
+    // Act
+    const added = add(['pick'], {}, file);
+    const edited = composeEditRequest('A1', { link: ['Plan=&F12=The plan'] }, undefined);
+
+    // Assert
+    should(added.links).deepEqual([{ label: 'Plan', target: '&F12', meaning: 'The plan' }, { target: '#F13' }]);
+    should(edited).containDeep({ links: [{ label: 'Plan', target: '&F12', meaning: 'The plan' }] });
   });
 });

@@ -1,9 +1,9 @@
 /**
- * THE BOARD'S HEADER NUMBERS: two one-tap pills for what needs the reader (To test, Waiting on
- * you), the health chips (stale, orphaned, active) and "N closed hidden", which opens the Archive.
+ * THE BOARD'S HEADER NUMBERS: the health chips (stale, orphaned, active) and "N closed hidden", which opens the Archive.
+ * What waits on the owner is the Agenda's, so the board draws no To test or Waiting on you pill.
  *
  * Every number is the daemon's own count (`BoardCounts`), summed over the machines read, less the agent cards the
- * board is not showing (so a pill and its cards agree); a pill is also a
+ * board is not showing (so a chip and its cards agree); a chip is also a
  * filter, so pressing it narrows the board to those cards and pressing it again lifts the filter.
  */
 
@@ -28,15 +28,6 @@ interface Pill {
 }
 
 const pills = (counts: BoardCounts): readonly Pill[] => [
-  { filter: 'to_test', icon: 'to-test', label: 'To test', count: counts.toTest, tone: 'pill', word: 'cards to test' },
-  {
-    filter: 'waiting_on_you',
-    icon: 'waiting-on-you',
-    label: 'Waiting on you',
-    count: counts.waitingOnYou,
-    tone: 'pill',
-    word: 'cards waiting on you',
-  },
   { filter: 'stale', icon: 'stale', label: '', count: counts.stale, tone: 'chip', word: 'stale' },
   { filter: 'orphaned', icon: 'orphaned', label: '', count: counts.orphaned, tone: 'chip', word: 'orphaned' },
   { filter: 'active', icon: 'active', label: '', count: counts.active, tone: 'chip', word: 'active' },

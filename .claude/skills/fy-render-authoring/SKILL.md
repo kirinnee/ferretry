@@ -35,6 +35,8 @@ button, no card, no caption:
 | `video`   | plays in the browser's own player, from `src:`                                                                             |
 | `audio`   | plays in the browser's own player, from `src:`                                                                             |
 | `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link                                                    |
+| `card`    | a live board card (`&F12`): title, lane, progress, PRs; click opens it; updates when the card moves                        |
+| `board`   | a live mini board, grouped by lane: up to 12 card refs, or `parent: &F12` for that card's children                         |
 
 So write `chart` when the point is in numbers — a trend, a comparison, a share, a before-and-after —
 and `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have

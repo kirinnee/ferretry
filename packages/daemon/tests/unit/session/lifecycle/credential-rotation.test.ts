@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
 import { NodeSessionCredentialIssuer } from '../../../../src/adapters/session/lifecycle/node-session-credential-issuer.ts';
-import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../src/lib/agent-tools/policy.ts';
 import {
   authenticate,
   isSessionCredential,
@@ -127,10 +127,13 @@ describe('the prefixed session credential, across a rotation', () => {
         erase: async () => {},
       },
     });
+    const session = async () => ({ id: ID, name: null, active: true, sessionCapabilityHash: stored });
     const identities = new CredentialAgentIdentities(
-      { snapshot: async () => [{ id: ID, name: null, active: true, sessionCapabilityHash: stored }] },
+      { snapshot: async () => [await session()], session },
       sha256,
       secretsMatch,
+      new CredentialDigestLocations(),
+      () => '',
     );
     const directory = { resolve: async (capability: string) => await identities.resolve(capability) };
     const asBearer = async (value: string) =>
@@ -153,6 +156,8 @@ describe('the prefixed session credential, across a rotation', () => {
   it('should mint a prefixed credential at the launch, and the old value then names nothing', async () => {
     // Arrange
     const { environment, subject, identities, asBearer } = rotating();
+    // Seed the digest lookup before rotation so the old pane cannot survive on its cached entry.
+    should(await identities.resolve(UNPREFIXED)).deepEqual({ sessionId: ID });
 
     // Act
     const hash = await subject.rotate(ID);

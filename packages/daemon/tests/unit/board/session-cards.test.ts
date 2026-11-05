@@ -53,6 +53,8 @@ interface Options {
   readonly off?: readonly BoardProjectId[];
   /** The board a child started in each folder works on; absent means PROJECT. */
   readonly folders?: Readonly<Record<string, BoardProjectId>>;
+  /** Replaces the lookup of a board's name. */
+  readonly nameOf?: SessionCardsPorts['projects']['nameOf'];
 }
 
 const build = (options: Options = {}) => {
@@ -102,7 +104,7 @@ const build = (options: Options = {}) => {
         return options.proposed ?? null;
       },
     },
-    projects: { nameOf: async projectId => NAMES[projectId] ?? projectId },
+    projects: { nameOf: options.nameOf ?? (async projectId => NAMES[projectId] ?? projectId) },
     focus,
     diagnostics: { warn: message => warnings.push(message) },
     bin: 'fy',
@@ -498,6 +500,7 @@ describe('a session started with a brief', () => {
         id: 'F5',
         existing: true,
         parent: { id: 'F1' },
+        held: { owner: 'lead', assignee: null },
         project: 'Ferretry',
       });
       should(notes[0]).startWith('You already had &F5 ("Build the Board Store")');
@@ -640,6 +643,335 @@ describe('a session started with a brief', () => {
       should(dropped.refusal).match(/&F3 is dropped/u);
       should(missing.delegation).be.undefined();
       should(ports.store.writes).be.empty();
+    });
+  });
+
+  describe('a fy start --card', () => {
+    it("should assign the lead's existing card to the new session and journal it, with no second card", async () => {
+      // Arrange
+      const { subject, ports, focus } = build({
+        cards: [card({ id: 'F9', owner: 'lead', title: 'Something else' })],
+      });
+
+      // Act
+      const { delegation, refusal } = await subject.startOn('lead', 'F9');
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead', delegation });
+
+      // Assert
+      should(refusal).be.undefined();
+      should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child', title: 'Something else' });
+      should(stored(ports, 'F9').history.find(event => event.type === 'assigned')).match({
+        from: null,
+        to: 'child',
+        actor: { kind: 'ferret', sessionId: 'lead' },
+      });
+      should([...ports.store.cards.keys()]).deepEqual(['F9']);
+      should(focus.focused.get('child')).deepEqual({ id: 'F9' });
+    });
+
+    it('should refuse a card its caller may not hand down, and write nothing', async () => {
+      // Arrange
+      const { subject, ports } = build({
+        cards: [
+          card({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
+          card({ id: 'F3', owner: 'sibling', assignee: 'sibling' }),
+        ],
+      });
+
+      // Act
+      const foreign = await subject.startOn('lead', 'F2');
+      const sideways = await subject.startOn('lead', 'F3');
+      const missing = await subject.startOn('lead', 'F99');
+
+      // Assert
+      should(foreign.delegation).be.undefined();
+      should(foreign.refusal).be.a.String();
+      should(sideways.delegation).be.undefined();
+      should(missing.refusal).match(/no card &F99/u);
+      should(ports.store.writes).be.empty();
+    });
+
+    it("should let the owner's start take any card that exists, as the owner's act", async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+
+      // Act
+      const { delegation, refusal } = await subject.startOn(undefined, 'F9');
+      const missing = await subject.startOn(undefined, 'F99');
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', delegation });
+
+      // Assert
+      should(refusal).be.undefined();
+      should(delegation).match({ id: 'F9', byOwner: true });
+      should(missing.refusal).match(/no card &F99/u);
+      should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child' });
+      should(stored(ports, 'F9').history.find(event => event.type === 'assigned')?.actor).match({ kind: 'owner' });
+    });
+  });
+
+  describe('a fy start --card that cannot be honoured', () => {
+    const stopper = () => {
+      const stopped: string[] = [];
+      return { stopped, stop: async (reason: string) => void stopped.push(reason) };
+    };
+
+    it('should refuse a dropped or closed card up front, for a lead and for the owner, and write nothing', async () => {
+      // Arrange
+      const { subject, ports } = build({
+        cards: [
+          card({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'superseded' } }),
+          card({ id: 'F4', owner: 'lead', laneId: 'closed' }),
+        ],
+      });
+
+      // Act
+      const outcomes = [
+        await subject.startOn('lead', 'F3'),
+        await subject.startOn('lead', 'F4'),
+        await subject.startOn(undefined, 'F3'),
+        await subject.startOn(undefined, 'F4'),
+      ];
+
+      // Assert
+      for (const outcome of outcomes) should(outcome.delegation).be.undefined();
+      should(outcomes.map(outcome => outcome.refusal)).match([
+        /&F3 is dropped/u,
+        /&F4 is closed/u,
+        /&F3 is dropped/u,
+        /&F4 is closed/u,
+      ]);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should refuse a start that is not an ordinary ferret, whatever the card', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+
+      // Act
+      const byLead = await subject.startOn('lead', 'F9', false);
+      const byOwner = await subject.startOn(undefined, 'F9', false);
+
+      // Assert
+      should(byLead.delegation).be.undefined();
+      should(byLead.refusal).match(/ordinary ferret/u);
+      should(byOwner.refusal).match(/ordinary ferret/u);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should refuse, not fail, when the board cannot be read', async () => {
+      // Arrange
+      const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);
+      store.read = async () => {
+        throw new TypeError('the board is unreadable');
+      };
+      const { subject } = build({ world: { store } });
+
+      // Act
+      const outcome = await subject.startOn(undefined, 'F9');
+
+      // Assert
+      should(outcome.delegation).be.undefined();
+      should(outcome.refusal).match(/the board is unreadable/u);
+    });
+
+    it('should hand the card over and stop nothing when it is still open', async () => {
+      // Arrange
+      const { subject, ports, focus } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).be.undefined();
+      should(taken.opened?.card).match({ id: 'F9', assignee: 'child' });
+      should(stopped).be.empty();
+      should(focus.focused.get('child')).deepEqual({ id: 'F9' });
+      should(stored(ports, 'F9').assignee).equal('child');
+    });
+
+    it('should stop the session and leave the card alone when it was dropped after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'changed course' } }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.opened).be.undefined();
+      should(taken.refusal).match(/&F9 could not be handed to the new session: .*&F9 is dropped/u);
+      should(stopped).deepEqual([taken.refusal]);
+      should(stored(ports, 'F9').assignee).be.null();
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should stop the session when the owner’s card was closed after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn(undefined, 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', laneId: 'closed' }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).match(/&F9 is closed/u);
+      should(stopped).have.length(1);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should stop the session when the card was reassigned away from the lead after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'stranger', assignee: 'stranger' }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.opened).be.undefined();
+      should(taken.refusal).be.a.String();
+      should(stopped).have.length(1);
+      should(stored(ports, 'F9').assignee).equal('stranger');
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should stop the second of two starts racing for a lead’s card, and keep the first one’s assignment', async () => {
+      // Arrange: both starts judge the card while the lead alone holds it.
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const first = await subject.startOn('lead', 'F9');
+      const second = await subject.startOn('lead', 'F9');
+
+      // Act
+      const winner = await subject.takeOver(first.delegation as NonNullable<typeof first.delegation>, 'child-a', stop);
+      const loser = await subject.takeOver(second.delegation as NonNullable<typeof second.delegation>, 'child-b', stop);
+
+      // Assert
+      should(winner.refusal).be.undefined();
+      should(loser.opened).be.undefined();
+      should(loser.refusal).match(
+        /&F9 could not be handed to the new session: .*&F9 changed hands .*nothing was assigned/u,
+      );
+      should(stopped).deepEqual([loser.refusal]);
+      should(stored(ports, 'F9').assignee).equal('child-a');
+      should(ports.store.cards.get('F9')?.history.filter(event => event.type === 'assigned')).have.length(1);
+    });
+
+    it('should stop the second of two owner starts racing for a card, though the owner may always assign', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const first = await subject.startOn(undefined, 'F9');
+      const second = await subject.startOn(undefined, 'F9');
+
+      // Act
+      const winner = await subject.takeOver(first.delegation as NonNullable<typeof first.delegation>, 'child-a', stop);
+      const loser = await subject.takeOver(second.delegation as NonNullable<typeof second.delegation>, 'child-b', stop);
+
+      // Assert
+      should(winner.refusal).be.undefined();
+      should(loser.refusal).match(/&F9 changed hands/u);
+      should(stopped).have.length(1);
+      should(stored(ports, 'F9').assignee).equal('child-a');
+    });
+
+    it('should stop a start when only the assignee changed after the preflight, the lead still owning the card', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', assignee: 'other-child' }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).match(/&F9 changed hands since you chose it \(now held by other-child\)/u);
+      should(stopped).have.length(1);
+      should(stored(ports, 'F9').assignee).equal('other-child');
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should stop a start when the owner started it and only the assignee changed after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn(undefined, 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', assignee: 'other-child' }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).match(/&F9 changed hands/u);
+      should(stopped).have.length(1);
+      should(stored(ports, 'F9').assignee).equal('other-child');
+    });
+
+    it('should start the session, naming no board, when the board’s name cannot be looked up after the card is assigned', async () => {
+      // Arrange: the name is read for the preflight, then the lookup fails once the card has been assigned.
+      let failing = false;
+      const { subject, ports, warnings } = build({
+        cards: [card({ id: 'F9', owner: 'lead' })],
+        nameOf: async projectId => {
+          if (failing) throw new Error('the project registry is unreadable');
+          return NAMES[projectId] ?? projectId;
+        },
+      });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      failing = true;
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).be.undefined();
+      should(taken.opened?.card).match({ id: 'F9', assignee: 'child', laneId: 'plan' });
+      should(taken.opened?.project).be.undefined();
+      should(stopped).be.empty();
+      should(stored(ports, 'F9').assignee).equal('child');
+      should(warnings).deepEqual(['could not name the board of &F9: the project registry is unreadable']);
+    });
+
+    it('should refuse a delegation that was never judged, rather than assign on a guess', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      const { held: _held, ...unjudged } = delegation as NonNullable<typeof delegation>;
+
+      // Act
+      const taken = await subject.takeOver(unjudged, 'child', stop);
+
+      // Assert
+      should(taken.refusal).match(/&F9 was not judged before it was handed over/u);
+      should(stopped).have.length(1);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should still refuse, and say the stop failed, when the session cannot be stopped', async () => {
+      // Arrange
+      const { subject, ports, warnings } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', async () => {
+        throw new Error('tmux would not answer');
+      });
+
+      // Assert
+      should(taken.refusal).be.a.String();
+      should(warnings.join('\n')).match(/could not stop child after a refused card: tmux would not answer/u);
     });
   });
 

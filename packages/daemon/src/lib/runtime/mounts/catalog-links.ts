@@ -2,13 +2,14 @@
  * Download links: ONE skill or MCP setup behind a URL (docs/catalogs.md § Links). The domain is `catalog-links/`;
  * the wire is `@ferretry/protocol` catalog-link.
  *
- * Every route is `sharing`/`use`. A FERRET HOLDS THE ADMIN TOKEN BUT MAY ONLY READ: previewing, minting, copying
+ * Every route is `sharing`/`use`; move, change, Copy and turn-off are the `narrowing` boundary demand (below). A FERRET HOLDS THE ADMIN TOKEN BUT MAY ONLY READ: previewing, minting, copying
  * and turning off are the owner's (`ownerOnly`). A prompt-injected agent that could mint a link could hand a
  * stranger a skill or an MCP setup from this machine, and one that could Copy would read a public link's key.
  *
  * MINTING ADDS ACCESS, so a governed caller proves a fresh passkey for the act `share-link` alone, claimed
- * atomically (a replayed proof is refused). Copy only shows what the owner already made, so it needs the device
- * unlock and no new proof. Turning off takes access away and asks for nothing.
+ * atomically (a replayed proof is refused). So does MOVING a link (it serves other bytes at the same URL) and a
+ * CHANGE that reaches further (a later end, a higher or no cap). A change that narrows takes access away and asks for
+ * nothing, like turning off; Copy only shows what the owner already made, so it needs the device unlock and no new proof.
  *
  * THE LINK LEAVES THIS MACHINE IN TWO ANSWERS: the mint's and Copy's. No other answer has a field for a URL or a
  * key, and the audit decorator reads only the named response fields.
@@ -17,10 +18,12 @@ import {
   CatalogLinkIdSchema,
   CatalogLinkPreviewRequestSchema,
   CreateCatalogLinkRequestSchema,
+  MoveCatalogLinkRequestSchema,
   SharedCatalogItemIdSchema,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
+  UpdateCatalogLinkRequestSchema,
 } from '@ferretry/protocol';
 import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
@@ -33,9 +36,19 @@ import type { CatalogLinkService } from '../../catalog-links/service.ts';
 import { CatalogLinkRefusal, LINK_STATUS } from '../../catalog-links/refusal.ts';
 
 const SHARING_USE: CapabilityDemand = { capability: 'sharing', axis: 'use' };
+/**
+ * What the routes that move, change, copy or turn off a link demand at the boundary: the grant, the device and the
+ * unlock, and NOT a generic per-action proof. The boundary cannot tell a narrowing from a widening, and it would
+ * spend the held proof before the handler claims the fresh `share-link` one that a move or a widening needs; the
+ * handler asks that itself. A narrowing, Copy and turning off then ask nothing more.
+ */
+const SHARING_NARROWING: CapabilityDemand = { ...SHARING_USE, narrowing: true };
 
 export interface CatalogLinkSubsystem {
-  readonly links: Pick<CatalogLinkService, 'storeStatus' | 'preview' | 'mint' | 'list' | 'get' | 'copy' | 'revoke'>;
+  readonly links: Pick<
+    CatalogLinkService,
+    'storeStatus' | 'preview' | 'mint' | 'list' | 'get' | 'copy' | 'revoke' | 'move' | 'widens' | 'update'
+  >;
 }
 
 async function answer(work: () => Promise<unknown>, success = 200): Promise<ApiResponse> {
@@ -59,15 +72,15 @@ function ownerOnly(context: RouteContext, act: string): void {
 }
 
 /**
- * Claims the passkey proof for minting, atomically. `undefined` means it may go on; an ungoverned caller (the
- * machine's own `fy`) needs none.
+ * Claims the passkey proof for an act that adds access, atomically. `undefined` means it may go on; an ungoverned
+ * caller (the machine's own `fy`) needs none.
  */
-function claimPasskey(context: RouteContext): ApiResponse | undefined {
+function claimPasskey(context: RouteContext, what = 'making a download link'): ApiResponse | undefined {
   if (context.governance?.governed !== true || context.claimFreshStepUp?.(STEP_UP_ACTS.shareLink) === true)
     return undefined;
   return jsonResponse(
     {
-      error: 'making a download link needs a passkey confirmation for it, from this device',
+      error: `${what} needs a passkey confirmation for it, from this device`,
       code: STEP_UP_REQUIRED_CODE,
       demand: { ...SHARING_USE, act: STEP_UP_ACTS.shareLink },
     } satisfies StepUpRequiredBody,
@@ -162,11 +175,54 @@ export function catalogLinkRoutes(subsystem: CatalogLinkSubsystem): readonly Api
       },
     },
     {
+      method: 'PUT',
+      path: '/v1/catalog-links/:linkId/version',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_NARROWING,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'move a download link');
+        const id = linkId(context);
+        const request = await parseBody(context.request, MoveCatalogLinkRequestSchema);
+        const refusal = claimPasskey(context, 'moving a download link to another version');
+        if (refusal !== undefined) return refusal;
+        return await answer(() => links.move(id, request));
+      },
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/catalog-links/:linkId',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_NARROWING,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'change a download link');
+        const id = linkId(context);
+        const request = await parseBody(context.request, UpdateCatalogLinkRequestSchema);
+        // Only a change that reaches further asks for a passkey; the service refuses one that became so after this.
+        let widens = false;
+        try {
+          widens = await links.widens(id, request);
+        } catch (error) {
+          if (error instanceof CatalogLinkRefusal)
+            throw new ApiError(LINK_STATUS[error.refusal], error.message, error.refusal);
+          throw error;
+        }
+        if (widens) {
+          const refusal = claimPasskey(context, 'making a download link reach further');
+          if (refusal !== undefined) return refusal;
+        }
+        return await answer(() => links.update(id, request, widens));
+      },
+    },
+    {
       method: 'POST',
       path: '/v1/catalog-links/:linkId/copy',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'copy a download link');
@@ -179,7 +235,7 @@ export function catalogLinkRoutes(subsystem: CatalogLinkSubsystem): readonly Api
       path: '/v1/catalog-links/:linkId',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'turn off a download link');

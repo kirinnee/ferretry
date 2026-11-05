@@ -885,6 +885,8 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(w.events.at(-1)?.type).equal('surface.input_expired');
     should(w.closed.length).equal(1);
     should(w.told[0]?.message).containEql('expired');
+    // The card closes in words that say it once (#B147).
+    should(w.closed[0]?.note).equal('Input request expired.');
     should((await service.agentView(SESSION, 'A1' as AgendaId, 0)).state).equal('expired');
   });
 

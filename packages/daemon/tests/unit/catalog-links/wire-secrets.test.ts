@@ -44,7 +44,7 @@ describe('the owner wire for links', () => {
 
   it('should name no field of the audit that could hold one', () => {
     const rules = AUDITED_ROUTES.filter(rule => rule.path.startsWith('/v1/catalog-links'));
-    should(rules).have.length(3);
+    should(rules).have.length(5);
     for (const rule of rules) {
       const paths = Object.values(rule.responseFields ?? {}).flat();
       should(paths.filter(name => SECRETISH.test(name))).deepEqual([]);

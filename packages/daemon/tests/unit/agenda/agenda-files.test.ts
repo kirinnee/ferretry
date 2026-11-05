@@ -9,6 +9,7 @@ import {
   migrateAgendaFiles,
   readAgendaFile,
 } from '../../../src/lib/agenda/agenda-files.ts';
+import { AGENDA_LEDGER_VERSION } from '../../../src/lib/agenda/state-machine.ts';
 
 const T1 = '2026-10-30T10:00:00.000Z';
 const T2 = '2026-10-30T11:00:00.000Z';
@@ -67,7 +68,8 @@ class MemoryStore implements AgendaFileStore {
 }
 
 function ledger(updatedAt: string, nextId = 1, sessionId = SESSION): string {
-  return `${JSON.stringify({ sessionId, nextId, entries: [], updatedAt }, null, 2)}\n`;
+  // In the shape this daemon writes (`AGENDA_LEDGER_VERSION`), so the copy it verifies is the same bytes.
+  return `${JSON.stringify({ sessionId, nextId, entries: [], updatedAt, version: AGENDA_LEDGER_VERSION }, null, 2)}\n`;
 }
 
 function outbox(at: string | undefined, sessionId = SESSION): string {

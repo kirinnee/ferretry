@@ -1,3 +1,4 @@
+import { boardPrivate } from '../../../src/lib/board-private-preference.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { boardOk } from '@ferretry/protocol';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
@@ -7,7 +8,6 @@ import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { cardPlaces } from '../../../src/lib/board-view.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
 import {
   boardAnswer,
   boardModelOf,
@@ -27,12 +27,11 @@ import {
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const LEAD = 'mvuc7tsf-0c3d50df';
 
-plainSendBackEditor();
-
 let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  boardPrivate.set(false);
 });
 
 const OPEN = [
@@ -67,7 +66,7 @@ const open = async (search = '', props: Partial<BoardPageProps> = {}, cards: typ
   };
   view = await mount(
     <BoardPage
-      agenda={{ respond: async () => undefined }}
+      agenda={{}}
       callsigns={new Map([[LEAD, 'denisha']])}
       machines={[{ connection: laptop, name: 'laptop' }]}
       now={NOW}
@@ -225,9 +224,7 @@ describe('Board on a phone — the lane strip', () => {
       showMachine: false,
       hrefFor: entry => `/d/laptop/board/${entry.task.id}`,
       onNavigate: () => undefined,
-      movesFor: () => undefined,
       places: cardPlaces(model),
-      dragging: null,
       touch: true,
     };
     view = await mount(
@@ -256,7 +253,6 @@ describe('Board on a phone — the lane strip', () => {
 describe('Board on a phone — counts and filters', () => {
   it('opens the matching cards as a list when a count is tapped', async () => {
     for (const [count, activity] of [
-      ['to_test', 'to_test'],
       ['stale', 'stale'],
       ['orphaned', 'orphaned'],
     ] as const) {
@@ -278,7 +274,7 @@ describe('Board on a phone — counts and filters', () => {
     expect(written.get('view')).toBe('list');
   });
 
-  it('keeps "Ferret cards" in the Filters sheet, not the header, so the header gains no row', async () => {
+  it('keeps "Show private" in the Filters sheet, not the header, so the header gains no row', async () => {
     const split = [
       originCard('F1', 'human', null, { laneId: 'implement' }),
       originCard('F2', 'agent', { id: 'F1' }, { laneId: 'implement' }),
@@ -290,12 +286,12 @@ describe('Board on a phone — counts and filters', () => {
       document.querySelector<HTMLInputElement>('.fy-board-filter-sheet [data-filter="agents"]'),
       'the agents toggle',
     );
-    expect(toggle.closest('label')?.textContent).toBe('Ferret cards');
+    expect(toggle.closest('label')?.textContent).toBe('Show private');
     await click(document.body, '.fy-board-filter-sheet [data-filter="agents"]');
     expect(searches).toEqual(['agents=1']);
   });
 
-  it('offers no "Ferret cards" in the sheet when the daemon does not say who asked', async () => {
+  it('offers no "Show private" in the sheet when the daemon does not say who asked', async () => {
     const { root } = await open('', {}, unasked(OPEN));
     await click(root, '.fy-board-filters__toggle');
     expect(document.querySelector('.fy-board-filter-sheet')).not.toBeNull();
@@ -344,34 +340,20 @@ describe('Board on a phone — counts and filters', () => {
 });
 
 describe('Board on a phone — rows waiting to be tested', () => {
-  it('puts ✓ Done and ✗ Not good right on the row', async () => {
+  it('draws no Done or Not good on the row: the owner answers in the agenda', async () => {
     const { root } = await open('at=tested');
     const row = must(root.querySelector('[data-task="F4"]'), 'the To test row');
-    expect(row.querySelector('.fy-board-done')?.textContent).toBe('Done');
-    expect(row.querySelector('.fy-board-done')?.getAttribute('aria-label')).toBe(
-      'Mark Try the thing done and close it',
-    );
-    const buttons = [...row.querySelectorAll<HTMLButtonElement>('.fy-board-verdict')];
-    expect(buttons.map(button => button.textContent)).toEqual(['Not good']);
-    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Not good: send back Try the thing']);
+    expect(row.querySelector('.fy-board-done, .fy-board-verdict, [data-verdict], .fy-board-card__verdict')).toBeNull();
+    expect(row.textContent).not.toMatch(/Not good/u);
   });
 
-  it('closes the card in one tap on Done', async () => {
+  it('has no hand control: no lane menu, no add-card button, no Lanes link, nothing to move a card with', async () => {
     const { root, acts } = await open('at=tested');
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('slides the reason box up on Not good, and sends the card back only with a reason', async () => {
-    const { root, acts } = await open('at=tested');
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    expect(root.querySelector('.fy-board-card__more, [role="menu"], [draggable="true"]')).toBeNull();
+    expect(root.querySelector('[data-board-add], .fy-board__fab, [data-board-lanes]')).toBeNull();
+    expect(root.querySelector('[aria-label="Add card"]')).toBeNull();
+    expect(root.textContent).not.toMatch(/Lanes ✎/u);
     expect(acts).toEqual([]);
-    const scrim = must(root.querySelector('.fy-board__scrim'), 'the reason box');
-    expect(scrim.hasAttribute('data-phone')).toBe(true);
-    expect(scrim.textContent).toContain('Not good: send Try the thing back to Implement');
-
-    await sendBack(sendBackBox(scrim), 'The button is dead');
-    expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'implement', reason: 'The button is dead' } }]);
   });
 
   it('links the row to the full-screen card, which this page does not draw', async () => {

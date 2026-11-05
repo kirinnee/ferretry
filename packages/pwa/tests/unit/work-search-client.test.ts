@@ -78,6 +78,7 @@ describe('what counts as words', () => {
 describe('the line a hit matched', () => {
   it('names the field for a body match and says nothing for a title or id match', () => {
     expect(workHitDescription(hit({ field: 'howToTest', line: ' open the page ' }))).toBe('how to test: open the page');
+    expect(workHitDescription(hit({ field: 'status', line: ' writing the route ' }))).toBe('status: writing the route');
     expect(workHitDescription(hit({ field: 'title', line: 'Relay handshake' }))).toBe('');
     expect(workHitDescription(hit({ field: 'id', line: 'F1' }))).toBe('');
     expect(workHitDescription(hit({ field: 'note', line: '   ' }))).toBe('');

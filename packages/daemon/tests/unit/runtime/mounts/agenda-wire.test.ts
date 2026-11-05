@@ -203,3 +203,21 @@ describe('the agenda wire feature', () => {
     should(DAEMON_FEATURES.agendaWire).equal('agenda.wire.1');
   });
 });
+
+it('keeps conversation reads operator-only on relayed loopback and admits a governed person without host privilege', async () => {
+  // Arrange
+  const dispatcher = await relayedDispatcher(LIMITED_DEVICE_GRANTS);
+  const path = '/v1/sessions/s1/agenda/A1/conversation';
+  const route = find('GET', '/v1/sessions/:sessionId/agenda/:id/conversation');
+
+  // Act
+  const anonymous = await dispatcher.dispatch(request({ path, loopback: true, carrier: 'tunnel' }));
+  const phone = await dispatcher.dispatch(request({ path, loopback: true, carrier: 'tunnel', device: PHONE }));
+
+  // Assert
+  should(route.minimum).equal('operator');
+  should(route.caller).equal('any');
+  should(route.privilegedOnly).be.undefined();
+  should(anonymous.status).equal(401);
+  should(phone.status).equal(404); // admitted; this session has no such item
+});

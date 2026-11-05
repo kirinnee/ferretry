@@ -167,6 +167,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  pushAlerts: { seen: async () => ({ found: true, tags: [] }) },
   stepUp: stepUpSubsystem(),
   // The published set's one view, which the pairing service reads too. Non-empty on purpose — an empty
   // one would let `PairingResponseSchema`'s default stand in for a carried-through set.
@@ -539,6 +540,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       },
     },
     result: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    subtree: async () => {
       throw new Error('not exercised by the surface inventory');
     },
     setSwitch: async () => {
@@ -953,12 +957,14 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      109 + // the session table and everything that is not the account model (one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      112 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       2 + // the owner's view of who holds the terminal slots, and closing the finished ferrets' terminals (`fy terminal close --all-finished`)
       7 + // the project boards: the board query, its card ids, one card, a new card, an action on a card (board-design.md §2), a ferret's skip (§3.4), and the owner's start of a new ferret on a card (docs/board.md, "Start a ferret on a card")
+      1 + // bounded full-conversation reads, including historical version threads
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       1 + // one ferret's tidy plan: its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy")
       2 + // the machine agenda: its read and the owner's dismiss, snooze or resolve (docs/agenda.md, "The machine agenda")
+      1 + // an agenda item the owner opened, so its alerts come down on their other devices (`POST /v1/push/seen`)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -969,6 +975,7 @@ describe('the mounted daemon surface', () => {
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
       1 + // the security log read
+      1 + // a lead's table of its sub-ferrets (`GET /v1/sessions/:sessionId/subtree`, docs/pack-mode.md)
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
       1 + // "Send now" for the answers a ferret's outbox holds (docs/agenda.md § The loop)
       1 + // the owner's "Clear all from agent ferrets": every open item on the agent ferrets' boards, dismissed (docs/agenda.md)
@@ -1023,7 +1030,7 @@ describe('the mounted daemon surface', () => {
       7 + // copying a skill from this machine into a project or runtime: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       19 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, the preview and publish of an update, making a version current and retiring one (docs/catalogs.md)
       10 + // the people a catalog is shared with: mint, list and end a share, approve a new passkey for an invite; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
-      7 + // the download links this machine makes: the store's status, a preview, list, mint, one link, Copy and turn off (docs/catalogs.md § Links)
+      9 + // the download links this machine makes: the store's status, a preview, list, mint, one link, move, change, Copy and turn off (docs/catalogs.md § Links)
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
       3 + // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
       1; // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
@@ -1064,6 +1071,8 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/pair/devices/:deviceId',
       // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
       'PATCH /v1/pair/devices/:deviceId/grants',
+      // An agenda item the owner opened: its alerts come down on their other devices (names no device, returns none).
+      'POST /v1/push/seen',
       // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
       // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
       // list is a projection with no field for one.
@@ -1252,6 +1261,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/catalog-links',
       'POST /v1/catalog-links',
       'GET /v1/catalog-links/:linkId',
+      'PUT /v1/catalog-links/:linkId/version',
+      'PATCH /v1/catalog-links/:linkId',
       'POST /v1/catalog-links/:linkId/copy',
       'DELETE /v1/catalog-links/:linkId',
       'GET /v1/sessions',
@@ -1307,6 +1318,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pack/recommend',
       'POST /v1/pack/new',
       'GET /v1/sessions/:sessionId/result',
+      'GET /v1/sessions/:sessionId/subtree',
       'PATCH /v1/sessions/:sessionId/pack',
       'POST /v1/sessions/:sessionId/mcp/project/preview',
       'POST /v1/sessions/:sessionId/mcp/login/preview',
@@ -1348,6 +1360,10 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'GET /v1/sessions/:sessionId/agenda',
       'POST /v1/sessions/:sessionId/agenda',
+      'GET /v1/sessions/:sessionId/agenda/:id/conversation',
+      'GET /v1/sessions/:sessionId/agenda/:id/versions',
+      'GET /v1/sessions/:sessionId/agenda/:id/versions/:version',
+      'PUT /v1/sessions/:sessionId/agenda/:id/seen',
       'POST /v1/sessions/:sessionId/agenda/replies',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',

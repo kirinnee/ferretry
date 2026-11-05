@@ -16,6 +16,8 @@ import {
   type SessionResult,
   SessionResultSchema,
   type SessionView,
+  type SubtreeView,
+  SubtreeViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -25,8 +27,17 @@ import { type PackSubsystem, packRoutes } from '../../../../src/lib/runtime/moun
 import { SessionPackError } from '../../../../src/lib/session/pack/service.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { packConfig } from '../../pack/support.ts';
-import { agentIn, CREDENTIALS, FERRET_SESSION, fromFerret, GRANTED, human, sessionView } from './support.ts';
 import { homesOf } from './state-homes-support.ts';
+import {
+  agentIn,
+  CREDENTIALS,
+  FERRET_SESSION,
+  fromFerret,
+  GRANTED,
+  human,
+  sessionView,
+  withoutGrant,
+} from './support.ts';
 
 /** The Pack mode routes, over the real dispatcher: what each status and body is made of. */
 
@@ -96,6 +107,25 @@ const JOB = {
 } as const;
 const SUGGESTED = { by: 'opus', via: 'claude-main', at: '2026-10-22T12:00:00.000Z' };
 
+const SUBTREE: SubtreeView = {
+  root: { id: 's1', callsign: 'rhett' },
+  at: '2026-11-03T12:00:00.000Z',
+  endedWindowMs: 7_200_000,
+  rows: [
+    {
+      id: 'c1',
+      callsign: 'ada',
+      parent: 's1',
+      depth: 1,
+      model: 'claude-sonnet-5-5',
+      state: 'running',
+      status: 'running',
+      card: { ref: '&F767', lane: 'In progress' },
+      last: { at: '2026-11-03T11:59:00.000Z', source: 'note', text: 'tests green' },
+    },
+  ],
+};
+
 class FakePack implements PackSubsystem {
   readonly recommended: Array<{ task?: string | undefined }> = [];
   readonly started: PackNewRequest[] = [];
@@ -108,6 +138,7 @@ class FakePack implements PackSubsystem {
     private readonly options: {
       readonly outcome?: PackNewOutcome;
       readonly result?: SessionResult | undefined;
+      readonly subtree?: SubtreeView | undefined;
       readonly switchError?: unknown;
       readonly start?: PackCleanUpStart;
       readonly job?: PackCleanUpJobResult | undefined;
@@ -163,6 +194,15 @@ class FakePack implements PackSubsystem {
 
   async result(sessionId: string): Promise<SessionResult | undefined> {
     return 'result' in this.options ? this.options.result : { ...RESULT, id: sessionId };
+  }
+
+  readonly subtreeCallers: Array<string | undefined> = [];
+
+  async subtree(sessionId: string, caller?: string): Promise<SubtreeView | undefined> {
+    this.subtreeCallers.push(caller);
+    return 'subtree' in this.options
+      ? this.options.subtree
+      : { ...SUBTREE, root: { id: sessionId, callsign: 'rhett' } };
   }
 
   async setSwitch(
@@ -525,6 +565,88 @@ describe('GET /v1/sessions/:sessionId/result', () => {
   });
 });
 
+describe('GET /v1/sessions/:sessionId/subtree', () => {
+  it("should answer the table of a lead's descendants, uncached", async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act
+    const answer = await dispatcher(subsystem).dispatch(call('GET', '/v1/sessions/s1/subtree'));
+
+    // Assert
+    should(answer.status).equal(200);
+    should(SubtreeViewSchema.parse(jsonBody(answer))).deepEqual(SUBTREE);
+    should(answer.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should answer 404 for a session that does not exist and 400 for an id that cannot be read', async () => {
+    // Arrange
+    const subsystem = new FakePack({ subtree: undefined });
+
+    // Act
+    const gone = await dispatcher(subsystem).dispatch(call('GET', '/v1/sessions/ghost/subtree'));
+    const blank = await dispatcher(subsystem).dispatch(call('GET', '/v1/sessions/%E0%A4%A/subtree'));
+
+    // Assert
+    should(gone.status).equal(404);
+    should(jsonBody(gone).code).equal('not-found');
+    should(blank.status).equal(400);
+    should(jsonBody(blank).code).equal('invalid_session_id');
+  });
+
+  it('should refuse a remote caller whose fleet use is narrowed, and read nothing', async () => {
+    // Arrange
+    let reads = 0;
+    const subsystem = new FakePack();
+    const counting: PackSubsystem = Object.assign(Object.create(subsystem) as PackSubsystem, {
+      subtree: async (id: string) => {
+        reads += 1;
+        return await subsystem.subtree(id);
+      },
+    });
+    const narrowed = new ApiDispatcher(
+      new ApiRouter(packRoutes(counting)),
+      CREDENTIALS,
+      withoutGrant({ capability: 'fleet', axis: 'use' }),
+    );
+
+    // Act
+    const answer = await narrowed.dispatch(call('GET', '/v1/sessions/s1/subtree'));
+
+    // Assert
+    should(answer.status).equal(403);
+    should(jsonBody(answer).code).equal('grant_not_granted');
+    should(reads).equal(0);
+  });
+
+  it("should hand the service the caller's session from its credential, and none for a person", async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act: a ferret asks for another's subtree; the owner asks too
+    await dispatcher(subsystem).dispatch(
+      request({ method: 'GET', path: '/v1/sessions/child/subtree', headers: agentIn('lead-a') }),
+    );
+    await dispatcher(subsystem).dispatch(call('GET', '/v1/sessions/child/subtree'));
+
+    // Assert
+    should(subsystem.subtreeCallers).deepEqual(['lead-a', undefined]);
+  });
+
+  it('should let a ferret read its own subtree, as it reads any session', async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act
+    const answer = await dispatcher(subsystem).dispatch(
+      request({ method: 'GET', path: '/v1/sessions/s1/subtree', headers: agentIn('s1') }),
+    );
+
+    // Assert
+    should(answer.status).equal(200);
+  });
+});
+
 describe('PATCH /v1/sessions/:sessionId/pack', () => {
   it('should switch one ferret and answer with its view, whether it needs a restart, and why', async () => {
     // Arrange
@@ -587,6 +709,7 @@ describe('the Pack route table', () => {
       ['POST', '/v1/pack/recommend', 'operator', true, 'fleet', 'use'],
       ['POST', '/v1/pack/new', 'operator', true, undefined, undefined],
       ['GET', '/v1/sessions/:sessionId/result', 'operator', true, undefined, undefined],
+      ['GET', '/v1/sessions/:sessionId/subtree', 'operator', true, 'fleet', 'use'],
       ['PATCH', '/v1/sessions/:sessionId/pack', 'operator', true, undefined, undefined],
     ]);
   });

@@ -3,3 +3,4 @@ export * from './ports.ts';
 export * from './refusal.ts';
 export * from './service.ts';
 export * from './store-origin.ts';
+export * from './usage.ts';

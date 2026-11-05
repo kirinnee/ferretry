@@ -4,7 +4,7 @@
  * on a phone.
  *
  * `?view=card|tested|ask|empty` picks the card: a card in review with a PR, children, dependencies, links and
- * history; a 🧪 To test card with the two verdict buttons; a card stopped by a blocking ask with answer buttons;
+ * history; a 🧪 To test card (no owner buttons: the owner answers in the agenda); a card stopped by a blocking ask;
  * a brand-new card with nothing on it yet.
  * Nothing leaves the page.
  */
@@ -113,14 +113,23 @@ const REVIEW_CARD = card('F2', {
   assignee: OTTILIE,
   summary: 'Open any card from the Board: its ask, asks waiting on you, children, links and history in one place.',
   ask: {
-    text: '(sada, found live) Open a card to see everything about it, and act on it from there.',
+    text: '(sada, found live) Open a card to see everything about it in one place.',
     source: 'owner (board)',
   },
   clarifications: [
     { text: 'On a phone this is a full page, and Back must work.', source: 'owner (board)', at: ago(300), by: owner },
   ],
+  status: {
+    now: 'Drawing the card detail on a phone; the drawer on desktop is in.',
+    doneSoFar: [
+      '- Side drawer and full-screen page ([#972](https://github.com/kirinnee/ferretry/pull/972))',
+      '- Ask, children, links and history sections',
+      '- Lane shown as a plain badge',
+    ].join('\n'),
+    next: '1. Back button on the phone page\n2. Review fixes, then merge',
+  },
   premise: 'Today the owner reads a card in a terminal; the Board shows only a compact card.',
-  context: 'The Board page (#972) is merged; this builds on its compact card and its move path.',
+  context: 'The Board page (#972) is merged; this builds on its compact card.',
   terms: [
     { term: 'Card', meaning: 'The only record of a piece of work; it replaces the per-session task.' },
     { term: 'Lane', meaning: 'A stage on the way from backlog to closed.' },
@@ -202,20 +211,6 @@ const REVIEW_CARD = card('F2', {
   ],
 });
 
-/** Assembled, never typed: `no-fy-render-in-docs.sh` refuses the literal fence opener in a tracked file. */
-const FENCE = '`'.repeat(3);
-const PAIRING_DIAGRAM = [
-  `${FENCE}fy-render`,
-  'type: mermaid',
-  'alt: The phone pairs once, then only ever holds a device grant',
-  '---',
-  'flowchart TB',
-  '  Code[Two-minute pairing code] --> Phone[Phone]',
-  '  Phone --> Grant[Device grant]',
-  '  Grant --> Daemon[Daemon keeps only a hash]',
-  FENCE,
-].join('\n');
-
 /** `?nested=1`: premise and context stored with a marker inside each point ("- - x"), as old cards are. */
 const NESTED = new URLSearchParams(window.location.search).get('nested') === '1';
 const nest = (text: string): string => (NESTED ? text.replaceAll(/^- /gmu, '- - ') : text);
@@ -228,13 +223,21 @@ const TESTED_CARD = card('F10', {
   assignee: MARGOT,
   summary: 'Pair a phone, then check Settings: no token is shown anywhere.',
   ask: { text: 'A paired device must never be able to read a token back.', source: `session:${DENISHA}` },
+  status: {
+    now: 'Released in 4.109.0 and waiting for your check.',
+    doneSoFar:
+      '- Device grant replaces the token on every route ([#918](https://github.com/kirinnee/ferretry/pull/918))\n- Settings no longer prints a token',
+    next: '1. You pair a phone and look for a token\n2. You answer in the agenda: Done, or Not good with what you saw',
+  },
   premise: nest('- A paired phone holds a device grant\n- Settings used to print the token after pairing'),
   context: nest('- The daemon keeps only a hash of each token\n- Shipped in 4.109.0'),
   terms: [{ term: 'device grant', meaning: 'What a paired phone holds instead of a token: it can be revoked.' }],
   howToTest: richRequested()
     ? RICH_HOW_TO_TEST
     : 'On your phone, once the Mac runs 4.109.0:\n\n1. Open **Settings › Devices** and pair this phone.\n2. Open the new device row.\n3. You should see its name and when it paired, and no token anywhere.',
-  brief: richRequested() ? RICH_BRIEF : `The device grant replaces the token on every route.\n\n${PAIRING_DIAGRAM}`,
+  brief: richRequested()
+    ? RICH_BRIEF
+    : 'The device grant replaces the token on every route.\n\n- A phone pairs once with a two-minute code\n- After that it holds only a device grant\n- The daemon keeps only a hash of each grant',
   links: links([
     pr(918, {
       state: 'merged',
@@ -351,7 +354,6 @@ const agenda = {
     });
     void connection;
   },
-  respond: async () => undefined,
 };
 
 function Harness() {
@@ -367,19 +369,6 @@ function Harness() {
         onNavigate={() => undefined}
         onSearch={() => undefined}
         openCard={{ daemonId: laptop.daemonId, taskId: OPEN_ID }}
-        ports={{
-          sendMessage: async () => undefined,
-          startFerret: async () => OTTILIE,
-          sendBackFiles: async () => true,
-          uploadAttachment: async (_daemon, _session, file) => ({
-            id: `att_${'a'.repeat(64)}`,
-            filename: file.name,
-            mime: file.type,
-            size: file.size,
-            sha256: '0'.repeat(64),
-            createdAt: ago(0),
-          }),
-        }}
         search=""
         store={store}
       />

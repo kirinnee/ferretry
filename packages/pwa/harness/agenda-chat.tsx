@@ -34,6 +34,7 @@ const CLIENT = {
   snooze: noop,
   unsnooze: noop,
   progress: noop,
+  merge: noop,
 };
 
 /** A wide screen with a mouse: the card has no swipe arrows and the agenda also shows as a section beside the chat. */
@@ -80,7 +81,8 @@ export function AgendaChatHarness({
     client: CLIENT,
     connection: CONNECTION,
     ferret,
-    focus: target === null ? null : { target, seq: 1 },
+    // A target is a link or a notification tap: it arrives with the page.
+    focus: target === null ? null : { target, seq: 1, onEntry: true },
     now,
     scope,
     snapshot: board,
@@ -181,7 +183,7 @@ export function AgendaChatHarness({
             data-agenda-harness-info=""
           >
             <h2 className="m-0 mb-sm text-meta font-semibold text-faint">Agenda</h2>
-            {agenda.section()}
+            {agenda.tab()}
           </aside>
         </div>
       ) : (
