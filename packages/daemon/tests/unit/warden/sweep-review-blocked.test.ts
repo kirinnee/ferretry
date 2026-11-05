@@ -173,3 +173,29 @@ describe('a card in Review whose pull request cannot merge', () => {
     should(nudges(subject)).be.empty();
   });
 });
+
+describe('a nudge that could not be typed', () => {
+  it('should be journalled and not remembered, so the next sweep tries again', async () => {
+    // Arrange
+    let now = NOW;
+    const subject = harness({
+      config: enabled(),
+      fleet: [idleWorker()],
+      board: boardPort(reviewBoard(pr({ mergeable: 'conflicting' }))),
+      remedyFails: 'nudge',
+      now: () => now,
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+    now = NOW + 31 * MINUTE;
+    await subject.service.run({ force: false });
+    now = NOW + 36 * MINUTE;
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject).filter(type => type === 'fleet.warden_review_blocked_failed')).have.length(2);
+    should(journalTypes(subject)).not.containEql('fleet.warden_review_blocked_nudged');
+    should(subject.state().reviewBlocked?.F1).eql({ state: `${URL}:conflict`, since: iso(NOW) });
+  });
+});
