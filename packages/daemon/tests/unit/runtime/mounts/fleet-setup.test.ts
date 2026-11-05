@@ -9,6 +9,7 @@
 import { describe, it } from 'bun:test';
 import type {
   FleetCloneBundle,
+  FleetCloneReview,
   FleetSetupScan,
   FleetToolInstallRequest,
   FleetToolInstallResult,
@@ -49,14 +50,27 @@ const BUNDLE: FleetCloneBundle = {
   notCopied: [],
 };
 
+const REVIEW: FleetCloneReview = {
+  mode: 'update',
+  source: { name: 'studio', verified: 'browser' },
+  items: [],
+  settings: [],
+  logins: [],
+  keys: [],
+  same: { count: 2, probable: 0 },
+  fingerprint: 'f'.repeat(64),
+};
+
 interface Calls {
   scans: number;
   exports: number;
+  reviews: number;
+  forgets: string[];
   installs: { request: FleetToolInstallRequest; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetSetupSubsystem; calls: Calls } {
-  const calls: Calls = { scans: 0, exports: 0, installs: [] };
+  const calls: Calls = { scans: 0, exports: 0, reviews: 0, forgets: [], installs: [] };
   return {
     calls,
     subsystem: {
@@ -71,6 +85,14 @@ function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetS
       exportBundle: async () => {
         calls.exports += 1;
         return BUNDLE;
+      },
+      reviewClone: async () => {
+        calls.reviews += 1;
+        return REVIEW;
+      },
+      forgetCloneSource: async source => {
+        calls.forgets.push(source);
+        return source === 'studio';
       },
       executors: {} as FleetSetupSubsystem['executors'],
       ...overrides,
@@ -105,6 +127,63 @@ describe('the fleet setup mount', () => {
     should(jsonBody(responses[0] as never)).deepEqual(SCAN);
     should(jsonBody(responses[1] as never)).deepEqual(BUNDLE);
     should([calls.scans, calls.exports]).deepEqual([1, 1]);
+  });
+
+  it('should answer a clone review through the shared schema, uncached, and refuse a body that is not one', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const answered = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE })),
+    );
+    const bad = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/review', JSON.stringify({ nope: 1 })));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(answered)).deepEqual(REVIEW);
+    should(bad.status).equal(400);
+    should(calls.reviews).equal(1);
+  });
+
+  it('should forget a source through the shared schema, uncached, and say whether there was one', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const known = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/forget', JSON.stringify({ source: 'studio' })),
+    );
+    const unknown = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/forget', JSON.stringify({ source: 'nobody' })),
+    );
+    const bad = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/forget', JSON.stringify({ source: '' })));
+
+    // Assert
+    should(known.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(known)).deepEqual({ forgotten: true });
+    should(jsonBody(unknown)).deepEqual({ forgotten: false });
+    should(bad.status).equal(400);
+    should(calls.forgets).deepEqual(['studio', 'nobody']);
+  });
+
+  it('should answer 409 when more than one source goes by the name given', async () => {
+    // Arrange
+    const { subsystem } = stub({
+      forgetCloneSource: async () => {
+        throw new FleetSetupRefusal('fleet_setup_refused', 'More than one source is called studio: a, b.');
+      },
+    });
+
+    // Act
+    const answer = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/forget', JSON.stringify({ source: 'studio' })),
+    );
+
+    // Assert
+    should(answer.status).equal(409);
+    should(jsonBody(answer).code).equal('fleet_setup_refused');
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {

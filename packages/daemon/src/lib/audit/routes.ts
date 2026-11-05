@@ -200,6 +200,12 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   { method: 'POST', path: '/v1/fleet/proposals', event: 'fleet.configured', detail: { action: 'propose' } },
   {
     method: 'POST',
+    path: '/v1/fleet/clone/forget',
+    event: 'fleet.configured',
+    detail: { action: 'forget-clone-source' },
+  },
+  {
+    method: 'POST',
     path: '/v1/fleet/proposals/:proposalId/apply',
     event: 'fleet.configured',
     subject: 'proposalId',

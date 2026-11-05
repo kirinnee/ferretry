@@ -19,11 +19,14 @@ import { daemonSessionPath } from '../../lib/pages/routes.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Button } from '../../shell/primitives.tsx';
+import { Segmented } from '../fleet/conversations/conversation-picker.tsx';
 import { fetchAnalytics } from './analytics-api.ts';
 import { ANALYTICS_QUERY_DEFAULT, AnalyticsQueryEditor, type AnalyticsRequest } from './analytics-custom-query.tsx';
 import { AnalyticsFleetError, asSentence, type FleetAnswer, type MachineFailure } from './analytics-fanout.ts';
 import { ANALYTICS_QUERY_EXAMPLES } from './analytics-query-examples.ts';
 import { readAnalyticsQuery } from './analytics-query-text.ts';
+import { type QueryView, type TrendBucket, trendPlan } from './analytics-query-trend.ts';
+import { queryViewPreference } from './analytics-query-view-preference.ts';
 import { AnalyticsResponseView, analyticsErrorMessage } from './analytics-response-view.tsx';
 import {
   addSavedQuery,
@@ -140,6 +143,12 @@ function QueryBody({
   const [error, setError] = useState<RunFailure | null>(null);
   const [querying, setQuerying] = useState(false);
   const [ranAt, setRanAt] = useState<string | null>(null);
+  // One result, or the same question day by day. Kept on this device; the bucket is per visit.
+  const view = queryViewPreference.use();
+  const [bucket, setBucket] = useState<TrendBucket>('day');
+  // Why there is no trend of the text, and the window a trend added; neither is a failed query.
+  const [trendNote, setTrendNote] = useState<string | null>(null);
+  const [trendRefusal, setTrendRefusal] = useState<string | null>(null);
   const serial = useRef(0);
   const lastResult = useRef<AnalyticsResponse | null>(null);
   /**
@@ -147,23 +156,48 @@ function QueryBody({
    * change asks it again even while the first run is still pending. Null until something is run.
    */
   const submitted = useRef<string | null>(null);
+  // The same text as state, so the result controls follow the query a rerun asks, never the draft.
+  const [submittedText, setSubmittedText] = useState<string | null>(null);
+  const textRef = useRef(text);
+  textRef.current = text;
 
   const run = useCallback(
-    async (source: string) => {
+    async (source: string, automatic = false) => {
       const mine = ++serial.current;
+      // What was submitted (not what is being typed) is what a zone, view or bucket change asks again.
       submitted.current = source;
-      setQuerying(true);
+      setSubmittedText(source);
       setError(null);
+      const plan = view === 'trend' ? trendPlan(source, bucket) : null;
+      if (plan !== null && !plan.ok) {
+        setAnswer(null);
+        setTrendNote(null);
+        setTrendRefusal(plan.reason);
+        setQuerying(false);
+        return;
+      }
+      setTrendRefusal(null);
+      setTrendNote(
+        plan?.ok && plan.addedRange !== undefined
+          ? `No range was given, so this trend covers the last ${plan.addedRange}. Add a range such as [90d] to change it.`
+          : null,
+      );
+      setQuerying(true);
       try {
-        const fleet = await requestRun(source.trim() || undefined);
+        const fleet = await requestRun((plan?.query ?? source).trim() || undefined);
         if (mine !== serial.current) return;
         const response = fleet.response;
         lastResult.current = response;
-        submitted.current = response.query;
-        setText(response.query);
+        // A trend asks a DERIVED query; the editor keeps the reader's own, in its canonical spelling.
+        const read = plan === null ? null : readAnalyticsQuery(source);
+        const shown = read?.ok ? read.parsed.canonical : plan === null ? response.query : source;
+        // A rerun the reader did not ask for (view, bucket, zone) never overwrites a draft they are still typing.
+        if (!automatic || textRef.current === source) setText(shown);
+        submitted.current = shown;
+        setSubmittedText(shown);
         setAnswer(fleet);
         setRanAt(now().toISOString().slice(11, 16));
-        onQueryChange?.(response.query);
+        onQueryChange?.(shown);
       } catch (reason) {
         if (mine === serial.current) {
           setAnswer(null);
@@ -173,7 +207,7 @@ function QueryBody({
         if (mine === serial.current) setQuerying(false);
       }
     },
-    [now, onQueryChange, requestRun],
+    [bucket, now, onQueryChange, requestRun, view],
   );
 
   // A link's query runs once, when it arrives — not again each time `run` is rebuilt.
@@ -186,16 +220,19 @@ function QueryBody({
     };
   }, [initialQuery]);
 
-  // A new zone changes what every day in the answer means, so whatever was submitted is asked again — and
-  // a run still in flight is invalidated by that (its serial is superseded), so its answer, read in the
-  // old zone, never lands. The first render is not a change, and a page nothing was run on has nothing
-  // to refresh.
-  const shownZone = useRef(timeZone);
+  // A new zone changes what every day in the answer means, and a new view or bucket changes the question
+  // itself, so the answer on screen is asked again. The first render is not a change, and a page that has
+  // run nothing has nothing to refresh.
+  const shown = `${timeZone ?? ''}|${view}|${bucket}`;
+  const shownRef = useRef(shown);
   useEffect(() => {
-    if (shownZone.current === timeZone) return;
-    shownZone.current = timeZone;
-    if (submitted.current !== null) void runLatest.current(submitted.current);
-  }, [timeZone]);
+    if (shownRef.current === shown) return;
+    shownRef.current = shown;
+    if (submitted.current !== null) void runLatest.current(submitted.current, true);
+  }, [shown]);
+
+  // The controls describe the submitted query (what reruns ask), not the draft being typed.
+  const trend = view === 'trend' ? trendPlan(submittedText ?? text, bucket) : null;
 
   const runText = useCallback(
     (source: string) => {
@@ -236,6 +273,15 @@ function QueryBody({
         loadValues={loadValues}
       />
 
+      <ResultView
+        view={view}
+        onView={queryViewPreference.write}
+        // The plan is the source of truth for the bucket: a time label the query already names wins.
+        bucket={trend?.ok ? trend.bucket : bucket}
+        fixed={trend?.ok === true && trend.fixed}
+        onBucket={setBucket}
+      />
+
       <div aria-live="polite" aria-busy={querying} className="grid min-w-0 gap-4" data-analytics-query-result="">
         {querying && (
           <p role="status" className="m-0 py-3 text-cell text-muted">
@@ -243,11 +289,21 @@ function QueryBody({
           </p>
         )}
         {error && <RunFailureNotice failure={error} />}
-        {!querying && !error && !answer && (
+        {trendRefusal && (
+          <p role="status" className="m-0 text-cell text-muted" data-analytics-trend-refusal="">
+            {trendRefusal}
+          </p>
+        )}
+        {!querying && !error && !answer && !trendRefusal && (
           <p className="m-0 text-cell text-muted">Run a query, or start from an example below.</p>
         )}
         {answer && (
           <>
+            {trendNote && (
+              <p className="m-0 text-meta text-muted" data-analytics-trend-note="">
+                {trendNote}
+              </p>
+            )}
             <MissingMachines failed={answer.failed} />
             <AnalyticsResponseView
               response={answer.response}
@@ -300,6 +356,69 @@ function RunFailureNotice({ failure }: { readonly failure: RunFailure }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+const VIEW_OPTIONS = [
+  { id: 'single', label: 'Single', title: 'One result for the whole query' },
+  { id: 'trend', label: 'Trend', title: 'The same result over time' },
+] as const satisfies readonly { readonly id: QueryView; readonly label: string; readonly title: string }[];
+
+const BUCKET_OPTIONS = [
+  { id: 'day', label: 'Daily' },
+  { id: 'week', label: 'Weekly' },
+] as const satisfies readonly { readonly id: TrendBucket; readonly label: string }[];
+
+/** Single result or trend; a trend also says how finely it is cut. Choosing re-asks the answer on screen. */
+function ResultView({
+  view,
+  onView,
+  bucket,
+  fixed,
+  onBucket,
+}: {
+  readonly view: QueryView;
+  readonly onView: (view: QueryView) => void;
+  readonly bucket: TrendBucket;
+  /** The query itself groups by this bucket, so the other choice is not on offer. */
+  readonly fixed: boolean;
+  readonly onBucket: (bucket: TrendBucket) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-md gap-y-sm" data-analytics-result-view="">
+      <div className="w-44">
+        <Segmented<QueryView>
+          label="Result view"
+          name="analytics-result-view"
+          options={VIEW_OPTIONS}
+          value={view}
+          onChoose={onView}
+        />
+      </div>
+      {view === 'trend' && (
+        <>
+          <div className="w-44">
+            <Segmented<TrendBucket>
+              label="Trend bucket"
+              name="analytics-trend-bucket"
+              options={BUCKET_OPTIONS.map(option => ({
+                ...option,
+                ...(fixed && option.id !== bucket
+                  ? { disabled: true, title: `The query groups by ${bucket} itself` }
+                  : {}),
+              }))}
+              value={bucket}
+              onChoose={onBucket}
+            />
+          </div>
+          {fixed && (
+            <p className="m-0 text-meta text-muted" data-analytics-bucket-locked="">
+              The query groups by {bucket} itself.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

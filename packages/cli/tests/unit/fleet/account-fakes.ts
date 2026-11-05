@@ -3,6 +3,8 @@ import type {
   FleetAccountChangeOutcome,
   FleetAccountChangeView,
   FleetCloneBundle,
+  FleetCloneReview,
+  FleetCloneReviewRequest,
   FleetComponentCatalog,
   FleetComponentView,
   FleetCredentialList,
@@ -214,6 +216,19 @@ export const bundle = (): FleetCloneBundle => ({
   notCopied: [],
 });
 
+/** The review a first copy gets: nothing compared yet, so nothing listed. Override what a test needs. */
+export const cloneReview = (overrides: Partial<FleetCloneReview> = {}): FleetCloneReview => ({
+  mode: 'first',
+  source: { name: 'laptop', verified: 'self' },
+  items: [],
+  settings: [],
+  logins: [],
+  keys: [],
+  same: { count: 0, probable: 0 },
+  fingerprint: 'fp-1',
+  ...overrides,
+});
+
 export const flow = (overrides: Record<string, unknown> = {}): HarnessLoginFlow =>
   ({
     harness: 'claude',
@@ -243,6 +258,8 @@ export interface FakeAnswers {
   scan: () => FleetSetupScan;
   installTools: () => FleetToolInstallResult;
   exportBundle: () => FleetCloneBundle;
+  reviewClone: (request: FleetCloneReviewRequest) => FleetCloneReview;
+  forgetCloneSource: (source: string) => boolean;
   startSignIn: () => HarnessLoginFlow;
   signInStatus: () => HarnessLoginFlow;
   submitSignInCode: () => HarnessLoginSubmission;
@@ -278,6 +295,8 @@ class FakeGateway implements IAccountGateway {
       scan: () => scan(),
       installTools: () => ({ outcomes: [] }),
       exportBundle: () => bundle(),
+      reviewClone: () => cloneReview(),
+      forgetCloneSource: () => true,
       startSignIn: () => flow({ state: 'complete' }),
       signInStatus: () => flow({ state: 'complete' }),
       submitSignInCode: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
@@ -344,6 +363,12 @@ class FakeGateway implements IAccountGateway {
   }
   exportBundle() {
     return this.#record('exportBundle', [], this.answers.exportBundle);
+  }
+  reviewClone(request: FleetCloneReviewRequest) {
+    return this.#record('reviewClone', [request], () => this.answers.reviewClone(request));
+  }
+  forgetCloneSource(source: string) {
+    return this.#record('forgetCloneSource', [source], () => this.answers.forgetCloneSource(source));
   }
   startSignIn(id: string, method?: HarnessLoginCodexMethod, restart?: boolean) {
     return this.#record(

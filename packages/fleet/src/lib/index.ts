@@ -5,6 +5,7 @@ export * from './account/adapt.ts';
 export * from './account/budget.ts';
 export * from './account/clone-base.ts';
 export * from './account/clone.ts';
+export * from './account/clone-update.ts';
 export * from './account/credential-status.ts';
 export * from './account/credentials.ts';
 export * from './account/disabled.ts';
