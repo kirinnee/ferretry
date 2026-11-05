@@ -110,13 +110,47 @@ const THEMES = [
   'x',
 ] as const;
 
-/** The whole page is read-only: no button on any card, nothing draggable, no menu, no Add card, no Lanes link. */
+/**
+ * The whole board is read-only: no button anywhere in it except the view switch, the filters, the counts, the lane
+ * chips and fold toggles, the per-chat "Add to chat" and the Archive's own paging; nothing draggable, no menu, no Add
+ * card, no Lanes link. Cards, table rows, dependency lines and tree rows are all inside `.fy-board`.
+ */
 const checkReadOnly = async (page: Page, where: string): Promise<void> => {
   const found = await page.evaluate(() => {
     const problems: string[] = [];
     const count = (selector: string): number => document.querySelectorAll(selector).length;
-    const buttons = count('.fy-board-card button, .fy-board-table__row button');
-    if (buttons > 0) problems.push(`${buttons} buttons on cards`);
+    const allowed = [
+      '.fy-board__view',
+      '.fy-board-card__chat',
+      '.fy-board-lane__toggle',
+      '.fy-board-phone__chip',
+      '.fy-board__scope-option',
+      '.fy-board-sort__option',
+      '.fy-board-archive__more',
+      '.fy-board-counts button',
+      '.fy-board-filters button',
+      '.fy-board-filters__toggle',
+      '.fy-board-count',
+      '.fy-board__retry',
+      '.fy-board-notice button',
+      '[data-page-theme-switch] button',
+    ].join(',');
+    const stray = [...document.querySelectorAll<HTMLElement>('.fy-board button')].filter(
+      button =>
+        !button.matches(allowed) &&
+        button.closest('.fy-board__phone-bar, .fy-board-filters, .fy-board-counts') === null,
+    );
+    if (stray.length > 0)
+      problems.push(
+        `${stray.length} stray buttons: ${stray
+          .slice(0, 4)
+          .map(b => b.className || b.textContent)
+          .join(', ')}`,
+      );
+    const inRows = count(
+      '.fy-board-card button, .fy-board-table__row button, .fy-board-summary__row button, .fy-board-dep button, .fy-board-tree button',
+    );
+    if (inRows > 0) problems.push(`${inRows} buttons on cards, rows, tree or dependency lines`);
     for (const [name, selector] of [
       ['draggable cards', '[draggable="true"]'],
       ['lane menus', '.fy-board-card__more, [role="menu"]'],

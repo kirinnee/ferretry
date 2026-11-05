@@ -543,6 +543,11 @@
   color: var(--muted);
   font-size: var(--text-xs);
 }
+.fy-board-dep__line > [data-dep] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
 .fy-board-archive__search {
   min-height: 30px;
   padding: 0 var(--gap-sm);
@@ -626,6 +631,7 @@
   }
   .fy-board__view {
     flex: none;
+    padding-inline: var(--gap-sm);
     white-space: nowrap;
   }
   .fy-board-lane {
