@@ -103,10 +103,11 @@
   padding: 0.15em 0 0.15em 0.4em;
 }
 /* No padding or border on the right and no trailing space inside, so a wrapped sentence's tint ends at its last
-   word. The bar is a shadow, not a border: it adds no width, and is repeated on every wrapped line. */
+   word. The bar is a background layer, not a border: it adds no width, and is repeated on every wrapped line. */
 .fy-read-caption[data-current] {
-  background: color-mix(in srgb, var(--accent-strong) 30%, var(--surface-2));
-  box-shadow: inset 4px 0 0 var(--accent-strong);
+  background:
+    linear-gradient(var(--accent-strong), var(--accent-strong)) left / 0.3em 100% no-repeat,
+    color-mix(in srgb, var(--accent-strong) 30%, var(--surface-2));
   font-weight: 600;
   text-decoration: underline;
   text-decoration-thickness: 2px;
