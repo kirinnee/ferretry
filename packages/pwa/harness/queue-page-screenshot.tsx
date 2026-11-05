@@ -102,7 +102,7 @@ createRoot(root).render(
   ) : (
     <RouterProvider>
       <StoreProvider store={store}>
-        <div style={{ display: 'flex', height: '100vh' }}>
+        <div style={{ display: 'flex', minHeight: '100vh' }}>
           {view === 'ferret' ? <QueuePage daemonId={laptop.daemonId} sessionId="s1" /> : <QueuePage daemonId={laptop.daemonId} />}
         </div>
       </StoreProvider>
