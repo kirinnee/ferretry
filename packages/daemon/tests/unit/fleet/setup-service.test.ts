@@ -14,28 +14,28 @@ import {
   builtInPresets,
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
-  parseCloneBase,
-  originKeyOfId,
-  parseExportKeys,
   FleetApplyFailureError,
   type FleetApplyPlan,
   type FleetDocumentWrite,
   type FleetLayout,
   type HostHarnessScan,
-  parseAccountModel,
+  originKeyOfId,
   type ProviderPreset,
-  type ShellEnvironmentReading,
+  parseAccountModel,
+  parseCloneBase,
+  parseExportKeys,
   RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
+  type ShellEnvironmentReading,
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
-  ORIGIN_KEY_PATTERN,
   FleetSetupScanSchema,
   FleetToolInstallResultSchema,
+  ORIGIN_KEY_PATTERN,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
@@ -1599,6 +1599,88 @@ describe('env providers', () => {
     should(keep('HOME')).be.false();
   });
 
+  it('should share ONE login-shell read among calls that arrive together, and keep nothing after it ends', async () => {
+    // Arrange — a shell that answers only when the test lets it, so the three calls overlap
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let reads = 0;
+    const { service } = world({
+      overrides: {
+        presets: async () => builtInPresets(),
+        shellEnvironment: {
+          read: async () => {
+            reads += 1;
+            await gate;
+            return { state: 'read', env: { CLAUDE_CODE_USE_BEDROCK: '1', AWS_PROFILE: 'work' } };
+          },
+        },
+      },
+    });
+
+    // Act — a scan, another scan and a preview at once
+    const together = Promise.all([service.scan(), service.scan(), service.scan()]);
+    await Bun.sleep(20);
+    release();
+    const [first, second] = await together;
+    const afterwards = await service.scan();
+
+    // Assert — one read served all three; the next call, after it ended, starts its own
+    should(first.shell).equal('read');
+    should(second.shell).equal('read');
+    should(afterwards.shell).equal('read');
+    should(reads).equal(2);
+  });
+
+  it('should answer a failed read as unavailable to everyone sharing it, and read again next time', async () => {
+    // Arrange
+    let reads = 0;
+    const { service } = world({
+      overrides: {
+        presets: async () => builtInPresets(),
+        shellEnvironment: {
+          read: async () => {
+            reads += 1;
+            throw new Error('the shell blew up');
+          },
+        },
+      },
+    });
+
+    // Act
+    const [first, second] = await Promise.all([service.scan(), service.scan()]);
+    await service.scan();
+
+    // Assert
+    should(first.shell).equal('failed');
+    should(second.shell).equal('failed');
+    should(reads).be.aboveOrEqual(2);
+  });
+
+  it('should say a key too short for the secret store was not imported, by name and never showing it', async () => {
+    // Arrange — a LiteLLM master key left at its documented example
+    const { service, state } = bedrockWorld();
+    state.shell = {
+      state: 'read',
+      env: { ANTHROPIC_BASE_URL: 'http://localhost:4000', ANTHROPIC_AUTH_TOKEN: 'sk-1234' },
+    };
+
+    // Act
+    const scan = FleetSetupScanSchema.parse(await service.scan());
+
+    // Assert
+    const provider = scan.harnesses
+      .find(harness => harness.harness === 'claude')
+      ?.findings?.find(each => each.kind === 'provider');
+    should(provider).containDeep({
+      kind: 'provider',
+      problem:
+        "Custom gateway was found in your shell, but ANTHROPIC_AUTH_TOKEN is shorter than the 8 characters Ferretry's secret store takes (a value that short cannot be masked out of output safely), so it was not imported.",
+    });
+    should(JSON.stringify(scan)).not.containEql('sk-1234');
+  });
+
   it('should say the shell was not read when it did not answer, and still find the sign-in', async () => {
     // Arrange
     const { service, state } = bedrockWorld();
@@ -1777,5 +1859,12 @@ describe('env providers', () => {
     should(scan.harnesses[0]?.findings?.[1]).containDeep({ kind: 'provider', login: 'claude-amazon-bedrock' });
     should(scan.harnesses[0]?.findings?.[1]).not.have.property('runtime');
     should(scan.duplicates).containDeep([{ harness: 'claude', existing: 'claude-amazon-bedrock' }]);
+    // The plan says the login was kept as it is, rather than letting what the shell holds now look imported.
+    should(scan.notes).containDeep([
+      {
+        harness: 'claude',
+        text: 'Amazon Bedrock (AWS profile) is already the login claude-amazon-bedrock; it was kept as it is, and what your shell holds now was not copied over it.',
+      },
+    ]);
   });
 });

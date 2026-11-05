@@ -49,7 +49,6 @@ import {
   providerFindingView,
   type ShellEnvironmentReading,
 } from './provider-findings.ts';
-import { componentScope, scopeFits } from './scope.ts';
 import {
   type AccountModel,
   type AccountModelDocument,
@@ -68,6 +67,7 @@ import {
   type SettingsComponent,
   type SkillsComponent,
 } from './schema.ts';
+import { componentScope, scopeFits } from './scope.ts';
 import { looksSecret } from './secret-values.ts';
 
 /** Whether a value looks like a secret lives in `./secret-values.ts`, which every reader of an environment shares. */
@@ -1366,6 +1366,12 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
           login: made.credential,
           ...(runtime === undefined ? {} : { runtime }),
         });
+        if (made.reused === true) {
+          notes.push({
+            harness,
+            text: `${view.label} is already the login ${made.credential}; it was kept as it is, and what your ${view.source === 'shell' ? 'shell' : view.source.replace('+shell', ' and shell')} holds now was not copied over it.`,
+          });
+        }
         if (made.secrets.length > 0) {
           notes.push({
             harness,
@@ -1479,7 +1485,9 @@ function textValues(env: unknown): Readonly<Record<string, string>> {
 
 /**
  * A finding's environment login: an existing one from the same preset for the same CLI, reused as Import
- * again finds it; else a new one, its secrets claimed into the plan; else why it cannot be made.
+ * again finds it — UNCHANGED, and `reused` says so, so the plan can tell the person that what was read
+ * this time was not copied over it (a second profile or key of the same provider is a login to add by hand);
+ * else a new one, its secrets claimed into the plan; else why it cannot be made.
  */
 function providerLogin(
   { finding, refusal }: FoundProvider,
@@ -1489,14 +1497,19 @@ function providerLogin(
   names: SecretNames,
   secrets: ImportedSecret[],
   kept: Set<string>,
-): { readonly credential?: string; readonly problem?: string; readonly secrets: readonly string[] } {
+): {
+  readonly credential?: string;
+  readonly problem?: string;
+  readonly secrets: readonly string[];
+  readonly reused?: true;
+} {
   const reuse = Object.entries(existing?.credentials ?? {}).find(
     ([, credential]) =>
       credential.store === 'environment' &&
       credential.harness === finding.harness &&
       credential.preset === finding.preset.id,
   )?.[0];
-  if (reuse !== undefined) return { credential: reuse, secrets: [] };
+  if (reuse !== undefined) return { credential: reuse, secrets: [], reused: true };
   const where =
     finding.source === 'shell' ? 'your shell' : `your ${finding.source.replace('+shell', ' and your shell')}`;
   if (refusal !== undefined) {

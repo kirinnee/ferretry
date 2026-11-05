@@ -231,8 +231,14 @@ A login's Test proves a key is accepted; it cannot prove Bedrock or Vertex, whos
 `action: runtime-check`) proves the RUNTIME starts: it runs the start probe `fy new` runs — the
 runtime's own launcher, its login's launch environment, "Reply with exactly: OK" on its **default
 model** — 30 seconds at most, and answers `{ ok, ms, code?, sentence }`. It is one real model call: a
-few cents on a pay-per-token login, nothing extra on a subscription. A pass is kept by the same probe
-cache `fy new` reads; a failure is not, so "test again" asks again.
+few cents on a pay-per-token login, nothing extra on a subscription. It runs only where a start would:
+a runtime that is switched off, is not an agent runtime, or cannot launch now (no CLI installed, its
+login needs signing in) is refused (`fleet_runtime_disabled`, `fleet_runtime_not_agent`,
+`fleet_runtime_blocked`) before anything runs, and the CLI is started in a private empty folder under the
+state home — never `/tmp`, where a planted `CLAUDE.md`, `.mcp.json` or `AGENTS.md` would be read with the
+login's environment. A pass is kept by the same probe cache `fy new` reads, under its key (launcher,
+model, effort): a start asking for the same model and effort soon after is answered from it, one that
+names an effort the check did not send probes again. A failure is not kept, so "test again" asks again.
 
 The `code` is `not_logged_in`, `out_of_quota`, `model_unavailable`, `timed_out`, `not_launchable` or
 `no_answer`, and the `sentence` is built from that code and plain facts — the runtime's name, the

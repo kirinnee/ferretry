@@ -10,8 +10,9 @@
  * daemon already holds — the runtime's name, its provider's label, a region, a profile NAME, a secret
  * NAME, the model id — because what a CLI prints can echo a key or a URL with a password in it.
  *
- * A pass is kept by the same cache `fy new` reads, so the first ferret on the runtime does not probe
- * again; a failure is never kept, so "test again" always asks again.
+ * A pass is kept by the same cache `fy new` reads, under its key (launcher, model, effort), so a start
+ * asking for the same model and effort soon after is not probed again; a failure is never kept, so "test
+ * again" always asks again.
  */
 import { z } from 'zod';
 import { NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
@@ -60,6 +61,13 @@ export const FleetRuntimeCheckResultSchema = z.discriminatedUnion('ok', [
 export type FleetRuntimeCheckResult = z.infer<typeof FleetRuntimeCheckResultSchema>;
 
 /** Every refusal the check answers with instead of a result. */
-export const FLEET_RUNTIME_CHECK_REFUSAL_CODES = ['fleet_runtime_unknown', 'fleet_runtime_disabled'] as const;
+export const FLEET_RUNTIME_CHECK_REFUSAL_CODES = [
+  'fleet_runtime_unknown',
+  'fleet_runtime_disabled',
+  /** Not an agent runtime (for using the CLI yourself): a start would refuse it, so the check does. */
+  'fleet_runtime_not_agent',
+  /** The catalogue says it cannot launch now: no CLI installed, its login needs signing in, and so on. */
+  'fleet_runtime_blocked',
+] as const;
 export const FleetRuntimeCheckRefusalCodeSchema = z.enum(FLEET_RUNTIME_CHECK_REFUSAL_CODES);
 export type FleetRuntimeCheckRefusalCode = z.infer<typeof FleetRuntimeCheckRefusalCodeSchema>;

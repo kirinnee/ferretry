@@ -50,15 +50,15 @@
  * No value of anything the shell holds leaves this service except into the secret store.
  */
 import {
+  type AccountModel,
   applyCloneToBase,
   assignOriginKeys,
-  type AccountModel,
   buildCloneBundle,
   CLONE_BASE_FILE,
   type ClonePlan,
   CloneRefusal,
-  cloneSourceIdentity,
   CloneSourceMismatch,
+  cloneSourceIdentity,
   cloneSources,
   describeClone,
   EMPTY_RUNTIME_IDS,
@@ -66,8 +66,8 @@ import {
   expandAssetPath,
   FleetApplyFailureError,
   type FleetDocumentWrite,
-  forgetCloneSource,
   type FleetModelApplyPlan,
+  forgetCloneSource,
   freeName,
   HARNESS_DISPLAY_NAMES,
   type HarnessKind,
@@ -80,25 +80,25 @@ import {
   isRuntimeName,
   type LayerReferenceText,
   type MaterialiseBodies,
-  materialiseFleet,
   type ModelCatalogSources,
+  materialiseFleet,
   mergeImport,
   mergeImportRecord,
+  type ProviderPreset,
   parseCloneBase,
   parseCloneBundle,
   parseExportKeys,
   parseSettings,
   planClone,
   planImport,
-  serializeCloneBase,
-  type SettingsObject,
-  skillFrontmatterKeys,
-  serializeExportKeys,
-  skillSourceReference,
   providerShellNames,
-  type ProviderPreset,
+  type SettingsObject,
   type ShellEnvironmentReading,
+  serializeCloneBase,
+  serializeExportKeys,
   shellVariableFilter,
+  skillFrontmatterKeys,
+  skillSourceReference,
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
@@ -300,6 +300,12 @@ interface Composed {
 export class FleetSetupService {
   /** The fingerprint each staged change was described with, keyed by the staged change itself. */
   readonly #described = new WeakMap<object, string>();
+  /**
+   * The login-shell reads in flight, by what they look for. A scan, a preview and an apply that arrive
+   * together share ONE read (a login shell can take five seconds and runs the owner's rc files); an entry
+   * is gone the moment its read ends, so nothing is ever kept between calls.
+   */
+  readonly #shellReads = new Map<string, Promise<ShellEnvironmentReading>>();
   constructor(private readonly deps: FleetSetupServiceDeps) {}
 
   // ── Scan ───────────────────────────────────────────────────────────────────────────────────────
@@ -359,14 +365,25 @@ export class FleetSetupService {
     } catch {
       return undefined;
     }
-    const keep = shellVariableFilter(presets, providerShellNames(scans));
-    let shell: ShellEnvironmentReading;
-    try {
-      shell = await this.deps.shellEnvironment.read(keep);
-    } catch {
-      shell = { state: 'unavailable', cause: 'failed' };
-    }
+    const names = providerShellNames(scans);
+    const shell = await this.#shellRead(presets, names);
     return { presets, shell, ...(skip === undefined ? {} : { skip }) };
+  }
+
+  /** One read of the login shell for these presets and names; a call that finds one running joins it. */
+  #shellRead(presets: readonly ProviderPreset[], names: readonly string[]): Promise<ShellEnvironmentReading> {
+    const key = JSON.stringify([presets.map(preset => preset.id), names]);
+    const running = this.#shellReads.get(key);
+    if (running !== undefined) return running;
+    const reading = (async (): Promise<ShellEnvironmentReading> => {
+      try {
+        return await this.deps.shellEnvironment.read(shellVariableFilter(presets, names));
+      } catch {
+        return { state: 'unavailable', cause: 'failed' };
+      }
+    })().finally(() => this.#shellReads.delete(key));
+    this.#shellReads.set(key, reading);
+    return reading;
   }
 
   #tools(): FleetSetupTool[] {

@@ -27,7 +27,7 @@
  *
  * Pure and total.
  */
-import { secretReference } from '@ferretry/protocol';
+import { MIN_SECRET_VALUE_LENGTH, secretReference } from '@ferretry/protocol';
 import type { HarnessKind } from '../manifest.ts';
 import { type DetectablePreset, detectProvider } from '../presets/detect.ts';
 import { credentialFromPreset, type PresetLoginInput, presetLoginRefusal } from '../presets/login.ts';
@@ -122,6 +122,23 @@ const URL_OR_KEY_NAME = /(?:BASE_URL|_ENDPOINT|_API_BASE|KEY|TOKEN|SECRET)$/u;
 /** Claude Code's own provider-identity variables: the ones a sign-in runtime must not inherit. */
 const CLAUDE_IDENTITY = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'] as const;
 
+/** The variables that pin which model Claude Code asks for: the main one, the small one and the three tiers. */
+const MODEL_PIN_NAME = /^ANTHROPIC_(?:MODEL|SMALL_FAST_MODEL|DEFAULT_(?:OPUS|SONNET|HAIKU)_MODEL)$/u;
+
+/**
+ * A model id the Anthropic API itself serves: `claude-sonnet-5-5`, a dated one, or an alias (`sonnet`,
+ * `opus[1m]`). Anything else — Bedrock's `us.anthropic.claude-…-v1:0` and ARNs, Vertex's `claude-…@2025…`, a
+ * gateway's own names — means nothing to a sign-in's Anthropic endpoint.
+ */
+const PLAIN_ANTHROPIC_MODEL = /^(?:claude-[a-z0-9][a-z0-9.-]*|sonnet|opus|haiku|opusplan|best)(?:\[1m\])?$/iu;
+
+/**
+ * A model pin that only the provider can serve. It moves with the provider's login: left in the shared
+ * `settings.json`, the sign-in runtime would be asked for a model id its endpoint does not know.
+ */
+const providerOnlyModelPin = (name: string, value: string | undefined): boolean =>
+  MODEL_PIN_NAME.test(name) && value !== undefined && value.trim() !== '' && !PLAIN_ANTHROPIC_MODEL.test(value.trim());
+
 /** The preset a base URL that no preset claims is: Claude Code through any Anthropic-compatible gateway. */
 export const CUSTOM_GATEWAY_PRESET = 'custom-gateway';
 
@@ -211,6 +228,21 @@ function urlCarriesCredentials(value: string): boolean {
 /** Whether a found value must go to the secret store rather than sit in a login file as text. */
 const secretValue = (name: string, value: string, declared: PresetVariable | undefined): boolean =>
   declared?.secretName !== undefined || looksSecret(name, value) || urlCarriesCredentials(value);
+
+/**
+ * The first variable the preset keeps as a secret whose value is shorter than the secret store accepts
+ * (`MIN_SECRET_VALUE_LENGTH`) — LiteLLM's `sk-1234`, Ollama's `dummy`. A value that short cannot be masked out
+ * of output safely, so the store refuses it, and a login file may not hold it as text either; the import
+ * is refused by NAME, never showing the value, and the person adds that login by hand like any other.
+ */
+const tooShortToStore = (
+  finding: ProviderFinding,
+  declared: Readonly<Record<string, PresetVariable>>,
+): string | undefined =>
+  Object.entries(finding.values).find(
+    ([name, value]) =>
+      value !== '' && declared[name]?.secretName !== undefined && value.length < MIN_SECRET_VALUE_LENGTH,
+  )?.[0];
 
 /** The longest plain fact shown; a longer value is left out rather than cut. */
 const MAX_FACT_LENGTH = 200;
@@ -326,7 +358,8 @@ function claudeFinding(
     declared[name] !== undefined ||
     clues.includes(name) ||
     SWITCH_NAME.test(name) ||
-    (CLAUDE_IDENTITY as readonly string[]).includes(name);
+    (CLAUDE_IDENTITY as readonly string[]).includes(name) ||
+    providerOnlyModelPin(name, settingsEnv[name]);
   const fromSettings = Object.keys(settingsEnv).filter(takes);
   return finish({ harness: 'claude', preset, clues, layered, fromSettings });
 }
@@ -507,6 +540,12 @@ export function providerCredential(
     }
     return env;
   };
+  const short = tooShortToStore(finding, declared);
+  if (short !== undefined) {
+    return {
+      refusal: `${short} is shorter than the ${String(MIN_SECRET_VALUE_LENGTH)} characters Ferretry's secret store takes (a value that short cannot be masked out of output safely)`,
+    };
+  }
   const input = (env: Record<string, string>): PresetLoginInput => ({
     env,
     harness,

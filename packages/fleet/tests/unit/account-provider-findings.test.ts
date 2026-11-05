@@ -98,6 +98,50 @@ describe('findProvider: the detection matrix', () => {
     should(Object.keys(actual?.values ?? {})).not.containEql('ANTHROPIC_ODD NAME');
   });
 
+  it("should take a Bedrock or Vertex model pin with the provider, so the sign-in's shared settings.json keeps none", () => {
+    // Act
+    const bedrock = claude(
+      {},
+      {
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        ANTHROPIC_MODEL: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        ANTHROPIC_SMALL_FAST_MODEL: 'arn:aws:bedrock:us-east-1:123456789012:inference-profile/abc',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-1@20250805',
+      },
+    );
+
+    // Assert — moved with the provider, so import takes them out of settings.json and puts them on the login
+    should(bedrock?.fromSettings).containEql('ANTHROPIC_MODEL');
+    should(bedrock?.fromSettings).containEql('ANTHROPIC_SMALL_FAST_MODEL');
+    should(bedrock?.fromSettings).containEql('ANTHROPIC_DEFAULT_OPUS_MODEL');
+    should(bedrock?.values.ANTHROPIC_MODEL).equal('us.anthropic.claude-sonnet-4-5-20250929-v1:0');
+    should(bedrock?.secrets).deepEqual([]);
+  });
+
+  it('should leave a plain Anthropic model id, an alias or a blank pin in the shared settings.json', () => {
+    // Act
+    const actual = claude(
+      {},
+      {
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        ANTHROPIC_MODEL: 'claude-sonnet-5-5',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet[1m]',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: '   ',
+      },
+    );
+
+    // Assert
+    for (const name of [
+      'ANTHROPIC_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    ]) {
+      should(actual?.fromSettings).not.containEql(name);
+    }
+  });
+
   it('should find a bare Anthropic API key, the commonest setup', () => {
     // Act
     const actual = claude({ ANTHROPIC_API_KEY: 'sk-ant-api03-abcdefghijklmnop' });
@@ -272,6 +316,35 @@ describe('providerCredential', () => {
       },
     });
     should(claimed).deepEqual([]);
+  });
+
+  it('should refuse a key shorter than the secret store accepts, by name and never showing it', () => {
+    // Arrange — a LiteLLM master key left at its documented example, and an ordinary key
+    const placeholder = claude({ ANTHROPIC_BASE_URL: 'http://localhost:4000', ANTHROPIC_AUTH_TOKEN: 'sk-1234' });
+    const real = claude({
+      ANTHROPIC_BASE_URL: 'http://localhost:4000',
+      ANTHROPIC_AUTH_TOKEN: 'sk-1234-a-key-long-enough',
+    });
+    const stored: string[] = [];
+
+    // Act
+    const refused = providerCredential(placeholder as never, name => {
+      stored.push(name);
+      return name;
+    });
+    const accepted = providerCredential(real as never, name => {
+      stored.push(name);
+      return name;
+    });
+
+    // Assert — nothing the store would refuse is sent to it, and the sentence never carries the value
+    should(refused).deepEqual({
+      refusal:
+        "ANTHROPIC_AUTH_TOKEN is shorter than the 8 characters Ferretry's secret store takes (a value that short cannot be masked out of output safely)",
+    });
+    should(JSON.stringify(refused)).not.containEql('sk-1234');
+    should(accepted).have.property('credential');
+    should(stored).deepEqual(['GATEWAY_API_KEY']);
   });
 
   it('should hand each secret value to the store and keep only its reference', () => {

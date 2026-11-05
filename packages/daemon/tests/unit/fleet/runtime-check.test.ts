@@ -24,6 +24,7 @@ const TARGET: RuntimeCheckTarget = {
   credential: 'claude-bedrock',
   defaultModel: 'claude-sonnet-5-5',
   disabled: false,
+  agent: true,
 };
 
 const BEDROCK = { provider: 'Amazon Bedrock', region: 'us-east-1', profile: 'work' } as const;
@@ -31,7 +32,14 @@ const BEDROCK = { provider: 'Amazon Bedrock', region: 'us-east-1', profile: 'wor
 /** What a CLI might print on failure: it must never reach the answer. */
 const LEAK = 'Authorization: Bearer sk-ant-api03-leaked-value https://user:pw@gw.example';
 
-function service(outcome: PackProbeOutcome, target: RuntimeCheckTarget | undefined = TARGET) {
+/** The private folder the probe is told to run in: never anything a stranger could have planted a file in. */
+const PRIVATE_FOLDER = '/state/tmp/runtime-check';
+
+function service(
+  outcome: PackProbeOutcome,
+  target: RuntimeCheckTarget | undefined = TARGET,
+  workingDirectory: () => Promise<string> = async () => PRIVATE_FOLDER,
+) {
   const probes: { request: PackProbeRequest; ttlMs: number }[] = [];
   const check = new RuntimeCheckService({
     runtime: async id => (target !== undefined && (id === target.id || id === target.name) ? target : undefined),
@@ -41,7 +49,7 @@ function service(outcome: PackProbeOutcome, target: RuntimeCheckTarget | undefin
       return { outcome, cached: false };
     },
     passTtlMs: async () => 600_000,
-    cwd: '/tmp/check',
+    workingDirectory,
   });
   return { check, probes };
 }
@@ -73,7 +81,7 @@ describe('RuntimeCheckService', () => {
           wrapper: 'claude-bedrock',
           harness: 'claude',
           model: 'claude-sonnet-5-5',
-          cwd: '/tmp/check',
+          cwd: PRIVATE_FOLDER,
           timeoutMs: RUNTIME_CHECK_TIMEOUT_MS,
         },
         ttlMs: 600_000,
@@ -100,6 +108,57 @@ describe('RuntimeCheckService', () => {
     should((missing as RuntimeCheckRefusal).code).equal('fleet_runtime_unknown');
     should((disabled as RuntimeCheckRefusal).code).equal('fleet_runtime_disabled');
     should(unknown.probes.length + off.probes.length).equal(0);
+  });
+
+  it('should refuse a runtime that is not an agent runtime, and one the catalogue says cannot launch, probing neither', async () => {
+    // Arrange
+    const notAgent = service({ ok: true, ms: 1 }, { ...TARGET, agent: false });
+    const blocked = service({ ok: true, ms: 1 }, { ...TARGET, blocked: 'Sign in to launch' });
+
+    // Act
+    const first = await notAgent.check.check('rt-1').catch((error: unknown) => error);
+    const second = await blocked.check.check('rt-1').catch((error: unknown) => error);
+
+    // Assert
+    should((first as RuntimeCheckRefusal).code).equal('fleet_runtime_not_agent');
+    should((first as RuntimeCheckRefusal).message).equal(
+      'claude-bedrock is for using Claude Code yourself in a terminal, so it cannot run a ferret and was not checked.',
+    );
+    should((second as RuntimeCheckRefusal).code).equal('fleet_runtime_blocked');
+    should((second as RuntimeCheckRefusal).message).equal(
+      'claude-bedrock cannot start right now, so it was not checked: Sign in to launch.',
+    );
+    should(notAgent.probes.length + blocked.probes.length).equal(0);
+  });
+
+  it('should name Codex in the not-an-agent refusal of a Codex runtime', async () => {
+    // Arrange
+    const { check } = service({ ok: true, ms: 1 }, { ...TARGET, harness: 'codex', agent: false });
+
+    // Act
+    const refusal = (await check.check('rt-1').catch((error: unknown) => error)) as RuntimeCheckRefusal;
+
+    // Assert
+    should(refusal.message).startWith('claude-bedrock is for using Codex yourself');
+  });
+
+  it('should run the CLI where the private-folder port says, and never probe when that folder is not safe', async () => {
+    // Arrange — the port refuses (a symlink, another owner): nothing may fall back to a shared folder
+    const unsafe = service({ ok: true, ms: 1 }, TARGET, async () => {
+      throw new Error('/state/tmp/runtime-check is a symbolic link, not a folder of ours.');
+    });
+
+    // Act
+    const actual = await unsafe.check.check('rt-1');
+
+    // Assert — a plain answer, with none of the port's words in it, and no process started
+    should(actual).deepEqual({
+      ok: false,
+      ms: 0,
+      code: 'not_launchable',
+      sentence: "Couldn't start claude-bedrock: the private folder its check runs in isn't safe to use.",
+    });
+    should(unsafe.probes.length).equal(0);
   });
 
   const cases: readonly [string, Partial<Extract<PackProbeOutcome, { ok: false }>>, string, string][] = [

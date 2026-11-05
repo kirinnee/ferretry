@@ -130,10 +130,9 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
-import { SessionOwnerChat, typedWords } from '../src/adapters/agenda/session-owner-chat.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
+import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
 import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
@@ -143,6 +142,7 @@ import {
   SendAgendaMessenger,
 } from '../src/adapters/agenda/send-agenda-delivery.ts';
 import { SessionConfigAgendaModes } from '../src/adapters/agenda/session-agenda-modes.ts';
+import { SessionOwnerChat, typedWords } from '../src/adapters/agenda/session-owner-chat.ts';
 import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/agenda/session-turn-stops.ts';
 import { armAgendaNudge, StorageAgendaNudgeSessions } from '../src/adapters/agenda/storage-agenda-nudge.ts';
 import { StorageAgentSessions } from '../src/adapters/agenda/storage-agent-sessions.ts';
@@ -210,14 +210,15 @@ import {
   readDeclaredAccountModel,
   sessionStatusOf,
 } from '../src/adapters/fleet/account-model-files.ts';
-import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
-import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
-import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
 import {
   bunShellSpawn,
   LoginShellEnvironment,
   loginShellBaseEnvironment,
 } from '../src/adapters/fleet/login-shell-environment.ts';
+import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
+import { ensureOwnedPrivateDirectory } from '../src/adapters/fleet/private-directory.ts';
+import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
+import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import {
   CredentialEmailReader,
@@ -762,11 +763,11 @@ import {
   AgendaItemDraftDiscard,
   AgendaReplyBatcher,
   AgendaReplyDelivery,
+  AgendaRestNudger,
   AgendaResurfacer,
   AgendaRollup,
   AgendaService,
   AgendaTurnNudge,
-  AgendaRestNudger,
   AgendaWaker,
   type AgentCopyPagesPort,
   type AgentCopyPort,
@@ -12733,6 +12734,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 credential: row.credential.id,
                 ...(row.models?.default === undefined ? {} : { defaultModel: row.models.default }),
                 disabled: row.disabled !== undefined,
+                agent: row.agent,
+                ...(row.launch.available ? {} : { blocked: row.launch.reason }),
               };
         },
         login: async target =>
@@ -12743,7 +12746,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ),
         probe: packProbe,
         passTtlMs: async () => (await configFiles.inEffect()).evaluation.effective.pack.probe.cacheSeconds * 1_000,
-        cwd: tmpdir(),
+        // Never `tmpdir()`: a CLI reads CLAUDE.md, .mcp.json and AGENTS.md from where it starts, with the login's env.
+        workingDirectory: async () =>
+          await ensureOwnedPrivateDirectory(join(paths.temporary, 'runtime-check'), { uid: process.getuid?.() }),
       });
       const packCatalogs = async () =>
         modelCatalogsView(await modelCatalogService.catalogs(), {

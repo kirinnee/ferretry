@@ -5,8 +5,9 @@
  * The process is started with a fixed argv and a small, fixed environment — the account's own `HOME`,
  * `USER`, `LOGNAME`, `SHELL`, a `PATH` and the locale, with `TERM=dumb` — so what comes back is what the
  * person's rc files set, not what this daemon happened to inherit. stdin is `/dev/null`, stdout is a
- * pipe and stderr is discarded unread. It is SIGKILLed when the time is up, and output past a fixed cap
- * is not read. Nothing it prints is ever logged: the parse keeps only the names it is told to keep.
+ * pipe and stderr is discarded unread. It is started in a process group of its own and the WHOLE group is
+ * SIGKILLed when the time is up or the answer is in — an rc file that backgrounds a program (an agent, a
+ * version manager's helper) must not outlive the read — and output past a fixed cap is not read. Nothing it prints is ever logged: the parse keeps only the names it is told to keep.
  */
 import type { ShellEnvironmentReading } from '@ferretry/fleet';
 import {
@@ -120,7 +121,10 @@ function concat(chunks: readonly Uint8Array[], length: number): Uint8Array {
   return joined;
 }
 
-/** The real spawn: stdin `/dev/null`, stdout a pipe, stderr discarded unread. */
+/**
+ * The real spawn: stdin `/dev/null`, stdout a pipe, stderr discarded unread, and a process group (and
+ * session) of its own, so `kill` reaches everything the shell's rc files started, not only the shell.
+ */
 export const bunShellSpawn: ShellSpawn = input => {
   const child = Bun.spawn({
     cmd: [...input.argv],
@@ -129,8 +133,20 @@ export const bunShellSpawn: ShellSpawn = input => {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'ignore',
+    detached: true,
   });
-  return { stdout: child.stdout, exited: child.exited, kill: signal => child.kill(signal) };
+  return {
+    stdout: child.stdout,
+    exited: child.exited,
+    kill: signal => {
+      try {
+        // A negative pid is the group the child leads; the shell alone is the fallback.
+        process.kill(-child.pid, signal);
+      } catch {
+        child.kill(signal);
+      }
+    },
+  };
 };
 
 /** The variables of this daemon's environment a login shell needs to find its own rc files, and no others. */

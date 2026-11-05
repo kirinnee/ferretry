@@ -4,7 +4,19 @@
  *
  * It is the start probe `fy new` already runs (`../pack/probe.ts`), through the same cache: the
  * runtime's own absolute launcher, its login's launch environment, 30 seconds at most. A pass is kept
- * there, so the first ferret on the runtime does not probe again; a failure never is.
+ * there for the cache's own key — launcher, model and effort — so a start that asks for the same model
+ * and effort inside the window is answered from it; a start that names an effort the check did not send
+ * probes again. A failure is never kept.
+ *
+ * IT RUNS ONLY WHAT A START WOULD RUN. A runtime that is switched off (its own switch or its login's),
+ * is not an agent runtime, or cannot launch right now (no CLI installed, its login needs signing in) is
+ * refused before any process starts, with the catalogue's own reason — the same gates a start applies,
+ * so the paid call is never spent on a runtime a start would refuse.
+ *
+ * IT RUNS IN A PRIVATE FOLDER. A CLI reads project files from its working directory (`CLAUDE.md`,
+ * `.claude/settings.json`, `.mcp.json`, `AGENTS.md`), and it is started with the login's environment, so the
+ * folder must be one nobody else can write to — never `/tmp`. The port that hands it out refuses a folder
+ * that is a symlink, not ours, or not a directory, and the check then reports `not_launchable`.
  *
  * THE ANSWER NEVER CARRIES THE CLI'S OUTPUT. The probe reads output only to classify it, and this builds
  * the sentence from that CODE, where the probe stopped, and plain facts the daemon already holds: the
@@ -34,6 +46,10 @@ export interface RuntimeCheckTarget {
   /** The model it starts on when nothing names one. Absent: the CLI's own default. */
   readonly defaultModel?: string;
   readonly disabled: boolean;
+  /** Whether it is an agent runtime: only those can run a ferret, so only those are checked. */
+  readonly agent: boolean;
+  /** Why the catalogue says it cannot launch now ("Sign in to launch"); absent when it can. */
+  readonly blocked?: string;
 }
 
 /**
@@ -55,8 +71,11 @@ export interface RuntimeCheckDeps {
   probe(request: PackProbeRequest, ttlMs: number): Promise<CachedProbe>;
   /** How long a pass is kept: Pack mode's own setting, so a check and a start agree. */
   passTtlMs(): Promise<number>;
-  /** Where the probe runs: a folder of nobody's project. */
-  readonly cwd: string;
+  /**
+   * Where the probe runs: an empty folder only this daemon's account can write to. Throws when there is
+   * none that is safe; the check then answers `not_launchable` rather than run somewhere else.
+   */
+  workingDirectory(): Promise<string>;
 }
 
 /** Why a check was not run. */
@@ -142,13 +161,37 @@ export class RuntimeCheckService {
         `${target.name} is switched off, so it was not checked. Switch it on first.`,
       );
     }
+    if (!target.agent) {
+      throw new RuntimeCheckRefusal(
+        'fleet_runtime_not_agent',
+        `${target.name} is for using ${target.harness === 'claude' ? 'Claude Code' : 'Codex'} yourself in a terminal, so it cannot run a ferret and was not checked.`,
+      );
+    }
+    if (target.blocked !== undefined) {
+      throw new RuntimeCheckRefusal(
+        'fleet_runtime_blocked',
+        `${target.name} cannot start right now, so it was not checked: ${target.blocked}.`,
+      );
+    }
     const [facts, ttlMs] = await Promise.all([this.deps.login(target), this.deps.passTtlMs()]);
+    const cwd = await this.deps.workingDirectory().then(
+      folder => folder,
+      () => undefined,
+    );
+    if (cwd === undefined) {
+      return {
+        ok: false,
+        ms: 0,
+        code: 'not_launchable',
+        sentence: `Couldn't start ${target.name}: the private folder its check runs in isn't safe to use.`,
+      };
+    }
     const { outcome } = await this.deps.probe(
       {
         wrapper: target.wrapper,
         harness: target.harness,
         model: target.defaultModel,
-        cwd: this.deps.cwd,
+        cwd,
         timeoutMs: RUNTIME_CHECK_TIMEOUT_MS,
       },
       ttlMs,

@@ -125,7 +125,11 @@ launcher once with "Reply with exactly: OK" — the probe every Pack start alrea
 and a sentence built from plain facts, never the CLI's output ([provider-presets.md](provider-presets.md#check-a-runtime)).
 It changes nothing and starts no ferret, so it sits with the other uses of the fleet's runtimes; it does
 spend one model call on that runtime's login, and the security log records it as `secrets.used`
-(`action: runtime-check`). The setup scan beside it stays `fleet.configure`: it now also reads the owner's
+(`action: runtime-check`). Why this paid call is `use` while a login's Test (`POST /v1/fleet/credentials/:id/test`)
+is `configure`: the check runs only what any start already runs — the runtime's own launcher, with the
+launch environment a start builds, refused for the same reasons a start is (switched off, not an agent
+runtime, cannot launch) — so a caller who may start a ferret may check; Test makes the daemon itself send
+the operator's key to a provider, outside any runtime, so it is held to the stricter axis and the step-up. The setup scan beside it stays `fleet.configure`: it now also reads the owner's
 login shell for env providers, and still answers names only.
 
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
