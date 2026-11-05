@@ -1478,6 +1478,26 @@ describe('a repeat copy (update) over real files', () => {
       should(await disk(target, 'warden.yaml')).equal(before);
     });
 
+    it('should refuse a carried file that would not check on this machine, naming the problem and writing nothing', async () => {
+      const { source, target } = await pair();
+      const before = await disk(target, 'warden.yaml');
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: `${WARDEN_THEIRS}investigation:\n  note: nothing\n` }],
+        { 'warden.yaml': { 'layers.jev': 'take', intervalMinutes: 'take', 'investigation.note': 'take' } },
+        allowed(false),
+      ).then(
+        () => should.fail(undefined, undefined, 'expected the unchecked file to be refused'),
+        (error: Error) => {
+          should(error.message).containEql('warden.yaml');
+          should(error.message).containEql('would not check');
+          should(error.message).containEql('Unrecognized key');
+        },
+      );
+      should(await disk(target, 'warden.yaml')).equal(before);
+    });
+
     it('should take only the controls chosen, and nothing else of machine.yaml', async () => {
       const { source, target } = await pair();
       const before = (await target.home.service.load()).evaluation.effective.model.machine;
