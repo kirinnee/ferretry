@@ -69,6 +69,8 @@ export * from './fleet-clone-review.ts';
 export * from './fleet-credentials.ts';
 export * from './fleet-setup.ts';
 export * from './foreign-history.ts';
+export * from './fy-render.ts';
+export * from './fy-render-caps.ts';
 export * from './grants.ts';
 export * from './handover.ts';
 export * from './harness-login.ts';
