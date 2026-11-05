@@ -162,13 +162,12 @@ export async function filesUnder(root: string, relative = ''): Promise<string[]>
 
 // ── The two machines of a re-copy ──
 
-
 export const crypto_ = new WebCryptoRelayCrypto();
 export const HELD = 'HELD_KEY';
 export const OTHER_HELD = 'OTHER_HELD_KEY';
 export const MISSING = 'MISSING_KEY';
-export const DEFAULTS = 'sites:\n  app.clickup.com: CLICKUP_A\n';
-export const EMAIL = 'kirin@example.test';
+const DEFAULTS = 'sites:\n  app.clickup.com: CLICKUP_A\n';
+const EMAIL = 'kirin@example.test';
 
 export interface Vault {
   readonly documents: MemorySecretDocuments;
@@ -176,7 +175,7 @@ export interface Vault {
 }
 
 /** A secret directory whose clock moves a minute with every write, so a rewrite shows in `updatedAt`. */
-export const vaultAt = (start: string): Vault => {
+const vaultAt = (start: string): Vault => {
   let at = Date.parse(start);
   const documents = new MemorySecretDocuments();
   return {
@@ -335,7 +334,6 @@ export async function credentialBytes(on: Machine): Promise<Record<string, strin
 export const unchanged = (before: Record<string, string>, after: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.keys(before).map(key => [key, after[key] as string]));
 
-
 /**
  * Every byte a sign-in, an account with its 2FA keys, their sealed seeds, a passkey, a secret entry (value,
  * timestamps) and an account default is.
@@ -349,4 +347,3 @@ export async function heldBytes(on: Machine, vault: Vault): Promise<Record<strin
   for (const name of [HELD, OTHER_HELD]) bytes[`vault/${name}`] = JSON.stringify(document?.entries[name]);
   return bytes;
 }
-

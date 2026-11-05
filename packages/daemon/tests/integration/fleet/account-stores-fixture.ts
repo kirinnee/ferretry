@@ -35,10 +35,10 @@ import { StatePasskeyStore } from '../../../src/adapters/step-up/state-passkey-s
 import type { FoundationPaths } from '../../../src/lib/index.ts';
 
 /** The passkey document's file name under the state home. */
-export const PASSKEYS_DOCUMENT = 'passkeys.json';
+const PASSKEYS_DOCUMENT = 'passkeys.json';
 
 /** Every file the account, sign-in, factor and passkey stores rest in, under the state home. */
-export const ACCOUNT_STORE_FILES = [LOGIN_INDEX_DOCUMENT, LOGIN_SECRETS_DOCUMENT, PASSKEYS_DOCUMENT] as const;
+const ACCOUNT_STORE_FILES = [LOGIN_INDEX_DOCUMENT, LOGIN_SECRETS_DOCUMENT, PASSKEYS_DOCUMENT] as const;
 
 const ACCOUNT_KEY = 'L0123456789ABCDEF01234567';
 const PASSWORD_SEAL = `${ACCOUNT_KEY}_PASSWORD_AABBCCDD`;
@@ -47,7 +47,7 @@ const SIGN_IN = 'si_0123456789abcdef';
 const WHEN = '2026-09-01T09:00:00.000Z';
 
 /** What the seeded stores hold, so a test can say which factor it is claiming to have preserved. */
-export const SEEDED_ACCOUNT = {
+const SEEDED_ACCOUNT = {
   handle: 'KIRIN_ACCOUNT',
   key: ACCOUNT_KEY,
   signIn: SIGN_IN,
@@ -129,7 +129,7 @@ export async function seedAccountStores(paths: FoundationPaths): Promise<void> {
  * The seeded state as the daemon reads it: the account with its three factor kinds and the sign-in, every seal the
  * index names present in the sealed document (and nothing else there), and the passkey on its device.
  */
-export async function assertSeeded(paths: FoundationPaths): Promise<void> {
+async function assertSeeded(paths: FoundationPaths): Promise<void> {
   const files = new StateFileSystem(paths);
   const stored = await new FileLoginIndexStore(paths, files).read();
   if (stored?.v !== 2) throw new Error('the account index is not a version 2 index');
