@@ -856,7 +856,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // the SAME carrier as every generated call. A direct-only second client would
   // make the action modal fail on precisely the remote phone it is for.
   const agendaWire = new AgendaWireDirectory();
-  const agenda = new DaemonAgendaClient(undefined, sharedReads, agendaWire);
+  // An answer that landed re-reads its conversation's row at once, so every badge and the Inbox agree with the board.
+  const agenda = new DaemonAgendaClient(undefined, sharedReads, agendaWire, (daemon, scope) => {
+    void fleet.fetchSession(daemon, scope).catch(() => undefined);
+  });
   const usage = new DaemonUsageStore(daemonUsagePort(sharedReads));
   const pins = new DaemonPinClient(undefined, carried);
   const browserLogin = new DaemonBrowserLoginStore(daemon => ({

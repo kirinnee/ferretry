@@ -297,6 +297,12 @@ export class DaemonAgendaClient {
     private readonly fetcher: DaemonFetch = browserFetch,
     /** Which spelling each machine speaks; a machine nobody has read health for is spoken to the older way. */
     readonly wires: AgendaWireDirectory = new AgendaWireDirectory(),
+    /**
+     * Told once a write the daemon ACCEPTED is applied here: the conversation's row (its `state.attention`, which every
+     * badge, list row and the Inbox's sections read) is re-read at once instead of waiting for the fleet feed's settle
+     * window (0.5–2 s), because the daemon wrote that summary before it answered. Never told of a refusal.
+     */
+    private readonly landed: (daemon: DaemonConnection, scope: DaemonSessionScope) => void = () => undefined,
   ) {
     this.rollup = new AgendaRollupStore(fetcher);
   }
@@ -544,6 +550,14 @@ export class DaemonAgendaClient {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);
           this.store.applySnapshot(scope, snapshot);
+        }
+        // The row moved whether or not a later write superseded this board here: a paired connection reads it again.
+        if (this.#currentConnection(daemon, generation) && !isMachineAgendaId(scope.sessionId)) {
+          try {
+            this.landed(daemon, scope);
+          } catch {
+            // A row read that cannot start leaves the fleet feed to catch up; the answer itself has landed.
+          }
         }
       })
       .catch(error => {

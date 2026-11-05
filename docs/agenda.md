@@ -1736,6 +1736,13 @@ letting go does:
   letting go over one snoozes the item until then, into the same undo window.
 - Pulling back up, or letting go before the threshold, cancels: the card springs back and nothing happens.
 
+**The window lasts only while Undo is on screen.** Every answer held for Undo is sent at once when the last undo toast
+leaves the screen — the owner went from the Inbox to the chat, say — rather than waiting out the five seconds: with no
+Undo to press, the wait only kept that chat, every other device and the ferret showing the item open
+(`DeferredAgendaActions.offerUndo`). A toast that moves (floating to inline) keeps the window. A refusal of an answer
+sent early comes back on its card like any other. Once an answer lands, the app re-reads that conversation's row at
+once, so every badge and the Inbox's sections agree with the board without waiting for the fleet feed.
+
 A swipe down is therefore never destructive without Undo. The choices are a pure state machine
 (`agenda-compass.ts`: a drag path in, an intent out), so the thresholds are tested without a pointer. Nothing depends on the
 gesture: behind every open card's ⋯ are plain buttons — **Skip** and **Not needed** — and **Snooze** (1 h / 4 h /

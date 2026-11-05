@@ -233,6 +233,50 @@ describe('DaemonAgendaClient', () => {
     should(client.store.status(scopeA)).equal('ready');
   });
 
+  it('re-reads the conversation row once an accepted answer lands, and never for a refusal or the machine agenda', async () => {
+    // Arrange — the daemon accepts A1, refuses A2
+    const landed: string[] = [];
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as { readonly id: string };
+        if (body.id === 'A2') return response({ error: 'already answered', code: 'conflict' }, 409);
+        return response(snapshot(String(_input).includes('/machine/') ? 'machine-agenda' : 'same/session'));
+      },
+      new AgendaWireDirectory(),
+      (daemon, scope) => landed.push(`${daemon.daemonId}/${scope.sessionId}`),
+    );
+
+    // Act
+    await client.resolve(daemonA, scopeA, 'A1');
+    await client.resolve(daemonA, daemonSessionScope(daemonA, 'machine-agenda'), 'A3');
+    const refused = await client.dismiss(daemonA, scopeA, 'A2').then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    // Assert — told once, for the landed answer only; the refusal reaches its caller and fails the board
+    should(landed).deepEqual(['daemon-a/same/session']);
+    should(refused).be.instanceOf(DaemonResponseError);
+    should(client.store.status(scopeA)).equal('error');
+  });
+
+  it('answers the owner even when the row re-read cannot start', async () => {
+    // Arrange
+    const client = new DaemonAgendaClient(
+      undefined,
+      async () => response(snapshot('same/session')),
+      new AgendaWireDirectory(),
+      () => {
+        throw new Error('no fleet');
+      },
+    );
+
+    // Act / Assert
+    await client.resolve(daemonA, scopeA, 'A1');
+    should(client.store.status(scopeA)).equal('ready');
+  });
+
   it("sends the gate mark on an answer to a thread's attached gate", async () => {
     const actions: unknown[] = [];
     const client = new DaemonAgendaClient(undefined, async (_input, init) => {

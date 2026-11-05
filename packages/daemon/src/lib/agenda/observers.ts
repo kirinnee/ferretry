@@ -39,6 +39,35 @@ export class AgendaChangeFanout implements AgendaChangeObserver {
   }
 }
 
+/**
+ * An observer the owner's answer does NOT wait for: it is started when the board changes and the request is answered
+ * without it. For presentation work that talks to the network or re-reads large files — taking an item's alerts down
+ * on every device is a web push per device (p50 136 ms, a 10 s timeout) after two reads of the whole notification
+ * ledger — and that already has its own recovery (the alert clearer's start-up sweep). The board is committed before
+ * any observer runs, so nothing the owner sees depends on it. Never for one that `requiresAcceptance`: its failure must
+ * hold the change pending, and a detached observer cannot fail anything.
+ *
+ * Order is kept by the observer itself: its work is STARTED in commit order, so one that runs on a keyed serial lane
+ * (the alert clearer's per-session lane) still runs each session's changes one after another.
+ */
+export class DetachedAgendaObserver implements AgendaChangeObserver {
+  constructor(
+    private readonly observer: Pick<AgendaChangeObserver, 'changed'>,
+    private readonly failed: (error: unknown) => void = () => undefined,
+  ) {}
+
+  async changed(sessionId: string, change: AgendaBoardChange): Promise<void> {
+    let started: Promise<void>;
+    try {
+      started = this.observer.changed(sessionId, change);
+    } catch (error) {
+      this.failed(error);
+      return;
+    }
+    void started.catch(error => this.failed(error));
+  }
+}
+
 /** Where a session's open-Agenda summary is kept: its state document, which the list reads. */
 export interface SessionAgendaState {
   /**
