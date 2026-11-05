@@ -1026,6 +1026,7 @@ import {
   LoopbackFirewallWatch,
   type LoopWatchdogPort,
   lateSeedCards,
+  launchEnvironment,
   launchedCompactAt,
   launchGuardActive,
   launchReasoningEffort,
@@ -11959,11 +11960,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         if (!state.success) return [];
         const config = SessionConfigSchema.safeParse(await storage.readConfig(parsed));
         if (!config.success) return [];
+        // The account's own variables (an `FY_HYPERMEDIA=0` an account carries) are merged under the session's
+        // exactly as both launchers do, or a ferret launched with them reads as outdated for good.
+        // A profile the launch itself would refuse (a missing secret) leaves nothing honest to compare against.
+        const account = await accountLaunchEnvironment
+          .forWrapper(config.data.agent, config.data.cwd)
+          .catch(() => undefined);
+        if (account === undefined) return [];
         return outdatedSections(
           state.data.launchInstructions,
           launchInstructions(
             CLIENT_NAME,
-            relaunchInstructionEnvironment(parsed, await launchEnvironments.read(parsed), config.data.mode),
+            relaunchInstructionEnvironment(
+              parsed,
+              launchEnvironment(account, await launchEnvironments.read(parsed)),
+              config.data.mode,
+            ),
           ),
         );
       };

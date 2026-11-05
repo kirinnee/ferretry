@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { launchInstructions } from '@ferretry/fleet';
 import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
+import { launchEnvironment } from '../../../../src/lib/fleet/launch-environment.ts';
 import { outdatedSections, relaunchInstructionEnvironment } from '../../../../src/lib/session/launch/outdated.ts';
 import { sessionPaneEnvironment } from '../../../../src/lib/session/lifecycle/policy.ts';
 import { parseSessionId } from '../../../../src/lib/session-id.ts';
@@ -88,5 +89,46 @@ describe('relaunchInstructionEnvironment', () => {
   it('should keep an explicit stored switch, and default an auto ferret to off', () => {
     should(relaunchInstructionEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive').FY_HYPERMEDIA).equal('0');
     should(relaunchInstructionEnvironment(id, {}, 'auto').FY_HYPERMEDIA).equal('0');
+  });
+  describe('with the account launch environment merged as the launchers do', () => {
+    const launched = (account: Record<string, string>, session: Record<string, string>) =>
+      launchInstructions('fy', sessionPaneEnvironment(id, launchEnvironment(account, session), 'interactive'));
+    const now = (account: Record<string, string>, session: Record<string, string>) =>
+      launchInstructions('fy', relaunchInstructionEnvironment(id, launchEnvironment(account, session), 'interactive'));
+
+    it('should stay current for an interactive ferret whose account turns hypermedia off', () => {
+      const account = { FY_HYPERMEDIA: '0' };
+      should(relaunchInstructionEnvironment(id, launchEnvironment(account, {}), 'interactive').FY_HYPERMEDIA).equal(
+        '0',
+      );
+      should(outdatedSections(launched(account, {}), now(account, {}))).deepEqual([]);
+    });
+
+    it('should stay current for an interactive ferret whose account turns hypermedia on', () => {
+      const account = { FY_HYPERMEDIA: '1' };
+      should(relaunchInstructionEnvironment(id, launchEnvironment(account, {}), 'interactive').FY_HYPERMEDIA).equal(
+        '1',
+      );
+      should(outdatedSections(launched(account, {}), now(account, {}))).deepEqual([]);
+    });
+
+    it('should let the session switch win over the account', () => {
+      const env = relaunchInstructionEnvironment(
+        id,
+        launchEnvironment({ FY_HYPERMEDIA: '0' }, { FY_HYPERMEDIA: '1' }),
+        'interactive',
+      );
+      should(env.FY_HYPERMEDIA).equal('1');
+    });
+
+    it('should call a ferret launched with the account switch off outdated when the account is ignored', () => {
+      const account = { FY_HYPERMEDIA: '0' };
+      should(
+        outdatedSections(
+          launched(account, {}),
+          launchInstructions('fy', relaunchInstructionEnvironment(id, {}, 'interactive')),
+        ),
+      ).deepEqual(['hypermedia']);
+    });
   });
 });
