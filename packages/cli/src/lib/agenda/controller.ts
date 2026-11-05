@@ -12,6 +12,7 @@ import {
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
 import { DaemonFeaturesUnreadable } from '../daemon/features.ts';
+import { patchYaml } from '../patch/document.ts';
 import { listedMatches, type RelatedCheck } from '../work-search/related.ts';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
 import {
@@ -35,6 +36,7 @@ import {
 } from './candidates.ts';
 import { type CardFlag, resolveCardFlag } from './card-flag.ts';
 import type { IAgendaBriefInput, IAgendaCardTies, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
+import { agendaPatchDocument, composeAgendaPatch, parseAgendaPatch } from './patch.ts';
 import { agendaReference, parseAgendaReference } from './reference.ts';
 import {
   renderAgendaHistory,
@@ -106,6 +108,14 @@ export interface AgendaAddOptions
   readonly new?: boolean | string;
   /** `--related <id>`: a card to tie the item to, or an agenda item to edit instead of raising a duplicate. */
   readonly related?: string;
+}
+
+/** `fy agenda patch <id> --file <f>`: the document, and `--now` as on edit. */
+export interface AgendaPatchOptions extends AgendaCommandOptions {
+  /** The YAML or JSON document; `-` (the default) reads standard input. */
+  readonly file?: string;
+  /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
+  readonly now?: boolean;
 }
 
 /** Flags that reword an open item. */
@@ -219,7 +229,10 @@ export class AgendaController {
   }
 
   /** Prints one item, open or resolved; read-only, so a mistyped verb can never raise anything. */
-  async show(reference: string, options: AgendaCommandOptions & { readonly tab?: string }): Promise<void> {
+  async show(
+    reference: string,
+    options: AgendaCommandOptions & { readonly tab?: string; readonly yaml?: boolean },
+  ): Promise<void> {
     const id = parseAgendaReference(reference);
     const sessionId = this.#target(options);
     const snapshot = await this.gateway.snapshot(sessionId);
@@ -229,6 +242,15 @@ export class AgendaController {
     if (found === undefined) throw new Error(`no agenda item ${agendaReference(id)} in ${sessionId}`);
     if (options.tab !== undefined) {
       this.out.success(tabText(found, options.tab));
+      return;
+    }
+    if (options.yaml === true) {
+      this.out.success(
+        patchYaml(agendaPatchDocument(found), [
+          `${agendaReference(id)} — read every part, update what is out of date, then: fy agenda patch ${id} --file <this file>`,
+          'a key present replaces the field, an absent key leaves it, null removes it; tabs by name',
+        ]),
+      );
       return;
     }
     this.out.success(
@@ -502,6 +524,43 @@ export class AgendaController {
       ...(options.now === true ? { now: true as const } : {}),
     });
     this.#report(snapshot, options, () => renderAgendaMutation('edited', agendaReference(id), snapshot, id));
+  }
+
+  /**
+   * PATCH an open item as ONE document (docs/agenda.md § Patch): YAML or JSON, merge-patch semantics, tabs by name.
+   * The CLI compares it with the item as it stands and sends ONE `edit` carrying what differs, so it is all or nothing
+   * and keeps every rule `edit` keeps; a document that changes nothing sends nothing.
+   */
+  async patch(reference: string, options: AgendaPatchOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const path = text(options.file) ?? '-';
+    const source = path === '-' ? 'the patch on standard input' : path;
+    const parsed = parseAgendaPatch(await this.#read(path), source);
+    if (!parsed.ok) {
+      throw new Error(
+        `agenda patch ${id} changed nothing:\n${parsed.problems.map(problem => `  ${problem}`).join('\n')}`,
+      );
+    }
+    // A patch names its revision, rewrites the why line or clears with null: all three need `agenda.patch.1`.
+    await this.#requireChannel('agenda patch', DAEMON_FEATURES.agendaPatch);
+    const sessionId = this.#target(options);
+    const item = (await this.gateway.snapshot(sessionId)).items.find(each => each.id === id);
+    if (item === undefined) throw new Error(`no open agenda item ${agendaReference(id)} in ${sessionId}`);
+    const plan = composeAgendaPatch(item, parsed.patch, typed => parseNeededBy(typed, this.now(), 'neededBy'));
+    if (plan.kind === 'stale') {
+      throw new Error(
+        `${agendaReference(id)} changed since you read it, so nothing was written: read it again (agenda show ${id} --yaml), update every part that is out of date, and patch it back`,
+      );
+    }
+    if (plan.kind === 'unchanged') {
+      this.out.success(`${agendaReference(id)}: nothing changed, so nothing was sent (every value matches the item)`);
+      return;
+    }
+    const snapshot = await this.gateway.apply(sessionId, {
+      ...(await this.#withLinkMeanings(plan.request)),
+      ...(options.now === true ? { now: true as const } : {}),
+    } as AgendaActionRequest);
+    this.#report(snapshot, options, () => renderAgendaMutation('patched', agendaReference(id), snapshot, id));
   }
 
   /**

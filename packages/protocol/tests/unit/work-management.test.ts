@@ -173,6 +173,11 @@ const resolvedAgenda = {
 };
 
 const agendaCases: SchemaCase[] = [
+  {
+    name: 'edit request with a revision (agenda.patch.1)',
+    schema: agenda.AgendaEditRequestSchema,
+    value: { action: 'edit', id: 'A1', revision: '1kvr35710qfik6', why: 'Ship it this week?', clear: ['detail'] },
+  },
   { name: 'attention source', schema: agenda.AgendaSourceSchema, value: 'agent-raised' },
   { name: 'card kind', schema: agenda.AgendaKindSchema, value: 'yesno' },
   { name: 'swipe direction', schema: agenda.AgendaDirectionSchema, value: 'up' },

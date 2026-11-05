@@ -313,6 +313,7 @@ export type BoardVerb =
   | 'reopen'
   | 'clarify'
   | 'link'
+  | 'patch'
   | 'assign'
   | 'claim'
   | 'note'
@@ -343,6 +344,7 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   reparent: 're-parented',
   file: 'file recorded',
   edit: 'edited',
+  patch: 'patched',
   refile: 'refiled',
   visibility: 'visibility changed',
 };

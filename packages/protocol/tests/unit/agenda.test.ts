@@ -33,11 +33,25 @@ const notice = {
 describe('AgendaClearableFieldSchema', () => {
   it('should name exactly the agenda fields an edit can take off an item', () => {
     // Assert
-    should(AgendaClearableFieldSchema.options).deepEqual(['blockingNow', 'willBlock', 'neededBy', 'questionAnswer']);
-    for (const field of ['blockingNow', 'willBlock', 'neededBy', 'questionAnswer']) {
-      should(AgendaClearableFieldSchema.safeParse(field).success).be.true();
-    }
-    for (const field of ['title', 'subject', 'urgency', '']) {
+    should(AgendaClearableFieldSchema.options).deepEqual([
+      'blockingNow',
+      'willBlock',
+      'neededBy',
+      'questionAnswer',
+      'decided',
+      'stillOpen',
+      'terms',
+      'recommendation',
+      'optionDetails',
+      'impact',
+      'urgency',
+      'links',
+      'whereWeAre',
+      'body',
+      'detail',
+    ]);
+    // A cold reader starts from these, and the ask's shape is replaced, never removed (docs/agenda.md § Patch).
+    for (const field of ['title', 'subject', 'why', 'howToResolve', 'premise', 'context', 'kind', 'ask', 'steps', '']) {
       should(AgendaClearableFieldSchema.safeParse(field).success).be.false();
     }
   });
@@ -140,7 +154,7 @@ describe('the edit request: clear', () => {
     ).containDeep({ willBlock: 'the release', clear: ['blockingNow', 'neededBy'] });
   });
 
-  it('should refuse an empty clear list, an unknown field and more fields than can be cleared', () => {
+  it('should refuse an empty clear list, an unknown field and a field named twice', () => {
     // Assert
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', clear: [] }).success).be.false();
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', clear: ['title'] }).success).be.false();
@@ -148,7 +162,7 @@ describe('the edit request: clear', () => {
       AgendaActionRequestSchema.safeParse({
         action: 'edit',
         id: 'A1',
-        clear: ['blockingNow', 'willBlock', 'neededBy', 'questionAnswer', 'neededBy'],
+        clear: ['blockingNow', 'willBlock', 'neededBy', 'blockingNow'],
       }).success,
     ).be.false();
   });

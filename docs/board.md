@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id>` whole, then `edit` what's stale: title, summary, `--status-{now,done,next}` (PRs in done); `--how-to-test "<where, do, see>"` before try. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -238,7 +238,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 
 ```text
 Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a card: each step, read it (`fy task show <id>`), then `fy task edit <id>` its status (`--status-{now,done,next}`, PR links in done) and `--how-to-test`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none.
+With a card: each step, `fy task show <id> --yaml`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
@@ -634,6 +634,47 @@ The view adds fields that are never stored:
 
 A card is referenced as `&F412`, an agenda item as `!A48`. The retired `#F12` is still accepted as input, and
 never printed ([reference-standard.md](reference-standard.md)).
+
+### Patch: a card as one document
+
+The owner: _"can you make it such that they modify agendas and tasks as YAML or JSON as patched?"_ (&F957), and
+_"we need to read to know what needs to be updated, else there might be many segments that might be outdated!"_. A
+card's words are one document, so a ferret reads it whole, updates every part that is out of date, and writes it back
+in one go:
+
+```sh
+fy task show F12 --yaml > f12.yaml   # the editable document, with the card's revision
+$EDITOR f12.yaml
+fy task patch F12 --file f12.yaml    # one atomic edit; --file - reads stdin; JSON works too
+```
+
+- **READ BEFORE WRITE: the revision is required.** `show --yaml` prints `revision:` — the seq of the card's newest
+  history event (`boardTaskRevision`). Every change to a card appends an event, so anybody's write moves it on. A
+  patch without it is refused before anything is sent; one whose revision is not the card's is refused
+  `version-conflict` — by the CLI against the card it just read, and by the daemon inside the card's write, so a
+  change in between is never overwritten unseen. Read it again, update, patch it back. It needs a daemon that
+  reports `board.patch.1`; an older one refuses the field as malformed (`fy daemon update`).
+- **The document**: `revision`, `title`, `summary`, `premise`, `context`, `terms` (a list of `{ term, meaning }`),
+  `brief`, `howToTest`, `visibility` and the card's **Status** (`status: { now, doneSoFar, next }`, Markdown each,
+  &C48) — the fields `fy task edit` changes. `show --yaml` prints the status whole when the card has one.
+- **Semantics: JSON Merge Patch (RFC 7386)**, as on the agenda
+  ([agenda.md § Patch](agenda.md#patch-the-item-as-one-document)): a key present replaces the field, an absent key
+  leaves it, `null` empties it; lists (`terms`, a point list) are replaced whole. `status` is the one object that
+  merges by key: `status: { now: … }` rewrites Now and keeps the rest, `""` empties a part, and only the parts that
+  differ are sent — the daemon merges them inside the card's write, so two ferrets rewriting different parts never
+  undo each other. `status: null` is refused.
+- **`null` empties** `premise`, `context`, `terms`, `brief` and `howToTest`. `title` and `summary` are never removed,
+  only rewritten, and `visibility` is `public` or `private`.
+- **One patch is one `edit` action** on `POST /v1/board/tasks/:taskId`: the CLI parses the document with zod
+  (`BoardTaskPatchSchema` in the protocol), drops values equal to the card's, and sends the rest with the revision as
+  ONE edit — the same validation, title check and governance as `fy task edit`. Who may change which field is the
+  daemon's decision on that action, so a per-field rule there (a card's holder, a sub-ferret included, changing only
+  `status` and `howToTest` on its own card, &C48) binds a patch exactly as it binds `edit`. A document written back
+  unchanged sends nothing.
+- **What stays fixed**: the ask and its clarifications (the owner's words), the lane, links, files, dependencies,
+  history, owner and assignee — each changed by its own verb with its own rules (`move`, `link`, `depend`,
+  `assign`…), never by a patch. They are refused here by name, as is any unknown key, and every problem is said per
+  field. The document has no token or credential field.
 
 ## How a card reads
 
@@ -1384,6 +1425,8 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy tidy`                                         | drop your own unwanted cards and close your own work-tracking agenda items; a dry run unless `--yes`; `--reason`, `--session`, `--json` ([Tidy](#tidy-dropping-what-nobody-asked-for))                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `fy search <words>`                               | find cards and agenda items by what they say; `--kind`, `--open`, `--all`, `--project`, `--limit`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy task show <id>`                               | print one card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `fy task show <id> --yaml`                        | the editable document `fy task patch` takes back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `fy task patch <id> --file <f\|->`                | change the card as ONE YAML or JSON document: one atomic edit ([Patch](#patch-a-card-as-one-document))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `fy task move <id> <lane>`                        | move it; `--reason` is required for a move back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `fy task trigger <id> <event>`                    | report an external event for a card (`pr.review_approved`, `deploy.done`); the daemon moves it if a lane waits on it. A sub-ferret may run it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `fy task focus <id>`                              | attribute this session's work to the card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |

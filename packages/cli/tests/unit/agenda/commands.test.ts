@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { DAEMON_FEATURES } from '@ferretry/protocol';
+import { agendaItemRevision, DAEMON_FEATURES } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
 import { registerAgendaCommands } from '../../../src/lib/agenda/commands';
@@ -1327,4 +1327,31 @@ it('dispatches log, merge and split arguments through the public command registr
     await parsed;
     should(gateway.applied[0]?.request.action).equal(argv[1]);
   }
+});
+
+describe('agenda patch command registration', () => {
+  it('should hand the item reference and --file to the controller, which sends one edit', async () => {
+    // Arrange
+    const held = humanItem('A1', 'approve the deploy');
+    const gateway = new RecordingAgendaGateway(snapshot([held]), snapshot([held]));
+    gateway.offered = [DAEMON_FEATURES.agendaPatch];
+    const input = {
+      read: async (path: string) =>
+        path === 'a1.yaml' ? `revision: ${agendaItemRevision(held)}\nurgency: before Friday` : '',
+    };
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerAgendaCommands(program, new AgendaController(gateway, new CapturingOutput(), SESSION, input));
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'agenda', 'patch', '!A1', '--file', 'a1.yaml']);
+
+    // Assert
+    should(gateway.applied).deepEqual([
+      {
+        sessionId: SESSION,
+        request: { action: 'edit', id: 'A1', revision: agendaItemRevision(held), urgency: 'before Friday' },
+      },
+    ]);
+  });
 });

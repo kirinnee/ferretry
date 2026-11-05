@@ -1516,3 +1516,85 @@ describe('fy task create — related work', () => {
     should(searchOutput.notices).eql(['related check skipped: this daemon has no search yet']);
   });
 });
+
+describe('fy task patch', () => {
+  it('should read the card, then send ONE edit carrying its revision', async () => {
+    // Arrange
+    const { gateway, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\nsummary: One patch, one edit' }),
+    );
+
+    // Act
+    await controller.patch('&F1', {});
+
+    // Assert
+    should(gateway.taskCalls).deepEqual(['F1']);
+    should(sent(gateway)).deepEqual([{ action: 'edit', revision: 1, summary: 'One patch, one edit' }]);
+  });
+
+  it('should refuse a stale revision with the way to read it again, and send nothing', async () => {
+    // Arrange
+    const { gateway, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ 'f1.yaml': 'revision: 9\nbrief: x' }),
+    );
+
+    // Act
+    const message = await refusal(() => controller.patch('F1', { file: 'f1.yaml' }));
+
+    // Assert
+    should(message).match(
+      /changed since you read it, so nothing was written: read it again \(fy task show F1 --yaml\)/u,
+    );
+    should(sent(gateway)).be.empty();
+  });
+
+  it('should say nothing changed and send nothing when every value matches the card', async () => {
+    // Arrange
+    const { gateway, log, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\ntitle: Rename the widget' }),
+    );
+
+    // Act
+    await controller.patch('F1', {});
+
+    // Assert
+    should(log).deepEqual(['ok: &F1: nothing changed, so nothing was sent (every value matches the card)']);
+    should(sent(gateway)).be.empty();
+  });
+
+  it('should say every problem at once and send nothing', async () => {
+    // Arrange
+    const { gateway, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\nbogus: 1\nlane: x' }),
+    );
+
+    // Act
+    const message = await refusal(() => controller.patch('F1', {}));
+
+    // Assert
+    should(message).match(/task patch &F1 changed nothing:\n {2}bogus: not a field.*\n {2}lane: not a field/u);
+    should(sent(gateway)).be.empty();
+  });
+
+  it('should print the editable document with show --yaml', async () => {
+    // Arrange
+    const { log, controller } = harness();
+
+    // Act
+    await controller.show('F1', { yaml: true });
+
+    // Assert
+    should(log[0]).match(
+      /^ok: # &F1 — read every part, update what is out of date, then: fy task patch F1 --file <this file>\n/u,
+    );
+    should(log[0]).match(/\nrevision: 1\ntitle: Rename the widget\n/u);
+  });
+});

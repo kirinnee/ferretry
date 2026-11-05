@@ -8,6 +8,7 @@ import {
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
+  boardTaskRevision,
   type PrLink,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
@@ -992,6 +993,29 @@ describe('everything else on a card', () => {
     // Assert
     should(none).not.have.property('status');
     should(same.code).equal('invalid');
+  });
+
+  it('should refuse a patch written against an older revision, and apply one written against the current', async () => {
+    // Arrange: the card's revision is the seq of its newest history event (`boardTaskRevision`)
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create({}), lead);
+    const read = boardTaskRevision(created.task);
+    await service.act(created.task.id, action({ action: 'edit', summary: 'somebody else wrote first' }), lead);
+
+    // Act
+    const stale = await refusal(
+      service.act(created.task.id, action({ action: 'edit', revision: read, summary: 'an old reading' }), lead),
+    );
+    await service.act(
+      created.task.id,
+      action({ action: 'edit', revision: boardTaskRevision(stored(ports)), summary: 'read, then written' }),
+      lead,
+    );
+
+    // Assert
+    should(stale.code).equal('version-conflict');
+    should(stale.message).match(/changed since you read it: read it again \(task show F\d+ --yaml\)/u);
+    should(stored(ports).summary).equal('read, then written');
   });
 
   it('should let the assignee write How to test without owner standing', async () => {
