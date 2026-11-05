@@ -189,11 +189,11 @@ export function OnboardingSpeedupsStep({
       const jevWorked = typed.some(([provider]) => provider === 'jev') && !failed.some(line => line.startsWith('Jev'));
       const wardenProblem = warden && jevWorked ? await switchJevOn(client) : null;
       setView(await readSpeedups(client));
-      if (wardenProblem !== null) setProblem(wardenProblem);
-      else if (failed.length === 0) {
-        // Only a key that worked sets the step: a saved key that failed its test leaves it open.
+      if (failed.length === 0) {
+        // Only keys that worked set the step: a saved key that failed its test leaves it open.
         latest.current.onSaved();
-        latest.current.onFinished(here.current);
+        if (wardenProblem === null) latest.current.onFinished(here.current);
+        else setProblem(wardenProblem);
       } else setProblem(`Saved, but the test didn’t pass. ${failed.join(' ')} Paste a corrected key, or skip.`);
     } catch (cause) {
       setProblem(changeRefusalSentence(cause));

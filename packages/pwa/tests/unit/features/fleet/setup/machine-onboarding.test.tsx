@@ -299,7 +299,7 @@ describe('MachineOnboarding · the rail', () => {
     expect(later.getAttribute('data-variant')).toBeNull();
   });
 
-  it('has Back · Skip · one primary on every page, never two, and no Continue anywhere', async () => {
+  it('has Back · Skip · one primary on every page, never two, and no second Next button', async () => {
     const screen = await render({ props: { voice: installedVoice() } });
     const steps = ['start', 'claude', 'codex', 'speedups', 'defaults', 'done'];
     for (const step of steps) {
@@ -309,7 +309,8 @@ describe('MachineOnboarding · the rail', () => {
       expect(screen.all('[data-onboarding-foot] button[data-variant="primary"]').length).toBeLessThanOrEqual(1);
     }
     await screen.rail('speedups');
-    expect(screen.text('[data-onboarding-foot] [data-onboarding-primary]')).toBe('Save keys');
+    // The fixture already stores a key and none is being typed: the one primary is Continue (a revisit).
+    expect(screen.text('[data-onboarding-foot] [data-onboarding-primary]')).toBe('Continue');
     await screen.rail('defaults');
     expect(screen.text('[data-onboarding-foot] [data-onboarding-primary]')).toBe('Use these');
     await screen.rail('start');
