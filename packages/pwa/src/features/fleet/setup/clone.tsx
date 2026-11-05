@@ -389,19 +389,16 @@ export function CloneMachine(props: CloneMachineProps) {
     stamps: readonly { readonly name: string; readonly updatedAt: string }[] | null,
   ): Promise<readonly NewerKey[]> => {
     if (stamps === null || stamps.length === 0 || pickedRecord === undefined) return [];
-    try {
-      const reviewed = await target.read(client =>
-        reviewFleetClone(client, {
-          bundle: { ...exported },
-          source: { daemonId: String(pickedRecord.daemonId) },
-          names: { source: sourceName, target: machineName },
-          sourceSecrets: [...stamps],
-        }),
-      );
-      return reviewed.kind === 'done' ? newerKeys(reviewed.value.keys) : [];
-    } catch {
-      return [];
-    }
+    // `read` turns any failure (a review that is refused, a list too long to send) into a refusal: none offered.
+    const reviewed = await target.read(client =>
+      reviewFleetClone(client, {
+        bundle: { ...exported },
+        source: { daemonId: String(pickedRecord.daemonId) },
+        names: { source: sourceName, target: machineName },
+        sourceSecrets: [...stamps],
+      }),
+    );
+    return reviewed.kind === 'done' ? newerKeys(reviewed.value.keys) : [];
   };
 
   const readSource = (): void => {
