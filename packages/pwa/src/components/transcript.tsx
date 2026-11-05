@@ -2,6 +2,7 @@ import type { SessionLiveActivity } from '@ferretry/protocol';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranscriptHold } from '../hooks/use-live-clock.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
+import { useStopReadingOnLeave } from '../hooks/use-read-aloud.ts';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
 import { compactionStripIndex } from '../lib/compaction-readout.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
@@ -117,6 +118,7 @@ export function Transcript({
   history,
 }: TranscriptProps) {
   const hold = useTranscriptHold();
+  useStopReadingOnLeave(`${daemonId}/${sessionId}`);
   const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
   const items = transcriptItems(shown.entries);
   const runs = agentRuns(items);
