@@ -430,7 +430,7 @@ const take = session.beginFinish(); // null when this engine cannot, or the mic 
 attempt was not discarded, replaced or cleared meanwhile; otherwise it decodes the whole take afresh, so the words are always those of the audio that was said. It
 never stops the microphone and never sends anything. Offered by the whole-take engines (Parakeet 0.6B and
 110M, the other sherpa batch models, Whisper); not by Vosk (already ~0.05 s), Browser voice, or Parakeet
-with near-live words on. The Live loop calls it; nothing in dictation does yet.
+with near-live words on. Slice 4 (the Live loop) will call it; nothing ships calling it yet, in dictation or elsewhere.
 
 ### Measuring your own device
 

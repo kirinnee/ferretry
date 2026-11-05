@@ -345,4 +345,71 @@ describe('WhisperEngine — threads', () => {
       should(outcome.error).be.instanceOf(WhisperEngineError);
     });
   });
+
+  describe('the one-thread replacement itself fails to start', () => {
+    /** Engine whose second worker (the replacement) is made by `makeSecond`. */
+    const failing = (makeSecond: () => FakeWorker) => {
+      const workers: FakeWorker[] = [];
+      let spawned = 0;
+      const engine = new WhisperEngine(
+        MODEL,
+        () => {
+          spawned += 1;
+          const worker = spawned === 2 ? makeSecond() : new FakeWorker();
+          workers.push(worker);
+          return worker;
+        },
+        undefined,
+        { threads: () => 4 },
+      );
+      return { engine, workers };
+    };
+
+    it('a replacement that cannot be created settles every waiting request and leaves the engine reusable', async () => {
+      let spawned = 0;
+      const workers: FakeWorker[] = [];
+      const engine = new WhisperEngine(
+        MODEL,
+        () => {
+          spawned += 1;
+          if (spawned === 2) throw new Error('QuotaExceededError');
+          const worker = new FakeWorker();
+          workers.push(worker);
+          return worker;
+        },
+        undefined,
+        { threads: () => 4 },
+      );
+      const one = settle(engine.transcribe(new Float32Array(4)));
+      const two = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(workers[0]?.terminated).equal(1);
+      should(one.error).be.instanceOf(WhisperEngineError);
+      should(two.error).be.instanceOf(WhisperEngineError);
+      // Nothing is stuck: a later request starts a fresh worker.
+      void engine.transcribe(new Float32Array(4));
+      should(workers).have.length(2);
+    });
+
+    it('a replacement that cannot be given the audio is terminated and every waiting request is settled', async () => {
+      class Refusing extends FakeWorker {
+        override postMessage(message: never, transfer?: Transferable[]): void {
+          if ((message as { type: string }).type === 'transcribe') throw new Error('DataCloneError');
+          super.postMessage(message, transfer);
+        }
+      }
+      const { engine, workers } = failing(() => new Refusing());
+      const one = settle(engine.transcribe(new Float32Array(4)));
+      const two = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(workers[1]?.terminated).equal(1);
+      should(one.error).be.instanceOf(WhisperEngineError);
+      should(two.error).be.instanceOf(WhisperEngineError);
+      // The dead replacement is forgotten: a later request starts another worker.
+      void engine.transcribe(new Float32Array(4));
+      should(workers).have.length(3);
+    });
+  });
 });

@@ -261,16 +261,29 @@ export class ParakeetEngine {
     this.#worker = null;
     this.#pinned = null;
     stale?.terminate();
-    const worker = this.#ensure();
-    this.#pinned = 1;
-    worker.postMessage({ type: 'load' });
-    const jobs = [...this.#replay];
-    this.#replay.clear();
-    for (const [id, job] of jobs)
-      worker.postMessage(
-        { type: 'transcribe', id, samples: job.samples, ...(job.timed ? { timed: true as const } : {}) },
-        [job.samples.buffer],
+    let worker: ParakeetWorkerLike | null = null;
+    try {
+      worker = this.#ensure();
+      this.#pinned = 1;
+      worker.postMessage({ type: 'load' });
+      const jobs = [...this.#replay];
+      this.#replay.clear();
+      for (const [id, job] of jobs)
+        worker.postMessage(
+          { type: 'transcribe', id, samples: job.samples, ...(job.timed ? { timed: true as const } : {}) },
+          [job.samples.buffer],
+        );
+    } catch {
+      // The replacement could not start (a runtime out of workers or memory) or could not be given the
+      // audio. Nothing waiting can be answered now, so release the partial worker and settle every caller.
+      this.#worker = null;
+      this.#pinned = null;
+      this.#loadStartedAt = null;
+      worker?.terminate();
+      this.#failAll(
+        new ParakeetEngineError('worker-failed', 'The on-device speech engine could not restart on one thread.'),
       );
+    }
   }
 
   #failAll(error: ParakeetEngineError): void {

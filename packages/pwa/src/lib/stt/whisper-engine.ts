@@ -245,13 +245,26 @@ export class WhisperEngine {
     this.#worker = null;
     this.#pinned = null;
     stale?.terminate();
-    const worker = this.#ensure();
-    this.#pinned = 1;
-    worker.postMessage({ type: 'load', model: this.#model });
-    const jobs = [...this.#replay];
-    this.#replay.clear();
-    for (const [id, samples] of jobs)
-      worker.postMessage({ type: 'transcribe', id, model: this.#model, samples }, [samples.buffer]);
+    let worker: WhisperWorkerLike | null = null;
+    try {
+      worker = this.#ensure();
+      this.#pinned = 1;
+      worker.postMessage({ type: 'load', model: this.#model });
+      const jobs = [...this.#replay];
+      this.#replay.clear();
+      for (const [id, samples] of jobs)
+        worker.postMessage({ type: 'transcribe', id, model: this.#model, samples }, [samples.buffer]);
+    } catch {
+      // The replacement could not start (a runtime out of workers or memory) or could not be given the
+      // audio. Nothing waiting can be answered now, so release the partial worker and settle every caller.
+      this.#worker = null;
+      this.#pinned = null;
+      this.#loadStartedAt = null;
+      worker?.terminate();
+      this.#failAll(
+        new WhisperEngineError('worker-failed', 'The on-device speech engine could not restart on one thread.'),
+      );
+    }
   }
 
   #loaded(): void {
