@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { SessionHandoff } from '@ferretry/protocol';
+import type { ReactElement } from 'react';
 import { AttachmentGalleryProvider, TranscriptAttachmentGallery } from '../../src/components/attachment-gallery.tsx';
 import { AttachmentReferences } from '../../src/components/attachment-reference-surface.tsx';
 import { AttachmentReferenceTarget } from '../../src/components/attachment-reference-target.tsx';
@@ -215,6 +216,81 @@ describe('the + against a real composer', () => {
     await composer.unmount();
   });
 
+  describe('while the composer is mounted but not writable', () => {
+    const pending = (): { readonly send: () => Promise<never>; readonly finish: () => void } => {
+      let finish: () => void = () => undefined;
+      const gate = new Promise<void>(resolve => {
+        finish = resolve;
+      });
+      return { send: async () => (await gate) as never, finish };
+    };
+    const withTile = (composer: ReactElement) => (
+      <AttachmentReferenceTarget scope={scope}>
+        <TranscriptAttachmentGallery daemon={daemon} images={[stored()]} />
+        {composer}
+      </AttachmentReferenceTarget>
+    );
+    const chips = (container: HTMLElement) => container.querySelectorAll('span[title="shot.png"]');
+
+    it('disables the + with the reason, refuses the reference, and leaves the draft alone — then wakes when enabled', async () => {
+      const store = new DaemonDraftStore(memoryStorage());
+      const view = await mount(
+        withTile(<Composer api={api} daemon={daemon} disabled draftStore={store} sessionId="ref-session" />),
+      );
+      const plus = (): HTMLButtonElement => must(plusOf(view.container), 'the + button');
+      expect(plus().disabled).toBe(true);
+      expect(plus().title).toBe("Open this session's message box to reference this file");
+
+      expect(referenceAttachmentInComposer(file, scope)).toEqual({ state: 'no-composer' });
+      // Reached around the + (a stale handle): the composer itself refuses to take the file or the words.
+      composerQuoteTarget(scope)?.insertAtCaret?.('%attachment:shot.png');
+      expect(composerQuoteTarget(scope)?.attachExisting?.(file)).toBe('refused');
+      expect(textarea(view.container).value).toBe('');
+      expect(chips(view.container)).toHaveLength(0);
+
+      await view.render(withTile(<Composer api={api} daemon={daemon} draftStore={store} sessionId="ref-session" />));
+      expect(plus().disabled).toBe(false);
+      await interact(() => plus().click());
+      expect(textarea(view.container).value).toBe('%attachment:shot.png ');
+      expect(chips(view.container)).toHaveLength(1);
+      await view.unmount();
+    });
+
+    it('disables the + while a send is in flight, keeps the draft and chips untouched, and wakes when it lands', async () => {
+      const gate = pending();
+      const view = await mount(
+        withTile(
+          <Composer
+            api={{ send: gate.send }}
+            connectionLive
+            daemon={daemon}
+            draftStore={new DaemonDraftStore(memoryStorage())}
+            sessionId="ref-session"
+          />,
+        ),
+      );
+      const plus = (): HTMLButtonElement => must(plusOf(view.container), 'the + button');
+      await interact(() => composerQuoteTarget(scope)?.replaceDraft('hello'));
+      expect(plus().disabled).toBe(false);
+
+      await interact(() => {
+        must(view.container.querySelector('form'), 'the form').dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+      });
+      expect(must(view.container.querySelector('[data-composer-send]'), 'send').getAttribute('data-sending')).toBe('');
+      expect(plus().disabled).toBe(true);
+
+      expect(referenceAttachmentInComposer(file, scope)).toEqual({ state: 'no-composer' });
+      expect(composerQuoteTarget(scope)?.attachExisting?.(file)).toBe('refused');
+      expect(chips(view.container)).toHaveLength(0);
+
+      await interact(async () => gate.finish());
+      expect(plus().disabled).toBe(false);
+      await view.unmount();
+    });
+  });
+
   it('answers that there is no composer for a session that has none open', async () => {
     expect(referenceAttachmentInComposer(file, daemonSessionScope(daemon, 'nobody-home'))).toEqual({
       state: 'no-composer',
@@ -266,6 +342,43 @@ describe('a proved %attachment: in a message', () => {
     const view = await mount(<Markdown text="see %attachment:shot.png" />);
     expect(view.container.querySelector('a')).toBeNull();
     expect(view.container.textContent).toContain('%attachment:shot.png');
+    await view.unmount();
+  });
+
+  it("proves every part of a combined delivery against the turn's own file, though the tile is drawn once", async () => {
+    // One delivery (turn-003) holds two peer parts and one shot.png; a NEWER turn then sent another shot.png.
+    const turn: SessionHandoff = {
+      name: 'turn-003',
+      message: '',
+      attachments: [{ attachmentId: 'att_turn', filename: 'shot.png', mime: 'image/png' }],
+    };
+    const newer: SessionHandoff = {
+      name: 'turn-009',
+      message: '',
+      attachments: [{ attachmentId: 'att_newer', filename: 'shot.png', mime: 'image/png' }],
+    };
+    const view = await mount(
+      <AttachmentGalleryProvider load={async () => new Blob()}>
+        <HandoffSourceProvider source={handoffs}>
+          <AttachmentReferences daemonId={daemon.daemonId} sessionId="ref-session">
+            <HandoffBody
+              at={1}
+              handoff={{ ...turn, message: 'first part: %attachment:shot.png' }}
+              showFiles={false}
+              source={handoffs}
+            />
+            <HandoffBody at={1} handoff={{ ...turn, message: 'last part' }} source={handoffs} />
+            <HandoffBody at={9} handoff={newer} source={handoffs} />
+          </AttachmentReferences>
+        </HandoffSourceProvider>
+      </AttachmentGalleryProvider>,
+    );
+    // Tiles: the turn's file once (not once per part) and the newer turn's.
+    expect(view.container.querySelectorAll('[data-attachment-id="att_turn"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('[data-attachment-id="att_newer"]')).toHaveLength(1);
+    const chip = must(view.container.querySelector<HTMLAnchorElement>('a[data-fy-attachment-ref]'), 'the chip');
+    expect(chip.getAttribute('href')).toContain('att_turn');
+    expect(chip.getAttribute('href')).not.toContain('att_newer');
     await view.unmount();
   });
 

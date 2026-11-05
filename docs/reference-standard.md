@@ -106,7 +106,9 @@ The composer it writes into is named by the surface that draws the tile (`Attach
 names its session's composer. A surface with a composer slot of its own — an agenda card's draft slot — names that
 instead by wrapping the gallery the same way; the agenda card view draws no stored files today, so that is wiring
 for when it does, not a behaviour to look for. The **+** is disabled, with the reason, while no message box is open (a question
-has replaced it); it is not drawn at all outside a session. When the composer is at its attachment limit the
+has replaced it) or the open one cannot be written to (it is disabled, or a send is in flight) — the composer publishes
+that as `writable` and the registry re-announces it when it flips, and the composer refuses the insert and the chip
+itself as well; it is not drawn at all outside a session. When the composer is at its attachment limit the
 token is still written and the chip is refused, because the sentence needs the token. **Inline** pictures and
 **transcript-record** images (a tool's screenshot) have no stored attachment id, so they have no **+**.
 
@@ -329,8 +331,10 @@ third answer, because a stored file is not a live surface.
 
 > **Which file a name means (GAP).** Two different files in one session can share a delivered name. A
 > reference resolves to the file of that name on the **same message** first, otherwise to the **newest** one in
-> the session ("newest" follows the hand-off document: `turn-<n>` counts up, and a queued send is behind every
-> delivered turn). An older file of the same name is reachable only through its own message's references. The
+> the session ("newest" follows the transcript's chronology — the time the carrying row landed — so a queued send
+> ranks by when it was sent, not by the order its document was read; a row with no known time falls back to the
+> document name: `turn-<n>` counts up, and a queued send is behind a turn). A combined delivery keeps the full list
+> of the turn's files as same-message proof for every part, though the tiles are drawn once. An older file of the same name is reachable only through its own message's references. The
 > **+** re-attaches the exact file, so the ferret still receives the one the person meant even when the token
 > alone would resolve to the newer. The envelope carries the stored attachment id, so a click re-proves the
 > same file, not merely the same name.

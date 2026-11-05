@@ -43,7 +43,12 @@ import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
-import { type ExistingAttachment, type ExistingAttachmentOutcome, registerComposerQuoteTarget } from '../lib/quote.ts';
+import {
+  announceComposerTargetChange,
+  type ExistingAttachment,
+  type ExistingAttachmentOutcome,
+  registerComposerQuoteTarget,
+} from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import { carrierDelivery } from '../lib/relay-carrier.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
@@ -756,9 +761,19 @@ export function Composer({
   const draftRef = useRef(draft);
   draftRef.current = draft;
   // The same for the files: a registered target must see the chips as they are NOW, not as they were when it registered.
+  // WRITABLE: a disabled or sending composer is still mounted (a quote reads its draft) but a reference must not
+  // edit it — an insert would change a draft the reader cannot touch, and a send in flight would clear a chip
+  // added meanwhile. Published to the registry and re-announced whenever it flips, so the + disables itself.
+  const writable = !disabled && !sending;
+  const writableRef = useRef(writable);
+  writableRef.current = writable;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `writable` is the trigger -- the registry is told when it flips
+  useEffect(() => {
+    announceComposerTargetChange();
+  }, [writable]);
   const attachExistingRef = useRef<(file: ExistingAttachment) => ExistingAttachmentOutcome>(() => 'refused');
   attachExistingRef.current = file => {
-    if (!canAttach) return 'refused';
+    if (!canAttach || !writableRef.current) return 'refused';
     // Every chip this composer shows counts — another device's too — so the same file is never named twice.
     if (sharedItems.entries.some(entry => entry.view?.id === file.id || entry.localId === `shared:${file.id}`))
       return 'present';
@@ -777,7 +792,9 @@ export function Composer({
             ...scope,
             draft: () => draftRef.current,
             attachExisting: file => attachExistingRef.current(file),
+            writable: () => writableRef.current,
             insertAtCaret: text => {
+              if (!writableRef.current) return;
               const input = inputRef.current;
               const value = draftRef.current;
               // The caret a field keeps while it is not focused is the one the reader left it at; with no field

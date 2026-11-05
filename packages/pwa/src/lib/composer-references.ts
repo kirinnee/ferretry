@@ -22,7 +22,12 @@
  */
 
 import type { DaemonSessionScope } from './daemon-scope.ts';
-import { composerQuoteTarget, type ExistingAttachment, type ExistingAttachmentOutcome } from './quote.ts';
+import {
+  composerQuoteTarget,
+  composerTargetOpen,
+  type ExistingAttachment,
+  type ExistingAttachmentOutcome,
+} from './quote.ts';
 import { findReferences, formatReference, type Reference } from './references.ts';
 
 /**
@@ -136,7 +141,8 @@ export const referenceAttachmentInComposer = (
   const token = referenceToken({ kind: 'attachment', name: file.filename });
   if (token === null) return { state: 'rejected' };
   const target = composerQuoteTarget(scope);
-  if (target === null || target.insertAtCaret === undefined) return { state: 'no-composer' };
+  if (target === null || target.insertAtCaret === undefined || !composerTargetOpen(target))
+    return { state: 'no-composer' };
   const chip = target.attachExisting === undefined ? 'unsupported' : target.attachExisting(file);
   target.insertAtCaret(token);
   return { state: 'referenced', chip };

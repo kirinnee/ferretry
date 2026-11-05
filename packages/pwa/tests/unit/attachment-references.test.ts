@@ -196,6 +196,49 @@ describe('AttachmentIndex', () => {
     should(index.find('a.png')?.attachmentId).equal('att_q2');
   });
 
+  test('should rank two queued sends by when they landed, not by the order their documents were read', () => {
+    // Arrange: the newer send's document is read FIRST.
+    const index = new AttachmentIndex();
+    index.record('queued-b', [{ attachmentId: 'att_b', filename: 'a.png' }], 200);
+    index.record('queued-a', [{ attachmentId: 'att_a', filename: 'a.png' }], 100);
+
+    // Assert
+    should(index.find('a.png')?.attachmentId).equal('att_b');
+  });
+
+  test('should not let an older queued send beat a later delivered turn of the same name', () => {
+    // Arrange
+    const index = new AttachmentIndex();
+    index.record('queued-old', [{ attachmentId: 'att_q', filename: 'a.png' }], 100);
+    index.record('turn-9', [{ attachmentId: 'att_t', filename: 'a.png' }], 200);
+
+    // Assert
+    should(index.find('a.png')?.attachmentId).equal('att_t');
+
+    // ...and a queued send that landed after the turn does win.
+    index.record('queued-new', [{ attachmentId: 'att_q2', filename: 'a.png' }], 300);
+    should(index.find('a.png')?.attachmentId).equal('att_q2');
+  });
+
+  test('should re-rank a message whose time becomes known, and say so to subscribers', () => {
+    // Arrange
+    const index = new AttachmentIndex();
+    let heard = 0;
+    index.subscribe(() => {
+      heard += 1;
+    });
+    index.record('queued-x', [{ attachmentId: 'att_x', filename: 'a.png' }]);
+    index.record('turn-9', [{ attachmentId: 'att_t', filename: 'a.png' }], 200);
+    should(index.find('a.png')?.attachmentId).equal('att_x');
+
+    // Act
+    index.record('queued-x', [{ attachmentId: 'att_x', filename: 'a.png' }], 100);
+
+    // Assert
+    should(index.find('a.png')?.attachmentId).equal('att_t');
+    should(heard).equal(3);
+  });
+
   test('should tell a subscriber when it learns a file, and stay quiet when nothing changed', () => {
     // Arrange
     const index = new AttachmentIndex();

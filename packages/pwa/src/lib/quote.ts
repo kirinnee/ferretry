@@ -101,6 +101,12 @@ export interface ComposerQuoteTarget extends DaemonSessionScope {
   readonly insertAtCaret?: (text: string) => void;
   /** Attach a file the session already stores, by its id: no upload. */
   readonly attachExisting?: (file: ExistingAttachment) => ExistingAttachmentOutcome;
+  /**
+   * Whether the draft can be written to right now. A composer that is mounted but disabled or sending is still
+   * a target (a quote reads its draft), yet a reference must not edit it. Absent means always writable. When it
+   * changes the composer calls `announceComposerTargetChange`, so a control that depends on it re-reads.
+   */
+  readonly writable?: () => boolean;
 }
 
 const targets = new Map<string, ComposerQuoteTarget>();
@@ -111,6 +117,13 @@ const changed = (): void => {
   generation += 1;
   for (const listener of [...listeners]) listener();
 };
+
+/** Tells subscribers that a mounted composer's availability changed without it mounting or unmounting. */
+export const announceComposerTargetChange = changed;
+
+/** Whether a target can take a reference now: it can insert at the caret, and its draft is writable. */
+export const composerTargetOpen = (target: ComposerQuoteTarget | null): boolean =>
+  target !== null && target.insertAtCaret !== undefined && (target.writable?.() ?? true);
 
 /** Tells a reader when a composer mounts or unmounts, for a control that is only live while one is open. */
 export const subscribeComposerTargets = (listener: () => void): (() => void) => {

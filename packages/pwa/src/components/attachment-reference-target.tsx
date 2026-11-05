@@ -9,7 +9,12 @@
 
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from 'react';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { composerQuoteTarget, composerTargetsGeneration, subscribeComposerTargets } from '../lib/quote.ts';
+import {
+  composerQuoteTarget,
+  composerTargetOpen,
+  composerTargetsGeneration,
+  subscribeComposerTargets,
+} from '../lib/quote.ts';
 
 const AttachmentReferenceTargetContext = createContext<DaemonSessionScope | null>(null);
 
@@ -29,8 +34,8 @@ export function AttachmentReferenceTarget({
 export const useAttachmentReferenceTarget = (): DaemonSessionScope | null =>
   useContext(AttachmentReferenceTargetContext);
 
-/** Whether a composer that takes a reference is mounted for this scope right now. */
+/** Whether a composer that takes a reference is mounted for this scope AND writable (not disabled, not sending) right now. */
 export function useComposerOpen(scope: DaemonSessionScope | null): boolean {
   useSyncExternalStore(subscribeComposerTargets, composerTargetsGeneration);
-  return scope !== null && composerQuoteTarget(scope)?.insertAtCaret !== undefined;
+  return scope !== null && composerTargetOpen(composerQuoteTarget(scope));
 }

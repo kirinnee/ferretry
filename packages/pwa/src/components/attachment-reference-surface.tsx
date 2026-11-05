@@ -84,9 +84,9 @@ export function AttachmentReferences({
 }
 
 /** Records the stored files a message carries, once they are on screen. */
-export function useRecordAttachments(message: string, files: readonly IndexedAttachment[]): void {
+export function useRecordAttachments(message: string, files: readonly IndexedAttachment[], at?: number): void {
   const held = useContext(HeldIndexContext);
   useEffect(() => {
-    held?.index.record(message, files);
-  }, [held, message, files]);
+    held?.index.record(message, files, at);
+  }, [held, message, files, at]);
 }

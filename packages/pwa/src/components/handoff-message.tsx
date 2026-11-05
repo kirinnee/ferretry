@@ -153,6 +153,7 @@ export function HandoffView({
   reading,
   source,
   draft,
+  at,
 }: {
   /** Absent for a send not handed over yet: there is no pointer, only the message on its way. */
   readonly pointer?: HandoffPointer | undefined;
@@ -162,11 +163,13 @@ export function HandoffView({
   readonly source: HandoffSource | null;
   /** The message as its send knows it, drawn until the document has been read. */
   readonly draft?: HandoffDraft | undefined;
+  /** When the row landed in the transcript: it orders this message's files against another's of the same name. */
+  readonly at?: number | undefined;
 }) {
   return (
     <div className="fy-handoff" data-handoff={pointer?.name} data-handoff-state={reading.state}>
       {reading.state === 'read' && source !== null ? (
-        <HandoffBody handoff={reading.handoff} source={source} />
+        <HandoffBody at={at} handoff={reading.handoff} source={source} />
       ) : reading.state === 'reading' && draft !== undefined ? (
         <HandoffDraftBody draft={draft} />
       ) : reading.state === 'reading' ? (
@@ -181,7 +184,23 @@ export function HandoffView({
   );
 }
 
-export function HandoffBody({ handoff, source }: { readonly handoff: SessionHandoff; readonly source: HandoffSource }) {
+export function HandoffBody({
+  handoff,
+  source,
+  at,
+  showFiles = true,
+}: {
+  readonly handoff: SessionHandoff;
+  readonly source: HandoffSource;
+  /** When the row landed in the transcript (`TranscriptEntry.at`): the chronology that ranks its files. */
+  readonly at?: number | undefined;
+  /**
+   * Draw the files' tiles and chips. A combined delivery draws one body per part and the turn's files sit under
+   * the last, so the others pass `false` — but every part still receives the FULL hand-off, because the files
+   * are what a reference in ANY part proves against first.
+   */
+  readonly showFiles?: boolean;
+}) {
   const stored = useMemo(
     () =>
       handoff.attachments.flatMap((attachment): StoredTranscriptAttachment[] =>
@@ -208,14 +227,14 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
     () => stored.map(file => ({ attachmentId: file.attachmentId, filename: file.filename })),
     [stored],
   );
-  useRecordAttachments(handoff.name, files);
+  useRecordAttachments(handoff.name, files, at);
   return (
     <AttachmentReferenceSurface local={files}>
       {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
-      {stored.length === 0 ? null : (
+      {!showFiles || stored.length === 0 ? null : (
         <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
       )}
-      {named.length === 0 ? null : (
+      {!showFiles || named.length === 0 ? null : (
         <ul className="fy-handoff-chips">
           {named.map(file => (
             <li className="fy-handoff-chip" key={`${file.filename}\u0000${file.mime}`} title={file.mime}>

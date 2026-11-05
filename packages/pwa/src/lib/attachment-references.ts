@@ -13,8 +13,11 @@
  * an older file of the same name is reachable only through its own message. The + on a tile re-attaches the
  * exact file, so the ferret still receives the one the reader meant.
  *
- * "Newest" follows the hand-off document's own name: `turn-<n>` counts up, and a `queued-…` send is behind
- * every delivered turn. Two files on one message are ranked by the order the message lists them.
+ * "Newest" follows the transcript's own chronology: the time the row landed (`TranscriptEntry.at`), which a
+ * delivered turn and a queued send both have. A row with no time falls back to its document's name — `turn-<n>`
+ * counts up — and is ranked against a timed one by the time alone when both know it, else a turn is older than
+ * a queued send (which cannot have a turn number). Equal chronology breaks the same way every time: the higher
+ * turn, then the later name. Two files on one message are ranked by the order the message lists them.
  */
 
 import type { DaemonId } from './daemon-connection.ts';
@@ -29,14 +32,28 @@ export interface IndexedAttachment {
 
 interface Entry extends IndexedAttachment {
   readonly message: string;
-  readonly rank: number;
+  /** When the message landed in the transcript, when known. */
+  readonly at: number | undefined;
   readonly order: number;
 }
 
-/** A hand-off document's place in time: `turn-8` is 8, a queued send is behind every turn. */
-const messageRank = (message: string): number => {
+/** `turn-8` is 8; a queued send has no turn number. */
+const turnOf = (message: string): number | undefined => {
   const turn = /^turn-(\d{1,9})$/u.exec(message);
-  return turn?.[1] === undefined ? Number.MAX_SAFE_INTEGER : Number(turn[1]);
+  return turn?.[1] === undefined ? undefined : Number(turn[1]);
+};
+
+/** Positive when `a` is the later message, negative when `b` is, zero only for the same message. */
+const compareMessages = (a: Entry, b: Entry): number => {
+  if (a.message === b.message) return 0;
+  if (a.at !== undefined && b.at !== undefined && a.at !== b.at) return a.at - b.at;
+  const turnA = turnOf(a.message);
+  const turnB = turnOf(b.message);
+  if (turnA !== undefined && turnB !== undefined) return turnA - turnB;
+  // A turn is delivered in order; a queued send has no number, so beside a turn of unknown time it is the later.
+  if (turnA !== undefined) return -1;
+  if (turnB !== undefined) return 1;
+  return a.message < b.message ? -1 : 1;
 };
 
 /** The stored attachments of one session's loaded messages, observable so a reference proves once its file loads. */
@@ -49,17 +66,20 @@ export class AttachmentIndex {
    * Records what one message carries; recording the same message again replaces it. A message with no files
    * records nothing: one hand-off document is drawn more than once (a combined delivery splits its words
    * across rows and puts the files under the last), and a row that shows none of them must not erase what the
-   * row that does has recorded.
+   * row that does has recorded. `at` is when the message landed in the transcript: it is what ranks this
+   * message's files against another's, however late its document happened to be read.
    */
-  record(message: string, files: readonly IndexedAttachment[]): void {
+  record(message: string, files: readonly IndexedAttachment[], at?: number): void {
     if (files.length === 0) return;
-    const rank = messageRank(message);
-    const next = files.map((file, order): Entry => ({ ...file, message, rank, order }));
+    const next = files.map((file, order): Entry => ({ ...file, message, at, order }));
     const before = this.#entries.filter(entry => entry.message === message);
     if (
       before.length === next.length &&
       before.every(
-        (entry, at) => entry.attachmentId === next[at]?.attachmentId && entry.filename === next[at]?.filename,
+        (entry, position) =>
+          entry.attachmentId === next[position]?.attachmentId &&
+          entry.filename === next[position]?.filename &&
+          entry.at === at,
       )
     )
       return;
@@ -83,12 +103,11 @@ export class AttachmentIndex {
     let best: Entry | undefined;
     for (const entry of this.#entries) {
       if (entry.filename !== name) continue;
-      if (
-        best === undefined ||
-        entry.rank > best.rank ||
-        (entry.rank === best.rank && entry.message === best.message && entry.order > best.order)
-      )
-        best = entry;
+      if (best === undefined) best = entry;
+      else {
+        const by = compareMessages(entry, best);
+        if (by > 0 || (by === 0 && entry.order > best.order)) best = entry;
+      }
     }
     return best;
   }
