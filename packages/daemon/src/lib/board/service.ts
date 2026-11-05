@@ -45,7 +45,7 @@ import { describeRelocationProblem, relocationProblems } from '../board-projects
 import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
-import { presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
+import { presenceOf, type SessionLivenessGuard, type SessionRoster } from './activity.ts';
 import {
   type BoardCaller,
   type BoardStanding,
@@ -112,9 +112,11 @@ export interface BoardServiceDependencies {
   readonly activity: ActivityDeriver;
   /**
    * Which sessions are alive, so a live lead may ADOPT a card whose owner ferret and assignee have both ended (docs/board.md
-   * § An orphaned card is adopted). Absent, nothing can be shown to be orphaned and every adoption is refused.
+   * § An orphaned card is adopted). The adoption is judged INSIDE a hold on the sessions it rests on (the owner ferret, the
+   * assignee and the adopter), against a roster read after the hold was taken, so none of them can end or resume
+   * between that read and the card landing on disk. Absent, nothing can be shown to be orphaned and every adoption is refused.
    */
-  readonly liveness?: SessionLivenessSource;
+  readonly liveness?: SessionLivenessGuard;
   readonly agenda: AgendaLinkSource;
   readonly changes: BoardChangeSink;
   readonly clock: BoardClock;
@@ -152,6 +154,15 @@ export interface BoardServiceDependencies {
 export interface CardHolders {
   readonly owner: string;
   readonly assignee: string | null;
+}
+
+/**
+ * The standing of the sessions an adoption rests on, held still while its card is written: `fresh` is their roster read
+ * after the hold was taken, and `held` names them (the card's owner ferret, its assignee and the adopter).
+ */
+interface AdoptionHold {
+  readonly fresh: SessionRoster;
+  readonly held: readonly string[];
 }
 
 export interface CardWriteObserver {
@@ -770,17 +781,21 @@ export class BoardService {
     if (request.action === 'focus' && caller.kind !== 'ferret') {
       throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
     }
-    const write = async () =>
+    const write = async (hold?: AdoptionHold) =>
       await this.ports.store.write(id, async current => {
         const card = this.requireCard(current, id);
         if (expect !== undefined && (card.laneId !== expect.laneId || gateEntry(card) !== expect.entry)) {
           throw new BoardError('invalid', `${formatTaskRef(card)} has moved on from the gate the answer was about`);
         }
-        const outcome = await this.decide(card, request, caller);
+        const outcome = await this.decide(card, request, caller, hold);
         return { task: outcome.task === null ? null : requireValidCard(outcome.task), result: { card, outcome } };
       });
     const { card, outcome } =
-      request.action === 'depend' ? await this.ports.serial.run(DEPENDENCY_SECTION, write) : await write();
+      request.action === 'depend'
+        ? await this.ports.serial.run(DEPENDENCY_SECTION, write)
+        : request.action === 'adopt'
+          ? await this.holdingAdopters(id, caller, write)
+          : await write();
     if (request.action === 'focus') {
       if (
         !(await this.ports.focus.setFocus((caller as { sessionId: string }).sessionId, { id: card.id }, card.title, {
@@ -1004,7 +1019,31 @@ export class BoardService {
     return card;
   }
 
-  private async decide(card: BoardTask, request: BoardTaskActionRequest, caller: BoardCaller): Promise<CardOutcome> {
+  /**
+   * Runs an adoption's card write inside a hold on the sessions it rests on: the card's owner ferret, its assignee and the
+   * adopter, named from the card as it is read now. The write re-judges them against the card as it is stored then
+   * (`orphanedOwner`), so a card that changed hands in the gap is refused rather than adopted. The order is the one
+   * `returnToLead` keeps: the sessions settle outside, the card's write is inside. Without a hold (no port, or nothing
+   * to hold) the write runs bare and `orphanedOwner` refuses.
+   */
+  private async holdingAdopters<T>(
+    id: BoardTaskId,
+    caller: BoardCaller,
+    write: (hold?: AdoptionHold) => Promise<T>,
+  ): Promise<T> {
+    const guard = this.ports.liveness;
+    const card = (await this.ports.store.read()).cards.find(each => each.id === id);
+    if (guard === undefined || card === undefined || caller.kind !== 'ferret') return await write();
+    const held = [...new Set([card.owner, effectiveAssignee(card), caller.sessionId])];
+    return await guard.settled(held, async fresh => await write({ fresh, held }));
+  }
+
+  private async decide(
+    card: BoardTask,
+    request: BoardTaskActionRequest,
+    caller: BoardCaller,
+    hold?: AdoptionHold,
+  ): Promise<CardOutcome> {
     // A sub-ferret reports what it saw on the card it is doing, not on others its standing reaches.
     if (request.action === 'trigger' && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
       await this.refuseSubFerret(
@@ -1018,7 +1057,7 @@ export class BoardService {
     if (holderOnly(request) && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
       await this.refuseSubFerret(caller, subFerretDoing(request), async () => await this.claimCommand(caller, card));
     }
-    const adoptedFrom = request.action === 'adopt' ? await this.orphanedOwner(caller, card) : undefined;
+    const adoptedFrom = request.action === 'adopt' ? await this.orphanedOwner(caller, card, hold) : undefined;
     const context = await this.context(card, caller, request.action === 'assign' ? request.assignee : undefined);
     const plans = request.action === 'drop' || (request.action === 'assign' && context.handsDown !== true);
     if (plans && !(await this.inSubtree(caller, card))) {
@@ -1077,12 +1116,14 @@ export class BoardService {
   }
 
   /**
-   * The ended owner ferret a live lead may ADOPT this card from, or the refusal: the caller is a lead of this machine (not a
-   * sub-ferret: the sub-ferret limit refused one before this), alive, working on the card's own board; the card is open work; and its owner ferret AND its assignee are
-   * both ended, as the session roster says now (a session the roster cannot read is never taken for ended). Nothing else
-   * about authority changes: the adopter is then the card's owner ferret and assignee, and judged as one.
+   * The ended owner ferret a live lead may ADOPT this card from, or the refusal: the caller is a lead (the roster read under
+   * the hold says it was started by nobody: a caller it cannot place is refused, never presumed a lead), alive, working on
+   * the card's own board; the card is open work; and its owner ferret AND its assignee are both ended, as that same
+   * roster says (a session the roster cannot read is never taken for ended). The hold names the holders of the card as it
+   * was read before the write; a card that has other holders now is refused. Nothing else about authority changes: the
+   * adopter is then the card's owner ferret and assignee, and judged as one.
    */
-  private async orphanedOwner(caller: BoardCaller, card: BoardTask): Promise<string> {
+  private async orphanedOwner(caller: BoardCaller, card: BoardTask, hold: AdoptionHold | undefined): Promise<string> {
     const ref = formatTaskRef(card);
     if (caller.kind !== 'ferret')
       throw new BoardError(
@@ -1093,14 +1134,16 @@ export class BoardService {
     const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
     if (category.ok && category.value === 'closed')
       throw new BoardError('invalid', `${ref} is closed: nothing to adopt`);
-    const liveness = this.ports.liveness;
-    if (liveness === undefined)
+    if (hold === undefined)
       throw new BoardError(
         'forbidden',
         `which ferrets are alive cannot be read here, so ${ref} cannot be shown to be orphaned`,
       );
-    const roster = await liveness.roster();
+    const roster = hold.fresh;
     const holders = [...new Set([card.owner, effectiveAssignee(card)])];
+    if (holders.some(holder => !hold.held.includes(holder))) {
+      throw new BoardError('version-conflict', `${ref} changed hands while it was being adopted: try again`);
+    }
     const alive = holders.filter(holder => presenceOf(roster, holder) !== 'dead');
     if (alive.length > 0) {
       throw new BoardError(
@@ -1110,6 +1153,9 @@ export class BoardService {
     }
     if (presenceOf(roster, caller.sessionId) !== 'alive')
       throw new BoardError('forbidden', `only a live ferret may adopt ${ref}`);
+    const lead = roster.sessions.get(caller.sessionId)?.lead;
+    if (lead !== undefined)
+      throw new BoardError('forbidden', `only a lead may adopt ${ref}: ${caller.sessionId} was started by ${lead}`);
     if ((await this.ports.lanes.projectOf(caller.sessionId)) !== card.projectId) {
       throw new BoardError(
         'forbidden',

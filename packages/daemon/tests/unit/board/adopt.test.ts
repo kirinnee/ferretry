@@ -54,7 +54,12 @@ const orphan = (overrides: Partial<BoardTask> = {}): BoardTask =>
 
 const setup = (
   cards: readonly BoardTask[],
-  options: { readonly sessions?: FakeSessions; readonly lanes?: FakeLanes; readonly withLiveness?: boolean } = {},
+  options: {
+    readonly sessions?: FakeSessions;
+    readonly lanes?: FakeLanes;
+    readonly withLiveness?: boolean;
+    readonly subFerrets?: typeof DIRECTORY;
+  } = {},
 ) => {
   const sessions =
     options.sessions ??
@@ -67,7 +72,7 @@ const setup = (
   const ports = world({
     store: new MemoryBoardStore(cards),
     parents: new FakeParents(PARENTS),
-    subFerrets: DIRECTORY,
+    subFerrets: options.subFerrets ?? DIRECTORY,
     ...(options.withLiveness === false ? {} : { liveness: sessions }),
     ...(options.lanes === undefined ? {} : { lanes: options.lanes }),
   });
@@ -217,6 +222,76 @@ describe('adopting an orphaned card', () => {
       should(error.code).equal('forbidden');
       should(error.message).containEql("You are a sub-ferret, so you can't adopt cards");
       unchanged(ports);
+    });
+
+    it('should refuse a caller the roster says was started by another, though the directory cannot tell', async () => {
+      // Arrange
+      const unreadableDirectory = {
+        leadOf: async (): Promise<string | undefined> => {
+          throw new Error('registry unreadable');
+        },
+        addressOf: async (sessionId: string) => sessionId,
+      };
+      const sessions = new FakeSessions(rosterOf([liveSession('lead'), liveSession('kid', { lead: 'lead' })]));
+      const { ports, service } = setup([orphan()], { sessions, subFerrets: unreadableDirectory });
+
+      // Act
+      const error = await refusal(service.act('F1', adopt, ferret('kid')));
+
+      // Assert
+      should(error.code).equal('forbidden');
+      should(error.message).containEql('only a lead may adopt &F1: kid was started by lead');
+      unchanged(ports);
+    });
+
+    it('should refuse a caller the roster holds but cannot read', async () => {
+      // Arrange
+      const { ports, service } = setup([orphan()]);
+
+      // Act
+      const error = await refusal(service.act('F1', adopt, ferret('unreadable')));
+
+      // Assert
+      should(error.message).containEql('only a live ferret may adopt &F1');
+      unchanged(ports);
+    });
+
+    it('should judge the orphan on the roster read inside the hold: an owner that resumed in the gap is not orphaned', async () => {
+      // Arrange
+      const sessions = new FakeSessions(rosterOf(['lead', 'other'].map(id => liveSession(id))));
+      const resumed = rosterOf(['lead', 'gone'].map(id => liveSession(id)));
+      const settled = sessions.settled.bind(sessions);
+      sessions.settled = async (ids, work) => {
+        sessions.current = resumed;
+        return await settled(ids, work);
+      };
+      const { ports, service } = setup([orphan()], { sessions });
+
+      // Act
+      const error = await refusal(service.act('F1', adopt, ferret('lead')));
+
+      // Assert
+      should(error.message).containEql('is not orphaned: gone has not ended');
+      should(sessions.holds).eql([['gone', 'gone2', 'lead']]);
+      unchanged(ports);
+    });
+
+    it('should refuse a card that changed hands between naming the holders and writing it', async () => {
+      // Arrange
+      const { ports, service, sessions } = setup([orphan()]);
+      const settled = sessions.settled.bind(sessions);
+      sessions.settled = async (ids, work) => {
+        ports.store.cards.set('F1', orphan({ assignee: 'gone3' }));
+        return await settled(ids, work);
+      };
+
+      // Act
+      const error = await refusal(service.act('F1', adopt, ferret('lead')));
+
+      // Assert
+      should(error.code).equal('version-conflict');
+      should(error.message).containEql('changed hands while it was being adopted');
+      should(ports.store.cards.get('F1')?.owner).equal('gone');
     });
 
     it('should refuse a ferret that is not alive', async () => {

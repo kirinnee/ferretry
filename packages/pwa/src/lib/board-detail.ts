@@ -180,6 +180,13 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
           minor: false,
         };
       }
+      if (event.adopted !== undefined && event.to !== null) {
+        return {
+          text: `adopted by ${context.names(event.to)} from ${context.names(event.adopted.from)}, whose ferrets ended: ${event.adopted.reason}`,
+          detail: null,
+          minor: false,
+        };
+      }
       if (event.returnedFrom !== undefined && event.to !== null) {
         return {
           text: `returned to ${context.names(event.to)}: ${context.names(event.returnedFrom)} finished`,

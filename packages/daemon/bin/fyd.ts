@@ -650,6 +650,7 @@ import {
   ReopenDeliveryLadder,
   rungsOf,
   SessionCards,
+  type SessionLivenessGuard,
   type SessionLivenessSource,
   stageGateLanes,
   startOnCard,
@@ -2255,7 +2256,7 @@ function createBoardWorld(
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
   /** Every session's life-signs, with the Warden's liveness ledger laid over them, for "last touched". */
-  sessions: SessionLivenessSource,
+  sessions: SessionLivenessSource & SessionLivenessGuard,
   /** Registers a folder as a project: the catalog `POST /v1/projects` writes through, so both share its dedupe. */
   registrar: ProjectRegistrar,
   /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */

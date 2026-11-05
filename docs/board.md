@@ -1050,17 +1050,19 @@ who is not on this host ([grants.md](grants.md)).
 A card is **orphaned** when its owner ferret AND its assignee have both ended. Nobody left holds it, and the standings above give
 the owner alone a say over it, so a card the owner never asked for sat there until they assigned or closed it by hand ("don't
 drop it, assign someone to it!"). `fy task adopt <id> [--reason <why>]` lets a live lead take it instead. The daemon judges every
-condition itself, in the card's write, from the session roster: the request names nobody, and a refusal changes nothing.
+condition itself, in the card's write, from the session roster: the request names nobody, and a refusal changes nothing. The write
+runs inside a hold on the owner ferret, the assignee and the adopter, and judges them on a roster read after the hold was taken, so
+none of them can end or resume between that read and the card landing. Where no hold can be taken, nothing is adopted.
 
-| Condition                                                                                             | Refused as                                     |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| the caller is a ferret (the owner and the daemon `assign`)                                            | "adopt is a ferret's"                          |
-| the card is open work (not dropped, not in a closed lane)                                             | "is dropped" / "is closed: nothing to adopt"   |
-| the owner ferret and the assignee are both ended (a session the daemon cannot read is NOT ended)      | "is not orphaned: <ferret> has not ended"      |
-| the caller is alive                                                                                   | "only a live ferret may adopt"                 |
-| the caller is a lead, not a sub-ferret (a sub-ferret asks its lead)                                   | the sub-ferret refusal                         |
-| the caller works on the card's own board (the same machine is implied: a card is local to its daemon) | "is on another board than the one you work on" |
-| the daemon can read which ferrets are alive                                                           | "cannot be shown to be orphaned"               |
+| Condition                                                                                                         | Refused as                                       |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| the caller is a ferret (the owner and the daemon `assign`)                                                        | "adopt is a ferret's"                            |
+| the card is open work (not dropped, not in a closed lane)                                                         | "is dropped" / "is closed: nothing to adopt"     |
+| the owner ferret and the assignee are both ended (a session the daemon cannot read is NOT ended)                  | "is not orphaned: <ferret> has not ended"        |
+| the caller is alive                                                                                               | "only a live ferret may adopt"                   |
+| the caller is a lead, not a sub-ferret: the roster says it was started by nobody (one it cannot place is refused) | "only a lead may adopt" / the sub-ferret refusal |
+| the caller works on the card's own board (the same machine is implied: a card is local to its daemon)             | "is on another board than the one you work on"   |
+| the daemon can read which ferrets are alive                                                                       | "cannot be shown to be orphaned"                 |
 
 An adoption makes the caller the card's **owner ferret and assignee**, in one write, and journals it as an `assigned` event carrying
 `adopted: { from: <the ended owner ferret>, reason }` (read as "adopted by <ferret> from <ferret>, whose ferrets ended: <reason>").
