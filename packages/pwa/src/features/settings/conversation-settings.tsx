@@ -1,7 +1,7 @@
 /**
  * Small browser-local choices: whether this device always reduces motion (from the session redesign),
  * where an external link opens, and whether the session list shows every paired machine or only the
- * one on screen.
+ * one on screen (the last is a compact row now).
  *
  * The values live in `lib/controls.ts`; this surface holds no state of its own. (It once shared the
  * file with "Show details", which went when the transcript stopped showing daemon bookkeeping.)
@@ -15,6 +15,8 @@ import {
   SESSIONS_LIST_SCOPES,
   type SessionsListScope,
 } from '../../lib/controls.ts';
+import { OptionNotes, Segmented, SettingRow } from './setting-row.tsx';
+import { settingDefinition } from './settings-catalog.ts';
 
 interface Choice<Value extends string> {
   readonly value: Value;
@@ -120,19 +122,18 @@ export function OpenLinksInSetting({
   );
 }
 
-const SESSIONS_LIST: Readonly<Record<SessionsListScope, Choice<SessionsListScope>>> = {
+const SESSIONS_LIST: Readonly<Record<SessionsListScope, { readonly label: string; readonly detail: string }>> = {
   all: {
-    value: 'all',
     label: 'All machines',
     detail: 'Every paired machine in one list, with everything that needs you at the top.',
   },
   current: {
-    value: 'current',
     label: 'Current machine only',
     detail: 'Only the machine you are on. Switch machines from the machine menu.',
   },
 };
 
+/** One row: a segmented choice for where the sessions list reads from. */
 export function SessionsListSetting({
   scope,
   onChange,
@@ -141,12 +142,29 @@ export function SessionsListSetting({
   readonly onChange: (scope: SessionsListScope) => void;
 }) {
   return (
-    <ChoiceGroup
-      choices={SESSIONS_LIST_SCOPES.map(value => SESSIONS_LIST[value])}
-      legend="Sessions list"
-      name="behaviour-sessions-list"
-      onSelect={onChange}
-      selected={scope}
+    <SettingRow
+      settingId="sessions-list"
+      name="Sessions list"
+      hint={SESSIONS_LIST[scope].detail}
+      explanation={
+        <>
+          <p className="m-0">{settingDefinition('sessions-list').description}</p>
+          <OptionNotes notes={SESSIONS_LIST_SCOPES.map(value => SESSIONS_LIST[value])} />
+        </>
+      }
+      wide
+      control={() => (
+        <Segmented
+          label="Sessions list"
+          value={scope}
+          options={SESSIONS_LIST_SCOPES.map(value => ({
+            id: value,
+            label: SESSIONS_LIST[value].label,
+            title: SESSIONS_LIST[value].detail,
+          }))}
+          onChange={onChange}
+        />
+      )}
     />
   );
 }

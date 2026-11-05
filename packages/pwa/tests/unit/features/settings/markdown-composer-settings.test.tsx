@@ -8,6 +8,7 @@ import {
 import { COMPOSER_DOCK_LAYOUT_KEY } from '../../../../src/lib/composer-dock-layout.ts';
 import { MD_COMPOSE_KEY, writeMdComposePref } from '../../../../src/lib/md-compose.ts';
 import { render, run } from '../../../support/react.ts';
+import { openAllInfo, segmentedRadios } from '../../../support/setting-rows.ts';
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -68,14 +69,14 @@ describe('MarkdownComposerSettings', () => {
     withBrowser(storage => {
       writeMdComposePref('on');
       const renderer = render(surface());
-      const styles = () =>
-        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-editor-style');
+      const styles = () => segmentedRadios(renderer, 'Editor style');
 
       expect(styles().map(style => [style.props.value, style.props.checked])).toEqual([
         ['on', true],
         ['rich', false],
         ['off', false],
       ]);
+      openAllInfo(renderer);
       expect(JSON.stringify(renderer.toJSON())).toContain('Markdown, Notion-style');
       expect(JSON.stringify(renderer.toJSON())).toContain('Plain text box');
 
@@ -93,8 +94,7 @@ describe('MarkdownComposerSettings', () => {
   it('offers the phone button layouts as radios, Stacked by default, and changes the live preference', () => {
     withBrowser(storage => {
       const renderer = render(surface());
-      const layouts = () =>
-        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-dock-layout');
+      const layouts = () => segmentedRadios(renderer, 'Button layout');
       const tree = () => JSON.stringify(renderer.toJSON());
 
       expect(tree()).toContain('Button layout');
@@ -104,6 +104,8 @@ describe('MarkdownComposerSettings', () => {
         ['auto', false],
       ]);
       expect(DOCK_LAYOUT_EXPLANATION).toContain('never move');
+      expect(tree()).not.toContain(DOCK_LAYOUT_EXPLANATION);
+      openAllInfo(renderer);
       expect(tree()).toContain(DOCK_LAYOUT_EXPLANATION);
 
       run(() => layouts()[1]?.props.onChange());
@@ -126,6 +128,8 @@ describe('MarkdownComposerSettings', () => {
       expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('what you send is markdown');
       expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('markers kept faintly visible');
       expect(tree).toContain('Editor style');
+      openAllInfo(renderer);
+      expect(JSON.stringify(renderer.toJSON())).toContain(MARKDOWN_COMPOSER_EXPLANATION);
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);
       expect(renderer.root.findAll(node => 'contentEditable' in node.props)).toHaveLength(0);
       run(() => renderer.unmount());
@@ -155,6 +159,7 @@ describe('MarkdownComposerSettings', () => {
       writeMdComposePref('off');
       const chosen: boolean[] = [];
       const renderer = render(surface(true, enabled => chosen.push(enabled)));
+      openAllInfo(renderer);
       const tree = JSON.stringify(renderer.toJSON());
 
       expect(switches(renderer)[0]?.props['aria-checked']).toBe(true);

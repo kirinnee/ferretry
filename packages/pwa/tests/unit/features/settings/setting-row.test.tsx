@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
+  OptionNotes,
   Segmented,
   SettingDisclosureRow,
   SettingGroup,
@@ -231,5 +232,57 @@ describe('SettingDisclosureRow', () => {
     expect(row.props['data-setting-id']).toBeUndefined();
     expect(row.props.tabIndex).toBeUndefined();
     expect(row.props['data-setting-row']).toBe('Viewport');
+  });
+});
+
+describe('SettingRow data hooks', () => {
+  it('carries extra data-* hooks on its row, beside the row name', () => {
+    const row = render(
+      <SettingRow name="Laptop" dataAttributes={{ 'data-machine-notification': 'd1', 'data-machine-status': 'on' }} />,
+    ).root.findByType('li');
+
+    expect(row.props['data-setting-row']).toBe('Laptop');
+    expect(row.props['data-machine-notification']).toBe('d1');
+    expect(row.props['data-machine-status']).toBe('on');
+  });
+});
+
+describe('SettingSwitch names', () => {
+  it('is named by its row, or by an explicit label when the action is not the row name', () => {
+    const byRow = render(<SettingSwitch checked={false} onChange={() => {}} labelledBy="row-label" />).root;
+    expect(byRow.findByType('button').props['aria-labelledby']).toBe('row-label');
+    expect(byRow.findByType('button').props['aria-label']).toBeUndefined();
+
+    const byLabel = render(
+      <SettingSwitch checked onChange={() => {}} labelledBy="" ariaLabel="Notifications from Laptop" />,
+    ).root;
+    expect(byLabel.findByType('button').props['aria-label']).toBe('Notifications from Laptop');
+    expect(byLabel.findByType('button').props['aria-labelledby']).toBeUndefined();
+  });
+});
+
+const plainText = (node: unknown): string => {
+  if (typeof node === 'string') return node;
+  const children = (node as { children?: unknown[] } | undefined)?.children ?? [];
+  return children.map(plainText).join('');
+};
+
+describe('OptionNotes', () => {
+  it('keeps every option’s own sentence, labelled, for behind the (i)', () => {
+    const root = render(
+      <OptionNotes
+        notes={[
+          { label: 'All machines', detail: 'Every machine you have paired.' },
+          { label: 'Current machine only', detail: 'Only the machine you are on.' },
+        ]}
+      />,
+    ).root;
+    const items = root.findAllByType('li');
+
+    expect(byAttr(root, 'data-option-notes')).toHaveLength(1);
+    expect(items).toHaveLength(2);
+    expect(plainText(items[0])).toContain('Every machine you have paired.');
+    expect(plainText(items[1])).toContain('Current machine only');
+    expect(plainText(items[1])).toContain('Only the machine you are on.');
   });
 });

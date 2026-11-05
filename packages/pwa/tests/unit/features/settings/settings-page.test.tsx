@@ -19,6 +19,7 @@ import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
+import { segmentedRadios, switchOfRow } from '../../../support/setting-rows.ts';
 import { machineClient, machineView } from '../fleet/shell/machine-support.ts';
 
 const memoryStorage = (): ControlsStorage => {
@@ -400,10 +401,8 @@ describe('SettingsPage sections', () => {
     const controls = new DaemonControlsStore(storage);
     const view = render(page({ controls }));
 
-    const keys = () =>
-      view.root
-        .findByProps({ 'data-setting-id': 'composer-suggestions' })
-        .findAll(node => node.type === 'input' && node.props.type === 'radio');
+    const keys = () => segmentedRadios(view, 'Open suggestions with');
+    const skills = () => switchOfRow(view, 'Suggest $ skills');
     expect(keys().map(radio => radio.props.checked)).toEqual([true, false, false]);
 
     // Choosing the symbols moves only the keys; $ skills is untouched.
@@ -411,27 +410,24 @@ describe('SettingsPage sections', () => {
     expect(keys().map(radio => radio.props.checked)).toEqual([false, true, false]);
     expect(controls.snapshot().device.suggestionKeys).toBe('symbols');
     expect(controls.snapshot().device.skillSuggestions).toBe(true);
-    expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([true]);
+    expect(skills()?.props['aria-checked']).toBe(true);
 
     // Vim shares the composer-editing control with the editor style, and is
     // the one switch there rather than a page of its own.
-    const editing = settingSwitches(view, 'composer-markdown');
-    expect(editing).toHaveLength(1);
-    expect(editing[0]?.props['aria-checked']).toBe(false);
-    run(() => editing[0]?.props.onClick());
+    const editing = () => switchOfRow(view, 'Vim-style editing');
+    expect(editing()?.props['aria-checked']).toBe(false);
+    run(() => editing()?.props.onClick());
     expect(controls.snapshot().device.composerVimMode).toBe(true);
-    expect(settingSwitches(view, 'composer-markdown')[0]?.props['aria-checked']).toBe(true);
+    expect(editing()?.props['aria-checked']).toBe(true);
 
     // The phone's return key persists the same way.
-    const radio = (id: string, name: string, value: string) =>
-      view.root
-        .findByProps({ 'data-setting-id': id })
-        .findAll(node => node.type === 'input' && node.props.name === name && node.props.value === value)[0];
-    run(() => radio('composer-enter-key', 'composer-phone-enter-key', 'send')?.props.onChange());
+    const radio = (group: string, value: string) =>
+      segmentedRadios(view, group).find(node => node.props.value === value);
+    run(() => radio('On a phone', 'send')?.props.onChange());
     expect(controls.snapshot().device.composerPhoneEnterKey).toBe('send');
 
     // The session list can show the machine on screen alone, on this device.
-    run(() => radio('sessions-list', 'behaviour-sessions-list', 'current')?.props.onChange());
+    run(() => radio('Sessions list', 'current')?.props.onChange());
     expect(controls.snapshot().device.sessionsList).toBe('current');
 
     // Both are properties of this screen: they survive a reload and read the

@@ -4400,15 +4400,18 @@ describe('the notifications settings card', () => {
     return { store, view, card };
   };
 
-  const switches = (card: HTMLElement): HTMLElement[] => [...card.querySelectorAll<HTMLElement>('[role="switch"]')];
+  /** A switch is named by its row (aria-labelledby), so find it by the row's name. */
+  const switchNamed = (card: HTMLElement, name: string): HTMLElement | undefined =>
+    [...card.querySelectorAll<HTMLElement>('[role="switch"]')].find(toggle => {
+      const labelId = toggle.getAttribute('aria-labelledby');
+      const label = labelId === null ? null : card.ownerDocument.getElementById(labelId);
+      return label?.textContent?.includes(name) ?? false;
+    });
 
   it('flips exactly the category switch pressed, leaving the others on', async () => {
     const { store, view, card } = await open();
 
-    const failedSwitch = must(
-      switches(card).find(toggle => toggle.textContent?.includes('Failed')),
-      'the Failed category switch',
-    );
+    const failedSwitch = must(switchNamed(card, 'Failed'), 'the Failed category switch');
     expect(failedSwitch.getAttribute('aria-checked')).toBe('true');
 
     await interact(() => failedSwitch.click());
@@ -4427,10 +4430,7 @@ describe('the notifications settings card', () => {
     const { store, view, card } = await open();
 
     expect(card.querySelectorAll('input[type="time"]')).toHaveLength(0);
-    const quietSwitch = must(
-      switches(card).find(toggle => toggle.textContent?.includes('Quiet hours')),
-      'the quiet-hours switch',
-    );
+    const quietSwitch = must(switchNamed(card, 'Quiet hours'), 'the quiet-hours switch');
 
     await interact(() => quietSwitch.click());
 
@@ -5482,17 +5482,17 @@ describe('the navigation cache', () => {
       );
       store.scrollMemory.rememberPage('entry-somewhere', '', 240);
       await settle();
-      const button = (label: string): HTMLButtonElement =>
+      const button = (scope: string, label: string): HTMLButtonElement =>
         must(
-          [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+          [...view.container.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find(
             candidate => candidate.textContent?.trim() === label,
           ),
           `the ${label} button`,
         );
 
       // Act
-      await interact(() => button('Clear').click());
-      await interact(() => button('Clear').click());
+      await interact(() => button('[data-setting-id="clear-cached-data"]', 'Clear').click());
+      await interact(() => button('[data-clear-cached-data="confirming"]', 'Clear').click());
       await settle();
 
       // Assert

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, RotateCcw } from 'lucide-react';
 
 import { Button } from '../../shell/primitives.tsx';
+import { SettingRow } from './setting-row.tsx';
 import {
   beginDictationShortcutCapture,
   DEFAULT_DICTATION_SHORTCUT,
@@ -122,73 +123,62 @@ export function DictationShortcutPicker({ binding, onChange }: DictationShortcut
     tone === 'warn' || (!feedback && currentVerdict.warning) ? 'text-warn' : tone === 'ok' ? 'text-ok' : 'text-faint';
 
   return (
-    <section
-      aria-labelledby="dictation-shortcut-title"
-      className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
-    >
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h3 id="dictation-shortcut-title" className="m-0 text-ui font-semibold text-fg">
-            Push to talk
-          </h3>
-          <p className="m-0 text-meta leading-base text-muted">
-            Hold to record and release to finish, or tap once to latch and press again to finish.
-          </p>
-        </div>
-        <kbd className="inline-flex min-h-8 items-center gap-1 rounded-control border border-accent bg-accent-soft px-2 font-ui text-meta font-semibold text-accent shadow-sm">
-          <KeyRound size={13} aria-hidden="true" />
-          {dictationShortcutLabel(binding)}
-        </kbd>
-      </div>
-      <p className="m-0 text-meta leading-base text-muted">
-        The finished transcript and one correction pass insert at your current caret. The shortcut never sends the
-        message. On a phone, use the mic button—the keyboard shortcut is optional. On an iPad keyboard, Option is Alt
-        and the Globe key never reaches the page; if Alt alone does nothing, press Change and try another chord.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={capturing ? 'primary' : 'outline'}
-          className="min-h-[44px] min-w-[44px]"
-          aria-pressed={capturing}
-          data-dictation-capture=""
-          onClick={event => {
-            if (capturing) cancel();
-            else {
-              pending.current = null;
-              setTone('muted');
-              setFeedback('Press your shortcut, then release its main key. Escape cancels.');
-              setCapturing(true);
-              // Focus is not needed to hear keys, but it keeps screen readers and the focus ring on the control.
-              event.currentTarget.focus();
-            }
-          }}
-        >
-          <KeyRound size={14} aria-hidden="true" />
-          <span className="ml-1">{capturing ? 'Listening — press a shortcut' : 'Change shortcut'}</span>
-        </Button>
-        {!isDefault && (
+    <SettingRow
+      name="Push to talk"
+      hint="Hold to record and release to finish, or tap once to latch and press again to finish."
+      explanation="The finished transcript and one correction pass insert at your current caret. The shortcut never sends the message. On a phone, use the mic button—the keyboard shortcut is optional. On an iPad keyboard, Option is Alt and the Globe key never reaches the page; if Alt alone does nothing, press Change and try another chord."
+      wide
+      control={() => (
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          <kbd className="inline-flex min-h-8 items-center gap-1 rounded-control border border-accent bg-accent-soft px-2 font-ui text-meta font-semibold text-accent shadow-sm">
+            <KeyRound size={13} aria-hidden="true" />
+            {dictationShortcutLabel(binding)}
+          </kbd>
           <Button
             type="button"
             size="sm"
+            variant={capturing ? 'primary' : 'outline'}
             className="min-h-[44px] min-w-[44px]"
-            onClick={() => {
-              onChange({ ...DEFAULT_DICTATION_SHORTCUT });
-              setTone('muted');
-              setFeedback('Reset to Alt (either side).');
+            aria-pressed={capturing}
+            data-dictation-capture=""
+            onClick={event => {
+              if (capturing) cancel();
+              else {
+                pending.current = null;
+                setTone('muted');
+                setFeedback('Press your shortcut, then release its main key. Escape cancels.');
+                setCapturing(true);
+                // Focus is not needed to hear keys, but it keeps screen readers and the focus ring on the control.
+                event.currentTarget.focus();
+              }
             }}
           >
-            <RotateCcw size={14} aria-hidden="true" />
-            <span className="ml-1">Use default Alt</span>
+            <KeyRound size={14} aria-hidden="true" />
+            <span className="ml-1">{capturing ? 'Listening — press a shortcut' : 'Change shortcut'}</span>
           </Button>
-        )}
-      </div>
+          {!isDefault && (
+            <Button
+              type="button"
+              size="sm"
+              className="min-h-[44px] min-w-[44px]"
+              onClick={() => {
+                onChange({ ...DEFAULT_DICTATION_SHORTCUT });
+                setTone('muted');
+                setFeedback('Reset to Alt (either side).');
+              }}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              <span className="ml-1">Use default Alt</span>
+            </Button>
+          )}
+        </span>
+      )}
+    >
       {(feedback || currentVerdict.warning) && (
-        <p className={`m-0 text-meta leading-base ${feedbackClass}`} role="status" aria-live="polite">
+        <p className={`m-0 px-panel pb-3 text-meta leading-base ${feedbackClass}`} role="status" aria-live="polite">
           {feedback ?? currentVerdict.warning}
         </p>
       )}
-    </section>
+    </SettingRow>
   );
 }

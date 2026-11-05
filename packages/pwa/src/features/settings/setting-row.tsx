@@ -60,7 +60,7 @@ export interface SettingRowProps {
   readonly wide?: boolean;
   /** Content under the row that is always shown, for example a list the control reveals. */
   readonly children?: ReactNode;
-  /** `data-*` attributes on the row itself, for a row whose state a test or a stylesheet reads. */
+  /** Extra `data-*` hooks on the row, for a test or a script that names the row by what it is. */
   readonly dataAttributes?: Readonly<Record<`data-${string}`, string>>;
 }
 
@@ -150,16 +150,18 @@ export interface SettingSwitchProps {
   readonly checked: boolean;
   readonly onChange: (next: boolean) => void;
   readonly labelledBy: string;
+  /** Names the switch by this text instead of by `labelledBy`, for a row whose visible name is not the action. */
+  readonly ariaLabel?: string;
   readonly disabled?: boolean;
 }
 
-export function SettingSwitch({ checked, onChange, labelledBy, disabled = false }: SettingSwitchProps) {
+export function SettingSwitch({ checked, onChange, labelledBy, ariaLabel, disabled = false }: SettingSwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-labelledby={labelledBy}
+      {...(ariaLabel === undefined ? { 'aria-labelledby': labelledBy } : { 'aria-label': ariaLabel })}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-60"
@@ -264,6 +266,23 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
         );
       })}
     </div>
+  );
+}
+
+/** What each choice of a segmented row means, for behind its (i): the choices' own sentences, none dropped. */
+export function OptionNotes({
+  notes,
+}: {
+  readonly notes: readonly { readonly label: string; readonly detail: string }[];
+}) {
+  return (
+    <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0" data-option-notes="">
+      {notes.map(note => (
+        <li key={note.label}>
+          <span className="font-semibold text-fg">{note.label}</span> — {note.detail}
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -9,6 +9,7 @@ import {
   NOTIFICATION_CATEGORY_COPY,
 } from '../../../../src/lib/notification-filter.ts';
 import { render, run } from '../../../support/react.ts';
+import { switchOfRow } from '../../../support/setting-rows.ts';
 
 const view = (overrides: Partial<NotificationFilterSettingsViewProps> = {}) => {
   const calls = {
@@ -30,20 +31,14 @@ describe('NotificationFilterSettingsView', () => {
     const switches = renderer.root.findAllByProps({ role: 'switch' });
     expect(switches).toHaveLength(5);
     for (const toggle of switches) expect(toggle.props.className).toContain('min-h-[44px]');
-    const quietToggle = switches.find(node =>
-      node.findAllByType('span').some(span => span.children.includes('Quiet hours')),
-    );
+    const quietToggle = switchOfRow(renderer, 'Quiet hours');
     expect(quietToggle?.props['aria-checked']).toBe(false);
     expect(switches.filter(toggle => toggle.props['aria-checked'] === true)).toHaveLength(4);
   });
 
   it('flips exactly the category switch that was pressed', () => {
     const { calls, renderer } = view();
-    const failedToggle = renderer.root
-      .findAllByProps({ role: 'switch' })
-      .find(node =>
-        node.findAllByType('span').some(span => span.children.includes(NOTIFICATION_CATEGORY_COPY.failed.label)),
-      );
+    const failedToggle = switchOfRow(renderer, NOTIFICATION_CATEGORY_COPY.failed.label);
     run(() => failedToggle?.props.onClick());
     expect(calls.categories).toEqual([['failed', false]]);
   });
@@ -79,9 +74,7 @@ describe('NotificationFilterSettingsView', () => {
 
   it('turns quiet hours on from its own switch', () => {
     const { calls, renderer } = view();
-    const quietToggle = renderer.root
-      .findAllByProps({ role: 'switch' })
-      .find(node => node.findAllByType('span').some(span => span.children.includes('Quiet hours')));
+    const quietToggle = switchOfRow(renderer, 'Quiet hours');
     run(() => quietToggle?.props.onClick());
     expect(calls.quietHours).toEqual([{ enabled: true }]);
   });

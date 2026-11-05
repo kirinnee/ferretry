@@ -8,6 +8,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MachineNotificationList, NotificationsOffBanner } from '../src/features/settings/notification-machines.tsx';
+import { SettingGroup } from '../src/features/settings/setting-row.tsx';
 import { daemonId } from '../src/lib/daemon-connection.ts';
 import type { MachineNotificationRow } from '../src/lib/machine-notifications.ts';
 import { daemonAgendaPath } from '../src/lib/pages/routes.ts';
@@ -44,16 +45,18 @@ function Settings(): ReactElement {
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-md bg-bg p-panel" data-fixture="">
       <h1 className="m-0 text-title font-semibold">Notifications</h1>
-      <MachineNotificationList
-        busy={new Set()}
-        canEnrol
-        failures={{}}
-        onDisable={noop}
-        onEnable={noop}
-        onToggleShown={noop}
-        onTurnOnAll={noop}
-        rows={ROWS}
-      />
+      <SettingGroup label="Notifications">
+        <MachineNotificationList
+          busy={new Set()}
+          canEnrol
+          failures={{}}
+          onDisable={noop}
+          onEnable={noop}
+          onToggleShown={noop}
+          onTurnOnAll={noop}
+          rows={ROWS}
+        />
+      </SettingGroup>
     </main>
   );
 }
@@ -61,7 +64,9 @@ function Settings(): ReactElement {
 function Banner(): ReactElement {
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-md bg-bg p-panel" data-fixture="">
-      <NotificationsOffBanner busy={new Set()} canEnrol onEnable={noop} rows={ROWS.slice(1, 2)} />
+      <SettingGroup label="Notifications">
+        <NotificationsOffBanner busy={new Set()} canEnrol onEnable={noop} rows={ROWS.slice(1, 2)} />
+      </SettingGroup>
     </main>
   );
 }
