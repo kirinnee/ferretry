@@ -255,7 +255,7 @@ export function AnalyticsQueryAutocomplete({
 }) {
   const generatedId = useId();
   const listboxId = `analytics-completions-${generatedId.replace(/:/g, '')}`;
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [caret, setCaret] = useState(value.length);
   const [focused, setFocused] = useState(false);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -303,8 +303,8 @@ export function AnalyticsQueryAutocomplete({
     },
     [candidates, onValueChange, result.replaceRange, value],
   );
-  const syncCaret = (input: HTMLInputElement) => setCaret(input.selectionStart ?? input.value.length);
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const syncCaret = (input: HTMLTextAreaElement) => setCaret(input.selectionStart ?? input.value.length);
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const action = analyticsAutocompleteKeyAction(event.key, {
       open,
       count: candidates.length,
@@ -325,9 +325,9 @@ export function AnalyticsQueryAutocomplete({
       <Search
         size={15}
         aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-faint"
+        className="pointer-events-none absolute left-3 top-[22px] z-10 -translate-y-1/2 text-faint"
       />
-      <input
+      <textarea
         id={inputId}
         ref={inputRef}
         role="combobox"
@@ -341,13 +341,18 @@ export function AnalyticsQueryAutocomplete({
         disabled={disabled}
         // `!` because `.kt-input` sets its padding after the utilities layer: a plain `pl-9` lost to it, and
         // the search icon sat on top of the first letters of the query.
-        className="kt-input mono min-h-[44px] w-full !pl-9 !pr-3"
+        // A phone is ~390px wide: the query wraps onto more lines (and the box grows with it) rather than
+        // clipping its tail behind the Run button. `field-sizing` grows the box where supported; elsewhere it
+        // stays two rows tall and scrolls. A query is one logical line, so Enter runs it and pasted line breaks
+        // become spaces.
+        className="kt-input mono block min-h-[44px] w-full resize-none whitespace-pre-wrap [overflow-wrap:anywhere] !pl-9 !pr-3 [field-sizing:content]"
+        rows={2}
         value={value}
         placeholder={placeholder}
         onChange={event => {
           setActiveIndex(0);
           setDismissedAt(null);
-          onValueChange(event.currentTarget.value);
+          onValueChange(event.currentTarget.value.replace(/\r?\n/g, ' '));
           syncCaret(event.currentTarget);
         }}
         onSelect={event => syncCaret(event.currentTarget)}
