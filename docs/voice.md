@@ -740,14 +740,14 @@ Kept in this browser under its own key, `fy-live-voice-v1` (`lib/voice-chat/live
 capped (a voice id is at most 200 characters), a bad field falls back by itself, a payload from another version is discarded, and
 refused storage keeps the choice in memory and says so. Nothing in it is a secret and no reply text is stored.
 
-| Setting           | Choices                                              | Default                  |
-| ----------------- | ---------------------------------------------------- | ------------------------ |
-| Auto-read replies | On / Off                                             | **Off**                  |
-| Voice             | the device's voices, or "Best voice for this device" | Best voice               |
-| Speed             | 0.8× – 2.0×                                          | 1.1×                     |
-| Longest reading   | 30 seconds · 1 · 2 · 5 minutes · No limit            | 1 minute                 |
-| What to read      | Last message of the turn · Every message             | Last message of the turn |
-| Live sounds       | On / Off (Live's tones, and the Android buzz)        | **On**                   |
+| Setting           | Choices                                                                                     | Default                  |
+| ----------------- | ------------------------------------------------------------------------------------------- | ------------------------ |
+| Auto-read replies | On / Off                                                                                    | **Off**                  |
+| Voice             | the device's voices, or "Best voice for this device"                                        | Best voice               |
+| Speed             | 0.8× – 2.0×                                                                                 | 1.1×                     |
+| Longest reading   | 30 seconds · 1 · 2 · 5 minutes · No limit                                                   | 1 minute                 |
+| What to read      | Last message of the turn · Every message                                                    | Last message of the turn |
+| Live sounds       | moved: now **Sounds** and **Buzz on phones** in [Live voice settings](#live-voice-settings) | **On**                   |
 
 **While Live voice is on, Auto-read stands down:** Live reads its own turns ([Reading the reply](#reading-the-reply)), so a reply is never read twice. The "Auto-read replies" setting is not changed; it works again when Live ends.
 
@@ -975,6 +975,75 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
   The mic button is held back while Live is on, and Live while the mic is recording.
 
+### The safeguards against a surprise send
+
+In plain words, what stops Live sending something you did not mean:
+
+1. **You see it first.** Your words go into the message box before anything is sent, and the countdown is on screen the whole time.
+2. **You can stop it.** **Hold** (a button, or **H**) stops the countdown; **Send now** (Enter) skips it; typing in the box holds it by itself.
+3. **A stop stays stopped.** Once you hold, type or leave the tab, speaking again cannot bring the send back. Only **Resume** does.
+4. **It only sends what the box shows.** The text sent is the text in the box at that moment, through the same send as a typed message.
+5. **Speaking again cancels it.** If you start talking during the countdown, the send is dropped and your next words are added.
+6. **The ferret cannot talk it into anything.** The microphone is off while it works and while it reads, and a spoken answer never approves a permission, sudo, secret or payment prompt.
+7. **A failed send is never retried for you.** Live goes On hold with your words kept.
+8. **It switches itself off.** Ten minutes without speech ends Live; it never turns itself back on, and a device that may not send gets no Live button.
+9. **No countdown is a decision.** The countdown picker stops at 0.5 s. "Send without a countdown" is its own switch, off until you turn it on, and while it is on the card says **Live will send without a countdown** and that there is no time to press Hold.
+
+### Half-duplex: the microphone and the voice never overlap
+
+Live is half-duplex. The microphone is **open** only while Live is listening or counting down, and **closed** while the ferret works and
+the whole time a reply is read (it is shut before the first word is spoken and reopened only after the last). So the voice cannot
+be heard by the microphone, nothing it says can be transcribed, sent or cause a stop, and the echo problem (the speaker feeding the
+microphone) never arises. The price is that you cannot talk over it: you interrupt with a tap or a key (**Space**, **Esc**, **S**).
+Talking over the reply is a later, headphones-only slice.
+
+### Live voice settings
+
+**Settings › Behaviour › Live voice** (right under Voice, which holds Read replies aloud; badge **This device**; found in the palette by
+"live", "voice chat", "read aloud" and "hands-free"). Same record as Read replies aloud: `fy-live-voice-v1`, now **version 2**. A version-1
+record is still read: the fields it never had take their defaults, and the buzz follows the old single "Live sounds" switch. A
+version this build does not know is discarded. Pause, countdown, reading and keep-screen-on are read **when Live starts** (a change
+applies the next time you press Live); the tones and the buzz are asked at every cue.
+
+| Setting                       | Choices                                                                                 | Default                      | Stored field                    |
+| ----------------------------- | --------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------- |
+| Pause before sending          | Quick 0.9 s · Normal 1.5 s · Thinker 2.5 s                                              | **Normal**                   | `pause`                         |
+| Countdown before send         | 0.5 s – 5 s in half-seconds                                                             | **1.5 s**                    | `countdownMs`                   |
+| Send without a countdown      | On / Off (stores 0; shows the warning when on)                                          | **Off**                      | `countdownMs` 0                 |
+| Read replies aloud in Live    | On / Off                                                                                | **On**                       | `liveRead`                      |
+| Voice, speed, longest reading | **not repeated**: shown in words, with a button to the one picker in Read replies aloud | best voice · 1.1× · 1 minute | `voiceId`, `rate`, `maxSeconds` |
+| Keep screen on                | On / Off                                                                                | **On**                       | `keepAwake`                     |
+| Sounds                        | On / Off                                                                                | **On**                       | `earcons`                       |
+| Buzz on phones                | On / Off                                                                                | **On**                       | `haptics`                       |
+| Screen-reader hint answered   | (the one-time hint is shown until Got it or Turn it off)                                | not answered                 | `screenReaderHintSeen`          |
+| Clean-up in Live              | read-only line: "Live uses Fix-style clean-up; Polish is treated as Fix."               | Fix                          | —                               |
+
+Not a setting, because it is not built: spoken "Hold" / "Send" words. Live has no spoken commands, so the card does not offer them.
+The countdown is clamped to 0–5 s on read and on write, and a bad field falls back by itself. The hint **Using a screen reader? Turn off
+Read replies aloud.** is shown once next to the reading switch while reading is on; **Turn it off** switches reading off, **Got it** keeps it
+on, and either closes the hint for good. Every control is at least 48 px high (measured in the browser, phone and desktop), and every
+switch is a real `role="switch"` that says On or Off in words.
+
+### The timeline of one turn
+
+Numbers only, in seconds after your last word, with the defaults (Normal pause, 1.5 s countdown):
+
+| Time    | What happens                                                                                                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------ |
+| 0       | you stop talking                                                                                                   |
+| 1.5     | the pause is heard (0.9 Quick · 2.5 Thinker); the words are worked out, shown in the box, and the countdown starts |
+| 1.5–3.0 | the countdown runs; Hold and Send now work; the engine's remaining decode (0 to 1.8 s) is inside it                |
+| 3.0     | sent (2.4 Quick · 4.0 Thinker; 1.5–1.7 with the countdown at 0)                                                    |
+| +       | the ferret works; Live is silent and the microphone is off                                                         |
+| +       | the reply is read, at most 60 s, then Live listens again                                                           |
+
+**Measured:** the engine decode times after an early finish (0 to 1.8 s) were measured on a 32-core Linux box in the Speed section, and the
+loop's own per-turn numbers (end → words, end → send, last word → sent) are measured on your device and shown in the working state.
+**Computed from those, not measured with a microphone:** the last-word-to-sent table under [Latency](#latency-last-word-to-sent) and the
+Quick/Thinker figures above (the same table with the pause and countdown changed; arithmetic, not a new run). **Estimated, not measured
+at all:** clean-up time (it has a 3 s budget and a failure sends the raw words), the network round trip, and every phone, microphone and
+Safari number.
+
 ### Reading the reply
 
 When the ferret's turn ends after a message **Live sent**, Live reads the reply aloud and then listens again.
@@ -1026,8 +1095,9 @@ told apart by shape, not only pitch, are quiet (peak gain 0.12) and last under 0
 as the mic opens, and the endpointer ignores anything shorter than a real utterance, so it is never taken for a
 turn. A refusal to start, hearing you, a countdown, a hold and a take that came to nothing make no sound. On an
 Android phone `navigator.vibrate` buzzes briefly for **sent** and **reply ready** (guarded: iOS web has no
-vibration, and a refusing device is silent). **Settings › Voice › Live sounds** switches the tones **and** the
-buzzes off (`fy-live-voice-v1`, `earcons`, on by default). The audio context is created and resumed inside the tap
+vibration, and a refusing device is silent). **Settings › Behaviour › Live voice** has one switch for the tones
+(**Sounds**, `earcons`) and one for the buzz (**Buzz on phones**, `haptics`), both on by default and both applied at the
+next cue. Before slice 6 one switch ("Live sounds") did both; an old stored choice of Off keeps the buzz off too. The audio context is created and resumed inside the tap
 that starts Live (browsers refuse sound before a gesture).
 
 ### Proving it on an iPhone
@@ -1058,8 +1128,34 @@ What must be tried on a real iPhone before this is called done (Safari tab, and 
 8. Home Screen app + Browser voice: Live refuses and says to pick an on-device voice (existing behaviour).
 9. Whether the "listening" tone is heard by the mic and taken as speech (it should not be).
 
-Record the iOS version, the model and the result of each in this section; until then every claim above about
-iOS is a design intent.
+Record the iOS version, the model and the result of each in this section.
+
+**UNPROVEN on a real iPhone (everything below was written from the specifications and tested only with fakes):** that speech starts from
+the Live tap and from each Resume/Listen tap; that it plays from the loudspeaker and not the earpiece; that the silent switch does or
+does not mute it; that the microphone can be reopened at all after a reply (and so whether the Listen button is needed, or is needed
+every time); that the screen stays on (the Screen Wake Lock needs a recent iOS, and nobody has tried it in the Home Screen app); that locking
+the screen or taking a call leaves Live Paused with nothing speaking; that the "listening" tone is not heard as speech; that the
+**Buzz on phones** switch does nothing there (iOS web has no vibration, by design). **Not tried on a real Android phone either:** the
+buzz, the wake lock and the Web Lock across tabs. What _is_ proven is the logic: the machine, the runner and the settings, by unit
+tests with fake ports, and the screens, by browser screenshots on a desktop engine.
+
+### Troubleshooting
+
+| What you see                                  | Why, and what to do                                                                                                                                                                      |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live does not start; "Allow the microphone…"  | The browser blocked the microphone. Allow it in the site settings and press Live again.                                                                                                  |
+| "Pick a voice in Settings › Voice first"      | Live needs a chosen speech-to-text voice. Choose one under Settings › Behaviour › Voice.                                                                                                 |
+| "Live is on in another tab."                  | One tab at a time may listen. End Live in the other tab.                                                                                                                                 |
+| It sends before you finish a thought          | Choose **Thinker** (2.5 s) under Pause before sending, or turn the countdown up.                                                                                                         |
+| It waits too long after you stop              | Choose **Quick** (0.9 s). In a noisy room Quick can cut you off or never end; use Normal.                                                                                                |
+| It sent without warning you                   | "Send without a countdown" is on. Turn it off for a countdown back.                                                                                                                      |
+| The reply is not read                         | "Read replies aloud in Live" is off, the device has no built-in voice, or the reply was a question you answer by tapping. A change to this setting applies the next time you press Live. |
+| A screen reader and Live talk over each other | Turn off Read replies aloud in Live; the reply stays on screen.                                                                                                                          |
+| "Screen may turn off"                         | The browser refused to keep the screen on (battery saver, an old browser). Keep the phone awake yourself, or accept Live pausing when the tab hides.                                     |
+| No sounds or buzz                             | **Sounds** or **Buzz on phones** is off; the device is muted; or (buzz) it is not an Android phone.                                                                                      |
+| iPhone: a big **Listen** after each reply     | Expected: iOS may not reopen the microphone without a tap. Tap Listen.                                                                                                                   |
+| Live ended by itself                          | Ten minutes without speech ends it, or the composer can no longer send.                                                                                                                  |
+| Your choices reset after a reload             | The browser is refusing storage; the card says so.                                                                                                                                       |
 
 ### Clean-up in Live: Fix only
 
@@ -1123,7 +1219,7 @@ real microphones, noise suppression, phones, Safari, any GPU.
 
 ## Not built yet
 
-- **Live voice settings screen and the `⌥L` chord** (slice 6): the loop, the reading and the sounds are built (see [Live voice](#live-voice-the-one-place-voice-sends)); the Live-specific settings (pause length, countdown, keep-screen-on) are not on a screen yet.
+- **The `⌥L` chord** and **spoken "Hold" / "Send" words**: the loop, the reading, the sounds and the settings screen are built (see [Live voice](#live-voice-the-one-place-voice-sends) and [Live voice settings](#live-voice-settings)); these two are not.
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
   downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
   channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per

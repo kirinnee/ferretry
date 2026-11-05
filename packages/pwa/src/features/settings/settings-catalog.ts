@@ -249,7 +249,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'live-voice',
     label: 'Live voice',
     description:
-      'Hands-free voice chat on this device. Choose how long a quiet ends your turn (Quick, Normal or Thinker), the countdown you can watch before your words are sent (or none, behind a plain warning), whether Live reads the ferret’s reply aloud, whether the screen stays on, and its sounds and phone buzzes. Live is the one place voice sends; the mic button never does.',
+      'Hands-free voice chat. Live is the one place voice sends: you talk, your words appear in the message box, a countdown runs, and they are sent. Choose the pause that ends your turn, the countdown, reading replies aloud, keeping the screen on, and sounds and buzzes. The mic button still never sends.',
     keywords: [
       'live',
       'voice chat',

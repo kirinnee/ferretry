@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AutoReadSettings } from '../../src/features/settings/auto-read-settings.tsx';
-import {
-  LIVE_VOICE_INTRO,
-  LiveVoiceSettingsSection,
-  SCREEN_READER_HINT,
-} from '../../src/features/settings/live-voice-settings.tsx';
+import { LiveVoiceSettingsSection, SCREEN_READER_HINT } from '../../src/features/settings/live-voice-settings.tsx';
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
 import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
 import { LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
@@ -68,13 +64,11 @@ const change = async (element: HTMLInputElement, value: string): Promise<void> =
 };
 
 describe('<LiveVoiceSettingsSection>', () => {
-  test('says what Live is, that voice sends only here, and when changes apply', async () => {
+  test('says when changes apply, and keeps technical words off the screen', async () => {
     const root = await show(rig());
-    expect(root.textContent).toContain(LIVE_VOICE_INTRO);
-    expect(root.textContent).toContain('Live is the one place voice sends');
     expect(root.textContent).toContain('apply the next time you press Live');
     expect(root.querySelector('[data-live-voice-settings]')?.getAttribute('aria-label')).toBe('Live voice');
-    // Plain words: none of the builder's vocabulary reaches the screen.
+    // Plain words: none of the builders vocabulary reaches the screen.
     for (const jargon of ['daemon', 'engine', 'endpointer'])
       expect(root.textContent?.toLowerCase()).not.toContain(jargon);
   });
@@ -155,11 +149,13 @@ describe('<LiveVoiceSettingsSection>', () => {
     expect(root.querySelector('input[type="range"]')).not.toBeNull();
   });
 
-  test('a stored 0 shows the warning from the first paint', async () => {
+  test('a stored 0 shows the warning from the first paint, and the intro stops promising a wait', async () => {
     const r = rig();
     r.store.update({ countdownMs: 0 });
     const root = await show(r);
     expect(root.textContent).toContain('Live will send without a countdown');
+    expect(root.textContent).toContain('There is no countdown.');
+    expect(root.textContent).not.toContain('wait in the message box for this long');
   });
 
   test('Read replies aloud in Live is on, says what that means, and can be turned off', async () => {
@@ -225,9 +221,11 @@ describe('<LiveVoiceSettingsSection>', () => {
     r.store.update({ voiceId: 'uri:Daniel', rate: 1.4, maxSeconds: 120 });
     const root = await show(r, <AutoReadSettings />);
     const summary = pick(root, '[data-live-reading-summary]');
+    expect(summary.textContent).toContain('Live reads with the voice, speed and length you chose');
+    expect(summary.textContent).toContain('Voice');
     expect(summary.textContent).toContain('Daniel');
-    expect(summary.textContent).toContain('1.4× speed');
-    expect(summary.textContent).toContain('up to 2 minutes');
+    expect(summary.textContent).toContain('1.4×');
+    expect(summary.textContent).toContain('2 minutes');
     // Exactly one voice picker and one speed slider on the page (the Read replies aloud ones).
     expect(root.querySelectorAll('select#auto-read-voice').length).toBe(1);
     expect(root.querySelectorAll('input#auto-read-rate').length).toBe(1);
@@ -247,7 +245,11 @@ describe('<LiveVoiceSettingsSection>', () => {
     r.store.update({ maxSeconds: null });
     const root = await show(r);
     const summary = pick(root, '[data-live-reading-summary]');
-    expect(summary.textContent).toContain('Best voice for this device · 1.1× speed · no limit');
+    expect(summary.textContent).toContain('Best voice for this device');
+    await interact(() => void r.store.update({ liveRead: false }));
+    expect(summary.textContent).toContain('If you turn reading on, Live will read with');
+    expect(summary.textContent).toContain('1.1×');
+    expect(summary.textContent).toContain('No limit');
     // The change link does nothing, and does not fail, where the picker is not on the page.
     await interact(() => pick(summary, '[data-change-voice]').click());
     await interact(() => void r.store.update({ maxSeconds: 45 }));

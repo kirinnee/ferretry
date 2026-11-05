@@ -221,6 +221,11 @@ function Supported({
             {previewing ? 'Stop preview' : 'Preview voice'}
           </Button>
         </div>
+        {chosen === null ? null : (
+          <p className="m-0 break-words text-meta leading-base text-muted" data-chosen-voice="">
+            Chosen: {voiceLabel(chosen)} — {chosen.lang}
+          </p>
+        )}
         {voices.length === 0 ? (
           <p className="text-meta leading-base text-faint" role="status">
             This device has not listed its voices yet. The best voice is used until it does.

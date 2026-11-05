@@ -35,9 +35,6 @@ import { voiceLabel } from '../../lib/voice-chat/voice-choice.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { READ_REPLIES_ALOUD_ID, useSpeakerVoices } from './auto-read-settings.tsx';
 
-export const LIVE_VOICE_INTRO =
-  'Live is the one place voice sends: you talk, your words appear in the message box, a countdown runs, and they are sent. These choices only change Live. Dictation (the mic button) still never sends.';
-
 const LIVE_VOICE_APPLIES_NOTE =
   'Pause, countdown, reading and screen-on apply the next time you press Live. Sounds and buzzes apply at once.';
 
@@ -55,6 +52,9 @@ const COUNTDOWN_ZERO_DETAIL =
   'The moment Live has your words, it sends them. You will not have time to press Hold. Turn this off to get a countdown back.';
 const COUNTDOWN_EXPLANATION =
   'After you stop talking, your words wait in the message box for this long. Hold stops the send; Send now skips the wait.';
+
+const COUNTDOWN_NONE_EXPLANATION =
+  'There is no countdown. Live sends your words the moment it has them; Hold and Send now have nothing left to do.';
 
 const AWAKE_ON_EXPLANATION =
   'Live asks the browser to keep the screen on while it is on. Some browsers and battery savers say no; Live then tells you the screen may turn off.';
@@ -91,8 +91,7 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
   const chosen = voices.find(voice => voice.id === settings.voiceId) ?? null;
 
   return (
-    <section aria-label="Live voice" className="flex flex-col gap-4" data-live-voice-settings="">
-      <p className="m-0 text-meta leading-base text-muted">{LIVE_VOICE_INTRO}</p>
+    <section aria-label="Live voice" className="fy-live-settings flex flex-col gap-4" data-live-voice-settings="">
       <p className="m-0 text-meta leading-base text-faint">{LIVE_VOICE_APPLIES_NOTE}</p>
 
       {/* ---- how long a quiet ends your turn ---- */}
@@ -133,7 +132,9 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
 
       {/* ---- the countdown ---- */}
       <Group id="live-countdown" label="Countdown before send">
-        <p className="m-0 text-meta leading-base text-muted">{COUNTDOWN_EXPLANATION}</p>
+        <p className="m-0 text-meta leading-base text-muted">
+          {noCountdown ? COUNTDOWN_NONE_EXPLANATION : COUNTDOWN_EXPLANATION}
+        </p>
         {noCountdown ? null : (
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline justify-between gap-3">
@@ -185,7 +186,7 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
       </Group>
 
       {/* ---- reading the reply ---- */}
-      <Group id="live-reading" label="Read replies aloud in Live">
+      <Group id="live-reading">
         <SwitchRow
           label="Read replies aloud in Live"
           checked={settings.liveRead}
@@ -201,11 +202,15 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
           </p>
         )}
         {settings.liveRead && !settings.screenReaderHintSeen ? <ScreenReaderHint update={update} /> : null}
-        <ReadingSummary settings={settings} voiceName={chosen === null ? null : voiceLabel(chosen)} />
+        <ReadingSummary
+          reading={settings.liveRead}
+          settings={settings}
+          voiceName={chosen === null ? null : voiceLabel(chosen)}
+        />
       </Group>
 
       {/* ---- the screen ---- */}
-      <Group id="live-awake" label="Keep screen on">
+      <Group id="live-awake">
         <SwitchRow
           label="Keep screen on"
           checked={settings.keepAwake}
@@ -256,12 +261,23 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
   );
 }
 
-function Group({ id, label, children }: { readonly id: string; readonly label: string; readonly children: ReactNode }) {
+/** One part of the card. A group that is a single switch has no heading: the switch is named by its own words. */
+function Group({
+  id,
+  label,
+  children,
+}: {
+  readonly id: string;
+  readonly label?: string;
+  readonly children: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-2" data-live-group={id}>
-      <h4 id={`${id}-label`} className="m-0 text-ui font-semibold">
-        {label}
-      </h4>
+      {label === undefined ? null : (
+        <h4 id={`${id}-label`} className="m-0 text-ui font-semibold">
+          {label}
+        </h4>
+      )}
       {children}
     </div>
   );
@@ -357,14 +373,16 @@ function ScreenReaderHint({ update }: { readonly update: (patch: LiveVoiceSettin
 const lengthWords = (maxSeconds: number | null): string => {
   const known = READING_LENGTH_OPTIONS.find(option => option.seconds === maxSeconds);
   if (known === undefined) return `${maxSeconds} seconds`;
-  return known.seconds === null ? 'no limit' : `up to ${known.label.toLowerCase()}`;
+  return known.label;
 };
 
 /** What Live reads with, in words, and the way to change it: the picker lives in "Read replies aloud". */
 function ReadingSummary({
+  reading,
   settings,
   voiceName,
 }: {
+  readonly reading: boolean;
   readonly settings: LiveVoiceSettings;
   readonly voiceName: string | null;
 }) {
@@ -374,16 +392,29 @@ function ReadingSummary({
     target.scrollIntoView({ block: 'start' });
     target.focus({ preventScroll: true });
   };
+  const rows: readonly (readonly [string, string])[] = [
+    ['Voice', voiceName ?? 'Best voice for this device'],
+    ['Speed', `${settings.rate.toFixed(1)}×`],
+    ['Longest reading', lengthWords(settings.maxSeconds)],
+  ];
   return (
     <div
-      className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      className="flex flex-col gap-3 rounded-control border border-border bg-surface-2 p-3"
       data-live-reading-summary=""
     >
-      <span className="text-meta text-muted">Voice and speed</span>
-      <p className="m-0 break-words text-ui font-semibold leading-base">
-        {voiceName ?? 'Best voice for this device'} · {settings.rate.toFixed(1)}× speed ·{' '}
-        {lengthWords(settings.maxSeconds)}
+      <p className="m-0 text-meta text-muted">
+        {reading
+          ? 'Live reads with the voice, speed and length you chose in Read replies aloud.'
+          : 'If you turn reading on, Live will read with the voice, speed and length you chose in Read replies aloud.'}
       </p>
+      <dl className="m-0 flex flex-col gap-1">
+        {rows.map(([name, value]) => (
+          <div key={name} className="flex flex-wrap gap-x-3">
+            <dt className="w-full shrink-0 text-meta text-muted sm:w-36">{name}</dt>
+            <dd className="m-0 min-w-0 flex-1 break-words text-ui font-semibold leading-base">{value}</dd>
+          </div>
+        ))}
+      </dl>
       <Button className="min-h-[48px] self-start px-4" data-change-voice="" onClick={move} type="button">
         Change voice, speed and length
       </Button>

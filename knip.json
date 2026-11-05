@@ -197,6 +197,7 @@
         "harness/read-aloud-screenshot.tsx",
         "harness/auto-read-screenshot.tsx",
         "harness/live-readout-screenshot.tsx",
+        "harness/live-voice-settings-screenshot.tsx",
         "harness/agenda-message-screenshot.tsx",
         "harness/agenda-card-quote-screenshot.tsx",
         "harness/inbox-item-history-screenshot.ts",

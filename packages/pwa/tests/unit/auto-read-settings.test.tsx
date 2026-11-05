@@ -121,6 +121,14 @@ describe('<AutoReadSettings>', () => {
     expect(r.store.get().voiceId).toBeNull();
   });
 
+  test('a chosen voice is also written out in full under the picker, where a long name cannot be cut off', async () => {
+    const r = rig();
+    const root = await show(r);
+    expect(root.querySelector('[data-chosen-voice]')).toBeNull();
+    await change(byId<HTMLSelectElement>(root, 'auto-read-voice'), 'uri:Samantha');
+    expect(root.querySelector('[data-chosen-voice]')?.textContent).toContain('Chosen: Samantha — en-US');
+  });
+
   test('a stored voice this device no longer has falls back, and says so', async () => {
     const r = rig();
     r.store.update({ voiceId: 'uri:Gone' });
