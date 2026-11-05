@@ -27,6 +27,8 @@ export interface StateHomeReach {
  */
 export interface StartCaller {
   readonly agent: boolean;
+  /** The start came through `fy new` (Pack): a ferret's errand whoever the boundary took the caller for. */
+  readonly pack?: true;
 }
 
 /** The daemon's own start: no agent asked for it. */

@@ -429,7 +429,7 @@ export class PackService {
             name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
           },
           delegation,
-          caller,
+          { ...caller, pack: true },
         );
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });
         const childCard = startedCard(view, delegation, card?.notes ?? []);

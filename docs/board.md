@@ -868,6 +868,13 @@ sub-ferret recorded from its own brief. Whether a session was started by a ferre
 per session per board read; a session this daemon cannot read counts as the owner's, so a card is never hidden on
 a guess.
 
+**A `fy new` card is never the owner's ask.** A sub-ferret's brief is a ferret's words, so the card the daemon writes for it (the ask
+source `session:<lead>`, or `fy new` when the boundary recorded no lead, which happens when the caller held the admin token and named
+no session) is stored `askedBy: agent`, therefore private, and reads `origin: agent` whatever it quotes. That is a rule of `decideAskedBy`: a card the
+daemon wrote for a session (`createdBy` is the daemon, with a session) is `person` only when its source names the owner, which only the
+owner's own New session writes. Without it a brief that repeated the owner's message made the helper's card the owner's public ask
+(&F1092), and the boot-time re-decision kept it so.
+
 The rule cannot tell a top-level ferret's own idea from the owner's words in that ferret's chat; both read as
 human, which errs toward showing the owner a card. Both fields are optional on the wire: a daemon older than the
 split sends neither, and the app then shows every card and no toggle.
@@ -882,6 +889,7 @@ the request (the create body has no such field, so a caller cannot claim it). `d
 
 1. the owner's own app made it (an owner caller that is not on the admin token, which a ferret can hold too);
 2. the ask's source names the owner (`owner (board)`, "owner via lead jaeda");
+   (A card the daemon wrote for a started session skips the next step: the ferret's brief proves nothing about the owner's words.)
 3. the ask's text matches words the OWNER said to the session it came from (`wordsSessionOf`: the session id the
    source names, in any form — `session:<id>`, `session <id>`, a turn document's path — else the recording ferret),
    whoever wrote the card down: a ferret on the admin token is stored as `owner` and the board import as `daemon`.
@@ -1036,6 +1044,31 @@ and close it ([Cards show progress](#cards-show-progress-their-asks-ride-the-age
 ships or its helper finishes ([Sub-cards close themselves](#sub-cards-close-themselves)). A ferret's change to a project's lanes waits for the owner
 ([above](#a-ferrets-lane-change-waits-for-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
+
+### An orphaned card is adopted
+
+A card is **orphaned** when its owner ferret AND its assignee have both ended. Nobody left holds it, and the standings above give
+the owner alone a say over it, so a card the owner never asked for sat there until they assigned or closed it by hand ("don't
+drop it, assign someone to it!"). `fy task adopt <id> [--reason <why>]` lets a live lead take it instead. The daemon judges every
+condition itself, in the card's write, from the session roster: the request names nobody, and a refusal changes nothing.
+
+| Condition                                                                                             | Refused as                                     |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| the caller is a ferret (the owner and the daemon `assign`)                                            | "adopt is a ferret's"                          |
+| the card is open work (not dropped, not in a closed lane)                                             | "is dropped" / "is closed: nothing to adopt"   |
+| the owner ferret and the assignee are both ended (a session the daemon cannot read is NOT ended)      | "is not orphaned: <ferret> has not ended"      |
+| the caller is alive                                                                                   | "only a live ferret may adopt"                 |
+| the caller is a lead, not a sub-ferret (a sub-ferret asks its lead)                                   | the sub-ferret refusal                         |
+| the caller works on the card's own board (the same machine is implied: a card is local to its daemon) | "is on another board than the one you work on" |
+| the daemon can read which ferrets are alive                                                           | "cannot be shown to be orphaned"               |
+
+An adoption makes the caller the card's **owner ferret and assignee**, in one write, and journals it as an `assigned` event carrying
+`adopted: { from: <the ended owner ferret>, reason }` (read as "adopted by <ferret> from <ferret>, whose ferrets ended: <reason>").
+`reason` is the lead's own words, else "owner ferret X and assignee Y ended". From then on the adopter is judged as an owner
+ferret: it may `assign`, `drop`, `edit` and re-plan the card like any other. **Nothing else about the card's authority changes.**
+A card a person asked for (`askedBy: person`, public) still closes only through the owner's agenda answer; an internal card
+(a ferret's own errand, private) is closed by its owner ferret, which after an adoption is the adopter. So "orphaned and
+private" is the case a lead can close.
 
 ## Done and Not good
 

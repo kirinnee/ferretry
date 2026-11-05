@@ -45,7 +45,7 @@ import { describeRelocationProblem, relocationProblems } from '../board-projects
 import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
-import type { SessionRoster } from './activity.ts';
+import { presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
 import {
   type BoardCaller,
   type BoardStanding,
@@ -110,6 +110,11 @@ export interface BoardServiceDependencies {
   /** Tells a card's ferret the owner marked it done. */
   readonly done: DoneNotifier;
   readonly activity: ActivityDeriver;
+  /**
+   * Which sessions are alive, so a live lead may ADOPT a card whose owner ferret and assignee have both ended (docs/board.md
+   * § An orphaned card is adopted). Absent, nothing can be shown to be orphaned and every adoption is refused.
+   */
+  readonly liveness?: SessionLivenessSource;
   readonly agenda: AgendaLinkSource;
   readonly changes: BoardChangeSink;
   readonly clock: BoardClock;
@@ -278,6 +283,7 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   link: 'link a commit or doc to cards',
   assign: 'reassign a card outside your own subtree',
   claim: 'claim cards',
+  adopt: 'adopt cards',
   note: 'note on cards',
   edit: 'edit cards',
   file: 'claim files on cards',
@@ -1012,6 +1018,7 @@ export class BoardService {
     if (holderOnly(request) && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
       await this.refuseSubFerret(caller, subFerretDoing(request), async () => await this.claimCommand(caller, card));
     }
+    const adoptedFrom = request.action === 'adopt' ? await this.orphanedOwner(caller, card) : undefined;
     const context = await this.context(card, caller, request.action === 'assign' ? request.assignee : undefined);
     const plans = request.action === 'drop' || (request.action === 'assign' && context.handsDown !== true);
     if (plans && !(await this.inSubtree(caller, card))) {
@@ -1044,6 +1051,7 @@ export class BoardService {
           ...context,
           ...(attachments === undefined ? {} : { attachments }),
           ...(claimedFrom === undefined ? {} : { claimedFrom }),
+          ...(adoptedFrom === undefined ? {} : { adoptedFrom }),
         },
         target,
         parentStanding,
@@ -1066,6 +1074,52 @@ export class BoardService {
       }
       throw error;
     }
+  }
+
+  /**
+   * The ended owner ferret a live lead may ADOPT this card from, or the refusal: the caller is a lead of this machine (not a
+   * sub-ferret), alive, working on the card's own board; the card is open work; and its owner ferret AND its assignee are
+   * both ended, as the session roster says now (a session the roster cannot read is never taken for ended). Nothing else
+   * about authority changes: the adopter is then the card's owner ferret and assignee, and judged as one.
+   */
+  private async orphanedOwner(caller: BoardCaller, card: BoardTask): Promise<string> {
+    const ref = formatTaskRef(card);
+    if (caller.kind !== 'ferret')
+      throw new BoardError(
+        'forbidden',
+        `adopt is a ferret's: the owner assigns ${ref} with \`fy task assign ${ref} <ferret>\``,
+      );
+    if (card.dropped !== null) throw new BoardError('invalid', `${ref} is dropped: nothing to adopt`);
+    const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
+    if (category.ok && category.value === 'closed')
+      throw new BoardError('invalid', `${ref} is closed: nothing to adopt`);
+    const liveness = this.ports.liveness;
+    if (liveness === undefined)
+      throw new BoardError(
+        'forbidden',
+        `which ferrets are alive cannot be read here, so ${ref} cannot be shown to be orphaned`,
+      );
+    const roster = await liveness.roster();
+    const holders = [...new Set([card.owner, effectiveAssignee(card)])];
+    const alive = holders.filter(holder => presenceOf(roster, holder) !== 'dead');
+    if (alive.length > 0) {
+      throw new BoardError(
+        'forbidden',
+        `${ref} is not orphaned: ${alive.join(', ')} ${alive.length === 1 ? 'has' : 'have'} not ended`,
+      );
+    }
+    if (presenceOf(roster, caller.sessionId) !== 'alive')
+      throw new BoardError('forbidden', `only a live ferret may adopt ${ref}`);
+    if ((await this.ports.subFerrets?.leadOf(caller.sessionId).catch(() => undefined)) !== undefined) {
+      throw new BoardError('forbidden', `only a lead may adopt ${ref}: a sub-ferret asks its lead`);
+    }
+    if ((await this.ports.lanes.projectOf(caller.sessionId)) !== card.projectId) {
+      throw new BoardError(
+        'forbidden',
+        `${ref} is on another board than the one you work on: only a lead on its board may adopt it`,
+      );
+    }
+    return card.owner;
   }
 
   /**

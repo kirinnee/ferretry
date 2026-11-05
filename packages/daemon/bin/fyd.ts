@@ -2318,6 +2318,7 @@ function createBoardWorld(
     ),
     attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
+    liveness: sessions,
     activity: new LivenessActivityDeriver({ sessions, clock }),
     // A card's ask goes on its ferret's agenda home: the homes are read too, so a sub-ferret's card finds its agenda.
     agenda: new AgendaCardLinks(
@@ -3089,6 +3090,7 @@ function createSessionControlSubsystem(
             brief: request.prompt,
             parent: request.parent,
             delegation: startDelegation,
+            ...(caller.pack === true ? { viaPack: true as const } : {}),
           });
         await lifecycle.start(
           id,
