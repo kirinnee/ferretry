@@ -374,6 +374,73 @@ describe('planClone stamping and base', () => {
   });
 });
 
+describe('the per-key settings digests', () => {
+  const D1 = '1'.repeat(64);
+  const D2 = '2'.repeat(64);
+  const D3 = '3'.repeat(64);
+
+  it('should be filed per document, replace only the documents a copy decided, and keep the rest', () => {
+    const previous: CloneBase = {
+      version: 1,
+      sources: {
+        'daemon-source': {
+          ...source({ [KEY_A]: item() }),
+          settings: { 'warden.yaml': { 'layers.jev': D1 }, 'voice.yaml': { 'postProcessing.provider': D2 } },
+        },
+      },
+    };
+    const next = applyCloneToBase(
+      previous,
+      update({
+        copied: [entry(KEY_A)],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModel(KEY_A),
+        settings: { 'warden.yaml': { 'layers.jev': D3, intervalMinutes: D1 } },
+      }),
+    );
+    should(next.sources['daemon-source']?.settings).deepEqual({
+      'warden.yaml': { 'layers.jev': D3, intervalMinutes: D1 },
+      'voice.yaml': { 'postProcessing.provider': D2 },
+    });
+  });
+
+  it('should keep a source alive on its settings alone, and start over on Replace', () => {
+    const settingsOnly = update({ settings: { controls: { defaultRuntime: D1 } } });
+    const first = applyCloneToBase(EMPTY_CLONE_BASE, settingsOnly);
+    should(first.sources['daemon-source']?.settings).deepEqual({ controls: { defaultRuntime: D1 } });
+    // Not a different source's: another source's settings never reach this one.
+    const other = applyCloneToBase(first, update({ source: { id: 'daemon-two', name: 'two', verified: 'self' } }));
+    should(Object.keys(other.sources)).deepEqual(['daemon-source']);
+    const replaced = applyCloneToBase(first, update({ replace: true, settings: { 'voice.yaml': { x: D2 } } }));
+    should(replaced.sources['daemon-source']?.settings).deepEqual({ 'voice.yaml': { x: D2 } });
+  });
+
+  it('should drop a source with no items and no settings, as before', () => {
+    should(applyCloneToBase(EMPTY_CLONE_BASE, update({})).sources).deepEqual({});
+    should(applyCloneToBase(EMPTY_CLONE_BASE, update({ settings: { 'warden.yaml': {} } })).sources).deepEqual({});
+  });
+
+  it('should read back what serializeCloneBase wrote, in order, and hold only digests', () => {
+    const base: CloneBase = {
+      version: 1,
+      sources: { s: { ...source({}), settings: { 'warden.yaml': { b: D2, a: D1 }, controls: { z: D3 } } } },
+    };
+    const text = serializeCloneBase(base);
+    should(parseCloneBase(text)).deepEqual(base);
+    should(serializeCloneBase(parseCloneBase(text))).equal(text);
+    should(Object.keys(JSON.parse(text).sources.s.settings['warden.yaml'])).deepEqual(['a', 'b']);
+  });
+
+  it.each([
+    ['a value instead of a digest', { 'warden.yaml': { a: 'enabled: true' } }],
+    ['a document that is not one a copy merges', { 'machine.yaml': { a: D1 } }],
+    ['an empty key', { 'warden.yaml': { '': D1 } }],
+  ])('should read a record holding %s as absent', (_name, settings) => {
+    const text = JSON.stringify({ version: 1, sources: { s: { ...source({}), settings } } });
+    should(parseCloneBase(text)).deepEqual(EMPTY_CLONE_BASE);
+  });
+});
+
 describe('applyCloneToBase', () => {
   it('should record what the copy wrote under the source, with the instant of the copy', () => {
     const copied = [entry(KEY_A), entry(KEY_B, { kind: 'profile', sourceName: 'default' })];

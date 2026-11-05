@@ -50,7 +50,13 @@ import {
   FleetCredentialViewSchema,
   FleetDisabledSchema,
 } from './fleet-credentials.ts';
-import { CloneDecisionsSchema, CloneLoginChoicesSchema } from './fleet-clone-diff.ts';
+import {
+  CLONE_SETTINGS_DOCS,
+  CloneDecisionsSchema,
+  CloneLoginChoicesSchema,
+  CloneSettingsDecisionsSchema,
+  CloneSettingsTextSchema,
+} from './fleet-clone-diff.ts';
 import { GrantRefusalSchema } from './grants.ts';
 import { LocalModelsSchema } from './models.ts';
 import { CATALOG_SKILL_MAX_FILES, CatalogSkillFileSchema } from './shared-catalog.ts';
@@ -878,11 +884,13 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     logins: CloneLoginChoicesSchema.optional(),
     /** `update` only: the review's fingerprint. The apply re-plans and is refused when it no longer matches. */
     reviewed: NonEmptyStringSchema.optional(),
-    /** Settings documents the source carried, for the per-key merge. Accepted now so the change stays stable. */
-    settings: z
-      .array(z.strictObject({ path: NonEmptyStringSchema, text: z.string() }))
-      .max(8)
-      .optional(),
+    /**
+     * `update` only: the settings documents the source carried (`warden.yaml`, `learning.yaml`, `voice.yaml`
+     * as text, and `controls` as JSON), merged key by key against this machine's own.
+     */
+    settings: z.array(CloneSettingsTextSchema).max(CLONE_SETTINGS_DOCS.length).optional(),
+    /** `update` only: take or keep for each key the review listed. Every key both sides changed needs one. */
+    settingsDecisions: CloneSettingsDecisionsSchema.optional(),
   }),
 ]);
 export type FleetAccountChange = z.infer<typeof FleetAccountChangeSchema>;

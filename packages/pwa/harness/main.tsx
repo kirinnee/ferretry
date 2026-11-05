@@ -2178,6 +2178,8 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     const setup = machineSetupAnswer(String(connection.daemonId), setUp, path, init);
     if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
+    // A machine that predates the review: no such route, so a clone copies its settings whole (and says so).
+    if (path === '/v1/fleet/clone/review') throw new FyHttpError('no route POST ' + path, 404, 'unknown_route');
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     // The Browser tab: a running browser behind a proxy, and a Test proxy that reaches it.
     if (path === '/v1/browser/state')

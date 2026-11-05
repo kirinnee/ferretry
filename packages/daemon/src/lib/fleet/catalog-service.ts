@@ -177,12 +177,28 @@ export interface AccountDocumentReading {
   documents(next: AccountModel, rename?: RuntimeRename): readonly FleetDocumentWrite[];
 }
 
+/**
+ * Who an executor acts for. A clone writes configuration files and machine settings, and what a caller may
+ * write is decided per file by the operator's grants (docs/grants.md), so the executor is told the caller
+ * rather than assuming one. Absent reads as "no standing": a settings write is refused, never allowed.
+ */
+export interface ExecutorCaller {
+  /** The operator's grants for this caller; `governed: false` is somebody at this machine. */
+  readonly governance: CallerGovernance | undefined;
+  /** A passkey was proved for THIS act (`FreshStepUpContext`): what lets a remote caller widen agent control. */
+  readonly freshStepUp: boolean;
+  /** Whether the caller is a ferret. A ferret never widens what ferrets may do. */
+  readonly agent: boolean;
+  /** Spend the proof above once a widening it allowed has landed. */
+  spend(): void;
+}
+
 /** A first-run import or a clone, carried out by its own executor (U15). */
 export interface AccountChangeExecutor<Change extends FleetAccountChange> {
   /** What applying would do, in words, for the confirm card. Writes nothing. */
-  describe(change: Change): Promise<string>;
+  describe(change: Change, caller?: ExecutorCaller): Promise<string>;
   /** Do it. Answers the one-line summary of what was done. */
-  execute(change: Change): Promise<string>;
+  execute(change: Change, caller?: ExecutorCaller): Promise<string>;
 }
 
 type SetupChange = Extract<FleetAccountChange, { kind: 'setup.import' }>;
@@ -344,8 +360,8 @@ type ChangePayload =
   | {
       readonly kind: 'executor';
       readonly preview: Extract<FleetAccountChangePreview, { kind: 'executor' }>;
-      /** Runs the executor on exactly the change that was described. */
-      readonly run: () => Promise<string>;
+      /** Runs the executor on exactly the change that was described, for whoever applies it. */
+      readonly run: (caller: ExecutorCaller | undefined) => Promise<string>;
       readonly consequences: readonly string[];
     };
 
@@ -510,9 +526,9 @@ export class FleetCatalogService {
    * cannot be applied is refused now rather than stored, because a proposal nobody can apply is
    * worse than a refusal nobody stored.
    */
-  async propose(change: FleetAccountChange): Promise<FleetAccountChangeView> {
+  async propose(change: FleetAccountChange, caller?: ExecutorCaller): Promise<FleetAccountChangeView> {
     const reading = await this.#read();
-    const staged = await this.#stage(reading, change);
+    const staged = await this.#stage(reading, change, caller);
     const record = this.#proposals(() =>
       this.#changes.open({
         revision: reading.revision,
@@ -617,7 +633,20 @@ export class FleetCatalogService {
       this.#changes.restore(record);
       throw error;
     }
-    const outcome = await this.#execute(record);
+    const caller: ExecutorCaller = {
+      governance,
+      freshStepUp: freshStepUp?.presentation?.freshStepUp === true,
+      agent: freshStepUp?.agent === true,
+      spend: () => freshStepUp?.spend(),
+    };
+    let outcome: FleetAccountChangeOutcome;
+    try {
+      outcome = await this.#execute(record, caller);
+    } catch (error) {
+      // Refused before anything was written, asking for a passkey: the same change can be applied once it is proved.
+      if (error instanceof FleetCatalogFreshStepUpRequired) this.#changes.restore(record);
+      throw error;
+    }
     if (widensAgentControl) freshStepUp?.spend();
     return outcome;
   }
@@ -733,12 +762,13 @@ export class FleetCatalogService {
   async #stage(
     reading: AccountDocumentReading,
     change: FleetAccountChange,
+    caller?: ExecutorCaller,
   ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
     if (isAccountPlanChange(change)) return await this.#stagePlan(reading, change);
     if (change.kind === 'credential.signout') return await this.#stageSignOut(change.id);
     return change.kind === 'setup.import'
-      ? await this.#stageExecutor('setup', change, this.deps.executors?.setup)
-      : await this.#stageExecutor('clone', change, this.deps.executors?.clone);
+      ? await this.#stageExecutor('setup', change, this.deps.executors?.setup, caller)
+      : await this.#stageExecutor('clone', change, this.deps.executors?.clone, caller);
   }
 
   async #stagePlan(
@@ -935,19 +965,20 @@ export class FleetCatalogService {
     executor: 'setup' | 'clone',
     change: Change,
     port: AccountChangeExecutor<Change> | undefined,
+    caller?: ExecutorCaller,
   ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
     const what = executor === 'setup' ? 'Importing a setup' : 'Cloning another machine';
     if (port === undefined) {
       throw new FleetCatalogRefusal('fleet_change_refused', `${what} is not available on this machine yet.`);
     }
-    const description = await port.describe(change);
+    const description = await port.describe(change, caller);
     return {
       summary: executor === 'setup' ? 'Import this machine’s setup' : 'Clone another machine’s setup',
       payload: {
         kind: 'executor',
         consequences: [],
         preview: { kind: 'executor', executor, description },
-        run: async () => await port.execute(change),
+        run: async applying => await port.execute(change, applying),
       },
     };
   }
@@ -968,10 +999,13 @@ export class FleetCatalogService {
     return reading.model;
   }
 
-  async #execute(record: {
-    readonly payload: ChangePayload;
-    readonly mutation: FleetAccountChange | FleetCatalogInstallChange;
-  }): Promise<FleetAccountChangeOutcome> {
+  async #execute(
+    record: {
+      readonly payload: ChangePayload;
+      readonly mutation: FleetAccountChange | FleetCatalogInstallChange;
+    },
+    caller?: ExecutorCaller,
+  ): Promise<FleetAccountChangeOutcome> {
     const payload = record.payload;
     if (payload.kind === 'apply') {
       try {
@@ -1003,7 +1037,7 @@ export class FleetCatalogService {
         ? { outcome: 'signed-out', credential: outcome.credential }
         : { outcome: 'sign-out-failed', reason: outcome.reason, credential: outcome.credential };
     }
-    return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run() };
+    return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run(caller) };
   }
 
   /**

@@ -37,6 +37,7 @@ import { ApiError } from '../../../src/lib/api/error.ts';
 import {
   type AccountDocumentReading,
   countRunningSessions,
+  type ExecutorCaller,
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   FleetCatalogService,
@@ -195,6 +196,12 @@ const governance: CallerGovernance = {
   governed: true,
   decide: () => ({ allowed: true, refusal: 'granted' }),
 } as never;
+
+const thrownBy = async (work: Promise<unknown>): Promise<unknown> =>
+  await work.then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
 
 const refusal = async (work: Promise<unknown>, code: string): Promise<FleetCatalogRefusal> => {
   const error = await work.then(
@@ -1013,6 +1020,121 @@ describe('first-run import and clone', () => {
       { outcome: 'executed', executor: 'clone', summary: 'Cloned 1 runtime' },
     ]);
     should(ran).deepEqual(['setup.import', 'clone.import']);
+  });
+});
+
+describe('an executor is told who it acts for', () => {
+  const loopback = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) } as never;
+  const remote = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) } as never;
+
+  it('should describe for the stager and execute for whoever applies, with the proof it presented and a way to spend it', async () => {
+    // Arrange
+    const seen: { stage: string; caller: ExecutorCaller | undefined }[] = [];
+    const { service } = world({
+      executors: {
+        clone: {
+          describe: async (_change, caller) => {
+            seen.push({ stage: 'describe', caller });
+            return 'Clones.';
+          },
+          execute: async (_change, caller) => {
+            seen.push({ stage: 'execute', caller });
+            caller?.spend();
+            return 'Cloned';
+          },
+        },
+      },
+    });
+    const staging: ExecutorCaller = { governance: loopback, freshStepUp: false, agent: false, spend: () => undefined };
+    let spent = 0;
+
+    // Act
+    const staged = await service.propose({ kind: 'clone.import', mode: 'update', bundle: {} }, staging);
+    await service.apply(staged.id, remote, {
+      presentation: { freshStepUp: true } as never,
+      spend: () => {
+        spent += 1;
+      },
+      agent: false,
+    });
+
+    // Assert
+    should(seen.map(entry => entry.stage)).deepEqual(['describe', 'execute']);
+    should(seen[0]?.caller).equal(staging);
+    should(seen[1]?.caller?.governance).equal(remote);
+    should(seen[1]?.caller).containDeep({ freshStepUp: true, agent: false });
+    should(spent).equal(1);
+  });
+
+  it('should treat an apply that carries no proof as one without it, and a ferret as a ferret', async () => {
+    const seen: (ExecutorCaller | undefined)[] = [];
+    const { service } = world({
+      executors: {
+        clone: {
+          describe: async () => 'Clones.',
+          execute: async (_change, caller) => {
+            seen.push(caller);
+            return 'Cloned';
+          },
+        },
+      },
+    });
+    const first = await service.propose({ kind: 'clone.import', mode: 'update', bundle: {} });
+    await service.apply(first.id, remote);
+    const second = await service.propose({ kind: 'clone.import', mode: 'update', bundle: {} });
+    await service.apply(second.id, remote, { presentation: undefined, spend: () => undefined, agent: true });
+    should(seen.map(caller => [caller?.freshStepUp, caller?.agent])).deepEqual([
+      [false, false],
+      [false, true],
+    ]);
+  });
+
+  it('should keep the change to retry when the executor asks for a passkey before writing anything', async () => {
+    // Arrange
+    let attempts = 0;
+    const { service } = world({
+      executors: {
+        clone: {
+          describe: async () => 'Clones.',
+          execute: async (_change, caller) => {
+            attempts += 1;
+            if (caller?.freshStepUp !== true) throw new FleetCatalogFreshStepUpRequired();
+            return 'Cloned';
+          },
+        },
+      },
+    });
+    const staged = await service.propose({ kind: 'clone.import', mode: 'update', bundle: {} });
+
+    // Act
+    const refused = await thrownBy(service.apply(staged.id, remote));
+    const outcome = await service.apply(staged.id, remote, {
+      presentation: { freshStepUp: true } as never,
+      spend: () => undefined,
+      agent: false,
+    });
+
+    // Assert: the same staged change was applied the second time.
+    should(refused).be.instanceOf(FleetCatalogFreshStepUpRequired);
+    should(outcome).deepEqual({ outcome: 'executed', executor: 'clone', summary: 'Cloned' });
+    should(attempts).equal(2);
+  });
+
+  it('should consume the change when an executor fails for any other reason', async () => {
+    const { service } = world({
+      executors: {
+        clone: {
+          describe: async () => 'Clones.',
+          execute: async () => {
+            throw new Error('the disk is full');
+          },
+        },
+      },
+    });
+    const staged = await service.propose({ kind: 'clone.import', mode: 'update', bundle: {} });
+    await thrownBy(service.apply(staged.id, loopback));
+    const again = await thrownBy(service.apply(staged.id, loopback));
+    should((again as { code?: string }).code).equal('fleet_change_consumed');
   });
 });
 

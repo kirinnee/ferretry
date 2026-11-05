@@ -9,7 +9,13 @@ import { HostHarnessScanner, type StoredCredentialMaterialReader } from '@ferret
 import { randomBytes } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { FleetSetupServiceDeps, FolderReading, SetupCatalogDeps } from '../../lib/fleet/setup-service.ts';
+import type { ConfigFilesService } from '../../lib/config-files/index.ts';
+import type {
+  CloneConfigFiles,
+  FleetSetupServiceDeps,
+  FolderReading,
+  SetupCatalogDeps,
+} from '../../lib/fleet/setup-service.ts';
 import type { ToolInstallService } from '../../lib/fleet/tool-install.ts';
 import { AtomicFileWriter } from '../atomic-file/atomic-file.ts';
 
@@ -88,6 +94,36 @@ export async function skillItemsIn(directory: string): Promise<readonly string[]
   }
 }
 
+/**
+ * The configuration files a copy merges settings into, over the daemon's one {@link ConfigFilesService}: the very
+ * service `PUT /v1/config/file` writes through, so a copy is validated, refused if the file moved, and held when
+ * it loosens exactly as an edit is. It writes as the owner (`'owner'`): the route that reached it is a person's.
+ */
+export function cloneConfigFilesOver(
+  service: Pick<ConfigFilesService, 'file' | 'inEffect' | 'validate' | 'write'>,
+): CloneConfigFiles {
+  return {
+    file: async path => {
+      const view = await service.file(path);
+      return { exists: view.exists, text: view.text, etag: view.etag };
+    },
+    effective: async () => {
+      const { effective } = (await service.inEffect()).evaluation;
+      return { warden: effective.warden, learning: effective.learning, voice: effective.voice };
+    },
+    validate: async (path, text) =>
+      (await service.validate(path, text)).map(issue => ({
+        severity: issue.severity,
+        message: issue.message,
+        ...(issue.line === undefined ? {} : { line: issue.line }),
+      })),
+    write: async (path, text, ifMatch, mayLoosen) => {
+      const written = await service.write(path, text, ifMatch, mayLoosen, 'owner');
+      return { outcome: written.outcome };
+    },
+  };
+}
+
 /** What the composition root hands the setup service: its own collaborators, never a second copy. */
 export interface FileFleetSetupOptions {
   /** The catalogue's collaborators, so both surfaces read and write one machine the same way. */
@@ -98,6 +134,8 @@ export interface FileFleetSetupOptions {
   /** The platform credential store: reads a login, never hands one out of this adapter. */
   readonly credentials: StoredCredentialMaterialReader;
   readonly tools: Pick<ToolInstallService, 'plans' | 'install'>;
+  /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
+  readonly configFiles?: CloneConfigFiles;
   /** This daemon's id as it reports itself; absent until pairing identity is open. */
   readonly daemonId: () => string | undefined;
   /** The secret store's management side. */
@@ -131,6 +169,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
   });
   return {
     catalog,
+    ...(options.configFiles === undefined ? {} : { configFiles: options.configFiles }),
     scan: async () => await scanner.scan(),
     tools: options.tools,
     secrets: {
