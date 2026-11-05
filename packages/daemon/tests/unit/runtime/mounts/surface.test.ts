@@ -271,6 +271,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     exportBundle: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    reviewClone: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    forgetCloneSource: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     executors: {
       setup: {
         describe: async () => {
@@ -973,7 +979,7 @@ describe('the mounted daemon surface', () => {
       2 + // an environment login's Test, and the provider presets one is made from (docs/provider-presets.md)
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
-      3 + // the setup scan, tool install and the clone export
+      5 + // the setup scan, tool install, the clone export, the clone review and forgetting a copy source
       1 + // the security log read
       1 + // a lead's table of its sub-ferrets (`GET /v1/sessions/:sessionId/subtree`, docs/pack-mode.md)
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
@@ -1140,6 +1146,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/setup/scan',
       'POST /v1/fleet/machine/tools/install',
       'GET /v1/fleet/export',
+      'POST /v1/fleet/clone/review',
+      'POST /v1/fleet/clone/forget',
       // Driving a harness’s own sign-in. NOTE WHAT IS ABSENT: no route here accepts or returns a
       // provider token. Two values go out — a verification URL, and for Codex a device code — and one
       // short-lived authorization code comes in, straight to the harness child’s stdin. Every route here is

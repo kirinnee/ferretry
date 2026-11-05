@@ -75,11 +75,31 @@ summary is [security.md](security.md).
   it, and the target keeps a **last-copied record** (`setup/clone-base.json`, mode 0600) of what the source
   looked like at each copy: digests, sizes and paths, never content or a secret. It is written in the same
   all-or-nothing batch as the copy, filed under the daemon id the browser verified (else the one the bundle
-  reports of itself, kept apart as `self:<id>` so it can never rewrite a verified entry — and a bundle that
+  reports of itself, kept apart as `self:<id>` so it can never rewrite a verified entry, and told apart from
+  another such source by the machine it names — and a bundle that
   names another machine than the one picked is refused), and garbage-collected on every copy from that
   source; a Replace rewrites it. A record file that cannot be read never blocks a copy: the copy is made
   without it, the review says so, and the file is left alone. Editing a copied item keeps its link. A copy
   never touches a login's sign-in or any secret (account-model.md K10–K18).
+- **3c″. The CLI reads the same review.** `fy machine clone <file>` asks `POST /v1/fleet/clone/review` first
+  and updates only when it says `update`; `--dry-run` prints the groups and writes nothing, and `--json` is
+  the review itself. A both-changed item is never chosen for the person (an error naming each, or a question
+  at a terminal), a login that could be several asks for `--login`, and the apply names the review's
+  fingerprint. `fy machine clone --forget <source>` calls `POST /v1/fleet/clone/forget` (`fleet.configure`,
+  a person), which rewrites the record file and nothing else (account-model.md L17).
+- **3c′. A repeat copy lists only what differs — and why that is safe.** The review
+  (`POST /v1/fleet/clone/review`, `fleet.configure`) compares every item with its copy here and hides the
+  ones that are **byte-identical** (every runnable field and every carried file, by `cloneItemDigest`
+  computed on the target from the bundle's own documents, never a digest the bundle claims). An item shown as
+  "the same" is never written, so what the review lists is everything an apply could write. Items are paired
+  by **origin key**, falling back to a probable match by name and content; a key two items claim is unlinked,
+  and a part the bundle did not carry is compared by its literal path so it can never hide a change. The apply
+  names the review's fingerprint and the target re-plans, so a person cannot apply a review other than the
+  one they saw: the fingerprint binds every byte and declaration the bundle carries (its not-copied list and
+  environment login descriptors included) and this machine's raw declarations, owned documents and record,
+  not just the semantic digests. A bundle that marks a carried file as not copied is refused. A taken item
+  is moved off any path another item here shares, so writing it can never change an item hidden as the same,
+  and the files the review lists as removed go in the same batch (account-model.md L14–L16). Governed devices need `fleet.configure`; no login or secret is written (account-model.md L13).
 - **Bounded.** A settings or hooks document too deep or too large to walk key by key (64 levels, 2,000
   values) is said to be so and shown whole; the walk never recurses.
 - **3d. Copying B into A shows B's setup to A — said out loud.** The Clone source step now says the
