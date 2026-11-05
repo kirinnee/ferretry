@@ -397,6 +397,38 @@ describe('CloneOutcomes', () => {
 });
 
 describe('CloneLoginsSection', () => {
+  const newerSection = (write: (value: string) => Promise<void>) => (
+    <CloneLoginsSection
+      logins={[]}
+      machineName="studio-mac"
+      sourceName="work-mac"
+      keys={[]}
+      copyKeys={false}
+      onCopyKeys={() => undefined}
+      newer={[{ name: 'DEMO_API_KEY', outcome: 'newer' }]}
+      write={write}
+    />
+  );
+
+  it('shows the command to replace a newer key as code with a copy button that copies it', async () => {
+    const written: string[] = [];
+    const view = await show(
+      newerSection(async value => {
+        written.push(value);
+      }),
+    );
+    const row = must(q(view, '[data-clone-newer-key="DEMO_API_KEY"]'), 'newer key');
+    expect(must(row.querySelector('code'), 'command').textContent).toBe('fy secret set DEMO_API_KEY');
+    expect(row.querySelector('input')).toBeNull();
+
+    await interact(() => {
+      (must(row.querySelector('button[aria-label="Copy command"]'), 'copy') as HTMLButtonElement).click();
+    });
+
+    expect(written).toEqual(['fy secret set DEMO_API_KEY']);
+    expect(must(row.querySelector('[data-onboarding-copy-status]'), 'status').textContent).toBe('Copied');
+  });
+
   const apiKey = (id: string, keys: Array<{ name: string; held: boolean }>): CloneLogin => ({
     kind: 'api-key',
     id,

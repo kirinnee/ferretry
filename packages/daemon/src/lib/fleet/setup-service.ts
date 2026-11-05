@@ -48,6 +48,9 @@ import {
   parseAccountModel,
   planCloneSettings,
   reviewCloneSettings,
+  classifyCloneKeys,
+  CloneSourceIdSchema,
+  recordCloneKeys,
   assignOriginKeys,
   type AccountModel,
   type CloneAnalysis,
@@ -107,10 +110,13 @@ import {
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetCloneFile,
+  type FleetCloneKeysRecordRequest,
+  type FleetCloneKeysRecordResult,
   type FleetCloneReview,
   type FleetCloneReviewRequest,
   type FleetSetupRefusalCode,
   type FleetSetupScan,
+  secretReferencesIn,
   type FleetSetupTool,
   type FleetToolInstallRequest,
   type FleetToolInstallResult,
@@ -235,6 +241,8 @@ export interface FleetSetupServiceDeps {
   /** The secret store's management side: names in, values in, never a value out. */
   readonly secrets: {
     names(): Promise<readonly string[]>;
+    /** Each secret's name and when it was made and last changed: what a repeat copy compares. Never a value. */
+    held(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<void>;
   };
   /** One folder, read as text: a host skill folder, or a folder of the asset tree. */
@@ -260,10 +268,18 @@ export interface FleetSetupServiceDeps {
    * that carries `warden.yaml`, `learning.yaml` or `voice.yaml` is then refused rather than half applied.
    */
   readonly configFiles?: CloneConfigFiles;
-  /** `setup/clone-base.json` outside a copy: only forgetting a source writes it alone (a copy writes it in its own batch). */
+  /**
+   * `setup/clone-base.json` outside a copy: forgetting a source and remembering the keys a copy filed write it on
+   * their own (a copy writes it in its own batch, which checks the revision it planned against).
+   */
   readonly cloneBase: {
     read(path: string): Promise<string | undefined>;
-    write(path: string, text: string): Promise<void>;
+    /**
+     * One read-modify-write of the record with no other writer of it between the read and the write — this
+     * daemon's fleet applies included: `change` gets the text on disk NOW (`undefined` when there is none) and
+     * answers the text to write, or `undefined` to write nothing. Answers whether it wrote.
+     */
+    update(path: string, change: (current: string | undefined) => string | undefined): Promise<boolean>;
   };
 }
 
@@ -860,7 +876,10 @@ export class FleetSetupService {
     const reading = await this.#read();
     try {
       const found = await this.#analyseUpdate(request, reading);
-      const review = reviewCloneUpdate(found.analysis);
+      const review = {
+        ...reviewCloneUpdate(found.analysis),
+        keys: [...(await this.#reviewKeys(request, found))],
+      };
       if (found.settings === undefined) return review;
       // A settings file this caller may not write is listed as refused, with the sentence the apply would give.
       const settings = reviewCloneSettings(found.settings.analysis).map(entry => {
@@ -874,6 +893,53 @@ export class FleetSetupService {
       }
       throw error;
     }
+  }
+
+  /**
+   * How each API key the copy concerns stands, from `updatedAt` alone (docs/secrets.md): the keys the bundle's
+   * logins name and the ones the last copy from this source recorded, against what the source listed. Nothing
+   * is answered without a list from the source, and no value is read to answer.
+   */
+  async #reviewKeys(request: FleetCloneReviewRequest, found: UpdateAnalysis): Promise<FleetCloneReview['keys']> {
+    if (request.sourceSecrets === undefined) return [];
+    const wanted = found.bundle.credentials.flatMap(credential =>
+      secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}])),
+    );
+    return classifyCloneKeys({
+      source: request.sourceSecrets,
+      target: await this.deps.secrets.held().catch(() => []),
+      wanted,
+      recorded: found.source === undefined ? undefined : cloneBaseFor(found.record, found.source)?.keys,
+    });
+  }
+
+  /**
+   * `POST /v1/fleet/clone/keys`: a sealed copy filed these keys here at `filedAt`; remember when the source last
+   * changed each and the instant this machine filed it. A key is recorded only if its own store entry was CREATED
+   * at `filedAt` — the one thing that proves it is the entry that copy made: a key the person deleted and made
+   * again since is a different key and is left unrecorded. The entry's later edits do not matter and must not:
+   * the baseline is the copy's instant, never the store's current `updatedAt`, so a key the person edited after
+   * the copy still reads as changed here. Only the `keys` of a source this machine already has a record of
+   * change; a source with no record and a name no copy can carry are skipped. The read-modify-write of the record
+   * is one step with no other writer between (`cloneBase.update`). Timestamps only: nothing here reads a secret.
+   */
+  async recordCloneKeys(request: FleetCloneKeysRecordRequest): Promise<FleetCloneKeysRecordResult> {
+    if (!CloneSourceIdSchema.safeParse(request.source.daemonId).success) return { recorded: 0 };
+    const filedAt = Date.parse(request.filedAt);
+    const made = new Map((await this.deps.secrets.held()).map(secret => [secret.name, secret.createdAt] as const));
+    const recorded = request.keys.flatMap(key => {
+      const createdAt = made.get(key.name);
+      return createdAt !== undefined && Date.parse(createdAt) === filedAt
+        ? [{ name: key.name, sourceUpdatedAt: key.sourceUpdatedAt, targetUpdatedAt: request.filedAt }]
+        : [];
+    });
+    const wrote = await this.deps.cloneBase.update(this.#cloneBasePath(), current => {
+      const before = parseCloneBase(current);
+      const after = recordCloneKeys(before, request.source.daemonId, recorded);
+      return after === before ? undefined : serializeCloneBase(after);
+    });
+    // Counted from the update that committed, never from a change that was handed a record and wrote nothing.
+    return { recorded: wrote ? recorded.length : 0 };
   }
 
   /** The three-way comparison of a bundle against this machine, from what is on disk now. */
@@ -1173,20 +1239,20 @@ export class FleetSetupService {
    * nothing copied, no login, no secret. Answers whether there was anything to forget.
    */
   async forgetCloneSource(source: string): Promise<boolean> {
-    const path = this.#cloneBasePath();
-    const before = parseCloneBase(await this.deps.cloneBase.read(path));
-    // A person names a source the way they know it: the id, the bare id an export carries, or its name.
-    const found = findCloneSources(before, source);
-    if (found.length === 0) return false;
-    const [only] = found;
-    if (found.length > 1 || only === undefined) {
-      throw new FleetSetupRefusal(
-        'fleet_setup_refused',
-        `More than one source is called ${source}: ${found.join(', ')}. Name one by its id.`,
-      );
-    }
-    await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, only)));
-    return true;
+    return await this.deps.cloneBase.update(this.#cloneBasePath(), current => {
+      const before = parseCloneBase(current);
+      // A person names a source the way they know it: the id, the bare id an export carries, or its name.
+      const found = findCloneSources(before, source);
+      if (found.length === 0) return undefined;
+      const [only] = found;
+      if (found.length > 1 || only === undefined) {
+        throw new FleetSetupRefusal(
+          'fleet_setup_refused',
+          `More than one source is called ${source}: ${found.join(', ')}. Name one by its id.`,
+        );
+      }
+      return serializeCloneBase(forgetCloneSource(before, only));
+    });
   }
 
   // ── Writing ────────────────────────────────────────────────────────────────────────────────────

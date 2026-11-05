@@ -1666,7 +1666,8 @@ const IMPORTED = {
   importId: IMPORT_ID,
   sourceDaemonId: SEALED.sourceDaemonId,
   imported: ['ZAI_API_KEY'],
-  replaced: [],
+  filedAt: '2026-10-21T08:00:00.000Z',
+  kept: [],
 };
 
 /** A GLM API-key login beside a Claude Code sign-in: the one copies with its key, the other cannot. */
@@ -1797,6 +1798,167 @@ describe('CloneMachine · API keys and sign-ins', () => {
     } finally {
       await screen.view.unmount();
     }
+  });
+
+  describe('a key that is newer on the source', () => {
+    const OLDER = '2026-10-10T08:00:00.000Z';
+    const NEWER = '2026-10-20T08:00:00.000Z';
+    const stamped = (names: readonly string[], updatedAt: string) => ({
+      ...secretList(names),
+      secrets: names.map(name => ({ name, createdAt: OLDER, updatedAt })),
+    });
+    const review = (outcome: 'missing' | 'newer' | 'both' | 'same') => ({
+      mode: 'update',
+      source: { name: 'work', verified: 'browser' },
+      items: [],
+      settings: [],
+      logins: [],
+      keys: [{ name: 'ZAI_API_KEY', outcome }],
+      same: { count: 0, probable: 0 },
+      fingerprint: 'f'.repeat(64),
+    });
+
+    /** The source holds the key under a newer instant; `held` says whether this machine holds one too. */
+    const setup = (outcome: 'missing' | 'newer' | 'both' | 'same', held = true, answer: unknown = IMPORTED) => {
+      const imports: Call[] = [];
+      const recorded: Call[] = [];
+      const reviews: Call[] = [];
+      return {
+        imports,
+        recorded,
+        reviews,
+        work: {
+          '/v1/fleet/export': MIXED_LOGINS(),
+          '/v1/secrets': stamped(['ZAI_API_KEY'], NEWER),
+          [`/v1/secrets/exports/${IMPORT_ID}`]: { bundle: SEALED, names: ['ZAI_API_KEY'] },
+        },
+        target: fullTarget({
+          '/v1/secrets': held ? stamped(['ZAI_API_KEY'], OLDER) : secretList([]),
+          '/v1/fleet/clone/review': (call: Call) => {
+            reviews.push(call);
+            return review(outcome);
+          },
+          '/v1/fleet/clone/keys': (call: Call) => {
+            recorded.push(call);
+            return { recorded: 1 };
+          },
+          '/v1/secrets/imports': OFFER,
+          [`/v1/secrets/imports/${IMPORT_ID}`]: (call: Call) => {
+            imports.push(call);
+            return answer;
+          },
+        }),
+      };
+    };
+
+    it('asks for the review with the source’s names and instants, and nothing else about the keys', async () => {
+      const w = setup('newer');
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        // The settings review (key by key, PR 7) is a separate question; exactly one review asks about the keys.
+        const asking = w.reviews.filter(call => 'sourceSecrets' in (call.body as object));
+        expect(asking).toHaveLength(1);
+        expect(asking[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(asking[0]?.body).not.toHaveProperty('settings');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    for (const outcome of ['newer', 'both'] as const) {
+      it(`only reports a ${outcome} key, with the command to replace it by hand, and copies and writes nothing`, async () => {
+        const w = setup(outcome);
+        const { calls, createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+        const screen = await render({ createClient });
+        try {
+          await toPreview(screen);
+          const row = screen.text('[data-clone-newer-key]');
+          expect(row).toContain('A newer ZAI_API_KEY exists on');
+          expect(row).toContain('Clone does not replace a key studio-mac already has');
+          expect(row).toContain('fy secret set ZAI_API_KEY');
+          expect(row.includes('You changed it on studio-mac too')).toBe(outcome === 'both');
+          // A report: nothing in it can be ticked, and there is no passkey to ask for.
+          expect(screen.q('[data-clone-newer-key] input')).toBeNull();
+          expect(row).not.toContain('passkey');
+          await click(screen.q('[data-change-submit]'), 'Copy');
+
+          expect(screen.step()).toBe('done');
+          expect(w.imports).toEqual([]);
+          expect(w.recorded).toEqual([]);
+          expect(calls.work.some(call => call.path.startsWith('/v1/secrets/exports/'))).toBe(false);
+          expect(secretCalls(calls.target)).toEqual([]);
+        } finally {
+          await screen.view.unmount();
+        }
+      });
+    }
+
+    it('says nothing about a key that is the same', async () => {
+      const w = setup('same');
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(screen.q('[data-clone-newer-key]')).toBeNull();
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('copies a key this machine lacks as it always did, naming no key to replace, and remembers when it was filed', async () => {
+      const w = setup('missing', false);
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(screen.q('[data-clone-newer-key]')).toBeNull();
+        await click(screen.q('[data-change-submit]'), 'Copy');
+
+        expect(w.imports.map(call => call.body)).toEqual([{ bundle: SEALED }]);
+        expect(w.recorded.map(call => call.body)).toEqual([
+          {
+            source: { daemonId: 'work' },
+            filedAt: '2026-10-21T08:00:00.000Z',
+            keys: [{ name: 'ZAI_API_KEY', sourceUpdatedAt: NEWER }],
+          },
+        ]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('remembers nothing for a key the import kept because it appeared meanwhile', async () => {
+      const w = setup('missing', false, { ...IMPORTED, imported: [], filedAt: undefined, kept: ['ZAI_API_KEY'] });
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(screen.q('[data-change-submit]'), 'Copy');
+
+        expect(w.imports).toHaveLength(1);
+        expect(w.recorded).toEqual([]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('carries no secret value in anything it sends to the target', async () => {
+      const w = setup('missing', false);
+      const { calls, createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(screen.q('[data-change-submit]'), 'Copy');
+        const sent = JSON.stringify(
+          calls.target.filter(call => call.path === '/v1/fleet/clone/review' || call.path === '/v1/fleet/clone/keys'),
+        );
+        expect(sent).not.toMatch(/sk-|value|digest/u);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
   });
 
   it('keeps the copy and says so when the passkey was not confirmed', async () => {

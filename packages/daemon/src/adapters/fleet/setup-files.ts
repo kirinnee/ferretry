@@ -5,7 +5,12 @@
  * Reads only: every write the setup service makes goes through the provisioner, inside its rollback
  * boundary.
  */
-import { HostHarnessScanner, type StoredCredentialMaterialReader } from '@ferretry/fleet/adapters';
+import {
+  type FleetApplyLockOptions,
+  fleetApplyLockFor,
+  HostHarnessScanner,
+  type StoredCredentialMaterialReader,
+} from '@ferretry/fleet/adapters';
 import { randomBytes } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -133,6 +138,8 @@ export interface FileFleetSetupOptions {
   readonly codexHome?: string;
   /** The platform credential store: reads a login, never hands one out of this adapter. */
   readonly credentials: StoredCredentialMaterialReader;
+  /** How long the clone record's update waits for a running fleet apply; a test shortens it. */
+  readonly lockOptions?: FleetApplyLockOptions;
   readonly tools: Pick<ToolInstallService, 'plans' | 'install'>;
   /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
   readonly configFiles?: CloneConfigFiles;
@@ -140,7 +147,7 @@ export interface FileFleetSetupOptions {
   readonly daemonId: () => string | undefined;
   /** The secret store's management side. */
   readonly secrets: {
-    list(): Promise<readonly { readonly name: string }[]>;
+    list(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<unknown>;
   };
 }
@@ -154,6 +161,36 @@ const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog } = options;
   const keyWriter = new AtomicFileWriter();
+  // The claim every fleet apply takes, keyed the one way the provisioner keys it (beside the manifest).
+  const applyLock = fleetApplyLockFor(catalog.layout.manifestPath, options.lockOptions);
+  // One read-modify-write of the clone record while holding the fleet apply claim. An apply publishes this same
+  // file inside that claim, so while it is held no apply can land between the read and the write: the change is
+  // made from what the last apply left, and the next apply's own revision check refuses a plan older than it.
+  // Two updates in this daemon take the claim one after the other, so neither reads what the other is about to write.
+  const exclusively = async (
+    path: string,
+    change: (current: string | undefined) => string | undefined,
+  ): Promise<boolean> => {
+    const token = await applyLock.acquire();
+    let wrote = false;
+    let failure: { readonly error: unknown } | undefined;
+    try {
+      const next = change((await keyWriter.read(path)) ?? undefined);
+      if (next !== undefined) {
+        await keyWriter.write(path, next);
+        wrote = true;
+      }
+    } catch (error) {
+      failure = { error };
+    }
+    const residue = await applyLock.release(token);
+    if (failure !== undefined) throw failure.error;
+    // A claim that could not be cleared blocks every later apply; say so rather than lose it.
+    if (residue !== undefined) {
+      throw new Error(`the record update finished, but the exclusive apply claim at ${residue} could not be cleared`);
+    }
+    return wrote;
+  };
   const layout = catalog.layout;
   const scanner = new HostHarnessScanner({
     userHome: layout.userHome,
@@ -174,6 +211,8 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     tools: options.tools,
     secrets: {
       names: async () => (await options.secrets.list()).map(secret => secret.name),
+      held: async () =>
+        (await options.secrets.list()).map(({ name, createdAt, updatedAt }) => ({ name, createdAt, updatedAt })),
       put: async (name, value) => {
         await options.secrets.put(name, value);
       },
@@ -191,9 +230,8 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     },
     cloneBase: {
       read: async path => (await keyWriter.read(path)) ?? undefined,
-      write: async (path, text) => {
-        await keyWriter.write(path, text);
-      },
+      // Under the fleet apply claim: one at a time, and never between an apply's read and its publish.
+      update: exclusively,
     },
   };
 }

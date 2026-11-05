@@ -15,7 +15,7 @@ export interface SecretCopyRow {
   readonly name: string;
   /** Where the source's configuration names it — "config/daemon.json → AUTH_HEADER", "login glm-env". */
   readonly uses: readonly string[];
-  /** The target already holds a secret by this name, so copying replaces it. */
+  /** The target already holds a secret by this name, so a copy keeps the one there and does not write this one. */
   readonly onTarget: boolean;
   /** A sign-in token a server filed itself. It is never copied: sign in on the other machine (docs/secrets.md). */
   readonly signIn: boolean;
@@ -38,9 +38,12 @@ export function secretCopyRows(source: SecretList, targetNames: ReadonlySet<stri
     .toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
-/** The rows a person may tick: every one but a sign-in. */
+/**
+ * The rows a person may tick: the ones a copy would really write. A sign-in never travels, and a key the target
+ * already holds is KEPT (a copy never replaces it), so neither is offered, ticked or counted.
+ */
 export function copyableRows(rows: readonly SecretCopyRow[]): readonly SecretCopyRow[] {
-  return rows.filter(row => !row.signIn);
+  return rows.filter(row => !row.signIn && !row.onTarget);
 }
 
 /** The names to start with ticked: the ones asked for that the source actually holds, or none. */
@@ -52,17 +55,32 @@ export function initialPicks(rows: readonly SecretCopyRow[], preselect: readonly
 
 const count = (n: number): string => `${n} ${n === 1 ? 'secret' : 'secrets'}`;
 
-/** The button: "Copy 3 secrets", or the instruction when none is picked. */
-export function copyButtonLabel(picked: number): string {
+/**
+ * The button: "Copy 3 secrets", or the instruction when none is picked. `copyable` is how many rows a copy could
+ * write at all: when it is none (everything is kept or a sign-in), there is nothing to pick, so it says so.
+ */
+export function copyButtonLabel(picked: number, copyable: number = picked): string {
+  if (copyable === 0) return 'Nothing to copy';
   return picked === 0 ? 'Pick secrets to copy' : `Copy ${count(picked)}`;
 }
 
-/** What a finished copy says: how many arrived, and how many replaced one already there. */
+/** What a person types on THIS machine to replace a key themselves: a copy never does (docs/secrets.md). */
+export const replaceKeyCommand = (name: string): string => `fy secret set ${name}`;
+
+/**
+ * What a finished copy says: how many arrived, and which ones `target` already held and kept as they were. A copy
+ * never replaces a secret, so the way to change one is named: the person's own `fy secret set NAME`.
+ */
 export function copiedSentence(result: SecretImportResult, target: string): string {
-  const copied = `${count(result.imported.length)} copied to ${target}.`;
-  const replaced = result.replaced.length;
-  if (replaced === 0) return copied;
-  return `${copied} ${replaced === 1 ? '1 of them replaced the one' : `${replaced} of them replaced the ones`} already there.`;
+  const copied =
+    result.imported.length === 0 ? 'Nothing was copied.' : `${count(result.imported.length)} copied to ${target}.`;
+  if (result.kept.length === 0) return copied;
+  const names = result.kept.join(', ');
+  const kept =
+    result.kept.length === 1
+      ? `${names} was already on ${target} and was left as it is.`
+      : `${String(result.kept.length)} were already on ${target} and were left as they are: ${names}.`;
+  return `${copied} ${kept} To replace one, run \`fy secret set NAME\` on ${target}.`;
 }
 
 /**

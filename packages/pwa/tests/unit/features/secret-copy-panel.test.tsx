@@ -19,9 +19,11 @@ import {
 } from '../../../src/features/secrets/secret-clone-api.ts';
 import {
   copiedSentence,
+  copyableRows,
   copyButtonLabel,
   copyRefusalSentence,
   initialPicks,
+  replaceKeyCommand,
   SECRET_COPY_PROMISE,
   secretCopyRows,
 } from '../../../src/features/secrets/secret-clone-model.ts';
@@ -80,11 +82,15 @@ const BUNDLE: SealedSecretBundle = {
   ciphertext: 'Y2lwaGVy',
 };
 
-const RESULT = (imported: readonly string[], replaced: readonly string[] = []): SecretImportResult => ({
+const FILED_AT = '2026-11-01T10:00:00.000Z';
+
+/** What an import answers: `imported` was filed (at `FILED_AT`), `kept` was already held and left as it was. */
+const RESULT = (imported: readonly string[], kept: readonly string[] = []): SecretImportResult => ({
   importId: IMPORT_ID,
   sourceDaemonId: SOURCE_ID,
   imported: named(...imported),
-  replaced: named(...replaced),
+  ...(imported.length === 0 ? {} : { filedAt: FILED_AT }),
+  kept: named(...kept),
 });
 
 interface Call {
@@ -199,19 +205,27 @@ describe('the secret copy wording', () => {
       { name: 'ZETA', uses: [], onTarget: true, signIn: false },
     ]);
     expect(secretCopyRows(source, null).every(row => !row.onTarget)).toBe(true);
-    expect(initialPicks(rows, ['ZETA', 'MISSING'])).toEqual(['ZETA']);
+    // A key the target holds is kept, never copied: it cannot be a pick, ticked or counted.
+    expect(copyableRows(rows).map(row => row.name)).toEqual(['API_KEY']);
+    expect(initialPicks(rows, ['ZETA', 'API_KEY', 'MISSING'])).toEqual(['API_KEY']);
   });
 
   it('should count and say what arrived', () => {
-    expect(copyButtonLabel(0)).toBe('Pick secrets to copy');
+    expect(copyButtonLabel(0)).toBe('Nothing to copy');
+    expect(copyButtonLabel(0, 2)).toBe('Pick secrets to copy');
+    expect(copyButtonLabel(1, 2)).toBe('Copy 1 secret');
+    expect(replaceKeyCommand('API_KEY')).toBe('fy secret set API_KEY');
     expect(copyButtonLabel(1)).toBe('Copy 1 secret');
     expect(copyButtonLabel(12)).toBe('Copy 12 secrets');
     expect(copiedSentence(RESULT(['A', 'B']), 'laptop')).toBe('2 secrets copied to laptop.');
-    expect(copiedSentence(RESULT(['A', 'B'], ['A']), 'laptop')).toBe(
-      '2 secrets copied to laptop. 1 of them replaced the one already there.',
+    expect(copiedSentence(RESULT(['A', 'B'], ['C']), 'laptop')).toBe(
+      '2 secrets copied to laptop. C was already on laptop and was left as it is. To replace one, run `fy secret set NAME` on laptop.',
     );
-    expect(copiedSentence(RESULT(['A', 'B'], ['A', 'B']), 'laptop')).toBe(
-      '2 secrets copied to laptop. 2 of them replaced the ones already there.',
+    expect(copiedSentence(RESULT(['A'], ['B', 'C']), 'laptop')).toBe(
+      '1 secret copied to laptop. 2 were already on laptop and were left as they are: B, C. To replace one, run `fy secret set NAME` on laptop.',
+    );
+    expect(copiedSentence(RESULT([], ['B']), 'laptop')).toBe(
+      'Nothing was copied. B was already on laptop and was left as it is. To replace one, run `fy secret set NAME` on laptop.',
     );
   });
 
@@ -296,9 +310,9 @@ describe('the secret copy panel', () => {
     expect(calls.find(call => call.path.startsWith('/v1/secrets/exports'))?.body).toMatchObject({ names: ['API_KEY'] });
   });
 
-  it('should copy TO a machine the person picks, marking what it replaces', async () => {
-    // Arrange
-    const { calls, createClient } = pair(['API_KEY'], ['API_KEY'], RESULT(['API_KEY'], ['API_KEY']));
+  it('should show a key the target holds as kept: not tickable, not counted, and nothing to copy', async () => {
+    // Arrange — the only secret on the sender is already on the receiver.
+    const { calls, createClient } = pair(['API_KEY'], ['API_KEY'], RESULT([], ['API_KEY']));
     const renderer = render(
       <SecretCopyPanel
         direction="to"
@@ -306,6 +320,7 @@ describe('the secret copy panel', () => {
         others={[LAPTOP, SPARE]}
         createClient={createClient}
         machineName={machine => machine.daemonName ?? ''}
+        preselect={['API_KEY']}
       />,
     );
     await settle();
@@ -315,15 +330,84 @@ describe('the secret copy panel', () => {
     const radios = renderer.root.findAllByProps({ type: 'radio' });
     await runAsync(async () => radios[0]?.props.onChange());
     await settle();
-    await runAsync(async () => box(renderer, 'API_KEY').props.onChange({ target: { checked: true } }));
     const picking = text(renderer);
+    const row = renderer.root.findByProps({ 'data-secret-copy-row': 'API_KEY' });
+    const action = button(renderer, 'Nothing to copy');
+    await runAsync(async () => action.props.onClick());
+    await settle();
+
+    // Assert — a kept row is a plain row with no checkbox, so it can neither look ticked nor be picked.
+    expect(picking).toContain('already on laptop: kept');
+    expect(row.findAllByType('input')).toHaveLength(0);
+    expect(picking).not.toContain('Select all');
+    expect(picking).not.toContain('Select none');
+    expect(picking).not.toContain('Copy 1 secret');
+    expect(action.props.disabled).toBe(true);
+    // No passkey is asked for: nothing was opened, sealed or filed on either machine.
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+  });
+
+  it('should count and send only the keys a copy would write when some are already held', async () => {
+    // Arrange — the sender holds A_KEY and B_KEY; the receiver already holds A_KEY.
+    const { calls, createClient } = pair(['A_KEY', 'B_KEY'], ['A_KEY'], RESULT(['B_KEY']));
+    const renderer = render(
+      <SecretCopyPanel
+        direction="from"
+        here={LAPTOP}
+        others={[STUDIO]}
+        createClient={createClient}
+        machineName={machine => machine.daemonName ?? ''}
+        preselect={['A_KEY', 'B_KEY']}
+      />,
+    );
+    await settle();
+
+    // Act
+    const picking = text(renderer);
+    await runAsync(async () => button(renderer, 'Select none').props.onClick());
+    await runAsync(async () => button(renderer, 'Select all').props.onClick());
+    const all = text(renderer);
+    const keptInputs = renderer.root.findByProps({ 'data-secret-copy-row': 'A_KEY' }).findAllByType('input');
+    const ticked = box(renderer, 'B_KEY').props.checked;
     await runAsync(async () => button(renderer, 'Copy 1 secret').props.onClick());
     await settle();
 
     // Assert
-    expect(picking).toContain('replaces laptop’s');
-    expect(text(renderer)).toContain('1 of them replaced the one already there.');
-    expect(calls.filter(call => call.machine === 'laptop').map(call => call.path)).toContain('/v1/secrets/imports');
+    expect(picking).toContain('Copy 1 secret');
+    expect(all).toContain('Copy 1 secret');
+    expect(keptInputs).toHaveLength(0);
+    expect(ticked).toBe(true);
+    expect(calls.find(call => call.path.startsWith('/v1/secrets/exports'))?.body).toMatchObject({ names: ['B_KEY'] });
+  });
+
+  it('should show the command to change a kept key as code, with a copy button that copies it', async () => {
+    // Arrange
+    const written: string[] = [];
+    const { createClient } = pair(['API_KEY'], ['API_KEY']);
+    const renderer = render(
+      <SecretCopyPanel
+        direction="from"
+        here={LAPTOP}
+        others={[STUDIO]}
+        createClient={createClient}
+        machineName={machine => machine.daemonName ?? ''}
+        write={async value => {
+          written.push(value);
+        }}
+      />,
+    );
+    await settle();
+
+    // Act
+    const code = renderer.root.findByType('code');
+    const copyCommand = renderer.root.findByProps({ 'aria-label': 'Copy command' });
+    await runAsync(async () => copyCommand.props.onClick());
+    await settle();
+
+    // Assert — the command is code, copied exactly; a name, never a value.
+    expect(words(code)).toBe('fy secret set API_KEY');
+    expect(written).toEqual(['fy secret set API_KEY']);
+    expect(words(renderer.root.findByProps({ 'data-onboarding-copy-status': 'copied' }))).toBe('Copied');
   });
 
   it('should keep the picks and say why when the copy is refused', async () => {
