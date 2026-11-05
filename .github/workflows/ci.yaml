@@ -146,7 +146,7 @@ jobs:
 
   pwa-screenshot:
     timeout-minutes: 20
-    name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
+    name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }}, ${{ matrix.leg }})
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
@@ -159,6 +159,10 @@ jobs:
     # but waits in GitHub's queue, which on a busy day put the pull-request p90 near 11 minutes against
     # 8, so a pull request keeps Namespace (docs/standards/ci-cd, "Runners": GitHub only when Namespace
     # buys close to nothing).
+    # EACH VIEWPORT'S WALK IS ITSELF SPLIT INTO LEGS (`parts`, packages/pwa/harness/walk-parts.ts). One leg walked
+    # 114s on its own and the job around it took 2-4 minutes; the independent tasks the harness already pooled
+    # now sit in separate jobs, each taking about a third of the walk. A leg owes only the tallies of its parts.
+    # tests/unit/harness-walk-parts.test.ts holds this matrix to naming every part for each viewport.
     # Separate jobs, not one job running both at once: that was three software-rendered Chromes on four
     # cores, and it timed out in 3 of 7 runs under load (#598). On `main` both legs take the GitHub
     # branch below, like every other job there.
@@ -179,9 +183,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { scheme: light, scope: settings, shape: 2x4 }
-          - { scheme: dark, scope: full, viewport: mobile, shape: 4x8 }
-          - { scheme: dark, scope: full, viewport: desktop, shape: 4x8 }
+          - { scheme: light, scope: settings, leg: settings, parts: 'settings', shape: 2x4 }
+          - { scheme: light, scope: settings, leg: layout, parts: 'layout,safe-area,sessions-page', shape: 2x4 }
+          - {
+              scheme: dark,
+              scope: full,
+              viewport: mobile,
+              leg: sessions,
+              parts: 'sessions,safe-area,sessions-page',
+              shape: 4x8,
+            }
+          - { scheme: dark, scope: full, viewport: mobile, leg: rest, parts: 'gallery,settings,overlays', shape: 4x8 }
+          - { scheme: dark, scope: full, viewport: desktop, leg: sessions, parts: 'sessions', shape: 4x8 }
+          - { scheme: dark, scope: full, viewport: desktop, leg: layout, parts: 'layout,gallery', shape: 4x8 }
+          - { scheme: dark, scope: full, viewport: desktop, leg: settings, parts: 'settings,overlays', shape: 4x8 }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -202,7 +217,8 @@ jobs:
           SCHEME: ${{ matrix.scheme }}
           SCOPE: ${{ matrix.scope }}
           VIEWPORT: ${{ matrix.viewport }}
-        run: ./scripts/ci/in-devshell.sh ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" ${VIEWPORT:+"$VIEWPORT"}
+          PARTS: ${{ matrix.parts }}
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" "$VIEWPORT" "$PARTS"
       # `always()` because a red run is the run whose frames matter most: the artifact carries this
       # colour scheme at its viewports plus the run's full log, so a reviewer can see the panel that
       # broke instead of reading a geometry number and guessing.
@@ -213,7 +229,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}${{ matrix.viewport && format('-{0}', matrix.viewport) || '' }}
+          name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}${{ matrix.viewport && format('-{0}', matrix.viewport) || '' }}-${{ matrix.leg }}
           path: packages/pwa/.artifacts/pwa-screenshot/
           if-no-files-found: warn
 

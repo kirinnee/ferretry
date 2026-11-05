@@ -59,6 +59,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
+import { PASS_OWNER_OF_PART, parseWalkParts, type WalkPartName } from './walk-parts.ts';
 import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,22 @@ const SELECTED_VIEWPORTS: readonly (typeof VIEWPORTS)[number][] = (() => {
   }
   return [viewport];
 })();
+
+/**
+ * WHICH PARTS THIS RUN TAKES: all, unless `--parts a,b` names some (walk-parts.ts says why). A part left out
+ * is walked by another CI leg, so its tallies are not owed here.
+ */
+const SELECTED_PARTS = (() => {
+  const parsed = parseWalkParts(process.argv);
+  if ('refusal' in parsed) {
+    process.stderr.write(`❌ ${parsed.refusal}\n`);
+    process.exit(2);
+  }
+  return parsed.parts;
+})();
+
+/** Whether this run takes `part`. */
+const partWanted = (part: WalkPartName): boolean => SELECTED_PARTS === undefined || SELECTED_PARTS.has(part);
 
 /** Whether this run walks `name`'s viewport. */
 type WalkPart = 'gallery' | 'settings' | 'sessions' | 'overlays';
@@ -220,6 +237,15 @@ const WALKS_SETTINGS = !(
   VIEWPORT_MATRIX_ONLY
 );
 
+if (SELECTED_PARTS !== undefined && !WALKS_SETTINGS) {
+  process.stderr.write('❌ --parts only splits the gallery walk, which a narrow --*-only mode does not run\n');
+  process.exit(2);
+}
+
+/** Whether this run owes the three tallies the Settings walk makes: it walks the `settings` part. */
+const OWES_SETTINGS_TALLIES = WALKS_SETTINGS && partWanted('settings');
+const settingsTallyNote = OWES_SETTINGS_TALLIES ? '' : ' — owed by the leg that walks the settings part';
+
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
@@ -300,9 +326,9 @@ const TERMINAL_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = {
  * passes measure phones only; the session layout is mostly 1100–1920px desktops, so it is the desktop's.
  */
 const PASS_OWNER = {
-  sessionLayout: 'desktop',
-  safeArea: 'mobile',
-  sessionsPage: 'mobile',
+  sessionLayout: PASS_OWNER_OF_PART.layout,
+  safeArea: PASS_OWNER_OF_PART['safe-area'],
+  sessionsPage: PASS_OWNER_OF_PART['sessions-page'],
 } as const satisfies Record<string, ViewportName>;
 
 /**
@@ -311,7 +337,7 @@ const PASS_OWNER = {
  * short tally and fails, and a leg that never reached the end prints neither line.
  */
 const notOwedHere = (pass: string, owner: ViewportName): string =>
-  `✅ ${pass} checks: 0/0 in ${SCHEME} at ${VIEWPORT_LABEL} — owed by the ${owner} run\n`;
+  `✅ ${pass} checks: 0/0 in ${SCHEME} at ${VIEWPORT_LABEL} — owed by ${walks(owner) ? 'another leg of this run' : `the ${owner} run`}\n`;
 
 /** The theme families the profile-scope frames are also captured in, beside the run's own scheme. */
 const PROFILE_SCOPE_THEMES = ['blueprint-dark', 'phosphor-light', 'broadsheet-light'] as const;
@@ -4481,7 +4507,7 @@ try {
               { part: 'sessions', weight: 100 },
               { part: 'overlays', weight: 60 },
             ];
-      for (const segment of segments) {
+      for (const segment of segments.filter(candidate => partWanted(candidate.part))) {
         const parts: ReadonlySet<WalkPart> = WALKS_SETTINGS
           ? new Set([segment.part])
           : new Set<WalkPart>(['gallery', 'settings', 'sessions', 'overlays']);
@@ -4494,7 +4520,8 @@ try {
 
     // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
     // every theme family. Its own contexts and viewports.
-    const owesSessionLayout = (WALKS_SETTINGS && walks(PASS_OWNER.sessionLayout)) || SESSION_LAYOUT_ONLY;
+    const owesSessionLayout =
+      (WALKS_SETTINGS && walks(PASS_OWNER.sessionLayout) && partWanted('layout')) || SESSION_LAYOUT_ONLY;
     const sessionLayoutPlan = owesSessionLayout
       ? planSessionLayoutGeometry({
           browser,
@@ -4509,7 +4536,7 @@ try {
 
     // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
     // down, and rotated. Its own contexts.
-    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
+    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea) && partWanted('safe-area')) || SAFE_AREA_ONLY;
     let safeAreaChecks = 0;
     if (owesSafeArea)
       addTask('safe area', {
@@ -4527,7 +4554,8 @@ try {
       });
 
     // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
-    const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
+    const owesSessionsPage =
+      (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage) && partWanted('sessions-page')) || SESSIONS_PAGE_ONLY;
     let sessionsPageChecks = 0;
     if (owesSessionsPage)
       addTask('sessions page', {
@@ -4609,7 +4637,7 @@ try {
     // missing sentinel rather than on a green summary nobody re-reads. A tally that is short is the
     // same failure as an assertion that broke: in both cases a surface this gate is supposed to be
     // measuring was not measured.
-    const owed = WALKS_SETTINGS ? owedOver(SETTINGS_SIDEWAYS_CHECKS) : 0;
+    const owed = OWES_SETTINGS_TALLIES ? owedOver(SETTINGS_SIDEWAYS_CHECKS) : 0;
     if (sidewaysChecks !== owed)
       fail(
         `the run made ${sidewaysChecks} sideways-scroll checks instead of the ${owed} this mode owes — ` +
@@ -4620,7 +4648,7 @@ try {
             : `a narrow mode reached the Settings block and left it part-way, which means it no longer ` +
               `skips Settings cleanly`),
       );
-    const owedGeometry = WALKS_SETTINGS ? owedOver(MACHINES_GEOMETRY_CHECKS) : 0;
+    const owedGeometry = OWES_SETTINGS_TALLIES ? owedOver(MACHINES_GEOMETRY_CHECKS) : 0;
     if (machinesGeometryChecks !== owedGeometry)
       fail(
         `the run made ${machinesGeometryChecks} Machines geometry checks instead of the ${owedGeometry} this mode ` +
@@ -4629,9 +4657,9 @@ try {
       );
     if (WALKS_SETTINGS)
       process.stdout.write(
-        `✅ settings sideways-scroll checks: ${sidewaysChecks}/${owed} in ${SCHEME} at ${VIEWPORT_LABEL}\n`,
+        `✅ settings sideways-scroll checks: ${sidewaysChecks}/${owed} in ${SCHEME} at ${VIEWPORT_LABEL}${settingsTallyNote}\n`,
       );
-    const owedTerminal = WALKS_SETTINGS ? owedOver(TERMINAL_GEOMETRY_CHECKS) : 0;
+    const owedTerminal = OWES_SETTINGS_TALLIES ? owedOver(TERMINAL_GEOMETRY_CHECKS) : 0;
     if (terminalGeometryChecks !== owedTerminal)
       fail(
         `the run made ${terminalGeometryChecks} terminal geometry checks instead of the ${owedTerminal} this mode ` +
@@ -4639,11 +4667,11 @@ try {
       );
     if (WALKS_SETTINGS)
       process.stdout.write(
-        `✅ machines geometry checks: ${machinesGeometryChecks}/${owedGeometry} in ${SCHEME} at ${VIEWPORT_LABEL}\n`,
+        `✅ machines geometry checks: ${machinesGeometryChecks}/${owedGeometry} in ${SCHEME} at ${VIEWPORT_LABEL}${settingsTallyNote}\n`,
       );
     if (WALKS_SETTINGS)
       process.stdout.write(
-        `✅ terminal geometry checks: ${terminalGeometryChecks}/${owedTerminal} in ${SCHEME} at ${VIEWPORT_LABEL}\n`,
+        `✅ terminal geometry checks: ${terminalGeometryChecks}/${owedTerminal} in ${SCHEME} at ${VIEWPORT_LABEL}${settingsTallyNote}\n`,
       );
     if (trustedTypesViolations.length > 0)
       fail(`Trusted Types refused ${trustedTypesViolations.length} write(s):\n${trustedTypesViolations.join('\n')}`);

@@ -66,13 +66,20 @@ set -euo pipefail
 # different first frame emulated at the browser context, not a class toggle inside one run.
 #
 # Local reproduction, identical to the job:
-#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light] [settings|full] [mobile|desktop]
+#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light] [settings|full] [mobile|desktop] [parts]
+#
+# AND WHY THE LEGS ARE SMALLER STILL: a fourth argument, `parts`, is a comma-separated list of the independent
+# parts of the walk (`packages/pwa/harness/walk-parts.ts`) that this leg takes, so CI can spread one viewport's
+# walk over several jobs. The slowest leg walked ~114s on its own and the job around it took 2-4 minutes; a leg
+# that takes about a third of the walk finishes under two minutes. A leg owes only the tallies of the parts it
+# takes and still prints all five lines (the others as `0/0 ... owed by`), so the checks below hold unchanged.
+# The CI matrix must name every part for each viewport; tests/unit/harness-walk-parts.test.ts holds it to that.
 #
 # With no scheme it runs both in turn; CI passes one per matrix job so they run side by side. The
 # scope defaults to `settings`; `full` drops `--settings-only` and walks the whole gallery. The
 # viewport defaults to both, one after the other; naming one walks it alone and owes only its share.
 
-usage() { echo "❌ usage: $0 [dark|light] [settings|full] [mobile|desktop]" >&2 && exit 2; }
+usage() { echo "❌ usage: $0 [dark|light] [settings|full] [mobile|desktop] [parts]" >&2 && exit 2; }
 
 schemes=(dark light)
 case "${1:-}" in
@@ -93,6 +100,9 @@ case "${viewport}" in
 *) usage ;;
 esac
 
+# The parts this leg takes, named exactly as the harness's `--parts` takes them; empty is every part.
+parts="${4:-}"
+
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
@@ -110,13 +120,14 @@ rm -rf "${artifact_dir}"
 mkdir -p "${artifact_dir}"
 
 viewports="${viewport:-mobile + desktop}"
-echo "📝 Driving ${chrome} over the ${scope} harness at ${viewports}"
+echo "📝 Driving ${chrome} over the ${scope} harness at ${viewports}${parts:+, parts: ${parts}}"
 
 for scheme in "${schemes[@]}"; do
   flags=()
   [ "${scope}" = "settings" ] && flags+=(--settings-only)
   [ "${scheme}" = "light" ] && flags+=(--light)
   [ -n "${viewport}" ] && flags+=(--viewport "${viewport}")
+  [ -n "${parts}" ] && flags+=(--parts "${parts}")
   log="${artifact_dir}/${scheme}.log"
 
   # A stale directory would hand this scheme's artifact the previous scheme's frames, which is a quiet
@@ -189,11 +200,15 @@ for scheme in "${schemes[@]}"; do
   empty="$(find packages/pwa/harness/out -maxdepth 1 -name '*.png' -size 0 -print -quit)"
   [ -n "${empty}" ] && echo "❌ ${empty} was captured as an empty file in ${scheme}" >&2 && exit 1
 
+  # The session layout, safe-area and sessions-page passes assert and capture nothing, so a leg that takes
+  # only those has no frames to owe; any other part always does.
   frames="$(find packages/pwa/harness/out -maxdepth 1 -name '*.png' -print | wc -l | tr -d ' ')"
-  [ "${frames}" -eq 0 ] && echo "❌ the ${scheme} run produced no frames at all" >&2 && exit 1
+  takes_frames=1
+  if [ -n "${parts}" ] && ! grep -qE '(^|,)(gallery|settings|sessions|overlays)(,|$)' <<<"${parts}"; then takes_frames=0; fi
+  [ "${takes_frames}" -eq 1 ] && [ "${frames}" -eq 0 ] && echo "❌ the ${scheme} run produced no frames at all" >&2 && exit 1
 
   mkdir -p "${artifact_dir}/${scheme}"
-  cp packages/pwa/harness/out/*.png "${artifact_dir}/${scheme}/"
+  [ "${frames}" -gt 0 ] && cp packages/pwa/harness/out/*.png "${artifact_dir}/${scheme}/"
   echo "📸 ${frames} ${scheme} frames -> ${artifact_dir}/${scheme}/"
 done
 
