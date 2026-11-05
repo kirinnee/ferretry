@@ -553,10 +553,14 @@ first because it decides what Changes shows (below).
     since, the refusal is shown as "Something changed since you reviewed. Review again." with a **Review
     again** button that reads the source and the review afresh (nothing is carried over: the both-changed
     items are unchosen again).
-  - **Settings files** (Warden, Learning, Voice) are still copied whole, so an Update leaves them **unticked**
-    and says why: a repeat copy never replaces an edit made here without being asked. The per-key merge of
-    the review's `settings` and the newer-key rows of its `keys` are drawn read-only until the apply takes
-    their decisions.
+  - **Settings files** (Warden, Learning, Voice, and the agent controls) start **unticked** in an Update: a
+    repeat copy changes nothing the person did not ask for. Ticking one reviews it again with that document
+    sent, and the screen lists its differing keys one by one (the settings merge, §5); a key changed on both
+    machines has no pick until the person makes one, and **Update** stays off until every such key has one.
+    The settings and the items name ONE review, so they are one apply: the items' `decisions` and the
+    `settingsDecisions` go together under the same `reviewed` fingerprint. Switching to Add alongside or Start
+    over reviews again for the settings that mode ticks. The newer-key rows of the review's `keys` are still
+    drawn read-only until the apply takes their decisions.
 - **Done**: what was copied, how many names got `-2`, **Sign in to use them** (each slot with "used
   by _n_ runtimes"), and a primary **Sign in once for _n_ runtimes** on the slot with the most
   runtimes (E31). After an Update, **What changed** lists the outcome per group (added, updated, removed,

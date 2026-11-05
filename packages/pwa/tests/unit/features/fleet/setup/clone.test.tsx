@@ -2007,7 +2007,7 @@ describe('CloneMachine · settings merged key by key', () => {
     (call: Call): unknown => {
       const sent = (call.body as { settings: { path: string }[] }).settings.map(document => document.path);
       return {
-        mode: 'update',
+        mode: 'first',
         source: { name: 'work-linux', verified: 'browser' },
         items: [],
         settings: sent.map(path =>

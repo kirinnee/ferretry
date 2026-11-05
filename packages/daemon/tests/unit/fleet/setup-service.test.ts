@@ -13,7 +13,6 @@ import {
   assembleAccountModel,
   buildCloneBundle,
   builtInModelCatalogs,
-  checkConfigFile,
   builtInPresets,
   CLONE_BASE_FILE,
   checkConfigFile,

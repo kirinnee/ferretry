@@ -107,6 +107,7 @@ import {
   updateWrites,
 } from './clone-review-model.ts';
 import {
+  choiceFor,
   defaultRuntimeToPicker,
   keepItemsDecisions,
   pickId,
@@ -151,7 +152,7 @@ import {
 } from './clone-settings-model.ts';
 import { machineItemHash } from './settings-route.ts';
 import { type Guarded, useSetupAccess } from './setup-access.ts';
-import { RadioChoices, SetupCommand, SetupNote, SetupRow, SetupSection, TOUCH_BUTTON } from './setup-ui.tsx';
+import { RadioChoices, SetupNote, SetupRow, SetupSection, TOUCH_BUTTON } from './setup-ui.tsx';
 import { closedSentence, countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 export interface CloneMachineProps extends MachineTabProps {
@@ -408,7 +409,11 @@ export function CloneMachine(props: CloneMachineProps) {
    */
   const keepReview = (answer: SettingsReview): void => {
     setReview(current =>
-      answer.kind === 'reviewed' ? answer.review : current?.mode === 'update' && answer.kind !== 'none' ? current : null,
+      answer.kind === 'reviewed'
+        ? answer.review
+        : current?.mode === 'update' && answer.kind !== 'none'
+          ? current
+          : null,
     );
     setReviewIssue(answer.kind === 'unsupported' || answer.kind === 'failed' ? answer : null);
   };
@@ -449,8 +454,7 @@ export function CloneMachine(props: CloneMachineProps) {
   /** Read the source's setup and the review of what a copy would change here. `advance` moves on from Source. */
   const readSource = (advance = true): void => {
     // Only reachable with a source picked: Next waits for one, and Review again comes after reading one.
-    const from = pickedRecord;
-    if (from === undefined) return;
+    if (pickedRecord === undefined) return;
     changes.clear();
     setSourceIssue(null);
     setReading(true);
@@ -472,16 +476,16 @@ export function CloneMachine(props: CloneMachineProps) {
         source.read(client => listSecrets(client)),
         readHeld(),
       ]);
-      // What differs from an earlier copy, when there was one. A machine that cannot answer (an older
+      // What differs from an earlier copy, when there was one. It is asked about the settings a first copy would
+      // send, key by key, so a first copy needs no second question; a machine that cannot answer (an older
       // Ferretry) leaves the first-copy preview as it has always been.
-      const asked = await target.read(client =>
-        reviewFleetClone(client, {
-          bundle: { ...exported.value },
-          source: { daemonId: String(from.daemonId) },
-          names: { source: sourceName, target: machineName },
-        }),
-      );
-      const found = asked.kind === 'done' ? asked.value : null;
+      let answer = await reviewSettings(exported.value, read, chosenFor('alongside', read), sourceMachine);
+      let found: FleetCloneReview | null = answer.kind === 'reviewed' ? answer.review : null;
+      if (found?.mode === 'update') {
+        // An Update starts with no settings ticked, and the apply names exactly the review it was made from.
+        answer = await reviewSettings(exported.value, read, chosenFor('update', read), sourceMachine, true);
+        found = answer.kind === 'reviewed' ? answer.review : null;
+      }
       const updatable = found?.mode === 'update';
       const nextMine = new Map<string, string>();
       let nextLogins: readonly FleetCredentialView[] = [];
@@ -519,13 +523,10 @@ export function CloneMachine(props: CloneMachineProps) {
       setDefaultPick(undefined);
       // An Update copies the fleet only. A settings file stays unticked until the person asks, and is then compared
       // key by key: a repeat copy never changes a setting made here without being asked.
-      const ticked = chosenFor(updatable ? 'update' : 'alongside', read);
-      setChosen(ticked);
+      setChosen(chosenFor(updatable ? 'update' : 'alongside', read));
       setKeyPicks(new Map());
-      // The settings it ticked are reviewed key by key too. An Update has none ticked, and the review it was just
-      // given is the one it applies.
-      if (!updatable) keepReview(await reviewSettings(exported.value, read, ticked, sourceMachine));
-      else setReviewIssue(null);
+      // Why the settings a first copy ticked could not be reviewed, if they could not: the screen says so and waits.
+      setReviewIssue(!updatable && (answer.kind === 'unsupported' || answer.kind === 'failed') ? answer : null);
       setReading(false);
       const nextSteps = updatable ? cloneUpdateSteps() : steps;
       setStepper(current => (advance ? stepForward(withSteps(current, nextSteps)) : withSteps(current, nextSteps)));
@@ -877,9 +878,18 @@ export function CloneMachine(props: CloneMachineProps) {
     const hold = applyHold(unchosen, sourceName);
     // Everything the one apply handler will do: the reviewed items, and the settings files, controls and keys
     // it writes after them. A button that writes any of them is never labelled "Nothing to copy".
+    // A settings document the review compared key by key writes only when some key is taken.
+    const writes = (id: CloneItemId): boolean =>
+      !perKeyItems.includes(id) ||
+      reviewedSettings.some(
+        document =>
+          settingsDocOf(id) === document.path &&
+          document.keys.some(row => choiceFor(document.path, row, settingsPicks) === 'take'),
+      );
     const others: OtherWrites = {
-      files: CLONE_SETTINGS_FILES.filter(item => chosen.includes(item.id) && files.has(item.file)).length,
-      controls: chosen.includes('controls') && sourceMachine !== null,
+      files: CLONE_SETTINGS_FILES.filter(item => chosen.includes(item.id) && files.has(item.file) && writes(item.id))
+        .length,
+      controls: chosen.includes('controls') && sourceMachine !== null && writes('controls'),
       keys: keyNames.length,
     };
     const count = updateWrites(sheet, picks, loginPicks, others);
@@ -939,9 +949,9 @@ export function CloneMachine(props: CloneMachineProps) {
             title="Settings files"
             intro={
               <>
-                Ticking one compares it with the one on <span className="font-mono">{machineName}</span> key by key: only a key
-                that differs is listed, and one changed on both machines is yours to choose. They start unticked so an
-                update changes nothing you didn’t ask for.
+                Ticking one compares it with the one on <span className="font-mono">{machineName}</span> key by key:
+                only a key that differs is listed, and one changed on both machines is yours to choose. They start
+                unticked so an update changes nothing you didn’t ask for.
               </>
             }
           />
@@ -1216,7 +1226,14 @@ export function CloneMachine(props: CloneMachineProps) {
             )
           ) : hasSetup ? (
             <Foot>
-              <Button type="button" variant="primary" className={TOUCH_BUTTON} data-step-next="" disabled={blockedBy !== null} onClick={next}>
+              <Button
+                type="button"
+                variant="primary"
+                className={TOUCH_BUTTON}
+                data-step-next=""
+                disabled={blockedBy !== null}
+                onClick={next}
+              >
                 Next
               </Button>
             </Foot>

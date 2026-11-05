@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { CLONE_REVIEW_STALE } from '@ferretry/protocol';
+import { CLONE_REVIEW_STALE, type CloneSettingsDoc, type FleetCloneReview } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
@@ -493,13 +493,14 @@ describe('CloneMachine · Update · Changes', () => {
       const note = must(screen.q('[data-setup-note="stale-review"]'), 'stale note');
       expect(note.textContent).toContain('Something changed since you reviewed. Review again.');
       expect(screen.q('[data-change-refusal]')).toBeNull();
-      expect(reviews).toBe(1);
+      // A read asks twice: once with the settings a first copy would send, then for the Update itself (none ticked).
+      expect(reviews).toBe(2);
       expectTouchTarget(screen.q('[data-review-again]'), 'Review again');
       expectTouchTarget(screen.submit(), 'Update beside Review again');
 
       await click(screen.q('[data-review-again]'), 'Review again');
-      expect(reviews).toBe(2);
-      expect(calls.target.filter(call => call.path === '/v1/fleet/clone/review')).toHaveLength(2);
+      expect(reviews).toBe(4);
+      expect(calls.target.filter(call => call.path === '/v1/fleet/clone/review')).toHaveLength(4);
       // A fresh review is a fresh start: the stale note is gone and nothing is chosen for the both-changed item.
       expect(screen.q('[data-setup-note="stale-review"]')).toBeNull();
       expect(screen.submit()?.disabled).toBe(true);
@@ -668,7 +669,7 @@ describe('CloneMachine · Update · An identical copy made before origin links e
       expect(screen.text('[data-setup-note="stale-review"]')).toContain(CLONE_REVIEW_STALE);
       expect(screen.q('[data-change-refusal]')).toBeNull();
       await click(screen.q('[data-review-again]'), 'Review again');
-      expect(reviews).toBe(2);
+      expect(reviews).toBe(4);
       expect(screen.q('[data-setup-note="stale-review"]')).toBeNull();
     } finally {
       await screen.view.unmount();
@@ -1110,7 +1111,10 @@ describe('CloneMachine · Update · A login and its keys are never touched', () 
 
       // Every request that carried a body, on either machine.
       const sent = [...calls.target, ...calls.work].filter(call => call.body !== undefined).map(call => call.path);
-      expect(sent.toSorted()).toEqual(['/v1/fleet/clone/review', '/v1/fleet/proposals', APPLY_PATH].toSorted());
+      // The review is asked twice per read (see the stale test): once with a first copy's settings, once for the Update.
+      expect(sent.toSorted()).toEqual(
+        ['/v1/fleet/clone/review', '/v1/fleet/clone/review', '/v1/fleet/proposals', APPLY_PATH].toSorted(),
+      );
       // The one change names the existing login to use; it carries no login to remove and no secret.
       const [body] = changeBodies(calls.target);
       const change = JSON.stringify(body?.change);
@@ -1339,6 +1343,203 @@ describe('CloneMachine · Update · Other states of the sheet', () => {
       expect(body?.change).not.toHaveProperty('decisions');
       const sent = [...calls.target, ...calls.work].filter(call => call.body !== undefined).map(call => call.path);
       expect(sent.filter(path => path.startsWith('/v1/secrets') || path.includes('credentials'))).toEqual([]);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── Settings an Update compares key by key ───────────────────────────────────────────────────────
+
+describe('CloneMachine · Update · Settings compared key by key', () => {
+  type Rows = FleetCloneReview['settings'][number]['keys'];
+  const WARDEN_ROWS: Rows = [
+    { key: 'intervalMinutes', outcome: 'both', mine: '5', theirs: '10' },
+    { key: 'caps.jevUsdPerDay', outcome: 'theirs', choice: 'take', mine: '1', theirs: '5', loosens: true },
+  ];
+  const DEFAULT_ROW: Rows[number] = {
+    key: 'defaultRuntime',
+    outcome: 'new',
+    choice: 'take',
+    theirs: '"claude-default"',
+  };
+  const HELD = { path: 'warden.yaml', etag: 'etag-held', changes: ['the Warden may spend more'] };
+  const configStatus = (pending: (typeof HELD)[] = []) => ({
+    directory: '/home/me/.fy/config',
+    files: [],
+    issues: [],
+    pending,
+    checkedAt: '2026-11-05T10:00:00.000Z',
+  });
+
+  /** The answer for what was sent: no settings, no rows; a document, its keys. The fingerprint says which. */
+  const answering =
+    (rows: Partial<Record<CloneSettingsDoc, Rows>> = { 'warden.yaml': WARDEN_ROWS }) =>
+    (call: Call): unknown => {
+      const sent = (call.body as { settings?: { path: CloneSettingsDoc }[] }).settings;
+      return review({
+        items: [ITEMS.newMcp],
+        settings: (sent ?? []).map(document => ({ path: document.path, keys: rows[document.path] ?? [] })),
+        fingerprint: sent === undefined ? 'fp-plain' : `fp-${sent.map(document => document.path).join('+')}`,
+      });
+    };
+  const keyRadios = (screen: Screen, name: string) =>
+    screen.all(`[data-clone-key="${name}"] input[type="radio"]`) as HTMLInputElement[];
+  const reviewBodies = (calls: readonly Call[]) =>
+    calls.filter(call => call.path === '/v1/fleet/clone/review').map(call => call.body as { settings?: unknown[] });
+
+  const setup = (target: Answers = {}) => {
+    const { target: here, work } = settingsAnswers();
+    return daemons(
+      { ...here, '/v1/config/status': configStatus([HELD]), '/v1/fleet/clone/review': answering(), ...target },
+      work,
+    );
+  };
+
+  it('starts with no settings ticked and none listed, then lists a ticked file’s keys and waits for a pick on a key both machines changed', async () => {
+    const { createClient, calls } = setup();
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      // The Update is the fleet alone: the review it applies was made with no settings.
+      expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(false);
+      expect(screen.q('[data-clone-key]')).toBeNull();
+      expect(screen.submit()?.disabled).toBe(false);
+      expect(screen.text('[data-clone-items-intro], [data-setup-section="clone-items"]')).not.toContain('Copied whole');
+      expect(reviewBodies(calls.target).map(body => body.settings === undefined)).toEqual([false, true]);
+
+      await click(tickItem(screen, 'warden'), 'tick warden');
+      // Ticking asks again, for exactly this document.
+      expect(reviewBodies(calls.target).at(-1)?.settings).toEqual([
+        { path: 'warden.yaml', text: expect.stringContaining('JEV_API_KEY') },
+      ]);
+      expect(screen.q('[data-clone-key="warden.yaml:caps.jevUsdPerDay"] [data-clone-key-loosens]')).not.toBeNull();
+      expect(keyRadios(screen, 'warden.yaml:intervalMinutes').map(radio => radio.checked)).toEqual([false, false]);
+      expect(screen.submit()?.disabled).toBe(true);
+      expect(screen.text('[data-setup-note="settings-undecided"]')).toContain('warden.yaml: intervalMinutes');
+      expect(screen.step()).toBe('preview');
+      expect(screen.q('[data-clone-review-state="changes"]')).not.toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('decides the items and the settings in ONE apply that names the review it was shown, and writes no file whole', async () => {
+    const { createClient, calls } = setup();
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(tickItem(screen, 'warden'), 'tick warden');
+      // The item and the key it needs are two writes; the file is a third only while some key of it is taken.
+      await click(keyRadios(screen, 'warden.yaml:intervalMinutes')[0] ?? null, 'keep mine');
+      expect(screen.submit()?.textContent).toBe('Update 3 things');
+      const cap = '[data-clone-key="warden.yaml:caps.jevUsdPerDay"] input[type="checkbox"]';
+      await click(screen.q(cap), 'keep the cap');
+      expect(screen.submit()?.textContent).toBe('Update 2 things');
+      await click(screen.q(cap), 'take the cap');
+      expect(screen.submit()?.textContent).toBe('Update 3 things');
+
+      await click(screen.submit(), 'Update');
+
+      expect(screen.step()).toBe('done');
+      const bodies = changeBodies(calls.target);
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]?.change).toMatchObject({
+        kind: 'clone.import',
+        mode: 'update',
+        reviewed: 'fp-warden.yaml',
+        settings: [{ path: 'warden.yaml' }],
+        settingsDecisions: { 'warden.yaml': { intervalMinutes: 'keep', 'caps.jevUsdPerDay': 'take' } },
+      });
+      expect(configWrites(calls.target)).toEqual([]);
+      // A file that loosens is held: Done says it is waiting, beside the fleet it came with.
+      expect(screen.q('[data-clone-outcome="warden"]')?.getAttribute('data-outcome')).toBe('pending');
+      expect(screen.text('[data-clone-outcome="warden"]')).toContain('waiting for your confirmation');
+      expect(screen.q('[data-clone-outcome="fleet"]')?.getAttribute('data-outcome')).toBe('copied');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('shows the default runtime as a row of its own, since an Update has no picker for it', async () => {
+    const { createClient, calls } = setup({
+      '/v1/fleet/clone/review': answering({ controls: [DEFAULT_ROW] }),
+    });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(tickItem(screen, 'controls'), 'tick controls');
+      expect(screen.q('[data-clone-key="controls:defaultRuntime"]')).not.toBeNull();
+      expect(screen.submit()?.disabled).toBe(false);
+      await click(screen.submit(), 'Update');
+      expect(changeBodies(calls.target)[0]?.change).toMatchObject({
+        mode: 'update',
+        settingsDecisions: { controls: { defaultRuntime: 'take' } },
+      });
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('stays on the Update when the settings cannot be reviewed, says why, and applies the review it has once they are unticked', async () => {
+    let asked = 0;
+    const plain = answering();
+    const { createClient, calls } = setup({
+      '/v1/fleet/clone/review': (call: Call) => {
+        asked += 1;
+        return asked === 3 ? new Error('network down') : plain(call);
+      },
+    });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(tickItem(screen, 'warden'), 'tick warden');
+
+      // The Update is still the screen: its review stands, and the settings wait for a review of their own.
+      expect(screen.q('[data-clone-review-state="changes"]')).not.toBeNull();
+      expect(screen.text('[data-setup-note="settings-undecided"]')).toContain('none of them is copied yet');
+      expect(screen.submit()?.disabled).toBe(true);
+      expect(screen.q('[data-clone-review-retry]')?.className).toContain('min-h-[44px]');
+
+      await click(tickItem(screen, 'warden'), 'untick warden');
+      expect(screen.q('[data-setup-note="settings-undecided"]')).toBeNull();
+      expect(screen.submit()?.disabled).toBe(false);
+      await click(screen.submit(), 'Update');
+      const change = changeBodies(calls.target)[0]?.change;
+      expect(change).toMatchObject({ mode: 'update', reviewed: 'fp-plain' });
+      expect(change).not.toHaveProperty('settings');
+      expect(change).not.toHaveProperty('settingsDecisions');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('reviews again for the settings a mode ticks when the person moves from Update to Add alongside', async () => {
+    const { createClient, calls } = setup();
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      expect(screen.step()).toBe('existing');
+      await screen.choose('alongside');
+      // Add alongside starts with every file the source shared ticked, so the review is made again for those.
+      expect(
+        ((reviewBodies(calls.target).at(-1)?.settings ?? []) as { path: string }[]).map(document => document.path),
+      ).toEqual(['warden.yaml', 'controls']);
+      await click(screen.q('[data-step-next]'), 'Next');
+      expect(screen.step()).toBe('preview');
+      await click(keyRadios(screen, 'warden.yaml:intervalMinutes')[1] ?? null, 'use theirs');
+      await click(screen.submit(), 'Copy alongside');
+
+      // The settings are decided first, against the review that asked for them, and the fleet is added after.
+      const [settings, fleet] = changeBodies(calls.target).map(body => body.change);
+      expect(settings).toMatchObject({
+        mode: 'update',
+        reviewed: 'fp-warden.yaml+controls',
+        settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take', 'caps.jevUsdPerDay': 'take' } },
+      });
+      expect(fleet).toMatchObject({ mode: 'alongside' });
+      expect(fleet).not.toHaveProperty('reviewed');
     } finally {
       await screen.view.unmount();
     }
