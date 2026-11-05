@@ -249,6 +249,9 @@ describe('fy-render chart value formats', () => {
     should(formatChartValue(2.1, axis('money'), en)).equal('$2.10');
     should(formatChartValue(1234, axis('money'), en)).equal('$1,234');
     should(formatChartValue(3, axis('money', 'EUR'), en)).equal('€3.00');
+    // A currency without minor units keeps its own default: no '.00' on yen.
+    should(formatChartValue(5, axis('money', 'JPY'), en)).equal('¥5');
+    should(formatChartValue(2.5, axis('money', 'JPY'), { ...en, compact: true, ticks: [0, 2.5, 5] })).equal('¥2.5');
   });
 
   test('should print one money format per axis: no cents on a whole-dollar axis, cents on every tick of a fractional one', () => {

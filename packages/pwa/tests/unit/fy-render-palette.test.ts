@@ -319,3 +319,36 @@ describe('fy-render chart configuration — callbacks', () => {
     should(pie.tooltip.callbacks.label({ dataset: { label: 'Share' }, label: 'Build', raw: 3 })).equal('Build: 3');
   });
 });
+
+describe('fy-render chart — value-axis tick labels', () => {
+  type Callback = (value: number, index: number, ticks: readonly { readonly value: number }[]) => string;
+  const callbackOf = (config: ChartConfiguration, scale: 'y' | 'r'): Callback => {
+    const ticks = config.options?.scales?.[scale]?.ticks as { callback?: Callback } | undefined;
+    if (ticks?.callback === undefined) throw new Error(`no tick callback on scale ${scale}`);
+    return ticks.callback;
+  };
+
+  test('should give every tick on a money axis one format, from the whole tick list', () => {
+    const config = chartConfiguration(
+      spec('{kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [5, 25]}]}'),
+      0,
+      theme(),
+      interaction,
+    );
+    const callback = callbackOf(config, 'y');
+    should(callback(5, 1, [{ value: 0 }, { value: 5 }, { value: 10 }])).equal('$5');
+    should(callback(5, 2, [{ value: 0 }, { value: 2.5 }, { value: 5 }])).equal('$5.00');
+  });
+
+  test('should do the same on a radar scale', () => {
+    const config = chartConfiguration(
+      spec('{kind: radar, x: [A, B, C], y: {format: money}, series: [{name: Cost, data: [5, 25, 10]}]}'),
+      0,
+      theme(),
+      interaction,
+    );
+    const callback = callbackOf(config, 'r');
+    should(callback(10, 1, [{ value: 0 }, { value: 10 }, { value: 20 }])).equal('$10');
+    should(callback(10, 1, [{ value: 0 }, { value: 7.5 }, { value: 10 }])).equal('$10.00');
+  });
+});

@@ -91,7 +91,8 @@ export function formatChartValue(
         currency: axis.currency,
         maximumFractionDigits: cents ? 2 : 0,
         // Intl's currency default is two digits: without this a whole $5 prints as $5.00.
-        minimumFractionDigits: notation === 'compact' ? undefined : cents ? 2 : 0,
+        // With cents, the currency's own default (two for USD, none for JPY); Intl clamps it to the maximum.
+        minimumFractionDigits: notation === 'compact' || cents ? undefined : 0,
         notation,
         style: 'currency',
         ...compact,
