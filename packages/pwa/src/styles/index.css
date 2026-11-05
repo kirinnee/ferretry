@@ -543,7 +543,7 @@ pre,
   box-sizing: border-box;
   max-width: 100%;
   padding: 0 0.5em;
-  border-radius: 0.75em;
+  border-radius: var(--radius-badge);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   text-decoration: none;
   vertical-align: bottom;
@@ -605,20 +605,20 @@ pre,
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: var(--border-width) solid var(--border);
   background: var(--surface);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  box-shadow: var(--shadow-control);
 }
 .fy-attachment-add:hover:not(:disabled) .fy-attachment-add-mark {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent-fg, #fff);
+  color: var(--accent-fg);
 }
 .fy-attachment-add:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 .fy-attachment-add:disabled {
   cursor: not-allowed;
