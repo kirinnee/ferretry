@@ -1,5 +1,6 @@
 import {
   type AnalyticsAggregateResult,
+  AnalyticsGroupLimitError,
   type AnalyticsIndexStatus,
   type AnalyticsLabel,
   type AnalyticsMeasure,
@@ -148,8 +149,7 @@ function aggregate(
       analyticsGroupSortKey(right.labels, parsed.groupBy),
     ),
   );
-  if (groups.length > groupLimit)
-    throw new Error(`analytics query produces more than ${groupLimit} groups; add a matcher`);
+  if (groups.length > groupLimit) throw new AnalyticsGroupLimitError(groupLimit);
   return groups.map(group => {
     const sessions = group.rows.length;
     // Built FROM the table rather than beside it: a hand-written set of placeholder measures is a
