@@ -24,7 +24,7 @@ import {
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from '../../../src/lib/board/ports';
 import type { ITextFileReader } from '../../../src/lib/tasks/ports';
 import { RelatedCheck } from '../../../src/lib/work-search/related';
-import { CapturingOutput, FakeWorkSearchGateway, taskHit } from '../work-search/fixtures';
+import { agendaHit, CapturingOutput, FakeWorkSearchGateway, taskHit } from '../work-search/fixtures';
 import {
   card,
   DENISHA,
@@ -221,8 +221,8 @@ describe('fy board', () => {
     await controller.board({});
 
     // Assert
-    should(gateway.boardCalls).eql([{ project: FERRETRY_ID, limit: 500 }]);
-    should(log).have.length(1);
+    should(gateway.boardCalls).eql([{ project: FERRETRY_ID, visibility: 'public', limit: 500 }]);
+    should(log).have.length(2);
     should(log[0]).startWith('ok: Ferretry — 0 cards');
   });
 
@@ -236,8 +236,41 @@ describe('fy board', () => {
     await controller.board({ project: ALL_PROJECTS });
 
     // Assert
-    should(gateway.boardCalls).eql([{ limit: 500 }, { limit: 500 }]);
+    should(gateway.boardCalls).eql([
+      { visibility: 'public', limit: 500 },
+      { visibility: 'public', limit: 500 },
+    ]);
     should(log[0]).startWith('ok: all projects — 0 cards');
+  });
+
+  it('should say so when the daemon is too old to filter by visibility', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+    gateway.boardResponse = response({ cards: [card({ id: 'F1', title: 'Old card' })] });
+
+    // Act
+    await controller.board({});
+
+    // Assert
+    should(log.join('\n'))
+      .containEql('this daemon predates public and private cards')
+      .and.not.containEql('public cards only');
+  });
+
+  it('should show public cards and say so, and show the rest with --private or --all', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+
+    // Act
+    await controller.board({});
+    await controller.board({ private: true });
+    await controller.board({ all: true });
+
+    // Assert
+    should(gateway.boardCalls.map(query => query.visibility)).eql(['public', 'private', undefined]);
+    should(log.filter(line => line.includes('public cards only'))).eql([
+      "ok: public cards only: fy board --private shows the ferrets' own cards, --all shows both",
+    ]);
   });
 
   it('should show every project when the session has no project and none is named', async () => {
@@ -249,7 +282,7 @@ describe('fy board', () => {
     await controller.board({ project: '  ' });
 
     // Assert
-    should(gateway.boardCalls).eql([{ limit: 500 }]);
+    should(gateway.boardCalls).eql([{ visibility: 'public', limit: 500 }]);
   });
 
   it('should resolve --project by name or id and refuse an unknown board', async () => {
@@ -280,6 +313,7 @@ describe('fy board', () => {
       activity: 'stale',
       state: 'closed',
       query: 'widget',
+      visibility: 'public',
       limit: 500,
     });
   });
@@ -461,6 +495,32 @@ describe('fy task create', () => {
       brief: '',
     });
     should(log).eql(['ok: &F2 created — Todo, denisha, idle']);
+  });
+
+  it("should warn once that a card with the owner's words under a --parent will be private", async () => {
+    // Arrange
+    const { controller, log } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    await controller.create([], { ...base, parent: 'F5' });
+    await controller.create([], base);
+
+    // Assert
+    should(log.filter(line => line.startsWith('diag:'))).eql([
+      'diag: this card will be private (a sub-card); drop --parent so the owner sees it',
+    ]);
+  });
+
+  it('should create a private or public card with --private or --public', async () => {
+    // Arrange
+    const { controller, gateway } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    await controller.create([], { ...base, private: true });
+    await controller.create([], { ...base, public: true });
+
+    // Assert
+    should(gateway.createCalls.map(call => call.request.visibility)).eql(['private', 'public']);
   });
 
   it("should send the owner's Yes a card rests on, in any spelling fy agenda takes", async () => {
@@ -926,6 +986,17 @@ describe('the action verbs', () => {
     ]);
   });
 
+  it('should claim a card without naming anyone', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    await controller.claim('F1', {});
+
+    // Assert
+    should(sent(gateway)).eql([{ action: 'claim' }]);
+  });
+
   it('should refuse an assign that names both a session and --none, or neither, or a stranger', async () => {
     // Arrange
     const { controller, gateway } = harness();
@@ -995,6 +1066,25 @@ describe('the action verbs', () => {
     should(await refusal(() => controller.edit('F1', {}))).match(/nothing to edit/u);
   });
 
+  it('should send --visibility, alone or with text, as ONE edit and print one result', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+
+    // Act
+    await controller.edit('F1', { visibility: 'private' });
+    await controller.edit('F1', { title: 'New name', visibility: 'public', json: true });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'edit', visibility: 'private' },
+      { action: 'edit', title: 'New name', visibility: 'public' },
+    ]);
+    should(log).have.length(2);
+    should(JSON.parse(log[1]?.slice(4) ?? '').task.id).equal('F1');
+    should(await refusal(() => controller.edit('F1', { visibility: 'secret' }))).match(/--visibility must be one of/u);
+    should(sent(gateway)).have.length(2);
+  });
+
   it('should edit How to test from --how-to-test or --how-to-test-file', async () => {
     // Arrange
     const { controller, gateway } = harness(new FakeGateway(), undefined, new FakeFiles({ '/test.md': '1. Open it' }));
@@ -1008,6 +1098,43 @@ describe('the action verbs', () => {
       { action: 'edit', howToTest: '1. Open it' },
       { action: 'edit', howToTest: '1. Inline' },
     ]);
+  });
+
+  it('should send only the parts --status-now/--status-done/--status-next name, without reading the card', async () => {
+    // Arrange — the daemon merges them into the card's status in its own write, so concurrent edits never undo each other.
+    const gateway = new FakeGateway();
+    gateway.taskView = card({ id: 'F1', status: { now: 'old', doneSoFar: '- done', next: '1. next' } });
+    const { controller } = harness(gateway);
+
+    // Act
+    await controller.edit('F1', { statusNow: 'new' });
+    await controller.edit('F1', { statusDone: '- a\n- b', statusNext: '' });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'edit', status: { now: 'new' } },
+      { action: 'edit', status: { doneSoFar: '- a\n- b', next: '' } },
+    ]);
+    should(gateway.taskCalls).eql([]);
+  });
+
+  it('should send the whole status from --status-file without reading the card, and let a flag override a part', async () => {
+    // Arrange
+    const files = new FakeFiles({ '/status.yaml': 'now: from file\ndoneSoFar: |\n  - a\nnext: later\n' });
+    const { controller, gateway } = harness(new FakeGateway(), undefined, files);
+
+    // Act
+    await controller.edit('F1', { statusFile: '/status.yaml' });
+    await controller.edit('F1', { statusFile: '/status.yaml', statusNext: 'sooner' });
+    const bad = await refusal(() => controller.edit('F1', { statusFile: '/status.yaml', statusNow: 3 as never }));
+
+    // Assert
+    should(sent(gateway).slice(0, 2)).eql([
+      { action: 'edit', status: { now: 'from file', doneSoFar: '- a\n', next: 'later' } },
+      { action: 'edit', status: { now: 'from file', doneSoFar: '- a\n', next: 'sooner' } },
+    ]);
+    should(gateway.taskCalls).eql([]);
+    should(bad).be.a.String();
   });
 
   it('should refile to another project, resolving the lane against that project’s own lanes', async () => {
@@ -1308,6 +1435,64 @@ describe('fy task create — related work', () => {
     should(JSON.parse(searchOutput.lines[0] ?? '').related[0].hit.id).equal('F303');
   });
 
+  it('should list the weak related cards and offer --related, then create', async () => {
+    // Arrange
+    const { controller, gateway, log } = related([
+      { strength: 'weak', hit: taskHit() },
+      { strength: 'weak', hit: agendaHit() },
+    ]);
+
+    // Act
+    await controller.create([], base);
+
+    // Assert — only cards are offered; the agenda match is not a card to note.
+    should(gateway.createCalls).have.length(1);
+    const listed = log.find(line => line.startsWith('diag: Related cards')) ?? '';
+    should(listed).containEql('prefer adding to one (a note, nothing created)');
+    should(listed).containEql('&F303');
+    should(listed).not.containEql('!A3');
+    should(listed).containEql('fy task create … --related F12');
+  });
+
+  it('should refuse an umbrella card, creating nothing and asking nothing of the daemon', async () => {
+    // Arrange
+    const { controller, gateway, searchGateway } = related([]);
+
+    // Act
+    const message = await refusal(() => controller.create([], { ...base, title: 'Agenda overhaul' }));
+
+    // Assert
+    should(gateway.createCalls).eql([]);
+    should(searchGateway.relatedCalls).eql([]);
+    should(message).containEql('This looks like an umbrella card (the title says "overhaul")');
+    should(message).containEql('fy task create … --parent F12');
+    should(message).containEql('fy task create … --related F12');
+    should(message).containEql('fy task create … --broad "<why this must be one card>"');
+  });
+
+  it('should create an umbrella card with --broad "<why>", or one under a parent', async () => {
+    // Arrange
+    const { controller, gateway } = related([]);
+
+    // Act
+    await controller.create([], { ...base, title: 'Agenda overhaul', broad: 'the owner asked for one tracker' });
+    await controller.create([], { ...base, title: 'Agenda overhaul', parent: 'F12' });
+
+    // Assert
+    should(gateway.createCalls).have.length(2);
+  });
+
+  it('should still refuse an umbrella card with a blank --broad', async () => {
+    // Arrange
+    const { controller, gateway } = related([]);
+
+    // Act + Assert
+    should(await refusal(() => controller.create([], { ...base, title: 'Misc fixes', broad: '  ' }))).containEql(
+      'umbrella card',
+    );
+    should(gateway.createCalls).eql([]);
+  });
+
   it('should create on weak matches alone', async () => {
     // Arrange
     const { controller, gateway } = related([{ strength: 'weak', hit: taskHit() }]);
@@ -1329,5 +1514,87 @@ describe('fy task create — related work', () => {
     // Assert
     should(gateway.createCalls).have.length(1);
     should(searchOutput.notices).eql(['related check skipped: this daemon has no search yet']);
+  });
+});
+
+describe('fy task patch', () => {
+  it('should read the card, then send ONE edit carrying its revision', async () => {
+    // Arrange
+    const { gateway, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\nsummary: One patch, one edit' }),
+    );
+
+    // Act
+    await controller.patch('&F1', {});
+
+    // Assert
+    should(gateway.taskCalls).deepEqual(['F1']);
+    should(sent(gateway)).deepEqual([{ action: 'edit', revision: 1, summary: 'One patch, one edit' }]);
+  });
+
+  it('should refuse a stale revision with the way to read it again, and send nothing', async () => {
+    // Arrange
+    const { gateway, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ 'f1.yaml': 'revision: 9\nbrief: x' }),
+    );
+
+    // Act
+    const message = await refusal(() => controller.patch('F1', { file: 'f1.yaml' }));
+
+    // Assert
+    should(message).match(
+      /changed since you read it, so nothing was written: read it again \(fy task show F1 --yaml\)/u,
+    );
+    should(sent(gateway)).be.empty();
+  });
+
+  it('should say nothing changed and send nothing when every value matches the card', async () => {
+    // Arrange
+    const { gateway, log, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\ntitle: Rename the widget' }),
+    );
+
+    // Act
+    await controller.patch('F1', {});
+
+    // Assert
+    should(log).deepEqual(['ok: &F1: nothing changed, so nothing was sent (every value matches the card)']);
+    should(sent(gateway)).be.empty();
+  });
+
+  it('should say every problem at once and send nothing', async () => {
+    // Arrange
+    const { gateway, controller } = harness(
+      undefined,
+      undefined,
+      new FakeFiles({ '-': 'revision: 1\nbogus: 1\nlane: x' }),
+    );
+
+    // Act
+    const message = await refusal(() => controller.patch('F1', {}));
+
+    // Assert
+    should(message).match(/task patch &F1 changed nothing:\n {2}bogus: not a field.*\n {2}lane: not a field/u);
+    should(sent(gateway)).be.empty();
+  });
+
+  it('should print the editable document with show --yaml', async () => {
+    // Arrange
+    const { log, controller } = harness();
+
+    // Act
+    await controller.show('F1', { yaml: true });
+
+    // Assert
+    should(log[0]).match(
+      /^ok: # &F1 — read every part, update what is out of date, then: fy task patch F1 --file <this file>\n/u,
+    );
+    should(log[0]).match(/\nrevision: 1\ntitle: Rename the widget\n/u);
   });
 });

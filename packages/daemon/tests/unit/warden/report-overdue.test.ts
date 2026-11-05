@@ -10,6 +10,7 @@ import {
   planOverdueReports,
   REPORT_OVERDUE_MS,
   type WardenSessionView,
+  withBatchMembers,
 } from '../../../src/lib/warden/index.ts';
 
 /**
@@ -266,5 +267,49 @@ describe('planOverdueReports', () => {
     // Assert
     should(off.tell).be.empty();
     should(Object.keys(off.memory)).eql(['child']);
+  });
+});
+
+describe('withBatchMembers: several ferret messages delivered as one turn', () => {
+  const lead: ExchangeSend = {
+    sendId: 'q-1',
+    from: 'session-a',
+    acceptedAt: '2026-10-31T08:00:00.000Z',
+    turn: 4,
+    replyExpected: false,
+    fate: 'landed',
+  };
+
+  it('reads each member as a send of its own, with its own sender and replyExpected', () => {
+    const sends = withBatchMembers(
+      [lead],
+      [
+        { id: 'q-1', from: 'session-a', replyExpected: false, deliveredAs: 'q-1' },
+        { id: 'q-2', from: 'session-b', replyExpected: true, deliveredAs: 'q-1' },
+      ],
+    );
+    should(sends.map(send => [send.from, send.replyExpected, send.acceptedAt, send.turn])).eql([
+      ['session-a', false, lead.acceptedAt, 4],
+      ['session-b', true, lead.acceptedAt, 4],
+    ]);
+  });
+
+  it('lets a parent whose message rode second be seen as having asked', () => {
+    const [, second] = withBatchMembers(
+      [lead],
+      [
+        { id: 'q-1', from: 'session-a', deliveredAs: 'q-1' },
+        { id: 'q-2', from: 'session-parent', replyExpected: true, deliveredAs: 'q-1' },
+      ],
+    );
+    should(parentExchangeOf([second as ExchangeSend], [], 'session-child', 'session-parent').asked).match({
+      replyExpected: true,
+    });
+  });
+
+  it('returns a send that no queue member points at unchanged', () => {
+    const other: ExchangeSend = { ...lead, sendId: 'z' };
+    should(withBatchMembers([other], [{ id: 'q-2', from: 'session-b', deliveredAs: 'q-1' }])).eql([other]);
+    should(withBatchMembers([other], [])).eql([other]);
   });
 });

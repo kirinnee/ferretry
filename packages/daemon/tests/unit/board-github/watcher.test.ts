@@ -549,7 +549,7 @@ describe('GitHubWatcher: releases', () => {
     });
     await subject.watcher.tick();
     should(subject.stored().laneId).equal('released');
-    // A card waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Gates ask the owner).
+    // A card waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Cards show progress).
     should(subject.stored('F2').laneId).equal('plan');
     should(subject.gh.calls).be.empty();
     // The release reaches this machine: the next tick finds it, with nothing new from GitHub.

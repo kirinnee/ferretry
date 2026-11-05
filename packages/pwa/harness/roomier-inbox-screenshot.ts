@@ -1,6 +1,6 @@
 /**
  * Screenshots for the roomier phone Inbox: the top bar with the Inbox count, an agenda card, a card waiting for a try, and the
- * same card with (i) open showing Skip / Not needed. Phone 390 and desktop 1440, three theme families, light and dark.
+ * agenda card with its ⋯ menu open (Skip / Not needed, Snooze), and the card to test with (i) open. Phone 390 and desktop 1440, three theme families, light and dark.
  *
  *   bun harness/roomier-inbox-screenshot.ts [outDir]     # writes <outDir>/<name>-<phone|desktop>-<theme>.png
  */
@@ -108,9 +108,9 @@ for (const form of ['phone', 'desktop'] as const) {
 
     const agenda = await open(context, theme, 'open');
     await snap(agenda, 'agenda-card');
-    await agenda.locator('[data-agenda-info-toggle]:visible').first().click();
+    await agenda.locator('[data-agenda-menu-toggle]:visible').first().click();
     await agenda.waitForTimeout(200);
-    await snap(agenda, 'agenda-card-info-open');
+    await snap(agenda, 'agenda-card-menu-open');
     await agenda.close();
 
     const task = await open(context, theme, 'quick-to-test');

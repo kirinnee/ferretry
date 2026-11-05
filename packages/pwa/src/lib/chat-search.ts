@@ -83,6 +83,18 @@ export const currentMatch = (state: ChatSearchState): SessionLogSearchMatch | un
   state.current === null ? undefined : state.matches[state.current];
 
 /**
+ * Every byte a row stands for — where it begins and its `alsoAt` — as one list in file order, so
+ * `rowForOffset` finds the row a record belongs to even where rows interleave: a copy Claude wrote
+ * before another message, a tool run with a message delivered in the middle of it.
+ */
+export const rowAnchors = <Row>(
+  rows: readonly { readonly offset: number; readonly also?: readonly number[]; readonly row: Row }[],
+): { readonly offset: number; readonly row: Row }[] =>
+  rows
+    .flatMap(({ offset, also = [], row }) => [offset, ...also].map(at => ({ offset: at, row })))
+    .sort((left, right) => left.offset - right.offset);
+
+/**
  * Which row holds a match at `offset`: the last of `rows` (in transcript order, each with the byte its
  * first record begins at) that begins at or before it. `undefined` when every row begins after it — the
  * history has not been loaded back that far.

@@ -84,17 +84,83 @@ export const DAEMON_FEATURES = {
    */
   agendaOfferClose: 'agenda.offer-close.1',
   /**
+   * An agenda link (`AgendaLink`) may carry a `meaning`: the plain words the item view's terms-and-references table
+   * shows for it (docs/agenda.md § Rules the writing keeps). A daemon without this name refuses the whole request
+   * over the field, so the CLI sends a meaning only where the machine reports it.
+   */
+  agendaLinkMeaning: 'agenda.link-meaning.1',
+  /**
    * A machine notice may list board cards (`AgendaItem.cards`), each with Open, Start a ferret on it and Close card:
    * `POST /v1/board/tasks/:taskId/start` starts a new ferret on the card with the card's brief. A daemon without this
    * name has neither the field nor the route, so the app draws its Got it alone.
    */
   agendaCards: 'agenda.cards.1',
   /**
-   * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
-   * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
-   * machine that reports it, because there the gate item is the card's one ask.
+   * THE AGENDA AS A CHANNEL (docs/agenda.md § States): an owner's answer or reply RESTS a ferret's item instead of
+   * closing it, and the ferret's answer brings it back to its old place in the Needs-you queue. The add and edit
+   * requests take `stage`, `whereWeAre` and `detail`; the `rest` action takes an item on as `working`; and text caps
+   * rise to a per-item transport bound. A daemon without this name refuses every one of those, so a client sends them
+   * only to one that reports it.
+   */
+  agendaChannel: 'agenda.channel.1',
+  /**
+   * EDITABLE ASKS (docs/agenda.md § Editable asks): an edit may REPLACE the ask (`ask`, `kind`, `answers`, questions
+   * with other options, a form's fields) and clear `questionAnswer`, and an answer — or a Done or Skip given from the
+   * ask — names the `askVersion` it was given to and is refused `409 ask_changed` past it (a human's unversioned
+   * answer to a replaced ask too). A daemon without this name refuses all three as malformed, so a client sends
+   * them only to one that reports it.
+   */
+  agendaAsks: 'agenda.asks.1',
+  /**
+   * THE CONVERSATION ON THE ITEM (docs/agenda.md § The conversation): every word the owner and the ferret say on an item
+   * is kept on it (`conversation`), `fy agenda log` copies the owner's chat words onto it, `merge` and `split` join and
+   * divide items, and every change to an item is kept as a full version that can be listed and fetched, with a per-device
+   * "last seen" mark. A daemon without this name refuses the `log`, `merge` and `split` actions as malformed and has no
+   * version routes, so a client sends them only to one that reports it; an older app drops the new item fields.
+   */
+  agendaConversation: 'agenda.conversation.1',
+  /**
+   * THE ITEM'S TABS (docs/agenda.md § The tabs): an item's live document is a row of tabs — the main tab
+   * (`whereWeAre`), the full picture (`body`) and the ferret's own (`tabs`), written with `tabEdits` in one edit. A
+   * daemon without this name refuses `tabs` and `tabEdits` as malformed, so a client sends them only to one that
+   * reports it; an app before it drops the `tabs` key.
+   */
+  agendaTabs: 'agenda.tabs.1',
+  /**
+   * PATCHING AN ITEM AS ONE DOCUMENT (docs/agenda.md § Patch, `fy agenda patch`): an edit names the `revision` it read
+   * and is refused `stale` when the item has moved on (read before write); it may rewrite `why` and `howToResolve`; and
+   * its `clear` takes the optional writing too (`decided`, `links`, `body`, `whereWeAre`, `detail`…), so a patch's `null`
+   * removes it. A daemon without this name refuses all three as malformed, so a client sends them only to one that
+   * reports it.
+   */
+  agendaPatch: 'agenda.patch.1',
+  /**
+   * PATCHING A CARD AS ONE DOCUMENT (docs/board.md § Patch, `fy task patch`): a card edit names the `revision` it read
+   * (the seq of the card's newest history event) and is refused `version-conflict` when the card has moved on. A daemon
+   * without this name refuses the field as malformed, so a client sends it only to one that reports it.
+   */
+  boardPatch: 'board.patch.1',
+  /**
+   * CARD ASKS (docs/agenda.md § Card asks): a card never asks the owner itself. Its ask (OK to build, or Done / Not
+   * good with the card's How to test) rides the agenda that carries the card as `AgendaItem.cardAsks`, the first open
+   * one mirrored as `gateAttached`; an answer names its ask by `cardAsk`, and the agenda RESTS after it. Cards carry
+   * no "waiting on you" any more: `waitingOnOwner`, the `toTest` and `waitingOnYou` counts and their filters come
+   * back empty. A daemon without this name raises standalone gate items (`AgendaItem.gate`) instead.
+   */
+  agendaCardAsks: 'agenda.card-asks.1',
+  /**
+   * The owner's answer to a card's gate moves the card (docs/board.md § Cards show progress). The app hides its own
+   * to-test rows only for a machine that reports it. A daemon that also reports {@link agendaCardAsks} asks on the
+   * card's agenda instead of raising a gate item, and has no to-test rows to hide.
    */
   boardGateItems: 'board.gate-items.1',
+  /**
+   * Cards are public or private (docs/board.md § Public and private cards): every card the daemon sends carries
+   * `visibility`, `GET /v1/board` takes `?visibility=public|private|all`, `fy task create` takes `--private|--public`
+   * and a card's visibility changes with the `visibility` action. A daemon without this name ignores the query
+   * parameter and sends no field, so the app keeps the older "Ferret cards" rule and the Board shows every card.
+   */
+  boardVisibility: 'board.visibility.1',
   /**
    * `GET /v1/sessions/:id/messages` reads backward: `?tail=1` and `?through=<cursor>`, answered with `previousCursor`.
    * A daemon without this name ignores both and serves the FIRST page forward, so the app asks only where the
@@ -243,20 +309,27 @@ export const DAEMON_FEATURES = {
    */
   pasteRulePasskey: 'copy-rules.passkey.1',
   /**
-   * Owner links (docs/catalogs.md § Links): `/v1/catalog-links` makes, lists, shows, copies and turns off a link to one
-   * skill or MCP setup, kept at a link store. NOT REPORTED YET: the routes exist from 3f-4, and the name is reported
-   * with moving and editing a link (3f-5), when the app can draw all of it. Until then the app does not offer links.
+   * Owner links (docs/catalogs.md § Links): `/v1/catalog-links` makes, lists, shows, copies, moves, edits and turns off a
+   * link to one skill or MCP setup, kept at a link store; `usedBy.linkIds` names the links serving a version and a
+   * version a link serves cannot be retired (`version_linked`).
    */
   catalogLinks: 'catalogs.links.1',
+  /**
+   * Handled agenda alerts come down on every device (docs/notifications.md § When an alert is cleared): the daemon sends
+   * `kind: 'clear'` pushes, and `POST /v1/push/seen` takes an item the owner opened down on their other devices. A
+   * daemon without this name answers 404 there, so the app says an item was opened only where the machine reports it.
+   */
+  pushClear: 'push.clear.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
 
 /**
  * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
- * them, because the daemon-side half is not built yet. Holds only `catalogs.links.1` while links are not built end to end. Removing a name from here is how the daemon starts to offer it.
+ * them, because the daemon-side half is not built yet. Empty while every name is built end to end; removing a name from
+ * here is how the daemon starts to offer it.
  */
-const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.catalogLinks]);
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([]);
 
 /** The names a daemon of this build reports, in a stable order. */
 export const daemonFeatureList = (): readonly DaemonFeature[] =>

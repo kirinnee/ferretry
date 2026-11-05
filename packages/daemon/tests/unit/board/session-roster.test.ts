@@ -39,6 +39,7 @@ class Documents {
   readonly storage = {
     listSessions: () =>
       [...this.states.keys()].map(id => ({ id: parseSessionId(id), lastSequence: 1, journalLine: 1, journal: null })),
+    holdSessions: async <T>(_ids: readonly SessionId[], work: () => Promise<T>) => await work(),
     readConfig: async (id: SessionId, freshness?: DocumentFreshness) => {
       this.freshness.push(`config:${freshness ?? 'proved'}`);
       return this.configs.get(id) as never;
@@ -79,6 +80,39 @@ describe('the board session roster memo', () => {
     should(sessions.get('child')).match({ lead: 'lizzette' });
     should(sessions.get('child')?.interactive).be.undefined();
     should(sessions.get('orphan')?.lead).be.undefined();
+  });
+
+  it('should read only the named sessions, proved from the files, when a commit holds them', async () => {
+    // Arrange
+    const documents = new Documents();
+    documents.set('lead', { status: 'running' });
+    documents.set('child', { status: 'completed' }, { parent: 'lead' });
+    documents.set('stranger', { status: 'running' });
+    const roster = new StorageSessionRoster(documents.storage, () => undefined);
+
+    // Act
+    const fresh = await roster.settled(['child', 'lead', 'missing'], async held => held);
+
+    // Assert
+    should([...fresh.held].sort()).eql(['child', 'lead']);
+    should([...fresh.sessions.keys()].sort()).eql(['child', 'lead']);
+    should(fresh.sessions.get('child')).match({ status: 'completed', lead: 'lead' });
+    should(documents.freshness.sort()).eql(['config:proved', 'config:proved', 'state:proved', 'state:proved']);
+  });
+
+  it('should leave a session whose documents cannot be read out of the held roster', async () => {
+    // Arrange
+    const documents = new Documents();
+    documents.set('lead', { status: 'running' });
+    documents.set('odd', { status: 'not-a-status' });
+    const roster = new StorageSessionRoster(documents.storage, () => undefined);
+
+    // Act
+    const fresh = await roster.settled(['lead', 'odd'], async held => held);
+
+    // Assert
+    should([...fresh.held].sort()).eql(['lead', 'odd']);
+    should([...fresh.sessions.keys()]).eql(['lead']);
   });
 
   it('should not look into an unchanged pair of documents again', async () => {

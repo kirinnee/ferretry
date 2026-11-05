@@ -65,6 +65,27 @@ describe('links.json under a real state home', () => {
     should(await boot().documents.read()).deepEqual(document);
   });
 
+  it('should keep a moved, revived, pending and identity-ended link across a restart', async () => {
+    const { boot } = await fixture();
+    const at = new Date(Date.UTC(2026, 0, 3)).toISOString();
+    const later = new Date(Date.UTC(2026, 0, 9)).toISOString();
+    const document = {
+      schemaVersion: 1 as const,
+      links: [
+        storedLink({
+          state: 'live',
+          version: 2,
+          movedFrom: 1,
+          revivedAt: at,
+          pendingUpload: { sequence: 3, version: 2, notAfter: later, issuedAt: at, revived: true },
+        }),
+        storedLink({ state: 'ended', endedAt: at, endReason: 'identity-changed' }),
+      ],
+    };
+    await boot().documents.write(document);
+    should(await boot().documents.read()).deepEqual(document);
+  });
+
   it('should refuse a damaged file, and leave it on disk untouched', async () => {
     const { paths, boot } = await fixture();
     await boot().documents.write({ schemaVersion: 1, links: [] });

@@ -1,10 +1,10 @@
-import type { QueuedMessage, SendDisposition } from '@ferretry/protocol';
+import type { SendDisposition } from '@ferretry/protocol';
+import type { QueueDelivery, QueueTransport } from '../../../lib/session/queue/deliverer.ts';
 import type { DeliveryView, HandOver, OwnDraft } from '../../../lib/session/queue/delivery.ts';
-import type { QueueTransport } from '../../../lib/session/queue/deliverer.ts';
-import type { SessionSendService } from '../../../lib/session/send/service.ts';
+import type { SendMessageRequest, SessionSendService } from '../../../lib/session/send/service.ts';
 import {
-  type SendFate,
   SendDraftRefused,
+  type SendFate,
   type SendLaunchGate,
   type SendLedger,
   SendPending,
@@ -35,18 +35,9 @@ export class SendPathQueueTransport implements QueueTransport {
     private readonly ledger: Pick<SendLedger, 'list'>,
   ) {}
 
-  async handOver(id: SessionId, message: QueuedMessage): Promise<HandOver> {
+  async handOver(id: SessionId, delivery: QueueDelivery): Promise<HandOver> {
     try {
-      const outcome = await this.sends.send({
-        id,
-        sendId: message.id,
-        message: message.text,
-        ...(message.replyExpected === true ? { replyExpected: true } : {}),
-        // An interrupt is the send path's own stop-then-type, done when this message's turn has come.
-        ...(message.interrupt === true ? { now: true } : {}),
-        ...(message.sender === 'agent' && message.from !== undefined ? { senderReference: message.from } : {}),
-        ...(message.sender === 'daemon' ? { origin: 'daemon' as const } : {}),
-      });
+      const outcome = await this.sends.send({ id, ...requestOf(delivery) });
       // A person's send the screen refused before any key is kept open and `untyped` by the send path,
       // which types it itself once the screen reads clear; its disposition then says nothing about the
       // pane. Unproven, so the ledger — keyed by this id — moves the message on.
@@ -70,6 +61,48 @@ export class SendPathQueueTransport implements QueueTransport {
   async clearOwnDraft(id: SessionId): Promise<OwnDraft> {
     return await this.sends.finishOwnDraft(id);
   }
+}
+
+/** The send path's request for one delivery: a message as it is, or several folded into one turn. */
+export function requestOf(delivery: QueueDelivery): Omit<SendMessageRequest, 'id'> {
+  const { sendId, members } = delivery;
+  const [first] = members;
+  if (first === undefined) throw new Error('a delivery carries at least one message');
+  if (members.length === 1)
+    return {
+      sendId,
+      message: first.text,
+      ...(first.replyExpected === true ? { replyExpected: true } : {}),
+      // An interrupt is the send path's own stop-then-type, done when this message's turn has come.
+      ...(first.interrupt === true ? { now: true } : {}),
+      ...(first.label === undefined ? {} : { label: first.label }),
+      ...(first.sender === 'agent' && first.from !== undefined ? { senderReference: first.from } : {}),
+      ...(first.sender === 'daemon' ? { origin: 'daemon' as const } : {}),
+    };
+  const parts = members.flatMap(member =>
+    member.from === undefined
+      ? []
+      : [
+          {
+            queueId: member.id,
+            senderReference: member.from,
+            text: member.text,
+            replyExpected: member.replyExpected === true,
+            ...(member.label === undefined ? {} : { label: member.label }),
+          },
+        ],
+  );
+  const attachmentIds = [...new Set(members.flatMap(member => member.attachmentIds))];
+  return {
+    sendId,
+    message: members.map(member => member.text).join('\n\n'),
+    parts,
+    // Any member parked its sender on an answer: the ledger row says so.
+    ...(members.some(member => member.replyExpected === true) ? { replyExpected: true } : {}),
+    ...(members.some(member => member.interrupt === true) ? { now: true } : {}),
+    senderReference: parts[0]?.senderReference ?? '',
+    ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+  };
 }
 
 /** The session as the deliverer reads it before typing: its record, a fresh look at its pane, its launch. */

@@ -90,7 +90,9 @@ export type SessionControlFailure =
   /** A sub-ferret this deep may not start its own (docs/pack-mode.md). */
   | 'depth_exceeded'
   /** A session a session starts may not run inside the daemon's state home (docs/agent-tools.md § The state home). */
-  | 'state_home';
+  | 'state_home'
+  /** `fy start --card` named a card the caller may not hand to the new session (docs/board.md § Authority). */
+  | 'card_refused';
 
 /** A refusal raised by the composition root's session control, in a taxonomy `src/lib` may name. */
 export class SessionControlError extends Error {
@@ -161,6 +163,7 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   limit_reached: { status: 409, code: 'limit_reached' },
   depth_exceeded: { status: 409, code: 'depth_exceeded' },
   state_home: { status: 403, code: 'state_home' },
+  card_refused: { status: 403, code: 'card_refused' },
 };
 
 /**

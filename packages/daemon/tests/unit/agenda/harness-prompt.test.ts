@@ -19,6 +19,7 @@ import {
   HarnessPromptAgenda,
   type HarnessQuestionAnswerer,
   harnessQuestionAnswers,
+  SKIPPED_ANSWER,
   harnessQuestionRequest,
   harnessWait,
   refusedQuestionId,
@@ -329,11 +330,69 @@ describe('harnessQuestionAnswers', () => {
     });
   });
 
-  it('should refuse a reply that does not answer every question in turn', () => {
+  it('should refuse a reply that does not number its answers in turn, and never guess from prose', () => {
     const open = (answer: string) => ({ kind: 'open-question' as const, answer });
     should(harnessQuestionAnswers(several, open('eu please')).ok).be.false();
     should(harnessQuestionAnswers(several, open('1. a\n→ eu\n\n3. b\n→ lint\n\n2. c\n→ x')).ok).be.false();
-    should(harnessQuestionAnswers(several, open('1. a\n→ eu\n\n2. b\n→ (no answer)\n\n3. c\n→ x')).ok).be.false();
+    // Words before the first number, a number out of order or past the last question: not a numbered reply.
+    should(harnessQuestionAnswers(several, open('so:\n1. eu')).ok).be.false();
+    should(harnessQuestionAnswers(several, open('2. lint\n1. eu')).ok).be.false();
+    should(harnessQuestionAnswers(several, open('1. eu\n4. more')).ok).be.false();
+    // A decimal is prose, not a number: "1.5 GB" is never answer 1 = "5 GB" (review of &F922).
+    should(harnessQuestionAnswers(several, open('1.5 GB should be enough')).ok).be.false();
+  });
+
+  it('should send a skipped question as "skipped": every question is optional, and it all goes in one answer (&F922)', () => {
+    const open = (answer: string) => ({ kind: 'open-question' as const, answer });
+    should(harnessQuestionAnswers(several, open('1. a\n→ eu\n\n2. b\n→ (no answer)\n\n3. c\n→ x'))).deepEqual({
+      ok: true,
+      answers: [
+        { kind: 'selection', labels: ['eu'] },
+        { kind: 'other', text: SKIPPED_ANSWER },
+        { kind: 'other', text: 'x' },
+      ] satisfies StructuredQuestionAnswer[],
+    });
+    // A plain numbered reply that leaves a question out, or says skip.
+    should(harnessQuestionAnswers(several, open('1. eu\n3. ship it\nafter lunch'))).deepEqual({
+      ok: true,
+      answers: [
+        { kind: 'selection', labels: ['eu'] },
+        { kind: 'other', text: SKIPPED_ANSWER },
+        { kind: 'other', text: 'ship it\nafter lunch' },
+      ] satisfies StructuredQuestionAnswer[],
+    });
+    should(harnessQuestionAnswers(several, open('1) skip\n2) lint, unit'))).deepEqual({
+      ok: true,
+      answers: [
+        { kind: 'other', text: SKIPPED_ANSWER },
+        { kind: 'selection', labels: ['lint', 'unit'] },
+        { kind: 'other', text: SKIPPED_ANSWER },
+      ] satisfies StructuredQuestionAnswer[],
+    });
+  });
+
+  it('should pick an offered option called Skip, never read it as a skipped question (review of &F922)', () => {
+    const offersSkip = {
+      ...several,
+      questions: [
+        {
+          question: 'Run the migration?',
+          header: 'Run',
+          options: [{ label: 'Run' }, { label: 'Skip' }],
+          multiSelect: false,
+        },
+        ...several.questions.slice(1),
+      ],
+    };
+    const mapped = harnessQuestionAnswers(offersSkip, { kind: 'open-question', answer: '1. Skip\n2. skip' });
+    should(mapped).deepEqual({
+      ok: true,
+      answers: [
+        { kind: 'selection', labels: ['Skip'] },
+        { kind: 'other', text: SKIPPED_ANSWER },
+        { kind: 'other', text: SKIPPED_ANSWER },
+      ] satisfies StructuredQuestionAnswer[],
+    });
   });
 });
 
@@ -667,7 +726,7 @@ describe('HarnessPromptAnswerDelivery', () => {
     // Assert
     should(harness.answered).be.empty();
     should(failures.map(failure => failure.reason)).deepEqual([
-      'the reply does not answer each of the 3 questions in turn',
+      'the reply does not number its answers to the 3 questions (1. …, 2. …)',
     ]);
     should(raised).deepEqual(['A1', 'A2']);
     const listed = await service.list(SESSION);

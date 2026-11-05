@@ -12,6 +12,11 @@
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
  *   ?view=gate            a GATE item open ("Try it", the card's How to test as its body, Done / Not good)
  *   ?view=gate-list       the list with that gate item first among the question items (one stream)
+ *   ?view=ask-gate        a QUESTION item (blue or green?) that also carries a card ask for &F61 (`not-good-ask-screenshot.ts`)
+ *   ?view=ask-plan-questions  !A304's shape (&B156): a REPLY item with three numbered questions that carries the card ask
+ *                         "OK to build" for &F923 (`card-ask-questions-screenshot.ts`)
+ *   ?view=ask-plan-replied  the same item after the owner replied "ok to build!" in words: the card ask offers the
+ *                         reply as its answer (&B155, `reply-approval-screenshot.ts`)
  *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
  *   ?view=gate-noproject  a gate item with NO project open: its header opens on the ferret, no stray dot
  *   ?view=open-longtitle  an item with a LONG title open: it folds onto two lines, never cut mid-word
@@ -23,6 +28,9 @@
  *                         the button for "Open its chat"
  *   ?view=open-headings   an item with a LONG ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
+ *   ?view=tabs            an item whose live document is TABS (&F923): Where we are now (with the answer to the
+ *                         owner's question, decided, still open), The full picture, Decisions and Risks — the last edit
+ *                         changed two of them (`agenda-tabs-screenshot.ts`)
  *   ?view=open            doubles as the reply run (`inbox-reply-screenshot.ts`): Send moves on to the next card with
  *                         the "Replied" toast, Undo brings the card back with its words restored
  *
@@ -32,7 +40,6 @@
 import { type AgendaItem, boardOk, type SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createAppStore, StoreProvider } from '../src/lib/store.tsx';
 import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
@@ -45,6 +52,7 @@ import type { DaemonBoardStore } from '../src/lib/board-store.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
+import { createAppStore, StoreProvider } from '../src/lib/store.tsx';
 import { toTestCards, withProjectName, withTaskName } from '../src/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
@@ -274,6 +282,48 @@ const FORM = item('A43', 5, 'ottilie', {
     { id: '4', type: 'text', label: 'Anything else I should know?', name: 'Notes', required: false },
   ],
 } as unknown as Partial<AgendaItem>);
+const TABBED = item('A44', 4, 'ottilie', {
+  title: 'Second relay plan',
+  subject: 'Pick the region for the second relay.',
+  ask: options(['Frankfurt', 'London']),
+  premise: '- One relay serves every phone today',
+  context: '- A second one halves the round trip for half the fleet',
+  questionAnswer: '- Yes: sessions pause for about ten seconds during the switch\n- Nothing is lost',
+  decided: '- It runs on the same build as the first relay\n- Alerts page you only when it is down',
+  stillOpen: '- The region\n- The restart window',
+  whereWeAre:
+    '**Building the relay image.** The config is written and tested on the laptop.\n\n| Step | State |\n| --- | --- |\n| Config | done |\n| Image | building |\n| Deploy | waits on your pick |\n\nOnce you pick the region it goes out the same day.',
+  body: '## Why a second relay\n\nEvery phone talks to one relay today. Half the fleet is far from it, so every message makes a long round trip.\n\n## What it costs\n\nOne more small machine, about the price of a coffee a month.',
+  tabs: [
+    {
+      id: 'decisions',
+      name: 'Decisions',
+      body: '1. **Same build** as the first relay.\n2. **Alerts** only when it is down.',
+    },
+    {
+      id: 'risks',
+      name: 'Risks',
+      body: '- The switch drops live sessions for about ten seconds.\n- A wrong region doubles the round trip instead.',
+    },
+  ],
+  revisions: [
+    {
+      at: '2026-10-29T08:30:00.000Z',
+      by: 'agent',
+      changed: ['whereWeAre', 'tabs'],
+      previous: {
+        whereWeAre: 'Writing the config.',
+        tabs: [
+          {
+            id: 'decisions',
+            name: 'Decisions',
+            body: '1. **Same build** as the first relay.\n2. **Alerts** only when it is down.',
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as Partial<AgendaItem>);
 /** A board card waiting at the "Try it" gate, as the daemon raises it: an ordinary choice item plus `gate`. */
 const GATE = item('G61', 3, 'daemon', {
   title: 'Pairing a second phone',
@@ -305,6 +355,64 @@ const GATE_NO_PROJECT = item('G63', 3, 'daemon', {
   gate: { ...GATE.gate, cardId: 'F63', projectName: '' },
 } as Partial<AgendaItem>);
 const GATE_NO_PROJECT_CARD = card(GATE_NO_PROJECT, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+/** A QUESTION item that also carries a card ask for &F61: its Not good words box must name the CARD, not the question. */
+const ASK_GATE_ASK = {
+  cardId: 'F61',
+  cardTitle: 'Pairing a second phone',
+  laneId: 'tested',
+  laneName: 'To test',
+  entry: 1,
+  projectId: 'p1',
+  projectName: 'ferretry',
+  options: [
+    { id: 'o0', label: 'Done', outcome: 'close' },
+    { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+  ],
+} as const;
+const ASK_GATE = item('A71', 6, 'judson', {
+  title: 'Which colour should the unread badge be?',
+  subject: 'Which colour should the unread badge be, blue or green?',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Blue' }, { label: 'Green' }] },
+  gateAttached: ASK_GATE_ASK,
+  cardAsks: [
+    {
+      gate: ASK_GATE_ASK,
+      at: ago(5),
+      howToTest:
+        '1. Open Settings and choose **Pair a device**.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+    },
+  ],
+} as unknown as Partial<AgendaItem>);
+const ASK_GATE_CARD = card(ASK_GATE, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+const PLAN_ASK = {
+  cardId: 'F923',
+  cardTitle: 'Agenda body tabs',
+  laneId: 'plan',
+  laneName: 'Plan',
+  entry: 1,
+  projectId: 'p1',
+  projectName: 'ferretry',
+  options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }],
+} as const;
+const ASK_PLAN_QUESTIONS = item('A304', 8, 'lizzette', {
+  title: 'Agenda redesign: building now',
+  subject: 'Three things to settle while the agenda redesign is built',
+  kind: 'reply',
+  ask: { kind: 'open-question' },
+  stage: 'plan',
+  questions: [
+    { question: 'Should Not needed stay behind the ⋯ menu?' },
+    { question: 'Keep the conversation folded by default?' },
+    { question: 'Which tab opens first: Where we are now, or the last one you read?' },
+  ],
+  premise: '- The item view is being rebuilt in four PRs',
+  context: '- The tabs plan (&F923) waits for your OK to build',
+  gateAttached: PLAN_ASK,
+  cardAsks: [{ gate: PLAN_ASK, at: ago(7) }],
+} as unknown as Partial<AgendaItem>);
+const ASK_PLAN_QUESTIONS_CARD = card(ASK_PLAN_QUESTIONS, chat(ferret('lz', 'lizzette', 'Agenda redesign')), 'studio');
+/** The same item after the owner answered it in words — "ok to build!" — without pressing the card's button (&B155). */
+const ASK_PLAN_REPLIED_CARD = ASK_PLAN_QUESTIONS_CARD;
 const LONG_TITLE = item('A111', 6, 'ottilie', {
   title:
     'Three answers for the catalog before I can finish the relay setup tonight, and the three layouts I would keep if you can spare one more minute',
@@ -374,12 +482,16 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-5': card(FIVE, RELAY, 'studio'),
   'open-7': card(SEVEN, RELEASE, 'studio'),
   form: card(FORM, RELAY, 'studio'),
+  tabs: card(TABBED, RELAY, 'studio'),
   gate: GATE_CARD,
   'gate-plan': GATE_PLAN_CARD,
   'gate-noproject': GATE_NO_PROJECT_CARD,
   'open-longtitle': card(LONG_TITLE, LEDGER, 'studio'),
   input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
+  'ask-gate': ASK_GATE_CARD,
+  'ask-plan-questions': ASK_PLAN_QUESTIONS_CARD,
+  'ask-plan-replied': ASK_PLAN_REPLIED_CARD,
   'orphan-one': ORPHAN_ONE,
   'orphan-three': ORPHAN_THREE,
   'orphan-list': ORPHAN_ONE,
@@ -438,26 +550,37 @@ const MACHINE: DaemonConnection = daemonConnection({
 const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> =>
   open.item.gate !== undefined || open.item.cards !== undefined
     ? []
-    : [
-        {
-          id: 'c1',
-          kind: 'assistant',
-          text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
-          at: NOW - 50 * 60_000,
-        },
-        {
-          id: 'c2',
-          kind: 'user',
-          text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
-          at: NOW - 30 * 60_000,
-        },
-        {
-          id: 'c3',
-          kind: 'assistant',
-          text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
-          at: NOW - 20 * 60_000,
-        },
-      ];
+    : view === 'ask-plan-replied'
+      ? // The owner answered in words, last (&B155): the card ask offers it as its answer.
+        [
+          {
+            id: 'r1',
+            kind: 'assistant',
+            text: `The tabs plan for !${open.item.id} is ready for your OK.`,
+            at: NOW - 6 * 60_000,
+          },
+          { id: 'r2', kind: 'user', text: `!${open.item.id} ok to build!`, at: NOW - 2 * 60_000 },
+        ]
+      : [
+          {
+            id: 'c1',
+            kind: 'assistant',
+            text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
+            at: NOW - 50 * 60_000,
+          },
+          {
+            id: 'c2',
+            kind: 'user',
+            text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
+            at: NOW - 30 * 60_000,
+          },
+          {
+            id: 'c3',
+            kind: 'assistant',
+            text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
+            at: NOW - 20 * 60_000,
+          },
+        ];
 /** Studio offers clearing; the laptop's daemon is older and does not — so the dialog shows both cases. */
 const CLEAR_PORT: ClearPort = {
   readHealth: async connection => ({

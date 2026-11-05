@@ -134,20 +134,22 @@ const expectOnScreen = (box: Awaited<ReturnType<typeof insideViewport>>, label: 
   expect(box.bottom, `${label}: bottom edge on screen`).toBeLessThanOrEqual(box.viewportHeight);
 };
 
-describe('the snooze menu in the open item', () => {
+describe('the snooze choices in the open item’s ⋯ menu', () => {
   for (const { name } of VIEWPORTS)
     for (const theme of THEMES)
       it(`opens with every edge on screen (${name}, ${theme})`, async () => {
         const { tab, close } = await open('item', name, theme);
         try {
-          await tab.click('.fy-item-view__bar [data-agenda-snooze]');
-          await tab.waitForSelector('.fy-snooze__popover');
+          // A sheet on a phone, a popover wider: either is the menu (`data-agenda-menu`).
+          await tab.click('.fy-item-view__bar [data-agenda-menu-toggle]');
+          await tab.waitForSelector('[data-agenda-menu] [data-agenda-menu-snooze]');
+          await tab.waitForTimeout(250);
           await framesSettled(tab);
-          expectOnScreen(await insideViewport(tab, '.fy-snooze__popover'), 'the menu');
-          await tab.click('.fy-snooze__popover [role="menuitem"]:last-child');
-          await tab.waitForSelector('.fy-snooze__custom');
+          expectOnScreen(await insideViewport(tab, '[data-agenda-menu]'), 'the menu');
+          await tab.click('[data-agenda-menu] [data-agenda-menu-snooze="custom"]');
+          await tab.waitForSelector('[data-agenda-menu] .fy-snooze__custom');
           await framesSettled(tab);
-          expectOnScreen(await insideViewport(tab, '.fy-snooze__popover'), 'the menu with its custom form');
+          expectOnScreen(await insideViewport(tab, '[data-agenda-menu]'), 'the menu with its custom form');
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${theme}-snooze.png`) });
         } finally {
           await close();

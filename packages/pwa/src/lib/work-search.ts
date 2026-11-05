@@ -115,6 +115,7 @@ const FIELD_LABELS: Readonly<Record<WorkHit['match']['field'], string>> = {
   context: 'context',
   brief: 'brief',
   howToTest: 'how to test',
+  status: 'status',
   note: 'note',
   body: 'text',
   history: 'history',

@@ -46,6 +46,9 @@ jobs:
   smoke-darwin:
     name: Smoke darwin-arm64
     needs: compile
+    # The owner's switch (docs/standards/ci-cd, "macOS runner shortage"): `vars.MACOS_SMOKE == 'skip'` skips the
+    # job, and `goreleaser` then says so and publishes the darwin binary unproven. Unset runs it.
+    if: ${{ vars.MACOS_SMOKE != 'skip' }}
     permissions:
       contents: read
     uses: ./.github/workflows/smoke-darwin.yaml
@@ -54,7 +57,11 @@ jobs:
   goreleaser:
     timeout-minutes: 30
     name: GoReleaser Publish
-    needs: smoke-darwin
+    needs: [compile, smoke-darwin]
+    # `!cancelled()` replaces the implicit success(), so the gate is spelled out: `compile` passed (a failed
+    # compile also leaves `smoke-darwin` skipped, which must never publish) and the smoke passed, or the owner
+    # switched it off and it was skipped. A smoke that failed publishes nothing, switch or no switch.
+    if: ${{ !cancelled() && needs.compile.result == 'success' && (needs.smoke-darwin.result == 'success' || (vars.MACOS_SMOKE == 'skip' && needs.smoke-darwin.result == 'skipped')) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -63,6 +70,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Say that the macOS smoke was skipped
+        if: ${{ vars.MACOS_SMOKE == 'skip' }}
+        run: ./scripts/ci/macos-smoke-skipped.sh
       - uses: ./.github/actions/install-nix
         with:
           shell: .#releaser
@@ -79,6 +89,10 @@ jobs:
     timeout-minutes: 15
     name: Sign daemon release
     needs: goreleaser
+    # GitHub skips a job whose dependency CHAIN holds a skipped job, even when the job in between ran. With
+    # the macOS smoke skipped by the owner's switch that chain is skipped, so the implicit success() would
+    # skip the signing: spell the gate out instead (goreleaser published, nothing was cancelled).
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
     environment: daemon-release
     permissions:
       contents: write

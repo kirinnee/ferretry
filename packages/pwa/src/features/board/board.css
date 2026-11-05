@@ -20,6 +20,13 @@
   flex-shrink: 0;
 }
 
+/* The card's padding and the gap between cards in a list: one value each, so an inline card (`fy-render.css`) takes
+   the Board's own instead of a copy. */
+:root {
+  --fy-board-card-padding: 4px var(--gap-xs) 4px var(--gap-sm);
+  --fy-board-list-gap: 4px;
+}
+
 /* ---- Header --------------------------------------------------------------------------------------- */
 .fy-board__head {
   display: flex;
@@ -97,72 +104,11 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
-.fy-board__lanes,
-.fy-board-project__lanes {
-  min-height: 24px;
-  padding: 0 var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.fy-board__lanes:hover,
-.fy-board-project__lanes:hover {
-  color: var(--fg);
-}
-.fy-board-project__lanes {
-  margin-left: auto;
-}
 .fy-board__tools {
   display: flex;
   margin-left: auto;
   align-items: center;
   gap: var(--gap-sm);
-}
-/* "Add card" in the header, beside Lanes ✎: a normal secondary button, the same height as its neighbours. */
-.fy-board__add {
-  height: var(--control-h-sm);
-  gap: var(--gap-xs);
-  padding-inline: var(--gap-md);
-  font-size: var(--text-sm);
-}
-/* On a phone it floats: bottom-right of the page's scroller, which ends where the tab bar begins, so it
-   sits above the bar and the home indicator. Sticky keeps it on screen while the board scrolls under it; a
-   short board pushes it to the foot of the page (`margin-top: auto`) instead of leaving it under the lanes. */
-.fy-board__fab {
-  position: sticky;
-  z-index: 5;
-  bottom: calc(var(--gap-md) + var(--safe-bottom, 0px));
-  display: flex;
-  height: var(--fab-size, 52px);
-  margin-top: auto;
-  justify-content: flex-end;
-  pointer-events: none;
-}
-.fy-board__fab-button {
-  display: inline-flex;
-  width: var(--fab-size, 52px);
-  height: var(--fab-size, 52px);
-  align-items: center;
-  justify-content: center;
-  border: var(--stroke-control, 1px) solid var(--accent);
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  box-shadow: var(--shadow-popover);
-  color: var(--accent-fg);
-  cursor: pointer;
-  pointer-events: auto;
-}
-.fy-board__fab-button:hover,
-.fy-board__fab-button:focus-visible {
-  border-color: var(--accent-strong);
-  background: var(--accent-strong);
-}
-.fy-board__fab-button:active {
-  translate: var(--press-translate, 1px) var(--press-translate, 1px);
 }
 
 /* ---- Counts --------------------------------------------------------------------------------------- */
@@ -408,26 +354,6 @@
   border-radius: var(--radius-panel);
   background: var(--surface-2);
 }
-.fy-board-lane[data-drop='ready'] {
-  border-color: var(--border-soft);
-  border-style: dashed;
-}
-.fy-board-lane[data-drop='over'] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-.fy-board-lane[data-variant='target'] {
-  min-width: 10rem;
-  flex: 0 0 10rem;
-  min-height: 4rem;
-  justify-content: center;
-  border-color: var(--ok);
-  border-style: dashed;
-  background: var(--ok-bg);
-}
-.fy-board-lane[data-variant='target'] .fy-board-lane__count {
-  display: none;
-}
 .fy-board-lane__head {
   margin: 0;
 }
@@ -461,7 +387,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--fy-board-list-gap);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -480,16 +406,10 @@
   flex-wrap: wrap;
   align-items: flex-start;
   margin-left: calc(var(--fy-board-depth, 0) * 20px);
-  padding: 4px var(--gap-xs) 4px var(--gap-sm);
+  padding: var(--fy-board-card-padding);
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);
-}
-.fy-board-card[draggable='true'] {
-  cursor: grab;
-}
-.fy-board-card[data-dragging] {
-  opacity: 0.45;
 }
 .fy-board-card__main {
   display: flex;
@@ -568,147 +488,10 @@
 .fy-board-seg[data-tone='accent'] {
   color: var(--accent);
 }
-/* THE ANSWERS NEVER LEAVE THE CARD. Each button starts at its whole label (`max-content`) and shares what is left;
-   when two do not fit side by side the row wraps and each takes a line, and a label wider than the card itself
-   breaks between words, never inside one (`min-content`). No answer clips, and none overflows its card. */
-.fy-board-card__verdict {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 100%;
-  flex-wrap: wrap;
-  gap: var(--gap-xs);
-  margin-top: 4px;
-}
-.fy-board-verdict {
-  display: inline-flex;
-  min-width: min-content;
-  max-width: 100%;
-  min-height: 20px;
-  flex: 1 1 max-content;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 var(--gap-xs);
-  line-height: 1.3;
-  text-align: center;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--fg);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.fy-board-card__verdict .fy-board-done {
-  min-width: min-content;
-  max-width: 100%;
-  flex: 1 1 max-content;
-  justify-content: center;
-  padding: 0 var(--gap-sm);
-  white-space: normal;
-  text-align: center;
-}
-.fy-board-verdict:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-/* The pressed answer stays fully drawn while its spinner turns: it is the one the reader is watching. */
-.fy-board-verdict[data-pending]:disabled,
-.fy-board-done[data-pending]:disabled,
+/* The pressed control stays fully drawn while its spinner turns: it is the one the reader is watching. */
 .kt-btn[data-pending]:disabled {
   opacity: 1;
   cursor: progress;
-}
-/* An answer's spinner is drawn in the button's own ink, so it reads on a filled button (Close, Mark done) as well
-   as on a quiet one: the accent arc on an accent fill vanished. */
-.fy-board-answer-spinner {
-  flex: none;
-  --spinner-arc: currentColor;
-  --spinner-track: color-mix(in srgb, currentColor 30%, transparent);
-}
-.fy-board-card__more:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-/* A refusal is said on the card it belongs to, under its answers. */
-.fy-board-card__error,
-.fy-board-table__error {
-  flex: 1 1 100%;
-  min-width: 0;
-  margin: 4px 0 0;
-  color: var(--err);
-  font-size: var(--text-xs);
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-.fy-board-table__error {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-.fy-board-detail__answer-error {
-  margin-top: var(--gap-xs);
-}
-.fy-board-menu__item[data-done='done'] {
-  color: var(--ok);
-}
-.fy-board-verdict[data-verdict='works'] {
-  border-color: var(--ok);
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-.fy-board-card__menu {
-  position: relative;
-  flex: 0 0 auto;
-}
-.fy-board-card__more {
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.fy-board-card__more:hover,
-.fy-board-card__more[aria-expanded='true'] {
-  background: var(--surface-2);
-  color: var(--fg);
-}
-.fy-board-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 20;
-  display: flex;
-  min-width: 11rem;
-  flex-direction: column;
-  padding: 4px;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-popover);
-}
-.fy-board-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px var(--gap-sm);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--fg);
-  font-size: var(--text-xs);
-  text-align: left;
-  cursor: pointer;
-}
-.fy-board-menu__item:hover,
-.fy-board-menu__item:focus-visible {
-  background: var(--accent-soft);
-}
-.fy-board-menu__item[data-backward] {
-  color: var(--warn);
 }
 
 /* ---- List, Tree, Dependencies, Archive ------------------------------------------------------------ */
@@ -760,6 +543,11 @@
   color: var(--muted);
   font-size: var(--text-xs);
 }
+.fy-board-dep__line > [data-dep] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
 .fy-board-archive__search {
   min-height: 30px;
   padding: 0 var(--gap-sm);
@@ -774,17 +562,6 @@
 }
 
 /* ---- Reason box ----------------------------------------------------------------------------------- */
-.fy-board__scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--gap-md);
-  background: var(--scrim);
-  --fy-send-back-max: 34rem;
-}
 .fy-board-reason {
   display: flex;
   width: min(30rem, 100%);
@@ -800,27 +577,10 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
-.fy-board-reason__input {
-  min-height: 32px;
-  padding: 0 var(--gap-sm);
-  border: var(--stroke-control, 1px) solid var(--border-soft);
-  border-radius: var(--radius-input, var(--radius-control));
-  background: var(--bg);
-  color: var(--fg);
-  font-size: var(--text-sm);
-}
-.fy-board-reason__input[aria-invalid='true'] {
-  border-color: var(--err);
-}
 .fy-board-reason__error {
   margin: 0;
   color: var(--err);
   font-size: var(--text-xs);
-}
-.fy-board-reason__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--gap-sm);
 }
 
 /* ---- Send back: "Not good" with the chat's composer ------------------------------------------------------ */
@@ -871,6 +631,7 @@
   }
   .fy-board__view {
     flex: none;
+    padding-inline: var(--gap-sm);
     white-space: nowrap;
   }
   .fy-board-lane {
@@ -886,10 +647,6 @@
   .fy-board-filters__toggle,
   .fy-board-count {
     min-height: 36px;
-  }
-  .fy-board-card__more {
-    width: 36px;
-    height: 36px;
   }
 }
 
@@ -989,8 +746,7 @@
   /* A sideways drag is the lane switch; the page still scrolls up and down. */
   touch-action: pan-y;
 }
-/* Dense rows: the title and the meta line set the height, not the menu button. The ⋮ is drawn small and its
-   44px hit area is an overlay, so a finger still lands on it but the row does not grow to hold it. */
+/* Dense rows: the title and the meta line set the height. */
 .fy-board[data-phone] .fy-board-card {
   align-items: center;
   padding: 6px var(--gap-xs) 6px var(--gap-sm);
@@ -1004,32 +760,7 @@
   align-self: stretch;
   justify-content: center;
 }
-.fy-board[data-phone] .fy-board-card__more {
-  position: relative;
-  width: 28px;
-  height: 28px;
-  min-width: 0;
-  min-height: 0;
-}
-.fy-board[data-phone] .fy-board-card__more::after {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 44px;
-  height: 44px;
-  transform: translate(-50%, -50%);
-  content: '';
-}
-.fy-board[data-phone] .fy-board-card__verdict {
-  gap: var(--gap-sm);
-  margin-top: 8px;
-}
-.fy-board[data-phone] .fy-board-verdict {
-  min-height: 44px;
-  gap: 6px;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
+
 /* One row above the lanes: the Filters icon, then the count pills, then the closed count, scrolling sideways. */
 .fy-board__phone-bar {
   display: flex;
@@ -1041,18 +772,13 @@
   overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
-.fy-board__phone-bar .fy-board__scope,
-.fy-board__phone-bar .fy-board__lanes {
+.fy-board__phone-bar .fy-board__scope {
   flex: none;
 }
 .fy-board__phone-bar .fy-board__scope-option {
   min-height: 24px;
   max-width: 9rem;
   font-size: var(--text-xs);
-}
-.fy-board__phone-bar .fy-board__lanes {
-  min-height: 30px;
-  white-space: nowrap;
 }
 .fy-board__phone-bar::-webkit-scrollbar {
   display: none;
@@ -1145,35 +871,6 @@
   padding-top: var(--gap-md);
 }
 
-/* The "why is it going back" box slides up from the bottom edge, above the keyboard. */
-.fy-board__scrim[data-phone] {
-  align-items: flex-end;
-  padding: 0;
-}
-.fy-board__scrim[data-phone] .fy-board-reason {
-  width: 100%;
-  padding-bottom: calc(var(--gap-md) + var(--safe-bottom, 0px));
-  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-  animation: fy-board-slide-up 180ms ease-out;
-}
-.fy-board__scrim[data-phone] .fy-board-reason__input {
-  min-height: 44px;
-  font-size: 16px;
-}
-@keyframes fy-board-slide-up {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .fy-board__scrim[data-phone] .fy-board-reason {
-    animation: none;
-  }
-}
-
 .fy-board-side {
   display: flex;
   min-width: 0;
@@ -1253,14 +950,6 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
-.fy-board-side__notice {
-  margin: 0;
-  padding: var(--gap-xs) var(--gap-sm);
-  border-radius: var(--radius-control);
-  background: var(--warn-bg);
-  color: var(--warn);
-  font-size: var(--text-xs);
-}
 /* The Kanban: one narrow column per lane, scrolling sideways a column at a time; a long column scrolls on its own. */
 .fy-board-side__kanban {
   display: flex;
@@ -1284,19 +973,6 @@
   max-height: calc(100dvh - 15rem);
   overflow-y: auto;
 }
-/* At a side width the owner's Done and Not good wrap instead of cutting a word or pushing the card wider. */
-.fy-board-card[data-density='side'] .fy-board-card__verdict {
-  flex-wrap: wrap;
-}
-.fy-board-card[data-density='side'] .fy-board-verdict,
-.fy-board-card[data-density='side'] .fy-board-card__verdict .fy-board-done {
-  min-width: max-content;
-  flex: 1 1 auto;
-  overflow: visible;
-  white-space: normal;
-  text-align: center;
-}
-
 /* The card Info's "Open board" pointed at: an accent edge and wash, so it is found at once in a full lane. */
 .fy-board-card[data-highlighted] {
   border-color: var(--accent);
@@ -1304,7 +980,7 @@
   box-shadow: 0 0 0 var(--focus-width) var(--ring);
 }
 
-/* ---- Table view and the Done control -------------------------------------------------------------- */
+/* ---- Table view -------------------------------------------------------------- */
 .fy-board-list {
   max-width: none;
 }
@@ -1325,7 +1001,7 @@
 .fy-board-table__head,
 .fy-board-table__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 9rem 6.5rem 5.5rem 8rem 5.5rem;
+  grid-template-columns: minmax(0, 1fr) 9rem 6.5rem 5.5rem 8rem;
   align-items: start;
   column-gap: var(--gap-md);
   padding: var(--gap-sm) var(--gap-md);
@@ -1336,8 +1012,7 @@
   color: var(--faint);
   font-size: var(--text-xs);
 }
-.fy-board-table__head [data-col='status'],
-.fy-board-table__head [data-col='done'] {
+.fy-board-table__head [data-col='status'] {
   text-align: right;
 }
 .fy-board-table__rows {
@@ -1421,8 +1096,7 @@
   color: var(--muted);
   font-size: var(--text-xs);
 }
-.fy-board-table__cell[data-col='status'],
-.fy-board-table__cell[data-col='done'] {
+.fy-board-table__cell[data-col='status'] {
   justify-content: flex-end;
 }
 .fy-board-table__none {
@@ -1461,41 +1135,6 @@
   color: var(--ok);
 }
 
-.fy-board-done {
-  display: inline-flex;
-  max-width: 100%;
-  min-height: 24px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 var(--gap-md);
-  border: var(--stroke) solid var(--ok-border);
-  border-radius: var(--radius-pill);
-  background: var(--ok-bg);
-  color: var(--ok);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.fy-board-done[data-done='reopen'] {
-  border-color: var(--border-soft);
-  background: var(--surface);
-  color: var(--muted);
-}
-.fy-board-done[data-size='primary'] {
-  min-height: 44px;
-  padding: 0 16px;
-  border-radius: var(--radius-panel);
-  font-size: var(--text-sm);
-}
-.fy-board-done[data-touch] {
-  min-height: 36px;
-}
-.fy-board-done:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
 @media (max-width: 720px) {
   .fy-board-table__head {
     display: none;
@@ -1524,10 +1163,7 @@
   .fy-board-table__cell[data-col='pr'] {
     order: 4;
   }
-  .fy-board-table__cell[data-col='done'] {
-    order: 5;
-    margin-left: auto;
-  }
+
   .fy-board-table__cell:empty,
   .fy-board-table__cell:has(> .fy-board-table__none) {
     display: none;
@@ -1572,7 +1208,7 @@
 }
 .fy-board-summary__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 14rem auto;
+  grid-template-columns: minmax(0, 1fr) 14rem;
   align-items: start;
   column-gap: var(--gap-md);
   padding: var(--gap-sm) var(--gap-md);
@@ -1602,20 +1238,7 @@
   color: var(--muted);
   font-size: var(--text-xs);
 }
-.fy-board-summary__act {
-  display: flex;
-  min-width: 2.5rem;
-  justify-content: flex-end;
-}
-/* The card's verdict row, worn on a Table row: it sits at the row's end, not as a full-width line under it. */
-.fy-board-summary__act .fy-board-card__verdict {
-  flex: 0 1 auto;
-  flex-wrap: nowrap;
-  margin-top: 0;
-}
-.fy-board-summary__act:empty {
-  display: none;
-}
+
 /* Information rows are quieter than the rows the owner must act on: smaller, plainer, with less air. */
 .fy-board-summary__row:not([data-action]) {
   padding-top: var(--gap-xs);
@@ -1633,7 +1256,7 @@
 }
 @media (max-width: 720px) {
   .fy-board-summary__row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     row-gap: var(--gap-xs);
   }
   .fy-board-summary__row .fy-board-table__what {
@@ -1645,9 +1268,6 @@
     align-items: center;
     align-self: center;
     gap: var(--gap-sm);
-  }
-  .fy-board-summary__act {
-    align-self: center;
   }
 }
 

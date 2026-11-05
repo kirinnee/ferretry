@@ -991,3 +991,28 @@ describe('catalogs.linkStore', () => {
     should(() => parseDaemonConfig({ catalogs: { linkStore: { url: 'https://a.test', enabled: false } } })).throw();
   });
 });
+
+describe('message coalescing settings', () => {
+  it('should default to a 60 s action window, a 10 minute FYI cap and a batch of 20, with the switch on', () => {
+    should(parseDaemonConfig({}).delivery).containEql({
+      queue: true,
+      coalesce: true,
+      actionWindowMs: 60_000,
+      fyiMaxHoldMs: 600_000,
+      batchMax: 20,
+    });
+  });
+
+  it('should let an operator turn coalescing off or retune it, and refuse values that would hold mail for ever', () => {
+    should(parseDaemonConfig({ delivery: { coalesce: false } }).delivery.coalesce).equal(false);
+    should(
+      parseDaemonConfig({ delivery: { actionWindowMs: 5_000, fyiMaxHoldMs: 30_000, batchMax: 3 } }).delivery,
+    ).containEql({
+      actionWindowMs: 5_000,
+      fyiMaxHoldMs: 30_000,
+      batchMax: 3,
+    });
+    for (const delivery of [{ actionWindowMs: 0 }, { fyiMaxHoldMs: 86_400_001 }, { batchMax: 1 }, { batchMax: 101 }])
+      should(() => parseDaemonConfig({ delivery })).throw();
+  });
+});

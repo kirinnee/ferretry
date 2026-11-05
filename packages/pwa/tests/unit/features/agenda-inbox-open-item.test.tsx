@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { AgendaSwipeDeck, deckIntent, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
-import { daemonId } from '../../../src/lib/daemon-connection.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
+import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import {
   agendaItem,
   choices,
@@ -13,10 +16,12 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
+import { openConversation } from '../../support/agenda-folds.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'token' });
 
 const shipIt = inboxCard(
   agendaItem('A2', {
@@ -125,7 +130,7 @@ describe('the open Inbox item', () => {
     expect(topView(mounted).querySelector('[data-agenda-dismiss]')).toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
     await interact(() =>
-      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
@@ -133,12 +138,15 @@ describe('the open Inbox item', () => {
   });
 
   it('offers no Snooze and no composer on a ferret’s rule suggestion: the ferret reads its own board (C2)', async () => {
-    const snoozeOf = (root: ParentNode) => root.querySelector('[data-agenda-snooze]');
+    const snoozeOf = async (root: HTMLElement): Promise<Element | null> => {
+      await interact(() => root.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]')?.click());
+      return root.querySelector('[data-agenda-menu-group="snooze"]');
+    };
     const plain = await mount(
       page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, renderComposer: () => <textarea /> }),
     );
     const offered =
-      snoozeOf(topView(plain)) !== null && plain.container.querySelector('[data-inbox-composer]') !== null;
+      (await snoozeOf(topView(plain))) !== null && plain.container.querySelector('[data-inbox-composer]') !== null;
     await plain.unmount();
     const mounted = await mount(
       page(fakeInbox(), [suggestionCard], {
@@ -147,7 +155,7 @@ describe('the open Inbox item', () => {
       }),
     );
     expect(offered).toBe(true);
-    expect(snoozeOf(topView(mounted))).toBeNull();
+    expect(await snoozeOf(topView(mounted))).toBeNull();
     expect(mounted.container.querySelector('[data-inbox-composer]')).toBeNull();
     await mounted.unmount();
   });
@@ -163,7 +171,7 @@ describe('the open Inbox item', () => {
     );
     const mounted = await mount(page(fakeInbox(), [suggested], { initialOpen: suggested.key }));
     await interact(() =>
-      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
@@ -423,11 +431,56 @@ describe('the open Inbox item’s History', () => {
       }),
     );
     await interact(() => Promise.resolve());
+    await openConversation(mounted.container);
     const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
     const ferret = [...mounted.container.querySelectorAll('[data-history="ferret"]')].map(node => node.textContent);
     expect(owner.some(text => text?.includes('Hold until Monday'))).toBe(true);
     expect(ferret.some(text => text?.includes('Asking about'))).toBe(true);
     expect(asked).toEqual([shipIt.key]);
+    await mounted.unmount();
+  });
+
+  it('draws the item’s own stored words when the machine keeps the conversation', async () => {
+    const wires = new AgendaWireDirectory();
+    wires.note(laptop.daemonId, {
+      kind: 'read',
+      health: { features: [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation] },
+    } as never);
+    const stored = inboxCard(
+      agendaItem('A8', {
+        subject: 'Stored?',
+        ask: choices('Yes', 'No'),
+        conversationCount: 1,
+        conversation: [{ at: '2026-08-01T10:30:00.000Z', by: 'owner', via: 'reply', text: 'Words kept on the item' }],
+      } as never),
+      sessionView('sess-8', { config: { teammate: 'kai', name: 'Stored' } as never }),
+      'Laptop',
+      daemonId('laptop'),
+    );
+    const mounted = await mount(
+      <StoreProvider store={{ agendaWire: wires, connections: { list: () => [] } } as unknown as AppStore}>
+        <InboxHarness
+          cards={[stored]}
+          fake={fakeInbox()}
+          reading={false}
+          render={inbox => (
+            <AgendaInboxPage
+              clock={Date.now}
+              inbox={{ ...inbox, connectionFor: () => laptop }}
+              initialOpen={stored.key}
+              now={NOW}
+              onNavigate={() => undefined}
+              phone
+              reducedMotion
+            />
+          )}
+        />
+      </StoreProvider>,
+    );
+    await interact(() => Promise.resolve());
+    await openConversation(mounted.container);
+    const owner = [...mounted.container.querySelectorAll('[data-history="owner"]')].map(node => node.textContent);
+    expect(owner.some(text => text?.includes('Words kept on the item'))).toBe(true);
     await mounted.unmount();
   });
 
@@ -455,5 +508,78 @@ describe('the open Inbox item’s History', () => {
     const vias = [...mounted.container.querySelectorAll('[data-agenda-group-via]')].map(node => node.textContent);
     expect(vias).toEqual(['via Vena']);
     await mounted.unmount();
+  });
+});
+
+describe('opening an item takes its alerts down (docs/notifications.md § When an alert is cleared)', () => {
+  it('tells the host once for the item on top, and not for the list', async () => {
+    // Arrange
+    const openedOnList: string[] = [];
+    const openedOnDeck: string[] = [];
+
+    // Act
+    const list = await mount(
+      page(fakeInbox(), [shipIt, rebase], { onItemOpened: card => openedOnList.push(card.key) }),
+    );
+    await list.unmount();
+    const deck = await mount(
+      page(fakeInbox(), [shipIt, rebase], {
+        initialOpen: shipIt.key,
+        onItemOpened: card => openedOnDeck.push(card.key),
+      }),
+    );
+    await interact(() => undefined);
+    const first = [...openedOnDeck];
+    await interact(() =>
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
+    );
+    await interact(() =>
+      must(topView(deck).querySelector<HTMLButtonElement>('[data-inbox-tool="skip"]'), 'Skip').click(),
+    );
+
+    // Assert
+    expect(openedOnList).toEqual([]);
+    expect(first).toEqual([shipIt.key]);
+    expect(openedOnDeck).toEqual([shipIt.key, rebase.key]);
+    await deck.unmount();
+  });
+
+  it('does not tell of a card the deck moved on to by itself while nobody used the page, until someone does (review round 9)', async () => {
+    // Arrange — the deck is open on Ship it on a screen nobody has touched for a while.
+    const fake = fakeInbox();
+    const opened: string[] = [];
+    const props = { initialOpen: shipIt.key, onItemOpened: (card: InboxCard) => opened.push(card.key) };
+    const deck = await mount(page(fake, [shipIt, rebase], props));
+    fake.clock.advance(61_000);
+
+    // Act — Ship it is answered on another device, so the deck deals Rebase; later someone presses a key here.
+    await deck.render(page(fake, [rebase], props));
+    const unattended = [...opened];
+    await key(document.body, 'Shift');
+
+    // Assert
+    expect(unattended).toEqual([shipIt.key]);
+    expect(opened).toEqual([shipIt.key, rebase.key]);
+    expect(topView(deck).getAttribute('data-agenda-view')).toBe('A3');
+    await deck.unmount();
+  });
+
+  it('does not tell of a card on a hidden page, whatever is pressed', async () => {
+    // Arrange
+    const opened: string[] = [];
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+
+    // Act
+    const deck = await mount(
+      page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, onItemOpened: card => opened.push(card.key) }),
+    );
+    await key(document.body, 'Shift');
+    if (visibility === undefined) delete (document as { visibilityState?: unknown }).visibilityState;
+    else Object.defineProperty(document, 'visibilityState', visibility);
+
+    // Assert
+    expect(opened).toEqual([]);
+    await deck.unmount();
   });
 });

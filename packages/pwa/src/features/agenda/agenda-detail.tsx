@@ -37,7 +37,8 @@ const markdownProse = defaultAgendaProse;
 
 /** Whether the item has anything to read beyond its question and options. */
 export const agendaHasDetail = (item: AgendaItem): boolean =>
-  [item.premise, item.context, item.decided, item.body].some(text => (text ?? '').trim() !== '') ||
+  [item.premise, item.context, item.decided, item.whereWeAre, item.body].some(text => (text ?? '').trim() !== '') ||
+  (item.tabs?.length ?? 0) > 0 ||
   (item.terms?.length ?? 0) > 0 ||
   (item.steps?.length ?? 0) > 0 ||
   (item.links?.length ?? 0) > 0;

@@ -50,7 +50,7 @@ describe('laneProposalReference and laneProposalCard', () => {
   it('should offer Accept and Edit with the lane path as its subject', () => {
     const card = laneProposalCard('Ferretry', LANES);
 
-    should(card.subject).equal('Lanes for Ferretry: Todo → Doing → To test → Closed');
+    should(card.subject).equal('Lanes for Ferretry: Todo → Doing → Ready to try → Closed');
     should(card.title).equal('Lanes for Ferretry');
     should(card.kind).equal('choice');
     should(card.ask.kind).equal('multiple-choice');
@@ -101,7 +101,7 @@ describe('laneChangeCard', () => {
         'koen proposes new lanes for Ferretry. The board keeps its lanes until you accept. Accepting it:',
         '',
         '- makes Plan/Design automatic: it would stop waiting for the owner',
-        '- removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+        '- removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
       ].join('\n'),
     );
     // Accept → stays plain; Edit ← is recommended, so it is the highlighted one.

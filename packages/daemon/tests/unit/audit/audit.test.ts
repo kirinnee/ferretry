@@ -1252,6 +1252,20 @@ describe('auditedRoutes', () => {
           name: 'A skill name the owner typed',
         },
         url: URL_WITH_KEY,
+        created: true,
+      },
+      'PUT /v1/catalog-links/:linkId/version': {
+        linkId: LINK,
+        version: 3,
+        movedFrom: 2,
+        sequence: 4,
+        url: URL_WITH_KEY,
+      },
+      'PATCH /v1/catalog-links/:linkId': {
+        linkId: LINK,
+        expiresAt: '2026-03-01T00:00:00.000Z',
+        installCap: 9,
+        url: URL_WITH_KEY,
       },
       'POST /v1/catalog-links/:linkId/copy': { url: URL_WITH_KEY },
       'DELETE /v1/catalog-links/:linkId': { linkId: LINK, state: 'ended', url: URL_WITH_KEY },
@@ -1264,6 +1278,8 @@ describe('auditedRoutes', () => {
     // Act
     for (const [method, path] of [
       ['POST', '/v1/catalog-links'],
+      ['PUT', `/v1/catalog-links/${LINK}/version`],
+      ['PATCH', `/v1/catalog-links/${LINK}`],
       ['POST', `/v1/catalog-links/${LINK}/copy`],
       ['DELETE', `/v1/catalog-links/${LINK}`],
     ] as const)
@@ -1273,6 +1289,8 @@ describe('auditedRoutes', () => {
     const logged = records(journal);
     should(logged.map(record => record.event)).deepEqual([
       'catalog.link.minted',
+      'catalog.link.moved',
+      'catalog.link.changed',
       'catalog.link.copied',
       'catalog.link.ended',
     ]);
@@ -1283,10 +1301,15 @@ describe('auditedRoutes', () => {
       kind: 'public',
       expiresAt: '2026-02-01T00:00:00.000Z',
       installCap: 5,
+      created: true,
     });
     should(logged[1]?.subject).equal(LINK);
+    should(logged[1]?.detail).containEql({ from: 2, to: 3, sequence: 4 });
     should(logged[2]?.subject).equal(LINK);
-    should(logged[2]?.detail).containEql({ state: 'ended' });
+    should(logged[2]?.detail).containEql({ expiresAt: '2026-03-01T00:00:00.000Z', installCap: 9 });
+    should(logged[3]?.subject).equal(LINK);
+    should(logged[4]?.subject).equal(LINK);
+    should(logged[4]?.detail).containEql({ state: 'ended' });
     should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(
       /KEYKEY|BUNDLEBUNDLE|app\.example|A skill name/u,
     );

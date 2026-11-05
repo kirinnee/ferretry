@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { MachineAgendaPort, MachineMembersStore, MachineRaise } from '../../../src/lib/agenda/index.ts';
 import { AUTO_MOVE_FAILED_REF, AutoMoveFailures } from '../../../src/lib/warden/auto-move-failures.ts';
+import { INBOX_STUCK_REF, StuckInboxList } from '../../../src/lib/warden/inbox-stuck-list.ts';
 import { INPUT_STUCK_REF, StuckInputList } from '../../../src/lib/warden/input-stuck-list.ts';
 import { ORPHANS_REF, OrphanList } from '../../../src/lib/warden/orphan-list.ts';
 import type { WardenCardNotice } from '../../../src/lib/warden/orphans.ts';
@@ -267,5 +268,55 @@ describe('the stuck-input item (B144)', () => {
     await list.add(stuck('annabeth', '2026-11-02T15:00:00Z'));
     await list.remove('annabeth');
     should(resolved).eql([INPUT_STUCK_REF]);
+  });
+});
+
+describe('the stuck-inbox item (B148)', () => {
+  const stuck = (sessionId: string, since: string) => ({
+    sessionId,
+    title: sessionId,
+    line: `${sessionId}: 3 messages waiting, oldest 30m past due — the safe re-check did not move it`,
+    since,
+  });
+
+  it('should list every stuck inbox in one item that pings, oldest wait first, and name a single one', async () => {
+    const { port, raised } = machine();
+    const list = new StuckInboxList(new Members(), port);
+
+    await list.add(stuck('ryu', '2026-11-02T08:12:00Z'));
+    should(raised[0]).containDeep({
+      ref: INBOX_STUCK_REF,
+      members: ['ryu'],
+      request: {
+        title: 'ryu’s inbox is stuck',
+        subject: 'ryu: 3 messages waiting, oldest 30m past due — the safe re-check did not move it',
+        notice: true,
+        ping: true,
+      },
+    });
+    await list.add(stuck('elta', '2026-11-03T15:49:00Z'));
+    should(raised[1]?.request.title).equal('2 ferrets have stuck inboxes');
+    should(raised[1]?.request.waitingSince).equal('2026-11-02T08:12:00Z');
+    should(raised[1]?.request.context).match(/- elta: 3 messages waiting[\s\S]*- ryu: 3 messages waiting/);
+  });
+
+  it('should list twelve and count the rest', async () => {
+    const { port, raised } = machine();
+    const list = new StuckInboxList(new Members(), port);
+
+    for (let index = 10; index < 24; index += 1) await list.add(stuck(`f${index}`, `2026-11-02T08:${index}:00Z`));
+    should(raised.at(-1)?.request.title).equal('14 ferrets have stuck inboxes');
+    should(raised.at(-1)?.request.context).match(/…and 2 more\.$/);
+    should(raised.at(-1)?.members).have.length(14);
+  });
+
+  it('should close the item when the last inbox drains, and ignore one it never held', async () => {
+    const { port, resolved, raised } = machine();
+    const list = new StuckInboxList(new Members(), port);
+    await list.remove('nobody');
+    should(raised).be.empty();
+    await list.add(stuck('ryu', '2026-11-02T08:12:00Z'));
+    await list.remove('ryu');
+    should(resolved).eql([INBOX_STUCK_REF]);
   });
 });

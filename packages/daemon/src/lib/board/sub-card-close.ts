@@ -28,6 +28,10 @@ const hasMergedPr = (card: Pick<BoardTask, 'links'>): boolean => card.links.prs.
 /** Whether the card has no PR that is open or merged: a review or research helper, or work that shipped nothing. */
 export const isPrFreeHelper = (card: Pick<BoardTask, 'links'>): boolean => !hasOpenPr(card) && !hasMergedPr(card);
 
+/** A sub-card handed to another ferret: a helper's card, never the lead's own bookkeeping. */
+export const isHandedHelper = (card: Pick<BoardTask, 'parent' | 'assignee' | 'owner'>): boolean =>
+  isSubCard(card) && card.assignee !== null && card.assignee !== card.owner;
+
 /** A sub-card that is still live and has somewhere to close to. */
 const closable = (card: BoardTask, laneSet: LaneSet): boolean => {
   const category = categoryOf(laneSet, card.laneId);

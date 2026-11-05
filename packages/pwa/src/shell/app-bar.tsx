@@ -570,21 +570,8 @@ export interface AppTabBarProps {
   readonly onOpenPalette: () => void;
   /** Open Agenda items across every paired machine: the Inbox tab's badge. */
   readonly agendaCount?: number;
-  /** Cards to test plus cards waiting on the owner, across every machine: the Board tab's badge. */
-  readonly boardCount?: number;
   /** The shell's What's new door: a row in More, so release notes are findable from the phone's own menu. */
   readonly whatsNew?: { readonly open: () => void; readonly unread: boolean };
-}
-
-/** The Board tab's count: the same pill as the Inbox's, announced as what it counts. */
-function BoardCountBadge({ count }: { readonly count: number }) {
-  if (count <= 0) return null;
-  return (
-    <>
-      <UnreadBadge announce={false} className="kt-tabbar__badge" count={count} />
-      <span className="sr-only">{`${count} board ${count === 1 ? 'card needs' : 'cards need'} you`}</span>
-    </>
-  );
 }
 
 const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
@@ -615,7 +602,6 @@ export function AppTabBar({
   onNavigate,
   onOpenPalette,
   agendaCount = 0,
-  boardCount = 0,
   whatsNew,
 }: AppTabBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -639,7 +625,6 @@ export function AppTabBar({
         <span className="kt-tabbar__icon">
           {TAB_ICONS[id]}
           {id === 'attention' ? <AgendaCountBadge className="kt-tabbar__badge" count={agendaCount} /> : null}
-          {id === 'board' ? <BoardCountBadge count={boardCount} /> : null}
         </span>
         <span className="kt-tabbar__label">{destination.label}</span>
       </RouteLink>

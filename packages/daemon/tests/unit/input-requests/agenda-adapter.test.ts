@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type AgendaId, AgendaItemSchema } from '@ferretry/protocol';
 import should from 'should';
+import { closestAgendaLink } from '../../../src/lib/agenda/closest.ts';
 import {
   type AgendaLedger,
   type AgendaLedgerRepository,
@@ -87,6 +88,30 @@ describe('InputAgendaAdapter', () => {
     });
     should(item).not.have.property('ask');
     should(item?.blockingNow).not.equal(true);
+  });
+
+  it('should link the card to the open agenda it belongs with, and name none when no finder answers', async () => {
+    // Arrange — the finder sees the prompt and the ask, and names the agenda the card is part of.
+    const { service } = world();
+    const seen: { sessionId: string; prompt: string }[] = [];
+    const linked = new InputAgendaAdapter(service, async (sessionId, input) => {
+      seen.push({ sessionId, prompt: input.prompt });
+      return { id: 'A3', title: 'Deploy the relay' };
+    });
+    const failing = new InputAgendaAdapter(service, async () => {
+      throw new Error('search is down');
+    });
+
+    // Act
+    const id = await raisedId(linked);
+    const other = await raisedId(failing, card({ requestId: 'b'.repeat(32) }));
+    const listed = await service.list(SESSION);
+
+    // Assert — a failed search never stops the card: it is raised, linking nothing.
+    const items = listed.ok ? listed.value.items : [];
+    should(seen).eql([{ sessionId: SESSION, prompt: 'sudo password for deploy' }]);
+    should(items.find(item => item.id === id)?.links).eql([closestAgendaLink({ id: 'A3', title: 'Deploy the relay' })]);
+    should(items.find(item => item.id === other)?.links).be.undefined();
   });
 
   it('should keep the subject on one line when the ask carries a line break', async () => {

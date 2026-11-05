@@ -15,6 +15,8 @@ export type {
   CatalogBlobStore,
   CatalogDocumentStore,
   CatalogIdentitySource,
+  LinkServing,
+  LinkUsage,
   RawCatalogs,
   McpDirectory,
   SkillDirectory,

@@ -28,4 +28,23 @@ describe('withRevive', () => {
     should((await reader.get('x'))?.revive).deepEqual(reviveRuling('failed'));
     should(await reader.get('none')).be.undefined();
   });
+
+  it('should answer the same view object for the same input view, and a new one for a new input', async () => {
+    // Arrange
+    const held = [view('a', 'running'), view('b', 'stopped')];
+    const subject = withRevive({ list: async () => held, get: async () => undefined });
+    const first = await subject.list();
+
+    // Act
+    const second = await subject.list();
+    held[0] = view('a', 'failed');
+    const third = await subject.list();
+
+    // Assert
+    should(second[0]).equal(first[0]);
+    should(second[1]).equal(first[1]);
+    should(third[0]).not.equal(first[0]);
+    should(third[0]?.revive?.revivable).be.true();
+    should(third[1]).equal(first[1]);
+  });
 });

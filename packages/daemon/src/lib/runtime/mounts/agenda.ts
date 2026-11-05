@@ -1,19 +1,28 @@
 import {
   AGENDA_PUSH_TITLE_LENGTH,
+  AgendaConversationPageSchema,
+  AgendaConversationQuerySchema,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
+  AgendaIdSchema,
+  type AgendaSeenResponse,
+  AgendaSeenRequestSchema,
+  type AgendaVersionList,
   type AgendaErrorCode,
   type AgendaSnapshot,
   clipAtWord,
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
+  legacyAgendaSnapshot,
   MAX_AGENDA_SUBJECT_LENGTH,
+  readsAgendaChannel,
+  restoredLegacyAgendaReply,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
@@ -70,6 +79,8 @@ const AGENDA_ERROR_STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   full: 409,
   corrupt: 500,
   use_input_form: 400,
+  ask_changed: 409,
+  stale: 409,
 };
 
 /**
@@ -112,6 +123,13 @@ function pathSessionId(context: RouteContext): string {
 type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 
 /**
+ * The board in the shape its caller reads: a caller that has not said it reads the channel (`x-fy-agenda-channel`)
+ * gets the legacy projection, so an app that shipped before it never meets an item its strict schema refuses.
+ */
+export const servedAgendaSnapshot = (context: RouteContext, snapshot: AgendaSnapshot): AgendaSnapshot =>
+  readsAgendaChannel(context.request.headers) ? snapshot : legacyAgendaSnapshot(snapshot);
+
+/**
  * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
  * but not yet proven to arrive (`delivery`), so the owner's screen can say "Sending…". An outbox that
  * cannot be read is left off: the board is the answer.
@@ -131,7 +149,9 @@ async function withReplies(replies: HeldReplies, sessionId: string, snapshot: Ag
 async function list(agenda: AgendaService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
-  return result.ok ? jsonResponse(await withReplies(replies, sessionId, result.value)) : refusal(result.error);
+  return result.ok
+    ? jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, result.value)))
+    : refusal(result.error);
 }
 
 /**
@@ -148,7 +168,58 @@ async function sendReplies(
   const before = await agenda.list(sessionId);
   if (!before.ok) return refusal(before.error);
   await replies.sendNow(sessionId);
-  return jsonResponse(await withReplies(replies, sessionId, before.value));
+  return jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, before.value)));
+}
+
+/** The item id in the path, or a 400: the same grammar the board uses. */
+function pathItemId(context: RouteContext): string {
+  const parsed = AgendaIdSchema.safeParse(decodeParameter(context.params.get('id') ?? ''));
+  if (!parsed.success) throw new ApiError(400, 'the item id in the path is not an agenda id', 'invalid');
+  return parsed.data;
+}
+
+/** Which device is asking: a paired device by its id, and the owner at the host by one name for all of its tools. */
+const deviceOf = (context: RouteContext): string =>
+  context.credential?.tokenClass === 'device' ? context.credential.deviceId : 'host';
+
+/** `GET …/agenda/:id/versions`: every version kept of an item, oldest first, and this device's last seen. */
+async function listVersions(agenda: AgendaService, context: RouteContext): Promise<ApiResponse> {
+  const sessionId = pathSessionId(context);
+  const id = pathItemId(context);
+  const result = await agenda.versionsOf(sessionId, id, deviceOf(context));
+  if (!result.ok) return refusal(result.error);
+  const { versions, seen } = result.value;
+  const body: AgendaVersionList = {
+    sessionId,
+    id,
+    latest: versions.at(-1)?.version ?? 0,
+    ...(seen === undefined ? {} : { seen }),
+    versions: [...versions],
+  };
+  return jsonResponse(body);
+}
+
+/** `GET …/agenda/:id/versions/:version`: one version of an item in full. */
+async function getVersion(agenda: AgendaService, context: RouteContext): Promise<ApiResponse> {
+  const sessionId = pathSessionId(context);
+  const id = pathItemId(context);
+  const version = Number(decodeParameter(context.params.get('version') ?? ''));
+  if (!Number.isSafeInteger(version) || version < 1) {
+    throw new ApiError(400, 'the version in the path is not a version number', 'invalid');
+  }
+  const result = await agenda.versionOf(sessionId, id, version);
+  return result.ok ? jsonResponse(result.value) : refusal(result.error);
+}
+
+/** `PUT …/agenda/:id/seen`: this device opened the item at this version. */
+async function markSeen(agenda: AgendaService, context: RouteContext): Promise<ApiResponse> {
+  const sessionId = pathSessionId(context);
+  const id = pathItemId(context);
+  const { version } = await parseBody(context.request, AgendaSeenRequestSchema);
+  const result = await agenda.markSeen(sessionId, id, version, deviceOf(context));
+  if (!result.ok) return refusal(result.error);
+  const body: AgendaSeenResponse = { seen: result.value };
+  return jsonResponse(body);
 }
 
 /**
@@ -168,8 +239,22 @@ async function apply(
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  const request = await parseBody(context.request, AgendaActionRequestSchema);
+  let request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
+  // Restore a legacy Retry before gate/config side effects as well as in the atomic ledger transition.
+  if (
+    actor.kind === 'human' &&
+    !readsAgendaChannel(context.request.headers) &&
+    request.action === 'resolve' &&
+    request.response !== undefined &&
+    (gates !== undefined || config !== undefined)
+  ) {
+    const board = await agenda.list(sessionId);
+    if (!board.ok) return refusal(board.error);
+    const id = request.id;
+    const item = board.value.items.find(item => item.id === id);
+    if (item !== undefined) request = restoredLegacyAgendaReply(item, request);
+  }
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     request.action === 'resolve' && request.response !== undefined && gates !== undefined
@@ -180,12 +265,14 @@ async function apply(
           note: request.note,
           actor,
           gate: request.gate,
+          cardAsk: request.cardAsk,
+          askVersion: request.askVersion,
           attachments: request.attachments,
         })
       : undefined;
   // Files belong to a card's gate answer: an answer that is not one has nothing to carry them to.
   if (request.action === 'resolve' && request.attachments !== undefined && gated === undefined) {
-    throw new ApiError(400, 'files can only come with the answer to a gate item', 'invalid');
+    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
   }
   // Not needed on a gate item asks the same grant an answer does.
   if (request.action === 'dismiss' && gates !== undefined) {
@@ -217,28 +304,56 @@ async function apply(
               ? agenda.discuss(sessionId, request.id, actor, request.note)
               : request.action === 'surface'
                 ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
-                : request.action === 'snooze'
-                  ? agenda.snooze(sessionId, request.id, request.until, actor)
-                  : request.action === 'unsnooze'
-                    ? agenda.unsnooze(sessionId, request.id, actor)
-                    : request.action === 'dismiss'
-                      ? agenda.dismiss(sessionId, request.id, actor, request.note)
-                      : request.response === undefined
-                        ? agenda.resolve(sessionId, request.id, actor, request.note)
-                        : agenda.answer(
+                : request.action === 'rest'
+                  ? agenda.rest(sessionId, request.id, request.why, actor)
+                  : request.action === 'log'
+                    ? agenda.log(sessionId, request.id, request.mode, request.text, actor, request.messageId)
+                    : request.action === 'merge'
+                      ? agenda.merge(sessionId, request.id, request.from, actor)
+                      : request.action === 'split'
+                        ? agenda.split(
                             sessionId,
                             request.id,
-                            request.response,
+                            { source: 'agent-raised', sourceRef: null, ...request.item },
                             actor,
-                            confirmed?.note ?? request.note,
-                          ));
+                            request.moveCards,
+                          )
+                        : request.action === 'snooze'
+                          ? agenda.snooze(sessionId, request.id, request.until, actor)
+                          : request.action === 'unsnooze'
+                            ? agenda.unsnooze(sessionId, request.id, actor)
+                            : request.action === 'dismiss'
+                              ? agenda.dismiss(sessionId, request.id, actor, request.note, request.askVersion)
+                              : request.response === undefined
+                                ? agenda.resolve(
+                                    sessionId,
+                                    request.id,
+                                    actor,
+                                    request.note,
+                                    'board',
+                                    request.askVersion,
+                                  )
+                                : agenda.answer(
+                                    sessionId,
+                                    request.id,
+                                    request.response,
+                                    actor,
+                                    confirmed?.note ?? request.note,
+                                    'board',
+                                    undefined,
+                                    request.askVersion,
+                                  ));
   if (!mutation.ok) return refusal(mutation.error);
-  const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
+  const written =
+    mutation.change === 'created' ||
+    mutation.change === 'split' ||
+    mutation.change === 'refreshed' ||
+    mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAgendaWriting(mutation.item) : [];
   const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...(await withReplies(replies, sessionId, mutation.snapshot)),
+    ...servedAgendaSnapshot(context, await withReplies(replies, sessionId, mutation.snapshot)),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),
@@ -344,6 +459,58 @@ export function agendaRoutes(
       consultsGrants: true,
       noStore: true,
       handle: handleApply,
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/agenda/:id/conversation',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      handle: async context => {
+        const query = AgendaConversationQuerySchema.safeParse({
+          index: queryValue(context.request, 'index'),
+          offset: queryValue(context.request, 'offset'),
+          version: queryValue(context.request, 'version'),
+        });
+        if (!query.success)
+          throw new ApiError(
+            400,
+            'conversation cursor must use nonnegative integers and a positive version',
+            'invalid',
+          );
+        const result = await agenda.conversationOf(
+          pathSessionId(context),
+          pathItemId(context),
+          query.data.index,
+          query.data.offset,
+          query.data.version,
+        );
+        return result.ok ? jsonResponse(AgendaConversationPageSchema.parse(result.value)) : refusal(result.error);
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/agenda/:id/versions',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      handle: async context => await listVersions(agenda, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/agenda/:id/versions/:version',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      handle: async context => await getVersion(agenda, context),
+    },
+    {
+      method: 'PUT',
+      path: '/v1/sessions/:sessionId/agenda/:id/seen',
+      minimum: 'operator',
+      caller: 'person',
+      noStore: true,
+      handle: async context => await markSeen(agenda, context),
     },
     {
       method: 'POST',

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { gateAnswers, gateAskOptions, type AgendaItem } from '@ferretry/protocol';
+import { type AgendaItem, gateAnswers, gateAskOptions } from '@ferretry/protocol';
 import { swipeTargets } from '../../src/lib/agenda-answers.ts';
+import { cardModel } from '../../src/lib/agenda-card-model.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
   attachedGateLead,
@@ -9,13 +10,14 @@ import {
   gateAsksWords,
   gateHeld,
   gateReopenOption,
+  gateWhySubject,
   gateWordsFor,
   isGateItem,
   toGateAction,
   toTestBesideGates,
 } from '../../src/lib/gate-items.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
-import { agendaItem } from '../support/agenda-inbox.tsx';
+import { agendaItem, choices } from '../support/agenda-inbox.tsx';
 import { boardModelOf, card } from './board-support.ts';
 
 const gate = (labels: readonly [string, 'next' | 'lane' | 'reopen-with-agenda' | 'close'][], cardId = 'F1') =>
@@ -70,6 +72,20 @@ describe('a gate item answers as a plain multiple choice', () => {
     const attachments = { from: 'sess-g', ids: [`att_${'a'.repeat(64)}`] };
     expect(gateAnswerAction('Not good', 'blank', false, attachments)).toMatchObject({ attachments });
     expect(gateAnswerAction('Not good', 'blank')).not.toHaveProperty('attachments');
+  });
+
+  test('an answer from an attached gate names the ask it was drawn for', () => {
+    const asked = gate([['Done', 'close']]);
+    expect(gateAnswerAction('Done', '', asked)).toMatchObject({ gate: true, cardAsk: 'gate:F1:tested:1' });
+    expect(gateAnswerAction('Done', '', true)).not.toHaveProperty('cardAsk');
+    expect(toGateAction(gateAnswerAction('Done', ''), asked)).toMatchObject({
+      gate: true,
+      cardAsk: 'gate:F1:tested:1',
+    });
+    expect(toGateAction({ kind: 'dismiss', label: 'Not needed' }, asked)).toEqual({
+      kind: 'dismiss',
+      label: 'Not needed',
+    });
   });
 
   test('gateAnswerAction builds the same action from the label and the words', () => {
@@ -153,10 +169,39 @@ describe('a gate attached to a thread', () => {
 
   test('leads with the card title: ready to test when its options reopen it, else the lane', () => {
     expect(attachedGateLead({ ...twoOptions, cardTitle: 'Badge colour' })).toBe('Badge colour is ready to test.');
-    expect(attachedGateLead(twoOptions)).toBe('is ready to test.');
+    expect(attachedGateLead(twoOptions)).toBe('It is ready to test.');
     const review = { ...twoOptions, laneName: 'Review', options: [{ ...twoOptions.options[0], outcome: 'advance' }] };
     expect(attachedGateLead({ ...review, cardTitle: 'Badge colour' } as never)).toBe('Badge colour is at Review.');
-    expect(attachedGateLead(review as never)).toBe('is at Review.');
+    expect(attachedGateLead(review as never)).toBe('It is at Review.');
+  });
+
+  // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and drew no button for it.
+  test('keeps none of the thread’s own answer shape, so a thread of questions, steps or a form still offers the card’s options', () => {
+    const plan = gate([['OK to build', 'next']], 'F923');
+    const hosts: Partial<AgendaItem>[] = [
+      {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'a' }, { question: 'b' }, { question: 'c' }],
+      },
+      { kind: 'task', ask: { kind: 'task' } as never, steps: ['Open it', 'Rotate it'], stepsDone: [0] },
+      { kind: 'form', ask: { kind: 'open-question' }, fields: [{ id: '1', type: 'text', question: 'Why?' }] as never },
+      {
+        kind: 'choice',
+        ask: choices('Red', 'Blue'),
+        optionDetails: [{ label: 'Red', detail: 'warm' }],
+        recommendation: { decision: 'Red', why: 'warm' },
+      } as Partial<AgendaItem>,
+    ];
+    for (const host of hosts) {
+      const view = attachedGateView(agendaItem('A304', { ...host, gateAttached: plan } as Partial<AgendaItem>));
+      expect(view?.questions).toBeUndefined();
+      expect(view?.steps).toBeUndefined();
+      expect(view?.fields).toBeUndefined();
+      expect(view?.recommendation).toBeUndefined();
+      // A one-option gate offers "Not yet" beside it, as on every gate surface.
+      expect(cardModel(view as AgendaItem).answers.map(answer => answer.label)).toEqual(['Not yet', 'OK to build']);
+    }
   });
 
   test('is nothing for an item with no attachment, a gate item or a notice', () => {
@@ -274,5 +319,90 @@ describe('each swipe on a real gate item means what the protocol says', () => {
         Object.fromEntries(gateAnswers(g).map(answer => [answer.direction, answer.label])),
       );
     }
+  });
+});
+
+describe('the Not good box names the CARD being tried, never the agenda question', () => {
+  const notGood = {
+    kind: 'respond',
+    label: 'Not good',
+    response: { kind: 'multiple-choice', choice: 'Not good' },
+    gate: true,
+  } as const;
+  const question = (extra: Partial<AgendaItem>): AgendaItem =>
+    agendaItem('A9', {
+      subject: 'Which colour should the unread badge be, blue or green?',
+      kind: 'choice',
+      ...extra,
+    } as Partial<AgendaItem>);
+
+  test('a card ask on a question thread is named by its card title and id', () => {
+    const asked = {
+      ...gate(
+        [
+          ['Done', 'close'],
+          ['Not good', 'reopen-with-agenda'],
+        ],
+        'F61',
+      ),
+      cardTitle: 'Pairing a second phone',
+    };
+    const item = question({ gateAttached: asked });
+    expect(gateWhySubject(item, notGood)).toBe('Pairing a second phone (&F61)');
+  });
+
+  test('the answer names WHICH card ask: the second card is named, not the first', () => {
+    const first = {
+      ...gate(
+        [
+          ['Done', 'close'],
+          ['Not good', 'reopen-with-agenda'],
+        ],
+        'F61',
+      ),
+      cardTitle: 'Pairing a second phone',
+    };
+    const second = {
+      ...gate(
+        [
+          ['Done', 'close'],
+          ['Not good', 'reopen-with-agenda'],
+        ],
+        'F62',
+      ),
+      cardTitle: 'Badge colour',
+    };
+    const item = question({
+      gateAttached: first,
+      cardAsks: [
+        { gate: first, at: '2026-11-03T10:00:00.000Z' },
+        { gate: second, at: '2026-11-03T10:05:00.000Z' },
+      ],
+    } as Partial<AgendaItem>);
+    expect(gateWhySubject(item, toGateAction(notGood, second))).toBe('Badge colour (&F62)');
+  });
+
+  test('a gate item is named by its own title and card', () => {
+    const item = gateItem(twoOptions, { title: 'Pairing QR' });
+    const plain = {
+      kind: 'respond',
+      label: 'Not good',
+      response: { kind: 'multiple-choice', choice: 'Not good' },
+    } as const;
+    expect(gateWhySubject(item, plain)).toBe('Pairing QR (&F1)');
+  });
+
+  test('a card with no known title is named by its id alone', () => {
+    const item = question({ gateAttached: gate([['Not good', 'reopen-with-agenda']], 'F7') });
+    expect(gateWhySubject(item, notGood)).toBe('&F7');
+  });
+
+  test('with no card, the subject is used without its closing "?" so the heading never ends in two', () => {
+    const plain = {
+      kind: 'respond',
+      label: 'Not yet',
+      response: { kind: 'multiple-choice', choice: 'Not yet' },
+    } as const;
+    expect(gateWhySubject(question({}), plain)).toBe('Which colour should the unread badge be, blue or green');
   });
 });

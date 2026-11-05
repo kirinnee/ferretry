@@ -5,7 +5,6 @@ import { AgendaBriefSections, PointForm } from '../../../src/features/agenda/age
 import { AgendaQuickReplies } from '../../../src/features/agenda/agenda-quick-replies.tsx';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import { swipeMap } from '../../../src/lib/agenda-inbox.ts';
-import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -111,7 +110,7 @@ describe('Markdown in the card’s fields', () => {
   });
 });
 
-describe('the quick replies, lettered', () => {
+describe('the quick replies say each option’s own short label', () => {
   const draw = async (item: AgendaItem): Promise<void> => {
     view = await mount(
       <AgendaQuickReplies
@@ -121,7 +120,6 @@ describe('the quick replies, lettered', () => {
         model={cardModel(item)}
         onAct={() => {}}
         onSkip={() => {}}
-        options={itemOptions(item)}
         swipeable
       />,
     );
@@ -129,11 +127,11 @@ describe('the quick replies, lettered', () => {
   const buttons = (): HTMLButtonElement[] => [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-option]')];
   const said = (): string[] => buttons().map(button => button.querySelector('.fy-qr__label')?.textContent ?? '');
 
-  test('one row of letters in the list’s order (← ↑ →), each named by its full label, the recommended one marked', async () => {
+  test('one row of labels in the list’s order (← ↑ →), each named by its full label, the recommended one marked', async () => {
     await draw(jaeda);
     expect(root().querySelectorAll('fieldset')).toHaveLength(1);
     expect(buttons().map(button => button.dataset.agendaAnswer)).toEqual(['left', 'up', 'right']);
-    expect(said()).toEqual(['A', 'B', 'C']);
+    expect(said()).toEqual(['Lock the session row', 'Retry with backoff', 'Do nothing at all']);
     expect(buttons().map(button => button.dataset.agendaOption)).toEqual([
       'Lock the session row',
       'Retry with backoff',
@@ -149,12 +147,13 @@ describe('the quick replies, lettered', () => {
     expect(buttons()[1]?.hasAttribute('data-recommended')).toBe(false);
   });
 
-  test('a row reads one way: one label that is not a single word letters the whole row', async () => {
+  test('never a bare letter: a long label is cut at a word, and still sends its whole label', async () => {
     await draw(agendaItem('A60', { ask: choices('Looks good', 'Needs a different approach') } as Partial<AgendaItem>));
-    expect(said()).toEqual(['A', 'B']);
+    expect(said()).toEqual(['Looks good', 'Needs a different…']);
+    expect(buttons().map(button => button.dataset.agendaOption)).toEqual(['Looks good', 'Needs a different approach']);
     await view?.unmount();
     await draw(agendaItem('A63', { ask: choices('Looks good', 'Skip') } as Partial<AgendaItem>));
-    expect(said()).toEqual(['A', 'B']);
+    expect(said()).toEqual(['Looks good', 'Skip']);
     await draw(agendaItem('A64', { ask: choices('Ship', 'Skip') } as Partial<AgendaItem>));
     expect(said()).toEqual(['Ship', 'Skip']);
   });
@@ -164,7 +163,7 @@ describe('the quick replies, lettered', () => {
       ask: choices('Now and here', 'Later on today', 'Never ever again', 'Maybe some day'),
     });
     await draw(many);
-    expect(said()).toEqual(['A', 'B', 'C']);
+    expect(said()).toEqual(['Now and here', 'Later on today', 'Never ever again']);
     expect(root().querySelector('[data-agenda-more-row]')).toBeNull();
     expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
   });

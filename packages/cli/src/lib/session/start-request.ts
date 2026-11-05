@@ -1,4 +1,4 @@
-import { parseCompactAt, type StartSessionRequestInput } from '@ferretry/protocol';
+import { type BoardTaskId, parseCompactAt, type StartSessionRequestInput } from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment } from './ports.ts';
 
@@ -30,6 +30,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly teammateFallback?: boolean;
   readonly label?: string;
   readonly parent?: string;
+  /** An existing card the new session takes over (`--card`): assigned to it, no second card made. */
+  readonly card?: BoardTaskId;
   readonly model?: string;
   /** Only set when the caller typed `--fast`/`--no-fast`; unset leaves the harness's own default (off). */
   readonly fast?: boolean;
@@ -141,6 +143,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.teammateFallback === true ? { teammateFallback: true } : {}),
     ...(flags.label === undefined ? {} : { label: flags.label }),
     ...(parent === undefined ? {} : { parent }),
+    ...(flags.card === undefined ? {} : { card: flags.card }),
     ...(flags.model === undefined ? {} : { model: flags.model }),
     ...(flags.fast === undefined ? {} : { fast: flags.fast }),
     ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),

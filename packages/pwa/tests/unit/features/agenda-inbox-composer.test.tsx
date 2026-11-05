@@ -102,12 +102,12 @@ describe('the open Inbox item’s composer', () => {
     run(() => view.unmount());
   });
 
-  test('a form’s “not answered yet” line goes once a pick changes', async () => {
+  test('a form’s “nothing to send” line goes once a pick changes', async () => {
     const api = { send: async () => ({}) as never };
     const view = render(
       <AgendaInboxComposer
         answerForm={() => {
-          throw new Error('Not answered yet: 2. Alerts. Press Send again to send it as it is.');
+          throw new Error('Pick an answer or type something before you send the form.');
         }}
         clientFor={async () => api}
         compact

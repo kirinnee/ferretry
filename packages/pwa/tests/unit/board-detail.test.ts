@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgendaRef, AgendaSnapshot, BoardTaskEvent, PrLink } from '@ferretry/protocol';
-import { MAX_BOARD_NOTE_LENGTH } from '@ferretry/protocol';
 
 import {
   activityText,
   askOrigin,
   askSessions,
   askWords,
-  assignedMessage,
   collectAsks,
-  commentNote,
-  commentTag,
-  ferretComment,
   type HistoryContext,
   hasLinks,
   historyRows,
@@ -20,15 +15,10 @@ import {
   laneCategoryOf,
   laneNameOf,
   linkLabel,
-  NEW_CARD_PROBLEM_TEXT,
-  newCardProblems,
   nonBlockingAsks,
-  OWNER_CARD_SOURCE,
   prLine,
   type SessionAgenda,
-  startBrief,
   testSteps,
-  verdictLanes,
   written,
 } from '../../src/lib/board-detail.ts';
 import { card, laneSetFor } from './board-support.ts';
@@ -44,29 +34,6 @@ describe('lane lookups', () => {
     expect(laneNameOf(lanes, 'review')).toBe(lanes.lanes.find(lane => lane.id === 'review')?.name ?? '');
     expect(laneNameOf(lanes, 'gone')).toBe('gone');
     expect(laneNameOf(null, 'gone')).toBe('gone');
-  });
-});
-
-describe('verdictLanes', () => {
-  const verify = lanes.lanes.find(lane => lane.category === 'verify')?.id ?? '';
-
-  it('goes to Closed and to the last active lane from a verify lane', () => {
-    const active = lanes.lanes.filter(lane => lane.category === 'active');
-    expect(verdictLanes(lanes, verify)).toEqual({
-      closeLaneId: lanes.lanes.find(lane => lane.category === 'closed')?.id ?? null,
-      reworkLaneId: active[active.length - 1]?.id ?? null,
-    });
-  });
-
-  it('is absent outside a verify lane and without lanes', () => {
-    expect(verdictLanes(lanes, 'implement')).toBeNull();
-    expect(verdictLanes(lanes, 'gone')).toBeNull();
-    expect(verdictLanes(null, verify)).toBeNull();
-  });
-
-  it('has no close or rework lane when the set has neither', () => {
-    const bare = { lanes: lanes.lanes.filter(lane => lane.category === 'verify') };
-    expect(verdictLanes(bare, verify)).toEqual({ closeLaneId: null, reworkLaneId: null });
   });
 });
 
@@ -289,6 +256,10 @@ describe('history', () => {
     expect(rowOf('assigned', { from: null, to: 'x' }).text).toBe('assigned it to ferret x');
     expect(rowOf('assigned', { from: 'y', to: 'x' }).text).toBe('assigned it to ferret x (was ferret y)');
     expect(rowOf('assigned', { from: 'y', to: null }).text).toBe('took the assignee off');
+    expect(rowOf('assigned', { from: 'y', to: 'x', claimedFrom: 'y' }).text).toBe('claimed by ferret x from ferret y');
+    expect(rowOf('assigned', { from: 'y', to: 'x', returnedFrom: 'y' }).text).toBe(
+      'returned to ferret x: ferret y finished',
+    );
   });
 
   it('says a dependency, with an override when it had one', () => {
@@ -314,6 +285,7 @@ describe('history', () => {
     });
     expect(rowOf('field-edited', { field: 'title' })).toMatchObject({ text: 'edited the title', minor: true });
     expect(rowOf('field-edited', { field: 'howToTest' })).toMatchObject({ text: 'edited How to test', minor: true });
+    expect(rowOf('field-edited', { field: 'status' })).toMatchObject({ text: 'edited the status', minor: true });
     expect(rowOf('file-claimed', { path: 'a.ts' })).toMatchObject({ text: 'claimed a.ts', minor: true });
     expect(rowOf('file-released', { path: 'a.ts', reason: 'done' })).toMatchObject({
       text: 'released a.ts',
@@ -333,55 +305,6 @@ describe('nonBlockingAsks', () => {
     const task = { openAsks: open, waitingOnOwner: [{ sessionId: 's', id: 'A1' }] };
     expect(nonBlockingAsks(task)).toEqual([{ sessionId: 's', id: 'A2' }]);
     expect(nonBlockingAsks({ openAsks: open, waitingOnOwner: [] })).toEqual(open);
-  });
-});
-
-describe('messages the owner sends', () => {
-  it('tags a comment with the card', () => {
-    expect(commentTag({ id: 'F412' })).toBe('[re &F412]');
-    expect(ferretComment({ id: 'F412' }, '  look at this  ')).toBe('[re &F412] look at this');
-  });
-
-  it('trims a history note and bounds its length', () => {
-    expect(commentNote('  hi  ')).toBe('hi');
-    expect(commentNote('x'.repeat(MAX_BOARD_NOTE_LENGTH + 50))).toHaveLength(MAX_BOARD_NOTE_LENGTH);
-  });
-
-  it('briefs a started ferret with the title and the ask', () => {
-    const brief = startBrief({ title: ' Try it ', ask: ' do it ' });
-    expect(brief.startsWith('Try it\n\ndo it\n\n')).toBe(true);
-    expect(brief).toContain('board card');
-  });
-
-  it('tells a started ferret which card is its own', () => {
-    expect(assignedMessage({ id: 'F9', title: 'Try it' })).toBe(
-      '[re &F9] The owner assigned this card to you: Try it. Keep it current as you work.',
-    );
-  });
-});
-
-describe('newCardProblems', () => {
-  it('is empty for a ready card', () => {
-    expect(newCardProblems({ title: 'Try it', ask: 'do it' }, 's')).toEqual([]);
-  });
-
-  it('lists what is missing in the order the form shows it', () => {
-    expect(newCardProblems({ title: ' ', ask: ' ' }, null)).toEqual(['title-empty', 'ask-empty', 'assignee-missing']);
-  });
-
-  it('allows five words in a title and no more', () => {
-    expect(newCardProblems({ title: 'one two three four five', ask: 'x' }, 's')).toEqual([]);
-    expect(newCardProblems({ title: 'one two three four five six', ask: 'x' }, 's')).toEqual(['title-long']);
-  });
-
-  it('has words for every problem', () => {
-    expect(Object.keys(NEW_CARD_PROBLEM_TEXT).sort()).toEqual([
-      'ask-empty',
-      'assignee-missing',
-      'title-empty',
-      'title-long',
-    ]);
-    expect(OWNER_CARD_SOURCE).toBe('owner (board)');
   });
 });
 

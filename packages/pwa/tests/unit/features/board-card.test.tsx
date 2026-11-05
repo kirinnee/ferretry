@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { BoardCard, type BoardCardMoves } from '../../../src/features/board/board-card.tsx';
+import { BoardCard } from '../../../src/features/board/board-card.tsx';
 import { BoardLane } from '../../../src/features/board/board-lane.tsx';
-import { moveChoices } from '../../../src/lib/board-move.ts';
 import { ferretNamer } from '../../../src/lib/board-present.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
-import { boardModelOf, card, laneSetFor } from '../board-support.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { boardModelOf, card } from '../board-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const names = ferretNamer(new Map([['mvuc7tsf-0c3d50df', 'denisha']]));
@@ -22,25 +21,6 @@ afterEach(async () => {
 const cardOf = async (extra: Record<string, unknown> = {}) => {
   const model = await boardModelOf([card('F412', { title: 'Wire the board page', ...extra })]);
   return must(model.cards[0], 'a card');
-};
-
-const moves = (log: string[] = [], overrides: Partial<BoardCardMoves> = {}): BoardCardMoves => ({
-  choices: moveChoices(laneSetFor(), 'review'),
-  onMove: (_card, laneId) => void log.push(`move:${laneId}`),
-  closeLaneId: 'closed',
-  reworkLaneId: 'implement',
-  onDragStart: target => void log.push(`start:${target.task.id}`),
-  onDragEnd: () => void log.push('end'),
-  ...overrides,
-});
-
-const dragEvent = (type: string) => {
-  const event = new Event(type, { bubbles: true, cancelable: true });
-  const data = new Map<string, string>();
-  Object.defineProperty(event, 'dataTransfer', {
-    value: { effectAllowed: '', dropEffect: '', setData: (key: string, value: string) => data.set(key, value) },
-  });
-  return { event, data };
 };
 
 const draw = async (props: Partial<Parameters<typeof BoardCard>[0]> = {}) => {
@@ -143,203 +123,32 @@ describe('BoardCard', () => {
     expect(seen).toEqual(['/d/laptop/board/F412']);
   });
 
-  it('is not draggable and has no menu without moves', async () => {
-    const root = await draw();
-    expect(must(root.querySelector('li'), 'the card').getAttribute('draggable')).toBe('false');
-    expect(root.querySelector('.fy-board-card__more')).toBeNull();
+  it('is read-only: not draggable, no lane menu, and no owner button on any card in any lane or density', async () => {
+    for (const category of ['verify', 'shipped', 'closed', 'review'] as const) {
+      for (const density of ['page', 'side'] as const) {
+        const root = await draw({ category, density, touch: category === 'verify' });
+        expect(must(root.querySelector('li'), 'the card').hasAttribute('draggable')).toBe(false);
+        expect(root.querySelector('.fy-board-card__more')).toBeNull();
+        expect(root.querySelector('[role="menu"]')).toBeNull();
+        expect(root.querySelector('[data-dragging]')).toBeNull();
+        expect(root.querySelector('.fy-board-card__verdict')).toBeNull();
+        expect(root.querySelector('[data-verdict]')).toBeNull();
+        expect(root.querySelector('.fy-board-done')).toBeNull();
+        // The card is one link and nothing else: no button at all (Add to chat is only drawn where a chat asks).
+        expect(root.querySelectorAll('button')).toHaveLength(0);
+        expect(root.querySelectorAll('a')).toHaveLength(1);
+        await release();
+      }
+    }
   });
 
-  it('starts and ends a drag when it can be moved', async () => {
-    const log: string[] = [];
-    const root = await draw({ moves: moves(log), dragging: true });
-    const li = must(root.querySelector('li'), 'the card');
-    expect(li.getAttribute('draggable')).toBe('true');
-    expect(li.hasAttribute('data-dragging')).toBe(true);
-    const start = dragEvent('dragstart');
-    await interact(() => li.dispatchEvent(start.event));
-    expect(start.data.get('text/plain')).toContain('F412');
-    await interact(() => li.dispatchEvent(dragEvent('dragend').event));
-    expect(log).toEqual(['start:F412', 'end']);
-  });
-
-  it('opens a Move to… menu that marks moves back and sends the pick', async () => {
-    const log: string[] = [];
-    const root = await draw({ moves: moves(log) });
-    const open = must(root.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button');
-    expect(open.getAttribute('aria-label')).toBe('Move Wire the board page to…');
-    expect(root.querySelector('[role="menu"]')).toBeNull();
-    await interact(() => open.click());
-    const items = [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-    expect(items.map(item => item.textContent)).toEqual([
-      'Todo',
-      'Plan/Design',
-      'Implement',
-      'Merged',
-      'Released',
-      'To test',
-      'Closed',
-    ]);
-    expect(items.map(item => item.hasAttribute('data-backward'))).toEqual([
-      true,
-      true,
-      true,
-      false,
-      false,
-      false,
-      false,
-    ]);
-    await interact(() => must(items[2], 'Implement').click());
-    expect(log).toEqual(['move:implement']);
-    expect(root.querySelector('[role="menu"]')).toBeNull();
-  });
-
-  it('closes the menu on Escape and when focus leaves it, and has none without choices', async () => {
-    const root = await draw({ moves: moves() });
-    const open = () => must(root.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button');
-    await interact(() => open().click());
-    await interact(() => pressKey(open(), 'Escape'));
-    expect(root.querySelector('[role="menu"]')).toBeNull();
-    await interact(() => pressKey(open(), 'Escape'));
-    await interact(() => open().click());
-    await interact(() =>
-      open().dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body })),
-    );
-    expect(root.querySelector('[role="menu"]')).toBeNull();
-    await release();
-    const bare = await draw({ moves: moves([], { choices: [] }) });
-    expect(bare.querySelector('.fy-board-card__more')).toBeNull();
-  });
-
-  it('offers Done and Not good on a card waiting to be tried', async () => {
-    const log: string[] = [];
-    const root = await draw({ category: 'verify', moves: moves(log) });
-    const works = must(root.querySelector<HTMLButtonElement>('[data-verdict="works"]'), 'Works');
-    const notGood = must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good');
-    expect(works.textContent).toBe('Done');
-    expect(works.title).toMatch(/^Mark .* done and close it$/u);
-    expect(notGood.textContent).toBe('Not good');
-    await interact(() => works.click());
-    await interact(() => notGood.click());
-    expect(log).toEqual(['move:closed', 'move:implement']);
-  });
-
-  it('puts Not good ← on the left and Done → on the right, whichever Done control the card wears', async () => {
-    const order = (root: HTMLElement): string[] =>
-      [...root.querySelectorAll<HTMLElement>('.fy-board-card__verdict > button')].map(b => b.textContent?.trim() ?? '');
-    const plain = await draw({ category: 'verify', moves: moves() });
-    expect(order(plain)).toEqual(['Not good', 'Done']);
-    expect(plain.querySelector('[data-verdict="not-good"] svg')?.classList.contains('lucide-arrow-left')).toBe(true);
-    expect(plain.querySelector('[data-verdict="works"] svg')?.classList.contains('lucide-arrow-right')).toBe(true);
-    await release();
-    const done = { done: { kind: 'done', laneId: 'closed' } as const, press: () => undefined, atRelease: false };
-    const shared = await draw({ category: 'verify', done, moves: moves() });
-    const buttons = [...shared.querySelectorAll<HTMLElement>('.fy-board-card__verdict > button')];
-    expect(buttons.map(b => b.textContent?.trim())).toEqual(['Not good', 'Done']);
-    expect(buttons[0]?.dataset.verdict).toBe('not-good');
-    expect(buttons[1]?.classList.contains('fy-board-done')).toBe(true);
-    expect(buttons[1]?.querySelector('svg')?.classList.contains('lucide-arrow-right')).toBe(true);
-    expect(buttons[1]?.querySelector('svg')?.nextElementSibling).toBeNull();
-  });
-
-  it('leaves out a verdict button whose lane the project does not have, and all of them off the verify lane', async () => {
-    const onlyClose = await draw({ category: 'verify', moves: moves([], { reworkLaneId: null }) });
-    expect(onlyClose.querySelector('[data-verdict="not-good"]')).toBeNull();
-    expect(onlyClose.querySelector('[data-verdict="works"]')).not.toBeNull();
-    await release();
-    const onlyRework = await draw({ category: 'verify', moves: moves([], { closeLaneId: null }) });
-    expect(onlyRework.querySelector('[data-verdict="works"]')).toBeNull();
-    expect(onlyRework.querySelector('[data-verdict="not-good"]')).not.toBeNull();
-    await release();
-    const neither = await draw({ category: 'verify', moves: moves([], { closeLaneId: null, reworkLaneId: null }) });
-    expect(neither.querySelector('.fy-board-card__verdict')).toBeNull();
-    await release();
-    const elsewhere = await draw({ moves: moves() });
-    expect(elsewhere.querySelector('.fy-board-card__verdict')).toBeNull();
-    await release();
-    const side = await draw({ category: 'verify', density: 'side', moves: moves() });
-    expect(side.querySelector('.fy-board-card__verdict [data-verdict="not-good"]')).not.toBeNull();
-  });
-
-  it('closes a card waiting to be tried with the shared Done, in place of Close, and keeps Not good', async () => {
-    const log: string[] = [];
-    const done = {
-      done: { kind: 'done', laneId: 'closed' } as const,
-      press: () => void log.push('done'),
-      atRelease: false,
-    };
-    const root = await draw({ category: 'verify', done, moves: moves(log) });
-    expect(root.querySelector('[data-verdict="works"]')).toBeNull();
-    const button = must(root.querySelector<HTMLButtonElement>('.fy-board-card__verdict .fy-board-done'), 'Done');
-    expect(button.textContent).toContain('Done');
-    await interact(() => button.click());
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good').click());
-    expect(log).toEqual(['done', 'move:implement']);
-    await release();
-    const touch = await draw({ category: 'verify', done, moves: moves(), touch: true });
-    expect(touch.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
-  });
-
-  it('keeps a Done verdict button when the card has no Done control to offer', async () => {
-    const reopen = { done: { kind: 'reopen', laneId: 'implement' } as const, press: () => undefined, atRelease: false };
-    const root = await draw({ category: 'verify', done: reopen, moves: moves() });
-    expect(root.querySelector('[data-verdict="works"]')).not.toBeNull();
-    expect(root.querySelector('.fy-board-done')).toBeNull();
-  });
-
-  it('gives a Released card its own Done row, and none where Done does not apply', async () => {
-    const log: string[] = [];
-    const done = {
-      done: { kind: 'done', laneId: 'closed' } as const,
-      press: () => void log.push('done'),
-      atRelease: true,
-    };
-    const root = await draw({ category: 'shipped', done, moves: moves() });
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('.fy-board-card__verdict .fy-board-done'), 'Done').click(),
-    );
-    expect(log).toEqual(['done']);
-    await release();
-    const merged = await draw({ category: 'shipped', done: { ...done, atRelease: false }, moves: moves() });
-    expect(merged.querySelector('.fy-board-done')).toBeNull();
-    await release();
-    const side = await draw({ category: 'shipped', density: 'side', done, moves: moves() });
-    expect(side.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
-    await release();
-    const bare = await draw({ category: 'shipped' });
-    expect(bare.querySelector('.fy-board-done')).toBeNull();
-  });
-
-  it('puts Done (or Reopen) first in the ⋯ menu, even when there are no lanes to move to', async () => {
-    const log: string[] = [];
-    const done = {
-      done: { kind: 'done', laneId: 'closed' } as const,
-      press: () => void log.push('done'),
-      atRelease: false,
-    };
-    const root = await draw({ done, moves: moves(log) });
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
-    );
-    const first = must(root.querySelector<HTMLButtonElement>('[role="menuitem"]'), 'the first item');
-    expect(first.textContent).toBe('Done');
-    expect(first.dataset.done).toBe('done');
-    await interact(() => first.click());
-    expect(log).toEqual(['done']);
-    expect(root.querySelector('[role="menu"]')).toBeNull();
-    await release();
-    const reopen = {
-      done: { kind: 'reopen', laneId: 'implement' } as const,
-      press: () => void log.push('reopen'),
-      atRelease: false,
-    };
-    const closed = await draw({ category: 'closed', done: reopen, moves: moves([], { choices: [] }) });
-    await interact(() =>
-      must(closed.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu button').click(),
-    );
-    const only = [...closed.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-    expect(only.map(item => item.textContent)).toEqual(['Reopen']);
-    await interact(() => must(only[0], 'Reopen').click());
-    expect(log).toEqual(['done', 'reopen']);
+  it('keeps "Add to chat" where a chat asks for it: it writes to the draft, never to the card', async () => {
+    const added: string[] = [];
+    const root = await draw({ onAddToChat: target => void added.push(target.task.id) });
+    const buttons = [...root.querySelectorAll('button')];
+    expect(buttons.map(button => button.getAttribute('data-add-to-chat'))).toEqual(['F412']);
+    await interact(() => must(buttons[0], 'the button').click());
+    expect(added).toEqual(['F412']);
   });
 
   it('marks a card whose lane is unknown as unplaced', async () => {
@@ -379,29 +188,12 @@ describe('BoardLane', () => {
     expect(view.container.querySelectorAll('li')).toHaveLength(0);
   });
 
-  it('takes a drop only while it accepts one', async () => {
-    const dropped: string[] = [];
-    view = await mount(lane({ onDropCard: () => void dropped.push('drop') }));
+  it('is not a drop target: a drag over it is left alone', async () => {
+    view = await mount(lane());
     const section = must(view.container.querySelector('section'), 'the lane');
-    expect(section.dataset.drop).toBeUndefined();
-    await interact(() => section.dispatchEvent(dragEvent('dragover').event));
-    await interact(() => section.dispatchEvent(dragEvent('drop').event));
-    expect(dropped).toEqual([]);
-
-    await view.render(lane({ accepts: true, onDropCard: () => void dropped.push('drop') }));
-    expect(section.dataset.drop).toBe('ready');
-    await interact(() => section.dispatchEvent(dragEvent('dragover').event));
-    expect(section.dataset.drop).toBe('over');
-    await interact(() => section.dispatchEvent(dragEvent('dragleave').event));
-    expect(section.dataset.drop).toBe('ready');
-    await interact(() => section.dispatchEvent(dragEvent('dragover').event));
-    await interact(() => section.dispatchEvent(dragEvent('drop').event));
-    expect(dropped).toEqual(['drop']);
-    expect(section.dataset.drop).toBe('ready');
-  });
-
-  it('does not accept a drop it has no handler for', async () => {
-    view = await mount(lane({ accepts: true }));
-    expect(must(view.container.querySelector('section'), 'the lane').dataset.drop).toBeUndefined();
+    const over = new Event('dragover', { bubbles: true, cancelable: true });
+    await interact(() => section.dispatchEvent(over));
+    expect(over.defaultPrevented).toBe(false);
+    expect(section.hasAttribute('data-drop')).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { moveChoices, planMove } from '../../src/lib/board-move.ts';
+import { planMove } from '../../src/lib/board-move.ts';
 import { laneSetFor } from './board-support.ts';
 
 const lanes = laneSetFor();
@@ -27,31 +27,5 @@ describe('planMove', () => {
     expect(unknownTarget).toEqual({ kind: 'refused', message: "Lane nowhere is not on this project's board." });
     const unknownOrigin = planMove(lanes, 'ghost', 'review');
     expect(unknownOrigin.kind).toBe('refused');
-  });
-});
-
-describe('moveChoices', () => {
-  it('lists every other lane and marks the ones behind the card', () => {
-    const choices = moveChoices(lanes, 'review');
-    expect(choices.map(choice => choice.laneId)).toEqual([
-      'todo',
-      'plan',
-      'implement',
-      'merged',
-      'released',
-      'tested',
-      'closed',
-    ]);
-    expect(choices.filter(choice => choice.backward).map(choice => choice.laneId)).toEqual([
-      'todo',
-      'plan',
-      'implement',
-    ]);
-    expect(choices[0]?.name).toBe('Todo');
-  });
-
-  it('marks nothing backward for a lane the set does not know, and is empty without a lane set', () => {
-    expect(moveChoices(lanes, 'ghost').some(choice => choice.backward)).toBe(false);
-    expect(moveChoices(null, 'review')).toEqual([]);
   });
 });

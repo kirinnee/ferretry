@@ -328,6 +328,27 @@ describe('PushService.notify', () => {
     should(transport.sent.map(sent => sent.subscription.endpoint)).eql([two.subscription.endpoint]);
   });
 
+  it('should reach every device but the one that opened the item, and carry a clear as composed', async () => {
+    // Arrange — the owner holds device a (two browsers) and device b.
+    const mine = record();
+    const myOther = record({ id: 'push-99999999-9999-4999-8999-999999999999' });
+    const theirs = record({
+      id: 'push-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      deviceId: deviceId('b'),
+      subscription: subscription('https://fcm.googleapis.com/send/three'),
+    });
+    const { service, transport } = world({ records: [mine, myOther, theirs], granted: [deviceId('a'), deviceId('b')] });
+    const clear = { version: 1 as const, kind: 'clear' as const, eventKey: 'c1', sessionId: 's1', tags: ['t1'] };
+
+    // Act
+    const result = await service.notify({ payload: clear, exceptDevice: deviceId('a') });
+
+    // Assert
+    should(result).eql({ delivered: 1, failed: 0 });
+    should(transport.sent.map(sent => sent.subscription.endpoint)).eql([theirs.subscription.endpoint]);
+    should(JSON.parse(transport.sent[0]?.payload ?? '{}')).eql(clear);
+  });
+
   it('should tell a device unconditionally, with no preference row left to consult', async () => {
     // There is no server-stored preference any more: every enrolled device is sent every event, and
     // deciding whether to show it is entirely the browser's own local choice.

@@ -5,9 +5,10 @@
  * old idea of (i) + marquee to keep it into a single line!)" and "the card form have similar problem, and the padding
  * and margins make them even smaller".
  *
- *  - The title, the status dot, ‹ n of N ›, the clock, ⓘ and ✕ share ONE row. A title too long for it scrolls (a
- *    marquee) — or, under `prefers-reduced-motion`, ends at a whole word and "…" and opens in full on a tap. The ask moves
- *    behind ⓘ, whose panel hangs under the row and sticks with it.
+ *  - The title, the status dot, ‹ n of N ›, ⋯ and ✕ share ONE row. The title is ONE line (&F920, the owner: "make sure
+ *    title is marquee instead of wrap"): a marquee when too long, and where motion is reduced it is cut at a word with
+ *    the whole title a tap away; it is never drawn a second time. The summary is drawn on the card under the title
+ *    (F909), outside the sticky head; the quiet controls are behind ⋯.
  *  - The card is one border level: no frame, no padding of its own inside the view, so a form's fields use the column,
  *    which keeps a 16px gutter on a phone.
  *
@@ -147,7 +148,7 @@ describe('the open item’s head', () => {
   for (const { name } of VIEWPORTS)
     for (const family of FAMILIES)
       for (const scheme of ['light', 'dark'] as const) {
-        it(`is one row with a short title, the ask behind ⓘ (${name}, ${family}, ${scheme})`, async () => {
+        it(`is one row with a short title, the summary on the card under it (${name}, ${family}, ${scheme})`, async () => {
           const { tab, close } = await open(name, family, scheme, '&title=short');
           try {
             const { head, title, pager } = await headBox(tab);
@@ -155,102 +156,90 @@ describe('the open item’s head', () => {
             expect(title.bottom, 'the title is on the controls’ row').toBeLessThanOrEqual(pager.bottom + 1);
             expect(title.top, 'the title is on the controls’ row').toBeGreaterThanOrEqual(pager.top - 1);
             expect(title.right, 'the title ends before the controls').toBeLessThanOrEqual(pager.left + 1);
-            const ask = await tab.evaluate(
-              () => document.querySelector('[data-agenda-ask]')?.getClientRects().length ?? 0,
+            const summary = await tab.evaluate(
+              () => document.querySelector('[data-agenda-description]')?.getClientRects().length ?? 0,
             );
-            expect(ask, 'the ask is not drawn until ⓘ opens').toBe(0);
+            expect(summary, 'the summary is drawn on the card, not behind ⓘ').toBeGreaterThan(0);
             await shot(tab, name, `${family}-${scheme}`, 'short-title');
           } finally {
             await close();
           }
         });
 
-        it(`scrolls a long title in the same one row (${name}, ${family}, ${scheme})`, async () => {
-          const { tab, close } = await open(name, family, scheme, '&title=long');
-          try {
-            const { head } = await headBox(tab);
-            expect(head.height, 'a long title does not make the head taller').toBeLessThanOrEqual(ONE_ROW);
-            const state = await tab.evaluate(() => {
-              const title = document.querySelector('[data-agenda-title]') as HTMLElement;
-              const text = title.querySelector('.fy-item-view__title-text') as HTMLElement;
-              return {
-                marquee: title.getAttribute('data-marquee') !== null,
-                running: text.getAnimations().filter(a => a.playState === 'running').length,
-                overflowing: text.getBoundingClientRect().width > (text.parentElement as HTMLElement).clientWidth,
-              };
-            });
-            expect(state.overflowing, 'the title really is longer than its box').toBe(true);
-            expect(state.marquee, 'it is marked as scrolling').toBe(true);
-            expect(state.running, 'and it scrolls').toBe(1);
-            const room = await tab.evaluate(() => {
-              const title = document.querySelector('[data-agenda-title]') as HTMLElement;
-              const context = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
-              const style = getComputedStyle(title);
-              context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-              return { box: title.clientWidth, sixteenLetters: context.measureText('Which day works ').width };
-            });
-            expect(room.box, 'the title shows at least 16 characters before it scrolls').toBeGreaterThanOrEqual(
-              room.sixteenLetters,
-            );
-            await shot(tab, name, `${family}-${scheme}`, 'long-title');
-          } finally {
-            await close();
-          }
-        });
+        for (const motion of ['no-preference', 'reduce'] as const)
+          it(`keeps a long title on ONE line in the same row — a marquee, or cut at a word with the rest a tap away where motion is reduced — and never draws it twice (${name}, ${family}, ${scheme}, motion ${motion})`, async () => {
+            const { tab, close } = await open(name, family, scheme, '&title=long', motion);
+            try {
+              await tab.waitForSelector(
+                motion === 'reduce' ? '[data-agenda-title][data-cut]' : '[data-agenda-title][data-marquee]',
+              );
+              const { head, title, pager } = await headBox(tab);
+              expect(head.height, 'a long title does not make the head more than one row').toBeLessThanOrEqual(ONE_ROW);
+              expect(title.right, 'the title ends before the controls').toBeLessThanOrEqual(pager.left + 1);
+              const state = await tab.evaluate(() => {
+                const box = document.querySelector('[data-agenda-title]') as HTMLElement;
+                const text = box.querySelector('.fy-item-view__title-text') as HTMLElement;
+                const lineHeight = Number.parseFloat(getComputedStyle(box).lineHeight);
+                return {
+                  wrap: box.getAttribute('data-wrap') !== null,
+                  // A CSS animation (the marquee): a theme's colour transition is not the title moving.
+                  moving: text.getAnimations().filter(each => each instanceof CSSAnimation).length,
+                  shownLines: Math.round(box.clientHeight / lineHeight),
+                  cut: box.querySelector('.fy-item-view__title-cut')?.textContent ?? '',
+                  title: text.textContent ?? '',
+                  whole: document.querySelectorAll('[data-agenda-full-title]').length,
+                  controlsRight: (document.querySelector('.fy-item-view__pager') as HTMLElement).getBoundingClientRect()
+                    .right,
+                  width: document.documentElement.clientWidth,
+                };
+              });
+              expect(state.wrap, 'the head never wraps the title').toBe(false);
+              expect(state.shownLines, 'one line in the head').toBe(1);
+              expect(state.whole, 'never a second copy in the body').toBe(0);
+              expect(state.controlsRight, '‹ n/N ›, ⋯ and ✕ fit the screen').toBeLessThanOrEqual(state.width + 1);
+              if (motion === 'reduce') {
+                expect(state.moving, 'nothing moves').toBe(0);
+                expect(state.cut.endsWith('…'), 'cut at a word, with an ellipsis').toBe(true);
+                expect(state.title.startsWith(state.cut.slice(0, -1).trimEnd()), 'the cut is the title’s start').toBe(
+                  true,
+                );
+                await shot(tab, name, `${family}-${scheme}`, 'long-title-reduced');
+                await tab.locator('[data-agenda-title]').click();
+                await framesSettled(tab);
+                expect(
+                  await tab.locator('[data-agenda-title][data-expanded]').count(),
+                  'a tap shows the whole title',
+                ).toBe(1);
+              } else {
+                expect(state.moving, 'the title scrolls to its end and back').toBeGreaterThan(0);
+                await shot(tab, name, `${family}-${scheme}`, 'long-title');
+              }
+            } finally {
+              await close();
+            }
+          });
 
-        it(`ends a long title at a whole word and an ellipsis under reduced motion, and a tap opens it whole (${name}, ${family}, ${scheme})`, async () => {
-          const { tab, close } = await open(name, family, scheme, '&title=long', 'reduce');
-          try {
-            await tab.waitForSelector('[data-agenda-title][data-cut]');
-            const rowHeight = (await headBox(tab)).head.height;
-            expect(rowHeight).toBeLessThanOrEqual(ONE_ROW);
-            const still = await tab.evaluate(() => {
-              const text = document.querySelector('.fy-item-view__title-text') as HTMLElement;
-              const box = text.parentElement as HTMLElement;
-              const cut = box.querySelector('.fy-item-view__title-cut') as HTMLElement | null;
-              const whole = text.textContent ?? '';
-              const shown = cut?.textContent ?? '';
-              const stem = shown.slice(0, -1);
-              return {
-                animations: text.getAnimations().filter(a => a instanceof CSSAnimation).length,
-                shown,
-                endsInEllipsis: shown.endsWith('…'),
-                wholeWords: whole.startsWith(stem) && /\s/u.test(whole.charAt(stem.length)),
-                fitsOneLine: cut !== null && cut.getBoundingClientRect().width <= box.clientWidth,
-                oneLine: cut !== null && cut.getClientRects().length === 1,
-              };
-            });
-            expect(still.animations, 'nothing moves').toBe(0);
-            expect(still.endsInEllipsis, `the visible title ends in an ellipsis (${still.shown})`).toBe(true);
-            expect(still.wholeWords, 'and stops at a word boundary, never mid-word').toBe(true);
-            expect(still.fitsOneLine, 'and fits the one row').toBe(true);
-            expect(still.oneLine, 'drawn on a single line').toBe(true);
-            await shot(tab, name, `${family}-${scheme}`, 'long-title-reduced');
-            await tab.locator('[data-agenda-title]').click();
-            await framesSettled(tab);
-            const open = await headBox(tab);
-            expect(open.head.height, 'a tap shows the whole title').toBeGreaterThan(rowHeight + 20);
-            await shot(tab, name, `${family}-${scheme}`, 'long-title-expanded');
-            await tab.locator('[data-agenda-title]').click();
-            await framesSettled(tab);
-            expect((await headBox(tab)).head.height, 'a second tap folds it again').toBeLessThanOrEqual(rowHeight + 1);
-          } finally {
-            await close();
-          }
-        });
-
-        it(`opens the ask under the row from ⓘ, and the head still sticks (${name}, ${family}, ${scheme})`, async () => {
+        it(`draws a short title once, in the head (${name}, ${family}, ${scheme})`, async () => {
           const { tab, close } = await open(name, family, scheme, '&title=short');
           try {
-            const before = (await headBox(tab)).head.height;
-            await tab.locator('[data-agenda-info-toggle]').click();
-            await framesSettled(tab);
-            const opened = await headBox(tab);
-            expect(opened.head.height, 'the panel is inside the head').toBeGreaterThan(before + 16);
-            const ask = await tab.locator('[data-agenda-ask]').boundingBox();
-            expect(ask, 'the ask is drawn').not.toBeNull();
-            expect((ask?.y ?? 0) + (ask?.height ?? 0)).toBeLessThanOrEqual(opened.head.bottom + 1);
-            await shot(tab, name, `${family}-${scheme}`, 'info-open');
+            expect(await tab.locator('[data-agenda-full-title]').count()).toBe(0);
+          } finally {
+            await close();
+          }
+        });
+
+        it(`draws the summary under the title, on the card and outside the sticky head, and the head still sticks (${name}, ${family}, ${scheme})`, async () => {
+          const { tab, close } = await open(name, family, scheme, '&title=short');
+          try {
+            const { head } = await headBox(tab);
+            const description = await tab.locator('[data-agenda-description]').boundingBox();
+            expect(description, 'the summary is drawn').not.toBeNull();
+            expect(description?.y ?? 0, 'under the head, not inside it').toBeGreaterThanOrEqual(head.bottom - 1);
+            expect(
+              await tab.locator('[data-agenda-info-toggle]').count(),
+              'there is no ⓘ: the quiet controls are ⋯',
+            ).toBe(0);
+            await shot(tab, name, `${family}-${scheme}`, 'description');
             await tab.evaluate(() => {
               const body = document.querySelector('.fy-item-view__body') as HTMLElement;
               body.scrollTop = body.scrollHeight;

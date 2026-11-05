@@ -171,17 +171,18 @@ describe('Info › About this ferret', () => {
     expect(root.querySelector('[data-info-restart]')).toBeNull();
   });
 
-  it('holds the agenda in its own row, and none when the ferret is not in agenda mode', async () => {
-    const root = await draw({ agenda: <b data-test-agenda="">2 need you</b> });
+  it('says the agenda in one line that opens the Agenda tab, and has none when the ferret has no agenda', async () => {
+    const opened: string[] = [];
+    const counts = { 'needs-you': 2, resting: 1, snoozed: 0, resolved: 5 };
+    const root = await draw({ agenda: { counts, onOpen: () => opened.push('tab') } });
     const slot = must(root.querySelector('[data-info-agenda]'), 'agenda slot');
     expect(row(root, 'Agenda').contains(slot)).toBe(true);
-    expect(slot.textContent).toBe('2 need you');
+    expect(slot.textContent).toContain('2 need you · 1 resting · 0 snoozed · 5 resolved');
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-info-agenda-open]'), 'link').click());
+    expect(opened).toEqual(['tab']);
     await mounted?.unmount();
-    for (const none of [undefined, null]) {
-      const empty = await draw({ agenda: none });
-      expect(empty.querySelector('[data-info-agenda]')).toBeNull();
-      expect(rowLabels(empty)).not.toContain('Agenda');
-      await mounted?.unmount();
-    }
+    const empty = await draw();
+    expect(empty.querySelector('[data-info-agenda]')).toBeNull();
+    expect(rowLabels(empty)).not.toContain('Agenda');
   });
 });

@@ -4,6 +4,7 @@
  *   useBoard(store, machines, filters)   every paired machine's cards, grouped project → lane, with the
  *                                        header's counts; live (`board.changed`) and re-derived every 30s
  *   useBoardTask(store, machine, id)     one card in full, by `(machine, id)`
+ *   useBoardTasks(store, machine, ids)   several cards in full, in the order asked for
  *   useBoardProjects(store, machines)    each machine's projects with their lane sets
  *   useBoardActions(store, agenda, ms)   move / reopen / depend / note / link / drop / editField / answer
  *   useBoardFilters(...)                 the filter set read from, and written to, the URL query
@@ -14,7 +15,7 @@
  */
 
 import type { BoardTaskId } from '@ferretry/protocol';
-import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
 import {
@@ -26,6 +27,7 @@ import {
   parseBoardFilters,
   toServerQuery,
 } from '../lib/board-model.ts';
+import { boardPrivate } from '../lib/board-private-preference.ts';
 import {
   type BoardLoadStatus,
   type BoardMachineSlice,
@@ -132,12 +134,14 @@ export const useBoardTask = (
   store: DaemonBoardStore,
   machine: DaemonConnection | undefined,
   id: BoardTaskId,
+  options: { readonly beat?: boolean } = {},
 ): BoardTaskState => {
   const daemonId = machine?.daemonId;
+  const beat = options.beat !== false;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing is the deliberate key
   useEffect(
-    () => (machine === undefined ? undefined : store.watchTask(machine, id)),
-    [store, daemonId, machine?.baseUrl, machine?.deviceId, id],
+    () => (machine === undefined ? undefined : store.watchTask(machine, id, { beat })),
+    [store, daemonId, machine?.baseUrl, machine?.deviceId, id, beat],
   );
   return useSyncExternalStore(
     store.subscribe,
@@ -145,6 +149,39 @@ export const useBoardTask = (
     () => IDLE_BOARD_TASK,
   );
 };
+
+/**
+ * Several cards in full, in the order asked for, each read from `machine`. The list is rebuilt only when a
+ * card's state changed, so it is as stable as the states in it.
+ */
+export const useBoardTasks = (
+  store: DaemonBoardStore,
+  machine: DaemonConnection | undefined,
+  ids: readonly BoardTaskId[],
+  options: { readonly beat?: boolean } = {},
+): readonly BoardTaskState[] => {
+  const daemonId = machine?.daemonId;
+  const beat = options.beat !== false;
+  const wanted = ids.join(',');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing and the id list are the deliberate key
+  useEffect(() => {
+    if (machine === undefined) return undefined;
+    const releases = ids.map(id => store.watchTask(machine, id, { beat }));
+    return () => {
+      for (const release of releases) release();
+    };
+  }, [store, daemonId, machine?.baseUrl, machine?.deviceId, wanted, beat]);
+  const last = useRef<readonly BoardTaskState[]>([]);
+  const snapshot = (): readonly BoardTaskState[] => {
+    const next = ids.map(id => (daemonId === undefined ? IDLE_BOARD_TASK : store.taskState(daemonId, id)));
+    const same = next.length === last.current.length && next.every((state, index) => state === last.current[index]);
+    if (!same) last.current = next;
+    return last.current;
+  };
+  return useSyncExternalStore(store.subscribe, snapshot, () => NO_TASK_STATES);
+};
+
+const NO_TASK_STATES: readonly BoardTaskState[] = [];
 
 /** Each machine's projects and lane sets; a machine that does not serve them reads `served: false`. */
 export const useBoardProjects = (
@@ -193,7 +230,18 @@ export const useBoardFilters = (
   search: string,
   navigate: (search: string) => void,
 ): readonly [BoardFilters, (next: BoardFilters) => void] => {
-  const filters = useMemo(() => parseBoardFilters(search), [search]);
-  const set = useCallback((next: BoardFilters) => navigate(boardFiltersToSearch(next).toString()), [navigate]);
+  const showPrivate = useSyncExternalStore(boardPrivate.subscribe, boardPrivate.snapshot, () => false);
+  const defaults = useMemo(() => ({ agents: showPrivate }), [showPrivate]);
+  const filters = useMemo(() => parseBoardFilters(search, defaults), [search, defaults]);
+  const set = useCallback(
+    (next: BoardFilters) => {
+      // Only the toggle itself changes the device's choice: a link that said `agents=1` does not. The toggle
+      // writes the choice into the link too (`agents=1`; off is the plain link, as the device now defaults to off).
+      const toggled = next.agents !== filters.agents;
+      if (toggled) boardPrivate.set(next.agents);
+      navigate(boardFiltersToSearch(next, toggled ? undefined : { agents: showPrivate }).toString());
+    },
+    [filters.agents, navigate, showPrivate],
+  );
   return [filters, set];
 };

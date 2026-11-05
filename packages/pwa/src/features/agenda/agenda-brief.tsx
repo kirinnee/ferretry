@@ -1,7 +1,7 @@
 /**
  * THE STRUCTURED PART OF AN AGENDA ITEM, as sections in ONE fixed order, each only when the item has it:
  * Premise · Context · the questions · Decided so far · Still open · Options · Impact ·
- * Terms · Steps · More detail · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet
+ * Terms · Steps · The full picture · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet
  * and the board page), so a reader learns one layout.
  *
  * PREMISE AND CONTEXT ARE TWO THINGS. The premise is the situation the item comes out of — what is going
@@ -10,7 +10,7 @@
  * in the ink colour, and room.
  *
  * Two layouts. The CARD's is open: every section is drawn in full under its heading, because a card
- * stands alone and nothing on it hides behind a click (only a long "More detail" is previewed). The
+ * stands alone and nothing on it hides behind a click (only a long "The full picture" is previewed). The
  * recommendation is NOT a section there: the answer bar tags the recommended option and says why under the
  * buttons. The BOARD's is collapsible: native `<details>`, closed except the first question.
  *
@@ -25,12 +25,11 @@ import type {
   AgendaRecommendation,
   AgendaRevisableField as RevisionField,
 } from '@ferretry/protocol';
-import { agendaCardKind, recommendedAgendaOption } from '@ferretry/protocol';
+import { agendaCardKind, agendaTabs, plainLabel, recommendedAgendaOption } from '@ferretry/protocol';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';
 import { bulletPoints, type RevisionHighlight } from '../../lib/agenda-revisions.ts';
-import { plainLabel } from '../../lib/plain-label.ts';
 import { defaultAgendaProse } from './agenda-prose.tsx';
 
 type AgendaProse = (text: string) => ReactNode;
@@ -387,7 +386,7 @@ export interface AgendaBriefProps {
   readonly recommendation?: AgendaRecommendation | undefined;
   /** The steps checklist, drawn under "Steps". */
   readonly steps?: ReactNode;
-  /** The body, drawn under "More detail" — the one section that may start folded. */
+  /** The body, drawn under "The full picture" — the one section that may start folded. */
   readonly detail?: ReactNode;
   /**
    * Which half to draw. `card`: only what the minimal card needs (the ask when it is not the heading, the
@@ -422,6 +421,14 @@ export function AgendaBriefSections({
   const decided = !asCard && item.decided?.trim() ? item.decided : null;
   const context = !asCard && item.context?.trim() ? item.context : null;
   const stillOpen = !asCard && item.stillOpen?.trim() ? item.stillOpen : null;
+  // THE MAIN TAB'S PREVIEW (&F923): its own words under the decided and still-open parts it opens with, then the
+  // ferret's own tabs by name, so a reader of the brief knows the item holds more than it shows.
+  const whereNow = !asCard && item.whereWeAre?.trim() ? item.whereWeAre : null;
+  const alsoTabs = asCard
+    ? []
+    : agendaTabs(item)
+        .filter(tab => tab.kind === 'own')
+        .map(tab => tab.name);
   const changedWhole = (...fields: readonly RevisionField[]): boolean =>
     fields.some(field => highlight?.fields.has(field) === true);
   const all = item.questions ?? [];
@@ -451,7 +458,12 @@ export function AgendaBriefSections({
     );
   const detailBlock =
     asCard || detail === undefined ? null : (
-      <Section fold={fold} name="more" open={open} title={typed && kind === 'review' ? 'Reasoning' : 'More detail'}>
+      <Section
+        fold={fold}
+        name="more"
+        open={open}
+        title={typed && kind === 'review' ? 'Reasoning' : 'The full picture'}
+      >
         {detail}
       </Section>
     );
@@ -561,6 +573,16 @@ export function AgendaBriefSections({
             text={stillOpen}
           />
         </Section>
+      )}
+      {whereNow === null ? null : (
+        <Section changed={changedWhole('whereWeAre')} fold={fold} name="where-now" open={open} title="Where we are now">
+          <div className="fy-attn-prose">{renderProse(whereNow)}</div>
+        </Section>
+      )}
+      {alsoTabs.length === 0 ? null : (
+        <p className="fy-attn-prose m-0" data-agenda-brief-also="">
+          <strong>Also in the item:</strong> {alsoTabs.join(', ')}
+        </p>
       )}
       {fold ? questionsBlock : null}
       {options.length === 0 ? null : (

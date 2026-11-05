@@ -377,7 +377,13 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const choice = await open(browserContext, theme, 'view=board&history=1');
   await openItem(choice, 'A5');
   await checkOverlay(choice, form, 'choice item', composerRest);
-  check((await choice.locator('table[data-agenda-terms]').count()) === 1, 'the terms are not a table');
+  // Terms and references, and the conversation, start folded (&F920): open both before reading them.
+  for (const part of ['references', 'conversation']) {
+    const fold = choice.locator(`[data-agenda-fold="${part}"]`).first();
+    check((await fold.getAttribute('aria-expanded')) === 'false', `the ${part} fold does not start closed`);
+    await fold.click();
+  }
+  check((await choice.locator('table[data-agenda-references]').count()) === 1, 'the terms are not a table');
   const toEnd = (): Promise<void> =>
     choice.locator('.fy-item-view__body').evaluate(node => {
       node.scrollTop = node.scrollHeight;
@@ -694,57 +700,40 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await withParked.close();
   const parkedBoard = await open(browserContext, theme, 'view=board&parked=1&agenda=A3');
   await overlay(parkedBoard).waitFor({ state: 'visible' });
-  const clock = parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-snooze]');
-  check((await clock.count()) === 1, 'the item view has no snooze clock');
-  const clockBox = await boxOf(clock, 'the snooze clock');
-  if (phone)
-    check(
-      clockBox.width >= 43.5 || clockBox.height >= 43.5,
-      `the clock is ${Math.round(clockBox.width)}x${Math.round(clockBox.height)}`,
-    );
-  await clock.click();
-  const menu = parkedBoard.locator('[role="menu"]');
+  // Snooze is in the open item's ⋯ menu (&F920): a bottom sheet on a phone, a popover wider.
+  const more = parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-menu-toggle]');
+  check((await more.count()) === 1, 'the item view has no ⋯');
+  await more.click();
+  const menu = parkedBoard.locator('[data-agenda-menu]');
   await menu.waitFor({ state: 'visible' });
-  await parkedBoard.waitForTimeout(150);
-  const items = await menu.locator('[role="menuitem"]').allTextContents();
+  await parkedBoard.waitForTimeout(300);
+  const items = await menu.locator('[data-agenda-menu-snooze]').allTextContents();
   check(
     JSON.stringify(items.map(text => text.trim())) ===
       JSON.stringify(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']),
-    `the snooze menu says: ${items.join(' | ')}`,
+    `the snooze choices say: ${items.join(' | ')}`,
   );
-  const menuBox = await boxOf(menu, 'the snooze menu');
+  const menuBox = await boxOf(menu, 'the ⋯ menu');
   const screen = parkedBoard.viewportSize();
   check(
     menuBox.x >= -1 &&
       menuBox.y >= -1 &&
       menuBox.x + menuBox.width <= (screen?.width ?? 0) + 1 &&
       menuBox.y + menuBox.height <= (screen?.height ?? 0) + 1,
-    `the snooze menu leaves the screen: ${JSON.stringify(menuBox)}`,
+    `the ⋯ menu leaves the screen: ${JSON.stringify(menuBox)}`,
   );
-  const onTop = await menu.locator('[role="menuitem"]').evaluateAll(nodes =>
-    nodes.every(node => {
-      const at = node.getBoundingClientRect();
-      const hit = document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2);
-      return hit !== null && node.contains(hit);
-    }),
-  );
-  check(onTop, 'something sits over the snooze menu');
   if (phone)
-    for (const entry of await menu.locator('[role="menuitem"]').all())
-      check(((await entry.boundingBox())?.height ?? 0) >= 43.5, 'a snooze menu item is under 44px');
+    for (const entry of await menu.locator('[data-agenda-menu-snooze]').all())
+      check(((await entry.boundingBox())?.height ?? 0) >= 43.5, 'a snooze choice is under 44px');
   await shot(parkedBoard, 'snooze-menu', form, theme, 'agenda-snooze');
-  await menu.locator('[role="menuitem"]').last().click();
+  await menu.locator('[data-agenda-menu-snooze="custom"]').click();
   const custom = parkedBoard.locator('input[type="datetime-local"]');
   await custom.waitFor({ state: 'visible' });
   await custom.fill('2026-10-01T09:00');
   await parkedBoard.locator('[data-snooze-custom] button[type="submit"]').click();
   check((await parkedBoard.locator('[role="alert"]').count()) >= 1, 'a past custom time was not refused');
   await shot(parkedBoard, 'snooze-custom-refused', form, theme, 'agenda-snooze');
-  await parkedBoard.keyboard.press('Escape');
-  await parkedBoard.waitForTimeout(100);
-  check((await parkedBoard.locator('[role="menu"]').count()) === 0, 'Esc did not close the snooze menu');
-  await parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-snooze]').click();
-  await parkedBoard.locator('[role="menuitem"]').first().click();
+  await parkedBoard.locator('[data-agenda-menu-snooze="hour"]').click();
   await parkedBoard.waitForTimeout(250);
   check((await parkedBoard.locator('[data-agenda-view="A3"]').count()) === 0, 'snoozing did not leave the item');
   await parkedBoard.close();

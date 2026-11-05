@@ -1,5 +1,5 @@
-import type { SendDisposition } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import type { SendDisposition } from '@ferretry/protocol';
 import should from 'should';
 import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
 import {
@@ -101,6 +101,32 @@ describe('planSend', () => {
   });
 });
 
+describe('planSend label', () => {
+  it('should default to action, and make a question (--ask, --expect-reply) or an interrupt a blocker', () => {
+    should(planSend({ message: 'x' }, HUMAN).label).equal('action');
+    should(planSend({ message: 'x', ask: true }, IN_PANE).label).equal('blocker');
+    should(planSend({ message: 'x', now: true }, HUMAN).label).equal('blocker');
+    should(planSend({ message: 'x', expectReply: true }, HUMAN).label).equal('blocker');
+    should(planSend({ message: 'x', expectReply: true, kind: 'action' }, HUMAN).label).equal('blocker');
+    should(planSend({ message: 'x', ask: true, kind: 'action' }, IN_PANE).label).equal('blocker');
+  });
+
+  it('should carry an explicit label', () => {
+    should(planSend({ message: 'x', kind: 'fyi' }, HUMAN).label).equal('fyi');
+    should(planSend({ message: 'x', kind: 'blocker' }, HUMAN).label).equal('blocker');
+    should(planSend({ message: 'x', kind: ' action ' }, HUMAN).label).equal('action');
+  });
+
+  it('should refuse an FYI that is a question or an interrupt, and an unknown word', () => {
+    should(() => planSend({ message: 'x', kind: 'fyi', ask: true }, IN_PANE)).throw(/a question is never an FYI/);
+    should(() => planSend({ message: 'x', kind: 'fyi', expectReply: true }, HUMAN)).throw(/a question is never an FYI/);
+    should(() => planSend({ message: 'x', kind: 'fyi', now: true }, HUMAN)).throw(/a question is never an FYI/);
+    should(() => planSend({ message: 'x', kind: 'urgent' }, HUMAN)).throw(
+      /--kind must be one of blocker \| action \| fyi/,
+    );
+  });
+});
+
 describe('describeDisposition', () => {
   const cases: readonly (readonly [SendDisposition, RegExp])[] = [
     ['delivered', /^delivered$/],
@@ -145,6 +171,17 @@ describe('describeSendResult', () => {
     should(describeSendResult({ disposition: 'queued', fate: 'queued' })).match(/auto-submits at the turn boundary/);
     should(describeSendResult({ disposition: 'delivered', fate: 'accepted' })).equal('delivered');
     should(waitingInFerretryQueue({ disposition: 'sent', fate: 'accepted' })).be.false();
+  });
+});
+
+describe('describeSendResult for a held message', () => {
+  it('should say an action is held to combine, and an FYI waits for the turn end', () => {
+    const held = { disposition: 'queued', fate: 'accepted', heldUntil: '2026-01-01T00:11:00.000Z' } as const;
+    should(describeSendResult({ ...held, label: 'action' })).match(
+      /^held until \d\d:\d\d:\d\d to combine with other messages \(action\); not typed yet; do not resend$/,
+    );
+    should(describeSendResult({ ...held, label: 'fyi' })).match(/held as an FYI .*turn ends.*do not resend/);
+    should(waitingInFerretryQueue({ disposition: 'sent', fate: 'accepted', heldUntil: held.heldUntil })).be.true();
   });
 });
 

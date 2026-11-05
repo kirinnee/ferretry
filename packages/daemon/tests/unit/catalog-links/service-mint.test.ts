@@ -21,6 +21,9 @@ import {
   UNREACHABLE,
 } from './support.ts';
 
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a secret placeholder is the literal text `${secret:NAME}`
+const PLACEHOLDER = '${secret:DOCS_KEY}';
+
 const refusal = async (work: () => Promise<unknown>): Promise<CatalogLinkRefusal> => {
   try {
     await work();
@@ -72,6 +75,36 @@ describe('CatalogLinkService preview', () => {
     should(preview.newItem).equal(false);
     should(preview.itemId).equal(added.itemId);
     should(preview.version).equal(1);
+  });
+
+  it('should warn in the preview when a skill file looks like it holds a key', async () => {
+    const r = await linkRig();
+    r.items.tree.set(SKILL_PATH, {
+      'SKILL.md': SKILL_MD,
+      'notes.txt': 'api_key = sk-live-0123456789abcdef0123456789abcdef',
+    });
+    const preview = await previewSkill(r);
+    const found = preview.warnings.find(warning => warning.code === 'possible-secret');
+    should(found?.text).match(/notes\.txt/u);
+    should(found?.text).not.match(/sk-live/u);
+  });
+
+  it('should preview an MCP setup with its secret placeholder, never a value', async () => {
+    const r = await linkRig();
+    r.items.servers = [
+      {
+        id: 'id-component-docs',
+        name: 'docs',
+        scope: 'component',
+        harness: 'claude',
+        declaration: null,
+        component: { command: 'npx', args: ['-y', 'docs'], env: { API: PLACEHOLDER }, harness: 'claude' },
+      },
+    ];
+    const preview = await r.service.preview({ source: { kind: 'mcp', mcp: 'docs' } });
+    should(preview.itemKind).equal('mcp');
+    should(JSON.stringify(preview.review)).containEql(PLACEHOLDER);
+    should(preview.warnings.map(warning => warning.code)).not.containEql('possible-secret');
   });
 
   it('should say a link is too big when the sealed bundle passes the store cap', async () => {

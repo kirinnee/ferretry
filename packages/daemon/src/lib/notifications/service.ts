@@ -1,6 +1,15 @@
-import { type AgendaItem, type AgendaSnapshot, type PushSubject, pushUrgencyFor } from '@ferretry/protocol';
+import {
+  agendaItemPushTag,
+  type AgendaItem,
+  type AgendaSnapshot,
+  asksOnlyCardAsks,
+  hasOpenCardAsk,
+  type PushSubject,
+  pushUrgencyFor,
+} from '@ferretry/protocol';
 import { type AgendaRaisedObserver, ownerTurnItems } from '../agenda/index.ts';
 import {
+  agendaAlertLane,
   agendaNotificationAttribution,
   deadlineNotificationPayload,
   legacyNotificationKey,
@@ -27,7 +36,7 @@ import {
 } from './types.ts';
 
 export interface NotificationServiceOptions {
-  readonly ledger: NotificationDeliveryLedger;
+  readonly ledger: Pick<NotificationDeliveryLedger, 'find' | 'append'>;
   readonly sessions: NotificationSessionDirectory;
   readonly push: NotificationPushDispatcher;
   readonly serial: NotificationSerialExecutor;
@@ -43,6 +52,16 @@ export interface NotificationServiceOptions {
    * one-time code is `one-time-code`. Absent, or `other`, is a normal push.
    */
   readonly subjectOf?: (sessionId: string, item: AgendaItem) => PushSubject;
+  /**
+   * Told when a push reached a device and its outcome is recorded: the item may have been handled or opened while it
+   * was on its way, so its line may already be stale (`AgendaAlertClearer.recheck`). Not awaited, never fails a push.
+   */
+  readonly landed?: (sessionId: string) => void;
+  /**
+   * One lane per ferret, shared with `AgendaAlertClearer` (`agendaAlertLane`): a push is recorded, sent and its outcome
+   * recorded inside it, so a clear decided from an older board is sent before a newer push, never after it.
+   */
+  readonly lanes?: NotificationSerialExecutor;
 }
 
 /**
@@ -88,8 +107,8 @@ export class NotificationService implements AgendaRaisedObserver {
    * else raised — an agenda item, a warden's card — waits for the stop or the deadline. Total.
    */
   async raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
-    if (item.gate !== undefined) {
-      // A card's gate: its one push, under the same once-per-item key a notice's ping has.
+    if (item.gate !== undefined || hasOpenCardAsk(item)) {
+      // A card's ask: its one push, under the same once-per-item key a notice's ping has.
       await this.announce({ sessionId, agendaId: item.id, ping: true }, item, () =>
         gateNotificationPayload(sessionId, item, snapshot),
       );
@@ -108,13 +127,17 @@ export class NotificationService implements AgendaRaisedObserver {
    */
   async stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void> {
     // A card's gate item made its own push at its raise: a stop never names it again.
-    const [first, ...rest] = ownerTurnItems(snapshot.items).filter(item => item.gate === undefined);
+    const [first, ...rest] = ownerTurnItems(snapshot.items).filter(
+      item => item.gate === undefined && !asksOnlyCardAsks(item),
+    );
     if (first === undefined) return;
     await this.announce(
       { sessionId, agendaId: first.id, stoppedAt },
       first,
       session => stoppedNotificationPayload(sessionId, session.name, [first, ...rest], snapshot),
       stopShows([first, ...rest]),
+      // A high stop keeps the ferret's tag: under the shown item's, that item's clear would take the group's line down.
+      { ownTag: true },
     );
   }
 
@@ -125,10 +148,12 @@ export class NotificationService implements AgendaRaisedObserver {
     );
   }
 
-  /** A snoozed item woke and it blocks or has a deadline: its one push for this wake. Total. */
+  /** A snoozed item woke and it blocks or has a deadline, or a card ask woke its agenda (each ask fresh): its one push. Total. */
   async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     await this.announce({ sessionId, agendaId: item.id, woke: item.waitingSince }, item, () =>
-      wokeNotificationPayload(sessionId, item, snapshot),
+      hasOpenCardAsk(item)
+        ? gateNotificationPayload(sessionId, item, snapshot)
+        : wokeNotificationPayload(sessionId, item, snapshot),
     );
   }
 
@@ -229,17 +254,25 @@ export class NotificationService implements AgendaRaisedObserver {
             : {
                 ...composed,
                 urgency: 'high',
-                tag: options.ownTag === true ? composed.tag : `${composed.tag}:${urgent.item.id}`,
+                tag: options.ownTag === true ? composed.tag : agendaItemPushTag(sessionId, urgent.item.id),
               };
         // The high slot is kept only when a device accepted the push; every other ending gives it back.
         let reached = false;
         try {
-          reached = await this.send(identity, item, key, session, payload, urgent !== undefined, options.ttlSeconds);
+          reached = await this.inLane(sessionId, () =>
+            this.send(identity, item, key, session, payload, urgent !== undefined, options.ttlSeconds),
+          );
         } finally {
           if (urgent !== undefined && !reached) this.refund(sessionId, urgent.at);
         }
       })
       .catch((error: unknown) => this.tell(diagnostics => diagnostics.failed(key, errorText(error))));
+  }
+
+  private async inLane<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    return this.options.lanes === undefined
+      ? await work()
+      : await this.options.lanes.run(agendaAlertLane(sessionId), work);
   }
 
   /** Records, sends and records the outcome of one push: whether a device accepted it. */
@@ -269,6 +302,7 @@ export class NotificationService implements AgendaRaisedObserver {
         ...(identity.woke === undefined ? {} : { woke: identity.woke }),
         ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
         ...(identity.phoneApproval === undefined ? {} : { phoneApproval: identity.phoneApproval }),
+        tag: payload.tag,
         sent: {
           kind: payload.kind,
           interactive: session.interactive,
@@ -304,7 +338,7 @@ export class NotificationService implements AgendaRaisedObserver {
       return false;
     }
     this.tell(diagnostics => diagnostics.made(key, { delivered, failed }));
-    await this.options.ledger
+    const recorded = await this.options.ledger
       .append(
         NotificationRecordSchema.parse({
           v: 1,
@@ -315,8 +349,20 @@ export class NotificationService implements AgendaRaisedObserver {
           failed,
         }),
       )
-      .catch(() => undefined);
+      .then(
+        () => true,
+        () => false,
+      );
+    if (recorded && delivered > 0) this.land(sessionId);
     return delivered > 0;
+  }
+
+  private land(sessionId: string): void {
+    try {
+      this.options.landed?.(sessionId);
+    } catch {
+      // A look at stale lines must never be what fails a push.
+    }
   }
 
   private tell(say: (diagnostics: NotificationDiagnostics) => void): void {

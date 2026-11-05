@@ -12,11 +12,19 @@ import {
 import { card, MemoryBoardStore, world } from './support.ts';
 
 /**
- * WHO PASSES A GATE (docs/board.md § Gates ask the owner): the owner always; on an INTERNAL card (a ferret's own
+ * WHO PASSES A GATE (docs/board.md § Cards show progress): the owner always; on an INTERNAL card (a ferret's own
  * errand) its owner ferret and the leads above it too; nobody else. Every standing × audience × kind of lane.
  */
 
-const STANDINGS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor', 'assignee', 'daemon', 'reader'];
+const STANDINGS: readonly BoardStanding[] = [
+  'owner-human',
+  'owner',
+  'ancestor',
+  'assignee-lead',
+  'assignee',
+  'daemon',
+  'reader',
+];
 
 describe('mayPassGate', () => {
   it('lets only the owner pass an external card’s gate', () => {
@@ -30,7 +38,7 @@ describe('mayPassGate', () => {
 });
 
 /** The card's owner ferret is `child`, started by `lead`; `grandchild` works it; `stranger` is nobody to it. */
-const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon'>, BoardCaller>> = {
+const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'>, BoardCaller>> = {
   'owner-human': { kind: 'owner' },
   owner: { kind: 'ferret', sessionId: 'child' },
   ancestor: { kind: 'ferret', sessionId: 'lead' },
@@ -73,7 +81,10 @@ const allowed = (standing: BoardStanding, audience: CardAudience, kind: (typeof 
 describe('moving a card through a gate, by standing and audience', () => {
   for (const audience of ['external', 'internal'] as const) {
     for (const move of MOVES) {
-      for (const [standing, caller] of Object.entries(CALLERS) as [Exclude<BoardStanding, 'daemon'>, BoardCaller][]) {
+      for (const [standing, caller] of Object.entries(CALLERS) as [
+        Exclude<BoardStanding, 'daemon' | 'assignee-lead'>,
+        BoardCaller,
+      ][]) {
         const expected = allowed(standing, audience, move.kind);
         it(`${expected ? 'lets' : 'refuses'} ${standing} on an ${audience} card: ${move.from} → ${move.to}`, async () => {
           // Arrange
@@ -153,5 +164,52 @@ describe('moving a card through a gate, by standing and audience', () => {
       to: 'closed',
       actor: { kind: 'ferret', sessionId: 'lead' },
     });
+  });
+});
+
+describe('a lead above only the assignee of an internal card', () => {
+  // lead > child > grandchild, but the card is owned by `stranger`, who is nobody's descendant.
+  const strangersCard = (laneId: string): BoardTask => ({ ...cardFor('internal', laneId), owner: 'stranger' });
+  const lead: BoardCaller = { kind: 'ferret', sessionId: 'lead' };
+
+  it.each(MOVES.filter(move => move.kind !== 'ordinary'))(
+    'should be refused the owner ferret’s gate: $from → $to',
+    async move => {
+      // Arrange
+      const store = new MemoryBoardStore([strangersCard(move.from)]);
+      const service = new BoardService(world({ store }));
+
+      // Act
+      const outcome = await service
+        .act('F1', BoardTaskActionRequestSchema.parse({ action: 'move', to: move.to }), lead)
+        .then(
+          () => undefined,
+          (thrown: unknown) => thrown as BoardError,
+        );
+
+      // Assert
+      should(outcome).be.instanceOf(BoardError);
+      should(outcome?.code).equalOneOf('owner-gate', 'forbidden');
+      should(store.cards.get('F1')?.laneId).equal(move.from);
+    },
+  );
+
+  it('should be refused an ordinary move, an edit and a re-plan of it, but may drop it', async () => {
+    // Arrange
+    const store = new MemoryBoardStore([strangersCard('implement'), { ...strangersCard('implement'), id: 'F2' }]);
+    const service = new BoardService(world({ store }));
+    const attempt = async (id: string, body: unknown) =>
+      await service.act(id, BoardTaskActionRequestSchema.parse(body), lead).then(
+        () => undefined,
+        (thrown: unknown) => (thrown as BoardError).code,
+      );
+
+    // Act
+    const moved = await attempt('F1', { action: 'move', to: 'review' });
+    const retitled = await attempt('F1', { action: 'edit', title: 'something else' });
+    const dropped = await attempt('F2', { action: 'drop', reason: 'not needed' });
+
+    // Assert
+    should([moved, retitled, dropped]).eql(['forbidden', 'forbidden', undefined]);
   });
 });

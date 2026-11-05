@@ -201,6 +201,11 @@
   min-width: 0;
   white-space: nowrap;
 }
+/* The arrow and the words of an answer: laid out as the button's own children here, and as one wrapping line of text
+   in an open card (`agenda-item-card.css`). */
+.fy-qr__face {
+  display: contents;
+}
 .fy-qr__chip[data-recommended] {
   border-color: var(--accent);
   color: var(--accent);
@@ -407,4 +412,26 @@
 .fy-snooze__popover[data-flip] {
   top: auto;
   bottom: calc(100% + 4px);
+}
+
+/* ---- the Agenda tab's mark line: where it stands, what it is, how long ---------------------------------------- */
+.fy-agenda-tab__meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--gap-sm);
+  margin-top: 2px;
+}
+.fy-agenda-tab__stage,
+.fy-agenda-tab__since {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
+.fy-agenda-tab__stage::before {
+  content: '· ';
+}
+.fy-agenda-tab__since {
+  margin-left: auto;
 }

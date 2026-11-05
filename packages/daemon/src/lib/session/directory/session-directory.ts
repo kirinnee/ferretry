@@ -51,6 +51,19 @@ function batches(
   return cut;
 }
 
+/** What one read of a session produced, kept against the documents it parsed (see `createSessionDirectory`). */
+interface KnownSession {
+  readonly rawConfig: object;
+  readonly rawState: object;
+  readonly config: ReturnType<typeof SessionConfigSchema.safeParse>;
+  readonly state: ReturnType<typeof SessionStateSchema.safeParse>;
+  readonly journalSequence: number | undefined;
+  readonly view: SessionView;
+}
+
+/** Only an object has an identity worth keeping a parse against. */
+const isDocument = (value: unknown): value is object => typeof value === 'object' && value !== null;
+
 export interface SessionDirectoryPorts {
   /** Every session the index holds. */
   readonly sessions: () => readonly IndexedSession[];
@@ -79,21 +92,72 @@ export interface SessionPresence {
 }
 
 export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDirectorySubsystem & SessionPresence {
+  /**
+   * What the last read of each session produced, by the documents the reader handed out.
+   *
+   * THE STORAGE HANDS OUT THE SAME FROZEN VALUE UNTIL ITS FILE CHANGES, so a document seen again is a document
+   * already parsed: the parse is kept per session and reused while the reader's value is the very object it
+   * parsed. On a box that keeps every session it ever ran — ~1,400, nearly all finished — a list that parsed
+   * both documents of every one on every call spent seconds of loop on answers that had not moved. A changed
+   * file is a new value, so that session — and only that session — is parsed again; a document that was not an
+   * object is never kept, so a broken pair is judged afresh each time.
+   *
+   * The assembled view is kept too, and handed out as the same object while its documents and its journal
+   * sequence are unchanged. That identity is what lets the layers above (and the route's own body cache)
+   * recognise an unchanged session without comparing it. A view is therefore SHARED between calls: nothing
+   * that reads a list may write to one.
+   */
+  const known = new Map<SessionId, KnownSession>();
   /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
   const view = async (id: SessionId, project: boolean): Promise<SessionView | undefined> => {
     // Read BEFORE the documents: a reader starting its live feed after this sequence is replayed every
     // event the documents might not reflect yet, and misses none they do not.
     const journalSequence = ports.find(id)?.lastSequence;
-    const config = SessionConfigSchema.safeParse(await ports.readConfig(id));
+    const previous = known.get(id);
+    const rawConfig = await ports.readConfig(id);
+    const config =
+      previous !== undefined && previous.rawConfig === rawConfig
+        ? previous.config
+        : SessionConfigSchema.safeParse(rawConfig);
     if (config.success && project) await ports.project?.(id, config.data);
-    const state = SessionStateSchema.safeParse(await ports.readState(id));
-    if (!config.success || !state.success) return undefined;
-    return {
-      config: config.data,
-      state: state.data,
-      directory: ports.directory(id),
-      ...(journalSequence === undefined ? {} : { journalSequence }),
-    };
+    const rawState = await ports.readState(id);
+    const state =
+      previous !== undefined && previous.rawState === rawState
+        ? previous.state
+        : SessionStateSchema.safeParse(rawState);
+    if (!config.success || !state.success) {
+      known.delete(id);
+      return undefined;
+    }
+    const unchanged =
+      previous !== undefined &&
+      previous.config === config &&
+      previous.state === state &&
+      previous.journalSequence === journalSequence;
+    const assembled: SessionView = unchanged
+      ? previous.view
+      : {
+          config: config.data,
+          state: state.data,
+          directory: ports.directory(id),
+          ...(journalSequence === undefined ? {} : { journalSequence }),
+        };
+    // Both schemas are objects, so a pair that parsed is a pair of objects; a pair that did not has already
+    // been forgotten above. The check narrows the types for the entry, it does not choose between outcomes.
+    if (isDocument(rawConfig) && isDocument(rawState))
+      known.set(id, { rawConfig, rawState, config, state, journalSequence, view: assembled });
+    return assembled;
+  };
+  /**
+   * Lets go of the sessions the index no longer holds, so what is kept is bounded by the fleet.
+   *
+   * By membership, never by size: an index that swaps one session for another holds as many as before, and a
+   * count comparison would keep the one that left — a session that came back later with the same documents
+   * would be handed its stale view.
+   */
+  const forget = (listed: readonly IndexedSession[]): void => {
+    const held = new Set<string>(listed.map(session => session.id));
+    for (const id of known.keys()) if (!held.has(id)) known.delete(id);
   };
   /** The indexed id a reference names, `undefined` for one the index does not hold. */
   const indexed = (reference: string): SessionId | undefined => {
@@ -113,13 +177,15 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
   return {
     list: async () => {
       const views: SessionView[] = [];
+      const listed = ports.sessions();
       let first = true;
-      for (const batch of batches(ports.sessions(), ports.ended)) {
+      for (const batch of batches(listed, ports.ended)) {
         if (!first) await ports.yieldToLoop();
         first = false;
         const found = await Promise.all(batch.map(async ({ id, project }) => await view(id, project)));
         for (const each of found) if (each !== undefined) views.push(each);
       }
+      forget(listed);
       return views;
     },
     get: async reference => {

@@ -4,9 +4,9 @@ import {
   ComposerDraftResultSchema,
   composerOccupiedDraft,
   FY_REQUEST_ID_HEADER,
-  SEND_UNCONFIRMED_CODE,
   type QueuedMessage,
   QueuedMessageSchema,
+  SEND_UNCONFIRMED_CODE,
   SendListResponseSchema,
   type SendRecord,
   SendRecordSchema,
@@ -108,6 +108,23 @@ describe('the session send mount', () => {
     should(sessions.sent[0]?.[1].senderSessionId).equal('s2');
     // The human's own CLI is not a peer, so nothing is attributed.
     should(sessions.sent[1]?.[1].senderSessionId).be.undefined();
+  });
+
+  it('should honour a message label from a ferret and drop it from a person', async () => {
+    // A label decides how long a message may be held, so only a ferret — whose messages are the only
+    // ones ever combined — may set it. A person's message is never held or labelled.
+    // Arrange
+    const sessions = new FakeSessionSend();
+    const subject = dispatcher(sessions);
+    const body = JSON.stringify({ message: 'ship it', label: 'fyi' });
+
+    // Act
+    await subject.dispatch(sendRequest('s1', body, withRequestId(agentIn('s2'))));
+    await subject.dispatch(sendRequest('s1', body, withRequestId(human, 'req-2')));
+
+    // Assert
+    should(sessions.sent[0]?.[1].label).equal('fyi');
+    should(sessions.sent[1]?.[1].label).be.undefined();
   });
 
   it('should refuse a send that carries no idempotency key', async () => {

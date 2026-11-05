@@ -289,6 +289,12 @@ session, so an `!attention` reference stays session-scoped and resolves against 
 own session — on the Board and on a card an ask is always shown with its card chip and its ferret,
 so it is never ambiguous there.
 
+**A `card` or `board` hypermedia block is a pointer under the same gate.** Its payload is nothing but `&F12` tokens, read by the same
+token reader; what it draws (title, lane, progress, PRs) is whatever the board answered, and a card the daemon did not
+answer is never a link or a frame, only a quiet note. It is drawn only where the surface lends a board to read
+(`cardEmbed`, offered with a task route); anywhere else the fence stays an ordinary code fence
+([fy-render.md](fy-render.md#cards-and-boards)).
+
 ## 7. References inside code
 
 A proved sigil inside an inline backtick span or a fenced block renders as a clickable reference, and

@@ -146,6 +146,25 @@ describe('AppearanceGroups', () => {
     expect(calls).toEqual([`family:${THEME_FAMILIES[1]?.id}`]);
   });
 
+  it('jumps to the first or last family with Home and End, and steps back with ArrowUp and ArrowLeft', () => {
+    const middle = THEME_FAMILIES[2]?.id;
+    const { root, calls } = setup(middle === undefined ? {} : { family: middle });
+    const tiles = root.find(node => node.props['data-theme-tiles'] !== undefined);
+    const press = (key: string) => run(() => tiles.props.onKeyDown({ key, preventDefault: () => {} }));
+
+    press('Home');
+    press('End');
+    press('ArrowUp');
+    press('ArrowLeft');
+
+    expect(calls).toEqual([
+      `family:${THEME_FAMILIES[0]?.id}`,
+      `family:${THEME_FAMILIES[THEME_FAMILIES.length - 1]?.id}`,
+      `family:${THEME_FAMILIES[1]?.id}`,
+      `family:${THEME_FAMILIES[1]?.id}`,
+    ]);
+  });
+
   it('keeps every option’s explanation behind the (i) of its row, not only the chosen one', () => {
     const { root } = setup();
     const explanationOf = (name: string): string => {

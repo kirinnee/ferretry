@@ -161,7 +161,11 @@ describe('the Inbox’s Machine group', () => {
               contextShown: [...document.querySelectorAll('[data-inbox-open]')]
                 .filter(open => (open.textContent ?? '').includes('durian'))
                 .some(open => open.querySelector('[data-agenda-section="context"]') !== null),
-              titleCut: title === null || text === null ? true : title.scrollHeight > title.clientHeight + 1,
+              // ONE line in the head (a long one scrolls as a marquee): never clipped from below.
+              titleCut:
+                title === null || text === null || text === undefined
+                  ? true
+                  : title.scrollHeight > title.clientHeight + 1,
             };
           });
           expect(laid.pad).toBeGreaterThanOrEqual(8);

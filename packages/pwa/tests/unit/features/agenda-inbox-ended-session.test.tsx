@@ -2,11 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary, SessionView } from '@ferretry/protocol';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { type AgendaInbox, type AgendaInboxMachine, useAgendaInboxModel } from '../../../src/hooks/use-agenda-inbox.ts';
-import { AgendaRollupStore } from '../../../src/lib/agenda-rollup.ts';
-import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import type { DaemonAgendaClient } from '../../../src/lib/agenda-client.ts';
 import type { DeferredTimers } from '../../../src/lib/agenda-inbox.ts';
+import { AgendaRollupStore } from '../../../src/lib/agenda-rollup.ts';
 import { DaemonAgendaStore } from '../../../src/lib/agenda-store.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DEFAULT_LIST_FILTER, sessionsBarView } from '../../../src/shell/sessions-bar-model.ts';
@@ -180,7 +180,7 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
     await settle();
     const open = must(view.container.querySelector('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
     await interact(() =>
-      must(open.querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+      must(open.querySelector<HTMLButtonElement>('[data-agenda-menu-toggle]'), 'the ⋯ button').click(),
     );
     await interact(() =>
       must(open.querySelector<HTMLButtonElement>('[data-inbox-tool="not-needed"]'), 'Not needed…').click(),

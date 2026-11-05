@@ -38,25 +38,25 @@ verbatim; `fy` is the binary name):
 Only these five. Everything else — a new item while the ferret works, an edit, a change of whose turn it
 is, a notice without `--ping`, the owner's own moves — moves the Inbox badge and nothing more.
 
-| #   | Moment                                                                                     | Push                                                              | How often                               |
-| --- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------- |
-| 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
-| 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)      | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
-| 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
-| 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
-| 5   | A card the owner asked for **reaches a gate** ([board.md](board.md#gates-ask-the-owner))   | The card's title; the lane's ask ("Try it: …", "OK to build? …")  | Once per gate item, at its raise        |
+| #   | Moment                                                                                                                                            | Push                                                              | How often                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------- |
+| 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn                                                        | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
+| 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)                                                             | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
+| 3   | A notice with **`--ping`**                                                                                                                        | The notice's summary                                              | Once per notice                         |
+| 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**                                                                     | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
+| 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
 
-A gate item is the gate's one signal: it pushes at its raise (row 5) and never again inside a stop, so a ferret that
-stops with only a gate item waiting makes no stop push, and one with other items too counts only those. An internal
-card (a ferret's own errand) raises no gate item, so it never buzzes.
+A card ask is the card's one signal: it pushes when it is put on its agenda (row 5) and that agenda is left out
+of a stop only while its sole open items are card asks, so a ferret that stops with only such an agenda waiting makes
+no stop push, and a question it asked on the same agenda is counted. An internal card (a ferret's own errand) never asks, so it never buzzes.
 
 An input card always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
 **quiet** (below). An
 **approve-on-phone card** ([input requests](input-requests.md#approve-on-your-phone)) is the one card that pushes
 outside these rows: once when it is raised, and once more for each new number the daemon reads off the page (at most
 four in all). It has no `neededBy`, so row 2 never pushes it a second time. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
-or replied item is parked ([agenda.md](agenda.md#parked-items)): it never counts toward a stop or a deadline while
-it sleeps.
+item is parked, and a replied item rests (stored as `parked: replied`; [agenda.md](agenda.md#parked-items)): neither
+counts toward a stop or a deadline while it sleeps.
 
 ### Quiet cards: filled in advance, never buzzed
 
@@ -80,12 +80,15 @@ sign-in no rule was ever about. The daemon instead asks `AgendaBuzz` to look at 
 caused raises no card in the ferret's session either: the owner sees it in Settings and on the input card's reason line.
 
 Each push opens the ferret's chat at the item that triggered it (`?attention=<id>`): the first blocking item
-for a stop, else the oldest.
+for a stop, else the oldest. **The item opens AT ITS ASK**: its view scrolls to "What I need from you" and focuses it
+([agenda.md](agenda.md#the-item-view)), so the owner lands on what to do.
 
 **What counts as a stop.** The ferret's session state says its turn ended on the owner (`turnState` is
-`your-turn` or `needs-input`, with `turnStateAt`), and at least one non-notice item is on the owner's turn
-(no `waitingOn: 'ferret'`, unresolved). A stop is named by that `turnStateAt` instant, so the same stop
-never pushes twice — across a daemon restart too — and the next idle period is a new stop.
+`your-turn` or `needs-input`, with `turnStateAt`), and its Needs-you queue is not empty (`needsYouQueue`,
+[agenda.md](agenda.md#the-needs-you-queue): no notice, nothing resting on the ferret or snoozed, unresolved). The
+push opens at the queue's first item — a blocker first — and its count is the queue's length (`agendaBadgeCount`). A
+stop is named by that `turnStateAt` instant, so the same stop never pushes twice — across a daemon restart too — and
+the next idle period is a new stop.
 
 **What never buzzes.**
 
@@ -93,8 +96,9 @@ never pushes twice — across a daemon restart too — and the next idle period 
 - A ferret that is working. Items raised mid-turn wait for the stop.
 - A ferret that was **already idle when the daemon started**. The start-up pass looks at deadlines only;
   a stop is something the daemon sees happen.
-- An item on the ferret's turn (the owner asked for more, or to discuss it; the ferret has the ball).
-- A parked item: one the owner replied to, or snoozed and not yet woken.
+- A RESTING item: the owner replied to or answered it, asked for more or to discuss it, or the ferret took it on
+  (`fy agenda rest`). The ferret has the ball; the Warden's silence nudge goes to the ferret, never to the phone.
+- A snoozed item that has not yet woken. (An item the owner replied to is RESTING, above, not parked.)
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
 sent, under a key naming its reason — `attention:<session>:stopped:<stoppedAt>`,
@@ -178,6 +182,161 @@ The payload says `urgency: "high"` and never the code, the value or anything typ
 is normal. A service worker older than this field cannot read the payload and shows its
 plain "something is waiting in your Inbox" notification instead: never nothing.
 
+### One line per item
+
+Every item push goes out under **its own tag**, `attention-<session>:<item>` (`agendaItemPushTag`): a ping, a
+gate, a deadline and a woken item each replace only that item's earlier line. **So a ferret with two pushed items
+shows two lines**, not one line with "+1 more". A stop's push keeps the ferret's tag, `attention-<session>`
+(`agendaSessionPushTag`), even when it goes out loud for a code card, because it is about the ferret and everything
+waiting then: clearing that one card never takes the stop's line down. The own tag is what lets a handled item's line
+come down on its own (below). A push recorded before tags were went out under the ferret's tag, the item's (a high
+push), its approval's (`pa-<id>`) or — a high stop — a code card's: a clear names each one it may have used, every
+code card that no longer waits included, since the ledger never said which card a high stop showed.
+
+## When an alert is cleared
+
+The owner asked for it: "if an agenda went to sleep, then you should dismiss all notifications sent out related to
+the agenda! or when on 1 device is alr replied or resolved. then it should dismiss on other phones".
+
+**When.** After every change to a board, the daemon (`AgendaAlertClearer`) looks at each item whose push a device
+accepted, and takes its alerts down on every device once the item no longer waits on the owner:
+
+- it was **answered, resolved or dismissed**, on any device, by the ferret or by the daemon;
+- it is **resting** (the owner replied and it waits on the ferret) or **snoozed**;
+- it moved to **the ferret's turn** (needs more information, discussed);
+- a notice was **read**.
+
+It decides from the board, not from what changed, so a new way for an item to stop needing the owner clears its alerts
+without a new rule. The **stop's line** ("N need you") comes down only once no item it could count is left on the
+owner's turn, because until then its words are still true.
+
+**When the owner opens the item.** Opening an item's card anywhere in the app takes its alerts down too: the Inbox
+deck's top card, or the item's card in its conversation (an agenda row, a `!A3` reference, a notification tap, paging
+to it). The app closes that item's lines on the device in the owner's hand at once, and tells the machine
+(`POST /v1/push/seen`, `fleet.use`, only where the machine lists `push.clear.1`). The machine clears every OTHER device
+and answers the tags it named, so the app closes those here too, the stop's line included when it was the last item.
+The device the item was opened on is skipped, so it never gets the iPhone note below about its own tap.
+
+An Inbox card counts as opened only while someone is at that page (`ATTENDED_MS`): it came on top within a minute of
+a press, key or tap on a visible page — coming to the page counts — or else it is told at the next one. A deck left
+open on a screen nobody is at moves on by itself when its card is answered elsewhere, and that is not the owner
+opening the next card, so it never takes that card's alert off the phone in their hand.
+
+The answer can be slow, and by then a NEWER line can be up under one of its tags (the next item was raised, and a new
+stop went out). So the app closes, for the answer's tags, only a line whose `timestamp` is at or before the moment of
+the open, read when the item was opened rather than when the answer came. A line the browser gives no `timestamp`
+(Safari does not stamp them) is left up: losing a newer alert is worse than keeping an old one. **GAP:** on such a
+browser the stop's or approval's line the answer names stays up on the opening device until it is handled again or
+swiped away. **GAP:** a push that already reached the opening device but is still being shown when the owner opens its
+item there (its worker is reading the filter) is not caught by either half, and that one stale line stays on that
+device; the other devices are cleared as usual. Once the machine answers, the app also closes the item's OWN lines
+however new — any is about the item open in front of the owner — which takes down one of its pushes that landed
+here after the open; one that lands after that close stays (the same push-ordering GAP as below).
+
+**What a clear says.** Nothing about the item. A clear push is `{ version, kind: "clear", eventKey, sessionId, tags }`
+and the parser refuses anything more (`PushClearPayloadSchema`): no title, no body, no link, no item words. The
+worker turns each tag into its own machine's namespace (`fy-push:<daemonId>:<tag>`), so one machine can never take
+down another's lines.
+
+**What each device does with it** (owner decision !A324). Which push service delivers it is read from the
+registration's own subscription endpoint (`mustShowForEveryPush`, from the protocol's `PUSH_SERVICE_ALLOWS_SILENT`): only FCM (`fcm.googleapis.com`) and WNS
+(`*.notify.windows.com`) are known to let a push show nothing; every other service — Apple's, Mozilla's, one not
+known — and an endpoint the worker cannot read need every push to show something.
+
+| Push service                                      | The item's line is showing                                                                         | Nothing is showing                                                            |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| FCM, WNS (Android, Chrome, Edge)                  | closed                                                                                             | nothing                                                                       |
+| any other (iPhone, iPad, Safari, Firefox, others) | **replaced** by "<machine> · Handled on another device" / "Nothing to do here." (same tag, silent) | the same note once, under one fixed tag per machine (`fy-handled:<daemonId>`) |
+
+Such a device swaps rather than closes because its push service revokes the subscription of a site that receives a
+push and shows nothing — Apple's at once, Mozilla's once a small quota of such pushes is spent — the same rule a
+muted push answers (below). The note never names the item. A tap on it opens that machine. Chrome lets a push show
+nothing too, within a budget: past it, Chrome shows its own "This site has been updated in the background" line.
+Each note is marked as one (`data.handled`), and showing one closes this machine's other notes on that device, so it
+keeps one quiet note however many items were handled (the newest, so the push that showed it still showed something).
+
+**Once each.** A clear is written to `notifications.jsonl` with the pushes it covers before it is sent, so a second
+change or a restart never clears the same push again; a later push about the same item (it woke again) is cleared on
+its own later. Each clear has its own key (`clear:<session>:<instant>:<count>`). A burst of more than eight tags goes
+as several clears, and a push counts as covered only by the clear that names its LAST tag, so one stopped between two
+sends the rest again on the next look. Opening an item again tells the machine again, because it may have buzzed
+since; a clear with nothing left to cover sends nothing.
+
+**A push raised while a clear is decided.** A ferret's pushes and its clears run one at a time in one lane
+(`agendaAlertLane`): a push is recorded, sent and its outcome recorded inside it, and a clear reads the ledger, then
+the board, and is recorded and sent inside it. So a clear decided from a board read before an item was raised or woke
+is sent before that item's new push, never after it, and never counts that push as covered.
+
+**An open that names many tags.** One answer to `seen` carries at most `PUSH_SEEN_MAX_TAGS` (as many as one board can
+name: the ferret's tag, and an item's and its approval's for each open and retained item). A clear past that skips
+nobody: it reaches the opening device too, whose worker takes those lines down (an iPhone may show the quiet note).
+
+**A push still on its way.** A push the owner handles or opens before it has reached a device had no line to take
+down yet. The daemon looks again as soon as that push's outcome is recorded: a handled item's line comes down then,
+and an open made while it was on its way is honoured then too (that memory is not kept across a restart). That late
+clear reaches EVERY device, the one that opened the item included: its page closed only what was showing when it
+asked, so an iPhone there may show the quiet note for that one line. The same holds for a push being sent when the
+owner opens its item: the open notes it before it waits its turn in the ferret's lane, and clears it on every device
+if it landed meanwhile. One that had already landed when the open reached the machine (the owner most likely just
+tapped it) is the ordinary clear's, which skips the opener, so the phone in the owner's hand almost never says "Handled on
+another device" about its own tap — only when another device's push service holds that push up (10 s at most) is it
+still on its way at the open. A push recorded with no outcome counts as on its way for 10 minutes at most. At
+start the daemon looks once at every ferret with a line this release pushed still up, for a board that changed while
+it was down.
+
+**A push and its clear at once.** A service worker can handle a push and the clear after it at the same time, and a
+push reads this device's filter before it shows anything. So the worker numbers pushes in the order they arrive, runs
+showing and clearing one at a time, and remembers each clear's tags for a minute (`RecentlyCleared`): a push whose
+line a LATER-arriving clear took down is settled as that clear would have, instead of showing. A push that arrives
+after the clear (the item woke again) shows as usual, and an older push that resumes after it never touches that
+newer line: on an iPhone it shows only the quiet line under the fixed tag. A clear the push service delivers before
+the push it clears is not caught: nothing on the wire tells that push from a newer one. A clear is never in
+`fy doctor`'s push count: one that reached no device (the only one was the device that opened the item) is not a
+failed push. A clear the push service refused leaves that line up.
+
+**Pushes from before this release.** No daemon before this one wrote a clear, so on the first start every push it
+ever made counts as uncovered. The start-up look therefore skips a push recorded before tags were: it is cleared only
+by its own ferret's next board change or open, one ferret at a time as the owner works, and only while it is under
+two days old. A finished ferret's old lines stay up as they did before this release, and an upgrade sends no burst of
+clears. A push this release made has no age bound: its item may be answered days later.
+
+**GAP: the ledger is never rotated.** The clearer reads the whole `notifications.jsonl` on every board change, every
+landing and each open, and the file only grows (its bounded rotation is a follow-up), so that cost grows with it.
+
+**Rolling back.** A daemon older than this release reads the new ledger records (a push's `tag`, a clear) as lines
+it cannot read and skips them: `fy doctor` counts them, and it may repeat a deadline, stop or wake push for an item
+still open, at most once each (the ledger's own rule).
+
+**Older apps.** A service worker older than this release cannot read a clear and shows its plain "Something is
+waiting in your Inbox." line instead. The hosted app ships before a daemon release does and a worker refreshes the
+next time the app opens, so the window is small; a device that has not opened the app since may see that line once
+per clear.
+
+### Known limits
+
+Each is a declared GAP: an alert may stay up longer than it should; none takes a wanted alert down or puts item words
+in a clear.
+
+- **A clear the push service delivers before the push it clears** is not caught: nothing on the wire tells that push
+  from a newer one, and the clear carries only its five fields.
+- **The opening device itself**: a push already reaching it while the owner opens its item (its worker still showing
+  it), or reaching it after the page's last close, stays on that device.
+- **A browser that gives notifications no `timestamp`** (Safari): the stop's or approval's line the machine's answer
+  names stays on the opening device; the item's own line still comes down.
+- **The tapped phone may get the quiet note** when another device's push service holds that push up (10 s at most), so
+  the push is still on its way when the owner opens it.
+- **Pushes from before this release** are cleared only by their own ferret's next change or open, and only while under
+  two days old; a finished ferret's old lines stay up.
+- **Chrome's own "This site has been updated in the background" line** may show once Chrome's budget for pushes that
+  show nothing is spent.
+- **A desktop notification clicked into a visible, idle window** is not counted as an open until the next press, key
+  or tap there (a window focus is not an input yet), so that item's line stays on the other devices until then.
+- **An open made while its push is on its way** is remembered in memory only: a restart before the push lands leaves
+  that one line up.
+- **The ledger is never rotated**, and the clearer reads it whole on every change.
+- **A service worker older than this release** shows its plain "Something is waiting in your Inbox." line for a clear,
+  and **a daemon rolled back** past this release skips the new ledger records (above).
+
 ## Where a tap goes
 
 The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`
@@ -198,7 +357,7 @@ Every push names a page, and the worker opens a page even when one does not:
 - **How the window gets there.** The worker brings the window forward and asks the app to route there
   in place (`packages/pwa/src/lib/notification-open.ts`). The app's entry point listens before React
   mounts, so a tap that lands while the app is still starting is routed once it is up. It moves the app
-  to the tapped machine, and the conversation opens at the item, again on every new tap.
+  to the tapped machine, and the conversation opens at the item — scrolled to its ask — again on every new tap (each tap carries its own number, and paging or closing leaves the request, so the same item opened from the list starts at its top).
 - **A window that never answers** (an app too old for the message) cannot be navigated by a machine's
   worker, which controls no page. So the worker opens the conversation in a window of its own.
 - **Old workers.** The browser never re-checks a machine's push worker on its own, because no page loads
@@ -259,14 +418,21 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,240 characters, capped at 1,300 by a
-test; the shipped prompt as a whole has its own cap, so a new rule here is paid for by tightening words) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
-action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
-and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`edit --question-answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), tells it to answer several bugs or asks the owner raised at once with ONE `-k info` item, a short line each and where it is tracked, so the owner knows each was heard ([agenda.md](agenda.md#rules-the-writing-keeps)), teaches the card formatting (an ask of about 80 characters with the detail in `--body`, short Markdown points in every segment, no `#` headings anywhere), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
-`--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — one line mapping each kind to its answer shape (`AGENDA_SHAPE_LINE`; [agenda.md](agenda.md#what-i-need-from-you)), what `--blocking`,
-`--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
-parks the item as replied (the ferret does the work and closes it with `done`, `--reason` to withdraw a question; `fy agenda edit --back` with the whole card refreshed — `--summary`, `--premise` and `--context` — only for something NEW, and a plain `edit` leaves it parked —
-[agenda.md](agenda.md#parked-items)).
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,352 characters, capped at 1,360 by a test; the shipped
+prompt as a whole has its own cap, so a new rule here is paid for by tightening words) teaches the model first: what an
+agenda is (one channel of the owner's attention), the three-part test, search-check-open, splitting, then the one
+command that opens one, then the states, the tabs as the live document (read whole, then every stale part edited — premise, context, the ask,
+its options, still-open and each tab — on every update; any kind of content, steps and explainers kept there), chat discussion, and the two standing rules (a bug batch is one
+agenda; an owner’s question is answered on its item)
+([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)). It names only verbs that exist. Exactly this,
+with the binary's name for `fy`:
+
+```text
+Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest. `split` misfits, `merge` items that share.
+Open: `fy agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (`--term X=meaning`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`); todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
+Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "…"` returns it. `rest <id> --why …`=working. Every update: `show <id> --yaml` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then `patch <id> --file f`; chat points there. Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there. Only you mark it `done` when nothing's left. Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.
+Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.
+```
 
 - **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
   means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into
@@ -328,20 +494,21 @@ recorded push errored or reached no device, plus a `notification log` note for s
 
 ## Every automatic push, and why it stays or goes
 
-| Path                                             | Where                                       | Decision                                                                                                                           |
-| ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| A ferret stops on the owner                      | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                                    |
-| An item's `neededBy` comes near                  | daemon `AgendaBuzz`                         | **One push** per item. Never for a quiet input card (filled under a paste rule, a task plan line or a standing rule at its raise). |
-| A notice with `--ping`                           | `fy notify --ping`                          | **One push** per notice.                                                                                                           |
-| A sign-in to approve on the phone                | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                                        |
-| An item is created, edited, surfaced or answered | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.)             |
-| A notice without `--ping`                        | `fy notify`, legacy `POST …/notify`         | **Never pushed.** Inbox badge only.                                                                                                |
-| Enrolment confirmation                           | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                            |
-| A new device was paired                          | daemon audit log                            | Kept. This is a security alert.                                                                                                    |
-| A harness parks on its own prompt                | daemon `HarnessPromptAgenda`                | **An item** like any other: it buzzes through a stop, not by itself.                                                               |
-| A session starts, finishes or idles              | daemon                                      | Never pushed on its own (a stop is idle **with** an item waiting).                                                                 |
-| `failed` / `stalled` / `kill_failed`             | PWA page watcher                            | Kept. A dead ferret cannot raise an item.                                                                                          |
-| Notifications a device's own filter hides        | push worker                                 | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.              |
+| Path                                                 | Where                                       | Decision                                                                                                                           |
+| ---------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| A ferret stops on the owner                          | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                                    |
+| An item's `neededBy` comes near                      | daemon `AgendaBuzz`                         | **One push** per item. Never for a quiet input card (filled under a paste rule, a task plan line or a standing rule at its raise). |
+| A notice with `--ping`                               | `fy notify --ping`                          | **One push** per notice.                                                                                                           |
+| A sign-in to approve on the phone                    | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                                        |
+| An item is created, edited, surfaced or answered     | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.)             |
+| A pushed item is handled, rests, sleeps or is opened | daemon `AgendaAlertClearer`                 | **One clear** per push: its line comes down on every device, content-free (see When an alert is cleared).                          |
+| A notice without `--ping`                            | `fy notify`, legacy `POST …/notify`         | **Never pushed.** Inbox badge only.                                                                                                |
+| Enrolment confirmation                               | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                            |
+| A new device was paired                              | daemon audit log                            | Kept. This is a security alert.                                                                                                    |
+| A harness parks on its own prompt                    | daemon `HarnessPromptAgenda`                | **An item** like any other: it buzzes through a stop, not by itself.                                                               |
+| A session starts, finishes or idles                  | daemon                                      | Never pushed on its own (a stop is idle **with** an item waiting).                                                                 |
+| `failed` / `stalled` / `kill_failed`                 | PWA page watcher                            | Kept. A dead ferret cannot raise an item.                                                                                          |
+| Notifications a device's own filter hides            | push worker                                 | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.              |
 
 ## GAPs
 

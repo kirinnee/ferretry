@@ -18,10 +18,13 @@
 import {
   type BoardActor,
   type BoardActorVia,
+  boardTaskRevision,
   type BoardAttachment,
   type BoardClarification,
   type BoardEditableField,
+  type BoardStatus,
   BoardEditableFieldSchema,
+  type BoardTaskVisibility,
   type BoardProjectId,
   type BoardTask,
   type BoardTaskActionRequest,
@@ -48,9 +51,11 @@ import {
   variantLanes,
 } from '@ferretry/protocol';
 import {
+  type BoardCaller,
   type BoardOperation,
   type BoardStanding,
   type CardAudience,
+  claimRefusalMessage,
   mayDo,
   mayPassGate,
   OPERATION_STANDINGS,
@@ -60,6 +65,7 @@ import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
 import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
+import { cardVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 /** An event's actor and, beside it, how an owner actor acted (`BoardActorVia`). */
 const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
@@ -82,6 +88,8 @@ export interface CardContext {
   readonly standing: BoardStanding;
   /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
   readonly handsDown?: boolean;
+  /** The lead of the caller's own that holds the card, when the caller may CLAIM it (`claimableFrom`). */
+  readonly claimedFrom?: string;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
@@ -208,7 +216,7 @@ const requireOwnerForClosed = (
 };
 
 // ---------------------------------------------------------------------------------------------------
-// Gates: the one stopping point (docs/board.md § Gates ask the owner)
+// Gates: the one stopping point (docs/board.md § Cards show progress)
 // ---------------------------------------------------------------------------------------------------
 
 const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
@@ -356,7 +364,7 @@ const reopen = (
  * and never moves a dropped card, and it is NOT stopped by dependencies, because
  * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
  *
- * IT NEVER PASSES A GATE (docs/board.md § Gates ask the owner): a card waiting at one stays there, whatever the
+ * IT NEVER PASSES A GATE (docs/board.md § Cards show progress): a card waiting at one stays there, whatever the
  * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
  */
 export const triggerMove = (
@@ -732,21 +740,90 @@ const link = (
 /** The fields only the owner side may rewrite: they change what the work IS. */
 const PLAN_FIELDS: readonly BoardEditableField[] = ['title', 'brief'];
 
+/** A card's status with the parts an edit names replaced, inside the card's own write (docs/board.md § The card's Status). */
+const mergedStatus = (card: BoardTask, parts: Partial<BoardStatus> | undefined): BoardStatus | undefined =>
+  parts === undefined
+    ? undefined
+    : {
+        now: parts.now ?? card.status?.now ?? '',
+        doneSoFar: parts.doneSoFar ?? card.status?.doneSoFar ?? '',
+        next: parts.next ?? card.status?.next ?? '',
+      };
+
 const edit = (
   card: BoardTask,
-  action: Extract<BoardTaskActionRequest, { action: 'edit' }>,
+  request: Extract<BoardTaskActionRequest, { action: 'edit' }>,
   context: CardContext,
 ): CardOutcome => {
   requireStanding('edit', context.standing, card);
+  const action = { ...request, status: mergedStatus(card, request.status) };
+  // READ BEFORE WRITE (`fy task patch`): the writer read the card at `revision`; a change since would be overwritten unseen.
+  if (action.revision !== undefined && boardTaskRevision(card) !== action.revision) {
+    throw new BoardError(
+      'version-conflict',
+      `${formatTaskRef(card)} changed since you read it: read it again (task show ${card.id} --yaml), update every part that is out of date, and patch it back`,
+    );
+  }
   const changed = BoardEditableFieldSchema.options.filter(
     field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(card[field]),
   );
   if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, card);
-  if (changed.length === 0) throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(card)}`);
+  const visibility =
+    action.visibility === undefined || alreadyChosen(card, action.visibility) ? undefined : action.visibility;
+  if (changed.length === 0 && visibility === undefined) {
+    throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(card)}`);
+  }
   let next = card;
   for (const field of changed)
     next = { ...withEvent(next, { type: 'field-edited', field }, context), [field]: action[field] };
-  return { task: next };
+  return { task: visibility === undefined ? next : visibilityChanged(next, card, visibility, undefined, context) };
+};
+
+/**
+ * Whether `to` is already the card's recorded choice. The same value as the derived default is still a change when
+ * nobody chose it: recording the choice is what keeps a later repair of the default from undoing it.
+ */
+const alreadyChosen = (card: BoardTask, to: BoardTaskVisibility): boolean =>
+  visibilityChosen(card) && cardVisibility(card) === to;
+
+/**
+ * Makes a card public or private ({@link visibilityVerdict} says who may). The change is stored on the card and
+ * written to its history as a note, which every app already reads.
+ */
+const setVisibility = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'visibility' }>,
+  context: CardContext,
+): CardOutcome => {
+  if (alreadyChosen(card, action.visibility)) {
+    throw new BoardError('invalid', `${formatTaskRef(card)} is already ${action.visibility}`);
+  }
+  return { task: visibilityChanged(card, card, action.visibility, action.reason, context) };
+};
+
+/**
+ * `card` (which may already carry other edits) made `to`, if the caller's standing on `original` allows it. The choice
+ * is stored as chosen, so no later repair of the derived default can undo it.
+ */
+const visibilityChanged = (
+  card: BoardTask,
+  original: BoardTask,
+  to: BoardTaskVisibility,
+  reason: string | undefined,
+  context: CardContext,
+): BoardTask => {
+  const refusal = visibilityVerdict(original, to, context.standing);
+  if (refusal !== null) {
+    throw new BoardError('forbidden', `${formatTaskRef(original)}: ${refusal.message}`, refusal.allowed);
+  }
+  const why = reason === undefined ? '' : `: ${reason}`;
+  const was = cardVisibility(original);
+  const change = was === to ? `${to} (chosen)` : `${was} → ${to}`;
+  return {
+    ...withEvent(card, { type: 'note', text: `visibility: ${change}${why}` }, context),
+    visibility: to,
+    visibilitySource: 'chosen',
+  };
 };
 
 const file = (
@@ -871,7 +948,7 @@ const refile = (
 };
 
 /**
- * Where a refile lands for anyone who may not pass a gate (docs/board.md § Gates ask the owner): never past a gate of
+ * Where a refile lands for anyone who may not pass a gate (docs/board.md § Cards show progress): never past a gate of
  * the other board's variant — a landing with one before it stops in that gate, and a lane NAMED past one is refused —
  * and a card waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
  * gate. Throws `owner-gate` naming the gate.
@@ -944,9 +1021,24 @@ const reparent = (
       `${ref} is already ${to === null ? 'at the top level' : `under ${formatTaskRef(to)}`}`,
     );
   }
+  const sitting = { ...card, parent: to };
+  const moved = card.visibility === undefined ? sitting : withDefaultVisibility(sitting);
+  const was = cardVisibility(card);
+  const now = cardVisibility(moved);
+  // Where a card sits is part of what decides who can see it: a card never becomes a public sub-card, and a
+  // person's card is never hidden, by a caller the visibility rules would stop doing either directly.
+  const refusal =
+    now === 'public' && card.parent === null && to !== null
+      ? visibilityVerdict(moved, 'public', context.standing)
+      : was === 'public' && now === 'private'
+        ? visibilityVerdict(moved, 'private', context.standing)
+        : null;
+  if (refusal !== null) {
+    throw new BoardError('forbidden', `${ref}: ${refusal.message}, and moving it there would do that`, refusal.allowed);
+  }
   return {
     task: {
-      ...withEvent(card, { type: 'reparented', from: card.parent, to, reason: action.reason ?? null }, context),
+      ...withEvent(moved, { type: 'reparented', from: card.parent, to, reason: action.reason ?? null }, context),
       parent: to,
     },
   };
@@ -1038,6 +1130,25 @@ export const applyAction = (
           assignee: action.assignee,
         },
       };
+    case 'claim': {
+      const actor = context.actor;
+      if (context.claimedFrom === undefined || actor.kind !== 'ferret') {
+        const caller: BoardCaller =
+          actor.kind === 'ferret' ? { kind: 'ferret', sessionId: actor.sessionId } : { kind: 'owner' };
+        throw new BoardError('forbidden', claimRefusalMessage(card, caller));
+      }
+      const claimer = actor.sessionId;
+      return {
+        task: {
+          ...withEvent(
+            card,
+            { type: 'assigned', from: card.assignee, to: claimer, claimedFrom: context.claimedFrom },
+            context,
+          ),
+          assignee: claimer,
+        },
+      };
+    }
     case 'note':
       requireStanding('note', context.standing, card);
       return { task: withEvent(card, { type: 'note', text: action.text }, context) };
@@ -1071,6 +1182,8 @@ export const applyAction = (
       return refile(card, action, refileTarget, context);
     case 'reparent':
       return reparent(card, action, context, parentStanding);
+    case 'visibility':
+      return setVisibility(card, action, context);
   }
 };
 
@@ -1116,6 +1229,7 @@ export const newCard = (request: BoardTaskCreateRequest, context: NewCardContext
     terms: request.terms,
     brief: request.brief,
     howToTest: request.howToTest,
+    ...(request.status === undefined ? {} : { status: request.status }),
     owner: context.owner,
     assignee: request.assignee,
     parent: request.parent,

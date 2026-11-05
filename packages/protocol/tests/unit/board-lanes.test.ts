@@ -256,7 +256,7 @@ describe('laneGateProblems', () => {
     should(plain(laneGateProblems(FERRETRY, disguised, { released: 'closed' }))).deepEqual([
       {
         laneId: 'closed',
-        why: 'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+        why: 'removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
       },
     ]);
   });
@@ -309,8 +309,8 @@ describe('laneGateProblems', () => {
 
     // Act + Assert
     should(whys(laneGateProblems(FERRETRY, swapped))).deepEqual([
-      'makes Released · to test the closed lane, which closes the cards in it',
-      'makes Released · to test automatic: it would stop waiting for the owner',
+      'makes Released the closed lane, which closes the cards in it',
+      'makes Released automatic: it would stop waiting for the owner',
       'makes Closed an open lane, which reopens the cards in it',
     ]);
   });
@@ -340,7 +340,7 @@ describe('laneGateProblems', () => {
     should(whys(laneGateProblems(FERRETRY, rewired))).deepEqual([
       'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
     ]);
-    should(whys(laneGateProblems(FERRETRY, ungated))).deepEqual(['drops the owner gate of Released · to test']);
+    should(whys(laneGateProblems(FERRETRY, ungated))).deepEqual(['drops the owner gate of Released']);
   });
 
   it('should find a gate moved among the lanes a workflow walks', () => {
@@ -551,7 +551,7 @@ describe('lane templates', () => {
         enterOn: ['work.started'],
         ownerGate: true,
         staleAfter: '2h',
-        emphasis: 'action',
+        emphasis: 'progress',
         stage: PLAN_GATE,
       },
       {
@@ -574,7 +574,7 @@ describe('lane templates', () => {
       },
       {
         id: 'released',
-        name: 'Released · to test',
+        name: 'Released',
         category: 'verify',
         enterOn: ['release.published'],
         ownerGate: true,
@@ -651,7 +651,7 @@ describe('lane templates', () => {
     should(closing('writing')?.ownerGate).be.true();
   });
 
-  it('should give quick work a To test lane that a merge, a release and a done all enter', () => {
+  it('should give quick work a Ready to try lane that a merge, a release and a done all enter', () => {
     // Arrange
     const quick = laneSetOf('quick');
 
@@ -664,7 +664,7 @@ describe('lane templates', () => {
     // Assert
     should(QUICK_TO_TEST_LANE).deepEqual({
       id: 'to-test',
-      name: 'To test',
+      name: 'Ready to try',
       category: 'verify',
       enterOn: ['pr.merged', 'release.published', 'signal.done'],
       ownerGate: true,
@@ -685,7 +685,7 @@ describe('lane templates', () => {
     should(names('pr')).deepEqual(['Todo', 'Plan/Design', 'In progress', 'Merged']);
     should(names('ops')).deepEqual(['Todo', 'Investigate', 'Fix', 'Verify', 'Closed']);
     should(names('writing')).deepEqual(['Todo', 'Research', 'Draft', 'Review', 'Published', 'Closed']);
-    should(names('quick')).deepEqual(['Todo', 'Doing', 'To test', 'Closed']);
+    should(names('quick')).deepEqual(['Todo', 'Doing', 'Ready to try', 'Closed']);
   });
 
   it('should apply a proposal’s renames and keep lane ids and targets', () => {
@@ -717,9 +717,9 @@ describe('lane emphasis', () => {
     should(laneEmphasis(lane('merged', 'shipped', { emphasis: 'progress' }))).equal('progress');
   });
 
-  it('should derive it from the category, and from an owner gate, when the lane does not say', () => {
+  it('should derive it from the category when the lane does not say: a gate draws nothing, its ask rides the agenda', () => {
     should(laneEmphasis(lane('tested', 'verify'))).equal('action');
-    should(laneEmphasis(lane('plan', 'active', { ownerGate: true }))).equal('action');
+    should(laneEmphasis(lane('plan', 'active', { ownerGate: true }))).equal('progress');
     should(laneEmphasis(lane('implement', 'active'))).equal('progress');
     should(laneEmphasis(lane('todo', 'backlog'))).equal('progress');
     should(laneEmphasis(lane('review', 'review'))).equal('progress');
@@ -738,7 +738,7 @@ describe('lane emphasis', () => {
         lane('tested', 'verify', { ownerGate: true, emphasis: 'info' }),
         lane('closed', 'closed', { ownerGate: true }),
       ]),
-    ).deepEqual(["a verify lane is the owner's action, so its emphasis is action"]);
+    ).deepEqual(["a verify lane's emphasis is action, so an older app still reads the set"]);
   });
 });
 
@@ -755,7 +755,7 @@ describe('when a card belongs in a lane', () => {
 
   it('should tell a plan lane the owner gates from the lane the building happens in', () => {
     should(useOf('pr-release-verify', 'plan')).equal(
-      'you are planning or designing it; the owner approves before it moves on; moves in when a session starts on it',
+      'you are planning or designing it; its agenda asks the owner OK to build before it moves on; moves in when a session starts on it',
     );
     should(useOf('pr-release-verify', 'implement')).equal(
       'you are building it now; moves in when a session starts on it or a PR opens or a PR is ready',
@@ -765,11 +765,11 @@ describe('when a card belongs in a lane', () => {
   it('should name what moves a card into a shipped, verify and closed lane, and who passes the gate', () => {
     should(useOf('pr-release-verify', 'merged')).equal('merged, waiting for a release; moves in when the PR merges');
     should(useOf('pr-release-verify', 'released')).equal(
-      'the owner tests it; moves in when a release ships it; the owner moves it on',
+      'released or ready for the owner to try; moves in when a release ships it; its agenda asks the owner to move it on',
     );
     should(useOf('pr-release-verify', 'closed')).equal('finished; only the owner closes it');
     should(useOf('quick', 'to-test')).equal(
-      'the owner tests it; moves in when the PR merges or a release ships it or `fy signal done`; the owner moves it on',
+      'released or ready for the owner to try; moves in when the PR merges or a release ships it or `fy signal done`; its agenda asks the owner to move it on',
     );
   });
 

@@ -2488,6 +2488,18 @@ button.fy-receipt {
   font-size: 11px;
   padding: 0 8px;
 }
+/* The sender's own label (blocker / action / fyi): a quiet outline chip; only a blocker is loud. */
+.fy-peer-label {
+  border: var(--stroke) solid var(--fy-border);
+  border-radius: var(--radius-badge);
+  color: var(--fy-muted);
+  font-size: 11px;
+  padding: 0 8px;
+}
+.fy-peer-label[data-peer-label='blocker'] {
+  border-color: var(--warn-border, var(--fy-border));
+  color: var(--warn, var(--fy-fg));
+}
 .fy-peer-kind[data-peer-kind='reply'] {
   background: var(--fy-surface-2);
   border-color: var(--fy-border);
@@ -2568,7 +2580,21 @@ button.fy-receipt {
   box-shadow: var(--card-shadow);
   margin-right: auto;
   max-width: min(85%, 640px);
-  padding: 8px 12px 8px;
+  padding: 6px 12px 6px;
+}
+/* THE HEAD IS A META LINE (&F949), the size of a chat row's name line: "Sent to :akasha" names where it went, the
+   message under it is what the card is for. The recipient is a proved reference drawn by Markdown, so its paragraph
+   is held to the same small size and no margin. */
+.fy-sent-head {
+  font-size: var(--text-sm, 13px);
+  line-height: 1.3;
+}
+.fy-sent-head .fy-peer-reference,
+.fy-sent-head .fy-peer-reference p {
+  display: inline;
+  font-size: inherit;
+  line-height: inherit;
+  margin: 0;
 }
 .fy-sent-label {
   color: var(--fy-muted);
@@ -2579,7 +2605,7 @@ button.fy-receipt {
   text-transform: var(--label-transform);
 }
 .fy-sent-body {
-  margin-top: 6px;
+  margin-top: 2px;
 }
 .fy-sent-unseen {
   color: var(--fy-muted);
@@ -2587,12 +2613,35 @@ button.fy-receipt {
   margin: 6px 0 0;
 }
 .fy-sent-state {
-  align-items: flex-start;
+  align-items: center;
   color: var(--fy-muted);
-  display: flex;
+  display: inline-flex;
+  flex: 0 1 auto;
   font-size: 11.5px;
-  gap: 6px;
-  margin: 6px 0 0;
+  gap: 4px;
+  line-height: 1.4;
+  min-width: 0;
+}
+.fy-sent-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The separator and the control it leads into never part: a wrap drops both to the next line together. */
+.fy-sent-command {
+  align-items: center;
+  color: var(--fy-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  gap: 4px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.fy-sent-dot {
+  color: var(--fy-muted);
+  font-weight: 400;
 }
 .fy-sent-state[data-sent-state='replied'] {
   color: var(--fy-accent);
@@ -2602,11 +2651,12 @@ button.fy-receipt {
   font-weight: 600;
 }
 .fy-sent-reason {
-  font-weight: 400;
+  color: var(--err);
+  font-size: 11.5px;
+  margin: 2px 0 0;
 }
 .fy-sent-mark {
   flex: 0 0 auto;
-  margin-top: 1px;
 }
 /* The sent card's foot reads like the peer foot's one row: its control at the left, the time and ticks
    at the right — and on a narrow phone it wraps the same way, the receipt taking the second line at the
@@ -2615,9 +2665,8 @@ button.fy-receipt {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-  margin-top: 2px;
+  gap: 2px 6px;
+  margin-top: 4px;
 }
 .fy-sent-foot > .fy-receipt-line {
   margin-left: auto;
@@ -2628,9 +2677,12 @@ button.fy-receipt {
   border: 0;
   color: var(--fy-muted);
   cursor: pointer;
-  font-size: 11px;
-  padding: 2px 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 0;
 }
+/* The foot's time keeps clear of the control before it, however full the line is: the foot's own gap (a padding
+   on top of it cost the longest label, "Not delivered", its one line on a 390px phone). */
 .fy-sent-command-toggle:hover,
 .fy-sent-command-toggle:focus-visible {
   color: var(--fy-fg);
@@ -2705,6 +2757,7 @@ button.fy-receipt {
   :root a.fy-peer-open[href],
   :root button.fy-system-details,
   :root button.fy-sent-command-toggle,
+  :root .fy-sent-head .fy-peer-reference a[href],
   :root button.fy-peer-more {
     min-height: 0;
     min-width: 0;
@@ -2712,6 +2765,7 @@ button.fy-receipt {
   }
   :root a.fy-peer-open[href]::after,
   :root button.fy-sent-command-toggle::after,
+  :root .fy-sent-head .fy-peer-reference a[href]::after,
   :root button.fy-peer-more::after {
     content: '';
     height: var(--target-floor);

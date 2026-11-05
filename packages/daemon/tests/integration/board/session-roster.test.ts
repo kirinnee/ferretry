@@ -173,6 +173,7 @@ describe('the board session roster', () => {
     await session(storage, 'broken', { status: 'running' });
     const reading = {
       listSessions: () => storage.listSessions(),
+      holdSessions: storage.holdSessions.bind(storage),
       readConfig: storage.readConfig.bind(storage),
       readState: async (id: Parameters<Storage['readState']>[0]) => {
         if (id === 'broken') throw new Error('unreadable');
@@ -186,5 +187,139 @@ describe('the board session roster', () => {
     // Assert
     should([...roster.held].sort()).eql(['broken', 'lead', 'odd']);
     should([...roster.sessions.keys()]).eql(['lead']);
+  });
+});
+
+describe('the board session roster, settled', () => {
+  it('should hand the work what is on disk now, though the last read was memoized and unheard', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running', lastActivityAt: EARLIER });
+    const roster = new StorageSessionRoster(storage, () => undefined);
+    await roster.roster();
+    const home = [...homes].at(-1) as string;
+    const file = createSessionPaths(createFoundationPaths(home as never), parseSessionId('lead')).state;
+    await writeFile(file, `${JSON.stringify({ id: 'lead', turn: 1, status: 'completed', lastActivityAt: LATER })}\n`);
+
+    // Act
+    const settled = await roster.settled(['lead'], async fresh => fresh);
+
+    // Assert
+    should([...settled.held]).eql(['lead']);
+    should(settled.sessions.get('lead')).match({ status: 'completed', lastActivityAt: LATER });
+  });
+
+  it('should read only the named sessions, and call a name the index does not hold gone', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running' });
+    await session(storage, 'child', { status: 'running' });
+    await session(storage, 'bystander', { status: 'running' });
+
+    // Act
+    const settled = await new StorageSessionRoster(storage, () => undefined).settled(
+      ['lead', 'child', 'ghost'],
+      async fresh => fresh,
+    );
+
+    // Assert
+    should([...settled.held].sort()).eql(['child', 'lead']);
+    should([...settled.sessions.keys()].sort()).eql(['child', 'lead']);
+  });
+
+  it("should lay the Warden's ledger over a settled session", async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running', lastTranscriptAt: EARLIER });
+    const ledger: WardenLivenessLedger = { lastTranscriptAt: LATER };
+
+    // Act
+    const settled = await new StorageSessionRoster(storage, () => ledger).settled(['lead'], async fresh => fresh);
+
+    // Assert
+    should(settled.sessions.get('lead')).match({ status: 'running', lastTranscriptAt: LATER });
+  });
+
+  it('should hold a settled session it cannot read without calling it alive or dead', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running' });
+    await session(storage, 'broken', { status: 'running' });
+    const reading = {
+      listSessions: () => storage.listSessions(),
+      holdSessions: storage.holdSessions.bind(storage),
+      readConfig: storage.readConfig.bind(storage),
+      readState: async (id: Parameters<Storage['readState']>[0], freshness?: Parameters<Storage['readState']>[1]) => {
+        if (id === 'broken') throw new Error('unreadable');
+        return await storage.readState(id, freshness);
+      },
+    };
+
+    // Act
+    const settled = await new StorageSessionRoster(reading, () => undefined).settled(
+      ['lead', 'broken'],
+      async fresh => fresh,
+    );
+
+    // Assert
+    should([...settled.held].sort()).eql(['broken', 'lead']);
+    should([...settled.sessions.keys()]).eql(['lead']);
+  });
+
+  it('should keep the named sessions still while the work runs, and let other sessions write', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running' });
+    await session(storage, 'child', { status: 'running' });
+    await session(storage, 'other', { status: 'running' });
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const finish = new Promise<void>(done => {
+      release = done;
+    });
+    let proceed = (): void => undefined;
+    const started = new Promise<void>(resolve => {
+      proceed = resolve;
+    });
+
+    // Act
+    const work = new StorageSessionRoster(storage, () => undefined).settled(['lead', 'child'], async fresh => {
+      proceed();
+      await finish;
+      order.push('work');
+      return fresh.sessions.get('child')?.status;
+    });
+    await started;
+    const later = storage
+      .writeState(parseSessionId('child'), { id: 'child', turn: 1, status: 'completed' })
+      .then(() => void order.push('later write'));
+    await storage.writeState(parseSessionId('other'), { id: 'other', turn: 1, status: 'completed' });
+    order.push('other write');
+    release();
+    const seen = await work;
+    await later;
+
+    // Assert
+    should(seen).equal('running');
+    should(order).eql(['other write', 'work', 'later write']);
+  });
+
+  it('should release the named sessions when the work throws', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', { status: 'running' });
+    const roster = new StorageSessionRoster(storage, () => undefined);
+
+    // Act
+    const failed = await roster
+      .settled(['lead'], async () => {
+        throw new Error('commit refused');
+      })
+      .catch((error: unknown) => (error as Error).message);
+    await storage.writeState(parseSessionId('lead'), { id: 'lead', turn: 1, status: 'completed' });
+
+    // Assert
+    should(failed).equal('commit refused');
+    should((await roster.settled(['lead'], async fresh => fresh)).sessions.get('lead')).match({ status: 'completed' });
   });
 });

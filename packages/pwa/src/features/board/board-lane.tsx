@@ -1,9 +1,8 @@
 /**
  * ONE LANE: a header with the lane's name and card count that folds the lane away, and the cards under it.
  *
- * It is the only lane renderer — a Kanban column on the full page, a collapsible group in the side pane —
- * and it is also a drop target: while a card of the same board is being dragged it accepts the drop and
- * says so. What a drop DOES is the page's (`onDropCard`), because only the page knows about reasons.
+ * It is the only lane renderer — a Kanban column on the full page, a collapsible group in the side pane. It is
+ * not a drop target: cards are not draggable, the board moves them itself.
  */
 
 import type { LaneCategory } from '@ferretry/protocol';
@@ -17,50 +16,18 @@ export interface BoardLaneProps {
   readonly count: number;
   readonly density: BoardDensity;
   readonly defaultCollapsed?: boolean;
-  /** A card of this board is in the air: this lane takes the drop. */
-  readonly accepts?: boolean;
-  readonly onDropCard?: () => void;
-  /** Drawn as a quiet "drop here to close" target rather than a column (the hidden Closed lane). */
-  readonly variant?: 'column' | 'target';
   readonly children?: ReactNode;
 }
 
-export function BoardLane({
-  name,
-  category,
-  count,
-  density,
-  defaultCollapsed = false,
-  accepts = false,
-  onDropCard,
-  variant = 'column',
-  children,
-}: BoardLaneProps) {
+export function BoardLane({ name, category, count, density, defaultCollapsed = false, children }: BoardLaneProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
-  const [over, setOver] = useState(false);
   const bodyId = useId();
-  const droppable = accepts && onDropCard !== undefined;
   return (
     <section
       aria-label={`${name}, ${count} ${count === 1 ? 'card' : 'cards'}`}
       className="fy-board-lane"
       data-category={category ?? 'unplaced'}
       data-density={density}
-      data-drop={droppable ? (over ? 'over' : 'ready') : undefined}
-      data-variant={variant}
-      onDragLeave={() => setOver(false)}
-      onDragOver={event => {
-        if (!droppable) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-        setOver(true);
-      }}
-      onDrop={event => {
-        if (!droppable) return;
-        event.preventDefault();
-        setOver(false);
-        onDropCard();
-      }}
     >
       <h3 className="fy-board-lane__head">
         <button

@@ -1,7 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  BOARD_ACTIVITY_CHOICES,
   buildAssignAction,
+  buildClaimAction,
   buildBlockAction,
   buildBoardCreateRequest,
   buildBoardQuery,
@@ -25,6 +27,7 @@ import {
   DEFAULT_REOPEN_SOURCE,
   parseTerms,
   requireCardRef,
+  visibilityOf,
 } from '../../../src/lib/board/board-request';
 import { FERRETRY_ID } from './fixtures';
 
@@ -352,6 +355,7 @@ describe('the action builders', () => {
     // Act + Assert
     should(buildAssignAction('sess-1')).eql({ action: 'assign', assignee: 'sess-1' });
     should(buildAssignAction(null)).eql({ action: 'assign', assignee: null });
+    should(buildClaimAction()).eql({ action: 'claim' });
   });
 
   it('should join the note words and refuse an empty note', () => {
@@ -417,6 +421,15 @@ describe('the action builders', () => {
     should(buildEditAction({ term: [] }, { brief: 'brief only' })).eql({ action: 'edit', brief: 'brief only' });
   });
 
+  it('should edit the status whole, and name the status flags in the nothing-to-edit refusal', () => {
+    // Arrange
+    const status = { now: 'x', doneSoFar: '- y', next: '1. z' };
+
+    // Act + Assert
+    should(buildEditAction({}, { status })).eql({ action: 'edit', status });
+    should(() => buildEditAction({}, {})).throw(/--status-now, --status-done, --status-next, --status-file/u);
+  });
+
   it('should edit How to test alone, and premise and context as bullets or cleared', () => {
     // Act + Assert
     should(buildEditAction({}, { howToTest: ' 1. Open it\n\n\n2FA codes\n4. See it\n' })).eql({
@@ -457,13 +470,13 @@ describe('buildBoardQuery', () => {
 
   it('should build an empty query when no filter is given', () => {
     // Act + Assert
-    should(buildBoardQuery({}, everything)).eql({});
+    should(buildBoardQuery({}, everything)).eql({ visibility: 'public' });
   });
 
   it('should carry the resolved project and ferret and every filter', () => {
     // Act
     const query = buildBoardQuery(
-      { kind: 'bug', pr: 'ci_red', activity: 'waiting_on_you', state: 'dropped', query: ' widget ' },
+      { kind: 'bug', pr: 'ci_red', activity: 'stale', state: 'dropped', query: ' widget ' },
       { projectId: FERRETRY_ID, ferretId: 'sess-1' },
     );
 
@@ -473,17 +486,27 @@ describe('buildBoardQuery', () => {
       ferret: 'sess-1',
       kind: 'bug',
       prState: 'ci_red',
-      activity: 'waiting_on_you',
+      activity: 'stale',
       state: 'dropped',
       query: 'widget',
     });
   });
 
+  it('should refuse the deprecated waiting filters: a card never waits on the owner, its agenda does', () => {
+    // Act + Assert
+    for (const activity of ['waiting', 'to_test', 'waiting_on_you'])
+      should(() => buildBoardQuery({ activity }, everything)).throw(/--activity must be one of/u);
+    should(BOARD_ACTIVITY_CHOICES).not.containEql('waiting_on_you');
+  });
+
   it('should read --closed as --state closed, and accept both when they agree', () => {
     // Act + Assert
-    should(buildBoardQuery({ closed: true }, everything)).eql({ state: 'closed' });
-    should(buildBoardQuery({ closed: true, state: 'closed' }, everything)).eql({ state: 'closed' });
-    should(buildBoardQuery({ closed: false, state: 'all' }, everything)).eql({ state: 'all' });
+    should(buildBoardQuery({ closed: true }, everything)).eql({ state: 'closed', visibility: 'public' });
+    should(buildBoardQuery({ closed: true, state: 'closed' }, everything)).eql({
+      state: 'closed',
+      visibility: 'public',
+    });
+    should(buildBoardQuery({ closed: false, state: 'all' }, everything)).eql({ state: 'all', visibility: 'public' });
   });
 
   it('should refuse --closed together with a different --state', () => {
@@ -506,5 +529,68 @@ describe('buildBoardQuery', () => {
     should(() => buildBoardQuery({ query: 'x'.repeat(201) }, everything)).throw(
       /the board query is not usable: query:/u,
     );
+  });
+});
+
+describe('public and private cards', () => {
+  const everything = { projectId: undefined, ferretId: undefined };
+
+  it('should send no visibility on create unless --private or --public is given', () => {
+    // Act + Assert
+    should(buildBoardCreateRequest(minimal, [], resolved)).not.have.property('visibility');
+    should(buildBoardCreateRequest({ ...minimal, private: true }, [], resolved).visibility).equal('private');
+    should(buildBoardCreateRequest({ ...minimal, public: true }, [], resolved).visibility).equal('public');
+  });
+
+  it('should refuse --private together with --public', () => {
+    // Act + Assert
+    should(() => buildBoardCreateRequest({ ...minimal, private: true, public: true }, [], resolved)).throw(
+      /pass --private or --public, not both/u,
+    );
+  });
+
+  it('should read --visibility as public or private, and refuse anything else', () => {
+    // Act + Assert
+    should(visibilityOf(undefined)).be.undefined();
+    should(visibilityOf('  ')).be.undefined();
+    should(visibilityOf(' public ')).equal('public');
+    should(visibilityOf('private')).equal('private');
+    should(() => visibilityOf('secret')).throw(/--visibility must be one of public \| private/u);
+  });
+
+  it('should build one edit action for visibility alone or beside card text', () => {
+    // Act + Assert
+    should(buildEditAction({ visibility: 'private' })).eql({ action: 'edit', visibility: 'private' });
+    should(buildEditAction({ title: 'New title', visibility: ' public ' })).eql({
+      action: 'edit',
+      title: 'New title',
+      visibility: 'public',
+    });
+    should(() => buildEditAction({ title: 'New title', visibility: 'secret' })).throw(/--visibility must be one of/u);
+  });
+
+  it('should ask the board for public cards by default', () => {
+    // Act + Assert
+    should(buildBoardQuery({}, everything).visibility).equal('public');
+  });
+
+  it('should ask for private cards with --private and for both with --all', () => {
+    // Act + Assert
+    should(buildBoardQuery({ private: true }, everything).visibility).equal('private');
+    should(buildBoardQuery({ all: true }, everything)).not.have.property('visibility');
+  });
+
+  it('should show both kinds on a board scoped to one ferret, unless --private is given', () => {
+    // Arrange
+    const ferret = { projectId: undefined, ferretId: 'sess-1' };
+
+    // Act + Assert
+    should(buildBoardQuery({}, ferret)).not.have.property('visibility');
+    should(buildBoardQuery({ private: true }, ferret).visibility).equal('private');
+  });
+
+  it('should refuse --private together with --all', () => {
+    // Act + Assert
+    should(() => buildBoardQuery({ private: true, all: true }, everything)).throw(/pass --private or --all, not both/u);
   });
 });

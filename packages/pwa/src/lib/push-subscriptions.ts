@@ -5,6 +5,9 @@ import {
   PushDeviceListResponseSchema,
   type PushDeviceView,
   PushDeviceViewSchema,
+  type PushSeenResponse,
+  PushSeenRequestSchema,
+  PushSeenResponseSchema,
   RegisterPushDeviceRequestSchema,
   VapidPublicKeyResponseSchema,
 } from '@ferretry/protocol';
@@ -160,5 +163,22 @@ export const revokeDaemonPushDevice = async (
   const id = PushDeviceViewSchema.shape.id.parse(deviceId);
   return PushDeviceViewSchema.parse(
     await pushJson(daemon, `/v1/push/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }, fetcher),
+  );
+};
+
+/**
+ * Tells one daemon the owner opened an agenda item here (`POST /v1/push/seen`), so its alerts come down on their OTHER
+ * devices; answers the tags that clear named, which this page takes down on this device itself. Only for a daemon
+ * that lists `push.clear.1`: an older one answers 404.
+ */
+export const postAgendaItemSeen = async (
+  daemon: DaemonConnection,
+  sessionId: string,
+  agendaId: string,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<PushSeenResponse> => {
+  const body = PushSeenRequestSchema.parse({ sessionId, agendaId });
+  return PushSeenResponseSchema.parse(
+    await pushJson(daemon, '/v1/push/seen', { method: 'POST', body: JSON.stringify(body) }, fetcher),
   );
 };

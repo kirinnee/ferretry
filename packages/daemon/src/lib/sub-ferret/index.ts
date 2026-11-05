@@ -24,24 +24,45 @@ export const NO_SUB_FERRETS: SubFerretDirectory = {
   addressOf: async sessionId => sessionId,
 };
 
-/** The sentence a refused sub-ferret reads: what it may not do, and the command that reaches who may. */
-const subFerretRefusalMessage = (doing: string, leadAddress: string): string =>
-  `Sub-ferrets don't ${doing}; tell your lead: fy send ${leadAddress} "…"`;
+/** What a sub-ferret may still do on the board: its own card, and every card in its own subtree. */
+const SUB_FERRET_MAY_ON_BOARD =
+  'note on, set the status and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree';
+
+/** What a sub-ferret may still do on the agenda: read it and report to its lead. */
+export const SUB_FERRET_MAY_ON_AGENDA = 'read the agenda and report to your lead';
+
+/** What a sub-ferret may still do to a project's lanes: read them. */
+export const SUB_FERRET_MAY_ON_LANES = 'read the board and its lanes';
+
+/**
+ * The sentence a refused sub-ferret reads: what it may not do, what it MAY do instead, and the command that reaches
+ * who can do the rest. It speaks to the caller, never of "sub-ferrets" at large: a sub-ferret that leads a subtree of
+ * its own is told what its subtree allows.
+ */
+const subFerretRefusalMessage = (doing: string, may: string, leadAddress: string, claim?: string): string =>
+  `You are a sub-ferret, so you can't ${doing}. You may ${may}. ${
+    claim === undefined
+      ? `For anything else ask your lead: fy send ${leadAddress} "…"`
+      : `Your lead holds this card: claim it first: ${claim}`
+  }`;
 
 /**
  * The refusal for `sessionId` doing `doing`, or `null` when it is a lead (or nobody the daemon knows has
  * started it). A directory that cannot answer refuses nothing: the limit narrows a ferret that is known to
- * be a sub-ferret, it never locks out one it cannot place.
+ * be a sub-ferret, it never locks out one it cannot place. `claim` is the command that takes a card its lead holds
+ * (`fy task claim &F12`): given, the refusal sends the caller there instead of to its lead.
  */
 export const subFerretRefusal = async (
   directory: SubFerretDirectory,
   sessionId: string,
   doing: string,
+  may: string = SUB_FERRET_MAY_ON_BOARD,
+  claim?: string,
 ): Promise<string | null> => {
   const lead = await directory.leadOf(sessionId).catch(() => undefined);
   if (lead === undefined) return null;
   const address = await directory.addressOf(lead).catch(() => lead);
-  return subFerretRefusalMessage(doing, address);
+  return subFerretRefusalMessage(doing, may, address, claim);
 };
 
 /** Whether `sessionId` was started by another session. */

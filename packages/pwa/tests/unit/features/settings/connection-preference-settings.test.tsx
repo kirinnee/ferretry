@@ -108,6 +108,24 @@ describe('the connection preferences for every machine', () => {
     should(radio('auto').props['aria-describedby']).equal(undefined);
   });
 
+  it('should offer to turn the tunnel on under the row of a machine whose tunnel is off and whose choice walks it', () => {
+    const offer = { sentence: 'Tunnel: off (opt-in).', off: true, turnOn: async () => undefined };
+    const view = render(
+      <ConnectionPreferenceSettings
+        machines={[
+          { daemonId: STUDIO, label: 'studio', preference: 'auto', availability: { webrtc: false, tunnel: offer } },
+          { daemonId: LAPTOP, label: 'laptop', preference: 'relay', availability: { webrtc: false, tunnel: offer } },
+        ]}
+        onChange={() => undefined}
+      />,
+    );
+    const rowOf = (name: string): ReactTestInstance =>
+      view.root.find(node => node.type === 'li' && node.props['data-setting-row'] === name);
+
+    should(rowOf('studio').findAll(node => node.props['data-tunnel-offer'] !== undefined)).not.have.length(0);
+    should(rowOf('laptop').findAll(node => node.props['data-tunnel-offer'] !== undefined)).have.length(0);
+  });
+
   it('should keep what every choice does behind the (i), not only the chosen one', () => {
     const view = render(
       <ConnectionPreferenceSettings

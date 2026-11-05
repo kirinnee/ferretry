@@ -218,4 +218,18 @@ describe('SettingDisclosureRow', () => {
     expect(byAttr(renderer.root, 'data-setting-panel')[0]?.props.id).toBe(button().props['aria-controls']);
     expect(opened).toEqual([true]);
   });
+
+  it('is not a deep-link target without a setting id', () => {
+    const renderer = render(
+      <SettingDisclosureRow name="Viewport" hint="Where the screen ends">
+        <p>details</p>
+      </SettingDisclosureRow>,
+    );
+    const row = renderer.root.findByType('li');
+
+    expect(row.props.id).toBeUndefined();
+    expect(row.props['data-setting-id']).toBeUndefined();
+    expect(row.props.tabIndex).toBeUndefined();
+    expect(row.props['data-setting-row']).toBe('Viewport');
+  });
 });

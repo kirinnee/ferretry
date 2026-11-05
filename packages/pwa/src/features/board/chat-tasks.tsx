@@ -2,62 +2,50 @@
  * THE TASKS TAB, WIRED: `BoardSideTab` plus everything that needs the network and the screen.
  *
  * The tab itself only draws. This host owns what the Board page owns for the same cards, scaled down to one
- * ferret's: the view the reader picked (kept on this device; Cards until one is), the card detail drawer that opens OVER the chat
- * (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it), and the move flow
- * behind Done ✓, Not good and the ⋯ menu, which is the Board's own (`useBoardAnswers`): a move back opens the same
- * composer, the pressed answer spins and the card's others wait, and a refusal is said on the card.
+ * ferret's: the view the reader picked (kept on this device; Cards until one is) and the card detail drawer that
+ * opens OVER the chat (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it).
+ * It is READ-ONLY: no lane menu, no drag, no Done / Not good / Reopen — the board moves its own cards and the owner
+ * answers in the agenda.
  * Drawn small in the Info panel, or at page density when `expanded` (the chat page lays that over the chat);
- * either way it is this one host, so a move, the drawer and the reason box behave the same in both.
+ * either way it is this one host, so the drawer behaves the same in both.
  * Nothing here navigates: a card link inside the drawer reopens the drawer on that card.
  */
 
 import { type ReactElement, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { type BoardMachine, useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
-import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
+import { type BoardMachine, useBoardProjects } from '../../hooks/use-board.ts';
+import type { BoardChat } from '../../lib/board-chat.ts';
 import { chatSiblings } from '../../lib/board-chat.ts';
-import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
-import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import { boardSideView } from '../../lib/board-side-view.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
-import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
+import type { BoardCardOf } from '../../lib/board-view.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
-import { snoozeOver, toTestAnswersOver } from '../agenda/to-test-rows.tsx';
-import { useBoardAnswers } from './board-answers.tsx';
-import type { BoardCardMoves } from './board-card.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
-import type { BoardDoneControl } from './board-views.tsx';
-import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
+import { type BoardAgenda, BoardDetail } from './detail/board-detail.tsx';
 
 export interface ChatTasksProps {
   readonly store: DaemonBoardStore;
-  /** With `ports`, a card opens in the drawer; without them (a host that cannot speak to ferrets) it opens on the Board. */
-  readonly agenda?: Pick<BoardAgenda, 'respond'> & Partial<Pick<BoardAgenda, 'hydrate' | 'store'>>;
-  readonly ports?: BoardDetailPorts;
+  /** With an agenda, a card opens in the drawer; without one (a host that has none) it opens on the Board. */
+  readonly agenda?: Partial<BoardAgenda>;
   readonly machine: BoardMachine;
   readonly chat: BoardChat;
   readonly scope: DaemonSessionScope;
   readonly callsigns: ReadonlyMap<string, string>;
-  /** The task each ferret was given, by session id: a card to test names its ferret by this, never by callsign. */
-  readonly taskNames?: ReadonlyMap<string, string>;
   /** A phone shows the open card as a page of its own, over the chat. */
   readonly phone: boolean;
   readonly now: number;
   /** Where a link inside the drawer that is not a card of this ferret goes. */
   readonly onNavigate?: (to: string) => void;
-  /** "Ferret cards" on or off (`chat.agents` is its current value). */
+  /** "Show private" on or off (`chat.agents` is its current value). */
   readonly onAgents: (agents: boolean) => void;
   /** The tab fills the chat, at page density; the button then collapses it. */
   readonly expanded?: boolean;
   /** Expands the tab to the chat, or collapses it back; absent: the tab has no such button. */
   readonly onExpand?: () => void;
 }
-
-const refuseAgenda = (): Promise<never> => Promise.reject(new Error('this host has no agenda'));
-const NO_AGENDA: Pick<BoardAgenda, 'respond'> = { respond: refuseAgenda };
 
 const subscribeView = (listener: () => void): (() => void) => boardSideView.subscribe(listener);
 const readView = () => boardSideView.snapshot();
@@ -74,12 +62,10 @@ const cardIdOf = (to: string, daemonId: DaemonId): string | null => {
 export function ChatTasks({
   store,
   agenda,
-  ports,
   machine,
   chat,
   scope,
   callsigns,
-  taskNames,
   phone,
   now,
   onNavigate,
@@ -90,69 +76,7 @@ export function ChatTasks({
   const view = useSyncExternalStore(subscribeView, readView, readView);
   const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
   const connections = useMemo(() => [machine.connection], [machine.connection]);
-  const actions = useBoardActions(store, agenda ?? NO_AGENDA, connections);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<BoardCardOf | null>(null);
-  const { requestMove, answerFor, composer } = useBoardAnswers({
-    actions,
-    ports,
-    connectionOf: id => (id === machine.connection.daemonId ? machine.connection : undefined),
-    phone,
-    onNotice: setNotice,
-    // The Info panel scrolls and stacks on its own; the composer goes over the whole page.
-    portal: true,
-  });
-
-  const toTestAnswers = useMemo(
-    () => toTestAnswersOver({ requestMove, answerFor, snooze: snoozeOver(actions, setNotice) }),
-    [requestMove, answerFor, actions],
-  );
-
-  const movesFor = useCallback(
-    (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
-      const { group } = place;
-      if (group.laneSet === null) return undefined;
-      // A closed card has no lane to move to: its menu holds Reopen alone.
-      const closed = place.category === 'closed';
-      return {
-        choices: closed ? [] : moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
-        closeLaneId: closed ? null : doneLaneOf(group.laneSet),
-        reworkLaneId: closed ? null : notGoodLaneOf(group.laneSet),
-        onDragStart: setDragging,
-        onDragEnd: () => setDragging(null),
-      };
-    },
-    [requestMove],
-  );
-
-  const dropOn = useCallback(
-    (card: BoardCardOf, lane: ChatKanbanLane): void => {
-      setDragging(null);
-      const place = chat.cards.places.get(card.key);
-      if (place !== undefined && lane.laneId !== null) requestMove(card, place.group, lane.laneId);
-    },
-    [chat.cards.places, requestMove],
-  );
-
-  const doneFor = useCallback(
-    (card: BoardCardOf, place: BoardCardPlace): BoardDoneControl | undefined => {
-      const done = boardDone({
-        laneSet: place.group.laneSet,
-        category: place.category,
-        dropped: card.task.dropped !== null,
-      });
-      return done === null
-        ? undefined
-        : {
-            done,
-            press: () => requestMove(card, place.group, done.laneId, done.kind),
-            atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
-          };
-    },
-    [requestMove],
-  );
 
   // CALLED ON `agenda`, NEVER COPIED OFF IT: its methods read the client's own private fields.
   const detailAgenda = useMemo((): BoardAgenda | null => {
@@ -161,7 +85,6 @@ export function ChatTasks({
     if (hydrate === undefined || agendaStore === undefined) return null;
     return {
       hydrate: (daemon, daemonScope) => hydrate.call(agenda, daemon, daemonScope),
-      respond: (...args) => agenda.respond(...args),
       store: agendaStore,
     };
   }, [agenda]);
@@ -175,7 +98,7 @@ export function ChatTasks({
       for (const project of state.projects ?? []) byId.set(project.id, project.name);
     return byId;
   }, [projects]);
-  const drawer = detailAgenda !== null && ports !== undefined;
+  const drawer = detailAgenda !== null;
   const openCard = useCallback(
     (card: BoardCardOf): void => {
       if (drawer) setOpenId(card.task.id);
@@ -198,37 +121,22 @@ export function ChatTasks({
 
   return (
     <>
-      {notice === null ? null : (
-        <p className="fy-board-side__notice" data-board-side-notice="" role="status">
-          {notice}
-        </p>
-      )}
       <BoardSideTab
         callsigns={callsigns}
         chat={chat}
-        taskNames={taskNames}
-        projectNames={projectNames}
-        answerFor={answerFor}
         density={expanded ? 'page' : 'side'}
-        doneFor={doneFor}
-        dragging={dragging}
-        movesFor={movesFor}
         now={now}
         onAgents={onAgents}
-        onDropCard={dropOn}
         onExpand={onExpand}
         onOpenCard={openCard}
         onView={next => boardSideView.set(next)}
         scope={scope}
-        toTestAnswers={toTestAnswers}
         view={view}
       />
-      {composer}
-      {openId === null || detailAgenda === null || ports === undefined
+      {openId === null || detailAgenda === null
         ? null
         : createPortal(
             <BoardDetail
-              actions={actions}
               agenda={detailAgenda}
               machine={machine}
               names={names}
@@ -236,7 +144,6 @@ export function ChatTasks({
               onClose={() => setOpenId(null)}
               onNavigate={navigateFromDrawer}
               phone={phone}
-              ports={ports}
               projectName={id => projectNames.get(id) ?? id.slice(0, 8)}
               siblings={siblings}
               store={store}

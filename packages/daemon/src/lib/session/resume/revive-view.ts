@@ -1,5 +1,6 @@
 import { reviveRuling, type SessionView } from '@ferretry/protocol';
 import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
+import { createViewMemo } from '../directory/view-memo.ts';
 
 /**
  * Puts `revive: { revivable, reason }` on every session view the daemon serves, so each Resume button in
@@ -7,7 +8,9 @@ import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts
  * the mount, like `withOutdated`, and is computed on read from the status alone — nothing is stored.
  */
 export function withRevive(reader: SessionDirectorySubsystem): SessionDirectorySubsystem {
-  const mark = (view: SessionView): SessionView => ({ ...view, revive: reviveRuling(view.state.status) });
+  const memo = createViewMemo<undefined>();
+  const mark = (view: SessionView): SessionView =>
+    memo(view, undefined, () => ({ ...view, revive: reviveRuling(view.state.status) }));
   return {
     list: async () => (await reader.list()).map(mark),
     get: async reference => {

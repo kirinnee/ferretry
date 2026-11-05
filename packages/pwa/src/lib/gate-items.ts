@@ -16,20 +16,25 @@ import {
   type AgendaGate,
   type AgendaItem,
   type BoardReopenAttachments,
+  cardAskOf,
   gateAnswers,
   gateAskOptions,
+  gateReference,
   TEST_KIND_LABEL,
 } from '@ferretry/protocol';
-import type { DaemonId } from './daemon-connection.ts';
 import type { InboxAction } from './agenda-answers.ts';
+import type { DaemonId } from './daemon-connection.ts';
 import type { ToTestCard } from './to-test-inbox.ts';
 
 /** An item that is a gate: it carries the card, lane and options. */
 export type GateItem = AgendaItem & { readonly gate: AgendaGate };
 
+/** Whether a gate item is a plan to approve ("OK to build"), not a card to test. The one place that reads it. */
+export const isPlanGate = (item: Pick<AgendaItem, 'subject'>): boolean => item.subject.startsWith('OK to build');
+
 /** What a gate item is, in the owner's verb: a card to test, or a plan to approve. */
 export const gateVerb = (item: Pick<AgendaItem, 'subject'>): string =>
-  item.subject.startsWith('OK to build') ? AGENDA_KIND_LABELS.permission : TEST_KIND_LABEL;
+  isPlanGate(item) ? AGENDA_KIND_LABELS.permission : TEST_KIND_LABEL;
 
 export const isGateItem = (item: AgendaItem): item is GateItem => item.gate !== undefined;
 
@@ -39,17 +44,50 @@ export const choiceLabel = (action: InboxAction): string | null =>
 
 export type GateWords = 'required' | 'optional' | 'none';
 
-/** The gate an answer is to: the item's own, or — for an answer marked `gate` — the one attached to its thread. */
-const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined =>
-  action.kind === 'respond' && action.gate === true ? item.gateAttached : item.gate;
+/**
+ * The gate an answer is to: the item's own, or — for an answer marked `gate` — the card ask it names (`cardAsk`),
+ * else the one attached to its thread.
+ */
+const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined => {
+  if (action.kind !== 'respond' || action.gate !== true) return item.gate;
+  const named = action.cardAsk === undefined ? undefined : cardAskOf(item, action.cardAsk)?.gate;
+  return named ?? item.gateAttached;
+};
+
+/**
+ * What the words box after "Not good" / "Not yet" names: the CARD being tried — its title and id ("Pairing a second
+ * phone (&F61)") — never the agenda's own question, which the answer is not about. Falls back to the item's subject,
+ * without its closing "?" so the heading does not end in two.
+ */
+export const gateWhySubject = (item: AgendaItem, action: InboxAction): string => {
+  const gate = answeredGate(item, action);
+  if (gate !== undefined) {
+    const title = gate.cardTitle ?? (item.gate === gate ? item.title : undefined);
+    return title === undefined ? `&${gate.cardId}` : `${title} (&${gate.cardId})`;
+  }
+  return (item.subject ?? item.id).trim().replace(/\?+$/u, '');
+};
 
 /**
  * The gate attached to a thread, drawn as the gate item it would be: the same options in the same directions, so the
  * thread's second answer row reads and swipes exactly like the card's own gate item. `undefined` for any other item.
+ *
+ * The thread's OWN answer shape is left behind (&B156): its questions, steps, form fields, option details and
+ * recommendation are the thread's ask, not the card's. Carried over, a thread with several questions made the card
+ * ask read as "several questions — answer in words", and its OK to build button was never drawn.
  */
 export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
-  const { gateAttached, waitingOn, ...rest } = item;
-  void waitingOn;
+  const {
+    gateAttached,
+    waitingOn: _waitingOn,
+    questions: _questions,
+    steps: _steps,
+    stepsDone: _stepsDone,
+    fields: _fields,
+    optionDetails: _optionDetails,
+    recommendation: _recommendation,
+    ...rest
+  } = item;
   if (gateAttached === undefined || item.gate !== undefined || item.notice === true) return undefined;
   return {
     ...rest,
@@ -61,18 +99,22 @@ export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
 };
 
 /**
- * What the second answer row says about its card, after the card's id: "Badge colour is ready to test." for a card
- * waiting to be tried (its options reopen it), else "Badge colour is at Review."; the lane alone when the title is not known.
+ * What a card ask says about its card, under the heading that names its id: "Badge colour is ready to test." for a card
+ * waiting to be tried (its options reopen it), else "Badge colour is at Review."; "It is ..." when the title is not known.
  */
 export const attachedGateLead = (gate: AgendaGate): string => {
-  const named = gate.cardTitle === undefined ? '' : `${gate.cardTitle} `;
-  const waiting = gate.options.some(option => option.outcome === 'reopen-with-agenda');
-  return waiting ? `${named}is ready to test.` : `${named}is at ${gate.laneName}.`;
+  return `${gate.cardTitle ?? 'It'} is ${attachedGateStanding(gate)}.`;
 };
 
+/** Where the attached card stands, in the owner's words: "ready to test", else "at Review". */
+const attachedGateStanding = (gate: AgendaGate): string =>
+  gate.options.some(option => option.outcome === 'reopen-with-agenda') ? 'ready to test' : `at ${gate.laneName}`;
+
 /** An answer from the attached gate's row: marked so the daemon answers the gate, never the thread. */
-export const toGateAction = (action: InboxAction): InboxAction =>
-  action.kind === 'respond' ? { ...action, gate: true } : action;
+export const toGateAction = (action: InboxAction, gate?: AgendaGate): InboxAction =>
+  action.kind === 'respond'
+    ? { ...action, gate: true, ...(gate === undefined ? {} : { cardAsk: gateReference(gate) }) }
+    : action;
 
 /** Whether this answer to the item takes words: "Not good" needs them, "Not yet" may carry them, the rest take none. */
 export const gateWordsFor = (item: AgendaItem, action: InboxAction): GateWords => {
@@ -97,11 +139,14 @@ export const gateAsksWords = (item: AgendaItem, action: InboxAction): boolean =>
 export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] | undefined =>
   item.gate.options.find(option => option.outcome === 'reopen-with-agenda');
 
-/** The gate's answer as the action to send: the choice, and the owner's words as its note. */
+/**
+ * The gate's answer as the action to send: the choice, and the owner's words as its note. `attached` marks it as the
+ * answer to the card ask an older app is shown; an ask's gate or its reference names which one the owner was looking at.
+ */
 export const gateAnswerAction = (
   label: string,
   words: string,
-  attached = false,
+  attached: boolean | string | AgendaGate = false,
   attachments?: BoardReopenAttachments,
 ): InboxAction => {
   const note = words.trim();
@@ -110,7 +155,9 @@ export const gateAnswerAction = (
     label,
     response: { kind: 'multiple-choice', choice: label },
     ...(note === '' ? {} : { note }),
-    ...(attached ? { gate: true as const } : {}),
+    ...(attached === false ? {} : { gate: true as const }),
+    ...(typeof attached === 'object' ? { cardAsk: gateReference(attached) } : {}),
+    ...(typeof attached === 'string' ? { cardAsk: attached } : {}),
     ...(attachments === undefined ? {} : { attachments }),
   };
 };

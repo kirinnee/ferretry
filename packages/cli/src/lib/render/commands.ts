@@ -10,7 +10,7 @@ export function registerRenderCommands(program: Command, controller: RenderContr
   render
     .command('guide', { isDefault: true })
     .description('print the guide: the fence grammar and the types, or one type’s section')
-    .argument('[type]', 'mermaid, svg, html, chart, map, image, video, audio, pdf, lottie')
+    .argument('[type]', 'mermaid, svg, html, chart, map, image, video, audio, pdf, lottie, card, board')
     .action((type: string | undefined) => {
       controller.guideFor(type);
     });
