@@ -165,10 +165,12 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // turn between that frame and the key. What follows is what the payload would have done unparked: a
   // slash command is the TUI's own, anything else is a turn.
   //
-  // A parked slash command is reported handled-local BEFORE Codex has run it. If Codex then exits on its
-  // startup timeout, the command never ran, and the session's exit is what tells. That is accepted: a
-  // start no longer types a command into a booting Codex, and a live control on a session that is still
-  // starting is rare.
+  // A parked slash command is reported handled-local BEFORE Codex has run it. A new session's start no
+  // longer types a command into a booting Codex (its level rides the argv), but a FORK still does: it
+  // types `/model` through the startup picker hook, and that drive's own exit/timeout is what surfaces a
+  // parked `/model` that never ran — Codex exiting on its startup timeout, or the picker never opening
+  // within the drive's budget. The same goes for a live control on a session that is still starting,
+  // which is rare. Reporting handled-local here only stops THIS delivery pressing Enter again.
   if (paneShowsStartupWait(frame.visible))
     return { kind: 'delivered', outcome: text.trimStart().startsWith('/') ? 'handled-local' : 'turn-started' };
   // Exact `/model` opens Codex's native picker. The pane often keeps `› /model` above it, which

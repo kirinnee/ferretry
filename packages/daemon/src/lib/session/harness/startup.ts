@@ -1,5 +1,6 @@
 import type { RuntimeControlRequest, RuntimeModelChoice } from '@ferretry/protocol';
 import type { HarnessKind } from '../../core/inventory.ts';
+import { reasoningLevel } from './launch-effort.ts';
 import { harnessQuirks } from './quirks.ts';
 
 /**
@@ -44,13 +45,14 @@ export type StartupEffort =
 /**
  * The way this harness's start carries `effort`, or `undefined` when none was asked for.
  *
- * The level is trimmed and lowercased, as `launchReasoningEffort` does for a relaunch, so a start and a
- * relaunch can never disagree about the spelling that reaches the argv or the catalog check. An `argv`
+ * The level goes through `reasoningLevel`, the very normaliser `launchReasoningEffort` records the document's
+ * level with, so the level on the argv and the level the session records can never differ — and a level that
+ * normaliser rejects (`x_high`, `9`) is carried as none, exactly as the document records none for it. An `argv`
  * answer also tells the caller it must read the login's catalog before `planStartupEffort`.
  */
 export function startupEffort(harness: HarnessKind, effort: string | undefined): StartupEffort | undefined {
-  const level = effort?.trim().toLowerCase();
-  if (level === undefined || level.length === 0) return undefined;
+  const level = reasoningLevel(effort);
+  if (level === undefined) return undefined;
   return harnessQuirks(harness).effortIsRuntimeCommand
     ? { kind: 'command', effort: level }
     : { kind: 'argv', effort: level };
@@ -84,7 +86,15 @@ export function codexStartupEffortRefusal(
 
 /** What a start does about its reasoning level: refuse, or launch with these. */
 export type StartupEffortPlan =
-  | { readonly kind: 'refused'; readonly reason: string }
+  | {
+      readonly kind: 'refused';
+      /**
+       * `catalog_unreadable` — the login's catalog could not be read, so nothing was decided: a RETRY may
+       * succeed. `unservable` — the catalog was read and does not list the model or the level: it will not.
+       */
+      readonly cause: 'catalog_unreadable' | 'unservable';
+      readonly reason: string;
+    }
   | {
       readonly kind: 'planned';
       /** The level for the launch argv (Codex). */
@@ -112,5 +122,10 @@ export function planStartupEffort(
   if (carried.kind === 'command')
     return { kind: 'planned', startupRuntime: { action: 'effort', effort: carried.effort } };
   const reason = codexStartupEffortRefusal(model, carried.effort, catalog);
-  return reason === undefined ? { kind: 'planned', argvEffort: carried.effort } : { kind: 'refused', reason };
+  if (reason === undefined) return { kind: 'planned', argvEffort: carried.effort };
+  return {
+    kind: 'refused',
+    cause: catalog === undefined || catalog instanceof Error ? 'catalog_unreadable' : 'unservable',
+    reason,
+  };
 }

@@ -547,6 +547,7 @@ export class SessionSendService {
     const current = await this.require(request.id);
     authorizeSend(current, request.attachmentIds ?? []);
     const observed = await this.ports.terminal.observe(request.id);
+    this.refuseWhileParked(request.id, observed);
     if (routeSend(current, observed) === 'revive') return { kind: 'revive' };
     // A pointer of ours left typed is finished, and the session re-read: finishing a turn pointer
     // starts that turn, so this send must not claim the same turn number again.
@@ -561,6 +562,7 @@ export class SessionSendService {
       request.now === true && first.activeWork
         ? await this.ports.terminal.stopActiveTurn(request.id)
         : await this.ports.terminal.observe(request.id);
+    this.refuseWhileParked(request.id, second);
     const settled = routeSend(target, second);
     if (settled === 'revive') return { kind: 'revive' };
     if (second.draft !== undefined) throw composerOccupiedRefusal(second.draft);
@@ -1033,9 +1035,24 @@ export class SessionSendService {
     return { target: await this.require(target.id), pane: await this.ports.terminal.observe(target.id) };
   }
 
-  /** A pane where Enter submits the composer: alive, not mid-turn, and not parked on a dialog. */
+  /**
+   * A send arriving while Codex holds an earlier submission until its startup ends is PENDING, not refused,
+   * and nothing is typed or pressed: the composer is drawn full but the harness has already taken what it
+   * holds, so Enter would key a message Codex is about to send itself, and typing beside it would be refused
+   * as a draft nobody wrote. The caller retries once startup has ended (the queue reads this as `launching`).
+   */
+  private refuseWhileParked(id: SessionId, pane: SendPaneObservation): void {
+    if (pane.startupParked === true)
+      throw new SendPending(
+        `session ${id} is still starting; its agent is holding an earlier message until startup ends, so this one is pending, not failed`,
+      );
+  }
+
+  /** A pane where Enter submits the composer: alive, not mid-turn, not parked on a dialog, and not holding a submission until startup ends. */
   private finishable(pane: SendPaneObservation): boolean {
-    return pane.alive && !pane.dead && !pane.activeWork && pane.blockingPrompt === undefined;
+    return (
+      pane.alive && !pane.dead && !pane.activeWork && pane.blockingPrompt === undefined && pane.startupParked !== true
+    );
   }
 
   /** One verified Enter for a send's stranded text, journalled, and the send settled when it left. */

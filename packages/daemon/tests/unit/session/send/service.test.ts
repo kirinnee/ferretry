@@ -2034,6 +2034,54 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     should(built.terminal.typed).eql(['ship it']);
     should(built.repository.transitions.map(change => change.turn)).eql([5, 6]);
   });
+
+  describe('a submission Codex parked until its startup ends (B170)', () => {
+    // What the real terminal reports for the codex-0.166.0-startup-queued-message pane: the text is drawn in
+    // the composer, but it is the harness's, not a draft — `draftBlockingReadiness` answers undefined for it.
+    const parked = (overrides: Partial<SendPaneObservation> = {}) => pane({ startupParked: true, ...overrides });
+
+    it('presses no Enter into it for the queue, the Warden or a tracker nudge — it is not a draft', async () => {
+      const built = idle([parked()], unconfirmed());
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(await built.service.resubmit(ID, 'send-0')).not.have.property('submitNudges');
+      should(built.terminal.calls).not.containEql('submitComposer');
+      should(built.terminal.calls).not.containEql('clearComposer');
+    });
+
+    it('is never finishable even when its text is read as a stranded pointer of ours', async () => {
+      // Defence in depth: whatever put the pointer in `draft`, a parked pane is not a pane Enter may key.
+      const built = idle([parked({ draft: POINTER })], unconfirmed());
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('makes a send that arrives meanwhile pending, not refused, and types and records nothing', async () => {
+      for (const status of ['running', 'awaiting_user'] as const) {
+        const built = parts(target({ status }), [parked()]);
+
+        const refusal = await built.service.send(request()).catch((error: unknown) => error);
+
+        should(refusal).be.instanceof(SendPending);
+        should(built.terminal.typed).be.empty();
+        should(built.terminal.calls).not.containEql('submitComposer');
+        should(built.ledger.records.has('send-1')).be.false();
+      }
+    });
+
+    it('sends normally once startup has ended and the pane is an ordinary idle prompt', async () => {
+      const built = parts(target(), [parked(), pane({ promptReady: true })]);
+      should(await built.service.send(request()).catch((error: unknown) => error)).be.instanceof(SendPending);
+
+      const again = await built.service.send(request());
+
+      should(again.record.sendId).equal('send-1');
+      should(built.terminal.typed).have.length(1);
+    });
+  });
 });
 
 describe('labels and combined deliveries', () => {

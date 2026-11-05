@@ -2940,7 +2940,11 @@ function createSessionControlSubsystem(
       const effortPlan = planStartupEffort(account.kind, plan.model, request.effort, catalog);
       if (effortPlan.kind === 'refused') {
         await releaseCallsign();
-        throw new SessionControlError('unservable_model', effortPlan.reason);
+        // An unreadable catalog is a retry (503); a model or level the catalog does not list is not (409).
+        throw new SessionControlError(
+          effortPlan.cause === 'catalog_unreadable' ? 'unavailable' : 'unservable_model',
+          effortPlan.reason,
+        );
       }
       const startupRuntime: RuntimeControlRequest | undefined = effortPlan.startupRuntime;
       // The remote-control arguments are added only when the caller asked for the surface, because

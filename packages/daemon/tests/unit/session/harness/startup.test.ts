@@ -6,6 +6,7 @@ import {
   startupEffort,
   startupModelArguments,
 } from '../../../../src/lib/session/harness/startup.ts';
+import { launchReasoningEffort } from '../../../../src/lib/session/harness/launch-effort.ts';
 import { buildLaunchArgv } from '../../../../src/lib/session/launch/argv.ts';
 
 describe('startupModelArguments', () => {
@@ -55,6 +56,17 @@ describe('how a start carries its reasoning level', () => {
   it('lowercases the level, as a relaunch does, so both spell it the way the catalog does', () => {
     expect(startupEffort('codex', ' High ')).toEqual({ kind: 'argv', effort: 'high' });
     expect(startupEffort('claude', 'XHigh')).toEqual({ kind: 'command', effort: 'xhigh' });
+  });
+
+  it('normalises exactly as the document records it, so a level the launch rejects is carried as none', () => {
+    for (const level of ['x_high', '9', 'a'.repeat(30), 'two words']) {
+      expect(startupEffort('codex', level)).toBeUndefined();
+      expect(startupEffort('claude', level)).toBeUndefined();
+      expect(launchReasoningEffort(level, undefined)).toBeUndefined();
+    }
+    for (const level of [' High ', 'xhigh', 'x-high']) {
+      expect(startupEffort('codex', level)?.effort).toBe(launchReasoningEffort(level, undefined));
+    }
   });
 });
 
@@ -133,14 +145,27 @@ describe('the plan for a start’s reasoning level', () => {
   it('refuses with the probe’s own error and a remedy when the catalog could not be read', () => {
     expect(planStartupEffort('codex', 'gpt-6.1-sol', 'high', new Error('spawn codex ENOENT'))).toEqual({
       kind: 'refused',
+      cause: 'catalog_unreadable',
       reason:
         'the Codex model catalog could not be read (spawn codex ENOENT), so reasoning level high cannot be checked for gpt-6.1-sol; retry, or start without --effort',
+    });
+  });
+
+  it('tells a catalog that was never read (a retry may work) from one that was read and does not list it', () => {
+    expect(planStartupEffort('codex', 'gpt-6.1-sol', 'high', undefined)).toMatchObject({
+      kind: 'refused',
+      cause: 'catalog_unreadable',
+    });
+    expect(planStartupEffort('codex', 'gpt-6.1-sol', 'xhigh', catalog)).toMatchObject({
+      kind: 'refused',
+      cause: 'unservable',
     });
   });
 
   it('refuses a model the login does not list', () => {
     expect(planStartupEffort('codex', 'gpt-gone', 'high', catalog)).toEqual({
       kind: 'refused',
+      cause: 'unservable',
       reason: "model gpt-gone is not in this Codex login's current catalog",
     });
   });
@@ -148,6 +173,7 @@ describe('the plan for a start’s reasoning level', () => {
   it('refuses a level the model does not advertise', () => {
     expect(planStartupEffort('codex', 'gpt-6.1-sol', 'xhigh', catalog)).toEqual({
       kind: 'refused',
+      cause: 'unservable',
       reason: 'xhigh is not advertised for Codex model gpt-6.1-sol',
     });
   });

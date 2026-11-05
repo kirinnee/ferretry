@@ -18,13 +18,14 @@ import {
   type DeliveryFrame,
   frameCursor,
   lonePasteOf,
-  occupiedComposer,
+  draftBlockingReadiness,
   type PaneHold,
   paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
   paneHoldOf,
   paneShowsActiveWork,
+  paneShowsStartupWait,
   readComposer,
   showsPayload,
   type TmuxController,
@@ -107,12 +108,15 @@ export class TmuxSendTerminal implements SendTerminal {
 
   async observe(id: SessionId): Promise<SendPaneObservation> {
     const frame = await captureFrame(this.tmux, await this.session(id));
-    const draft = occupiedComposer(frame);
+    // A composer under Codex's `Waiting for startup` line holds a message Codex already accepted, not a draft:
+    // reporting it as one would let a send press Enter into it (`startupParked` says what it is instead).
+    const draft = draftBlockingReadiness(frame);
     return {
       alive: frame.alive,
       dead: frame.dead,
       promptReady: frame.promptReady,
       activeWork: paneShowsActiveWork(frame.visible),
+      startupParked: paneShowsStartupWait(frame.visible),
       // A permission prompt blocks a send as surely as a dialog: a message typed into its choice list
       // could pick a row.
       blockingPrompt:
