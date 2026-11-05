@@ -16,6 +16,7 @@ import { type ComponentType, useEffect, useMemo, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type AnalyticsView, daemonAnalyticsPath, daemonAnalyticsQueryPath } from '../../lib/pages/routes.ts';
+import { useInsightsTimeZone } from '../../lib/insights-time-zone.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Segmented } from '../fleet/conversations/conversation-picker.tsx';
@@ -25,6 +26,7 @@ import type { AnalyticsRequest } from './analytics-custom-query.tsx';
 import { type AnalyticsMachine, askEveryMachine } from './analytics-fanout.ts';
 import { AnalyticsOverviewPage } from './analytics-overview-page.tsx';
 import { AnalyticsQueryPage, type AnalyticsQueryPageProps } from './analytics-query-page.tsx';
+import { InsightsTimeZonePicker } from './insights-time-zone-picker.tsx';
 
 /** The `?q=` a link brought. */
 export const analyticsLinkQuery = (search: string): string | null => new URLSearchParams(search).get('q');
@@ -68,9 +70,12 @@ export function GlobalAnalyticsPage({
 }: GlobalAnalyticsPageProps) {
   // Through the carrier router by default: a paired device has no bearer value of its own to read with.
   const fetcher = useDaemonFetch();
+  // The zone days are counted in is the READER's (kept on this device); every request carries it, so the
+  // daemon groups and filters `day`/`week` on the same calendar the page draws.
+  const { choice: zoneChoice, zone, setChoice: chooseZone } = useInsightsTimeZone();
   const requestAnalytics = useMemo<AnalyticsRequest>(
-    () => injected ?? ((daemon, query) => fetchAnalytics(daemon, query, fetcher)),
-    [fetcher, injected],
+    () => injected ?? ((daemon, query) => fetchAnalytics(daemon, query, fetcher, zone)),
+    [fetcher, injected, zone],
   );
   const machines = useMemo<readonly AnalyticsMachine[]>(
     () => given ?? [{ connection, name: daemonDisplayName(connection) }],
@@ -106,6 +111,7 @@ export function GlobalAnalyticsPage({
         className={`${INSIGHTS_COLUMN_CLASS} flex shrink-0 flex-wrap items-center justify-between gap-x-md gap-y-sm pt-3 sm:pt-4`}
       >
         <h2 className="m-0 text-title font-semibold leading-tight text-fg">Analytics</h2>
+        <InsightsTimeZonePicker choice={zoneChoice} onChoose={chooseZone} />
         <div className="w-48">
           <Segmented<AnalyticsView>
             label="Analytics page"
@@ -134,6 +140,7 @@ export function GlobalAnalyticsPage({
               machines={machines}
               requestAnalytics={requestAnalytics}
               now={now ?? (() => new Date())}
+              timeZone={zone}
             />
           </div>
         </main>
@@ -144,6 +151,7 @@ export function GlobalAnalyticsPage({
           connections={machines.map(machine => machine.connection)}
           requestAnalytics={requestValues}
           requestRun={requestRun}
+          timeZone={zone}
           {...(now === undefined ? {} : { now })}
           onQueryChange={
             onQueryChange ?? (query => replaceAddress(daemonAnalyticsQueryPath(connection.daemonId, query)))

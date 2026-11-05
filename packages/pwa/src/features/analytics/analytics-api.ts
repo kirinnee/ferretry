@@ -35,14 +35,21 @@ const analyticsRead = async (
   return AnalyticsResponseSchema.parse(await response.json());
 };
 
-/** Reads one analytics query from exactly the supplied paired daemon. */
+/**
+ * Reads one analytics query from exactly the supplied paired daemon.
+ *
+ * `timeZone` is the IANA zone whose calendar the daemon counts `day` and `week` in; without it the answer
+ * is UTC's, exactly as before.
+ */
 export const fetchAnalytics = async (
   daemon: DaemonConnection,
   query?: string,
   fetcher: DaemonFetch = browserFetch,
+  timeZone?: string,
 ): Promise<AnalyticsResponse> => {
   const search = new URLSearchParams();
   if (query?.trim()) search.set('q', query.trim());
+  if (timeZone) search.set('tz', timeZone);
   return await analyticsRead(daemon, search, fetcher);
 };
 

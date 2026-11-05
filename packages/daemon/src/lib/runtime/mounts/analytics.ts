@@ -2,6 +2,7 @@ import { ANALYTICS_TOO_MANY_GROUPS_CODE, AnalyticsGroupLimitError, type Analytic
 import type { AnalyticsIndexRead } from '../../analytics/ingestion.ts';
 import { AnalyticsQueryError, parseAnalyticsQuery, scopeAnalyticsQuery } from '../../analytics/query.ts';
 import { queryAnalyticsRecords } from '../../analytics/results.ts';
+import { isTimeZone } from '../../analytics/time-zone.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiRequest, ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -55,8 +56,11 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * one that has nothing to say.
  */
 
-/** The parameters this route takes. `session` is the server-enforced side-pane scope. */
-const ANALYTICS_PARAMETERS = ['q', 'session'] as const;
+/**
+ * The parameters this route takes. `session` is the server-enforced side-pane scope; `tz` is the IANA zone
+ * whose calendar `day`/`week` and whole-day ranges are read in (absent: UTC).
+ */
+const ANALYTICS_PARAMETERS = ['q', 'session', 'tz'] as const;
 
 /**
  * The analytics subsystem as the route needs it.
@@ -111,9 +115,30 @@ function reraise(error: unknown): never {
   throw error;
 }
 
+/**
+ * The zone the caller reads days in, or undefined for UTC.
+ *
+ * An unknown zone is REFUSED rather than quietly read as UTC: a caller who asked for Singapore's days
+ * and got UTC's has numbers that look right and are a day off for eight hours of every day.
+ */
+function analyticsTimeZone(request: ApiRequest): string | undefined {
+  const zones = request.query.get('tz');
+  if (zones === undefined) return undefined;
+  if (zones.length > 1) throw new ApiError(400, 'analytics parameter tz may be given once', 'repeated_parameter');
+  const zone = zones[0]!;
+  if (!isTimeZone(zone))
+    throw new ApiError(
+      400,
+      `tz must be an IANA time zone such as Asia/Singapore, not ${JSON.stringify(zone)}`,
+      'invalid_time_zone',
+    );
+  return zone;
+}
+
 /** One analytics answer over the whole fleet. */
 function query(subsystem: AnalyticsSubsystem, context: RouteContext): ApiResponse {
   const source = analyticsQuery(context.request);
+  const timeZone = analyticsTimeZone(context.request);
   try {
     // Parsed BEFORE the index is read: a malformed query is the caller's mistake and must not cost a
     // full read of the store first.
@@ -123,6 +148,7 @@ function query(subsystem: AnalyticsSubsystem, context: RouteContext): ApiRespons
       index: read.status,
       now: read.now,
       machine: subsystem.machine?.() ?? null,
+      ...(timeZone === undefined ? {} : { timeZone }),
     });
     return jsonResponse(response);
   } catch (error) {

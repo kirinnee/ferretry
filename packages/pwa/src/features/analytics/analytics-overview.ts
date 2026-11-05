@@ -46,9 +46,24 @@ const DAY_MS = 86_400_000;
 /** The UTC calendar day of an instant, in the daemon's `day` label spelling. */
 export const utcDay = (instant: Date): string => instant.toISOString().slice(0, 10);
 
-/** Every UTC day in the window, oldest first, ending with the day `now` falls on. */
-export const analyticsRangeDays = (range: number, now: Date): readonly string[] => {
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+/**
+ * The calendar day an instant falls on in `timeZone` (an IANA name), or UTC's when none is given — the
+ * same spelling as the daemon's `day` label, which the daemon counts in the same zone.
+ */
+export const zonedDay = (instant: Date, timeZone?: string): string => {
+  if (timeZone === undefined) return utcDay(instant);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .formatToParts(instant)
+      .map(part => [part.type, part.value]),
+  );
+  return `${parts['year']}-${parts['month']}-${parts['day']}`;
+};
+
+/** Every day in the window, oldest first, ending with the day `now` falls on in `timeZone` (UTC by default). */
+export const analyticsRangeDays = (range: number, now: Date, timeZone?: string): readonly string[] => {
+  // Calendar arithmetic is done on the DATE (as a UTC midnight): the reader's day has no length of its own.
+  const today = Date.parse(`${zonedDay(now, timeZone)}T00:00:00Z`);
   return Array.from({ length: range }, (_, index) => utcDay(new Date(today - (range - 1 - index) * DAY_MS)));
 };
 

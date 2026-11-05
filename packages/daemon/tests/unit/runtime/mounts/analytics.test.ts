@@ -358,6 +358,49 @@ describe('the analytics mount', () => {
       });
     });
 
+    it('should group days on the calendar of the zone the caller names', async () => {
+      // Arrange: 20:30Z is 04:30 the NEXT day in Singapore.
+      const sessions = [finishedSession({ id: 'late', createdAt: '2026-10-14T20:30:00.000Z' })];
+      const ask = async (query: ReadonlyArray<readonly [string, string]>) =>
+        await dispatcher(sessions).dispatch(request({ path: '/v1/analytics', headers: human, query }));
+
+      // Act
+      const utc = await ask([['q', 'count by (day)']]);
+      const singapore = await ask([
+        ['q', 'count by (day)'],
+        ['tz', 'Asia/Singapore'],
+      ]);
+
+      // Assert
+      const days = (response: Awaited<ReturnType<typeof ask>>): unknown[] =>
+        (jsonBody(response) as { results: { labels: { day: string } }[] }).results.map(row => row.labels.day);
+      should(days(utc)).deepEqual(['2026-10-14']);
+      should(days(singapore)).deepEqual(['2026-10-15']);
+    });
+
+    it('should refuse a time zone it does not know rather than read it as UTC', async () => {
+      // Arrange / Act
+      const unknown = await dispatcher().dispatch(
+        request({ path: '/v1/analytics', headers: human, query: [['tz', 'SGT']] }),
+      );
+      const repeated = await dispatcher().dispatch(
+        request({
+          path: '/v1/analytics',
+          headers: human,
+          query: [
+            ['tz', 'UTC'],
+            ['tz', 'Asia/Singapore'],
+          ],
+        }),
+      );
+
+      // Assert
+      should(unknown.status).equal(400);
+      should(jsonBody(unknown)).have.property('code', 'invalid_time_zone');
+      should(repeated.status).equal(400);
+      should(jsonBody(repeated)).have.property('code', 'repeated_parameter');
+    });
+
     it('should refuse a parameter it does not implement rather than answer the whole fleet', async () => {
       // Silently ignoring `?since=` would answer a narrowed question with every session, which reads
       // as "nothing was filtered out" rather than as "this daemon cannot filter that way".

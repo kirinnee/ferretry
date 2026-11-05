@@ -335,6 +335,41 @@ describe('AnalyticsQueryPage', () => {
     expect(text(renderer)).toContain('kirin-box did not answer: asleep Its sessions are not in this result.');
   });
 
+  it('asks the answer on screen again when the reader changes the time zone', async () => {
+    const asked: Array<string | undefined> = [];
+    const requestRun = async (query: string | undefined): Promise<FleetAnswer> => {
+      asked.push(query);
+      return { response: answer(query ?? 'sum by (day)'), failed: [], daemonOf: () => undefined };
+    };
+    const page = (timeZone: string) => (
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={requestRun}
+        timeZone={timeZone}
+        initialQuery="sum by (day)"
+      />
+    );
+    const renderer = mount(page('UTC'));
+    await settle();
+    expect(asked).toEqual(['sum by (day)']);
+
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked).toEqual(['sum by (day)', 'sum by (day)']);
+
+    // The same zone again is not a change.
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked).toHaveLength(2);
+  });
+
   it('reads through the paired carrier by default', async () => {
     const original = globalThis.fetch;
     const urls: string[] = [];

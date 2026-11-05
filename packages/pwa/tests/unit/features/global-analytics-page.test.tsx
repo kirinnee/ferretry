@@ -16,6 +16,7 @@ import {
 } from '../../../src/features/analytics/analytics-overview-page.tsx';
 import { analyticsLinkQuery, GlobalAnalyticsPage } from '../../../src/features/analytics/global-analytics-page.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { DEVICE_TIME_ZONE, insightsTimeZonePreference } from '../../../src/lib/insights-time-zone.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 import { dayAggregate, rawResponse, rawRow } from '../../support/analytics-rows.ts';
@@ -565,6 +566,40 @@ describe('GlobalAnalyticsPage', () => {
       expect(seen.length).toBeGreaterThan(0);
       expect(text(renderer)).toContain('this machine');
     } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('asks every machine in the reader\u2019s zone and asks again when the zone is changed', async () => {
+    window.history.replaceState({}, '', '/d/daemon-a/analytics');
+    const original = globalThis.fetch;
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify(rawResponse([])), { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    insightsTimeZonePreference.write('Asia/Singapore');
+    try {
+      const renderer = mount(
+        <GlobalAnalyticsPage connection={daemonA} onNavigate={() => {}} now={NOW} initialQuery={null} />,
+      );
+      await settle();
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every(url => url.includes('tz=Asia%2FSingapore'))).toBe(true);
+      expect(text(renderer)).toContain('Days in');
+
+      seen.length = 0;
+      const select = renderer.root.findByType('select');
+      await runAsync(async () => {
+        select.props.onChange({ target: { value: 'America/Los_Angeles' } });
+        await Promise.resolve();
+      });
+      await settle();
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every(url => url.includes('tz=America%2FLos_Angeles'))).toBe(true);
+      expect(globalThis.localStorage.getItem('fy-insights-time-zone-v1')).toBe('America/Los_Angeles');
+    } finally {
+      insightsTimeZonePreference.write(DEVICE_TIME_ZONE);
       globalThis.fetch = original;
     }
   });

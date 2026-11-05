@@ -46,6 +46,11 @@ export interface AnalyticsQueryPageProps {
    * lives. Defaults to asking `requestAnalytics` on this machine alone.
    */
   readonly requestRun?: (query: string | undefined) => Promise<FleetAnswer>;
+  /**
+   * The zone the requests were made in. A change re-runs the answer on screen, so the days it shows are
+   * never the old zone's.
+   */
+  readonly timeZone?: string;
   /** The clock "ran at" reads. */
   readonly now?: () => Date;
   /** A query handed in by a link; it is run at once. */
@@ -63,6 +68,7 @@ export function AnalyticsQueryPage({
   connections,
   requestAnalytics: injected,
   requestRun: injectedRun,
+  timeZone,
   now,
   initialQuery,
   onQueryChange,
@@ -95,6 +101,7 @@ export function AnalyticsQueryPage({
         machines={connections?.length ?? 1}
         requestAnalytics={requestAnalytics}
         requestRun={requestRun}
+        timeZone={timeZone}
         now={now ?? (() => new Date())}
         initialQuery={initialQuery ?? null}
         onQueryChange={onQueryChange}
@@ -109,6 +116,7 @@ function QueryBody({
   machines,
   requestAnalytics,
   requestRun,
+  timeZone,
   now,
   initialQuery,
   onQueryChange,
@@ -118,6 +126,7 @@ function QueryBody({
   readonly machines: number;
   readonly requestAnalytics: AnalyticsRequest;
   readonly requestRun: (query: string | undefined) => Promise<FleetAnswer>;
+  readonly timeZone: string | undefined;
   readonly now: () => Date;
   readonly initialQuery: string | null;
   readonly onQueryChange: ((query: string) => void) | undefined;
@@ -132,6 +141,8 @@ function QueryBody({
   const [ranAt, setRanAt] = useState<string | null>(null);
   const serial = useRef(0);
   const lastResult = useRef<AnalyticsResponse | null>(null);
+  /** The text last RUN (not whatever is being typed), which a zone change asks again. */
+  const lastText = useRef('');
 
   const run = useCallback(
     async (source: string) => {
@@ -143,6 +154,7 @@ function QueryBody({
         if (mine !== serial.current) return;
         const response = fleet.response;
         lastResult.current = response;
+        lastText.current = response.query;
         setText(response.query);
         setAnswer(fleet);
         setRanAt(now().toISOString().slice(11, 16));
@@ -168,6 +180,15 @@ function QueryBody({
       serial.current += 1;
     };
   }, [initialQuery]);
+
+  // A new zone changes what every day in the answer means, so the answer on screen is asked again. The
+  // first render is not a change, and a page with nothing on screen has nothing to refresh.
+  const shownZone = useRef(timeZone);
+  useEffect(() => {
+    if (shownZone.current === timeZone) return;
+    shownZone.current = timeZone;
+    if (lastResult.current !== null) void runLatest.current(lastText.current);
+  }, [timeZone]);
 
   const runText = useCallback(
     (source: string) => {
