@@ -103,8 +103,11 @@ also what it is.
 
 ### Caps
 
-Single-owned constants in `packages/pwa/src/lib/fy-render.ts`; this table and the tests read the same
-numbers.
+Single-owned constants in `packages/protocol/src/lib/fy-render-caps.ts` (`@ferretry/protocol/fy-render-caps`);
+this table and the tests read the same numbers. The caps live in protocol — above every consumer —
+because a daemon or CLI validating a saved picture reads the same numbers the reader enforces, and
+`packages/pwa/src/lib/fy-render-bounds.ts` re-exports them unchanged beside the sandbox-frame limits
+that stay with the shells.
 
 | Type      | Payload cap                      | Also refused                                                                                                                                                                                                                                                                                                          |
 | --------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
