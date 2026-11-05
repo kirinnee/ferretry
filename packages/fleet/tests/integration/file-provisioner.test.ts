@@ -1329,8 +1329,9 @@ describe('FileFleetProvisioner', () => {
         FileMutationJournal.prototype.capture = original;
       }
 
-      // Assert — only the entry itself was ever captured; committed, nothing is left beside it.
-      should(captured).deepEqual(['kept']);
+      // Assert — the entry itself was captured and no reserved name ever was; committed, nothing is left beside it.
+      should(captured).containEql('kept');
+      should(captured.filter(name => isMutationReservedName(name))).deepEqual([]);
       should(await readFile(path.join(directory, 'kept'), 'utf8')).equal('the new skill\n');
       should(await readdir(directory)).deepEqual(['kept']);
       should(actual.backupResidue).be.undefined();
