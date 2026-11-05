@@ -13,6 +13,7 @@ import {
   cloneSourceIdentity,
   CloneSourceMismatch,
   EMPTY_CLONE_BASE,
+  findCloneSources,
   forgetCloneSource,
   SELF_REPORTED_PREFIX,
   linkedKeys,
@@ -585,6 +586,41 @@ describe('forgetCloneSource', () => {
     const base: CloneBase = { version: 1, sources: { a: source({}), b: source({}) } };
     should(Object.keys(forgetCloneSource(base, 'a').sources)).deepEqual(['b']);
     should(Object.keys(forgetCloneSource(base, 'nobody').sources)).deepEqual(['a', 'b']);
+  });
+});
+
+describe('findCloneSources', () => {
+  const base: CloneBase = {
+    version: 1,
+    sources: {
+      'daemon-a': { ...source({}), name: 'Studio' },
+      'self:daemon-b': { ...source({}), name: 'Laptop', machine: 'studio-mac' },
+      'self:daemon-c': { ...source({}), name: 'Studio' },
+    },
+  };
+
+  it('should find a source by the id as filed, or by the bare id an export carries', () => {
+    should(findCloneSources(base, 'daemon-a')).deepEqual(['daemon-a']);
+    should(findCloneSources(base, 'self:daemon-b')).deepEqual(['self:daemon-b']);
+    should(findCloneSources(base, 'daemon-b')).deepEqual(['self:daemon-b']);
+  });
+
+  it('should find a source by the name it was copied under or the machine name its export gave', () => {
+    should(findCloneSources(base, 'Laptop')).deepEqual(['self:daemon-b']);
+    should(findCloneSources(base, 'studio-mac')).deepEqual(['self:daemon-b']);
+  });
+
+  it('should answer every source a name fits, and none for a word that fits nothing', () => {
+    should(findCloneSources(base, 'Studio')).deepEqual(['daemon-a', 'self:daemon-c']);
+    should(findCloneSources(base, 'nobody')).deepEqual([]);
+  });
+
+  it('should take an exact id over a name that happens to be the same word', () => {
+    const tricky: CloneBase = {
+      version: 1,
+      sources: { Studio: source({}), other: { ...source({}), name: 'Studio' } },
+    };
+    should(findCloneSources(tricky, 'Studio')).deepEqual(['Studio']);
   });
 });
 

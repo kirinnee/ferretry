@@ -509,6 +509,20 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
   return { version: CLONE_BASE_VERSION, sources: { ...sources } };
 }
 
+/**
+ * The ids of the sources a person's word names: an id as filed, the bare id an export carries (filed under
+ * {@link SELF_REPORTED_PREFIX}), or the name the source was copied under (its display name, or the machine
+ * name its export gave). An exact id wins outright; a name can name several, and the caller says so.
+ */
+export function findCloneSources(base: CloneBase, word: string): readonly string[] {
+  if (Object.hasOwn(base.sources, word)) return [word];
+  const bare = `${SELF_REPORTED_PREFIX}${word}`;
+  if (Object.hasOwn(base.sources, bare)) return [bare];
+  return Object.entries(base.sources)
+    .filter(([, source]) => source.name === word || source.machine === word)
+    .map(([id]) => id);
+}
+
 /** The record without one source: the next copy from it starts as if there was never one. Nothing else changes. */
 export function forgetCloneSource(base: CloneBase, sourceId: string): CloneBase {
   const sources = plain<CloneBaseSource>();

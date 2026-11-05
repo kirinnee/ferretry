@@ -1,5 +1,4 @@
 import {
-  cloneRunnables,
   type FleetAgentControl,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
@@ -20,6 +19,7 @@ import {
 } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
 import { HARNESS_LABEL, indent } from '../fleet/account-render.ts';
+import { type CloneOptions, runClone } from './clone-command.ts';
 
 /** "What agents may control", by the word `machine set agent-control` takes, in the order it names them. */
 const AGENT_CONTROL_FIELDS = {
@@ -257,34 +257,38 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
     machine
       .command('clone')
       .description(
-        'copy a setup exported from another machine; a login this machine already has is reused; any other arrives as an empty slot to sign in',
+        'copy a setup exported from another machine. A repeat copy from the same machine is an update that shows only what differs (--dry-run to look first); a login this machine already has is reused, and no login, token or secret is ever cleared',
       )
-      .argument('<file>', `the output of \`${bin} machine export\` on the other machine`)
-      .option('--replace', 'replace this machine’s profiles and runtimes instead of adding alongside (logins are kept)')
+      .argument('[file]', `the output of \`${bin} machine export\` on the other machine`)
       .option(
-        '--skip <component...>',
-        'leave a component out (mcp/notes, hooks/guard): the preview lists every one that runs a command here',
+        '--replace',
+        'start over: replace this machine’s profiles and runtimes with the copy (logins are kept and reused)',
+      )
+      .option(
+        '--alongside',
+        'add the copy beside what is here (a name already taken becomes name-2), even after an earlier copy',
+      )
+      .option(
+        '--skip <item...>',
+        'leave an item out (mcp/notes, hooks/guard): the preview lists every one that runs a command here',
+      )
+      .option('--theirs <item...>', 'update: take the other machine’s version of an item (kind/name as listed)')
+      .option('--mine <item...>', 'update: keep this machine’s version of an item')
+      .option('--remove <item...>', 'update: remove an item the other machine no longer has')
+      .option(
+        '--login <mapping...>',
+        'update: which login here a sign-in the copy cannot match to one is: <source login>=<login here>, or =slot for a new empty one',
+      )
+      .option(
+        '--forget <source>',
+        'drop the record of an earlier copy from <source> (its id or name); nothing else changes',
       ),
-  ).action(async (file: string, _options: unknown, command: Command) => {
-    const options = mergedOptions(command);
-    const bundle = parseCloneBundle(await readLocalFile(deps.readText, file), file);
-    const replace = options.replace === true;
-    const skip = Array.isArray(options.skip) ? (options.skip as string[]) : [];
-    // A copy that brings commands to run here always asks first, like a replace: the preview above the
-    // question is the only place a person sees them.
-    const runs = cloneRunnables(bundle).some(runnable => !skip.includes(runnable.reference));
-    const outcome = await runChange(deps, {
-      change: {
-        kind: 'clone.import',
-        mode: replace ? 'replace' : 'alongside',
-        bundle: { ...bundle },
-        ...(skip.length === 0 ? {} : { skip }),
-      },
-      destructive: replace || runs,
-      options: writeFlags(options),
-    });
-    if (outcome !== undefined && options.json !== true) {
-      deps.out.report(`Sign in to any copied login that is new here: \`${bin} credentials\` lists each one.`);
-    }
+  ).action(async (file: string | undefined, _options: unknown, command: Command) => {
+    const options = mergedOptions(command) as CloneOptions;
+    const bundle =
+      options.forget !== undefined || file === undefined
+        ? undefined
+        : parseCloneBundle(await readLocalFile(deps.readText, file), file);
+    await runClone(deps, file, bundle, options);
   });
 }

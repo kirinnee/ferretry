@@ -62,6 +62,7 @@ import {
   expandAssetPath,
   FleetApplyFailureError,
   type FleetDocumentWrite,
+  findCloneSources,
   forgetCloneSource,
   type FleetModelApplyPlan,
   freeName,
@@ -909,11 +910,20 @@ export class FleetSetupService {
    * Forget one source: the next copy from it starts as if there had been none. Only the record changes —
    * nothing copied, no login, no secret. Answers whether there was anything to forget.
    */
-  async forgetCloneSource(sourceId: string): Promise<boolean> {
+  async forgetCloneSource(source: string): Promise<boolean> {
     const path = this.#cloneBasePath();
     const before = parseCloneBase(await this.deps.cloneBase.read(path));
-    if (!Object.hasOwn(before.sources, sourceId)) return false;
-    await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, sourceId)));
+    // A person names a source the way they know it: the id, the bare id an export carries, or its name.
+    const found = findCloneSources(before, source);
+    if (found.length === 0) return false;
+    const [only] = found;
+    if (found.length > 1 || only === undefined) {
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `More than one source is called ${source}: ${found.join(', ')}. Name one by its id.`,
+      );
+    }
+    await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, only)));
     return true;
   }
 
