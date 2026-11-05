@@ -17,8 +17,16 @@
  *     never open for this, so interrupting is by hand only. Only a reading this hook started is stopped by
  *     a tap or key: pressing Read aloud on a message yourself is not undone by the tap that started it.
  *   - The tab going to the background. A turn that ends while the tab is hidden is NOT read on return: it
- *     stays silent rather than speak at someone who has walked away.
+ *     stays silent rather than speak at someone who has walked away. The completion is judged when it is
+ *     SEEN (and again the moment the tab hides), not when a timer later fires, so coming back before the
+ *     timer would have fired changes nothing.
  *   - Leaving the conversation, or switching the setting off.
+ *
+ * A SEND IS A TOKEN, TAKEN WHEN THE PRESS HAPPENS. The page calls `beginSend` as the composer starts sending,
+ * before anything is awaited: that stops a reading under way, drops whatever was pending for an earlier
+ * send, remembers the newest turn state and the rows the page already held, and arms the watch. The reply
+ * is then judged against that token — never against "now" — so a turn that ends before the send is
+ * acknowledged is still read, and the reply is cut at the person's own row, not at a clock.
  *
  * One reading at a time is the controller's own guarantee: starting this one replaces any other.
  * Nothing here logs, stores or sends the words it hands the controller.
@@ -55,6 +63,13 @@ export interface AutoReadHandle {
   /** A reading this hook started is going on right now. */
   readonly reading: boolean;
   readonly stop: () => void;
+  /** The person pressed send (call it as the send starts, before awaiting it): the next end of turn is its reply. */
+  readonly beginSend: () => void;
+}
+
+/** The rows the page held when a send began: the turn it starts is whatever the person adds after them. */
+interface SendToken {
+  readonly knownIds: readonly string[];
 }
 
 const parseInstant = (value: string | undefined): number | null => {
@@ -74,6 +89,9 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   const latest = useRef({ ...input, settings, visible });
   latest.current = { ...input, settings, visible };
   const watch = useRef<TurnWatch>(IDLE_WATCH);
+  const token = useRef<SendToken | null>(null);
+  /** When this conversation was opened, and the records that came after it (an old daemon's only proof of a turn). */
+  const openedAt = useRef(now());
   const changedAt = useRef(now());
   const seen = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,8 +110,11 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
     const current = latest.current;
+    const fired = { knownIds: token.current?.knownIds };
     if (!current.settings.autoRead || !controller.supported) {
-      watch.current = IDLE_WATCH;
+      // Off: nothing is watched, but what was already read stays read.
+      watch.current = { ...watch.current, armed: null };
+      token.current = null;
       return;
     }
     const at = now();
@@ -103,15 +124,20 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       turnAt: parseInstant(current.turnStateAt),
       legacy: current.legacy,
       quietMs: at - changedAt.current,
+      visible: current.visible,
+      fresh: current.entries.filter(row => row.at !== undefined && row.at > openedAt.current).length,
     });
     watch.current = step.watch;
+    if (step.watch.armed === null) token.current = null;
     if (step.fire !== null) {
-      // A turn that ended while nobody was looking is not read at them on return.
-      if (!current.visible) return;
       const pick =
         step.fire.outcome === 'needs-input'
           ? pickQuestion(current.question)
-          : pickReply(current.entries, step.fire.startedAt, current.settings.whatToRead);
+          : pickReply(
+              current.entries,
+              { startedAt: step.fire.startedAt, knownIds: fired.knownIds },
+              current.settings.whatToRead,
+            );
       mine.current = pick.key;
       controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
       return;
@@ -123,7 +149,9 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   // biome-ignore lint/correctness/useExhaustiveDependencies: `scope` is the trigger.
   useEffect(() => {
     watch.current = IDLE_WATCH;
+    token.current = null;
     mine.current = null;
+    openedAt.current = now();
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
       timer.current = null;
@@ -142,14 +170,38 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     evaluate();
   }, [changeKey, settings.autoRead, evaluate, now]);
 
-  // The person sent something: stop what is being read, and the next end of turn is its reply.
+  // THE PRESS: the composer starts a send. Arm now, from what the page has seen up to this moment.
+  const begun = useRef(0);
+  const beginSend = useCallback(() => {
+    begun.current += 1;
+    stop();
+    const current = latest.current;
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+    if (!current.settings.autoRead || !controller.supported) return;
+    token.current = { knownIds: current.entries.map(row => row.id) };
+    watch.current = armOnSend(watch.current, now());
+    evaluate();
+  }, [controller, evaluate, now, stop]);
+
+  // The send came back (or happened somewhere that did not announce its press, like answering a form):
+  // stop what is being read, and arm now if the press did not already.
   const firstSend = useRef(sendSignal);
+  const acknowledged = useRef(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the send signal is the trigger.
   useEffect(() => {
     if (sendSignal === firstSend.current) return;
     firstSend.current = sendSignal;
     stop();
-    if (latest.current.settings.autoRead) watch.current = armOnSend(watch.current, now());
+    if (acknowledged.current < begun.current) {
+      acknowledged.current += 1;
+      return;
+    }
+    if (latest.current.settings.autoRead) {
+      token.current = null;
+      watch.current = armOnSend(watch.current, now());
+      evaluate();
+    }
   }, [sendSignal]);
 
   // Switched off: silence what this hook started.
@@ -157,10 +209,13 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     if (!settings.autoRead) stop();
   }, [settings.autoRead, stop]);
 
-  // The tab goes to the background: speech stops.
+  // The tab goes to the background: speech stops, the timer is cancelled and anything that has ended is
+  // judged now, while nobody is looking — so it can never be read on return.
   useEffect(() => {
-    if (!visible) controller.stop();
-  }, [visible, controller]);
+    if (visible) return;
+    controller.stop();
+    evaluate();
+  }, [visible, controller, evaluate]);
 
   // A tap or a key stops a reading this hook started.
   useEffect(() => {
@@ -174,5 +229,5 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     };
   }, [reading, stop]);
 
-  return { reading, stop };
+  return { reading, stop, beginSend };
 }

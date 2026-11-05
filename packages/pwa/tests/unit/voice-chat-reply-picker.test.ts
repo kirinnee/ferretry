@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   NO_MESSAGE_WORDS,
+  needsInputOf,
   type PickerRow,
   pickQuestion,
   pickReply,
@@ -161,5 +162,118 @@ describe('pickQuestion: read, never answered by voice', () => {
       expect(pickQuestion(none)).toEqual({ key: QUESTION_KEY, markdown: QUESTION_ON_SCREEN_WORDS, reason: 'question' });
     }
     expect(pickQuestion({ questions: 'nope' } as never).reason).toBe('question');
+  });
+});
+
+describe('pickReply: the turn boundary is the initiating record', () => {
+  test('REGRESSION (round 1, #7): a follow-up within five seconds does not replace the turn boundary', () => {
+    const rows = [
+      row('u1', 'user', 'fix it', 0),
+      row('a1', 'assistant', 'The fix is in.', 2),
+      row('u2', 'user', 'thanks, one more thing', 3),
+    ];
+    expect(pickReply(rows, T0)).toEqual({ key: 'a1', markdown: 'The fix is in.', reason: 'reply' });
+  });
+
+  test('the harness clock a little ahead: the row that began the turn, dated just after it, still begins it', () => {
+    const rows = [
+      row('u0', 'user', 'earlier', -600),
+      row('a0', 'assistant', 'Earlier reply.', -590),
+      row('u1', 'user', 'now', 2),
+      row('a1', 'assistant', 'Reply to now.', 6),
+    ];
+    expect(pickReply(rows, T0)).toMatchObject({ key: 'a1' });
+  });
+
+  test('a row dated after the slack, or after the agent already answered, never begins the turn', () => {
+    const late = [row('u1', 'user', 'go', 0), row('a1', 'assistant', 'Reply.', 2), row('u2', 'user', 'later', 20)];
+    expect(pickReply(late, T0).key).toBe('a1');
+    const answered = [
+      row('u0', 'user', 'earlier', -600),
+      row('a0', 'assistant', 'Answer after the start.', 1),
+      row('u1', 'user', 'skewed?', 3),
+      row('a1', 'assistant', 'Second.', 4),
+    ];
+    expect(pickReply(answered, T0).key).toBe('a1');
+    expect(pickReply(answered, T0, 'every').markdown).toBe('Answer after the start.\n\nSecond.');
+  });
+});
+
+describe('pickReply: a send names its own boundary', () => {
+  test('the first row of the person not among the rows held at the press begins the turn, whatever the clocks say', () => {
+    const rows = [
+      row('u0', 'user', 'earlier', 0),
+      row('a0', 'assistant', 'Earlier reply.', 1),
+      // The browser's clock is far behind the harness's: every time below is nonsense to the picker.
+      row('u1', 'user', 'new message', -900),
+      row('a1', 'assistant', 'Reply to it.', -899),
+      row('u2', 'user', 'follow-up', -898),
+    ];
+    const pick = pickReply(rows, { startedAt: T0 + 99_000, knownIds: ['u0', 'a0'] });
+    expect(pick).toEqual({ key: 'a1', markdown: 'Reply to it.', reason: 'reply' });
+  });
+
+  test("before the person's own row shows, the turn begins after everything already held", () => {
+    const rows = [row('u0', 'user', 'earlier', 0), row('a0', 'assistant', 'Earlier reply.', 1)];
+    expect(pickReply(rows, { startedAt: null, knownIds: ['u0', 'a0'] }).reason).toBe('no-message');
+    expect(pickReply(rows, { startedAt: null, knownIds: [] })).toMatchObject({ key: 'a0' });
+  });
+
+  test("another ferret's message is not the person's row", () => {
+    const rows = [
+      row('u0', 'user', 'earlier', 0),
+      row('p1', 'user', 'ping', 1, { peer: { from: 'dev' } }),
+      row('u1', 'user', 'mine', 2),
+      row('a1', 'assistant', 'Done.', 3),
+    ];
+    expect(pickReply(rows, { startedAt: null, knownIds: ['u0'] }).key).toBe('a1');
+  });
+});
+
+describe('needsInputOf: every needs-input prompt becomes read-only question data', () => {
+  const options = [{ label: 'Yes' }, { label: 'No, and tell it why' }];
+
+  test('a permission prompt is read with its tool and options, not the generic fallback', () => {
+    const asked = needsInputOf({
+      permissionRequest: { tool: 'Bash', question: 'Do you want to proceed?', options },
+      turnPrompt: 'Waiting for approval',
+    });
+    expect(pickQuestion(asked)).toEqual({
+      key: QUESTION_KEY,
+      markdown: 'The ferret asks. Bash: Do you want to proceed? Options: one, Yes; two, No, and tell it why.',
+      reason: 'question',
+    });
+  });
+
+  test('a permission prompt without a tool name reads just the question', () => {
+    expect(needsInputOf({ permissionRequest: { question: 'Proceed?' } })).toEqual({
+      questions: [{ question: 'Proceed?', options: [] }],
+    });
+  });
+
+  test('a harness dialog is read by its title and rows', () => {
+    const asked = needsInputOf({ harnessDialog: { title: 'Review hooks', options }, turnPrompt: 'x' });
+    expect(pickQuestion(asked).markdown).toBe(
+      'The ferret asks. Review hooks. Options: one, Yes; two, No, and tell it why.',
+    );
+    expect(pickQuestion(needsInputOf({ harnessDialog: { title: 'Sign in' } })).markdown).toBe(
+      'The ferret asks. Sign in.',
+    );
+  });
+
+  test("the agent's own question comes next, then the daemon's one-line reason", () => {
+    const question = { questions: [{ question: 'Which one?', options: [{ label: 'A' }] }] };
+    expect(needsInputOf({ question, turnPrompt: 'Waiting' })).toBe(question);
+    expect(pickQuestion(needsInputOf({ turnPrompt: '  Needs your sign-off  ' })).markdown).toBe(
+      'The ferret asks. Needs your sign-off.',
+    );
+  });
+
+  test('nothing to read is null, and an unreadable prompt falls back to "on screen"', () => {
+    expect(needsInputOf({})).toBeNull();
+    expect(needsInputOf({ question: null, permissionRequest: null, harnessDialog: null, turnPrompt: '  ' })).toBeNull();
+    expect(
+      pickQuestion(needsInputOf({ permissionRequest: { question: '   ' }, harnessDialog: { title: '' } })).markdown,
+    ).toBe(QUESTION_ON_SCREEN_WORDS);
   });
 });

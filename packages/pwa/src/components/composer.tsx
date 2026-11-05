@@ -157,6 +157,12 @@ export interface ComposerProps {
   /** Told when a send went: what the owner wrote and what the transport made of it (see {@link ComposerSent}). */
   readonly onSent?: (sent: ComposerSent) => void;
   /**
+   * Told the moment a send STARTS — the press has been accepted, nothing has been awaited yet. A host that
+   * must tell "the reply to this message" from earlier turns (Auto-read replies) needs this instant, not
+   * the one `onSent` reports after the request has come back.
+   */
+  readonly onSending?: () => void;
+  /**
    * Words to put back in the box, once: a reply the owner took back (Inbox Undo). They go in front of anything
    * already there, unless the box already holds them. `onRestored` fires when they are in, so the host can stop
    * offering them.
@@ -446,6 +452,7 @@ export function Composer({
   draftSlot,
   sharedSlots,
   onSent,
+  onSending,
   restore,
   onRestored,
   onEscape,
@@ -949,6 +956,7 @@ export function Composer({
       return;
     }
     submitLock.current = true;
+    onSending?.();
     // What this press sends, remembered against everything typed before it lands.
     const mark = shared.markSend();
     const sentScope = scope;

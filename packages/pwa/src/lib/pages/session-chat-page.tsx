@@ -144,6 +144,7 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
+import { needsInputOf } from '../voice-chat/reply-picker.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
@@ -931,17 +932,6 @@ export function SessionChatPage({
   const runtimeSwitchBusy = isPromptKnownBusy(session.state);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
-  // "Auto-read replies" (F137): off unless this device switched it on in Settings › Voice. It watches this
-  // conversation's turn and reads the reply aloud; a question is only ever read, never answered by voice.
-  const autoRead = useAutoRead({
-    scope: `${connection.daemonId}/${session.config.id}`,
-    entries,
-    turn,
-    turnStateAt: session.state.turnStateAt,
-    legacy: session.state.turnState === undefined,
-    question,
-    sendSignal: pinSignal,
-  });
   // The tool-permission prompt the agent's pane is parked on, answerable only while the session is live.
   const permissionRequest = TERMINAL_STATUSES.has(session.state.status) ? undefined : session.state.permissionRequest;
   // The harness's own dialog (hooks to review, a sign-in) — the same pane, so never beside a permission prompt.
@@ -949,6 +939,25 @@ export function SessionChatPage({
     TERMINAL_STATUSES.has(session.state.status) || permissionRequest !== undefined
       ? undefined
       : session.state.harnessDialog;
+  // "Auto-read replies" (F137): off unless this device switched it on in Settings › Voice. It watches this
+  // conversation's turn and reads the reply aloud. Whatever parks a turn on the person — a question, a
+  // permission prompt, a harness dialog, the daemon's one-line reason — is only ever READ, never answered by voice.
+  const spokenPrompt = useMemo(
+    () =>
+      TERMINAL_STATUSES.has(session.state.status)
+        ? null
+        : needsInputOf({ question, permissionRequest, harnessDialog, turnPrompt: session.state.turnPrompt }),
+    [harnessDialog, permissionRequest, question, session.state.status, session.state.turnPrompt],
+  );
+  const autoRead = useAutoRead({
+    scope: `${connection.daemonId}/${session.config.id}`,
+    entries,
+    turn,
+    turnStateAt: session.state.turnStateAt,
+    legacy: session.state.turnState === undefined,
+    question: spokenPrompt,
+    sendSignal: pinSignal,
+  });
   const compact = presentation === 'sheet';
   // ---- SEARCH WITHIN THE CONVERSATION (`components/chat-search.tsx`) ----------------------------------
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1755,6 +1764,7 @@ export function SessionChatPage({
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               onSent={onSentWithAgenda}
+              onSending={autoRead.beginSend}
               {...(agendaComposer.onEscape === undefined ? {} : { onEscape: agendaComposer.onEscape })}
               connectionLive={connectionState?.kind === 'connected'}
               quota={quota}

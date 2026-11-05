@@ -494,23 +494,38 @@ switch is on, and the microphone is never involved.
 | with no text                   | "Done. No message." (a silent turn is not mistaken for a broken one)                                        |
 | waiting on you (`needs-input`) | The question, and its options numbered ("Options: one, Postgres; two, SQLite"). **Never answered by voice** |
 
+"Waiting on you" is every shape the page can show it in, read from the same read-only data: a **permission prompt** (the tool and its
+question, with its options), a **harness dialog** (its title and rows), the agent's own **question**, or the daemon's one-line **reason**,
+in that order. Only when none has readable words does it say "The ferret needs your answer. It is on screen."
+
 Never read: the person's own messages, **other ferrets' messages**, agenda and system rows, notices, thinking and tool calls (they are not
 assistant text at all), a message the ferret _sent to another ferret_, and Pack commands. The turn is what came after the person's last
-message, so a silent turn can never fall back to the previous turn's reply. Code, tables and pictures are described, not read (the
+message, so a silent turn can never fall back to the previous turn's reply. For a reply to a send from this page the turn begins at the
+person's own row — the first one the page had not held when send was pressed — so a follow-up typed a moment later never moves it, whatever the
+clocks say. A turn that was only watched is cut by its start time: the last message of the person's at or before the start (a later one moves it only
+when the clock is skewed, it is the first, and the agent has not answered before it). Code, tables and pictures are described, not read (the
 speakable rules above), and one reading stops at the **longest reading** setting with "There's more on screen."
 
 ### When a turn has "ended"
 
 `lib/voice-chat/auto-read.ts` is a small pure state machine over what the page can see; the clock is passed in, so every rule is a plain test.
 
-1. It follows a turn **it saw**: the daemon's `turnState` was `working` while the page was open, or this page just sent something. A
-   session already at `your-turn` when the page opens, or when the switch is turned on, reads nothing.
-2. It fires on the move to `your-turn` or `needs-input` with `turnStateAt` **later than the turn's start** — the old `your-turn` still
+1. It follows a turn **it saw**: the daemon's `turnState` was `working` (with a date) while the page was open, or this page just sent
+   something. A session already at `your-turn` when the page opens, or when the switch is turned on, reads nothing.
+2. **A send is a token taken when the press happens**, before the request is awaited, remembering the newest turn state the page had
+   seen. The reply is judged against that token, never against "now": a turn that ends before the send is acknowledged is still read, a
+   newer send drops whatever was waiting on the older one, and a replayed snapshot of the earlier turn cannot move the new turn's start.
+3. It fires on the move to `your-turn` or `needs-input` with `turnStateAt` **later than the token** — the old `your-turn` still
    showing in the moment after a send is not the reply.
-3. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
+4. **Consumed is consumed:** each reading (or skip) moves a per-conversation watermark, so replaying the same working → your-turn pair after a
+   reconnect reads nothing again.
+5. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
    nothing new before it reads.
-4. **Old daemon** (no `turnState`): it waits for 3 seconds with no new records and not working. That is a guess, and the setting says so.
-5. A turn that ends while the tab is **hidden** is not read when you come back.
+6. **Old daemon** (no `turnState`): it waits for 3 seconds with no new records and not working. That is a guess, and the setting says so.
+   An idle old daemon reads as "working" for a moment when the page opens, which proves nothing, so it only follows a send or a conversation
+   that gained a record after the page opened.
+7. A turn that ends while the tab is **hidden** is never read: it is judged when it is seen (and the moment the tab hides cancels a
+   pending reading), not when the timer would have fired, so coming back changes nothing.
 
 ### What stops it
 
@@ -546,7 +561,7 @@ animation to turn off); the settings carry no autofocus.
 ### Where it lives
 
 `lib/voice-chat/` — `reply-picker.ts`, `auto-read.ts`, `live-settings.ts`. `hooks/use-auto-read.ts` is the composition point (one timer and a few
-document events), used by the chat page; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
+document events), used by the chat page, which hands its `beginSend` to the composer's `onSending`; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
 `features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice.
 
 ## Not built yet

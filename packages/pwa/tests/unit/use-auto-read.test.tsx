@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactElement } from 'react';
 import { AutoReadChip } from '../../src/components/auto-read-chip.tsx';
-import { type AutoReadInput, useAutoRead } from '../../src/hooks/use-auto-read.ts';
+import { type AutoReadHandle, type AutoReadInput, useAutoRead } from '../../src/hooks/use-auto-read.ts';
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
 import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
 import { LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
@@ -65,8 +65,9 @@ const rig = (autoRead: boolean) => {
   return { synth, controller, store };
 };
 
+let handle: AutoReadHandle | null = null;
 function Probe({ input }: { readonly input: AutoReadInput }) {
-  const handle = useAutoRead(input);
+  handle = useAutoRead(input);
   return <AutoReadChip onStop={handle.stop} reading={handle.reading} />;
 }
 
@@ -250,8 +251,11 @@ describe('useAutoRead', () => {
       turnStateAt: undefined,
       legacy: true,
     });
+    // The page opens on a quiet conversation; the turn is proved by a record that comes in AFTER it opened.
+    const fresh: PickerRow = { ...reply('Legacy reply.'), at: Date.now() + 1000 };
     mounted = await mount(tree(r, legacy([user], 'working')));
-    await mounted.render(tree(r, legacy([user, reply('Legacy reply.')], 'your-turn')));
+    await mounted.render(tree(r, legacy([user, fresh], 'working')));
+    await mounted.render(tree(r, legacy([user, fresh], 'your-turn')));
     await settle(1200);
     expect(r.synth.spoken).toHaveLength(0);
     await settle(2200);
@@ -281,5 +285,128 @@ describe('useAutoRead', () => {
     await mounted.render(tree(r, ended([user, reply('Reply.')])));
     await settle();
     expect(synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #3): a fast turn that ends before the send is acknowledged is still read', async () => {
+    const r = rig(true);
+    // The page already shows the previous turn's your-turn.
+    const before = ended([user, reply('Old reply.')], { turnStateAt: new Date(AT - 5000).toISOString() });
+    mounted = await mount(tree(r, before));
+    // The press: armed at its initiation, before the request is awaited.
+    await interact(() => handle?.beginSend());
+    // The whole turn happens before the request comes back and the page bumps its send signal.
+    const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Quick answer.', at: AT + 3000 };
+    await mounted.render(
+      tree(
+        r,
+        ended([user, reply('Old reply.'), { id: 'u2', kind: 'user', text: 'again', at: AT + 1000 }, second], {
+          turnStateAt: new Date(AT + 4000).toISOString(),
+        }),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('Quick answer.');
+    // The acknowledgement arrives afterwards and changes nothing.
+    await mounted.render(
+      tree(
+        r,
+        ended([user, reply('Old reply.'), { id: 'u2', kind: 'user', text: 'again', at: AT + 1000 }, second], {
+          turnStateAt: new Date(AT + 4000).toISOString(),
+          sendSignal: 1,
+        }),
+      ),
+    );
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+  });
+
+  test('REGRESSION (round 1, #2): a newer send drops the reading that was waiting on the older turn', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    // working → your-turn, with the text still arriving (the settle timer is pending)…
+    await mounted.render(tree(r, ended([user, reply('Older reply.')])));
+    // …and the person sends again before it fires.
+    await interact(() => handle?.beginSend());
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #5): a replay of a turn that was already read is not read again', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Read once.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+    await interact(() => handle?.stop());
+    // A reconnect replays the same working → your-turn pair.
+    await mounted.render(tree(r, { ...working(), entries: [user, reply('Read once.')] }));
+    await mounted.render(tree(r, ended([user, reply('Read once.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+  });
+
+  test('REGRESSION (round 1, #6): the turn ends while the tab is hidden; coming back before the timer reads nothing', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await interact(() => setVisibility('hidden'));
+    await mounted.render(tree(r, ended([user, reply('Missed.')])));
+    await interact(() => setVisibility('visible'));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #6): hiding the tab cancels a reading that was waiting out its settle time', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Pending.')])));
+    await interact(() => setVisibility('hidden'));
+    await interact(() => setVisibility('visible'));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #1): an idle old daemon read as working then idle on page load reads nothing', async () => {
+    const r = rig(true);
+    const legacy = (turn: 'working' | 'your-turn'): AutoReadInput => ({
+      ...BASE,
+      entries: [
+        { ...user, at: AT - 600_000 },
+        { ...reply('Historic reply.'), at: AT - 590_000 },
+      ],
+      turn,
+      turnStateAt: undefined,
+      legacy: true,
+    });
+    mounted = await mount(tree(r, legacy('working')));
+    await mounted.render(tree(r, legacy('your-turn')));
+    await settle(3600);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('a send the composer did not announce (a form answer) still arms, from the acknowledgement', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, ended([user, reply('First reply.')])));
+    await mounted.render(tree(r, ended([user, reply('First reply.')], { sendSignal: 1 })));
+    const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Answer reply.', at: Date.now() + 5000 };
+    await mounted.render(
+      tree(
+        r,
+        ended([user, reply('First reply.'), second], {
+          sendSignal: 1,
+          turnStateAt: new Date(Date.now() + 6000).toISOString(),
+        }),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('Answer reply.');
+  });
+
+  test('a send while Auto-read is off, or on a device with no speech, arms nothing', async () => {
+    const off = rig(false);
+    mounted = await mount(tree(off, ended([user, reply('Reply.')])));
+    await interact(() => handle?.beginSend());
+    await mounted.render(tree(off, ended([user, reply('Reply.')], { sendSignal: 1 })));
+    await settle();
+    expect(off.synth.spoken).toHaveLength(0);
   });
 });
