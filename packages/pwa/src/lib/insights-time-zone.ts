@@ -19,26 +19,14 @@ export const INSIGHTS_TIME_ZONE_KEY = 'fy-insights-time-zone-v1';
 /** The stored choice that means "whatever this device's clock says". */
 export const DEVICE_TIME_ZONE = 'device';
 
-/** The zone this device's clock is set to, or UTC when the runtime will not say. */
-export const deviceTimeZone = (): string => {
-  try {
-    return new Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
-};
+/** The zone this device's clock is set to; UTC when the runtime leaves it empty. */
+export const deviceTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-/** Every IANA zone the runtime knows, UTC and this device's own always among them. */
+/** Every IANA zone the runtime lists (an older one lists none): UTC first, this device's own always among them. */
 export const knownTimeZones = (): readonly string[] => {
-  let listed: readonly string[] = [];
-  try {
-    listed = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone') ?? [];
-  } catch {
-    listed = [];
-  }
-  return [...new Set(['UTC', deviceTimeZone(), ...listed])].sort((left, right) =>
-    left === 'UTC' ? -1 : right === 'UTC' ? 1 : left.localeCompare(right),
-  );
+  const listed = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone') ?? [];
+  const rest = [...new Set([deviceTimeZone(), ...listed])].filter(zone => zone !== 'UTC').sort();
+  return ['UTC', ...rest];
 };
 
 export const insightsTimeZonePreference = devicePreference<string>(
