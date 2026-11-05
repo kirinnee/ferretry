@@ -101,18 +101,6 @@ describe('quoting from the open agenda item', () => {
     expect(document.querySelector('[role="menu"][aria-label="Quote menu"]')).not.toBeNull();
   });
 
-  test('the menu is drawn under the body at the click, never inside the item whose ancestors can shift it (#B152)', async () => {
-    // The Inbox's open item sits in a swipe-deck card with `will-change: transform`; a fixed box inside it is placed
-    // relative to the card, not the viewport, so the menu landed far right of the click.
-    const root = await draw(scope);
-    await openMenu(selectIn(root, 'keeps every finished item'));
-    const menu = must(document.querySelector<HTMLElement>('[role="menu"][aria-label="Quote menu"]'), 'the menu');
-    expect(root.contains(menu)).toBe(false);
-    expect(menu.parentElement).toBe(document.body);
-    expect(menu.style.left).toBe('10px');
-    expect(menu.style.top).toBe('10px');
-  });
-
   test('without a composer scope the browser’s own menu stays', async () => {
     const root = await draw(null);
     const target = selectIn(root, 'keeps every finished item');

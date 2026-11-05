@@ -473,4 +473,39 @@ describe('ContextMenu', () => {
     expect(menu.menu.style.top).toBe('30px');
     await menu.unmount();
   });
+
+  it('opens at the viewport point even inside a transformed ancestor that offsets fixed boxes (#B152)', async () => {
+    // The Inbox swipe-deck card is `will-change: transform`: a fixed box inside it lands where the CARD is, so the
+    // same left/top draw 378px right and 96px down of the click. Simulate that containing block.
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const left = (Number.parseFloat(this.style.left) || 0) + 378;
+      const top = (Number.parseFloat(this.style.top) || 0) + 96;
+      return {
+        left,
+        top,
+        right: left + 196,
+        bottom: top + 54,
+        width: 196,
+        height: 54,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      };
+    };
+    try {
+      const menu = await openMenu();
+      // It was asked to open at (20, 30): shifted back by the card's offset, it paints there.
+      expect(menu.menu.style.left).toBe('-358px');
+      expect(menu.menu.style.top).toBe('-66px');
+      expect(menu.menu.getBoundingClientRect().left).toBe(20);
+      // The outside-press surface still covers the whole viewport, not just the card.
+      const scrim = menu.container.querySelector<HTMLElement>('button[aria-label="Close menu"]') as HTMLElement;
+      expect(scrim.style.left).toBe('-378px');
+      expect(scrim.style.top).toBe('-96px');
+      await menu.unmount();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    }
+  });
 });
