@@ -33,6 +33,7 @@ import type { SendDismiss, SendExpand } from '../../components/settled-send-note
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
+import { WaitingFoldNotice } from '../../components/waiting-fold-notice.tsx';
 import type { TranscriptHistoryControl } from '../../components/transcript-history-row.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
 import {
@@ -146,7 +147,13 @@ import { hideWaiting } from '../waiting-fold.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
-import { daemonAddSkillsPath, daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath } from './routes.ts';
+import {
+  daemonAddSkillsPath,
+  daemonBoardCardPath,
+  daemonBoardForFerretPath,
+  daemonQueuePath,
+  daemonSessionPath,
+} from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -602,6 +609,7 @@ export function SessionChatPage({
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
   // A message still waiting to go into the ferret is on the Queue page, not in the chat (waiting-fold.ts).
   const shownEntries = useMemo(() => hideWaiting(entries), [entries]);
+  const waitingCount = entries.length - shownEntries.length;
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
   const readDictationConversation = useCallback(() => conversationFromTranscript(entriesRef.current), []);
@@ -1669,6 +1677,12 @@ export function SessionChatPage({
           {/* THE AGENDA: the drawer, the line and the "about" chip, all siblings above the composer, so the
               composer's own box never moves. */}
           {agenda.above}
+          <WaitingFoldNotice
+            count={waitingCount}
+            {...(onNavigate === undefined
+              ? {}
+              : { onOpenQueue: () => onNavigate(daemonQueuePath(connection.daemonId, session.config.id)) })}
+          />
           {permissionRequest === undefined || !canControl ? null : (
             <ApprovalCard
               agentName={sessionDisplayName(session)}

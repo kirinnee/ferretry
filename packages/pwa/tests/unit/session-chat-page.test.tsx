@@ -21,6 +21,7 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
+import { WaitingFoldNotice } from '../../src/components/waiting-fold-notice.tsx';
 import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine } from '../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../src/features/agenda/agenda-row.tsx';
@@ -42,6 +43,7 @@ import { SessionSearchProvider } from '../../src/features/session-search/session
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
+import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
@@ -49,7 +51,7 @@ import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
-import { daemonAddSkillsPath, daemonSessionPath } from '../../src/lib/pages/routes.ts';
+import { daemonAddSkillsPath, daemonQueuePath, daemonSessionPath } from '../../src/lib/pages/routes.ts';
 import {
   type SessionAgendaModel,
   type SessionChatClient,
@@ -3776,6 +3778,42 @@ describe('SessionChatPage Info and Actions', () => {
       expect(page.root.findAllByProps({ 'data-info-rename': '' })).toHaveLength(0);
     } finally {
       run(() => page.unmount());
+    }
+  });
+
+  test('names the waiting messages the chat folded out and opens the queue from the notice', () => {
+    const waiting = {
+      id: 'send:w1',
+      kind: 'ledger',
+      text: 'saved for later',
+      ledger: {
+        sendId: 'w1',
+        acceptedAt: '2026-11-04T11:00:00.000Z',
+        message: 'saved for later',
+        attachmentIds: [],
+        fate: 'accepted',
+        held: true,
+      },
+      placement: 'chronological',
+    } as unknown as TranscriptEntry;
+    const navigated: string[] = [];
+    const page = renderSessionChatPage(
+      chatPage({ entries: [waiting], onNavigate: to => navigated.push(to) }),
+      fakeDaemon().factory,
+    );
+    try {
+      const notice = page.root.findByType(WaitingFoldNotice);
+      expect(notice.props.count).toBe(1);
+      run(() => notice.props.onOpenQueue());
+      expect(navigated).toEqual([daemonQueuePath(alpha.daemonId, 'shared')]);
+    } finally {
+      run(() => page.unmount());
+    }
+    const none = renderSessionChatPage(chatPage(), fakeDaemon().factory);
+    try {
+      expect(none.root.findByType(WaitingFoldNotice).props.count).toBe(0);
+    } finally {
+      run(() => none.unmount());
     }
   });
 

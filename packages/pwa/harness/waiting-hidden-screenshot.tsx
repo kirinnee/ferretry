@@ -4,9 +4,11 @@
  *
  *   bun harness/waiting-hidden-screenshot.tsx [outDir]     # default harness/out/waiting-*.png
  *
- * Views: `chat` (the REAL `TranscriptRow` over `hideWaiting`: a delivered message and a failed one are
- * drawn, a queued one, a held ferret note and one saved on this device are not) and `queue` (the REAL
- * `QueuePageView` for the same ferret, where those three are, with their send times).
+ * Views: `chat` (the REAL `SessionChatPage`, wired like `phone-chat-page.tsx`, fed five sends: a delivered
+ * message and a failed one are drawn, a queued one, a held ferret note and one saved on this device are folded
+ * out and named by the waiting-fold notice, with the composer below) and `queue` (the REAL `QueuePageView`
+ * for the same ferret, where those three are, with their send times). The chat is an app shell whose
+ * transcript scrolls inside it, so its shots are viewport shots; the queue's are full-page.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -31,10 +33,16 @@ const run = (command: string, args: readonly string[]): void => {
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { QueuePageView } from '../../src/components/queue-page.tsx';
-import { TranscriptRow } from '../../src/components/transcript-row.tsx';
-import { QueueActionsContext } from '../../src/components/queue-actions-context.tsx';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { useAppViewport } from '../../src/hooks/use-app-viewport.ts';
+import { useLayoutMode } from '../../src/hooks/use-layout-mode.ts';
+import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
+import { DaemonBoardStore } from '../../src/lib/board-store.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
 import { outboxRowOf, queueRowOf } from '../../src/lib/queue-view.ts';
-import { hideWaiting } from '../../src/lib/waiting-fold.ts';
+import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
+import { boardAnswer, fakeEnvironment, fakePort, laneSetFor, laptop, PROJECT, COUNTS } from '../../tests/unit/board-support.ts';
 
 const view = new URLSearchParams(location.search).get('view') ?? 'chat';
 const NOW = Date.parse('2026-10-30T02:00:00.000Z');
@@ -66,7 +74,70 @@ const all = Object.keys(records).map(key => {
     ? ({ id: 'send:' + key, kind: 'user', text: texts[key], send: record } as never)
     : ({ id: 'send:' + key, kind: 'ledger', text: texts[key], ledger: record, placement: 'chronological' } as never);
 });
-const shown = hideWaiting(all);
+const ID = 's1';
+const SESSION = {
+  config: {
+    id: ID, name: 'Casen', teammate: 'casen', agent: 'claude-work', harness: 'claude', modelHint: 'claude-opus-5-5',
+    mode: 'auto', cwd: '/home/kirin/Workspace/personal/ferretry', createdAt: at, updatedAt: at, boardAccess: 'none',
+    projectId: PROJECT,
+  },
+  state: {
+    id: ID, status: 'running', turn: 4, startedAt: at, lastActivityAt: at, turnState: 'working', turnStateAt: at,
+    promptReady: false,
+  },
+  directory: '/home/kirin/Workspace/personal/ferretry',
+} as never;
+const noop = async () => undefined;
+const CLIENT = {
+  answer: async () => SESSION, interrupt: async () => SESSION, resume: async () => SESSION,
+  send: async () => ({ ...(SESSION as object), disposition: 'queued' }) as never, stop: async () => SESSION,
+  runtime: async () => SESSION,
+} as never;
+const SNAPSHOT = { v: 1, sessionId: ID, items: [], resolved: [], count: 0, parseErrors: 0, updatedAt: at } as never;
+const AGENDA_CLIENT = {
+  respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, snooze: noop, unsnooze: noop, progress: noop,
+} as never;
+const board = new DaemonBoardStore(
+  fakePort({
+    board: async () => boardAnswer([], { projectId: PROJECT, laneSet: laneSetFor(), counts: { ...COUNTS, active: 0 } }),
+    projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
+  }),
+  fakeEnvironment(),
+);
+
+// THE REAL PAGE: it runs the real hideWaiting over all five entries and draws the notice and the composer.
+function ChatHarness() {
+  useAppViewport();
+  const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
+  return (
+    <div className="kt-shell flex flex-col overflow-hidden" data-marks="" id="harness-waiting-chat">
+      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3" data-shell-main="">
+        <SessionChatPage
+          attention={{ client: AGENDA_CLIENT, snapshot: SNAPSHOT, status: 'ready' }}
+          board={board}
+          chatWidth="readable"
+          client={CLIENT}
+          connection={laptop}
+          context={{
+            attention: new DaemonAgendaClient(undefined, async () => Response.json({}, { status: 503 })),
+            createFleetClient: async () => { throw new Error('the harness has no fleet'); },
+            machineName: 'laptop',
+          }}
+          daemonSessions={[SESSION]}
+          dictationSettings={DEFAULT_STT_SETTINGS}
+          entries={all as never}
+          onNavigate={to => window.history.pushState(null, '', '#nav=' + to)}
+          onOpenSessions={() => undefined}
+          onSessionChange={() => undefined}
+          presentation={presentation}
+          project="ferretry"
+          readSnapshot={async () => ''}
+          session={SESSION}
+        />
+      </div>
+    </div>
+  );
+}
 
 const message = (id: string, text: string, extra: object = {}) => ({
   v: 1, id, sender: 'human', text, attachmentIds: [], state: 'queued', stateAt: at, revision: 1, enqueuedAt: at, ...extra,
@@ -86,23 +157,14 @@ const rows = [
 ];
 const casen = { key: 'laptop/s1', daemonId: 'laptop', machine: 'Laptop', sessionId: 's1', ferret: 'Casen', rows };
 const handlers = { edit: async () => undefined, cancel: async () => undefined };
-const inert = async () => true;
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   view === 'chat' ? (
-    <QueueActionsContext.Provider value={{ edit: async () => true, cancel: async () => true }}>
-      <main data-marks="" style={{ margin: '0 auto', maxWidth: 560, padding: '12px 16px' }}>
-        <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible' }}>
-          <div className="fy-transcript-content">
-            {shown.map((e: any, i: number) => (
-              <TranscriptRow answered={false} entry={e} key={e.id} onCancel={inert} onRetry={inert} onSubmit={inert} previous={shown[i - 1]} />
-            ))}
-          </div>
-        </div>
-      </main>
-    </QueueActionsContext.Provider>
+    <SessionSearchProvider connection={laptop} focusSignal={0} scope={daemonSessionScope(laptop, ID)}>
+      <ChatHarness />
+    </SessionSearchProvider>
   ) : (
     <div data-marks="" style={{ display: 'flex', height: '100vh' }}>
       <QueuePageView groups={[casen]} handlers={handlers} loading={false} now={NOW} onOpenFerret={() => undefined} onShowAll={() => undefined} showMachine={false} title="Queue — Casen" />
@@ -111,13 +173,13 @@ createRoot(root).render(
 );
 `;
 
-const html = (theme: string) => `<!doctype html>
+const html = (theme: string, view: string) => `<!doctype html>
 <html lang="en" data-theme="${theme}">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="stylesheet" href="/app.css" />
-    <style>html, body { height: auto !important; overflow: visible !important; }</style>
+    ${view === 'queue' ? '<style>html, body { height: auto !important; overflow: visible !important; }</style>' : ''}
   </head>
   <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/waiting-entry.js"></script></body>
 </html>`;
@@ -138,13 +200,19 @@ run('./node_modules/.bin/tailwindcss', [
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/')
-      return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
-        headers: { 'content-type': 'text/html' },
-      });
-    return new Response(Bun.file(join(outDir, url.pathname)));
+      return new Response(
+        html(url.searchParams.get('theme') ?? 'studio-dark', url.searchParams.get('view') ?? 'chat'),
+        {
+          headers: { 'content-type': 'text/html' },
+        },
+      );
+    const built = Bun.file(join(outDir, url.pathname));
+    if (await built.exists()) return new Response(built);
+    const shipped = Bun.file(join(packageDir, 'public', url.pathname));
+    return (await shipped.exists()) ? new Response(shipped) : new Response(null, { status: 404 });
   },
 });
 
@@ -178,7 +246,7 @@ try {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${view} ${device.name} ${scheme} scrolls sideways by ${overflow}px`);
           const target = join(shotDir, `waiting-${view}-${device.name}-${scheme}.png`);
-          await page.screenshot({ path: target, fullPage: true });
+          await page.screenshot({ path: target, fullPage: view === 'queue' });
           process.stdout.write(`📸 ${target}\n`);
         }
       } finally {
