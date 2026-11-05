@@ -16,7 +16,6 @@ import {
   builtInPresets,
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
-  serializeCloneBase,
   parseCloneBase,
   serializeCloneBase,
   originKeyOfId,

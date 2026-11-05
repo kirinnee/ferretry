@@ -358,7 +358,9 @@ describe('the setup service collaborators over a temporary machine', () => {
 
       // Assert
       should(wrote).deepEqual([true, true]);
-      should(await deps.cloneBase.read(recordPath(layout))).equal('A_KEY;B_KEY;');
+      // Which update takes the claim first is not promised; that each saw the other's record is.
+      const kept = (await deps.cloneBase.read(recordPath(layout)))?.split(';').filter(name => name !== '');
+      should(kept?.slice().sort()).deepEqual(['A_KEY', 'B_KEY']);
     });
 
     it('should run the next update after one whose change raised', async () => {
