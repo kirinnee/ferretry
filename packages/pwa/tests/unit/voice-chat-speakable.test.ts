@@ -326,11 +326,10 @@ describe('speakableSegments: total', () => {
     expect(reading.segments.map(s => s.text)).toEqual(['This reply is on screen.']);
   });
 
-  test('a huge reply is bounded in time and says there is more', () => {
-    const started = performance.now();
+  test('a huge reply is bounded and says there is more', () => {
     const reading = speakableSegments('A sentence here. '.repeat(100_000));
-    expect(performance.now() - started).toBeLessThan(2000);
     expect(reading.truncated).toBe(true);
+    expect(reading.segments.at(-1)?.text).toBe(MORE_ON_SCREEN);
   });
 
   test('speakInline is total too and strips its own marker character', () => {
@@ -347,15 +346,32 @@ describe('speakableSegments: total', () => {
   });
 });
 
+/**
+ * Hostile input stays CHEAP — proved by structure, not by a stopwatch (the unit tier runs on a virtual clock, so
+ * a time assertion here could never fail; the real timings live in `tests/realworld/voice-chat-speakable.perf`):
+ *  - the reading is bounded by the cap however large the input is, and
+ *  - nothing past the scan window can change it: the same head with 1× or 20× of the hostile tail reads
+ *    identically, so the parser cannot have looked at (let alone been slowed by) the excess.
+ */
 describe('speakableSegments: hostile input stays cheap (review round 1, finding 1)', () => {
-  // The first call pays for building the parser; time the rest.
-  speakableSegments('warm up');
+  const CAP = READING_CHARACTERS_PER_MINUTE;
+  const spoken = (markdown: string): string => said(markdown).join(' ');
   const quick = (name: string, markdown: string): void => {
-    test(`${name} is read in well under 100 ms`, () => {
-      const started = performance.now();
+    test(`${name} reads a bounded answer`, () => {
       const reading = speakableSegments(markdown);
-      expect(performance.now() - started).toBeLessThan(100);
       expect(Array.isArray(reading.segments)).toBe(true);
+      const total = reading.segments.reduce((sum, segment) => sum + segment.text.length + 1, 0);
+      expect(total).toBeLessThanOrEqual(CAP + MORE_ON_SCREEN.length + 8);
+    });
+  };
+  const independentOfTheExcess = (name: string, head: string, tail: string): void => {
+    test(`${name}: the excess past the window changes nothing`, () => {
+      const filler = 'Plain words go here and make the head long enough. '.repeat(260);
+      expect(filler.length).toBeGreaterThan(12_000);
+      const once = speakableSegments(`${head}${filler}${tail}`);
+      const many = speakableSegments(`${head}${filler}${tail.repeat(20)}`);
+      expect(many.segments.map(s => s.text)).toEqual(once.segments.map(s => s.text));
+      expect(once.truncated).toBe(true);
     });
   };
 
@@ -387,12 +403,73 @@ describe('speakableSegments: hostile input stays cheap (review round 1, finding 
   quick('sentence-ending marks with no space after', `a${'.!?'.repeat(10_000)}b`);
   quick('thousands of tiny sentences', 'A. '.repeat(30_000));
 
-  test('sentencesOf is linear on a long run of marks and on a long unspaced word', () => {
-    const started = performance.now();
+  independentOfTheExcess('backtick runs', '', '``` `` ` ```` ');
+  independentOfTheExcess('open brackets', '', '[ [a]( ![ ');
+  independentOfTheExcess('tildes', '', '~'.repeat(500));
+  independentOfTheExcess('stars', '', '*'.repeat(500));
+  independentOfTheExcess('nested list markers', '', '\n- - - - - - - - - - x');
+  independentOfTheExcess('a dangling code span', 'Start with `', 'runDangerousCommand();');
+
+  test('sentencesOf keeps a long run of marks and a long unspaced word whole, and counts every tiny sentence', () => {
     expect(sentencesOf(`a${'.'.repeat(50_000)}b`)).toEqual([`a${'.'.repeat(50_000)}b`]);
     expect(sentencesOf(`${'a'.repeat(50_000)}. Next one.`)).toHaveLength(2);
     expect(sentencesOf('A. '.repeat(20_000))).toHaveLength(20_000);
-    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  test('the scan sees no more than the window: the line limit and the character limit both end it', () => {
+    expect(spoken(`${'- a\n'.repeat(500)}`)).toBe(spoken(`${'- a\n'.repeat(400)}${'- b\n'.repeat(5000)}`));
+    const words = 'word '.repeat(20_000);
+    expect(spoken(words)).toBe(spoken(`${words}${'tail '.repeat(40_000)}`));
+  });
+
+  test('a code span the window cuts open is never spoken raw (review round 2, finding 1)', () => {
+    const dangerous = 'runDangerousCommand();';
+    const source = `Run \`${dangerous.repeat(700)}\` then stop.`;
+    expect(source.lastIndexOf('`')).toBeGreaterThan(12_000);
+    const reading = speakableSegments(source);
+    const text = reading.segments.map(s => s.text).join(' ');
+    expect(text).not.toContain('runDangerous');
+    expect(text).not.toContain('Dangerous');
+    expect(reading.truncated).toBe(true);
+    // The words before the open span are still read, and it stops there.
+    expect(reading.segments.map(s => s.text)).toEqual(['Run.', MORE_ON_SCREEN]);
+    // …and the same cut at the line limit, in a list item, a quote and a numbered item.
+    const lines = (open: string): string => `${open}\`${dangerous}\n${'more\n'.repeat(500)}\``;
+    for (const open of ['- item ', '> quote ', '1. num ']) {
+      const cut = spoken(lines(open));
+      expect(cut).not.toContain('Dangerous');
+    }
+    // A span that closes inside the window is a whole construct: described, as always.
+    expect(said(`Use \`${dangerous}\` and go on.\n\n${'x '.repeat(7000)}`)[0]).toBe('Use a code snippet and go on.');
+    // A backtick the window does not cut open is left to the parser: a window that ends cleanly keeps the paragraph.
+    expect(said(`Use a \` alone.\n${'- a\n'.repeat(500)}`)[0]).toBe('Use a ` alone.');
+  });
+
+  test('a long fence delimiter keeps its length: a shorter tilde line inside it does not close it (round 2, finding 2)', () => {
+    const outer = '~'.repeat(30);
+    const inner = '~'.repeat(25);
+    const code = `${outer}ts\nconst a = 1;\n${inner}\nrunDangerousCommand();\n${outer}\n\nAfter it.`;
+    const reading = speakableSegments(code);
+    expect(reading.segments.map(s => s.text)).toEqual([
+      "Code block, 3 lines of TypeScript. It's on screen.",
+      'After it.',
+    ]);
+    expect(reading.segments.map(s => s.text).join(' ')).not.toContain('runDangerous');
+    // Inside a quote and a list item too, and with a 100-tilde fence.
+    expect(said(`> ${outer}\n> ${inner}\n> runDangerousCommand();\n> ${outer}`).join(' ')).not.toContain(
+      'runDangerous',
+    );
+    expect(said(`- ${outer}\n  ${inner}\n  runDangerousCommand();\n  ${outer}`).join(' ')).not.toContain(
+      'runDangerous',
+    );
+    const huge = '~'.repeat(100);
+    expect(said(`${huge}\n${'~'.repeat(99)}\nrunDangerousCommand();\n${huge}`).join(' ')).not.toContain('runDangerous');
+    // A long run that is not a fence is still shortened: it is only stray marks, dropped.
+    expect(said(`word ${'~'.repeat(40)} word`)).toEqual(['word word.']);
+    // …and so is one that sits too deep in markers to be a fence.
+    expect(said(`${'- '.repeat(12)}${'~'.repeat(40)}`).length).toBe(1);
+    // A second run on the fence's own line is text, not a delimiter.
+    expect(said(`${outer} ${'~'.repeat(40)}\ncode\n${outer}`)).toEqual(["Code block, 1 line. It's on screen."]);
   });
 
   test('the excess of a run is blanked, one for one, so offsets still slice the original', () => {

@@ -141,17 +141,27 @@ const rangeOf = (node: MdNode): { start: number; end: number } => ({
  * of two thousand nested `- - - -`, each cost it seconds. No reply a person reads has either, so before
  * parsing the excess is overwritten one-for-one — runs with spaces, container markers with an `x` — which
  * keeps every offset (every UTF-16 unit) where it was, so `sourceRange` still slices the original.
- * Two linear passes; nothing is parsed twice.
+ * A few linear passes over the text, and one parse (a second only when the window ends inside a code span).
  */
 const MAX_MARK_RUN = 24;
 const MAX_CONTAINER_DEPTH = 8;
-const MARK_RUN = /([*_.~])\1{24,}/gu;
+const MARK_RUN = /([*_.])\1{24,}/gu;
+/**
+ * Tildes are tamed apart from the rest, because a run of them at the start of a line is a fence delimiter whose
+ * LENGTH matters: a 30-tilde fence is only closed by 30 or more, so a 25-tilde line inside it must stay 25.
+ * Anywhere else on a line a long run is just text.
+ */
+const TILDE_RUN = /~{25,}/gu;
 
 const isDigit = (char: string | undefined): boolean => char !== undefined && char >= '0' && char <= '9';
 const isBlank = (char: string | undefined): boolean => char === ' ' || char === '\t';
 
-/** Where the list and quote markers at the start of the line `[start, end)` sit, in order. */
-const containerMarkers = (source: string, start: number, end: number): number[] => {
+/** Where the list and quote markers at the start of the line `[start, end)` sit, in order, and where its content begins. */
+const containerPrefix = (
+  source: string,
+  start: number,
+  end: number,
+): { readonly markers: number[]; readonly content: number } => {
   const markers: number[] = [];
   let at = start;
   while (at < end) {
@@ -181,17 +191,41 @@ const containerMarkers = (source: string, start: number, end: number): number[] 
     }
     break;
   }
-  return markers;
+  return { markers, content: at };
+};
+
+const shorten = (run: string): string => `${run.slice(0, MAX_MARK_RUN)}${' '.repeat(run.length - MAX_MARK_RUN)}`;
+
+/** Long tilde runs shortened, except a fence delimiter: the first thing on its line, past at most eight markers. */
+const tameTildes = (source: string): string => {
+  let out = '';
+  let copied = 0;
+  let lineEnd = -1;
+  let content = -1;
+  for (const match of source.matchAll(TILDE_RUN)) {
+    const at = match.index ?? 0;
+    if (at > lineEnd) {
+      const start = source.lastIndexOf('\n', at - 1) + 1;
+      const newline = source.indexOf('\n', at);
+      lineEnd = newline === -1 ? source.length : newline;
+      const prefix = containerPrefix(source, start, lineEnd);
+      content = prefix.markers.length <= MAX_CONTAINER_DEPTH ? prefix.content : -1;
+    }
+    if (at === content) continue;
+    out += `${source.slice(copied, at)}${shorten(match[0])}`;
+    copied = at + match[0].length;
+  }
+  return out + source.slice(copied);
 };
 
 const tame = (source: string): string => {
-  const runs = source.replace(MARK_RUN, run => `${run.slice(0, MAX_MARK_RUN)}${' '.repeat(run.length - MAX_MARK_RUN)}`);
+  const runs = tameTildes(source.replace(MARK_RUN, shorten));
   let out = '';
   let copied = 0;
   for (let start = 0; start <= runs.length; ) {
     const newline = runs.indexOf('\n', start);
     const end = newline === -1 ? runs.length : newline;
-    for (const marker of containerMarkers(runs, start, end).slice(MAX_CONTAINER_DEPTH)) {
+    for (const marker of containerPrefix(runs, start, end).markers.slice(MAX_CONTAINER_DEPTH)) {
       out += `${runs.slice(copied, marker)}x`;
       copied = marker + 1;
     }
@@ -614,9 +648,9 @@ const walk = (node: MdNode, depth: number, prose: ProseKind, out: Block[]): void
   }
 };
 
-const blocksOf = (source: string): Block[] => {
+const blocksOf = (root: MdNode): Block[] => {
   const blocks: Block[] = [];
-  walk(parse(source), 0, 'text', blocks);
+  walk(root, 0, 'text', blocks);
   return blocks;
 };
 
@@ -653,6 +687,31 @@ const scanWindow = (source: string): string => {
   return head.slice(0, newline);
 };
 
+const TEXT_BLOCKS: ReadonlySet<string> = new Set(['paragraph', 'heading', 'tableCell']);
+
+/**
+ * Where a code span may have been left open by the cut. The window ends mid-text, so the last paragraph can
+ * hold a backtick whose closing partner lies past the cut: the parser then sees plain text and the code
+ * between would be SPOKEN. Only the last text block can be in that state (anything followed by another block
+ * is complete), and a backtick left in its plain text is exactly an opener the parser could not pair. Returns
+ * the offset of the first one, or -1. The caller stops there, so no code is ever read raw.
+ */
+const openCodeSpan = (root: MdNode, source: string): number => {
+  let block: MdNode | undefined = root;
+  while (block !== undefined && !TEXT_BLOCKS.has(block.type)) block = block.children?.at(-1);
+  if (block === undefined) return -1;
+  let first = -1;
+  const pending: MdNode[] = [block];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    pending.push(...(node.children ?? []));
+    if (node.type !== 'text' || !(node.value ?? '').includes('`')) continue;
+    const { start, end } = rangeOf(node);
+    const at = source.indexOf('`', start);
+    if (at !== -1 && at < end && (first === -1 || at < first)) first = at;
+  }
+  return first;
+};
+
 /**
  * The segments one reading says, in order. Always a value, never a throw. Empty `segments` means there
  * is nothing worth saying (blank, or markup with no words).
@@ -663,11 +722,19 @@ export function speakableSegments(markdown: string, options: SpeakableOptions = 
     const limit = options.maxCharacters ?? READING_CHARACTERS_PER_MINUTE;
     const cap = Number.isFinite(limit) && limit >= 1 ? Math.floor(limit) : READING_CHARACTERS_PER_MINUTE;
     const scanned = scanWindow(source);
-    const all = segmentsOf(blocksOf(tame(scanned)));
+    let tamed = tame(scanned);
+    let root = parse(tamed);
+    // A window that ends before the reply does can end inside a code span: stop before it, never read it raw.
+    const open = scanned.length < source.length ? openCodeSpan(root, tamed) : -1;
+    if (open !== -1) {
+      tamed = tamed.slice(0, open);
+      root = parse(tamed);
+    }
+    const all = segmentsOf(blocksOf(root));
 
     const out: SpeakableSegment[] = [];
     let used = 0;
-    let truncated = scanned.length < source.length;
+    let truncated = tamed.length < source.length;
     for (const segment of all) {
       if (out.length > 0 && used + segment.text.length + 1 > cap) {
         truncated = true;
