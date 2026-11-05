@@ -50,6 +50,7 @@ import {
   FleetCredentialViewSchema,
   FleetDisabledSchema,
 } from './fleet-credentials.ts';
+import { CloneDecisionsSchema, CloneLoginChoicesSchema } from './fleet-clone-diff.ts';
 import { GrantRefusalSchema } from './grants.ts';
 import { LocalModelsSchema } from './models.ts';
 import { CATALOG_SKILL_MAX_FILES, CatalogSkillFileSchema } from './shared-catalog.ts';
@@ -842,7 +843,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     kind: z.literal('clone.import'),
-    mode: z.enum(['alongside', 'replace']),
+    /**
+     * `update` repeats an earlier copy and writes only what the review listed and the person chose
+     * (`decisions`); `alongside` and `replace` copy everything, as they always have.
+     */
+    mode: z.enum(['alongside', 'replace', 'update']),
     /** The source machine's export, read by the browser and handed over as data. */
     bundle: z.record(z.string(), z.unknown()),
     /**
@@ -867,6 +872,17 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
      * the hostname). Display only: nothing is matched against them.
      */
     names: z.strictObject({ source: NonEmptyStringSchema.max(120), target: NonEmptyStringSchema.max(120) }).optional(),
+    /** `update` only: what to do with each item the review listed, by its `ref`. Every `both` item needs one. */
+    decisions: CloneDecisionsSchema.optional(),
+    /** `update` only: which login here each sign-in the source carries uses. Never rewrites a login. */
+    logins: CloneLoginChoicesSchema.optional(),
+    /** `update` only: the review's fingerprint. The apply re-plans and is refused when it no longer matches. */
+    reviewed: NonEmptyStringSchema.optional(),
+    /** Settings documents the source carried, for the per-key merge. Accepted now so the change stays stable. */
+    settings: z
+      .array(z.strictObject({ path: NonEmptyStringSchema, text: z.string() }))
+      .max(8)
+      .optional(),
   }),
 ]);
 export type FleetAccountChange = z.infer<typeof FleetAccountChangeSchema>;

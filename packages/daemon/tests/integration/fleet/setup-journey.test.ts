@@ -11,25 +11,29 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat,
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  type AccountModel,
+  accountModelFiles,
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
   parseCloneBase,
   parseExportKeys,
+  renderConfigFile,
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
-import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
-import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { fleetSetupRoutes } from '../../../src/lib/runtime/mounts/fleet-setup.ts';
+import { CREDENTIALS, GRANTED, human, NARROWED } from '../../unit/runtime/mounts/support.ts';
+import { request } from '../../unit/api/support.ts';
+import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
+import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
-import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
 import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
-import { request } from '../../unit/api/support.ts';
-import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -654,8 +658,8 @@ const TARGET_SECRET = 'ghp_targetplaceholderplaceholder000000000';
  * A target that is signed in: the login `claude-you` (the id the source's own login has, so a copy has
  * to deal with a clash), its credential-store entry with a placeholder token, and a secret the store holds.
  */
-async function signedInTarget(name: string): Promise<Machine> {
-  const target = await machine(name, { claude: false });
+async function signedInTarget(name: string, emails?: Readonly<Record<string, string>>): Promise<Machine> {
+  const target = await machine(name, { claude: false, ...(emails === undefined ? {} : { emails }) });
   const steps = [
     { kind: 'credential.add', id: 'claude-you', harness: 'claude' },
     { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content: 'Be kind.\n', create: true },
@@ -901,4 +905,402 @@ describe('Clone reuses a login the target already has, and never touches it (des
       }
     });
   }
+});
+
+describe('a repeat copy (update) over real files', () => {
+  const apply = async (on: Machine, change: unknown, governed = false) => {
+    const staged = await on.catalog.propose(change as never);
+    return await on.catalog.apply(staged.id, { governed } as never);
+  };
+
+  const instructionsName = async (on: Machine): Promise<string> => {
+    const [name] = Object.keys((await declared(on)).components.instructions);
+    if (name === undefined) throw new Error('expected an instructions component');
+    return name;
+  };
+
+  const editInstructions = async (on: Machine, content: string): Promise<void> => {
+    const name = await instructionsName(on);
+    await apply(on, { kind: 'component.put', name, component: { kind: 'instructions' }, content, create: false });
+  };
+
+  const instructionsFile = async (on: Machine): Promise<string> =>
+    await readFile(
+      path.join(on.fleet, 'assets', 'components', 'instructions', `${await instructionsName(on)}.md`),
+      'utf8',
+    );
+
+  /** The source after its own import, and a target that took its first copy. */
+  async function copiedPair(): Promise<{ source: Machine; target: Machine }> {
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const target = await machine('work-linux', { claude: false });
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle });
+    return { source, target };
+  }
+
+  const exported = async (source: Machine) => FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+
+  const update = async (
+    target: Machine,
+    source: Machine,
+    decisions: Record<string, 'take' | 'keep'> = {},
+    governed = false,
+  ) => {
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    return {
+      review,
+      outcome: await apply(
+        target,
+        { kind: 'clone.import', mode: 'update', bundle, reviewed: review.fingerprint, decisions },
+        governed,
+      ),
+    };
+  };
+
+  /** Every file under the target's assets, with its bytes. */
+  const assetBytes = async (on: Machine): Promise<Record<string, string>> => {
+    const root = path.join(on.fleet, 'assets');
+    const bytes: Record<string, string> = {};
+    for (const file of await filesUnder(root)) bytes[file] = await readFile(path.join(root, file), 'utf8');
+    return bytes;
+  };
+
+  it('should copy twice with nothing changed and list every item as already the same, writing no asset', async () => {
+    const { source, target } = await copiedPair();
+    const before = await assetBytes(target);
+
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    should(review.items).deepEqual([]);
+    should(review.same.count).be.above(0);
+    await update(target, source);
+
+    should(await assetBytes(target)).deepEqual(before);
+  });
+
+  it('should say "changed here" for an item edited here, and leave its bytes alone', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(target, 'Edited here.\n');
+
+    const review = await target.setup.reviewClone({ bundle: await exported(source) });
+    const item = review.items.find(row => row.kind === 'instructions');
+    should(item?.outcome).equal('mine');
+    await update(target, source);
+
+    should(await instructionsFile(target)).equal('Edited here.\n');
+  });
+
+  it('should apply an item edited on the source', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(source, 'Edited on the source.\n');
+
+    const { review } = await update(target, source);
+
+    should(review.items.find(row => row.kind === 'instructions')?.outcome).equal('theirs');
+    should(await instructionsFile(target)).equal('Edited on the source.\n');
+  });
+
+  it('should honour the choice for an item edited on both sides, in both directions', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(source, 'Edited on the source.\n');
+    await editInstructions(target, 'Edited here.\n');
+    const ref = `instructions/${await instructionsName(target)}`;
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === ref)?.choice).be.undefined();
+
+    await target.catalog
+      .propose({
+        kind: 'clone.import',
+        mode: 'update',
+        bundle,
+        reviewed: review.fingerprint,
+        decisions: {},
+      } as never)
+      .then(
+        () => should.fail(undefined, undefined, 'expected the unchosen item to be refused'),
+        (error: Error) => should(error.message).containEql(ref),
+      );
+    should(await instructionsFile(target)).equal('Edited here.\n');
+
+    await apply(target, {
+      kind: 'clone.import',
+      mode: 'update',
+      bundle,
+      reviewed: review.fingerprint,
+      decisions: { [ref]: 'keep' },
+    });
+    should(await instructionsFile(target)).equal('Edited here.\n');
+
+    // Keeping settles it: the next review calls it changed here, and only keep is allowed.
+    const reviewAgain = await target.setup.reviewClone({ bundle });
+    should(reviewAgain.items.find(row => row.ref === ref)?.outcome).equal('mine');
+
+    // The other direction, from a fresh both-changed state.
+    const fresh = await copiedPair();
+    await editInstructions(fresh.source, 'Edited on the source.\n');
+    await editInstructions(fresh.target, 'Edited here.\n');
+    const freshBundle = await exported(fresh.source);
+    const freshReview = await fresh.target.setup.reviewClone({ bundle: freshBundle });
+    await apply(fresh.target, {
+      kind: 'clone.import',
+      mode: 'update',
+      bundle: freshBundle,
+      reviewed: freshReview.fingerprint,
+      decisions: { [ref]: 'take' },
+    });
+    should(await instructionsFile(fresh.target)).equal('Edited on the source.\n');
+  });
+
+  it('should still link an item renamed by hand on both machines', async () => {
+    const { source, target } = await copiedPair();
+    await apply(source, { kind: 'runtime.rename', name: 'claude-default', to: 'claude-studio' });
+    await apply(target, { kind: 'runtime.rename', name: 'claude-default', to: 'claude-mine' });
+
+    const review = await target.setup.reviewClone({ bundle: await exported(source) });
+
+    should(review.items.filter(row => row.kind === 'runtime' && row.outcome === 'new')).deepEqual([]);
+    should((await declared(target)).runtimes['claude-mine']).not.be.undefined();
+  });
+
+  it('should refuse an apply whose review is stale', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(source, 'Edited on the source.\n');
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    await editInstructions(target, 'Edited here after the review.\n');
+
+    await target.catalog
+      .propose({
+        kind: 'clone.import',
+        mode: 'update',
+        bundle,
+        reviewed: review.fingerprint,
+        decisions: {},
+      } as never)
+      .then(
+        () => should.fail(undefined, undefined, 'expected a stale review to be refused'),
+        (error: Error) => should(error.message).equal('Something changed since you reviewed. Review again.'),
+      );
+    should(await instructionsFile(target)).equal('Edited here after the review.\n');
+  });
+
+  it('should refuse a governed device without fleet.configure, on the review route', async () => {
+    const { source, target } = await copiedPair();
+    const dispatcher = new ApiDispatcher(new ApiRouter(fleetSetupRoutes(target.setup)), CREDENTIALS, NARROWED);
+
+    const answered = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/clone/review',
+        headers: { ...human, 'content-type': 'application/json' },
+        body: JSON.stringify({ bundle: await exported(source) }),
+      }),
+    );
+
+    should(answered.status).equal(403);
+  });
+
+  it('should leave a signed-in login and its secrets byte-identical across an update', async () => {
+    const { source, target } = await copiedPair();
+    const store = path.join(target.fleet, 'credentials', 'claude-you');
+    await mkdir(store, { recursive: true });
+    await writeFile(path.join(store, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
+    target.secrets.set('GITHUB_TOKEN', FAKE_SECRET);
+    const before = await signedInState(target);
+    await editInstructions(source, 'Edited on the source.\n');
+
+    await update(target, source);
+
+    should(await signedInState(target)).deepEqual(before);
+  });
+
+  // ── Security review regressions (#F544) ──
+
+  it('should remove a file the source dropped from a folder it took, and leave the rest of the folder', async () => {
+    // Arrange: the source's skill carries a second file at the first copy, then drops it.
+    const source = await machine('studio', { claude: true });
+    await writeFile(path.join(source.userHome, '.claude', 'skills', 'review', 'notes.md'), 'Old notes.\n');
+    await importHost(source);
+    const target = await machine('work-linux', { claude: false });
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await exported(source) });
+    const skill = path.join(target.fleet, 'assets', 'skills', 'review');
+    should(await readFile(path.join(skill, 'notes.md'), 'utf8')).equal('Old notes.\n');
+    await rm(path.join(source.fleet, 'assets', 'skills', 'review', 'notes.md'));
+
+    // Act
+    const { review } = await update(target, source);
+
+    // Assert: listed as removed, gone from disk, the rest untouched, and the next review has nothing to say.
+    should(review.items.flatMap(row => row.files)).containEql({
+      path: 'skills/review/notes.md',
+      change: 'removed',
+      lines: { added: 0, removed: 2 },
+    });
+    await stat(path.join(skill, 'notes.md')).then(
+      () => should.fail(undefined, undefined, 'expected the removed file to be gone'),
+      (error: NodeJS.ErrnoException) => should(error.code).equal('ENOENT'),
+    );
+    should(await readFile(path.join(skill, 'SKILL.md'), 'utf8')).containEql('Review it.');
+    should((await target.setup.reviewClone({ bundle: await exported(source) })).items).deepEqual([]);
+  });
+
+  it('should link old copies by name and leave a signed-in login and its secrets byte-identical', async () => {
+    // Arrange: a signed-in target that took a copy before origin keys existed (a version 1 bundle).
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const target = await signedInTarget('work-linked');
+    const before = await signedInState(target);
+    const current = await exported(source);
+    if (current.version !== 2) throw new Error('expected a version 2 bundle');
+    const { daemon: _daemon, keys: _keys, ...rest } = current;
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: { ...rest, version: 1 } });
+
+    // Act: the repeat copy finds the old copies by name.
+    const { review } = await update(target, source);
+
+    // Assert
+    should(review.same.probable).be.above(0);
+    should(await signedInState(target)).deepEqual(before);
+    const linked = Object.values((await declared(target)).components.instructions).filter(
+      component => component.clonedFromKey !== undefined,
+    );
+    should(linked.length).be.above(0);
+  });
+
+  it('should reuse the signed-in login with the same email, in another case, and leave it byte-identical', async () => {
+    // Arrange: the source's login is signed in as Kirin@Example.TEST; the target already holds that account as
+    // an unlinked, signed-in login (no origin key, so only the email can pair them).
+    const source = await machine('studio', { claude: true, emails: { 'claude-you': 'Kirin@Example.TEST' } });
+    await importHost(source);
+    const target = await signedInTarget('work-email', { 'claude-you': 'kirin@example.test' });
+    const bundle = await exported(source);
+    should(bundle.credentials.map(credential => credential.email)).deepEqual(['Kirin@Example.TEST']);
+    const before = await signedInState(target);
+    const loginsBefore = Object.keys((await declared(target)).credentials);
+
+    // Act
+    const review = await target.setup.reviewClone({ bundle });
+    await apply(target, { kind: 'clone.import', mode: 'update', bundle, reviewed: review.fingerprint, decisions: {} });
+
+    // Assert: the review said the login is already here, no slot or login was added, the copied runtime uses it,
+    // and everything that makes it signed in is exactly as it was.
+    should(review.logins).deepEqual([{ sourceId: 'claude-you', outcome: 'matched', target: 'claude-you' }]);
+    const model = await declared(target);
+    should(Object.keys(model.credentials)).deepEqual(loginsBefore);
+    should(model.runtimes['claude-default']?.credential).equal('claude-you');
+    should(await signedInState(target)).deepEqual(before);
+  });
+
+  for (const choice of ['keep', 'remove'] as const) {
+    it(`should ${choice} an item the source dropped and leave a signed-in login and its secrets byte-identical`, async () => {
+      // Arrange: the source had an instructions component nothing layers, copied once, then deleted it.
+      const source = await machine('studio', { claude: true });
+      await importHost(source);
+      await apply(source, {
+        kind: 'component.put',
+        name: 'extra',
+        component: { kind: 'instructions' },
+        content: 'Extra.\n',
+        create: true,
+      });
+      const target = await signedInTarget(`work-gone-${choice}`);
+      await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await exported(source) });
+      should((await declared(target)).components.instructions.extra).not.be.undefined();
+      await apply(source, { kind: 'component.remove', componentKind: 'instructions', name: 'extra' });
+      const before = await signedInState(target);
+      const bundle = await exported(source);
+      const review = await target.setup.reviewClone({ bundle });
+      should(review.items.find(row => row.ref === 'instructions/extra')).match({ outcome: 'gone', choice: 'keep' });
+
+      // Act
+      await apply(target, {
+        kind: 'clone.import',
+        mode: 'update',
+        bundle,
+        reviewed: review.fingerprint,
+        decisions: { 'instructions/extra': choice },
+      });
+
+      // Assert
+      const after = (await declared(target)).components.instructions.extra;
+      if (choice === 'remove') should(after).be.undefined();
+      else should(after).not.be.undefined();
+      should(await signedInState(target)).deepEqual(before);
+    });
+  }
+
+  /** Rename an instructions component (and, when named, a profile) by editing the config files, as an owner would. */
+  async function renameByHand(on: Machine, component: string, to: string, profile?: { from: string; to: string }) {
+    const model = await declared(on);
+    const config = on.home.paths.config;
+    const { [component]: moved, ...others } = model.components.instructions;
+    if (moved === undefined) throw new Error(`expected instructions/${component}`);
+    const relayer = (layers: readonly string[]) =>
+      layers.map(layer => (layer === `instructions/${component}` ? `instructions/${to}` : layer));
+    const profiles = Object.fromEntries(
+      Object.entries(model.profiles).map(([name, value]) => [
+        name === profile?.from ? profile.to : name,
+        { ...value, layers: relayer(value.layers) },
+      ]),
+    );
+    const runtimes = Object.fromEntries(
+      Object.entries(model.runtimes).map(([name, value]) => [
+        name,
+        value.profile === profile?.from ? { ...value, profile: profile.to } : value,
+      ]),
+    );
+    const renamed = {
+      ...model,
+      components: { ...model.components, instructions: { ...others, [to]: moved } },
+      profiles,
+      runtimes,
+    } as AccountModel;
+    await rm(path.join(config, 'components', 'instructions', `${component}.yaml`));
+    if (profile !== undefined) await rm(path.join(config, 'profiles', `${profile.from}.yaml`));
+    for (const [file, { address, value }] of accountModelFiles(renamed)) {
+      const touched =
+        file === `components/instructions/${to}.yaml` || file.startsWith('profiles/') || file.startsWith('runtimes/');
+      const text = touched ? renderConfigFile(file, address, value, undefined) : undefined;
+      if (text !== undefined) await writeFile(path.join(config, file), text, { mode: 0o600 });
+    }
+  }
+
+  it('should still link a component renamed by hand in its YAML on the source', async () => {
+    // Arrange
+    const { source, target } = await copiedPair();
+    const mine = Object.keys((await declared(target)).components.instructions).toSorted();
+    const name = await instructionsName(source);
+    await renameByHand(source, name, `${name}-renamed`);
+    should((await declared(source)).components.instructions[`${name}-renamed`]).not.be.undefined();
+
+    // Act
+    const { review } = await update(target, source);
+
+    // Assert: nothing new, nothing gone, and no second copy under another name.
+    should(review.items).deepEqual([]);
+    should(Object.keys((await declared(target)).components.instructions).toSorted()).deepEqual(mine);
+  });
+
+  it('should still link a component and a profile renamed by hand in their YAML here', async () => {
+    // Arrange
+    const { source, target } = await copiedPair();
+    const name = await instructionsName(target);
+    const [profile] = Object.keys((await declared(target)).profiles);
+    if (profile === undefined) throw new Error('expected a profile');
+    await renameByHand(target, name, `${name}-mine`, { from: profile, to: `${profile}-mine` });
+    const renamed = await declared(target);
+    should(renamed.components.instructions[`${name}-mine`]).not.be.undefined();
+    should(renamed.profiles[`${profile}-mine`]).not.be.undefined();
+
+    // Act
+    const { review } = await update(target, source);
+
+    // Assert
+    should(review.items).deepEqual([]);
+    should(Object.keys((await declared(target)).profiles)).deepEqual(Object.keys(renamed.profiles));
+  });
 });

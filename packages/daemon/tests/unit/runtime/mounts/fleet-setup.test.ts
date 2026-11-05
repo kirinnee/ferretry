@@ -9,6 +9,7 @@
 import { describe, it } from 'bun:test';
 import type {
   FleetCloneBundle,
+  FleetCloneReview,
   FleetSetupScan,
   FleetToolInstallRequest,
   FleetToolInstallResult,
@@ -49,14 +50,26 @@ const BUNDLE: FleetCloneBundle = {
   notCopied: [],
 };
 
+const REVIEW: FleetCloneReview = {
+  mode: 'update',
+  source: { name: 'studio', verified: 'browser' },
+  items: [],
+  settings: [],
+  logins: [],
+  keys: [],
+  same: { count: 2, probable: 0 },
+  fingerprint: 'f'.repeat(64),
+};
+
 interface Calls {
   scans: number;
   exports: number;
+  reviews: number;
   installs: { request: FleetToolInstallRequest; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetSetupSubsystem; calls: Calls } {
-  const calls: Calls = { scans: 0, exports: 0, installs: [] };
+  const calls: Calls = { scans: 0, exports: 0, reviews: 0, installs: [] };
   return {
     calls,
     subsystem: {
@@ -71,6 +84,10 @@ function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetS
       exportBundle: async () => {
         calls.exports += 1;
         return BUNDLE;
+      },
+      reviewClone: async () => {
+        calls.reviews += 1;
+        return REVIEW;
       },
       executors: {} as FleetSetupSubsystem['executors'],
       ...overrides,
@@ -105,6 +122,24 @@ describe('the fleet setup mount', () => {
     should(jsonBody(responses[0] as never)).deepEqual(SCAN);
     should(jsonBody(responses[1] as never)).deepEqual(BUNDLE);
     should([calls.scans, calls.exports]).deepEqual([1, 1]);
+  });
+
+  it('should answer a clone review through the shared schema, uncached, and refuse a body that is not one', async () => {
+    // Arrange
+    const { subsystem, calls } = stub();
+
+    // Act
+    const answered = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE })),
+    );
+    const bad = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/review', JSON.stringify({ nope: 1 })));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(answered)).deepEqual(REVIEW);
+    should(bad.status).equal(400);
+    should(calls.reviews).equal(1);
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {

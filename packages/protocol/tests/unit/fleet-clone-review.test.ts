@@ -9,6 +9,7 @@ import {
   CLONE_REVIEW_MAX_LEAVES,
   cloneBundleProblem,
   cloneFileOwned,
+  cloneLoginRunnable,
   cloneRunnables,
   commandLine,
   isCanonicalAssetPath,
@@ -351,5 +352,77 @@ describe('the membership and spelling rules', () => {
     for (const path of ['./a', 'a//b', 'a/./b', 'a/../b', 'a/', '/a', '~/a', '$X/a', 'a\\b', '']) {
       should(isCanonicalAssetPath(path)).be.false();
     }
+  });
+});
+
+describe('cloneBundleProblem: a file is carried or it is not', () => {
+  const carried = (notCopied: string) => ({
+    ...bundleWith({ hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } }, [
+      { path: 'components/hooks/a/run.sh', content: 'echo' },
+    ]),
+    notCopied: [{ path: notCopied, reason: 'too large' }],
+  });
+
+  it('should refuse a carried file also listed as not copied, however that is spelled', () => {
+    for (const spelling of [
+      'components/hooks/a/run.sh',
+      './components/hooks/a//run.sh',
+      'components/hooks/a/run.sh/',
+    ]) {
+      should(cloneBundleProblem(carried(spelling))).equal(
+        `The setup from studio-mac carries ${spelling} and also says it could not carry it, so none of it can be copied.`,
+      );
+    }
+  });
+
+  it('should accept a file not copied beside the carried ones', () => {
+    should(cloneBundleProblem(carried('components/hooks/a/huge.bin'))).be.null();
+    should(cloneBundleProblem(carried('components/hooks/a/run'))).be.null();
+    should(cloneBundleProblem(carried('/elsewhere/components/hooks/a'))).be.null();
+  });
+
+  it('should refuse a carried file beneath a folder also listed as not copied, however that is spelled', () => {
+    for (const folder of ['components/hooks/a', './components/hooks/a/', 'components', '.']) {
+      should(cloneBundleProblem(carried(folder))).equal(
+        `The setup from studio-mac carries components/hooks/a/run.sh and also says it could not carry ${folder}, the folder it is in, so none of it can be copied.`,
+      );
+    }
+  });
+});
+
+describe('cloneLoginRunnable: what an environment login runs with', () => {
+  it('should list nothing for a sign-in login: it becomes an empty slot', () => {
+    should(cloneLoginRunnable({ id: 'you', harness: 'claude', email: 'you@example.test' })).be.undefined();
+  });
+
+  it('should list the harness, provider, every variable and both halves, with secrets as references', () => {
+    const entries = cloneLoginRunnable({
+      id: 'api',
+      harness: 'codex',
+      store: 'environment',
+      preset: 'bedrock',
+      cloudCredential: 'aws:work',
+      env: { NODE_OPTIONS: '--require /tmp/x.cjs', API_KEY: '${secret:API_KEY}' },
+      codexProvider: { base_url: 'https://example.test' },
+      claude: { env: { ANTHROPIC_BASE_URL: 'https://example.test' } },
+      codex: { model: 'gpt' },
+    });
+    should(entries?.map(entry => [entry.label, entry.text, entry.document])).eql([
+      ['Harness', 'codex', false],
+      ['Provider', 'bedrock', false],
+      ['Cloud credential', 'aws:work', false],
+      ['Environment API_KEY', '${secret:API_KEY}', false],
+      ['Environment NODE_OPTIONS', '--require /tmp/x.cjs', false],
+      ['Codex provider', JSON.stringify({ base_url: 'https://example.test' }, null, 2), true],
+      ['claude Environment ANTHROPIC_BASE_URL', 'https://example.test', false],
+      ['What claude is given', JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://example.test' } }, null, 2), true],
+      ['What codex is given', JSON.stringify({ model: 'gpt' }, null, 2), true],
+    ]);
+  });
+
+  it('should list just the harness for an environment login that sets nothing else', () => {
+    should(cloneLoginRunnable({ id: 'bare', harness: 'claude', store: 'environment' })).eql([
+      { label: 'Harness', text: 'claude', document: false },
+    ]);
   });
 });
