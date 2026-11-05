@@ -270,7 +270,9 @@ function parseRange(source: string): AnalyticsRange {
   const from = rangeBound(bounds[0]!, false);
   const to = rangeBound(bounds[1]!, true);
   if (from.at < 0 || to.at > MAX_INSTANT_MS) throw new AnalyticsQueryError('range bounds must fall in 1970..9999');
-  if (!(from.at < to.at)) throw new AnalyticsQueryError('a range must end after it starts');
+  // One date bound and one instant bound are ordered on the reader's clock, which only the daemon knows
+  // (`tz`): a range such as [2026-10-15..2026-10-14T20:00:00Z] is empty in UTC and four hours in Singapore.
+  if (from.date === to.date && !(from.at < to.at)) throw new AnalyticsQueryError('a range must end after it starts');
   return {
     kind: 'absolute',
     from: new Date(from.at).toISOString(),

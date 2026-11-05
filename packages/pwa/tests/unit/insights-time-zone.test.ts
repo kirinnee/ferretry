@@ -40,6 +40,21 @@ describe('the Insights time zone preference', () => {
     expect(zones).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 
+  it('lists the device zone even when the runtime lists the same zone under another alias', () => {
+    const intl = Intl as { supportedValuesOf?: unknown };
+    const original = intl.supportedValuesOf;
+    const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    try {
+      intl.supportedValuesOf = () => ['Asia/Kolkata', 'Asia/Calcutta'].filter(zone => zone !== device);
+      expect(knownTimeZones()).toContain(device);
+      expect(knownTimeZones()).toContain('Asia/Kolkata');
+      intl.supportedValuesOf = undefined;
+      expect(knownTimeZones()).toEqual(device === 'UTC' ? ['UTC'] : ['UTC', device]);
+    } finally {
+      intl.supportedValuesOf = original;
+    }
+  });
+
   it('never lists, nor lets storage keep, a fixed-offset abbreviation', () => {
     expect(knownTimeZones()).not.toContain('EST');
     expect(insightsTimeZonePreference.parse('EST')).toBe(DEVICE_TIME_ZONE);

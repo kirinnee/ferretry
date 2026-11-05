@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AnalyticsIndexStatus, AnalyticsRawSession } from '@ferretry/protocol';
+import { AnalyticsQueryError, type AnalyticsIndexStatus, type AnalyticsRawSession } from '@ferretry/protocol';
 import should from 'should';
 import { queryAnalyticsRecords } from '../../../src/lib/analytics/results.ts';
 import { isTimeZone, zonedDay, zonedMidnight, zonedWeek } from '../../../src/lib/analytics/time-zone.ts';
@@ -116,17 +116,31 @@ describe('zoned days', () => {
     for (const name of ['EST', 'PST', 'MST', 'GMT+8', 'GMT', 'EST5EDT']) should(isTimeZone(name)).equal(false);
   });
 
-  it('should still accept the zone a device sends when the runtime lists no zones', () => {
-    // Arrange — an older runtime has no Intl.supportedValuesOf
+  it('should accept both spellings of a zone, whichever one the engine lists', () => {
+    // Arrange — Node lists Asia/Calcutta where Bun lists Asia/Kolkata; neither list may decide the answer
     const intl = Intl as { supportedValuesOf?: unknown };
     const original = intl.supportedValuesOf;
-    intl.supportedValuesOf = undefined;
     try {
-      // Act / Assert
-      should(isTimeZone('Asia/Singapore')).equal(true);
-      should(isTimeZone('UTC')).equal(true);
-      for (const name of ['EST', 'PST', 'GMT+8', 'SGT', '+08:00', 'Mars/Olympus_Mons']) {
-        should(isTimeZone(name)).equal(false);
+      for (const listed of [['Asia/Calcutta'], ['Asia/Kolkata'], []]) {
+        intl.supportedValuesOf = () => listed;
+
+        // Act / Assert
+        for (const name of ['Asia/Calcutta', 'Asia/Kolkata', 'US/Pacific', 'Etc/UTC', 'Etc/GMT', 'UTC']) {
+          should(isTimeZone(name)).equal(true);
+        }
+        for (const name of [
+          'EST',
+          'PST',
+          'GMT+8',
+          'SGT',
+          '+08:00',
+          'Mars/Olympus_Mons',
+          '',
+          ' Asia/Singapore',
+          'Asia/Singapore ',
+        ]) {
+          should(isTimeZone(name)).equal(false);
+        }
       }
     } finally {
       intl.supportedValuesOf = original;
@@ -208,14 +222,47 @@ describe('queryAnalyticsRecords in a time zone', () => {
     should(mixed.results[0]!.tokens.value).equal(30);
   });
 
-  it('should never invert a window: a date end that the zone pulls before an instant start keeps the stated instants', () => {
-    // [2026-10-15T20:00Z..2026-10-16] in Singapore would close at 2026-10-16 00:00+08 = 10-15T16:00Z, before 20:00Z.
-    const response = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-15T20:00:00Z..2026-10-15]', {
+  it('should refuse a window the zone inverts, rather than answer a different one', () => {
+    // [2026-10-15T20:00Z..2026-10-15] closes at Singapore's midnight, 2026-10-15T16:00Z, before 20:00Z.
+    const source = 'sum(tokens) [2026-10-15T20:00:00Z..2026-10-15]';
+
+    should(() => queryAnalyticsRecords(records, source, { index, timeZone: 'Asia/Singapore' })).throw(
+      AnalyticsQueryError,
+      { message: 'a range must end after it starts' },
+    );
+    // Without a zone the same range is as inverted as it reads.
+    should(() => queryAnalyticsRecords(records, 'sum(tokens) [2026-10-15..2026-10-14T20:00:00Z]', { index })).throw(
+      AnalyticsQueryError,
+    );
+  });
+
+  it('should order a mixed range on the zone\u2019s clock: empty in UTC terms, four hours in Singapore', () => {
+    // 2026-10-15 is 2026-10-14T16:00Z in Singapore, so [..2026-10-14T20:00Z] is a four-hour window.
+    const response = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-15..2026-10-14T20:00:00Z]', {
       index,
       timeZone: 'Asia/Singapore',
     });
     if (response.kind !== 'aggregate') throw new Error('expected aggregate result');
-    should(response.scope.window).deepEqual({ from: '2026-10-15T20:00:00.000Z', to: '2026-10-16T00:00:00.000Z' });
+    should(response.scope.window).deepEqual({ from: '2026-10-14T16:00:00.000Z', to: '2026-10-14T20:00:00.000Z' });
+    should(response.scope.matched).equal(0);
+  });
+
+  it('should answer an empty window, not a UTC day, for a day the zone skipped', () => {
+    // Pacific/Apia skipped 2011-12-30: a session either side of it is on neither day there.
+    const apia = [
+      session('before', '2011-12-29T12:00:00.000Z', 1),
+      session('after', '2011-12-31T12:00:00.000Z', 2),
+      session('on-utc-30th', '2011-12-30T12:00:00.000Z', 4),
+    ];
+    const inApia = { index, timeZone: 'Pacific/Apia' };
+
+    const range = queryAnalyticsRecords(apia, 'sum(tokens) [2011-12-30..2011-12-30]', inApia);
+    const day = queryAnalyticsRecords(apia, 'sum(tokens) {day=2011-12-30}', inApia);
+
+    if (range.kind !== 'aggregate' || day.kind !== 'aggregate') throw new Error('expected aggregate result');
+    should(range.scope.matched).equal(0);
+    should(range.scope.window!.from).equal(range.scope.window!.to);
+    should(day.scope.matched).equal(0);
   });
 
   it('should give raw rows the reader\u2019s day and week as well', () => {

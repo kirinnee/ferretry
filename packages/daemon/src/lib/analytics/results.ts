@@ -1,6 +1,7 @@
 import {
   type AnalyticsAggregateResult,
   AnalyticsGroupLimitError,
+  AnalyticsQueryError,
   type AnalyticsIndexStatus,
   type AnalyticsLabel,
   type AnalyticsMeasure,
@@ -209,9 +210,11 @@ function costGapCounts(rows: readonly AnalyticsRawSession[]): Record<string, num
  *
  * The parsed range says which bounds were WRITTEN as dates (`[2026-10-01..2026-10-20]`): in a zone, only
  * those open (or close) at THAT zone's midnight, so the range covers the days the reader sees. A bound
- * written as an instant — a midnight one included — is exactly what it names. Moving the two bounds
- * independently can cross them (a zone ahead of UTC pulls a date end earlier than an instant start), so
- * a window that would invert keeps its stated instants instead and can never be silently empty.
+ * written as an instant — a midnight one included — is exactly what it names. A range with one date bound
+ * and one instant bound cannot be ordered until the zone is applied, so the order is checked HERE: a
+ * window that ends before it starts is the caller's mistake (400), never a different window. One that
+ * starts and ends together is empty (a day the zone skipped, such as Pacific/Apia 2011-12-30), and matches
+ * nothing rather than a UTC day the reader never asked for.
  */
 function absoluteWindow(
   range: Extract<NonNullable<ParsedAnalyticsQuery['range']>, { kind: 'absolute' }>,
@@ -219,12 +222,12 @@ function absoluteWindow(
 ): { from: number; to: number } {
   const start = Date.parse(range.from);
   const end = Date.parse(range.to);
-  if (timeZone === undefined) return { from: start, to: end };
   const onZoneClock = (at: number, date: boolean | undefined): number =>
-    date === true ? zonedMidnight(utcDateOf(at), timeZone) : at;
+    timeZone !== undefined && date === true ? zonedMidnight(utcDateOf(at), timeZone) : at;
   const from = onZoneClock(start, range.dates?.from);
   const to = onZoneClock(end, range.dates?.to);
-  return from < to ? { from, to } : { from: start, to: end };
+  if (from > to) throw new AnalyticsQueryError('a range must end after it starts');
+  return { from, to };
 }
 
 /**

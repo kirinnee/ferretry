@@ -332,6 +332,17 @@ describe('analytics query grammar v2', () => {
       should(instants.canonical).equal('[2026-10-01T04:00:00.000Z..2026-10-02T00:00:00.000Z]');
     });
 
+    it('should leave the order of a mixed date/instant range to the daemon, which knows the zone', () => {
+      // Act — empty in UTC (2026-10-15 00:00Z is after 2026-10-14T20:00Z), four hours in Asia/Singapore
+      const mixed = parseAnalyticsQuery('[2026-10-15..2026-10-14T20:00:00Z]');
+
+      // Assert — it parses, keeps both bounds as written, and round-trips
+      should(mixed.canonical).equal('[2026-10-15..2026-10-14T20:00:00.000Z]');
+      should(mixed.range).have.property('dates', { from: true, to: false });
+      should(parseAnalyticsQuery(mixed.canonical).range).deepEqual(mixed.range);
+      should(refusal('[2026-10-14T20:00:00Z..2026-10-14T20:00:00Z]')).be.instanceof(AnalyticsQueryError);
+    });
+
     it('should tell a date from the same UTC midnight written as an instant, and keep it so', () => {
       // Act
       const date = parseAnalyticsQuery('[2026-10-14..2026-10-14]');

@@ -90,7 +90,10 @@ export const AnalyticsRangeSchema = z
     }),
   ])
   .superRefine((value, context) => {
-    if (value.kind === 'absolute' && !(Date.parse(value.from) < Date.parse(value.to))) {
+    // A range written with one date bound and one instant bound is ordered on the READER'S clock, which this
+    // schema cannot see: the daemon refuses it once the zone is applied, so only the rest are checked here.
+    const mixed = value.kind === 'absolute' && value.dates !== undefined && value.dates.from !== value.dates.to;
+    if (value.kind === 'absolute' && !mixed && !(Date.parse(value.from) < Date.parse(value.to))) {
       context.addIssue({ code: 'custom', message: 'range must end after it starts', path: ['to'] });
     }
     if (value.kind === 'absolute' && value.dates !== undefined) {

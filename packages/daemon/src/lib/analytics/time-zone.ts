@@ -31,26 +31,22 @@ function formatter(timeZone: string): Intl.DateTimeFormat {
   return made;
 }
 
-/** The `Area/Place` shape of an IANA region zone: no abbreviation, offset or legacy fixed-offset name. */
-const REGION_ZONE = /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+$/;
-
 /**
- * Whether `name` is an IANA REGION zone this runtime knows (or `UTC`). `Intl` also accepts legacy
- * fixed-offset names (`EST` is UTC-05 all year, with no daylight saving), which would count days wrongly
- * for a reader in that region, so the answer is the runtime's canonical list (`Intl.supportedValuesOf`)
- * plus `UTC`. A runtime without that function lists nothing, and the zone a device sends must still be
- * accepted: there any `Area/Place` name that `Intl` can format is, and `EST`, `PST`, `GMT+8`, `SGT`,
- * `+08:00` and junk are not.
+ * Whether `name` is an IANA REGION zone this runtime can build a formatter for (or `UTC`).
+ *
+ * The test is the SHAPE of the answer, not a list: `Intl.supportedValuesOf` differs by engine (Node lists
+ * `Asia/Calcutta`, Bun `Asia/Kolkata`), so a list would refuse a zone whose rules this runtime holds. A
+ * region name contains an `Area/` and resolves to one (`Etc/UTC` resolves to `UTC`). `Intl` also accepts
+ * legacy fixed-offset names (`EST` is UTC-05 all year, with no daylight saving), which resolve without an
+ * area and would count days wrongly for a reader in that region; those, offsets (`GMT+8`, `+08:00`),
+ * abbreviations (`SGT`), padded names and junk are refused.
  */
 export function isTimeZone(name: string): boolean {
-  if (name.trim() !== name || name === '' || /^[+-]?\d/.test(name)) return false;
-  if (name !== 'UTC') {
-    const listed = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone') ?? [];
-    if (listed.length > 0 ? !listed.includes(name) : !REGION_ZONE.test(name)) return false;
-  }
+  if (name === 'UTC') return true;
+  if (name.trim() !== name || !name.includes('/')) return false;
   try {
-    formatter(name);
-    return true;
+    const resolved = formatter(name).resolvedOptions().timeZone;
+    return resolved.includes('/') || resolved === 'UTC';
   } catch {
     return false;
   }
