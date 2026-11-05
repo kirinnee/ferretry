@@ -49,6 +49,7 @@ describe('destinationPaletteEntries', () => {
 
     expect(entries.map(entry => entry.id)).toEqual([
       'destination-sessions',
+      'destination-queue',
       'destination-attention',
       'destination-board',
       'destination-projects',
@@ -118,6 +119,28 @@ describe('destinationPaletteEntries', () => {
     expect(byLabel.map(entry => entry.id)).toEqual(['destination-analytics']);
     expect(byDescription.map(entry => entry.id)).toEqual(['destination-new-session']);
     expect(byKeyword.map(entry => entry.id)).toEqual(['destination-analytics']);
+  });
+
+  /**
+   * &B160: "queue" answered nothing even though `SHELL_DESTINATIONS` carried the
+   * page, because `ordered()` only ever spread the first two shell rows. The
+   * queues page must answer to the word itself and to what a reader calls it.
+   */
+  it('answers the queues page by every word a reader reaches for', () => {
+    for (const word of ['queue', 'queues', 'queued', 'waiting messages', 'outbox', 'messages'])
+      expect([word, destinationPaletteEntries(word, APP_BAR_DESTINATIONS, alpha).map(entry => entry.id)]).toEqual([
+        word,
+        ['destination-queue'],
+      ]);
+    // Board and Inbox honestly share the bare word, so it must answer, not win.
+    expect(destinationPaletteEntries('waiting', APP_BAR_DESTINATIONS, alpha).map(entry => entry.id)).toContain(
+      'destination-queue',
+    );
+  });
+
+  it('offers every shell destination at rest, so a declared row can never be invisible', () => {
+    const offered = destinationPaletteEntries('', [], alpha).map(entry => entry.id);
+    for (const destination of SHELL_DESTINATIONS) expect(offered).toContain(`destination-${destination.id}`);
   });
 
   /**

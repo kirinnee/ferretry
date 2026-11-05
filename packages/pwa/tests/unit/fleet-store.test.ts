@@ -96,6 +96,34 @@ describe('DaemonFleetStore reads', () => {
     should(store.session(scopeA)).be.undefined();
   });
 
+  /**
+   * THE EXTERNAL-STORE CONTRACT, DETACHED (&B160): `useSyncExternalStore` takes
+   * `subscribe` and `getSnapshot` as bare values and calls them with no `this`,
+   * so a detached prototype method over private fields throws — which is how the
+   * Queue page crashed the moment it opened. Both must survive detachment, the
+   * way `SendOutbox.subscribe`/`snapshot` already do.
+   */
+  it('keeps subscribe and getSnapshot working detached, as useSyncExternalStore takes them', async () => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    const { subscribe, getSnapshot } = store;
+
+    should(getSnapshot().daemons.size).equal(0);
+    let notifications = 0;
+    const unsubscribe = subscribe(() => {
+      notifications += 1;
+    });
+
+    const request = store.hydrate(daemonA);
+    port.lists[0]?.resolve([session('shared')]);
+    await request;
+
+    should(getSnapshot().daemons.get(daemonA.daemonId)?.sessions?.length).equal(1);
+    should(notifications).equal(2);
+
+    unsubscribe();
+  });
+
   it('publishes loading, then the daemon rows, and notifies its listeners', async () => {
     const port = new RecordingPort();
     const store = new DaemonFleetStore(port);

@@ -18,6 +18,8 @@ import type {
   LaunchInstructionSectionId,
   SessionLaunchInstructions,
 } from '@ferretry/protocol';
+import type { SessionId } from '../../session-id.ts';
+import { sessionPaneEnvironment } from '../lifecycle/policy.ts';
 
 /** A launch record made before the rename called the notify section `attention`. */
 const canonical = (id: LaunchInstructionSectionId): LaunchInstructionSectionId => (id === 'attention' ? 'notify' : id);
@@ -42,4 +44,18 @@ export function outdatedSections(
       return before === undefined || after === undefined || !same(before, after);
     })
     .toSorted((left, right) => order.indexOf(left) - order.indexOf(right));
+}
+
+/**
+ * The environment a relaunch would give the pane, as far as instructions read it: the stored variables with the
+ * launch's own derivations on top (`sessionPaneEnvironment` — notably the mode's hypermedia default, which a
+ * ferret whose switch was never written only gets from there). Comparing against the STORED variables alone
+ * called every such interactive ferret "out of date: hypermedia" right after the restart that had just fixed it.
+ */
+export function relaunchInstructionEnvironment(
+  id: SessionId,
+  stored: Readonly<Record<string, string>>,
+  mode: 'auto' | 'interactive',
+): Readonly<Record<string, string>> {
+  return sessionPaneEnvironment(id, stored, mode);
 }
