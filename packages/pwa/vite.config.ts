@@ -314,6 +314,21 @@ export default defineConfig({
     leafletTrustedTypes,
     entityDecoderTrustedTypes,
     {
+      // DEV SERVER ONLY, OPT-IN. `FY_DEV_ISOLATED=1 bunx vite` answers every request with the two headers that
+      // make a page cross-origin isolated, so `speed-bench/` can measure multi-thread WebAssembly
+      // (docs/voice.md › Speed). `configureServer` never runs in a build, and the deployed site's headers
+      // are `public/_headers`, which this does not touch.
+      name: 'fy-dev-isolation',
+      configureServer(server) {
+        if (process.env.FY_DEV_ISOLATED !== '1') return;
+        server.middlewares.use((_request, response, next) => {
+          response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+          response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+          next();
+        });
+      },
+    },
+    {
       name: 'fy-release-version',
       transformIndexHtml: {
         order: 'pre',
