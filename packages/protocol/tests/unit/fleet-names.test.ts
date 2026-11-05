@@ -5,6 +5,7 @@ import {
   LOGIN_NAME_MAX,
   loginIdFor,
   loginLabelTaken,
+  loginLabelTakenSentence,
   loginNameProblem,
   runtimeNameFor,
 } from '../../src/lib/fleet-names.ts';
@@ -90,5 +91,12 @@ describe('loginNameProblem', () => {
 
   it('leaves the login being renamed out of the clash', () => {
     should(loginLabelTaken('work', 'claude', [{ id: 'a', harness: 'claude', label: 'work' }], 'a')).be.false();
+  });
+});
+
+describe('loginLabelTakenSentence', () => {
+  it('names the tool and the label, trimmed', () => {
+    should(loginLabelTakenSentence(' work ', 'claude')).equal('You already have a Claude Code login named work.');
+    should(loginLabelTakenSentence('side', 'codex')).equal('You already have a Codex login named side.');
   });
 });
