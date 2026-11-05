@@ -772,13 +772,28 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   words are added after your text and Live goes **On hold**. Only **Send now** (your own press) sends them.
 - **One revocable send path (nothing is sent that was not on screen exactly as sent, never twice, never after a stop).**
   Live sends through exactly one door: a `SendTicket` (`ports.ts`) carrying the words on screen when the machine
-  approved the send. The composer sends them a render later (`liveBridge.submit`) and, **in that render, immediately
-  before sending**, checks that the box still reads exactly the approved words and calls `ticket.commit()`, which is
-  false once the ticket is revoked or the page is hidden. Until it commits the send is only _queued_: **Hold**, typing,
-  a hidden tab, **End**, a refused lock and the page leaving each revoke the ticket (Hold, typing and a hidden tab first
-  tell the machine `send-withdrawn`, so they land exactly as in the countdown, words kept), and the composer then sends
-  nothing. A send the composer has committed is on the wire and stands. Only the _current_ ticket's answer is heard, so
-  a taken-back send that answers late cannot fail the next one.
+  approved the send. The composer sends them a render later (`liveBridge.submit`) and carries the ticket **into the
+  one `sendDraft`**, where it stays revocable across **every await** — the wait for the shared draft's acknowledgement
+  included. **Immediately before the message is submitted** (the daemon call, or the outbox), with nothing awaited in
+  between, the composer checks that the ticket is unrevoked, that the box still reads exactly the approved words, that
+  no composition is open and that the page is visible, and only then calls `ticket.commit()`. Until that moment the
+  send is only _queued_: **Hold**, typing, a composition starting, a hidden tab, **End**, a refused lock and the page
+  leaving each revoke the ticket (Hold, typing, a composition and a hidden tab first tell the machine `send-withdrawn`,
+  so they land exactly as in the countdown, words kept), and the composer then sends nothing — also if the shared
+  draft's answer only arrives later or its wait only runs out later. A send the composer has committed is on the wire
+  and stands. Only the _current_ ticket's answer is heard, so a taken-back send that answers late cannot fail the next
+  one.
+- **A composition holds Live, and Live never becomes an ordinary press.** An input-method composition starting
+  (`compositionstart`) is the person typing before the first `input` is reported: it pauses auto-send and takes back
+  a queued send at once (`LiveComposerObserver.composing`). A Live attempt never ends a composition to read its word
+  (a person's press does that, and resubmits as the person); a ticketed attempt that finds a composition open, a
+  revoked ticket or a box that differs from the approved words **returns false and sends nothing** — it is never
+  deferred and never promoted into the ordinary send, so text the person did not approve cannot go as a voice send.
+- **A hide while Live's send is on its way or the ferret is working is latched.** The hide during `sending` (send in
+  flight) or `working` sets `LiveState.hiddenHold`, which showing the tab does **not** clear: the reply watch carries
+  on, the finished reply lands **Paused** (not Listening, not Reading) with the microphone shut, and only **Resume**
+  reopens it. Anything that ends the wait (the reply needing input, a failed send, **End**) drops the latch, so it never
+  carries into a later turn.
 - **Typing is heard at the keystroke.** The composer tells Live about every write to its draft the moment it is made
   (`LiveComposerBridge.observe`), so typing pauses auto-send and takes back a queued send before React renders — not in an
   effect after it. A write that is exactly the words Live just put there is not typing.
@@ -809,7 +824,7 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. Hiding, showing
   and Resume while a request is still pending share that one request; a grant that arrives after Live ended or
   after a newer one replaced it is handed straight back, so End releases everything that was granted
-  (`wake-lock.ts`). A hidden tab **pauses** Live (mic closed) and resumes when visible.
+  (`wake-lock.ts`). A hidden tab **pauses** Live (mic closed); coming back to the tab does not reopen the microphone — **Resume** does.
 - **Buttons are at least 48 px tall on a phone and 44 px on a computer** (the harness measures them; the CSS
   outranks the app's coarse-pointer 44 px floor). On a phone **Hold** is the big round button only — there is no second one.
 - **The button is an icon** (44 px on a phone), and on a desktop it is **not drawn in a pane narrower than 300 px of row**

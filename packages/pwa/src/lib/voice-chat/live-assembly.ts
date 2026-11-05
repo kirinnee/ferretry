@@ -42,6 +42,11 @@ import { type ReplySource, sessionReplyFeed } from './reply-feed.ts';
 export interface LiveComposerObserver {
   /** The draft was written by anything but Live's own `show`/`clear` (a keystroke, a paste, another device). */
   edited(text: string): void;
+  /**
+   * An input-method composition began. The word being composed is the person's and is not in the draft yet, so Live
+   * holds exactly as it does for a keystroke: auto-send pauses and a send queued but not started is taken back.
+   */
+  composing(): void;
   /** The person pressed the composer's own Send; `outcome` is that press (true: it went). */
   sending(outcome: Promise<boolean>): void;
 }

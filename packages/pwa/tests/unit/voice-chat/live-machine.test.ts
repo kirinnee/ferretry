@@ -534,6 +534,85 @@ describe('liveReduce — races', () => {
   });
 });
 
+describe('liveReduce — a hide while the send is on its way or the ferret is working', () => {
+  const FLYING = run([...WORDS, { type: 'countdown-done', atMs: 6_500 }]).state;
+  const hidden: LiveEvent = { type: 'visibility', visible: false };
+  const shown: LiveEvent = { type: 'visibility', visible: true };
+  const done: LiveEvent = { type: 'reply', signal: 'done' };
+
+  it('latches the hide across a show: the finished reply lands paused, and the reply watch is stopped', () => {
+    const latched = run([hidden, shown], WORKING);
+    should(latched.state.phase).equal('working');
+    should(latched.state.hidden).be.false();
+    should(latched.state.hiddenHold).be.true();
+    const landed = run([done], latched.state);
+    should(landed.state.phase).equal('paused');
+    should(landed.state.pauseReason).equal('hidden');
+    should(landed.state.hiddenHold).be.false();
+    should(types(landed.effects)).deepEqual(['stopWatchReply']);
+    should(micIsOpen(landed.state)).be.false();
+  });
+
+  it('latches before the reply too: a hide while the send is in flight survives the sent answer and a show', () => {
+    const away = run([hidden, shown], FLYING);
+    should(away.state.phase).equal('sending');
+    should(away.state.hiddenHold).be.true();
+    const sent = run([{ type: 'sent', atMs: 6_600 }], away.state);
+    should(sent.state.phase).equal('working');
+    should(sent.state.hiddenHold).be.true();
+    should(run([done], sent.state).state.phase).equal('paused');
+  });
+
+  it('pauses instead of reading aloud, and only Resume reopens the microphone', () => {
+    const reader = run([{ ...START, canRead: true }, { type: 'locks', granted: true }, { type: 'listening' }]).state;
+    const working = run(
+      [
+        { type: 'speech-start' },
+        { type: 'live-words', text: 'fix the bug' },
+        turnEnd(),
+        { type: 'turn-words', attempt: 1, atMs: 5_300, text: 'Fix the bug.' },
+        { type: 'countdown-done', atMs: 6_500 },
+        { type: 'sent', atMs: 6_600 },
+        hidden,
+        shown,
+        done,
+      ],
+      reader,
+    );
+    should(working.state.phase).equal('paused');
+    should(working.all).not.containEql({ type: 'speak' });
+    should(micIsOpen(working.state)).be.false();
+    should(run([{ type: 'timer', kind: 'idle', atMs: 99_000 }], working.state).state.phase).equal('paused');
+    const back = run([{ type: 'resume' }], working.state);
+    should(back.state.phase).equal('starting');
+    should(types(back.effects)).containEql('openMic');
+  });
+
+  it('is dropped by anything that ends the wait, so it never carries into a later turn', () => {
+    const latched = run([hidden, shown], WORKING).state;
+    // The ferret asks for input: the turn is On hold (the person must act), and the latch is gone.
+    const needs = run([{ type: 'reply', signal: 'needs-input' }], latched);
+    should(needs.state.phase).equal('hold');
+    should(needs.state.hiddenHold).be.false();
+    // Live ends.
+    should(run([{ type: 'end' }], latched).state.hiddenHold).be.false();
+    // The send fails: On hold with the words kept.
+    const failed = run([hidden, shown, { type: 'send-failed' }], FLYING);
+    should(failed.state.phase).equal('hold');
+    should(failed.state.hiddenHold).be.false();
+    // After Resume the person is listened to again, and nothing of the old hide is left.
+    const back = run([{ type: 'resume' }, { type: 'locks', granted: true }, { type: 'listening' }], needs.state);
+    should(back.state.phase).equal('listening');
+    should(back.state.hiddenHold).be.false();
+  });
+
+  it('is not set by a hide while Live is off, hold, or paused (those have their own stop)', () => {
+    should(run([hidden]).state.hiddenHold).be.false();
+    should(run([...LISTENING, { type: 'hold' }, hidden]).state.hiddenHold).be.false();
+    should(run([...LISTENING, hidden]).state.hiddenHold).be.false();
+  });
+});
+
 describe('liveReduce — a take that comes to nothing', () => {
   it('goes quietly back to listening on an empty take, and takes the preview away', () => {
     const result = run([...SENDING, { type: 'turn-empty', attempt: 1 }]);

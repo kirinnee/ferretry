@@ -98,6 +98,12 @@ export interface LiveState {
   readonly canRead: boolean;
   /** The tab is hidden now (kept in every phase: a reply that lands while away pauses instead of listening). */
   readonly hidden: boolean;
+  /**
+   * The tab was hidden while a send was in flight or the ferret was working, and that stop is LATCHED: showing the
+   * tab does not undo it. The reply watch carries on, and the finished reply lands paused (not listening) until an
+   * explicit Resume. Only ever true in `working` and in `sending` with the send in flight.
+   */
+  readonly hiddenHold: boolean;
   /** While `starting`: the microphone and the level meter are open. */
   readonly micReady: boolean;
   /** While `starting`: the one-Live-tab lock is ours. */
@@ -237,6 +243,7 @@ export const INITIAL_LIVE_STATE: LiveState = Object.freeze({
   graceMs: DEFAULT_GRACE_MS,
   canRead: false,
   hidden: false,
+  hiddenHold: false,
   micReady: false,
   lockReady: false,
   words: '',
@@ -506,7 +513,19 @@ function startedOrWaiting(state: LiveState): LiveStep {
   return state.hidden ? stepToPaused(state) : step(toListening(state, { notice: null }), [idleTimer]);
 }
 
+/**
+ * One event, one step. The latched hide (`hiddenHold`) belongs to a send in flight and to the ferret working on it; any
+ * step that leaves them (the reply landed, the send failed, Live ended) has consumed or dropped it, so it can never
+ * carry into a later turn.
+ */
 export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
+  const next = reduceEvent(state, event);
+  const { phase, sendInFlight, hiddenHold } = next.state;
+  if (!hiddenHold || phase === 'working' || (phase === 'sending' && sendInFlight)) return next;
+  return { ...next, state: { ...next.state, hiddenHold: false } };
+}
+
+function reduceEvent(state: LiveState, event: LiveEvent): LiveStep {
   const { phase } = state;
 
   // Events that mean the same in every phase.
@@ -523,6 +542,8 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
       return phase === 'starting' ? stepToPaused(seen) : park(seen, { phase: 'paused', reason: 'hidden' });
     if (phase === 'reading')
       return step({ ...seen, phase: 'paused', pauseReason: 'hidden' }, [{ type: 'stopSpeaking' }]);
+    // A send already on its way, or the ferret working on it: the hide is latched (see `hiddenHold`).
+    if (phase === 'working' || (phase === 'sending' && state.sendInFlight)) return step({ ...seen, hiddenHold: true });
     return step(seen);
   }
   if (event.type === 'person-send') return personSent(state, event.atMs);
@@ -576,7 +597,7 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
         ]);
       if (event.signal !== 'done') return step(state);
       const stop: LiveEffect = { type: 'stopWatchReply' };
-      if (state.hidden) return step({ ...state, phase: 'paused', pauseReason: 'hidden' }, [stop]);
+      if (state.hidden || state.hiddenHold) return step({ ...state, phase: 'paused', pauseReason: 'hidden' }, [stop]);
       if (state.canRead) return step({ ...state, phase: 'reading' }, [stop, { type: 'speak' }]);
       if (state.typingHold) return holdForTyping(state, [stop]);
       return step({ ...state, phase: 'starting', micReady: false, lockReady: true }, [stop, { type: 'openMic' }]);

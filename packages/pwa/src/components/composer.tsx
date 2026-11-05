@@ -978,11 +978,28 @@ export function Composer({
     onSent?.(sent);
   };
 
-  const sendDraft = async (interrupt = false): Promise<boolean> => {
+  /**
+   * THE ONE SEND. A person's press passes no ticket; Live passes the `SendTicket` it approved, and then this send is
+   * REVOCABLE until the very moment of submission: the ticket is carried through every await, re-validated
+   * IMMEDIATELY before the message is submitted (the approval stands, the box still holds exactly the approved words,
+   * no composition is open, the page is visible, Live is still on), and committed only there. A ticketed attempt that
+   * cannot stand returns false and sends nothing — it is NEVER promoted into an ordinary press, and it never defers a
+   * resubmit (a deferred press would no longer be the approved one).
+   */
+  const sendDraft = async (interrupt = false, ticket?: SendTicket): Promise<boolean> => {
     if (!canSubmit || submitLock.current) return false;
-    // The word a phone keyboard is still composing is part of the message: the composition ends here,
-    // and when that changed the text this press goes once the composer holds it (the effect below).
-    if (inputRef.current?.endComposition?.() === true) {
+    /**
+     * Right now, with no await since the last look: does Live's approval still stand? Not revoked, the box holds exactly
+     * the approved words, and no composition is open (its word is the person's and not yet in the draft).
+     */
+    const standing = (live: SendTicket): boolean =>
+      !live.revoked && draftRef.current === live.text && !composing.current;
+    if (ticket !== undefined) {
+      // A composition is never ended here to be read and sent: that is what a PERSON's press does.
+      if (!standing(ticket)) return false;
+    } else if (inputRef.current?.endComposition?.() === true) {
+      // The word a phone keyboard is still composing is part of the message: the composition ends here,
+      // and when that changed the text this press goes once the composer holds it (the effect below).
       setResubmit({ interrupt });
       return false;
     }
@@ -1007,6 +1024,12 @@ export function Composer({
       // nothing at all (the send still goes) if it is not.
       const clear = shared.sendClear(mark);
       const sharedDraft = clear instanceof Promise ? await clear : clear;
+      // The wait above is where a stop lands (End, a hidden tab, the page leaving, a keystroke): the approval is
+      // checked again, and committed, with nothing awaited between this line and the submission below.
+      if (ticket !== undefined && !(standing(ticket) && ticket.commit())) {
+        shared.abandonSend(mark);
+        return false;
+      }
       const input = {
         message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
@@ -1376,6 +1399,8 @@ export function Composer({
     },
     onCompositionStart: () => {
       composing.current = true;
+      // A composition is the person typing, before the input event reports a letter of it: Live holds now.
+      liveObserver.current?.composing();
       autocomplete.startComposition();
     },
     onSelect: (event: { readonly currentTarget: ComposerFieldSelection }) => {
@@ -1543,11 +1568,12 @@ export function Composer({
     if (pending === null) return;
     liveSend.current = null;
     const { ticket, resolve } = pending;
-    if (draft !== ticket.text || !ticket.commit()) {
+    // Not committed here: the ticket stays revocable until `sendDraft` submits (it commits at that moment).
+    if (draft !== ticket.text || ticket.revoked) {
       resolve(false);
       return;
     }
-    void sendDraft().then(resolve);
+    void sendDraft(false, ticket).then(resolve);
   }, [liveSendRequest]);
   const [liveActive, setLiveActive] = useState(false);
   const [dictating, setDictating] = useState(false);
