@@ -713,6 +713,9 @@ function reduceOpen(state: LiveState, event: LiveEvent): LiveStep {
 function reduceSending(state: LiveState, event: LiveEvent): LiveStep {
   if (state.sendInFlight) {
     if (event.type === 'sent') return sentTurn(state, event.atMs);
+    // Typing once the send is on the wire cannot take it back, but it is still the person typing: it holds Live
+    // through the reply (see `typingHold`), so a draft another device put in the box is never spoken over.
+    if (event.type === 'typing') return step({ ...state, typingHold: true });
     // Taken back before the composer started it: the words stand on screen, ready, and nothing has gone. The stop
     // that caused it follows at once; until it does the turn is parked, so no timer or press can send it.
     if (event.type === 'send-withdrawn')

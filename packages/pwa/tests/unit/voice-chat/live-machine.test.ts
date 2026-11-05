@@ -987,10 +987,31 @@ describe('liveReduce — typing is a hold that outlasts the reply (the surprise-
     should(run([{ type: 'listening' }], resumed.state).state.phase).equal('listening');
   });
 
-  it('typing while the send is on the wire changes nothing (the text left in the box is caught when the next turn would count down)', () => {
+  it('typing while the send is on the wire cannot take it back, but latches a hold through the reply', () => {
     const inFlight = run([...WORDS, { type: 'countdown-done', atMs: 6_500 }]).state;
     should(inFlight.sendInFlight).be.true();
-    should(run([{ type: 'typing' }], inFlight).state).equal(inFlight);
+    const typed = run([{ type: 'typing' }], inFlight);
+    should(typed.state.phase).equal('sending');
+    should(typed.state.sendInFlight).be.true();
+    should(typed.state.typingHold).be.true();
+    should(typed.effects).deepEqual([]);
+    // Acknowledged: Working, the hold kept; the reply landing goes On hold and never reopens the microphone.
+    const working = run([{ type: 'sent', atMs: 7_000 }], typed.state);
+    should(working.state.phase).equal('working');
+    should(working.state.typingHold).be.true();
+    const done = run([{ type: 'reply', signal: 'done' }], working.state);
+    should(done.state.phase).equal('hold');
+    should(done.state.holdReason).equal('typing');
+    should(types(done.effects)).deepEqual(['stopWatchReply']);
+    // Without the typing the same reply reopens the microphone.
+    const free = run(
+      [
+        { type: 'sent', atMs: 7_000 },
+        { type: 'reply', signal: 'done' },
+      ],
+      inFlight,
+    );
+    should(free.state.phase).equal('starting');
   });
 
   it('a needs-input reply is still a hold for the question, and Resume forgets the typing', () => {

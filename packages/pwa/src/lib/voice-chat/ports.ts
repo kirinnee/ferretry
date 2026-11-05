@@ -141,7 +141,10 @@ export interface ReplyWatch {
 }
 
 export interface ReplyFeedPort {
-  /** Take the baseline and start listening. Called BEFORE the message is submitted. */
+  /**
+   * Take the baseline and start listening. Called BEFORE the message is submitted. A turn already running at that
+   * moment is NOT this message's reply (the message queues behind it): only a turn that begins after it ends counts.
+   */
   arm(): ReplyWatch;
 }
 

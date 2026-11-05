@@ -8,6 +8,7 @@ import type { LiveRunnerPorts } from '../../src/lib/voice-chat/live-runner.ts';
 import type {
   LevelMeterHandle,
   ReplySignal,
+  ReplyWatch,
   SendOutcome,
   SendTicket,
   TakeHandle,
@@ -64,6 +65,17 @@ export const fakeLive = (): FakeLive => {
   const sendResult = { current: { kind: 'sent', sentAtMs: 0 } as SendOutcome };
   let onFrame: (frame: LevelFrame) => void = () => undefined;
   let reply: ((signal: ReplySignal) => void) | null = null;
+  const watch = (): ReplyWatch => ({
+    attach: listener => {
+      reply = listener;
+      return () => {
+        reply = null;
+      };
+    },
+    cancel: () => {
+      reply = null;
+    },
+  });
   let visible = true;
   const visibility = new Set<(visible: boolean) => void>();
 
@@ -127,17 +139,7 @@ export const fakeLive = (): FakeLive => {
       },
     },
     reply: {
-      arm: () => ({
-        attach: listener => {
-          reply = listener;
-          return () => {
-            reply = null;
-          };
-        },
-        cancel: () => {
-          reply = null;
-        },
-      }),
+      arm: () => watch(),
     },
     speaker: null,
     wakeLock: { acquire: async () => true, release: () => undefined },
