@@ -1,4 +1,5 @@
 import { type MouseEvent, type ReactNode, type RefObject, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useInputModality } from '../hooks/use-input-modality.ts';
 import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
@@ -86,7 +87,11 @@ export function useQuoteMenu(
         lastPointerType.current = 'touch';
       },
     },
-    menu: (
+    // PORTALED TO THE BODY. The menu is placed with `position: fixed` at the click's VIEWPORT coordinates, but a fixed
+    // box is relative to its nearest transformed / will-change ancestor, not the viewport. The Inbox's swipe deck card
+    // is one (`will-change: transform`), so a menu drawn inside the open item landed offset by the card's own position:
+    // far to the right of the click, or clipped off screen (#B152). Under the body no ancestor can move it.
+    menu: createPortal(
       <ContextMenu
         anchor={open ?? { x: 0, y: 0 }}
         ariaLabel="Quote menu"
@@ -95,7 +100,8 @@ export function useQuoteMenu(
         open={open !== null}
         touch={touchAffected}
         triggerRef={trigger}
-      />
+      />,
+      document.body,
     ),
   };
 }
