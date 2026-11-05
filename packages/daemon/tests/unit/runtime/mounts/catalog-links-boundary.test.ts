@@ -308,15 +308,34 @@ describe('minting a link at the boundary', () => {
     should([store.status, codeOf(store)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
   });
 
-  it('should leave the held step-up to retry with when the fresh proof is refused', async () => {
+  // A failed claim must not spend anything: with no second proof, the unlock's held step-up serves exactly one read.
+  it('should leave the held step-up unspent when the mint was refused for want of the proof, with a zero-minute window', async () => {
+    // Arrange
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+
+    // Act
+    const refused = await world.mint();
+    const first = await world.ask('GET', '/v1/catalog-links/store');
+    const second = await world.ask('GET', '/v1/catalog-links/store');
+
+    // Assert
+    should([refused.status, codeOf(refused)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should(first.status).equal(200);
+    should([second.status, codeOf(second)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should(world.links.calls).be.empty();
+  });
+
+  it('should serve the mint on its own proof after a refused one, with a zero-minute window', async () => {
     const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
     await world.unlock();
 
     const refused = await world.mint();
+    await world.prove();
+    const served = await world.mint();
 
     should([refused.status, codeOf(refused)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
-    await world.prove();
-    should((await world.mint()).status).equal(201);
+    should(served.status).equal(201);
   });
 
   it('should refuse a proof made for another act', async () => {
