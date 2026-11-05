@@ -415,9 +415,6 @@ export const filedKeyStamps = (
     return sourceUpdatedAt === undefined ? [] : [{ name, sourceUpdatedAt }];
   });
 
-/** What a person types on THIS machine to replace a key themselves: Clone never does (docs/secrets.md). */
-export const replaceKeyCommand = (name: string): string => `fy secret set ${name}`;
-
 /** "JEV_API_KEY, GROQ_API_KEY, Claude Code login (claude-work)" — what is not held yet, or `null`. */
 export const needsSentence = (needs: readonly CloneNeed[]): string | null => {
   const missing = needs.filter(need => !need.held);

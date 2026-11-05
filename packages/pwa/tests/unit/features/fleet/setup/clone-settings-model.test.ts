@@ -18,9 +18,8 @@ import {
   newerKeys,
   outcomeSentence,
   providersNeededBy,
-  replaceKeyCommand,
-  signInLink,
   type SourceSettingsFile,
+  signInLink,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
 import { bundle, machineView } from './setup-support.ts';
@@ -632,8 +631,7 @@ describe('keys that are newer on the source', () => {
     ]);
   });
 
-  it('should have nothing that selects a reported key for copying: it is a report, with a command to run by hand', () => {
-    expect(replaceKeyCommand('B_KEY')).toBe('fy secret set B_KEY');
+  it('should have nothing that selects a reported key for copying: it is a report', () => {
     expect(Object.keys(newerKeys(outcomes)[0] ?? {}).toSorted()).toEqual(['name', 'outcome']);
   });
 

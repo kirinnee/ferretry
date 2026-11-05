@@ -12,6 +12,8 @@ import { Check, KeyRound, Lock } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { LoosensBadge } from './clone-loosens-badge.tsx';
+import { browserClipboardWriter, type ClipboardWriter } from '../../onboarding/copy-button.tsx';
+import { ReplaceKeyCommand } from '../../secrets/replace-key-command.tsx';
 import { CLONE_KEEP_DEFAULT, CLONE_NO_DEFAULT, type CloneDefaultView } from './clone-model.ts';
 import {
   CLONE_ITEMS,
@@ -23,7 +25,6 @@ import {
   type NewerKey,
   needsSentence,
   outcomeSentence,
-  replaceKeyCommand,
 } from './clone-settings-model.ts';
 import { CheckChoices, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
 import { countWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
@@ -97,11 +98,13 @@ function NewerKeyRow({
   both,
   machineName,
   sourceName,
+  write,
 }: {
   readonly keyName: string;
   readonly both: boolean;
   readonly machineName: string;
   readonly sourceName: string;
+  readonly write: ClipboardWriter;
 }) {
   return (
     <div className="kt-panel relative flex min-h-control min-w-0 flex-col gap-1 p-panel" data-clone-newer-key={keyName}>
@@ -110,9 +113,9 @@ function NewerKeyRow({
       </span>
       <span className="text-cell text-muted">
         {both ? `You changed it on ${machineName} too. ` : ''}
-        Clone does not replace a key {machineName} already has. To use the newer one, run{' '}
-        <code className="font-mono">{replaceKeyCommand(keyName)}</code> on {machineName}.
+        Clone does not replace a key {machineName} already has. To use the newer one, run this on {machineName}:
       </span>
+      <ReplaceKeyCommand name={keyName} write={write} />
     </div>
   );
 }
@@ -140,6 +143,7 @@ export function CloneLoginsSection({
   copyKeys,
   onCopyKeys,
   newer = [],
+  write = browserClipboardWriter(),
 }: {
   readonly logins: readonly CloneLogin[];
   readonly machineName: string;
@@ -150,6 +154,8 @@ export function CloneLoginsSection({
   readonly onCopyKeys: (on: boolean) => void;
   /** Keys the source changed since the last copy, each reported on its own; Clone never copies one over the one here. */
   readonly newer?: readonly NewerKey[];
+  /** Writes the `fy secret set` command to the clipboard; the browser's own unless a host or a test brings one. */
+  readonly write?: ClipboardWriter;
 }) {
   const boxId = useId();
   if (logins.length === 0 && keys.length === 0 && newer.length === 0) return null;
@@ -208,6 +214,7 @@ export function CloneLoginsSection({
           both={key.outcome === 'both'}
           machineName={machineName}
           sourceName={sourceName}
+          write={write}
         />
       ))}
       {keys.length === 0 ? null : (

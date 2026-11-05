@@ -12,9 +12,11 @@
  */
 
 import type { SecretImportResult, SecretList } from '@ferretry/protocol';
-import { ArrowRightLeft, CheckCircle2 } from 'lucide-react';
+import { ArrowRightLeft, CheckCircle2, Lock } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { browserClipboardWriter, type ClipboardWriter } from '../onboarding/copy-button.tsx';
+import { ReplaceKeyCommand } from './replace-key-command.tsx';
 import { copySecrets, type SecretCloneClient } from './secret-clone-api.ts';
 import {
   copiedSentence,
@@ -40,6 +42,8 @@ export interface SecretCopyPanelProps {
   readonly preselect?: readonly string[];
   readonly onCopied?: (result: SecretImportResult) => void;
   readonly onClose?: () => void;
+  /** Writes the `fy secret set` command to the clipboard; the browser's own unless a host or a test brings one. */
+  readonly write?: ClipboardWriter;
 }
 
 type Lists =
@@ -55,6 +59,7 @@ type Phase =
 
 export function SecretCopyPanel(props: SecretCopyPanelProps) {
   const { direction, here, others, createClient, machineName, preselect = [], onCopied, onClose } = props;
+  const write = props.write ?? browserClipboardWriter();
   const uid = useId();
   const [otherId, setOtherId] = useState<string | null>(others.length === 1 ? String(others[0]?.daemonId) : null);
   const other = others.find(candidate => String(candidate.daemonId) === otherId) ?? null;
@@ -160,6 +165,7 @@ export function SecretCopyPanel(props: SecretCopyPanelProps) {
           phase={phase}
           sourceName={machineName(source)}
           targetName={machineName(target)}
+          write={write}
           onToggle={toggle}
           onAll={on => setPicks(on && lists.kind === 'ready' ? copyableRows(lists.rows).map(row => row.name) : [])}
           onCopy={() => void copy()}
@@ -184,12 +190,13 @@ interface CopyBodyProps {
   readonly phase: Phase;
   readonly sourceName: string;
   readonly targetName: string;
+  readonly write: ClipboardWriter;
   readonly onToggle: (name: string, on: boolean) => void;
   readonly onAll: (on: boolean) => void;
   readonly onCopy: () => void;
 }
 
-function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, onAll, onCopy }: CopyBodyProps) {
+function CopyBody({ uid, lists, picks, phase, sourceName, targetName, write, onToggle, onAll, onCopy }: CopyBodyProps) {
   if (lists.kind === 'loading')
     return (
       <p className="m-0 text-ui text-faint" role="status">
@@ -222,56 +229,56 @@ function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, 
       </p>
     );
   const copying = phase.kind === 'copying';
-  const everything = picks.length === copyableRows(lists.rows).length;
+  const copyable = copyableRows(lists.rows).length;
+  const everything = picks.length === copyable;
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p id={`${uid}-list`} className="m-0 text-cell font-medium text-fg">
           Secrets on {sourceName}
         </p>
-        <button
-          type="button"
-          className="kt-btn kt-btn--sm min-h-[44px]"
-          disabled={copying}
-          onClick={() => onAll(!everything)}
-        >
-          {everything ? 'Select none' : 'Select all'}
-        </button>
+        {copyable === 0 ? null : (
+          <button
+            type="button"
+            className="kt-btn kt-btn--sm min-h-[44px]"
+            disabled={copying}
+            onClick={() => onAll(!everything)}
+          >
+            {everything ? 'Select none' : 'Select all'}
+          </button>
+        )}
       </div>
       <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" aria-labelledby={`${uid}-list`}>
         {lists.rows.map(row => (
           <li key={row.name} className="min-w-0">
-            <label
-              className="flex min-h-[44px] min-w-0 items-start gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
-              data-secret-copy-row={row.name}
-            >
-              <input
-                type="checkbox"
-                className="mt-1 shrink-0"
-                checked={picks.includes(row.name)}
-                disabled={copying || row.signIn}
-                onChange={event => onToggle(row.name, event.target.checked)}
-              />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="mono min-w-0 truncate text-ui font-medium text-fg">{row.name}</span>
-                  {row.onTarget && (
-                    <span className="rounded-control bg-warn/10 px-1.5 text-meta font-medium text-warn">
-                      already on {targetName}: kept
-                    </span>
-                  )}
-                </span>
-                <span className="text-meta leading-base text-muted">
-                  {row.signIn
-                    ? `A sign-in isn’t copied. Sign in again on ${targetName}.`
-                    : row.onTarget
-                      ? `A copy never replaces it. To change it, run fy secret set ${row.name} on ${targetName}.`
+            {row.onTarget && !row.signIn ? (
+              <KeptRow row={row} targetName={targetName} write={write} />
+            ) : (
+              <label
+                className="flex min-h-[44px] min-w-0 items-start gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
+                data-secret-copy-row={row.name}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1 shrink-0"
+                  checked={picks.includes(row.name)}
+                  disabled={copying || row.signIn}
+                  onChange={event => onToggle(row.name, event.target.checked)}
+                />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="mono min-w-0 truncate text-ui font-medium text-fg">{row.name}</span>
+                  </span>
+                  <span className="text-meta leading-base text-muted">
+                    {row.signIn
+                      ? `A sign-in isn’t copied. Sign in again on ${targetName}.`
                       : row.uses.length === 0
                         ? 'No setting names it'
                         : `Used by ${row.uses.join(', ')}`}
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
+            )}
           </li>
         ))}
       </ul>
@@ -288,12 +295,47 @@ function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, 
           disabled={copying || picks.length === 0}
           onClick={onCopy}
         >
-          {copying ? 'Copying…' : copyButtonLabel(picks.length)}
+          {copying ? 'Copying…' : copyButtonLabel(picks.length, copyable)}
         </button>
         <span className="text-meta text-faint">
           {copying ? `Confirm with your passkey on ${sourceName} if asked.` : `${sourceName} → ${targetName}`}
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A key the receiving machine already holds. A copy keeps the one there, so this row is not a choice: no box, no
+ * tick, not counted in the button. A lock and the word "kept" say so, and the command to change the key by hand is
+ * right here, copyable. Only the name is shown; a value is never known to this browser.
+ */
+function KeptRow({
+  row,
+  targetName,
+  write,
+}: {
+  readonly row: SecretCopyRow;
+  readonly targetName: string;
+  readonly write: ClipboardWriter;
+}) {
+  return (
+    <div
+      className="flex min-h-[44px] min-w-0 flex-col gap-1 rounded-control border border-dashed border-border-strong px-3 py-2"
+      data-secret-copy-row={row.name}
+      data-secret-copy-kept=""
+    >
+      <span className="flex min-w-0 flex-wrap items-center gap-2">
+        <Lock size={14} className="shrink-0 text-muted" aria-hidden="true" />
+        <span className="mono min-w-0 truncate text-ui font-medium text-muted">{row.name}</span>
+        <span className="rounded-control bg-surface-2 px-1.5 text-meta font-medium text-fg">
+          already on {targetName}: kept
+        </span>
+      </span>
+      <span className="text-meta leading-base text-muted">
+        A copy never replaces it. To change it, run this on {targetName}:
+      </span>
+      <ReplaceKeyCommand name={row.name} write={write} />
     </div>
   );
 }
