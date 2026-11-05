@@ -734,7 +734,8 @@ describe('a Codex 0.166 picker opened before Codex has finished starting', () =>
     // Assert
     should(failure).be.instanceOf(CodexPickerDriveError);
     should(failure).match({
-      message: /did not reach a model list within 3 observations \(last: Codex still starting\)/u,
+      message:
+        /did not reach a model list within 3 observations after 5 frames of Codex still starting \(last: Codex still starting\)/u,
     });
   });
 

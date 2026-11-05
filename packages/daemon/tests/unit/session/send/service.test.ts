@@ -167,11 +167,14 @@ class FakeTerminal implements SendTerminal {
   /** Which observe call starts failing, so a test can fail the SECOND look at a pane. */
   observeFailFrom = 0;
   private observed = 0;
+  /** When set, every look answers this, whatever the scripted frames say. */
+  frozen: SendPaneObservation | undefined;
 
   constructor(private readonly frames: SendPaneObservation[]) {}
 
   async observe(): Promise<SendPaneObservation> {
     this.calls.push('observe');
+    if (this.frozen !== undefined) return this.frozen;
     if (this.observeFailure !== undefined && this.observed++ >= this.observeFailFrom) throw this.observeFailure;
     return this.frames.length > 1
       ? (this.frames.shift() as SendPaneObservation)
@@ -341,6 +344,7 @@ function parts(
   current: SendTarget | null = target(),
   frames: SendPaneObservation[] = [pane({ promptReady: true })],
   senders: Readonly<Record<string, SendTarget>> = {},
+  pause?: (ms: number) => Promise<void>,
 ): Parts {
   const repository = new FakeRepository(current ?? undefined, senders);
   const ledger = new FakeLedger();
@@ -354,7 +358,7 @@ function parts(
   const tracked: string[] = [];
   const tracking: SendTracking = { track: id => void tracked.push(id) };
   const service = new SessionSendService(
-    { repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, clock, tracking },
+    { repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, clock, tracking, pause },
     defaultSessionSendSettings,
   );
   return { service, repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, tracked };
@@ -1411,8 +1415,8 @@ describe('a person retrying a send that is still open', () => {
 });
 
 describe('delivering held messages after a revive', () => {
-  async function heldParts(frames: SendPaneObservation[]) {
-    const built = parts(target(), frames);
+  async function heldParts(frames: SendPaneObservation[], pause?: (ms: number) => Promise<void>) {
+    const built = parts(target(), frames, {}, pause);
     built.ledger.records.set('held-1', {
       sendId: 'held-1',
       acceptedAt: NOW,
@@ -1479,6 +1483,100 @@ describe('delivering held messages after a revive', () => {
       return calls === 1 ? records : records.map(record => ({ ...record, held: false }));
     };
     should(await raced.service.releaseHeld(ID)).equal(0);
+  });
+});
+
+describe('a Codex startup park while held sends are released (B170)', () => {
+  const parked = (overrides: Partial<SendPaneObservation> = {}) => pane({ startupParked: true, ...overrides });
+  const held = (built: Awaited<ReturnType<typeof heldRecord>>) => built.ledger.only();
+
+  async function heldRecord(frames: SendPaneObservation[], pause?: (ms: number) => Promise<void>) {
+    const built = parts(target(), frames, {}, pause);
+    built.ledger.records.set('held-1', {
+      sendId: 'held-1',
+      acceptedAt: NOW,
+      acceptedTurn: 3,
+      path: 'revive-queue',
+      message: 'when you are back',
+      held: true,
+      fate: 'accepted',
+    });
+    return built;
+  }
+
+  it('waits for the park to clear, then types the held message once — never into the parked composer', async () => {
+    const pauses: number[] = [];
+    const built = await heldRecord(
+      [parked({ draft: 'resume turn' }), parked(), parked(), pane({ promptReady: true })],
+      async ms => void pauses.push(ms),
+    );
+
+    should(await built.service.releaseHeld(ID)).equal(1);
+
+    should(pauses).eql([2_000, 2_000, 2_000]);
+    should(built.terminal.typed).eql(['when you are back']);
+    should(held(built)).match({ held: false, fate: 'accepted' });
+  });
+
+  it('gives up at the bound with the sends still held, nothing typed, and the deferral journalled', async () => {
+    let pauses = 0;
+    const built = await heldRecord([parked()], async () => {
+      pauses += 1;
+    });
+
+    should(await built.service.releaseHeld(ID)).equal(0);
+
+    should(pauses).equal(300);
+    should(built.terminal.typed).be.empty();
+    should(held(built)).match({ held: true, fate: 'accepted' });
+    should(built.repository.journal_.at(-1)).match({ event: 'control.send_release_deferred', data: { held: 1 } });
+  });
+
+  it('looks once and leaves the sends held when nothing can wait', async () => {
+    const built = await heldRecord([parked()]);
+
+    should(await built.service.releaseHeld(ID)).equal(0);
+
+    should(built.terminal.typed).be.empty();
+    should(held(built).held).be.true();
+  });
+
+  it('leaves a send held when the park returns between the wait and the lock', async () => {
+    const built = await heldRecord([pane({ promptReady: true }), parked()], async () => undefined);
+
+    should(await built.service.releaseHeld(ID)).equal(0);
+
+    should(built.terminal.typed).be.empty();
+    should(held(built).held).be.true();
+  });
+
+  it('withholds a re-attempt as busy at a parked pane, quoting no draft and typing nothing', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate: 'queued', attempt: 1 });
+    built.terminal.typed.length = 0;
+    built.terminal.frozen = parked({ draft: 'ship it' });
+    built.terminal.held.set('ship it', 'composer');
+
+    const withheld = await built.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('busy');
+    should((withheld as Error).message).not.match(/composer|draft/u);
+    should(built.terminal.typed).be.empty();
+    should(built.ledger.only()).match({ fate: 'queued', attempt: 1 });
+  });
+
+  it('presses no Enter for a person asking to submit a send at a parked pane', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate: 'accepted', typedNotSent: true });
+    built.terminal.frozen = parked();
+
+    const refused = await built.service.submit(ID, 'send-1').catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendPending);
+    should(built.terminal.calls).not.containEql('submitComposer');
   });
 });
 

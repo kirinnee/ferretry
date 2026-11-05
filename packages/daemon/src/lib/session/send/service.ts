@@ -72,6 +72,11 @@ export interface SessionSendPorts {
   /** Serializes every mutation of one session, so two sends cannot both claim the next turn. */
   readonly serial: SerialExecutor;
   readonly clock: ClockPort;
+  /**
+   * Waits this long. Only the release of held sends uses it, to wait out a
+   * Codex startup park; without it the park is looked at once and a still-parked pane leaves the sends held.
+   */
+  readonly pause?: ((ms: number) => Promise<void>) | undefined;
   /** Told after every transport, so the send's true fate is looked for rather than assumed. */
   readonly tracking: SendTracking;
 }
@@ -356,6 +361,13 @@ export class SessionSendService {
       const observed = await this.ports.terminal.observe(id);
       if (routeSend(target, observed) === 'revive')
         throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
+      // A parked composer is Codex's own accepted submission, not a copy of this send to rule out and not a
+      // draft to quote: wait (the tracker reads `busy` as "not yet"), type nothing, press nothing.
+      if (observed.startupParked === true)
+        throw new SendRetypeWithheld(
+          `session ${id} is still starting; its agent is holding an earlier message until startup ends, so send ${sendId} is not typed yet`,
+          'busy',
+        );
       const text = current.matchText ?? current.message;
       // EVERY retry is checked against the pane, the daemon's as well as a person's: a message still
       // typed in the composer, or held in the harness's queue, is not lost, and retyping it would be the
@@ -451,6 +463,16 @@ export class SessionSendService {
     const held = (await this.ports.ledger.list(id)).filter(
       record => record.held === true && record.fate === 'accepted',
     );
+    if (held.length === 0) return 0;
+    // A revived Codex 0.166 parks its resume turn and the launch settles at once; the held sends wait for the
+    // park to clear instead of reading its text as a draft and going back to held until the NEXT revive.
+    if (!(await this.awaitStartupParkCleared(id))) {
+      await this.ports.repository.journal(id, 'control.send_release_deferred', {
+        held: held.length,
+        waitedMs: this.settings.startupParkWaitMs,
+      });
+      return 0;
+    }
     let released = 0;
     for (const record of held) {
       const outcome = await this.ports.serial.run(id, async () => {
@@ -458,6 +480,8 @@ export class SessionSendService {
         if (current?.held !== true || current.fate !== 'accepted') return undefined;
         const target = await this.require(id);
         const pane = await this.ports.terminal.observe(id);
+        // Parked again between the wait and the lock: leave it held, nothing typed.
+        if (pane.startupParked === true) return undefined;
         const routing = routeSend(target, pane);
         if (routing === 'revive') return undefined;
         const request: SendMessageRequest = {
@@ -475,6 +499,23 @@ export class SessionSendService {
     }
     if (released > 0) this.ports.tracking.track(id);
     return released;
+  }
+
+  /**
+   * Waits, bounded, for Codex to end a startup park (`Waiting for startup`). True when the pane is not parked
+   * (or cannot be read, which the locked release then answers for itself); false when it was still parked at
+   * the bound. Codex ends a park itself within ~15 s or exits, so the default bound is many times that.
+   */
+  private async awaitStartupParkCleared(id: SessionId): Promise<boolean> {
+    const { startupParkWaitMs, startupParkPollMs } = this.settings;
+    const pause = this.ports.pause;
+    const polls = pause === undefined ? 0 : Math.ceil(startupParkWaitMs / startupParkPollMs);
+    for (let poll = 0; ; poll += 1) {
+      const pane = await this.ports.terminal.observe(id).catch(() => undefined);
+      if (pane?.startupParked !== true) return true;
+      if (pause === undefined || poll >= polls) return false;
+      await pause(startupParkPollMs);
+    }
   }
 
   /**
@@ -866,6 +907,9 @@ export class SessionSendService {
         throw new SendRefused(`session ${id} has no send ${sendId}`);
       if (current.fate === 'delivered' || current.fate === 'cancelled')
         throw new SendRefused(`send ${sendId} is ${current.fate}; there is nothing to submit`);
+      // Codex parks a submission made during its startup and has already accepted it: the composer shows the
+      // text, but Enter is not ours to press (the terminal refuses too; this says why).
+      this.refuseWhileParked(id, await this.ports.terminal.observe(id));
       const outcome = await this.ports.terminal.submitComposer(id, current.matchText ?? current.message);
       if (outcome === 'absent')
         throw new SendRefused(`send ${sendId} is not sitting in the agent's composer, so Enter was not pressed`);

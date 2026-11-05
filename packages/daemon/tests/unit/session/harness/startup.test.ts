@@ -58,7 +58,7 @@ describe('how a start carries its reasoning level', () => {
     expect(startupEffort('claude', 'XHigh')).toEqual({ kind: 'command', effort: 'xhigh' });
   });
 
-  it('normalises exactly as the document records it, so a level the launch rejects is carried as none', () => {
+  it('normalises exactly as the document records it, so a level the launch rejects is carried as none (and refused by the plan)', () => {
     for (const level of ['x_high', '9', 'a'.repeat(30), 'two words']) {
       expect(startupEffort('codex', level)).toBeUndefined();
       expect(startupEffort('claude', level)).toBeUndefined();
@@ -135,6 +135,18 @@ describe('the plan for a start’s reasoning level', () => {
       kind: 'planned',
       startupRuntime: { action: 'effort', effort: 'xhigh' },
     });
+  });
+
+  it('refuses a non-blank level that is not a reasoning level, instead of starting without it', () => {
+    for (const level of ['x_high', '9', 'two words']) {
+      for (const harness of ['codex', 'claude'] as const) {
+        expect(planStartupEffort(harness, 'm', level, undefined)).toEqual({
+          kind: 'refused',
+          cause: 'unservable',
+          reason: `${level} is not a reasoning level`,
+        });
+      }
+    }
   });
 
   it('plans nothing when no level was asked for, and does not need the catalog', () => {

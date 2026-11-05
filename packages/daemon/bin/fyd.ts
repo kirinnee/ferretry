@@ -10252,6 +10252,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // every unrelated document write in the process wait behind a live terminal.
           serial: new KeyedSerialExecutor(),
           clock,
+          pause: async ms => await new Promise<void>(resolve => setTimeout(resolve, ms)),
           tracking: sendTracker,
         },
         // The receiving agent is told the CLI a human types, not this daemon — `fyd send` is not a

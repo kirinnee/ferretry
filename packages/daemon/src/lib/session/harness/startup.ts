@@ -47,7 +47,7 @@ export type StartupEffort =
  *
  * The level goes through `reasoningLevel`, the very normaliser `launchReasoningEffort` records the document's
  * level with, so the level on the argv and the level the session records can never differ — and a level that
- * normaliser rejects (`x_high`, `9`) is carried as none, exactly as the document records none for it. An `argv`
+ * normaliser rejects (`x_high`, `9`) is carried as none here, and `planStartupEffort` refuses it. An `argv`
  * answer also tells the caller it must read the login's catalog before `planStartupEffort`.
  */
 export function startupEffort(harness: HarnessKind, effort: string | undefined): StartupEffort | undefined {
@@ -118,7 +118,14 @@ export function planStartupEffort(
   catalog: readonly RuntimeModelChoice[] | Error | undefined,
 ): StartupEffortPlan {
   const carried = startupEffort(harness, effort);
-  if (carried === undefined) return { kind: 'planned' };
+  if (carried === undefined) {
+    // A level the person asked for that `reasoningLevel` rejects (`x_high`, `9`, `two words`) is refused, not
+    // dropped: a start that silently ran at the default would answer a question nobody asked. Blank is no ask.
+    const asked = effort?.trim() ?? '';
+    return asked === ''
+      ? { kind: 'planned' }
+      : { kind: 'refused', cause: 'unservable', reason: `${asked} is not a reasoning level` };
+  }
   if (carried.kind === 'command')
     return { kind: 'planned', startupRuntime: { action: 'effort', effort: carried.effort } };
   const reason = codexStartupEffortRefusal(model, carried.effort, catalog);

@@ -19,7 +19,10 @@
  *
  * BOUNDED BY OBSERVATIONS, NOT BY A DEADLINE, for the reason picker cleanup is: a wall clock makes
  * the number of keys sent into a live pane depend on how loaded the host is, and turns "Codex never
- * opened its picker" and "the box was busy for four seconds" into the same failure.
+ * opened its picker" and "the box was busy for four seconds" into the same failure. Frames showing Codex's
+ * startup park (`Waiting for startup`) are not charged to that budget: they have their own per-await ceiling
+ * (`CODEX_STARTUP_WAIT_OBSERVATIONS`), intentionally per await, because each stage can only be parked once
+ * Codex is still starting, and the ceiling only has to outlast Codex's own startup timeout.
  */
 
 import type { InjectionOutcome } from '../../tmux/delivery.ts';
@@ -277,7 +280,9 @@ export class CodexModelPickerDriver {
       await this.sleeper.sleep(this.policy.settleMs);
     }
     throw new CodexPickerDriveError(
-      `Codex did not reach ${stage} within ${this.policy.maxObservations} observations (last: ${last})`,
+      `Codex did not reach ${stage} within ${this.policy.maxObservations} observations${
+        parked === 0 ? '' : ` after ${parked} frames of Codex still starting`
+      } (last: ${last})`,
     );
   }
 
