@@ -127,6 +127,10 @@ describe('speakableSegments: links, references and ids', () => {
     ]);
   });
 
+  test('a skill reference is "skill" and its name', () => {
+    expect(said('Run $update-config first.')).toEqual(['Run skill update-config first.']);
+  });
+
   test('commit hashes and UUIDs are "a commit" and "an ID", but numbers and versions are read', () => {
     expect(said('Fixed in 3f2a9c1b4d and 11b889e72f0a1b2c3d4e5f60718293a4b5c6d7e8.')).toEqual([
       'Fixed in a commit and a commit.',
@@ -309,6 +313,17 @@ describe('speakableSegments: total', () => {
       expect(Array.isArray(reading.segments)).toBe(true);
       for (const segment of reading.segments) expect(typeof segment.text).toBe('string');
     }
+  });
+
+  test('a failure inside still gives a reading: the reply is on screen', () => {
+    const hostile = {
+      get maxCharacters(): number {
+        throw new Error('boom');
+      },
+    };
+    const reading = speakableSegments('Hello.', hostile);
+    expect(reading.truncated).toBe(true);
+    expect(reading.segments.map(s => s.text)).toEqual(['This reply is on screen.']);
   });
 
   test('a huge reply is bounded in time and says there is more', () => {

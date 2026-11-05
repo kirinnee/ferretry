@@ -260,6 +260,21 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(synth.spoken[0]?.volume).toBe(0);
   });
 
+  test('an unlock the engine refuses is tried again next time', () => {
+    const synth = new FakeSynth();
+    let refuse = true;
+    const speak = synth.speak.bind(synth);
+    synth.speak = utterance => {
+      if (refuse) throw new Error('not in a tap');
+      speak(utterance);
+    };
+    const speaker = speakerOver(synth);
+    expect(() => speaker.unlock()).not.toThrow();
+    refuse = false;
+    speaker.unlock();
+    expect(synth.spoken).toHaveLength(1);
+  });
+
   test('the real-browser factory is an unsupported speaker where there is no speechSynthesis', () => {
     expect(browserSpeaker().supported).toBe(false);
     expect(browserSpeaker().voices()).toEqual([]);
