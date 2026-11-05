@@ -95,6 +95,8 @@ const probeWords = (attempt: PackAttempt): string => {
 const attemptLine = (attempt: PackAttempt, ready = ''): string => {
   const model = attempt.model === undefined ? '' : ` ${attempt.model}`;
   const probe = probeWords(attempt);
+  if (attempt.refusal?.code === 'start_failed')
+    return `  failed ${attempt.runtime}${model}${probe} — ${attempt.refusal.message}`;
   return attempt.outcome === 'started'
     ? `  started ${attempt.runtime}${model}${probe}${ready}`
     : `  refused ${attempt.runtime}${model}${probe} — ${attempt.refusal?.code ?? 'refused'}: ${attempt.refusal?.message ?? ''}`;
@@ -138,7 +140,9 @@ export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): stri
   );
   if (outcome.outcome === 'refused')
     return [
-      `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
+      outcome.refusal.code === 'start_failed'
+        ? `start failed: ${outcome.refusal.message}`
+        : `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
       ...(outcome.refusal.remedy === undefined ? [] : [outcome.refusal.remedy]),
       ...(attempts.length === 0 ? [] : ['', 'Tried:', ...attempts]),
     ].join('\n');

@@ -9,7 +9,7 @@ import {
 import { sessionView } from './session-fixtures.ts';
 
 const NOTE =
-  'Codex waited on its account check with chatgpt.com; a slow start is the network, not this machine (docs/message-delivery.md).';
+  'Codex waits on an account check with chatgpt.com before it starts, so a slow start is usually the network (the first start on a new Codex home also indexes its history once) (docs/message-delivery.md).';
 
 describe('harnessReadySeconds', () => {
   it('should read seconds to one decimal', () => {
@@ -25,6 +25,12 @@ describe('harnessReadyWords', () => {
     should(harnessReadyWords(sessionView({}, { harnessStartupMs: 4_200 }))).equal('harness ready in 4.2 s');
     should(harnessReadyWords(sessionView())).be.undefined();
   });
+
+  it('should say a start that gave up waiting was not ready, never that it was ready in the bound', () => {
+    const words = harnessReadyWords(sessionView({}, { harnessNotReadyAfterMs: 30_000 }));
+    should(words).equal('harness not ready after 30.0 s');
+    should(words).not.containEql('ready in');
+  });
 });
 
 describe('slowCodexStartNote', () => {
@@ -33,6 +39,12 @@ describe('slowCodexStartNote', () => {
       NOTE,
     );
     should(slowCodexStartNote(sessionView({ harness: 'codex' }, { harnessStartupMs: 30_000 }))).equal(NOTE);
+  });
+
+  it('should explain a Codex start that gave up waiting too, without claiming the cause as fact', () => {
+    should(slowCodexStartNote(sessionView({ harness: 'codex' }, { harnessNotReadyAfterMs: 30_000 }))).equal(NOTE);
+    should(NOTE).containEql('usually the network');
+    should(NOTE).not.containEql('not this machine');
   });
 
   it('should stay quiet for a fast Codex start, an unmeasured one, and any other harness', () => {

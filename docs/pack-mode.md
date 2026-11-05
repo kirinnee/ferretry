@@ -302,19 +302,20 @@ The answer is never an HTTP error for a refusal: it is `{outcome: 'refused', ref
 remedy}, attempts}`, every attempt listed, so a ferret falls back on the code. `fy new` exits **2** on a
 refusal (a failure of the command itself is 1).
 
-| Code                                  | Means                                                                 |
-| ------------------------------------- | --------------------------------------------------------------------- |
-| `pack_off`                            | the machine's or this ferret's switch is off                          |
-| `limit_reached` / `depth_exceeded`    | see Limits; do the work yourself                                      |
-| `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                        |
-| `cli_missing` / `not_logged_in`       | the CLI or its launcher is missing / the login needs signing in       |
-| `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model                  |
-| `disabled`                            | the runtime or its login is switched off; pick another or `enable` it |
-| `over_budget`                         | its login spent its budget trigger here ([budgets.md](budgets.md))    |
-| `probe_failed`                        | the "reply OK" check did not answer OK in time                        |
-| `no_candidate`                        | no model a runtime here offers can run now                            |
-| `scratch_cwd`                         | the named folder is temporary; leave `--cwd` out or `--allow-scratch` |
-| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the prompt's order, with a note     |
+| Code                                  | Means                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `pack_off`                            | the machine's or this ferret's switch is off                                                            |
+| `limit_reached` / `depth_exceeded`    | see Limits; do the work yourself                                                                        |
+| `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                                                          |
+| `cli_missing` / `not_logged_in`       | the CLI or its launcher is missing / the login needs signing in                                         |
+| `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model                                                    |
+| `disabled`                            | the runtime or its login is switched off; pick another or `enable` it                                   |
+| `over_budget`                         | its login spent its budget trigger here ([budgets.md](budgets.md))                                      |
+| `probe_failed`                        | the "reply OK" check did not answer OK in time                                                          |
+| `no_candidate`                        | no model a runtime here offers can run now                                                              |
+| `scratch_cwd`                         | the named folder is temporary; leave `--cwd` out or `--allow-scratch`                                   |
+| `start_failed`                        | the start was accepted but its session came back `failed`; its reason is the message (`fy status <id>`) |
+| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the prompt's order, with a note                                       |
 
 ## Who decides
 

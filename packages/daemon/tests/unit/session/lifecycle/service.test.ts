@@ -1845,16 +1845,19 @@ class ControlledClock implements ClockPort {
 /** A launcher that can wait out its harness's own startup, taking `settleMs` of the clock to do it. */
 class SettlingLauncher extends RecordingLauncher {
   settleError?: unknown;
+  /** What the wait answers when it does not throw: `timed-out` is the bound passing. */
+  settlement: 'settled' | 'timed-out' = 'settled';
   constructor(
     private readonly clock: ControlledClock,
     private readonly settleMs: number,
   ) {
     super();
   }
-  async settled(_record: SessionLifecycleRecord): Promise<void> {
+  async settled(_record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'> {
     this.calls.push('settled');
     this.clock.advance(this.settleMs);
     if (this.settleError !== undefined) throw this.settleError;
+    return this.settlement;
   }
 }
 
@@ -1902,16 +1905,50 @@ describe('SessionLifecycleService harness startup time', () => {
     ]);
   });
 
-  it('should treat a wait that ran out its bound as a started session, with the time it took', async () => {
-    // Arrange — the launcher returns normally after the bound, as the tmux adapter does.
-    const { subject } = startup(30_000);
+  it('should treat a wait that ran out its bound as a started session, but not as a startup time', async () => {
+    // Arrange — the launcher answers `timed-out` after the bound, as the tmux adapter does.
+    const { launcher, repository, subject } = startup(30_000);
+    launcher.settlement = 'timed-out';
+
+    // Act
+    const actual = await subject.createAndStart(input());
+
+    // Assert — the 30 s is what was WAITED, never what the harness took.
+    should(actual.state.status).equal('running');
+    should(actual.state.harnessStartupMs).be.undefined();
+    should(actual.state.harnessNotReadyAfterMs).equal(30_000);
+    should(repository.current().state.harnessStartupMs).be.undefined();
+    should(repository.current().state.harnessNotReadyAfterMs).equal(30_000);
+  });
+
+  it('should record nothing when the clock readings are not instants', async () => {
+    // Arrange — the one reading taken right after the wait does not parse; the transitions after it do.
+    const base = new ControlledClock();
+    let garbleNext = false;
+    const clock: ClockPort = {
+      now: () => {
+        if (!garbleNext) return base.now();
+        garbleNext = false;
+        return 'not an instant';
+      },
+    };
+    const launcher = new SettlingLauncher(base, 1_000);
+    launcher.livenessFromLaunch = true;
+    const waited = launcher.settled.bind(launcher);
+    launcher.settled = async record => {
+      const settlement = await waited(record);
+      garbleNext = true;
+      return settlement;
+    };
+    const { subject } = harness({ launcher, clock });
 
     // Act
     const actual = await subject.createAndStart(input());
 
     // Assert
     should(actual.state.status).equal('running');
-    should(actual.state.harnessStartupMs).equal(30_000);
+    should(actual.state.harnessStartupMs).be.undefined();
+    should(actual.state.harnessNotReadyAfterMs).be.undefined();
   });
 
   it('should fail the start with the harness’s own reason when its pane dies during startup', async () => {
@@ -1921,16 +1958,55 @@ describe('SessionLifecycleService harness startup time', () => {
       'the interactive harness exited (1): its last output was "account/read failed during TUI bootstrap: workspace routing discovery timed out"';
     launcher.settleError = new Error(reason);
 
-    // Act + Assert
-    await should(subject.createAndStart(input())).be.rejectedWith(reason);
-    should(repository.current().state).containDeep({ status: 'failed', reason });
+    // Act + Assert — delivery was recorded, so the reason also says the turn never ran.
+    const said = `${reason}; its first turn was never run, so start a new session rather than reviving this one`;
+    await should(subject.createAndStart(input())).be.rejectedWith(said);
+    should(repository.current().state).containDeep({ status: 'failed', reason: said });
     should(repository.current().state.harnessStartupMs).be.undefined();
+    should(repository.current().state.harnessNotReadyAfterMs).be.undefined();
     should(repository.events.map(entry => entry.type)).deepEqual([
       'session.created',
       'session.starting',
       'session.failed',
     ]);
     should(launcher.calls).containEql('snapshot');
+  });
+
+  it('should fail a start whose pane was already dead on the first look, naming the first turn as never run', async () => {
+    // Arrange — the wait ended at once, with nothing of the settle bound spent.
+    const { launcher, repository, subject } = startup(0);
+    launcher.settleError = new Error('the interactive harness exited (127): its last output was "codex: not found"');
+
+    // Act
+    const failure = await subject.createAndStart(input()).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    // Assert
+    should((failure as Error).message).equal(
+      'the interactive harness exited (127): its last output was "codex: not found"; its first turn was never run, so start a new session rather than reviving this one',
+    );
+    should(repository.current().state.status).equal('failed');
+    should(repository.current().state.harnessStartupMs).be.undefined();
+  });
+
+  it('should release the conversation lease when the pane dies during startup', async () => {
+    // Arrange
+    const clock = new ControlledClock();
+    const launcher = new SettlingLauncher(clock, 5_000);
+    launcher.livenessFromLaunch = true;
+    launcher.settleError = new Error('the interactive harness exited (1)');
+    const leases = new RecordingLeases();
+    const { subject } = harness({ launcher, clock, leases });
+
+    // Act
+    await should(subject.createAndStart(input())).be.rejectedWith(/exited \(1\)/u);
+
+    // Assert — claimed before the pane existed, released by the failure the settle recorded.
+    should(leases.calls).have.length(2);
+    should(leases.calls[0]).startWith('claim:');
+    should(leases.calls.at(-1)).equal(`release:${ID}`);
   });
 
   it('should measure a launcher that cannot wait on startup without waiting, so Claude is unaffected', async () => {

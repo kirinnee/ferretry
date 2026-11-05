@@ -249,6 +249,11 @@ const sessionCases: SchemaCase[] = [
     schema: session.SessionStateSchema,
     value: { ...sessionView.state, harnessStartupMs: 4_200 },
   },
+  {
+    name: 'session state whose start gave up waiting for its harness',
+    schema: session.SessionStateSchema,
+    value: { ...sessionView.state, harnessNotReadyAfterMs: 30_000 },
+  },
   { name: 'session view', schema: session.SessionViewSchema, value: sessionView },
   {
     name: 'session view with its journal position',

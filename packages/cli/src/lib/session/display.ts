@@ -69,11 +69,19 @@ function headline(view: SessionView): string {
     .join('  ');
 }
 
+/** `ready in 4.2 s`, or `not ready after 30.0 s` when the start gave up waiting; empty when nothing was measured. */
+function startupVital(state: SessionState): string {
+  if (state.harnessStartupMs !== undefined) return `ready in ${harnessReadySeconds(state.harnessStartupMs)}`;
+  return state.harnessNotReadyAfterMs === undefined
+    ? ''
+    : `not ready after ${harnessReadySeconds(state.harnessNotReadyAfterMs)}`;
+}
+
 function vitals(view: SessionView): string[] {
   const quota = quotaLabel(view.state);
   const parts = [
     view.config.compactAt === undefined ? '' : `compact at ${describeCompactAt(view.config.compactAt)}`,
-    view.state.harnessStartupMs === undefined ? '' : `ready in ${harnessReadySeconds(view.state.harnessStartupMs)}`,
+    startupVital(view.state),
     view.state.contextPercent === undefined ? '' : `context ${view.state.contextPercent}% used`,
     quota === undefined ? '' : `quota ${quota}`,
     view.state.lastToolStartedAt === undefined ? '' : `last tool started ${view.state.lastToolStartedAt}`,

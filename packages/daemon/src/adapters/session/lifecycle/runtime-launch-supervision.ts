@@ -5,7 +5,7 @@
  * Both are decorators, so neither the tmux launcher nor the reap knows anything about Codex:
  *
  * - {@link RuntimeSupervisedLauncher} wraps the lifecycle launcher. After a STOP it asks the Codex
- *   supervisor to stop the app-server daemon that session's runtime started; when READY or DELIVER
+ *   supervisor to stop the app-server daemon that session's runtime started; when READY, DELIVER or SETTLED
  *   fails it reads what the dead pane last showed and, for a Codex that could not reach the network
  *   while starting, replaces the error with one that says so.
  * - {@link RuntimeSupervisedReaper} wraps the reap, which ends a session whose pane outlived it, and
@@ -57,8 +57,9 @@ export class RuntimeSupervisedLauncher implements SessionLifecycleLauncher {
     });
   }
 
-  async settled(record: SessionLifecycleRecord): Promise<void> {
-    await this.inner.settled?.(record).catch(async (error: unknown) => {
+  async settled(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'> {
+    if (this.inner.settled === undefined) return 'settled';
+    return await this.inner.settled(record).catch(async (error: unknown) => {
       throw await this.#explained(record, error);
     });
   }

@@ -101,6 +101,9 @@ export interface SessionLifecyclePorts {
   readonly launches?: Pick<LaunchGate, 'launching' | 'awaitSettled'>;
 }
 
+/** Appended to a settle failure: delivery was recorded, but the harness died before it ran the first turn. */
+const FIRST_TURN_NEVER_RAN = '; its first turn was never run, so start a new session rather than reviving this one';
+
 function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -380,15 +383,21 @@ export class SessionLifecycleService {
    *
    * Delivery is not startup — Codex parks a first turn until its account check answers — so a pane that
    * dies in that window fails THIS start with the harness's own reason, rather than reporting a running
-   * session that dies later. A wait that runs out its bound is not a failure; the time is recorded as is.
+   * session that dies later. A wait that runs out its bound is not a failure, but it is not a startup time
+   * either: it is recorded as the time spent waiting, never as `harnessStartupMs`. A clock reading that is
+   * not an instant records neither.
    */
   private async settleStartup(record: SessionLifecycleRecord, launchedAt: string): Promise<SessionLifecycleRecord> {
+    let settlement: 'settled' | 'timed-out' = 'settled';
     try {
-      await this.ports.launcher.settled?.(record);
+      settlement = (await this.ports.launcher.settled?.(record)) ?? 'settled';
     } catch (error) {
-      throw await this.recordFailure(record, error);
+      // The first turn is already recorded delivered, but a parked Codex never ran it: reviving this
+      // session would resume a conversation that was never given its assignment.
+      throw await this.recordFailure(record, new Error(`${failureMessage(error)}${FIRST_TURN_NEVER_RAN}`));
     }
-    return withHarnessStartup(record, elapsedMs(launchedAt, this.ports.clock.now()));
+    const elapsed = elapsedMs(launchedAt, this.ports.clock.now());
+    return elapsed === undefined ? record : withHarnessStartup(record, settlement, elapsed);
   }
 
   /** The one initial turn this lifecycle may type, keyed beneath the session it acts on. */

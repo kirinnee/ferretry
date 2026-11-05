@@ -833,6 +833,12 @@ export const SessionStateSchema = z.object({
    * was measured, or one whose start launched nothing.
    */
   harnessStartupMs: NonNegativeIntegerSchema.optional(),
+  /**
+   * How long the start waited for the harness to finish its own startup before giving up. Set instead of
+   * `harnessStartupMs`, by the same launch, when the harness was still starting (a parked first turn) at the
+   * bound; it is a lower bound on the startup, not a startup time.
+   */
+  harnessNotReadyAfterMs: NonNegativeIntegerSchema.optional(),
   /** What the current pane was told at launch; absent for a session last launched before it was recorded. */
   launchInstructions: SessionLaunchInstructionsSchema.optional(),
   observedModel: z.string().optional(),

@@ -180,6 +180,14 @@ describe('renderSessionView', () => {
     should(unmeasured[2]).equal('  context 42% used');
   });
 
+  it('should say a start that gave up waiting was not ready, rather than ready in the bound', () => {
+    // Arrange
+    const gaveUp = renderSessionView(sessionView({}, { harnessNotReadyAfterMs: 30_000, contextPercent: 42 }), NOW);
+
+    // Act / Assert
+    should(gaveUp[2]).equal('  not ready after 30.0 s  context 42% used');
+  });
+
   it('should report the liveness ledger with a nudge marker', () => {
     // Arrange
     const view = sessionView(

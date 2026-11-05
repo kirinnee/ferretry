@@ -11,10 +11,14 @@ export function harnessReadySeconds(milliseconds: number): string {
   return `${(Math.round(Math.max(0, milliseconds) / 100) / 10).toFixed(1)} s`;
 }
 
-/** `harness ready in 4.2 s`, or nothing when this session's start was never measured. */
+/**
+ * `harness ready in 4.2 s`, or `harness not ready after 30.0 s` when the start gave up waiting (that figure is
+ * the bound, not a startup time), or nothing when this session's start was never measured.
+ */
 export function harnessReadyWords(view: SessionView): string | undefined {
-  const measured = view.state.harnessStartupMs;
-  return measured === undefined ? undefined : `harness ready in ${harnessReadySeconds(measured)}`;
+  const { harnessStartupMs: ready, harnessNotReadyAfterMs: waited } = view.state;
+  if (ready !== undefined) return `harness ready in ${harnessReadySeconds(ready)}`;
+  return waited === undefined ? undefined : `harness not ready after ${harnessReadySeconds(waited)}`;
 }
 
 /**
@@ -22,7 +26,8 @@ export function harnessReadyWords(view: SessionView): string | undefined {
  * start, an unmeasured one, or any other harness (Claude never waits on an account check).
  */
 export function slowCodexStartNote(view: SessionView): string | undefined {
-  const measured = view.state.harnessStartupMs;
+  // A start that gave up waiting was at least that slow, so it earns the same line.
+  const measured = view.state.harnessStartupMs ?? view.state.harnessNotReadyAfterMs;
   if (view.config.harness !== 'codex' || measured === undefined || measured < SLOW_CODEX_START_MS) return undefined;
-  return 'Codex waited on its account check with chatgpt.com; a slow start is the network, not this machine (docs/message-delivery.md).';
+  return 'Codex waits on an account check with chatgpt.com before it starts, so a slow start is usually the network (the first start on a new Codex home also indexes its history once) (docs/message-delivery.md).';
 }

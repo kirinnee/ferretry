@@ -120,6 +120,11 @@ export const SessionLifecycleStateSchema = z.object({
    * the start that launched the pane; a start that launched nothing leaves the value it found.
    */
   harnessStartupMs: NonNegativeIntegerSchema.optional(),
+  /**
+   * How long the start waited for the harness to finish its own startup before giving up, when it never did. Set
+   * INSTEAD of `harnessStartupMs` by the same launch: the harness was not ready, so no startup time exists.
+   */
+  harnessNotReadyAfterMs: NonNegativeIntegerSchema.optional(),
 });
 export type SessionLifecycleState = z.infer<typeof SessionLifecycleStateSchema>;
 
@@ -203,11 +208,12 @@ export interface SessionLifecycleLauncher {
    * Waits, boundedly, until the harness has finished its OWN startup after the first turn was delivered.
    *
    * Delivery is not startup: Codex 0.166 takes a submission while it is still starting and parks it until an
-   * account check with chatgpt.com answers. Resolves when the harness is up — or when the bound passes, which
-   * is not a failure — and rejects with the harness's own reason when the pane dies first. Optional: a launcher
-   * that cannot tell never waits, and the start then measures delivery alone.
+   * account check with chatgpt.com answers. Answers `settled` when the harness is up, `timed-out` when the bound
+   * passes first — not a failure, but not a startup time either — and rejects with the harness's own reason when
+   * the pane dies first. Optional: a launcher that cannot tell never waits, and the start then measures delivery
+   * alone.
    */
-  settled?(record: SessionLifecycleRecord): Promise<void>;
+  settled?(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'>;
   /** Captures a live final frame before a durable terminal transition, if one exists. */
   snapshot(record: SessionLifecycleRecord): Promise<void>;
   stop(record: SessionLifecycleRecord): Promise<void>;

@@ -277,19 +277,36 @@ export function withLaunchInstructions(
 }
 
 /**
- * Whole milliseconds from one clock reading to a later one, never below zero.
+ * Whole milliseconds from one clock reading to a later one, never below zero; `undefined` when either reading
+ * is not an instant.
  *
  * The lifecycle reads time only through its clock port, whose readings are instants; a clock that steps
- * backwards or a reading that does not parse is a measurement that is wrong, not one worth a thrown error.
+ * backwards is clamped, and a reading that does not parse is no measurement at all — recording a made-up
+ * zero would claim an instant start.
  */
-export function elapsedMs(from: string, to: string): number {
+export function elapsedMs(from: string, to: string): number | undefined {
   const span = Date.parse(to) - Date.parse(from);
-  return Number.isFinite(span) ? Math.max(0, Math.round(span)) : 0;
+  return Number.isFinite(span) ? Math.max(0, Math.round(span)) : undefined;
 }
 
-/** The record carrying how long its pane's harness took to start, as measured by the launch that opened it. */
-export function withHarnessStartup(record: SessionLifecycleRecord, harnessStartupMs: number): SessionLifecycleRecord {
-  return { ...record, state: { ...record.state, harnessStartupMs } };
+/**
+ * The record carrying what the launch that opened its pane learned about the harness's startup: how long it
+ * took (`settled`), or how long was spent before the wait gave up (`timed-out`, which is NOT a startup time).
+ * Exactly one of the two is left on the record, so a relaunch never leaves its predecessor's reading beside it.
+ */
+export function withHarnessStartup(
+  record: SessionLifecycleRecord,
+  settlement: 'settled' | 'timed-out',
+  elapsed: number,
+): SessionLifecycleRecord {
+  const { harnessStartupMs: _ready, harnessNotReadyAfterMs: _waited, ...state } = record.state;
+  return {
+    ...record,
+    state:
+      settlement === 'settled'
+        ? { ...state, harnessStartupMs: elapsed }
+        : { ...state, harnessNotReadyAfterMs: elapsed },
+  };
 }
 
 /**

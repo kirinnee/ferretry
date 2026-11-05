@@ -212,7 +212,7 @@ describe('renderPackNewOutcome', () => {
         attempts: [attempt({ runtime: 'b', probe: 'ran', probeMs: 640 })],
       });
     const note =
-      'Codex waited on its account check with chatgpt.com; a slow start is the network, not this machine (docs/message-delivery.md).';
+      'Codex waits on an account check with chatgpt.com before it starts, so a slow start is usually the network (the first start on a new Codex home also indexes its history once) (docs/message-delivery.md).';
 
     // Act
     const slow = renderPackNewOutcome(outcome('codex', 4_200), 'fy');
@@ -225,6 +225,32 @@ describe('renderPackNewOutcome', () => {
     should(fast).not.containEql('chatgpt.com');
     should(claude).not.containEql('chatgpt.com');
     should(claude).containEql('harness ready in 20.0 s');
+  });
+
+  it('should print a start whose session failed as a failed start with its reason, never as Started', () => {
+    // Arrange
+    const reason = 'claude-main opus did not start: the interactive harness exited (1)';
+    const outcome = refused({
+      refusal: { code: 'start_failed', message: reason, remedy: 'Its session child-1 holds the evidence.' },
+      attempts: [
+        attempt({
+          runtime: 'claude-main',
+          model: 'opus',
+          outcome: 'refused',
+          refusal: { code: 'start_failed', message: reason },
+        }),
+      ],
+    });
+
+    // Act
+    const text = renderPackNewOutcome(outcome, 'fy');
+
+    // Assert
+    should(text.split('\n')[0]).equal(`start failed: ${reason}`);
+    should(text).containEql('Its session child-1 holds the evidence.');
+    should(text).containEql(`  failed claude-main opus — ${reason}`);
+    should(text).not.containEql('Started');
+    should(text).not.containEql('refused');
   });
 
   it('should time a probe that passed and one that failed, and name a failed probe another start shared', () => {

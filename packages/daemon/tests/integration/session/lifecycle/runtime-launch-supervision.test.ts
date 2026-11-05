@@ -30,6 +30,7 @@ const LAUNCHED: SessionLaunchInstructions = { sections: [{ id: 'tools', chars: 1
 class RecordingLauncher implements SessionLifecycleLauncher {
   readonly calls: string[] = [];
   failure: Error | undefined;
+  settlement: 'settled' | 'timed-out' = 'settled';
 
   async alive(): Promise<boolean> {
     this.calls.push('alive');
@@ -46,6 +47,11 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   async deliver(_record: SessionLifecycleRecord, instruction: string): Promise<void> {
     this.calls.push(`deliver ${instruction}`);
     if (this.failure !== undefined) throw this.failure;
+  }
+  async settled(): Promise<'settled' | 'timed-out'> {
+    this.calls.push('settled');
+    if (this.failure !== undefined) throw this.failure;
+    return this.settlement;
   }
   async snapshot(): Promise<void> {
     this.calls.push('snapshot');
@@ -87,12 +93,23 @@ describe('RuntimeSupervisedLauncher', () => {
     const launched = await subject.launch(RECORD);
     await subject.ready(RECORD);
     await subject.deliver(RECORD, 'go');
+    const settled = await subject.settled(RECORD);
     await subject.snapshot(RECORD);
     await subject.stop(RECORD);
 
     // Assert
-    should(inner.calls).deepEqual(['alive', 'launch', 'ready', 'deliver go', 'snapshot', 'stop', `ended ${WRAPPER}`]);
+    should(inner.calls).deepEqual([
+      'alive',
+      'launch',
+      'ready',
+      'deliver go',
+      'settled',
+      'snapshot',
+      'stop',
+      `ended ${WRAPPER}`,
+    ]);
     should(launched).equal(LAUNCHED);
+    should(settled).equal('settled');
   });
 
   it('should explain a Codex that could not reach the network while starting', async () => {
@@ -104,9 +121,10 @@ describe('RuntimeSupervisedLauncher', () => {
     // Act
     const ready = await caught(subject.ready(RECORD));
     const deliver = await caught(subject.deliver(RECORD, 'go'));
+    const settled = await caught(subject.settled(RECORD));
 
     // Assert
-    for (const error of [ready, deliver]) {
+    for (const error of [ready, deliver, settled]) {
       should(error.message.startsWith(CODEX_OFFLINE_LAUNCH_ERROR)).be.true();
       should(error.cause).equal(inner.failure);
     }
@@ -122,6 +140,34 @@ describe('RuntimeSupervisedLauncher', () => {
     // Act + Assert
     should(await caught(unrelated.ready(RECORD))).equal(inner.failure);
     should(await caught(unreadable.deliver(RECORD, 'go'))).equal(inner.failure);
+    should(await caught(unrelated.settled(RECORD))).equal(inner.failure);
+    should(await caught(unreadable.settled(RECORD))).equal(inner.failure);
+  });
+
+  it('should pass a timed-out wait through untouched, since a slow start is not a failed one', async () => {
+    // Arrange
+    const inner = new RecordingLauncher();
+    inner.settlement = 'timed-out';
+    const subject = new RuntimeSupervisedLauncher(inner, supervisor([]), screen(OFFLINE));
+
+    // Act + Assert
+    should(await subject.settled(RECORD)).equal('timed-out');
+  });
+
+  it('should call a start settled when the launcher it wraps cannot tell', async () => {
+    // Arrange — the optional port method is absent, as on a launcher that never waits on startup.
+    const bare: SessionLifecycleLauncher = {
+      alive: async () => true,
+      launch: async () => undefined,
+      ready: async () => undefined,
+      deliver: async () => undefined,
+      snapshot: async () => undefined,
+      stop: async () => undefined,
+    };
+    const subject = new RuntimeSupervisedLauncher(bare, supervisor([]), screen(''));
+
+    // Act + Assert
+    should(await subject.settled(RECORD)).equal('settled');
   });
 });
 
