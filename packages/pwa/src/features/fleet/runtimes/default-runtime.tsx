@@ -68,15 +68,15 @@ export function DefaultRuntimeControl({
     );
 
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-default-runtime="">
-      <div className="flex min-w-0 flex-col gap-1 md:flex-row md:flex-wrap md:items-center md:gap-3">
-        <label htmlFor={id} className="shrink-0 text-cell font-semibold text-fg">
+    <div className="flex min-w-0 flex-col gap-1" data-default-runtime="">
+      <div className="flex min-w-0 items-center gap-3">
+        <label htmlFor={id} className="shrink-0 text-ui font-semibold text-fg">
           {DEFAULT_RUNTIME_LABEL}
         </label>
         <select
           id={id}
           aria-describedby={`${id}-hint`}
-          className="kt-input w-full min-w-0 md:w-auto md:min-w-64 md:max-w-full"
+          className="kt-input min-w-0 flex-1 md:max-w-80 md:flex-none"
           data-default-runtime-select=""
           value={shown}
           onChange={event => {
@@ -96,10 +96,10 @@ export function DefaultRuntimeControl({
             </option>
           ))}
         </select>
-        <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="" id={`${id}-hint`}>
-          {DEFAULT_RUNTIME_HINT}
-        </p>
       </div>
+      <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="" id={`${id}-hint`}>
+        {DEFAULT_RUNTIME_HINT}
+      </p>
       {pending ? (
         <ChangeApplyPanel
           machineName={machineName}

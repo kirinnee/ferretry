@@ -11,7 +11,7 @@ import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
-import { AutoResumeSection } from '../../../src/features/fleet/machine/settings-tab.tsx';
+import { AutoResumeRows } from '../../../src/features/fleet/machine/settings-tab.tsx';
 import type { SetupAccess } from '../../../src/features/fleet/setup/setup-access.ts';
 import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';
@@ -51,7 +51,11 @@ const access = {
 const scene = (): string =>
   renderToStaticMarkup(
     <div className="flex min-w-0 flex-col gap-5 bg-bg p-panel">
-      <AutoResumeSection machine={machine} machineName="studio" access={access} onSaved={() => undefined} />
+      <section data-setup-section="auto-resume">
+        <ul className="kt-groupcard m-0 list-none p-0">
+          <AutoResumeRows machine={machine} machineName="studio" access={access} onSaved={() => undefined} />
+        </ul>
+      </section>
     </div>,
   );
 

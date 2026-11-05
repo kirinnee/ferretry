@@ -108,7 +108,7 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
 function ListPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Page) => void }) {
   const profiles = catalog.profiles.profiles;
   const create = (
-    <Button type="button" variant="primary" data-profile-new="" onClick={() => open({ kind: 'new' })}>
+    <Button type="button" size="sm" variant="primary" data-profile-new="" onClick={() => open({ kind: 'new' })}>
       + New profile
     </Button>
   );
@@ -125,8 +125,7 @@ function ListPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Pag
     );
   return (
     <>
-      <PageHead title="Profiles" sub={counted(profiles.length, 'profile')} />
-      <div>{create}</div>
+      <PageHead title="Profiles" sub={counted(profiles.length, 'profile')} action={create} />
       <RowList label="Profiles">
         {profiles.map(profile => {
           const runtimes = runtimesReaching(profile, catalog.runtimes.runtimes).length;

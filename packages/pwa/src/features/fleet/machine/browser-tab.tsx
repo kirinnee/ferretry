@@ -32,7 +32,7 @@ export function BrowserTab(props: MachineTabProps) {
     );
 
   return (
-    <div className="flex min-w-0 flex-col gap-5" data-browser-tab="">
+    <div className="flex min-w-0 flex-col gap-4" data-browser-tab="">
       <BrowserStateLine access={access} online={online} savedProxy={machine.browserProxy != null} />
       <BrowserModeSection
         key={machine.browserMode ?? 'headless'}

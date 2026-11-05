@@ -2,7 +2,8 @@ import type { BrowserMode, FleetMachineView } from '@ferretry/protocol';
 import { useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
-import { RadioChoices, SetupSection } from '../setup/setup-ui.tsx';
+import { Segmented, SettingRow } from '../../settings/setting-row.tsx';
+import { SetupSection } from '../setup/setup-ui.tsx';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { machineSettings } from './machine-settings.ts';
 
@@ -44,21 +45,41 @@ export function BrowserModeSection({
   if (machine.browserMode === undefined) return null;
   return (
     <SetupSection title="Browser mode" name="browser-mode">
-      <RadioChoices
-        legend="Browser mode"
-        legendHidden
-        name="browser-mode"
-        value={draft}
-        onChoose={value => {
-          setDraft(value);
-          changes.clear();
-        }}
-        options={(['headless', 'window'] as const).map(mode => ({ id: mode, ...BROWSER_MODE_WORDS[mode] }))}
-      />
-      <p className="m-0 text-meta leading-base text-muted" data-browser-mode-hint="">
-        Applies the next time the browser on {machineName} starts. Neither mode solves a captcha for you: when a page
-        asks, take it over and solve it yourself.
-      </p>
+      <ul className="kt-groupcard m-0 list-none p-0" aria-label="Browser mode" data-browser-mode-list="">
+        <SettingRow
+          name="Browser mode"
+          hint={`Applies the next time the browser on ${machineName} starts.`}
+          explanation={
+            <div className="flex flex-col gap-2" data-browser-mode-explanation="">
+              {(['headless', 'window'] as const).map(mode => (
+                <p key={mode} className="m-0" data-browser-mode-detail={mode}>
+                  <span className="font-semibold text-fg">{BROWSER_MODE_WORDS[mode].title}.</span>{' '}
+                  {BROWSER_MODE_WORDS[mode].detail}
+                </p>
+              ))}
+              <p className="m-0" data-browser-mode-hint="">
+                Applies the next time the browser on {machineName} starts. Neither mode solves a captcha for you: when a
+                page asks, take it over and solve it yourself.
+              </p>
+            </div>
+          }
+          control={() => (
+            <Segmented
+              label="Browser mode"
+              value={draft}
+              onChange={value => {
+                setDraft(value);
+                changes.clear();
+              }}
+              options={(['headless', 'window'] as const).map(mode => ({
+                id: mode,
+                label: BROWSER_MODE_WORDS[mode].title,
+                title: BROWSER_MODE_WORDS[mode].detail,
+              }))}
+            />
+          )}
+        />
+      </ul>
       {pending ? (
         <ChangeApplyPanel
           machineName={machineName}

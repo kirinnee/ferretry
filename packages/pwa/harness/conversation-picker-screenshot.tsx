@@ -38,7 +38,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import { ConversationsSection } from '../../src/features/fleet/machine/settings-tab.tsx';
+import { ConversationsRows } from '../../src/features/fleet/machine/settings-tab.tsx';
 import { ContinueConversation } from '../../src/features/fleet/conversations/continue-conversation.tsx';
 import { ConversationPicker } from '../../src/features/fleet/conversations/conversation-picker.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -119,7 +119,9 @@ createRoot(root).render(
   <main data-fixture="" style={{ margin: '0 auto', maxWidth: 720, padding: '12px 16px' }}>
     <section className="kt-panel p-panel">
       {view === 'settings' ? (
-        <ConversationsSection daemonId={connection.daemonId} access={access} />
+        <ul className="kt-groupcard m-0 list-none p-0">
+          <ConversationsRows daemonId={connection.daemonId} access={access} />
+        </ul>
       ) : view !== 'picker' ? (
         <ContinueConversation connection={connection} createClient={async () => client} onNavigate={() => undefined} now={() => NOW} sessions={SESSIONS} resume={async () => undefined} />
       ) : (

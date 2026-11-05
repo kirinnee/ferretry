@@ -39,7 +39,7 @@ export function BrowserProxyCredential({
         {what}
       </label>
       {showBox ? (
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <input
             id={id}
             // `password` hides it from a shoulder; `new-password` keeps a password manager from filing a copy.
@@ -48,7 +48,7 @@ export function BrowserProxyCredential({
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            className="kt-input min-w-0 flex-1"
+            className="kt-input min-w-0 flex-1 basis-32"
             value={value}
             placeholder={replacing ? `New ${key}` : ''}
             data-browser-proxy-credential-value={key}
@@ -57,6 +57,7 @@ export function BrowserProxyCredential({
           {replacing ? (
             <Button
               type="button"
+              size="sm"
               data-browser-proxy-credential-cancel={key}
               onClick={() => {
                 setReplacing(false);
@@ -68,21 +69,26 @@ export function BrowserProxyCredential({
           ) : null}
         </div>
       ) : (
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <input
             id={id}
             readOnly
             tabIndex={-1}
-            className="kt-input min-w-0 flex-1 text-muted"
+            className="kt-input min-w-0 flex-1 basis-32 text-muted"
             value={MASK}
             aria-label={`${what}: stored`}
             data-browser-proxy-credential-stored={key}
           />
           <div className="flex gap-2">
-            <Button type="button" data-browser-proxy-credential-replace={key} onClick={() => setReplacing(true)}>
+            <Button
+              type="button"
+              size="sm"
+              data-browser-proxy-credential-replace={key}
+              onClick={() => setReplacing(true)}
+            >
               Replace
             </Button>
-            <Button type="button" data-browser-proxy-credential-remove={key} onClick={onRemove}>
+            <Button type="button" size="sm" data-browser-proxy-credential-remove={key} onClick={onRemove}>
               Remove
             </Button>
           </div>

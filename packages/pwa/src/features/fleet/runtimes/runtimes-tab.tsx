@@ -68,12 +68,17 @@ const followInApp = (event: MouseEvent<HTMLAnchorElement>, browser: Window = win
 function MissingHarness({
   runtime,
   machineName,
+  className,
 }: {
   readonly runtime: FleetRuntimeView;
   readonly machineName: string;
+  readonly className?: string;
 }) {
   return (
-    <p className="m-0 flex flex-wrap items-center gap-1 text-cell text-warn" data-runtime-missing-harness="">
+    <p
+      className={cn('relative m-0 flex flex-wrap items-center gap-1 text-meta text-warn', className)}
+      data-runtime-missing-harness=""
+    >
       <TriangleAlert size={14} aria-hidden="true" />
       <span>{HARNESS_NAMES[runtime.harness]} isn’t installed here</span> ·{' '}
       <a href={machineDetailHash(machineName, 'machine')} className="font-semibold text-accent underline">
@@ -414,42 +419,37 @@ function RuntimeRow({
     !isDefaultRuntime(machine, runtime);
   const detailsLine = `${loginLine(runtime, data)} · ${runtime.profile} profile · ${runtimeDefaultModel(runtime)}`;
   return (
-    <div className="flex flex-col gap-1">
-      <div
-        className="kt-panel relative flex min-w-0 flex-col gap-1 p-panel has-[a:hover]:border-accent"
-        data-runtime-card={runtime.name}
+    <li
+      className="relative flex min-h-[var(--row-min-h)] min-w-0 flex-col justify-center gap-0.5 px-panel py-1 hover:bg-[var(--nav-hover,var(--surface-2))]"
+      data-runtime-card={runtime.name}
+    >
+      <RuntimeSwitch
+        compact
+        detailsClassName={`${ROW_INDENT} empty:hidden`}
+        runtime={runtime}
+        machineName={machineName}
+        online={online}
+        changes={changes}
+        reload={reload}
       >
-        <RuntimeSwitch
-          compact
-          detailsClassName={`${ROW_INDENT} empty:hidden`}
-          runtime={runtime}
-          machineName={machineName}
-          online={online}
-          changes={changes}
-          reload={reload}
-        >
-          {({ toggle, details }) => (
-            <>
-              <div className="flex min-w-0 items-center gap-2">
-                <a
-                  href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-                  className="flex min-h-control min-w-0 flex-1 items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
-                  data-runtime-row={runtime.name}
-                >
-                  <AccountStatus
-                    word={runtimeWord(runtime)}
-                    className="min-h-[calc(var(--control-h)-0.5rem)] w-4 shrink-0 justify-center"
-                  />
+        {({ toggle, details }) => (
+          <>
+            <div className="flex min-w-0 items-center gap-2">
+              <a
+                href={machineDetailHash(machineName, 'runtimes', runtime.name)}
+                className="flex min-h-control min-w-0 flex-1 items-center gap-2 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                data-runtime-row={runtime.name}
+              >
+                <AccountStatus word={runtimeWord(runtime)} className="w-4 shrink-0 justify-center" />
+                <span className="flex min-w-0 flex-1 flex-nowrap items-center gap-x-2" data-runtime-name-row="">
                   <span
-                    className="flex min-h-[calc(var(--control-h)-0.5rem)] min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1"
-                    data-runtime-name-row=""
+                    className="min-w-0 truncate font-mono text-ui font-semibold text-fg"
+                    title={runtime.name}
+                    data-runtime-name=""
                   >
-                    <span
-                      className="max-w-full shrink-0 break-words font-mono text-row font-semibold text-fg"
-                      data-runtime-name=""
-                    >
-                      {runtime.name}
-                    </span>
+                    {runtime.name}
+                  </span>
+                  <span className="hidden shrink-0 items-center gap-x-2 md:contents">
                     {isDefaultRuntime(machine, runtime) ? (
                       <Badge tone="ok" className="shrink-0" data-runtime-default-badge="">
                         Default
@@ -461,34 +461,40 @@ function RuntimeRow({
                       </Badge>
                     )}
                   </span>
-                </a>
-                {toggle}
-                <RuntimeActionsMenu
-                  runtime={runtime}
-                  refusal={refusal}
-                  onRename={() => onAct({ kind: 'rename', name: runtime.name })}
-                  onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
-                  {...(showMakeDefault ? { onMakeDefault: () => onMakeDefault(runtime.name) } : {})}
-                />
-              </div>
-              <span
-                className={`${ROW_INDENT} truncate text-cell text-muted`}
-                title={detailsLine}
-                data-runtime-details=""
-              >
+                </span>
+              </a>
+              {toggle}
+              <RuntimeActionsMenu
+                runtime={runtime}
+                refusal={refusal}
+                onRename={() => onAct({ kind: 'rename', name: runtime.name })}
+                onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
+                {...(showMakeDefault ? { onMakeDefault: () => onMakeDefault(runtime.name) } : {})}
+              />
+            </div>
+            <span
+              className={`${ROW_INDENT} flex min-w-0 items-center gap-x-2 text-meta text-muted`}
+              title={detailsLine}
+              data-runtime-details=""
+            >
+              <span className="flex shrink-0 items-center gap-x-2 md:hidden">
+                {isDefaultRuntime(machine, runtime) ? <Badge tone="ok">Default</Badge> : null}
+                {runtime.agent ? null : <Badge>Not agent</Badge>}
+              </span>
+              <span className="min-w-0 truncate">
                 <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
                 {runtimeDefaultModel(runtime)}
               </span>
-              {details}
-            </>
-          )}
-        </RuntimeSwitch>
-        <SkippedLine name={runtime.name} items={skippedItems(runtime)} className={ROW_INDENT} />
-      </div>
+            </span>
+            {details}
+          </>
+        )}
+      </RuntimeSwitch>
+      <SkippedLine name={runtime.name} items={skippedItems(runtime)} className={ROW_INDENT} />
       {harnessInstalled(machine, runtime.harness) ? null : (
-        <MissingHarness runtime={runtime} machineName={machineName} />
+        <MissingHarness runtime={runtime} machineName={machineName} className={ROW_INDENT} />
       )}
-    </div>
+    </li>
   );
 }
 
@@ -648,7 +654,7 @@ export function RuntimesTab({
     defaultRef.current?.scrollIntoView?.({ block: 'nearest' });
   };
   return (
-    <section className="flex min-w-0 flex-col gap-4" data-runtimes-tab="">
+    <section className="flex min-w-0 flex-col gap-3" data-runtimes-tab="">
       {state.kind === 'failed' ? (
         <p role="alert" className="m-0 text-cell leading-base text-warn">
           {state.sentence}
@@ -672,7 +678,7 @@ export function RuntimesTab({
       ) : (
         <>
           {machine === null ? null : (
-            <div ref={defaultRef} className="scroll-mt-4 border-b border-border-soft pb-4">
+            <div ref={defaultRef} className="scroll-mt-4">
               <DefaultRuntimeControl
                 machine={machine}
                 machineName={machineName}
@@ -692,31 +698,34 @@ export function RuntimesTab({
               {runtimes.length} {runtimes.length === 1 ? 'runtime' : 'runtimes'} on {machineName}
             </p>
             <span className="flex flex-wrap gap-2">
-              <Button type="button" data-import-conversations-open="" onClick={() => setImporting(true)}>
+              <Button type="button" size="sm" data-import-conversations-open="" onClick={() => setImporting(true)}>
                 Import conversations…
               </Button>
-              <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
+              <Button type="button" size="sm" variant="primary" data-add-runtime="" onClick={start}>
                 <Plus size={16} aria-hidden="true" />
                 Add runtime
               </Button>
             </span>
           </div>
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+          <ul
+            className="kt-groupcard m-0 list-none p-0"
+            aria-label={`Runtimes on ${machineName}`}
+            data-runtimes-list=""
+          >
             {runtimes.map(item => (
-              <li key={item.name}>
-                <RuntimeRow
-                  runtime={item}
-                  data={data}
-                  machine={machine}
-                  machineName={machineName}
-                  online={online}
-                  refusal={refusal}
-                  onAct={open}
-                  {...(machine === null ? {} : { onMakeDefault: makeDefault })}
-                  changes={changes}
-                  reload={reload}
-                />
-              </li>
+              <RuntimeRow
+                key={item.name}
+                runtime={item}
+                data={data}
+                machine={machine}
+                machineName={machineName}
+                online={online}
+                refusal={refusal}
+                onAct={open}
+                {...(machine === null ? {} : { onMakeDefault: makeDefault })}
+                changes={changes}
+                reload={reload}
+              />
             ))}
           </ul>
           {refusal === null ? null : (

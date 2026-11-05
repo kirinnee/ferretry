@@ -276,13 +276,24 @@ describe('BrowserTab › Browser mode', () => {
       },
       async ({ q, calls, refreshed }) => {
         const section = must(q('[data-setup-section="browser-mode"]'), 'browser mode');
-        expect(section.querySelector('[data-setup-choice="headless"]')?.textContent).toContain('Headless');
-        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('needs Xvfb');
+        // One compact row with a segmented pick; the long words are behind its (i), none of them dropped.
+        const group = must(section.querySelector('[role="radiogroup"]'), 'the segmented pick');
+        expect(group.textContent).toBe('HeadlessReal window');
+        expect(section.querySelector('ul.kt-groupcard [data-setting-row]')).not.toBeNull();
+        expect(section.querySelector('[data-setup-choice]')).toBeNull();
+        expect(section.querySelector('[data-setting-hint]')?.textContent).toBe(
+          'Applies the next time the browser on studio-mac starts.',
+        );
+        expect(q('[data-browser-mode-hint]')).toBeNull();
+        await click(q('[data-setting-info]'), 'the (i)');
+        expect(q('[data-browser-mode-detail="window"]')?.textContent).toContain('needs Xvfb');
+        expect(q('[data-browser-mode-detail="headless"]')?.textContent).toContain('No window.');
         expect(q('[data-browser-mode-hint]')?.textContent).toContain(
           'Applies the next time the browser on studio-mac starts.',
         );
+        expect(q('[data-browser-mode-hint]')?.textContent).toContain('Neither mode solves a captcha for you');
         expect(q('[data-change-submit]')).toBeNull();
-        await click(q('[data-setup-choice="window"] input'), 'window radio');
+        await click(q('[role="radiogroup"] input[value="window"]'), 'window radio');
         expect(q('[data-change-submit]')?.textContent).toBe('Save browser mode');
         expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Headless');
         await click(q('[data-change-submit]'), 'save');

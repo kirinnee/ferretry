@@ -22,8 +22,7 @@ export interface PanelGroup {
 }
 
 const PANEL_GROUPS = [
-  { id: 'supervision', label: 'Supervision', tab: 'agents', panels: ['warden'] },
-  { id: 'agent-settings', label: 'More agent settings', tab: 'agents', panels: ['learning', 'pack'] },
+  { id: 'more', label: 'More', tab: 'agents', panels: ['warden', 'learning', 'pack'] },
   { id: 'site-sign-ins', label: 'Sites and secrets', tab: 'sign-ins', panels: ['accounts', 'secrets', 'secure-copy'] },
   {
     id: 'devices-access',

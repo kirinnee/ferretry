@@ -63,16 +63,16 @@ export function Prose({ children }: { children: ReactNode }) {
   return <p className="m-0 text-cell leading-base text-fg">{children}</p>;
 }
 
-/** A list of rows inside one panel. */
+/** A list of rows inside one grouped card (the Settings look: a hairline between rows, no box per row). */
 export function RowList({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <ul aria-label={label} className="kt-panel m-0 flex min-w-0 list-none flex-col divide-y divide-border p-0">
+    <ul aria-label={label} className="kt-groupcard m-0 min-w-0 list-none p-0">
       {children}
     </ul>
   );
 }
 
-const ROW = 'flex min-h-control w-full min-w-0 items-center gap-3 px-panel py-2 text-left';
+const ROW = 'flex min-h-[var(--row-min-h)] w-full min-w-0 items-center gap-3 px-panel py-1 text-left';
 
 /** A row that opens a page. */
 export function OpenRow({
@@ -98,10 +98,12 @@ export function OpenRow({
   return (
     <li className="min-w-0">
       <button type="button" className={cn(ROW, 'transition-colors hover:bg-surface-2')} onClick={onOpen} {...data}>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={cn('break-words text-row font-semibold text-fg', mono && 'font-mono')}>{title}</span>
-          {badges}
-          {sub === undefined ? null : <span className="break-words text-cell text-muted">{sub}</span>}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className={cn('break-words text-ui font-semibold text-fg', mono && 'font-mono')}>{title}</span>
+            {badges}
+          </span>
+          {sub === undefined ? null : <span className="break-words text-meta leading-tight text-muted">{sub}</span>}
         </span>
         {aside}
         <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
@@ -115,9 +117,9 @@ export function OpenRow({
 export function PlainRow({ title, sub, mono = false }: { title: ReactNode; sub?: ReactNode; mono?: boolean }) {
   return (
     <li className={ROW}>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={cn('break-words text-row text-fg', mono && 'font-mono')}>{title}</span>
-        {sub === undefined ? null : <span className="break-words text-cell text-muted">{sub}</span>}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className={cn('break-words text-ui text-fg', mono && 'font-mono')}>{title}</span>
+        {sub === undefined ? null : <span className="break-words text-meta leading-tight text-muted">{sub}</span>}
       </span>
     </li>
   );
@@ -147,11 +149,14 @@ export function PageHead({
   sub,
   mono = false,
   onBack,
+  action,
 }: {
   title: string;
   sub?: string;
   mono?: boolean;
   onBack?: () => void;
+  /** A button that belongs to the page as a whole, on the title's line (`+ New profile`). */
+  action?: ReactNode;
 }) {
   return (
     <header className="flex min-w-0 flex-col gap-1">
@@ -166,14 +171,17 @@ export function PageHead({
           ‹ Back
         </button>
       )}
-      <h3
-        className={cn(
-          'm-0 break-words font-display text-title font-semibold tracking-display text-fg',
-          mono && 'font-mono',
-        )}
-      >
-        {title}
-      </h3>
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <h3
+          className={cn(
+            'm-0 min-w-0 break-words font-display text-title font-semibold tracking-display text-fg',
+            mono && 'font-mono',
+          )}
+        >
+          {title}
+        </h3>
+        {action}
+      </div>
       {sub === undefined ? null : <p className="m-0 text-cell text-muted">{sub}</p>}
     </header>
   );
