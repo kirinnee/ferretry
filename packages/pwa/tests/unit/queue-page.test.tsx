@@ -90,6 +90,18 @@ describe('QueuePageView', () => {
     expect(JSON.stringify(mounted.toJSON())).toContain('3 messages are waiting');
   });
 
+  test('keeps every card, the header and the empty note at natural height so the page scrolls instead of clipping rows', () => {
+    mounted = view({ groups: [group([queued('q1', 'queued')], 'd1/s1'), group([queued('q22', 'read')], 'd1/s2')] });
+    const sections = mounted.root.findAll(n => n.type === 'section' && n.props['data-queue-group'] !== undefined);
+    expect(sections).toHaveLength(2);
+    for (const section of sections) expect(String(section.props.className).split(' ')).toContain('shrink-0');
+    expect(String(mounted.root.findByType('header').props.className).split(' ')).toContain('shrink-0');
+    mounted.unmount();
+    mounted = view({ groups: [] });
+    const note = mounted.root.findAll(n => n.type === 'p' && text(n) === 'Nothing is waiting.');
+    expect(String(note[0]?.props.className).split(' ')).toContain('shrink-0');
+  });
+
   test('says when nothing waits, and when it is still reading', () => {
     mounted = view({ groups: [] });
     expect(JSON.stringify(mounted.toJSON())).toContain('Nothing is waiting.');

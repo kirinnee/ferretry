@@ -163,7 +163,7 @@ export function QueuePageView({
       className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 scroll-thin"
       data-queue-page=""
     >
-      <header className="flex flex-wrap items-baseline gap-3">
+      <header className="flex shrink-0 flex-wrap items-baseline gap-3">
         <h1 className="m-0 text-lg">{title}</h1>
         <span className="text-meta text-muted">{loading ? 'Reading the queues…' : waitingCountLine(waiting)}</span>
         {onShowAll === undefined ? null : (
@@ -172,11 +172,11 @@ export function QueuePageView({
           </button>
         )}
       </header>
-      {groups.length === 0 && !loading ? <p className="m-0 text-muted">Nothing is waiting.</p> : null}
+      {groups.length === 0 && !loading ? <p className="m-0 shrink-0 text-muted">Nothing is waiting.</p> : null}
       {groups.map(group => (
         <section
           aria-label={group.ferret}
-          className="kt-panel overflow-hidden"
+          className="kt-panel shrink-0 overflow-hidden"
           data-queue-group={group.key}
           key={group.key}
         >
