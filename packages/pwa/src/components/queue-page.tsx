@@ -18,6 +18,7 @@ import {
   type RowSend,
   rowSend,
   TURN_ENDS_COPY,
+  DUE_NOW_COPY,
   waitingCountLine,
   waitingGroups,
 } from '../lib/queue-view.ts';
@@ -52,12 +53,16 @@ export interface QueueRowHandlers {
   readonly cancel: (row: QueueRow) => Promise<void>;
 }
 
-/** "sends by 11:20" / "when its turn ends", on the reader's clock. */
+/** "sends by 11:20" / "due now" / "when its turn ends", on the reader's clock. */
 const sendCopy = (send: RowSend, lead: string): string => {
+  if ('due' in send) return DUE_NOW_COPY;
   if ('turn' in send) return TURN_ENDS_COPY;
   const clock = clockOfInstant(send.at);
   return clock === undefined ? TURN_ENDS_COPY : `${lead} ${clock.short}`;
 };
+
+/** The machine-readable twin of the copy: `due`, `turn`, or the hold's instant. */
+const sendKey = (send: RowSend): string => ('due' in send ? 'due' : 'turn' in send ? 'turn' : send.at);
 
 function QueueRowView({
   row,
@@ -92,9 +97,7 @@ function QueueRowView({
           </span>
         )}
         <span>{row.why}</span>
-        {send === undefined ? null : (
-          <span data-queue-send={'turn' in send ? 'turn' : send.at}>{sendCopy(send, 'sends by')}</span>
-        )}
+        {send === undefined ? null : <span data-queue-send={sendKey(send)}>{sendCopy(send, 'sends by')}</span>}
       </div>
       {editing ? (
         <div className="flex flex-col gap-2">
@@ -165,7 +168,7 @@ function GroupNextSend({ group, now }: { readonly group: QueueGroup; readonly no
   const next = groupNextSend(group, now);
   if (next === undefined) return null;
   return (
-    <span className="text-meta text-muted" data-queue-next={'turn' in next ? 'turn' : next.at}>
+    <span className="text-meta text-muted" data-queue-next={sendKey(next)}>
       {sendCopy(next, 'next send')}
     </span>
   );

@@ -146,11 +146,22 @@ describe('when a queued message goes', () => {
     expect(rowSend(row({ holdUntil: '2026-11-04T11:20:00.000Z' }), NOW)).toEqual({ at: '2026-11-04T11:20:00.000Z' });
   });
 
-  test('no hold, or one that has run out, waits for the turn to end — unless something else is in the way', () => {
+  test('no hold waits for the turn to end — unless something else is in the way', () => {
     expect(rowSend(row(), NOW)).toEqual({ turn: true });
     expect(rowSend(row({ waitReason: 'busy' as never }), NOW)).toEqual({ turn: true });
-    expect(rowSend(row({ holdUntil: '2026-11-04T10:59:00.000Z' }), NOW)).toEqual({ turn: true });
     expect(rowSend(row({ waitReason: 'stopped' as never }), NOW)).toBeUndefined();
+  });
+
+  test('a hold that is up reads as due now, not as waiting for the turn', () => {
+    expect(rowSend(row({ holdUntil: '2026-11-04T10:59:00.000Z' }), NOW)).toEqual({ due: true });
+    expect(rowSend(row({ holdUntil: '2026-11-04T11:00:00.000Z' }), NOW)).toEqual({ due: true });
+    expect(rowSend(row({ holdUntil: '2026-11-04T11:00:00.001Z' }), NOW)).toEqual({ at: '2026-11-04T11:00:00.001Z' });
+  });
+
+  test('an expired hold with a reason in the way still defers to the reason', () => {
+    const past = '2026-11-04T10:59:00.000Z';
+    expect(rowSend(row({ holdUntil: past, waitReason: 'busy' as never }), NOW)).toEqual({ turn: true });
+    expect(rowSend(row({ holdUntil: past, waitReason: 'stopped' as never }), NOW)).toBeUndefined();
   });
 
   test('only a queued message has a send time', () => {
@@ -174,5 +185,25 @@ describe('when a queued message goes', () => {
     expect(groupNextSend(group([row({ id: 'plain' })]), NOW)).toEqual({ turn: true });
     expect(groupNextSend(group([row({ waitReason: 'stopped' as never })]), NOW)).toBeUndefined();
     expect(groupNextSend(group([]), NOW)).toBeUndefined();
+  });
+
+  test('a due row is the ferret’s next send, ahead of any later hold or turn', () => {
+    const at = (id: string, hold: string) => row({ id, holdUntil: hold });
+    const group = (rows: ReturnType<typeof row>[]): QueueGroup => ({
+      key: 'k',
+      daemonId: 'd1',
+      machine: 'M',
+      sessionId: 's1',
+      ferret: 'Casen',
+      rows,
+    });
+    const later = at('later', '2026-11-04T11:20:00.000Z');
+    for (const hold of ['2026-11-04T10:59:00.000Z', '2026-11-04T11:00:00.000Z']) {
+      expect(groupNextSend(group([later, at('due', hold)]), NOW)).toEqual({ due: true });
+      expect(groupNextSend(group([at('due', hold), later, row({ id: 'plain' })]), NOW)).toEqual({ due: true });
+    }
+    expect(groupNextSend(group([later, at('soon', '2026-11-04T11:00:00.001Z')]), NOW)).toEqual({
+      at: '2026-11-04T11:00:00.001Z',
+    });
   });
 });

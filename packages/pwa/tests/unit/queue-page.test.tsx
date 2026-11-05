@@ -192,6 +192,26 @@ describe('QueuePageView send times', () => {
     );
   });
 
+  test('a hold that is up says due now, on the row and on the ferret, whatever a later hold says', () => {
+    mounted = view({
+      now: NOW,
+      groups: [
+        group([
+          queued('q1', 'queued', { holdUntil: '2026-11-04T11:20:00.000Z' }),
+          queued('q22', 'queued', { holdUntil: '2026-11-04T10:59:00.000Z' }),
+          queued('q3', 'queued', { holdUntil: '2026-11-04T11:00:00.000Z' }),
+        ]),
+      ],
+    });
+    const { root } = mounted;
+    for (const id of ['q22', 'q3']) {
+      expect(text(root.findByProps({ 'data-queue-row': id }).findByProps({ 'data-queue-send': 'due' }))).toBe(
+        'due now',
+      );
+    }
+    expect(text(root.findByProps({ 'data-queue-next': 'due' }))).toBe('due now');
+  });
+
   test('a row waiting on a busy ferret with no hold says when its turn ends; one on this device says nothing', () => {
     mounted = view({ now: NOW, groups: [group([saved, queued('q1', 'queued', { waitReason: 'busy' })])] });
     const { root } = mounted;
