@@ -234,6 +234,9 @@ function CompletionRow({
   );
 }
 
+/** A query is one logical line: typed or pasted line breaks become single spaces. */
+const normaliseQueryLineBreaks = (text: string): string => text.replace(/\r?\n/g, ' ');
+
 export function AnalyticsQueryAutocomplete({
   value,
   onValueChange,
@@ -350,10 +353,21 @@ export function AnalyticsQueryAutocomplete({
         value={value}
         placeholder={placeholder}
         onChange={event => {
+          const input = event.currentTarget;
+          const normalised = normaliseQueryLineBreaks(input.value);
+          if (normalised !== input.value) {
+            // Applying the normalised value makes the browser drop the caret at the end: re-seat it right
+            // after whatever was typed or pasted (`\r\n` collapses to one space, so measure the prefix).
+            pending.current = {
+              expected: normalised,
+              start: normaliseQueryLineBreaks(input.value.slice(0, input.selectionStart)).length,
+              end: normaliseQueryLineBreaks(input.value.slice(0, input.selectionEnd)).length,
+            };
+          }
           setActiveIndex(0);
           setDismissedAt(null);
-          onValueChange(event.currentTarget.value.replace(/\r?\n/g, ' '));
-          syncCaret(event.currentTarget);
+          onValueChange(normalised);
+          syncCaret(input);
         }}
         onSelect={event => syncCaret(event.currentTarget)}
         onFocus={() => setFocused(true)}
