@@ -199,22 +199,28 @@ export interface OnboardingRoute {
 const ROUTES: { readonly [Id in OnboardingRouteId]: OnboardingRoute & { readonly id: Id } } = Object.freeze({
   'first-time': Object.freeze({
     id: 'first-time' as const,
-    title: 'First time setup',
-    answer: 'Nothing installed yet. Get a daemon running on a computer, then pair this browser with it.',
+    title: 'Set up a computer',
+    answer: 'Nothing installed yet.',
   }),
   'add-client': Object.freeze({
     id: 'add-client' as const,
-    title: 'I have a link or QR',
-    answer: 'A daemon is already running somewhere. Pair this browser with it now.',
+    title: 'I have a QR or link',
+    answer: 'Ferretry already runs somewhere.',
   }),
   'add-daemon': Object.freeze({
     id: 'add-daemon' as const,
-    title: 'Add another daemon',
-    answer: 'You already have a fleet. Set up one more computer to run agents.',
+    title: 'Add another computer',
+    answer: 'Set up one more computer to run agents.',
   }),
 });
 
-/** All three entries, in the order they are read. */
+/**
+ * All three entries, in the order they are read.
+ *
+ * The chooser draws the first two as cards and the third as a small link: adding
+ * a computer is an errand for somebody who already has a fleet, and the entry is
+ * for the reader who has nothing yet.
+ */
 export const ONBOARDING_ROUTES: readonly OnboardingRoute[] = Object.freeze([
   ROUTES['first-time'],
   ROUTES['add-client'],
@@ -231,132 +237,55 @@ export const isOnboardingRouteId = (value: unknown): value is OnboardingRouteId 
 /** Whether this entry leads into the daemon subflow, and therefore has a target and a doer. */
 export const isDaemonRouteId = (id: OnboardingRouteId): id is OnboardingDaemonRouteId => id !== 'add-client';
 
-/**
- * WHAT THE STEP HEADER CALLS THIS JOURNEY.
- *
- * The subflow's own name, not the entry's: two entries walk the identical list of
- * steps, and a header reading "I have a link or QR · step 1 of 3" describes what
- * the reader was holding rather than what they are doing.
- */
-const JOURNEY: Readonly<Record<OnboardingRouteId, string>> = Object.freeze({
-  'first-time': 'Get a daemon running',
-  'add-client': 'Pair this browser',
-  'add-daemon': 'Add another daemon',
-});
-
 /** Every stage that any journey can put on the glass, in no particular order. */
-export type OnboardingStepId =
-  | 'brief'
-  | 'agent-pair'
-  | 'install'
-  | 'agents'
-  | 'daemon'
-  | 'local'
-  | 'elsewhere'
-  | 'handoff'
-  | 'pair'
-  | 'scan'
-  | 'done';
+export type OnboardingStepId = 'brief' | 'install' | 'local' | 'elsewhere' | 'handoff' | 'pair';
 
 export interface OnboardingStep {
   readonly id: OnboardingStepId;
-  /** The step heading. */
+  /** The page heading. */
   readonly title: string;
-  /** The track label. One word, because up to five of them share a 390px row. */
-  readonly short: string;
-  /**
-   * One short line under the heading.
-   *
-   * Never a paragraph, and never a sentence either: the diagram beside it
-   * already says where the work happens, so this says only what the reader does.
-   */
+  /** One short line under the heading: what the reader does here, never a paragraph. */
   readonly summary: string;
 }
 
+/**
+ * EVERY JOURNEY IS ONE PAGE, EXCEPT THE ONE WITH COMMANDS IN IT.
+ *
+ * A page the reader can finish by doing one thing is not three pages. The agent
+ * answer, the pairing entry and "another computer" are each a single page now —
+ * the instruction and the pairing surface sit together — and installing by hand
+ * on this computer is three: install and start, open, and the optional phone.
+ */
 const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze({
   brief: Object.freeze({
     id: 'brief' as const,
-    title: 'Give your agent the prompt',
-    short: 'Prompt',
-    summary: 'Copy it, then paste it into your agent.',
-  }),
-  'agent-pair': Object.freeze({
-    id: 'agent-pair' as const,
-    title: 'Pair when your agent is done',
-    short: 'Pair',
-    summary: 'It shows you a QR code and a link. Use them here.',
+    title: 'Let your agent set it up',
+    summary: 'Copy the prompt and paste it into your agent.',
   }),
   install: Object.freeze({
     id: 'install' as const,
-    title: 'Install Ferretry',
-    short: 'Install',
-    summary: 'Run this in a terminal on this machine.',
-  }),
-  /**
-   * THE STEP WITHOUT WHICH EVERYTHING ELSE IS THEATRE.
-   *
-   * Ferretry runs Claude and Codex; it is not either of them. A reader who
-   * installed `fy`, started the daemon and paired this browser has a working
-   * Ferretry that cannot run one session, and the old arc let them finish
-   * believing they were done. It is a step inside standing the daemon up rather
-   * than a question, because there is nothing here to decide.
-   */
-  agents: Object.freeze({
-    id: 'agents' as const,
-    title: 'Install Claude Code or Codex',
-    short: 'Agents',
-    /* Not "Ferretry runs these", which the line under it says better and once. */
-    summary: 'One of them is enough. Both is fine.',
-  }),
-  daemon: Object.freeze({
-    id: 'daemon' as const,
-    title: 'Start the daemon',
-    short: 'Daemon',
-    summary: 'Leave it running. It does the work.',
+    title: 'Install and start',
+    summary: 'Run this in a terminal on this computer.',
   }),
   local: Object.freeze({
     id: 'local' as const,
-    title: 'Open it from your terminal',
-    short: 'Open',
-    summary: 'The daemon is on this machine, so there is nothing to scan.',
+    title: 'Open Ferretry',
+    summary: 'The daemon is on this computer, so there is nothing to scan.',
   }),
-  /**
-   * THE WHOLE OF "ANOTHER COMPUTER, MYSELF" — one screen, and no instructions.
-   *
-   * It replaced `need-computer`, which only a phone could ever see and which
-   * explained why this device was unsuitable. The honest screen is about the
-   * machine that IS suitable, it is the same screen on a phone and on a computer,
-   * and it teaches nothing: that computer opens this page and is taught there.
-   */
   elsewhere: Object.freeze({
     id: 'elsewhere' as const,
-    title: 'Open Ferretry on that computer',
-    short: 'Computer',
+    title: 'Set it up on your computer',
     summary: 'Agents need a terminal, so the setup continues there.',
   }),
   handoff: Object.freeze({
     id: 'handoff' as const,
-    title: 'Add your phone',
-    short: 'Phone',
-    summary: 'Optional. Your phone can watch this machine too.',
+    title: 'Add your phone (optional)',
+    summary: 'Your phone can watch this computer too.',
   }),
   pair: Object.freeze({
     id: 'pair' as const,
-    title: 'Run fy pair',
-    short: 'Pair',
-    summary: 'On the computer running the daemon, print a fresh code.',
-  }),
-  scan: Object.freeze({
-    id: 'scan' as const,
-    title: 'Scan QR or paste link',
-    short: 'Scan',
-    summary: 'On this device, use the fresh code from that computer.',
-  }),
-  done: Object.freeze({
-    id: 'done' as const,
-    title: 'You are set up',
-    short: 'Done',
-    summary: 'This browser is a window onto your machine.',
+    title: 'Pair this device',
+    summary: 'Run the command there, then scan the QR it shows.',
   }),
 });
 
@@ -395,9 +324,6 @@ export type OnboardingJourney =
  * answer for the wrong kind of machine.
  */
 export type OnboardingPath = OnboardingJourney & { readonly device: DeviceKind };
-
-/** What the step header calls this journey. */
-export const journeyLabel = (path: OnboardingJourney): string => JOURNEY[path.route];
 
 /**
  * WHAT THIS DEVICE ALREADY ANSWERS FOR THE READER, and on what grounds.
@@ -444,42 +370,26 @@ export const presumedTarget = (route: OnboardingDaemonRouteId, device: DeviceKin
  * your own relay is an expert path with its own runbook,
  * `docs/cloudflare-relay-self-hosting.md`, and never a step here.
  */
-const DAEMON_STEPS: readonly OnboardingStepId[] = Object.freeze([
-  'install',
-  /*
-   * BEFORE the daemon starts, so its own boot preflight reports the harness the
-   * reader just installed rather than a gap they have to come back for. A daemon
-   * that came up first would have told them something was missing at the one
-   * moment they were being congratulated for starting it.
-   */
-  'agents',
-  'daemon',
-  'local',
-] as OnboardingStepId[]);
+const DAEMON_STEPS: readonly OnboardingStepId[] = Object.freeze(['install', 'local'] as OnboardingStepId[]);
 
 /**
- * The steps this journey walks.
+ * The pages this journey walks.
  *
- * FOUR LISTS, AND THE CROSS PRODUCT IS THE POINT — every one of them is short,
- * and none of them explains a machine the reader is not sitting at:
- *
- * - Pairing only: somebody arrived holding a code.
- * - An agent: the prompt, then pairing. Identical wherever the reader is
- *   standing, because none of the work happens on the device holding this page.
- * - Another computer, by hand: ONE screen that says to open this page there, then
- *   pairing. That computer walks the list below, answering "this one".
+ * - Pairing only: somebody arrived holding a code. One page.
+ * - An agent: the prompt, with the pairing surface under it. One page.
+ * - Another computer, by hand: the setup link, with the pairing surface under it.
+ *   One page; that computer walks the list below, answering "this one".
  * - This computer, by hand: the only list with commands in it, and the only one
  *   that ends by offering a phone the same view.
+ *
+ * NONE OF THEM ENDS ON A "DONE" PAGE. Pairing succeeding is the end, and the
+ * reader goes straight into the app.
  */
 export const onboardingRouteSteps = (path: OnboardingPath): readonly OnboardingStepId[] => {
-  if (path.route === 'add-client') return Object.freeze(['pair', 'scan', 'done'] as OnboardingStepId[]);
-  if (path.doer === 'agent') return Object.freeze(['brief', 'agent-pair', 'done'] as OnboardingStepId[]);
-  if (path.target === 'other') return Object.freeze(['elsewhere', 'scan', 'done'] as OnboardingStepId[]);
-  return Object.freeze([
-    ...DAEMON_STEPS,
-    ...(path.route === 'first-time' ? (['handoff'] as OnboardingStepId[]) : []),
-    'done',
-  ] as OnboardingStepId[]);
+  if (path.route === 'add-client') return Object.freeze(['pair'] as OnboardingStepId[]);
+  if (path.doer === 'agent') return Object.freeze(['brief'] as OnboardingStepId[]);
+  if (path.target === 'other') return Object.freeze(['elsewhere'] as OnboardingStepId[]);
+  return Object.freeze([...DAEMON_STEPS, ...(path.route === 'first-time' ? (['handoff'] as OnboardingStepId[]) : [])]);
 };
 
 /** Position within a journey, or `-1` for a step that journey never walks. */
@@ -490,58 +400,14 @@ export const onboardingStepIndex = (path: OnboardingPath, step: OnboardingStepId
 export const isStepOfRoute = (path: OnboardingPath, step: OnboardingStepId): boolean =>
   onboardingStepIndex(path, step) >= 0;
 
-/** How many steps this journey walks, for a track that has to say "step 2 of 5". */
+/** How many pages this journey walks, for a header that has to say "step 2 of 3". */
 export const onboardingStepCount = (path: OnboardingPath): number => onboardingRouteSteps(path).length;
 
 /** The step a journey opens on. */
 export const firstOnboardingStep = (path: OnboardingPath): OnboardingStepId => {
   const [first] = onboardingRouteSteps(path);
   /* Unreachable: every branch above ships at least one step, and each list is frozen. */
-  return first ?? 'done';
-};
-
-/**
- * The steps on which a daemon actually answers this browser.
- *
- * Every journey ends with exactly one of them, and which one is the whole subject
- * of this flow: `local` when the daemon is on this machine, `agent-pair` when an
- * agent printed the code, `scan` when the reader carried it here.
- */
-const PAIRING_STEPS: readonly OnboardingStepId[] = Object.freeze(['local', 'agent-pair', 'scan']);
-
-/**
- * WHERE A JOURNEY PAIRS, for the last screen's way back to it.
- *
- * Not "the step before the end": on the journey that offers the reader's phone
- * afterwards, the step before the end is that optional offer, and a reader who
- * pressed "back to pairing" would land on a screen with no pairing on it. Not a
- * two-way guess between `local` and `scan` either — that was wrong for the agent
- * answer, whose pairing step is neither. The journey knows, so it is asked.
- */
-export const pairingOnboardingStep = (path: OnboardingPath): OnboardingStepId => {
-  const steps = onboardingRouteSteps(path);
-  /* Unreachable: every list above ends in a pairing step and then `done`. */
-  return [...steps].reverse().find(step => PAIRING_STEPS.includes(step)) ?? firstOnboardingStep(path);
-};
-
-/** Is this a step the reader has been to, is on, or has not reached? */
-export type OnboardingStepStatus = 'completed' | 'current' | 'upcoming';
-
-/**
- * A step is jumpable exactly when the reader has already been there.
- *
- * `furthest` rather than `current` is what makes a back-jump reversible: after
- * stepping back from pairing to install, pairing is still somewhere the reader
- * has been, so the track must still take them there.
- */
-export const onboardingStepStatus = (
-  path: OnboardingPath,
-  step: OnboardingStepId,
-  current: OnboardingStepId,
-  furthest: OnboardingStepId,
-): OnboardingStepStatus => {
-  if (step === current) return 'current';
-  return onboardingStepIndex(path, step) <= onboardingStepIndex(path, furthest) ? 'completed' : 'upcoming';
+  return first ?? 'pair';
 };
 
 /** The next step of this journey, or the same one at the end of it. */
@@ -564,10 +430,9 @@ export const furthestOnboardingStep = (
 ): OnboardingStepId => (onboardingStepIndex(path, left) >= onboardingStepIndex(path, right) ? left : right);
 
 /**
- * Whether this step is the last one on its journey, so nothing offers a way onward.
+ * Whether this step is the last one on its journey, so finishing it means going into the app.
  *
- * A `Next` on the final step would advance to itself, which reads as a page that
- * is stuck — a control that does nothing is worse than no control.
+ * There is no page after it: pairing, or the reader saying they are done, is the end.
  */
 export const isLastOnboardingStep = (path: OnboardingPath, step: OnboardingStepId): boolean =>
   onboardingStepIndex(path, step) === onboardingStepCount(path) - 1;

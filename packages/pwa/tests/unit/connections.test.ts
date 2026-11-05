@@ -5,6 +5,7 @@ import {
   CONNECTIONS_VERSION,
   type DaemonConnectionRepository,
   DaemonConnectionStore,
+  type DaemonConnectionsChanged,
   type DaemonScopedCache,
   parseDaemonConnections,
 } from '../../src/lib/connections.ts';
@@ -407,5 +408,232 @@ describe('the name a paired machine goes by', () => {
 
     // Assert
     should(replaced?.daemonName).equal('workstation');
+  });
+});
+
+/** One browser: a repository and a channel that every tab shares, and that never echoes to its sender. */
+class SharedBrowser {
+  value: string | null = null;
+  failLoad = false;
+  readonly saves: string[] = [];
+  readonly announcements: unknown[] = [];
+  readonly #listeners = new Set<{ tab: number; listener: () => void }>();
+
+  #held: Promise<string | null> | undefined;
+
+  /** The next load is read at once but answers only when released, with the value given then. */
+  holdNextLoad(): (value: string | null) => void {
+    let release: (value: string | null) => void = () => undefined;
+    this.#held = new Promise(resolve => {
+      release = resolve;
+    });
+    return release;
+  }
+
+  repository(): DaemonConnectionRepository {
+    return {
+      load: async () => {
+        if (this.failLoad) throw new Error('load failed');
+        const held = this.#held;
+        if (held !== undefined) {
+          this.#held = undefined;
+          return await held;
+        }
+        return this.value;
+      },
+      save: async (_key, value) => {
+        this.value = value;
+        this.saves.push(value);
+      },
+    };
+  }
+
+  channel(tab: number): DaemonConnectionsChanged {
+    return {
+      announce: () => {
+        this.announcements.push('changed');
+        for (const heard of this.#listeners) if (heard.tab !== tab) heard.listener();
+      },
+      subscribe: listener => {
+        const heard = { tab, listener };
+        this.#listeners.add(heard);
+        return () => this.#listeners.delete(heard);
+      },
+    };
+  }
+}
+
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+  await new Promise(resolve => setTimeout(resolve, 0));
+};
+
+describe('two tabs of one browser', () => {
+  const open = async (browser: SharedBrowser, tab: number, caches: DaemonScopedCache[] = []) =>
+    await DaemonConnectionStore.open({ repository: browser.repository(), changed: browser.channel(tab), caches });
+
+  it('shows the original tab a pairing made in another tab, and tells its listeners', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    const other = await open(browser, 2);
+    let notified = 0;
+    original.subscribe(() => {
+      notified += 1;
+    });
+    should(original.list()).deepEqual([]);
+
+    other.add(connection('a'));
+    await other.flush();
+    await settle();
+
+    should(original.list().map(record => record.daemonId)).deepEqual(['a']);
+    should(original.selected()?.daemonId).equal('a');
+    should(notified).equal(1);
+  });
+
+  it('keeps this tab’s own selected machine when another tab selects a different one', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    original.add(connection('b'));
+    await original.flush();
+    const other = await open(browser, 2);
+    should(original.selected()?.daemonId).equal('b');
+
+    other.select(daemonId('a'));
+    await other.flush();
+    await settle();
+
+    should(original.selected()?.daemonId).equal('b');
+    should(other.selected()?.daemonId).equal('a');
+    should(
+      original
+        .list()
+        .map(record => record.daemonId)
+        .sort(),
+    ).deepEqual(['a', 'b']);
+  });
+
+  it('still adopts the other tab’s selection when this tab’s machine was removed there', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    original.add(connection('b'));
+    await original.flush();
+    const other = await open(browser, 2);
+    original.select(daemonId('a'));
+    await original.flush();
+
+    other.remove(daemonId('a'));
+    await other.flush();
+    await settle();
+
+    should(original.selected()?.daemonId).equal('b');
+  });
+
+  it('does not echo: adopting another tab’s registry saves and announces nothing', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    const other = await open(browser, 2);
+
+    other.add(connection('a'));
+    await other.flush();
+    await settle();
+    await original.flush();
+
+    should(browser.saves.length).equal(1);
+    should(browser.announcements.length).equal(1);
+  });
+
+  it('clears the caches of a pairing another tab removed or re-paired', async () => {
+    const browser = new SharedBrowser();
+    const first = await open(browser, 2);
+    first.add(connection('a'));
+    first.add(connection('b'));
+    await first.flush();
+    const cache = new RecordingCache();
+    const original = await open(browser, 1, [cache]);
+    should(original.list().length).equal(2);
+
+    first.remove(daemonId('a'));
+    first.add(connection('b', 'b2'));
+    await first.flush();
+    await settle();
+
+    should(original.list().map(record => record.daemonId)).deepEqual(['b']);
+    should(original.get(daemonId('b'))?.baseUrl).equal('https://b2.example.test');
+    should(cache.cleared.map(String).sort()).deepEqual(['a', 'b']);
+  });
+
+  it('keeps its registry when the repository cannot be re-read', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    await original.flush();
+    const other = await open(browser, 2);
+    other.add(connection('b'));
+    browser.failLoad = true;
+    await other.flush();
+    await settle();
+
+    should(original.list().map(record => record.daemonId)).deepEqual(['a']);
+  });
+
+  it('does not let a slow read of the old registry overwrite a newer local add', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    await original.flush();
+    const stale = browser.value;
+    const release = browser.holdNextLoad();
+
+    browser.channel(2).announce();
+    await settle();
+    original.add(connection('b'));
+    await original.flush();
+    release(stale);
+    await settle();
+    await original.flush();
+
+    should(
+      original
+        .list()
+        .map(record => record.daemonId)
+        .sort(),
+    ).deepEqual(['a', 'b']);
+    should(parseDaemonConnections(browser.value).connections.length).equal(2);
+  });
+
+  it('lets only the newest reload adopt what it read', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    browser.value = persisted([row('a', 1)], 'a');
+    const releaseOld = browser.holdNextLoad();
+
+    browser.channel(2).announce();
+    await settle();
+    const stale = browser.value;
+    browser.value = persisted([row('a', 1), row('b', 2)], 'b');
+    browser.channel(2).announce();
+    await settle();
+    releaseOld(stale);
+    await settle();
+
+    should(
+      original
+        .list()
+        .map(record => record.daemonId)
+        .sort(),
+    ).deepEqual(['a', 'b']);
+  });
+
+  it('carries no record, id or token in the signal', () => {
+    const browser = new SharedBrowser();
+    const channel = browser.channel(1);
+    const heard: unknown[] = [];
+    browser.channel(2).subscribe((...args: unknown[]) => heard.push(args));
+    channel.announce();
+    should(heard).deepEqual([[]]);
+    should(browser.announcements).deepEqual(['changed']);
   });
 });

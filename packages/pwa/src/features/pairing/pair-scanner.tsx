@@ -32,9 +32,17 @@ export interface PairScannerProps {
   readonly onText: (text: string) => void;
   /** A scan that ended in a refusal, so the caller can reveal its fallback. */
   readonly onFailed: () => void;
+  /**
+   * The resting control is NOT the page's one loud action.
+   *
+   * A host whose page leads with something else (copy a prompt, copy a link) draws the scan as a plain
+   * button, because two filled buttons on one page is a page with no next action. The scanning itself
+   * is unchanged.
+   */
+  readonly quiet?: boolean;
 }
 
-export function PairScanner({ host, label, onText, onFailed }: PairScannerProps) {
+export function PairScanner({ host, label, onText, onFailed, quiet = false }: PairScannerProps) {
   const video = useRef<HTMLVideoElement | null>(null);
   // True once frames are actually arriving. Permission prompts and camera
   // warm-up take a visible moment on a phone, and a black rectangle with no
@@ -111,12 +119,12 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
       ) : (
         <button
           type="button"
-          className="kt-btn min-h-[64px] w-full text-title"
-          data-variant="primary"
+          className={quiet ? 'kt-btn min-h-[44px] w-full' : 'kt-btn min-h-[64px] w-full text-title'}
+          {...(quiet ? {} : { 'data-variant': 'primary' })}
           onClick={scan.start}
           disabled={host === null}
         >
-          <QrCode size={22} aria-hidden="true" />
+          <QrCode size={quiet ? 16 : 22} aria-hidden="true" />
           {label}
         </button>
       )}

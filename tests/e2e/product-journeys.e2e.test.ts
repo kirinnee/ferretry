@@ -938,7 +938,7 @@ async function pairAgain(journey: string, stepName: string, page: ProductPage, u
   // while that document is still settling.
   await page.goto(`${new URL(url).origin}/`, { waitUntil: 'load', timeout: 30_000 });
   for (let attempt = 1; ; attempt += 1) {
-    const cleared = await page.evaluate(`localStorage.removeItem('fy-onboarding-v4')`).then(
+    const cleared = await page.evaluate(`localStorage.removeItem('fy-onboarding-v5')`).then(
       () => true,
       (error: unknown) => {
         if (attempt >= 5 || !/Execution context was destroyed/u.test(String((error as Error).message))) throw error;
@@ -955,7 +955,7 @@ async function pairAgain(journey: string, stepName: string, page: ProductPage, u
     journey,
     step: `${stepName}:workaround`,
     status: 'PASS',
-    evidence: `after clearing fy-onboarding-v4 the same link paired (${settled})`,
+    evidence: `after clearing fy-onboarding-v5 the same link paired (${settled})`,
   });
   return 'workaround';
 }

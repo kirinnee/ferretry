@@ -88,11 +88,24 @@ export interface PairingScreenProps {
    */
   readonly embedded?: boolean;
   /**
+   * The host page leads with a different action, so scanning is drawn as a plain button.
+   *
+   * Only the weight of the resting control changes; the arc behind it is the same. Meaningful only
+   * when `embedded`.
+   */
+  readonly quiet?: boolean;
+  /**
    * Told `true` while the failure on screen is `stated` — its sentence is the whole remedy — and `false`
    * otherwise, so a host drops the advice it adds around this screen (the code expiring, the step
    * finishing itself), which is about the one thing that was working.
    */
   readonly onStatedFailure?: (stated: boolean) => void;
+  /**
+   * Told where the reader is in the arc whenever it changes (and once on mount), so a host page can
+   * stop drawing its own primary the moment this screen draws one — scan, confirm and "Start over"
+   * are never on a page together with another filled button.
+   */
+  readonly onStageChange?: (stage: PairingStageKind) => void;
 }
 
 /**
@@ -110,6 +123,9 @@ type Stage =
   | { readonly kind: 'pairing'; readonly seed: PairingSeed }
   | { readonly kind: 'paired'; readonly host: string }
   | { readonly kind: 'failed'; readonly message: string; readonly cause: PairingFailureCause };
+
+/** The screens of the arc, by name; `browse` is the resting scan-or-paste screen. */
+export type PairingStageKind = Stage['kind'];
 
 /**
  * WHY A REDEMPTION FAILED, AS THE ONLY TWO ANSWERS THAT LEAD ANYWHERE DIFFERENT.
@@ -169,10 +185,15 @@ export function PairingScreen({
   onArrivalTaken,
   onOpenSetup,
   embedded = false,
+  quiet = false,
   defaultName = browserDeviceName,
   onStatedFailure,
+  onStageChange,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
+  useEffect(() => {
+    onStageChange?.(stage.kind);
+  }, [onStageChange, stage.kind]);
   const statedFailure = stage.kind === 'failed' && stage.cause === 'stated';
   useEffect(() => {
     onStatedFailure?.(statedFailure);
@@ -324,9 +345,10 @@ export function PairingScreen({
 
       <PairScanner
         host={scanHost}
-        label={first ? 'Scan QR code' : 'Pair another daemon'}
+        label={embedded ? 'Scan QR' : first ? 'Scan QR code' : 'Pair another daemon'}
         onText={readText}
         onFailed={revealPaste}
+        quiet={embedded && quiet}
       />
 
       {pasting || scanHost === null ? (
@@ -362,7 +384,7 @@ export function PairingScreen({
           className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
           onClick={revealPaste}
         >
-          Paste a link instead
+          {embedded ? 'Paste a link' : 'Paste a link instead'}
         </button>
       )}
 

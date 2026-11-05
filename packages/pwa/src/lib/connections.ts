@@ -47,8 +47,24 @@ export interface DaemonScopedCache {
   clearDaemon(daemonId: DaemonId): void;
 }
 
+/**
+ * "The stored registry changed", between the tabs of one browser — and nothing else.
+ *
+ * It carries no record, id or token: a receiver re-reads the repository, which is the one place a
+ * connection is kept. A tab that never hears this (no `BroadcastChannel`) simply keeps the registry
+ * it loaded, exactly as before.
+ */
+export interface DaemonConnectionsChanged {
+  /** Tell the other tabs; never delivered back to the announcer. */
+  announce(): void;
+  /** Hear another tab announce. Returns its unsubscribe. */
+  subscribe(listener: () => void): () => void;
+}
+
 export interface DaemonConnectionStoreOptions {
   readonly repository?: DaemonConnectionRepository;
+  /** Cross-tab change signal. Without a `repository` there is nothing to re-read, so it is ignored. */
+  readonly changed?: DaemonConnectionsChanged | undefined;
   readonly caches?: readonly DaemonScopedCache[];
   readonly maxConnections?: number;
   readonly now?: () => number;
@@ -248,16 +264,22 @@ export class DaemonConnectionStore {
   readonly #listeners = new Set<Listener>();
   readonly #caches = new Set<DaemonScopedCache>();
   readonly #repository: DaemonConnectionRepository | undefined;
+  readonly #changed: DaemonConnectionsChanged | undefined;
   readonly #maximum: number;
   readonly #now: () => number;
   readonly #forget: (daemonId: DaemonId) => void;
   #write: Promise<void> = Promise.resolve();
+  /** Bumped by every local change; a reload's read that began before one is stale. */
+  #revision = 0;
+  /** Bumped by every reload; only the newest one may adopt what it read. */
+  #reloads = 0;
 
   constructor(initial: DaemonConnectionsSnapshot = emptySnapshot(), options: DaemonConnectionStoreOptions = {}) {
     const maximum = options.maxConnections ?? MAX_CONNECTIONS;
     if (!Number.isInteger(maximum) || maximum < 1) throw new Error('maxConnections must be a positive integer');
     this.#maximum = maximum;
     this.#repository = options.repository;
+    this.#changed = options.repository === undefined ? undefined : options.changed;
     this.#now = options.now ?? Date.now;
     this.#forget = options.forget ?? (() => undefined);
     const selected = initial.selectedDaemonId;
@@ -272,6 +294,8 @@ export class DaemonConnectionStore {
       selectedDaemonId,
     };
     for (const cache of options.caches ?? []) this.#caches.add(cache);
+    // Document-lifetime, like the store itself: there is no moment this tab stops caring.
+    this.#changed?.subscribe(() => void this.#reload());
   }
 
   static async open(options: DaemonConnectionStoreOptions = {}): Promise<DaemonConnectionStore> {
@@ -489,6 +513,53 @@ export class DaemonConnectionStore {
     return this.#write;
   }
 
+  /**
+   * Another tab saved: take its registry as ours.
+   *
+   * Last writer wins, as it already does for the saves themselves. Any pairing this tab was holding
+   * that the stored registry no longer has — or now has a different credential for — is cleared from
+   * every cache before the new snapshot is visible, the same invalidation a local unpair does. The
+   * device key is NOT forgotten here: the tab that removed the pairing already did, in the key store
+   * all tabs share. Nothing is saved or announced back, so two tabs cannot echo each other.
+   */
+  async #reload(): Promise<void> {
+    const repository = this.#repository;
+    if (repository === undefined) return;
+    const generation = ++this.#reloads;
+    try {
+      // A read is only trusted if no local write began, and no newer reload started, while it was in
+      // flight; otherwise it may be older than what this tab already shows. Re-read once writes settle.
+      let next: DaemonConnectionsSnapshot;
+      for (;;) {
+        const pending = this.#write;
+        await pending;
+        if (generation !== this.#reloads) return;
+        if (pending !== this.#write) continue;
+        const revision = this.#revision;
+        next = parseDaemonConnections(await repository.load(CONNECTIONS_KEY), this.#maximum);
+        if (generation !== this.#reloads) return;
+        if (revision === this.#revision) break;
+      }
+      // WHICH MACHINE THIS TAB IS LOOKING AT IS THIS TAB'S OWN. The registry is shared, the selection is
+      // what the person is doing right here, so another tab choosing a machine must not move this one.
+      // Only a selection the registry no longer holds (or none yet) is replaced by the other tab's.
+      const mine = this.#snapshot.selectedDaemonId;
+      const adopted =
+        mine !== null && next.connections.some(candidate => candidate.daemonId === mine)
+          ? { connections: next.connections, selectedDaemonId: mine }
+          : next;
+      if (serialized(adopted) === serialized(this.#snapshot)) return;
+      for (const record of this.#snapshot.connections) {
+        const kept = next.connections.find(candidate => candidate.daemonId === record.daemonId);
+        if (kept === undefined || !sameConnection(kept, record)) this.#clearDaemon(record.daemonId);
+      }
+      this.#snapshot = adopted;
+      for (const listener of this.#listeners) listener();
+    } catch {
+      // Best-effort, like every other repository read: this tab keeps the registry it has.
+    }
+  }
+
   #clearDaemon(id: DaemonId): void {
     for (const cache of this.#caches) {
       try {
@@ -500,6 +571,7 @@ export class DaemonConnectionStore {
   }
 
   #publish(snapshot: DaemonConnectionsSnapshot): void {
+    this.#revision += 1;
     this.#snapshot = snapshot;
     for (const listener of this.#listeners) listener();
     if (this.#repository === undefined) return;
@@ -507,7 +579,7 @@ export class DaemonConnectionStore {
     this.#write = this.#write
       .catch(() => undefined)
       .then(async () => await this.#repository?.save(CONNECTIONS_KEY, value))
-      .then(() => undefined)
+      .then(() => this.#changed?.announce())
       .catch(() => undefined);
   }
 }

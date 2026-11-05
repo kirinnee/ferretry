@@ -324,6 +324,26 @@ describe('PairingScreen exchange', () => {
     await screen.unmount();
   });
 
+  it('tells its host which stage it is in, so the host can step its own primary down', async () => {
+    const stages: string[] = [];
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onStageChange: kind => stages.push(kind),
+      onPair: async () => {
+        throw new Error('Failed to fetch');
+      },
+    });
+    expect(stages).toEqual(['confirm']);
+
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+    expect(stages.at(0)).toBe('confirm');
+    expect(stages.at(-1)).toBe('failed');
+
+    await interact(() => buttonNamed(screen.container, 'Start over').click());
+    expect(stages.at(-1)).toBe('browse');
+    await screen.unmount();
+  });
+
   it('declines a confirmation without pairing anything', async () => {
     let calls = 0;
     const screen = await screenWith({
@@ -497,6 +517,30 @@ describe('PairingScreen naming this device', () => {
   it('names a browser by itself when nobody passes a name', async () => {
     const screen = await screenWith({ arrival: PREFILLED });
     expect(screen.container.querySelector('[data-pair-device-label]')?.textContent).toMatch(/ · [2-9A-Z]{4}\./u);
+    await screen.unmount();
+  });
+});
+
+describe('the quiet embedded presentation', () => {
+  it('draws Scan QR and Paste a link as plain secondaries when quiet', async () => {
+    const screen = await screenWith({ embedded: true, quiet: true });
+
+    const scan = buttonNamed(screen.container, 'Scan QR');
+    expect(scan.getAttribute('data-variant')).toBeNull();
+    expect(scan.className).toContain('min-h-[44px]');
+    expect(buttonNamed(screen.container, 'Paste a link')).not.toBeNull();
+    await screen.unmount();
+  });
+
+  it('keeps Scan QR as the primary action when embedded but not quiet', async () => {
+    const screen = await screenWith({ embedded: true });
+    expect(buttonNamed(screen.container, 'Scan QR').getAttribute('data-variant')).toBe('primary');
+    await screen.unmount();
+  });
+
+  it('ignores quiet outside the embedded seam', async () => {
+    const screen = await screenWith({ quiet: true });
+    expect(buttonNamed(screen.container, 'Scan QR code').getAttribute('data-variant')).toBe('primary');
     await screen.unmount();
   });
 });

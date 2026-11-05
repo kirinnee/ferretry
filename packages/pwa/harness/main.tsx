@@ -142,8 +142,12 @@ import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.t
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
 import type { HostedRelayFallback } from '../src/features/onboarding/hosted-relay.ts';
-import type { OnboardingRouteId, OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
-import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
+import type {
+  InstallChannelId,
+  OnboardingRouteId,
+  OnboardingStepId,
+} from '../src/features/onboarding/onboarding-model.ts';
+import { OnboardingPage, type OnboardingPairingHost } from '../src/features/onboarding/onboarding-page.tsx';
 import {
   ONBOARDING_PROGRESS_VERSION,
   OnboardingProgressStore,
@@ -237,7 +241,7 @@ import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
 import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
-import type { PairingArrival } from '../src/lib/pairing.ts';
+import { type PairingArrival, pairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import { type DaemonFetch, DaemonResponseError } from '../src/lib/runtime-models.ts';
@@ -2490,7 +2494,7 @@ const HARNESS_SCAN_HOST: QrScanHost = { supported: true, scan: async () => await
  * the right behaviour for an arrival and useless for a gallery that has to show
  * the middle of one. The fake answers with a fixed document and swallows every
  * write, so a review page can neither read nor overwrite the real reader's
- * `fy-onboarding-v4` progress.
+ * `fy-onboarding-v5` progress.
  *
  * THE JOURNEY IS SEEDED IN FULL, not just the route: which computer runs the
  * daemon and who installs it are what decide the list of steps, and a document
@@ -2500,6 +2504,7 @@ const harnessOnboarding = (
   journey: Record<string, string>,
   current: OnboardingStepId,
   device: DeviceKind = 'desktop',
+  furthest: OnboardingStepId = current,
 ): OnboardingProgressStore =>
   new OnboardingProgressStore({
     device,
@@ -2510,11 +2515,10 @@ const harnessOnboarding = (
           stage: 'walk',
           ...journey,
           current,
-          furthest: current,
+          furthest,
         }),
       setItem: () => {},
     },
-    paired: true,
   });
 
 /** The daemon subflow, walked by hand on the machine holding the page. */
@@ -2539,7 +2543,6 @@ const harnessQuestion = (document: Record<string, string>, device: DeviceKind = 
       getItem: () => JSON.stringify({ v: ONBOARDING_PROGRESS_VERSION, ...document }),
       setItem: () => {},
     },
-    paired: true,
   });
 
 /**
@@ -2551,11 +2554,8 @@ const harnessQuestion = (document: Record<string, string>, device: DeviceKind = 
  * - `doer` and `doer-mobile`: the same question, above a STATED ASSUMPTION with a
  *   way out on a computer and a STATED FACT on a phone, which is what replaced
  *   asking a phone what it is.
- * - `brief` and `brief-elsewhere`: the same prompt, with the share affordance that
+ * - `brief` and `brief-elsewhere`: the same page, with the share affordance that
  *   only exists when the agent is on a machine this clipboard cannot reach.
- * - `agent-pair` and `agent-pair-elsewhere`: "already paired in another tab" is
- *   true only when the daemon is on this machine, and that is now an answer rather
- *   than a guess from the device.
  * - `elsewhere` and `elsewhere-mobile`: ONE screen that reads the same on both,
  *   which is the whole claim of the recursion — a laptop setting up a server sees
  *   what a phone sees.
@@ -2567,18 +2567,17 @@ type HarnessOnboardingScreen =
   | 'doer-mobile'
   | 'brief'
   | 'brief-elsewhere'
-  | 'agent-pair'
-  | 'agent-pair-elsewhere'
+  | 'brief-confirm'
+  | 'brief-failed'
   | 'install'
-  | 'agents'
-  | 'daemon'
   | 'local'
+  | 'local-back'
+  | 'handoff'
   | 'elsewhere'
   | 'elsewhere-mobile'
-  | 'handoff'
-  | 'pair'
-  | 'scan'
-  | 'done';
+  | 'elsewhere-confirm'
+  | 'elsewhere-failed'
+  | 'pair';
 
 const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingProgressStore>> = {
   /* No document at all: the ENTRY question is what an empty store resolves to. */
@@ -2589,28 +2588,78 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   'doer-mobile': harnessQuestion({ stage: 'doer', route: 'first-time', target: 'other' }, 'mobile'),
   brief: harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
   'brief-elsewhere': harnessOnboarding({ route: 'first-time', target: 'other', doer: 'agent' }, 'brief', 'mobile'),
-  'agent-pair': harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'agent-pair'),
-  'agent-pair-elsewhere': harnessOnboarding(
-    { route: 'first-time', target: 'other', doer: 'agent' },
-    'agent-pair',
-    'mobile',
-  ),
+  /* The composed states: the embedded pairing screen has its OWN primary, so the page's copy button steps down. */
+  'brief-confirm': harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
+  'brief-failed': harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
   install: harnessOnboarding(hereByHand(), 'install'),
-  /* Ferretry runs Claude Code and Codex and is neither: the step that makes the daemon worth starting. */
-  agents: harnessOnboarding(hereByHand(), 'agents'),
-  daemon: harnessOnboarding(hereByHand(), 'daemon'),
   /* The same-machine collapse: a daemon on this box, and nothing to scan. */
   local: harnessOnboarding(hereByHand(), 'local'),
+  /* Back from the phone offer: already paired, so the page itself offers the way on. */
+  'local-back': harnessOnboarding(hereByHand(), 'local', 'desktop', 'handoff'),
+  /* The optional last page: only reachable once something is paired. */
+  handoff: harnessOnboarding(hereByHand(), 'handoff'),
   /* The recursion, on a computer: the reader walks to the machine that will host it. */
   elsewhere: harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
+  'elsewhere-confirm': harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
+  'elsewhere-failed': harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
   /* And on a phone, where the answer was forced rather than chosen. */
   'elsewhere-mobile': harnessOnboarding({ route: 'first-time', target: 'other', doer: 'self' }, 'elsewhere', 'mobile'),
-  handoff: harnessOnboarding(hereByHand(), 'handoff'),
+  /* The entry that arrives holding a link: one page, `fy pair` and the scan. */
   pair: harnessOnboarding({ route: 'add-client' }, 'pair'),
-  /* The scan step on the entry that arrives holding a link: no `fy pair` to run here. */
-  scan: harnessOnboarding({ route: 'add-client' }, 'scan'),
-  done: harnessOnboarding(hereByHand(), 'done'),
 };
+
+/**
+ * The arrivals that park the embedded pairing screen past its scanner: a pasted link (confirming) and a damaged one
+ * (failed). The code in the link is invented and the screen redeems nothing.
+ */
+const HARNESS_PAIRING_ARRIVALS: Partial<Record<HarnessOnboardingScreen, PairingArrival>> = {
+  'brief-confirm': pairingArrival(HARNESS_PAIR_URL),
+  'elsewhere-confirm': pairingArrival(HARNESS_PAIR_URL),
+  'brief-failed': { kind: 'unreadable', reason: 'the code is incomplete' },
+  'elsewhere-failed': { kind: 'unreadable', reason: 'the code is incomplete' },
+};
+
+/** The embedded pairing screen the real app renders, with a camera that never decodes. */
+const renderHarnessPairing = (arrival: PairingArrival | undefined) => (host: OnboardingPairingHost) => (
+  <PairingScreen
+    embedded
+    {...(arrival === undefined ? {} : { arrival })}
+    quiet={host.quiet}
+    onStageChange={host.onStageChange}
+    connections={[]}
+    selectedDaemonId={null}
+    scanHost={HARNESS_SCAN_HOST}
+    onPair={async () => {}}
+    onRemove={() => {}}
+    onSelect={() => {}}
+  />
+);
+
+interface HarnessSetupProps {
+  readonly screen: HarnessOnboardingScreen;
+  readonly channel?: InstallChannelId;
+  /** Render the real embedded pairing screen (the questions and install pages have none). */
+  readonly pairing?: boolean;
+  /** Daemons this browser is paired with; the phone page only exists once there is one. */
+  readonly pairings?: number;
+  readonly share?: boolean;
+}
+
+function HarnessSetup({ screen, channel = 'apt', pairing = false, pairings = 0, share = false }: HarnessSetupProps) {
+  return (
+    <OnboardingPage
+      progress={HARNESS_ONBOARDING[screen]}
+      write={HARNESS_CLIPBOARD}
+      href={HARNESS_SETUP_HREF}
+      channel={channel}
+      fallback={HARNESS_FALLBACK.available}
+      pairings={pairings}
+      onOpenFleet={() => {}}
+      share={share ? HARNESS_SHARE : undefined}
+      renderPairing={pairing ? renderHarnessPairing(HARNESS_PAIRING_ARRIVALS[screen]) : () => null}
+    />
+  );
+}
 
 /**
  * The origin a hand-off link is built from.
@@ -5408,113 +5457,47 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — what do you have',
+      label: 'Setup — welcome',
       render: () => (
         <section aria-label="Setup entry question" id="harness-onboarding-entry">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.entry}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="entry" />
         </section>
       ),
     },
     {
-      label: 'Setup — the prompt for an agent',
+      label: 'Setup — agent: one page',
       render: () => (
         <section aria-label="Setup agent brief step" id="harness-onboarding-brief">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.brief}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="brief" pairing />
         </section>
       ),
     },
     {
       /*
-       * The same prompt when the agent is on ANOTHER machine, which is the frame
-       * that proves the gap is closed: a clipboard does not cross devices, so this
-       * one carries the share sheet and the address of the page over there.
+       * The same page when the agent is on ANOTHER machine, which is the frame that
+       * proves the gap is closed: a clipboard does not cross devices, so this one
+       * carries the share sheet and the address of the page over there.
        */
-      label: 'Setup — the prompt, for an agent elsewhere (phone)',
+      label: 'Setup — agent elsewhere (phone)',
       render: () => (
         <section aria-label="Setup agent brief step for another machine" id="harness-onboarding-brief-elsewhere">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING['brief-elsewhere']}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="brew"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            share={HARNESS_SHARE}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="brief-elsewhere" channel="brew" pairing share />
         </section>
       ),
     },
     {
-      label: 'Setup — pair with what the agent printed',
+      label: 'Setup — agent: a pasted link is being confirmed',
       render: () => (
-        <section aria-label="Setup agent pairing step" id="harness-onboarding-agent-pair">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING['agent-pair']}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => (
-              <PairingScreen
-                embedded
-                connections={[]}
-                selectedDaemonId={null}
-                scanHost={HARNESS_SCAN_HOST}
-                onPair={async () => {}}
-                onRemove={() => {}}
-                onSelect={() => {}}
-              />
-            )}
-          />
+        <section aria-label="Setup agent brief step confirming" id="harness-onboarding-brief-confirm">
+          <HarnessSetup screen="brief-confirm" pairing />
         </section>
       ),
     },
     {
-      label: 'Setup — pair with what an agent elsewhere printed (phone)',
+      label: 'Setup — agent: the pairing failed',
       render: () => (
-        <section aria-label="Setup agent pairing step for another machine" id="harness-onboarding-agent-pair-elsewhere">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING['agent-pair-elsewhere']}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => (
-              <PairingScreen
-                embedded
-                connections={[]}
-                selectedDaemonId={null}
-                scanHost={HARNESS_SCAN_HOST}
-                onPair={async () => {}}
-                onRemove={() => {}}
-                onSelect={() => {}}
-              />
-            )}
-          />
+        <section aria-label="Setup agent brief step failed" id="harness-onboarding-brief-failed">
+          <HarnessSetup screen="brief-failed" pairing />
         </section>
       ),
     },
@@ -5522,263 +5505,87 @@ function Shell() {
       label: 'Setup — which computer runs it',
       render: () => (
         <section aria-label="Setup target question" id="harness-onboarding-target">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.target}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="target" />
         </section>
       ),
     },
     {
-      /* The assumption, stated, with the escape from it beside the answers. */
       label: 'Setup — who installs it',
       render: () => (
         <section aria-label="Setup doer question" id="harness-onboarding-doer">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.doer}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="doer" />
         </section>
       ),
     },
     {
-      label: 'Setup — install',
-      render: () => (
-        <section aria-label="Setup install step" id="harness-onboarding-install">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.install}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
-        </section>
-      ),
-    },
-    {
-      /*
-       * The step that makes the daemon worth starting: Ferretry RUNS Claude Code
-       * and Codex and is neither of them, so a reader who skips this finishes with
-       * a paired app that cannot open one session.
-       */
-      label: 'Setup — install an agent harness',
-      render: () => (
-        <section aria-label="Setup agents step" id="harness-onboarding-agents">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.agents}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="brew"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
-        </section>
-      ),
-    },
-    {
-      label: 'Setup — start the daemon',
-      render: () => (
-        <section aria-label="Setup daemon step" id="harness-onboarding-daemon">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.daemon}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="brew"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
-        </section>
-      ),
-    },
-    {
-      /* The same question on a phone, above the FACT that replaced asking. */
       label: 'Setup — who installs it (phone)',
       render: () => (
         <section aria-label="Setup doer question on a phone" id="harness-onboarding-doer-mobile">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING['doer-mobile']}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="brew"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="doer-mobile" channel="brew" />
         </section>
       ),
     },
     {
-      label: 'Setup — same machine, nothing to scan',
+      label: 'Setup — by hand, 1: install and start',
+      render: () => (
+        <section aria-label="Setup install step" id="harness-onboarding-install">
+          <HarnessSetup screen="install" />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — by hand, 2: open Ferretry',
       render: () => (
         <section aria-label="Setup local pairing step" id="harness-onboarding-local">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.local}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => (
-              <PairingScreen
-                embedded
-                connections={[]}
-                selectedDaemonId={null}
-                scanHost={HARNESS_SCAN_HOST}
-                onPair={async () => {}}
-                onRemove={() => {}}
-                onSelect={() => {}}
-              />
-            )}
-          />
+          <HarnessSetup screen="local" pairing />
         </section>
       ),
     },
     {
-      /*
-       * THE RECURSION, ON BOTH KINDS OF DEVICE. The pair is the evidence for the
-       * claim that this is ONE screen: a phone that can never host a daemon and a
-       * computer standing up a second machine are told the same thing, in the same
-       * words, because in both cases the machine that matters is somewhere else.
-       */
-      label: 'Setup — open it on that computer (phone)',
-      render: () => (
-        <section aria-label="Setup elsewhere step on a phone" id="harness-onboarding-elsewhere-mobile">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING['elsewhere-mobile']}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="brew"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
-        </section>
-      ),
-    },
-    {
-      label: 'Setup — open it on that computer',
-      render: () => (
-        <section aria-label="Setup elsewhere step" id="harness-onboarding-elsewhere">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.elsewhere}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
-        </section>
-      ),
-    },
-    {
-      label: 'Setup — add your phone',
+      label: 'Setup — by hand, 3: add your phone',
       render: () => (
         <section aria-label="Setup hand-off step" id="harness-onboarding-handoff">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.handoff}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="handoff" pairings={1} />
         </section>
       ),
     },
     {
-      label: 'Setup — arrived with a link',
+      label: 'Setup — another computer: one page',
       render: () => (
-        <section aria-label="Setup scan step" id="harness-onboarding-scan">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.scan}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="curl"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => (
-              <PairingScreen
-                embedded
-                connections={[]}
-                selectedDaemonId={null}
-                scanHost={HARNESS_SCAN_HOST}
-                onPair={async () => {}}
-                onRemove={() => {}}
-                onSelect={() => {}}
-              />
-            )}
-          />
+        <section aria-label="Setup elsewhere step" id="harness-onboarding-elsewhere">
+          <HarnessSetup screen="elsewhere" pairing />
         </section>
       ),
     },
     {
-      label: 'Setup — run fy pair',
+      label: 'Setup — another computer: a pasted link is being confirmed',
+      render: () => (
+        <section aria-label="Setup elsewhere step confirming" id="harness-onboarding-elsewhere-confirm">
+          <HarnessSetup screen="elsewhere-confirm" pairing />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — another computer: the pairing failed',
+      render: () => (
+        <section aria-label="Setup elsewhere step failed" id="harness-onboarding-elsewhere-failed">
+          <HarnessSetup screen="elsewhere-failed" pairing />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — another computer, from a phone',
+      render: () => (
+        <section aria-label="Setup elsewhere step on a phone" id="harness-onboarding-elsewhere-mobile">
+          <HarnessSetup screen="elsewhere-mobile" channel="brew" pairing />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — I have a link: one page',
       render: () => (
         <section aria-label="Setup pair step" id="harness-onboarding-pair">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.pair}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="curl"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => (
-              <PairingScreen
-                embedded
-                connections={[]}
-                selectedDaemonId={null}
-                scanHost={HARNESS_SCAN_HOST}
-                onPair={async () => {}}
-                onRemove={() => {}}
-                onSelect={() => {}}
-              />
-            )}
-          />
-        </section>
-      ),
-    },
-    {
-      label: 'Setup — done',
-      render: () => (
-        <section aria-label="Setup done step" id="harness-onboarding-done">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.done}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="apt"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
+          <HarnessSetup screen="pair" channel="curl" pairing />
         </section>
       ),
     },
@@ -7815,25 +7622,12 @@ function OnboardingStageHarness({ screen }: { readonly screen: HarnessOnboarding
   useAppViewport();
   return (
     <div className="kt-shell overflow-y-auto" id={`harness-onboarding-${screen}-page`}>
-      <OnboardingPage
-        progress={HARNESS_ONBOARDING[screen]}
-        write={HARNESS_CLIPBOARD}
-        href={HARNESS_SETUP_HREF}
+      <HarnessSetup
+        screen={screen}
         channel="curl"
-        fallback={HARNESS_FALLBACK.available}
-        fleetReady={screen === 'done'}
-        onOpenFleet={() => {}}
-        renderPairing={() => (
-          <PairingScreen
-            embedded
-            connections={[]}
-            selectedDaemonId={null}
-            scanHost={HARNESS_SCAN_HOST}
-            onPair={async () => {}}
-            onRemove={() => {}}
-            onSelect={() => {}}
-          />
-        )}
+        pairing
+        pairings={screen === 'handoff' || screen === 'local-back' ? 1 : 0}
+        share={screen === 'brief-elsewhere'}
       />
     </div>
   );
@@ -8686,8 +8480,10 @@ function BrowserFullViewportHarness() {
 
 /** Hash fragments that replace the whole gallery with one setup screen. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
-  '#onboarding-install': 'install',
-  '#onboarding-keyboard': 'scan',
+  ...Object.fromEntries(
+    (Object.keys(HARNESS_ONBOARDING) as HarnessOnboardingScreen[]).map(screen => [`#onboarding-${screen}`, screen]),
+  ),
+  '#onboarding-keyboard': 'pair',
 };
 
 /**

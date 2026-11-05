@@ -65,6 +65,39 @@ const COPY_TONE: Record<CopyState, string> = {
   failed: 'text-warn',
 };
 
+/** The copy and its three-way state, shared by the quiet icon and the labelled action. */
+function useCopy(text: string, write: ClipboardWriter): readonly [CopyState, () => void] {
+  const [state, setState] = useState<CopyState>('idle');
+  // The promise is consumed here on purpose: an unhandled rejection would take
+  // the whole page's error handling with it over a clipboard permission.
+  const copy = (): void => {
+    void write(text).then(
+      () => setState('copied'),
+      () => setState('failed'),
+    );
+  };
+  return [state, copy];
+}
+
+/**
+ * Present from first paint and empty until there is news: a live region
+ * added at the same moment it fills announces nothing at all. A success is
+ * announced but not written out — the tick already says it, in place, with
+ * no layout shift. A REFUSAL is different: nothing else on screen would
+ * tell the reader their clipboard is empty, so it gets words.
+ */
+function CopyStatus({ state }: { readonly state: CopyState }) {
+  return (
+    <span
+      role="status"
+      className={state === 'failed' ? 'text-meta text-warn' : 'sr-only'}
+      data-onboarding-copy-status={state}
+    >
+      {COPY_MESSAGE[state]}
+    </span>
+  );
+}
+
 export interface CopyButtonProps {
   readonly text: string;
   /** The accessible name. Not rendered: the icon carries the meaning. */
@@ -75,15 +108,7 @@ export interface CopyButtonProps {
 }
 
 export function CopyButton({ text, label, write, touch = false }: CopyButtonProps) {
-  const [state, setState] = useState<CopyState>('idle');
-  // The promise is consumed here on purpose: an unhandled rejection would take
-  // the whole page's error handling with it over a clipboard permission.
-  const copy = (): void => {
-    void write(text).then(
-      () => setState('copied'),
-      () => setState('failed'),
-    );
-  };
+  const [state, copy] = useCopy(text, write);
   return (
     <>
       <button
@@ -95,20 +120,44 @@ export function CopyButton({ text, label, write, touch = false }: CopyButtonProp
       >
         <CopyIcon state={state} />
       </button>
-      {/*
-        Present from first paint and empty until there is news: a live region
-        added at the same moment it fills announces nothing at all. A success is
-        announced but not written out — the tick already says it, in place, with
-        no layout shift. A REFUSAL is different: nothing else on screen would
-        tell the reader their clipboard is empty, so it gets words.
-      */}
-      <span
-        role="status"
-        className={state === 'failed' ? 'text-meta text-warn' : 'sr-only'}
-        data-onboarding-copy-status={state}
+      <CopyStatus state={state} />
+    </>
+  );
+}
+
+export interface CopyActionProps {
+  readonly text: string;
+  /** The visible name, which is also the accessible one: "Copy prompt". */
+  readonly label: string;
+  readonly write: ClipboardWriter;
+  /** Another control on the page is the primary action right now, so this one is drawn as a plain button. */
+  readonly demoted?: boolean;
+}
+
+/**
+ * Copy as THE action of a page: a labelled, full-width, filled button.
+ *
+ * The quiet icon beside a block is right when copying is a convenience for text
+ * that is already on screen. It is wrong when the page exists to hand something
+ * over — the agent prompt, the setup link — because then copying is the one
+ * thing to press and has to look like it. The label turns to "Copied" in place,
+ * with the tick, so the state is never colour alone.
+ */
+export function CopyAction({ text, label, write, demoted = false }: CopyActionProps) {
+  const [state, copy] = useCopy(text, write);
+  return (
+    <>
+      <button
+        type="button"
+        className="kt-btn min-h-[44px] w-full"
+        {...(demoted ? {} : { 'data-variant': 'primary' })}
+        onClick={copy}
+        data-onboarding-copy={label}
       >
-        {COPY_MESSAGE[state]}
-      </span>
+        <CopyIcon state={state} />
+        {state === 'copied' ? 'Copied' : label}
+      </button>
+      <CopyStatus state={state} />
     </>
   );
 }

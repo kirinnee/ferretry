@@ -1,52 +1,46 @@
 /**
- * THE STAGES: heading, one command, one action.
+ * THE STAGES: one page, one thing to do.
  *
- * Each stage used to carry its command plus two or three paragraphs explaining
- * the command, and the paragraphs are what made the screen unreadable — they sat
- * at the same weight as the thing to actually do, so the next action had to be
- * hunted for. The rule now is that a stage shows exactly what a reader must run
- * and nothing else; everything that answers "why" or "what if" moves behind a
- * disclosure, one tap away, closed by default.
+ * A page the reader can finish by doing one thing is one page. The agent answer,
+ * the pairing entry and "another computer" are each a SINGLE page now — what to do
+ * and the pairing surface sit together — and installing by hand on this computer is
+ * three: install and start, open, and the optional phone. Everything that answers
+ * "why" or "what if" sits behind a disclosure, closed by default.
  *
- * NOTHING HONEST WAS DROPPED to get there. The verification command, the healthy
- * daemon's output and the two-minute expiry are all still on the page — they are
- * simply no longer competing with the instruction. What was cut is restatement.
+ * THE PRIMARY CONTROL IS THE STEP'S ACTION. On the agent page and the "another
+ * computer" page that is a labelled copy; on the pairing page it is the scan. Any
+ * pairing surface sitting UNDER such a primary is drawn quiet (`quiet`), because
+ * "scan this if the other thing shows a QR" is a fallback, not the next move, and
+ * two filled buttons is a page with no next move.
  *
- * WHO INSTALLS IT IS A QUESTION, NOT A DISCLOSURE ON THIS STEP. For one release
- * the agent path was folded in here, on the argument that an agent is just a way
- * of PERFORMING the install. That was wrong: an agent doing the setup means no
- * platform picker, no commands here and no `fy pair` by hand. What survives on the
- * install step is a one-tap way to CHANGE EITHER ANSWER — the doer, and the machine
- * these commands are addressed to — but never a second copy of the prompt, because
- * two copies of the thing that answer exists to hand over is two things to keep
- * true.
+ * NOTHING HONEST WAS DROPPED, EXCEPT THE CHECKS THE PAGE CANNOT MAKE. The
+ * two-minute expiry, the PATH advice for the script route and the way back from a
+ * terminal that cannot open a browser are all still on the page. The separate
+ * verification command (`fy --version`) is not: it stays in the agent prompt,
+ * and a reader who ran the block sees `fy daemon start` fail or work.
  *
  * EVERY STAGE HERE IS REUSED BY EVERY JOURNEY THAT NEEDS IT, including "add
  * another daemon" — a second copy of the daemon instructions is a second copy to
  * keep true, and one of the two would be wrong within a release.
  */
 
-import { ExternalLink, Share2 } from 'lucide-react';
+import { Share2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
-import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
-import type { CarrierDisclosure } from './hosted-relay.ts';
+import { type ClipboardWriter, CopyAction } from './copy-button.tsx';
+import type { HostedRelayFallback } from './hosted-relay.ts';
+import { OnboardingConnectionNote } from './onboarding-connection-note.tsx';
 import {
-  AGENT_HARNESSES,
-  agentHarness,
   agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
-  DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
-  DAEMON_STATUS_COMMAND,
   INSTALL_CHANNELS,
   type InstallChannelId,
   installChannel,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
   type SetupTargetId,
-  VERIFY_COMMAND,
 } from './onboarding-model.ts';
 import type { SetupSharePort } from './setup-handoff-panel.tsx';
 
@@ -59,6 +53,11 @@ const CHOICE_TONE = {
   on: 'border-accent bg-accent-soft font-semibold text-fg',
   off: 'border-border bg-surface-2 text-muted',
 } as const;
+
+const LINK =
+  'inline-flex min-h-[44px] items-center self-start text-meta text-muted underline underline-offset-2 hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus';
+
+const COPY = 'm-0 text-meta leading-base text-muted';
 
 /**
  * A secondary thing, folded away.
@@ -81,54 +80,52 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
   );
 }
 
-export interface InstallStageProps {
-  readonly write: ClipboardWriter;
-  readonly channel: InstallChannelId;
-  /** Change answer: hand the whole thing to an agent instead of typing it. */
-  readonly onAgentInstead: () => void;
-  /**
-   * Change the other answer: these commands are for a machine the reader is not at.
-   *
-   * Absent when the reader chose this machine outright, because then there is a
-   * question one Back away and nothing to escape from.
-   */
-  readonly onOtherMachine?: (() => void) | undefined;
+/** The pairing surface, wherever a stage embeds it. */
+function Pairing({ children }: { readonly children: ReactNode }) {
+  return (
+    <div className="min-w-0" data-onboarding-pairing="">
+      {children}
+    </div>
+  );
 }
 
-export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }: InstallStageProps) {
+/** What to do when a pairing code did not take, said once and not when the screen already said its own remedy. */
+function ExpiryNote({ stated, children }: { readonly stated: boolean; readonly children: ReactNode }) {
+  return stated ? null : <p className="m-0 text-2xs leading-base text-faint">{children}</p>;
+}
+
+export interface InstallStageProps {
+  readonly write: ClipboardWriter;
+  /** The detected install route. A guess; every other route stays one tap away. */
+  readonly channel: InstallChannelId;
+}
+
+/**
+ * INSTALL AND START, as ONE block to copy.
+ *
+ * The detected platform's commands are `INSTALL_CHANNELS` verbatim — they are
+ * pinned against `INSTALLATION.md`, so none of them is ever reworded here — with
+ * `fy daemon start` appended, because two blocks read as two decisions and one
+ * paste into one terminal is the whole job. The other platforms are behind a link
+ * rather than a row of buttons.
+ */
+export function InstallStage({ write, channel }: InstallStageProps) {
   const [selected, setSelected] = useState<InstallChannelId>(channel);
+  const [choosing, setChoosing] = useState(false);
   const chosen = installChannel(selected);
+  const guessed = installChannel(channel);
   return (
     <div className={STAGE}>
-      {/*
-        A row of buttons that swaps what is shown below it. `role="toolbar"`
-        rather than a tablist: there is no tab panel per option, and rather than
-        a bare labelled div, which is not a nameable element.
+      <p className={COPY}>
+        {selected === channel ? 'Detected: ' : 'For: '}
+        {chosen.label}
+      </p>
 
-        A GRID, NOT A WRAPPING ROW. Labels of different widths wrap into a ragged
-        last row, which reads as a mistake rather than a choice. The four NAMED
-        routes take two even columns on a phone and one row on anything wider;
-        the fallback spans the full width beneath them, which is both tidy and
-        true — it is the route for machines the named ones do not cover.
-      */}
-      <div role="toolbar" aria-label="Install method" className="grid grid-cols-2 gap-1 sm:grid-cols-4">
-        {INSTALL_CHANNELS.map(option => (
-          <button
-            key={option.id}
-            type="button"
-            className={`${CHOICE} ${option.id === selected ? CHOICE_TONE.on : CHOICE_TONE.off} ${
-              option.fallback === undefined ? '' : 'col-span-2 sm:col-span-4'
-            }`}
-            aria-pressed={option.id === selected}
-            onClick={() => setSelected(option.id)}
-            data-onboarding-channel={option.id}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      <CommandBlock command={chosen.command} copyLabel="Copy install command" write={write} />
+      <CommandBlock
+        command={`${chosen.command}\n${DAEMON_START_COMMAND}`}
+        copyLabel="Copy install and start commands"
+        write={write}
+      />
 
       {/*
         Said only for the fallback, and only when it is showing: a reader who
@@ -138,146 +135,51 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
       */}
       {chosen.fallback === undefined ? null : (
         <p className="m-0 text-meta leading-base text-muted" data-onboarding-fallback-note="">
-          The generic fallback. It works on every supported target — but if your machine is named above, that route is
-          packaged and, on macOS, clears the Gatekeeper quarantine for you.
+          The generic fallback. It works on every supported target — but if your machine is named in the list, that
+          route is packaged and, on macOS, clears the Gatekeeper quarantine for you.{' '}
+          <span data-onboarding-path-note="">
+            It installs into <code className="font-mono text-syn-string">~/.local/bin</code> and only prints a PATH note
+            — if <code className="font-mono text-syn-string">fy</code> is not found on the last line, add that folder to
+            your PATH or open a new terminal, then run{' '}
+            <code className="font-mono text-syn-string">{DAEMON_START_COMMAND}</code> again.
+          </span>
         </p>
       )}
 
-      <Aside summary="Check it landed">
-        <CommandBlock command={VERIFY_COMMAND} copyLabel="Copy check" write={write} />
-      </Aside>
-
-      {/*
-        CHANGING ANSWER, not a second copy of the agent path. A reader who is
-        looking at a command they did not want should not have to find the way
-        back to the first question and re-answer it; and the prompt itself lives
-        on the agent route's own step, where it is the whole screen rather than
-        thirty lines folded under a caret.
-      */}
-      <Aside summary="Rather have an agent do it?">
-        <p className="m-0 text-meta leading-base text-muted">
-          If you already have Claude or Codex on that machine, it can install Ferretry, start the daemon and pair with
-          this browser. You copy one prompt and nothing else.
-        </p>
-        <button
-          type="button"
-          className="kt-btn min-h-[44px] w-full"
-          data-variant="ghost"
-          onClick={onAgentInstead}
-          data-onboarding-agent-instead=""
-        >
-          Let an agent do it
-        </button>
-      </Aside>
-
-      {/*
-        THE SECOND PLACE THE ASSUMPTION CAN BE ESCAPED, and the one that catches
-        the reader who did not read the screen before this. These commands are
-        addressed to the machine holding this page; somebody who meant a different
-        one has to be able to say so from the screen that is wrong for them, not
-        only from the screen that stated the assumption.
-      */}
-      {onOtherMachine === undefined ? null : (
-        <Aside summary="Setting up a different machine?">
-          <p className="m-0 text-meta leading-base text-muted">
-            These commands install Ferretry on the machine reading this page. If the agents are meant to run somewhere
-            else, the setup happens over there instead.
-          </p>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px] w-full"
-            data-variant="ghost"
-            onClick={onOtherMachine}
-            data-onboarding-other-machine=""
-          >
-            It is another computer
-          </button>
-        </Aside>
-      )}
-    </div>
-  );
-}
-
-/**
- * THE STEP THAT MAKES THE DAEMON WORTH STARTING.
- *
- * Ferretry runs Claude Code and Codex; it is not either of them. Everything before
- * and after this step is about a daemon, and a daemon with neither harness
- * installed starts perfectly and can run nothing at all — so a reader who finished
- * without this had a paired app, a green shield, and no way to open a session.
- *
- * AT LEAST ONE IS THE BAR, said in words rather than left to be inferred from two
- * commands sitting side by side. Two blocks with no qualifier read as two
- * requirements.
- *
- * AND BEING ON `PATH` IS NOT BEING SIGNED IN. This page cannot see a terminal, let
- * alone somebody's account, so the check command is described as what it actually
- * proves and the sign-in is named as a separate thing that happens on first run.
- * The alternative — "you are ready" — is the benign reading of no evidence, which
- * is the failure this whole flow is built to avoid.
- */
-export function AgentsStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      {/*
-        AND IT SAYS SO TO SOMEBODY WHO ALREADY HAS ONE. A developer who uses Claude
-        Code daily is the likeliest reader of this page, and a step that only knows
-        how to say "install this" invites them to reinstall something they have. The
-        check below is the whole task for them, and this line points at it.
-      */}
-      <p className="m-0 text-meta leading-base text-muted">
-        Ferretry runs your agents; it is not one. Install{' '}
-        <strong className="font-semibold text-fg">at least one</strong> of these on this machine — both is fine, one is
-        enough. Already have one? Check it below and move on.
-      </p>
-      {AGENT_HARNESSES.map(harness => (
-        <div key={harness.id} className="flex min-w-0 flex-col gap-1" data-onboarding-harness={harness.id}>
-          <p className="m-0 text-meta font-semibold text-fg">{harness.label}</p>
-          <CommandBlock command={harness.command} copyLabel={`Copy ${harness.label} install command`} write={write} />
+      {choosing ? (
+        /*
+          A row of buttons that swaps what is shown above it. `role="toolbar"`
+          rather than a tablist: there is no tab panel per option. A GRID, not a
+          wrapping row — labels of different widths wrap into a ragged last row,
+          which reads as a mistake rather than a choice.
+        */
+        <div role="toolbar" aria-label="Install method" className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+          {INSTALL_CHANNELS.map(option => (
+            <button
+              key={option.id}
+              type="button"
+              className={`${CHOICE} ${option.id === selected ? CHOICE_TONE.on : CHOICE_TONE.off} ${
+                option.fallback === undefined ? '' : 'col-span-2 sm:col-span-4'
+              }`}
+              aria-pressed={option.id === selected}
+              onClick={() => setSelected(option.id)}
+              data-onboarding-channel={option.id}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-      ))}
-      <Aside summary="Check one of them is there">
-        {AGENT_HARNESSES.map(harness => (
-          <CommandBlock
-            key={harness.id}
-            command={harness.check}
-            copyLabel={`Copy ${harness.label} check`}
-            write={write}
-          />
-        ))}
-        <p className="m-0 text-meta leading-base text-muted">
-          A version means the command is installed. It does not mean you are signed in — the first time you run{' '}
-          <code className="font-mono text-syn-string">{agentHarness('claude').id}</code> or{' '}
-          <code className="font-mono text-syn-string">{agentHarness('codex').id}</code> it will ask you to log in, and
-          Ferretry cannot do that for you.
-        </p>
-      </Aside>
-      <Aside summary="These are not ours">
-        <p className="m-0 text-meta leading-base text-muted">
-          Claude Code and Codex are other people&apos;s products, so their own documentation is the authority on
-          installing them. These are the commands each one documents; if either has moved on, believe them over this
-          page.
-        </p>
-      </Aside>
-    </div>
-  );
-}
+      ) : (
+        <button type="button" className={LINK} onClick={() => setChoosing(true)} data-onboarding-other-platforms="">
+          {guessed.fallback === undefined ? `Not ${guessed.label}?` : 'Other platforms'}
+        </button>
+      )}
 
-export function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock command={DAEMON_START_COMMAND} copyLabel="Copy start command" write={write} />
-      <Aside summary="Is it actually up?">
-        <CommandBlock command={DAEMON_STATUS_COMMAND} copyLabel="Copy status command" write={write} />
-        <p className="m-0 text-meta leading-base text-muted">
-          A healthy daemon prints <code className="font-mono text-syn-string">{DAEMON_SERVING_OUTPUT}</code>.
-        </p>
-      </Aside>
+      <p className={COPY}>Needs Claude Code or Codex — Ferretry offers to install them once you are in.</p>
+
       <Aside summary="Keep it running after a reboot">
         <CommandBlock command={DAEMON_INSTALL_COMMAND} copyLabel="Copy service command" write={write} />
-        <p className="m-0 text-meta leading-base text-muted">
-          Installs the user service and starts the daemon under it.
-        </p>
+        <p className={COPY}>Installs the user service and starts the daemon under it.</p>
       </Aside>
     </div>
   );
@@ -294,56 +196,80 @@ export interface BriefStageProps {
   readonly plainUrl: string;
   /** The OS share sheet, when this browser has one. Absent is the ordinary case. */
   readonly share?: SetupSharePort | undefined;
+  /** The real pairing surface, for the case where the agent shows a QR instead of opening Ferretry. */
+  readonly pairing: ReactNode;
+  /** The pairing failure on screen already says its remedy, so the code-expiry advice is not added. */
+  readonly stated?: boolean;
+  /** The pairing screen is past its resting scan (confirming, retrying or failed) and draws its own primary. */
+  readonly engaged?: boolean;
 }
 
 /**
- * THE AGENT PROMPT: on this answer it IS the product, so it is the whole screen.
+ * THE AGENT PAGE: copy one prompt, then wait for Ferretry to open.
  *
  * The reader said an agent does it, and everything that answer promises is carried
- * by this text. So it is shown in full rather than behind a second tap: a person
- * is about to hand it to something with a shell on their machine, and "copy this
- * text I will not show you" is not a thing to ask of anybody. It is also generic
- * by construction — it names no host, no user, no daemon and no fleet — and seeing
- * that for themselves is the point on a page anyone can load.
+ * by the prompt. It is still SHOWN IN FULL one tap away — a person is about to hand
+ * it to something with a shell on their machine, and "copy this text I will not
+ * show you" is not a thing to ask of anybody. It is generic by construction: it
+ * names no host, no user, no daemon and no fleet.
  *
- * A COPY BUTTON IS NOT A HAND-OFF WHEN THE AGENT IS ON ANOTHER MACHINE, and that
- * was the honest gap in the previous release: a phone's clipboard does not reach a
- * laptop, so "copy this" ended in the reader retyping thirty lines or giving up.
- * There is no QR to fix it either — nothing on a desk points a camera at a phone —
- * so the answer is words and the OS share sheet: Messages, mail, a note to
- * yourself, whatever that phone already has. And the plain page address is offered
- * beside it, because the prompt is public and identical on every device: opening
- * this page over there puts the same text one copy away, with nothing sent at all.
+ * THE ONLY WAY BACK IN IS THE DAEMON ANSWERING. On the daemon's own machine the
+ * agent runs `fy pair --open`, which opens Ferretry already paired, and the page
+ * finishes by itself. When the agent shows a QR or a link instead, the reader
+ * scans or pastes it into the same pairing surface every other page uses.
+ *
+ * A COPY BUTTON IS NOT A HAND-OFF WHEN THE AGENT IS ON ANOTHER MACHINE: a phone's
+ * clipboard does not reach a laptop. There is no QR to fix it — nothing on a desk
+ * points a camera at a phone — so the answer is words and the OS share sheet, and
+ * the plain page address beside it, because the prompt is public and identical on
+ * every device.
  */
-export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) {
+export function BriefStage({
+  write,
+  target,
+  plainUrl,
+  share,
+  pairing,
+  stated = false,
+  engaged = false,
+}: BriefStageProps) {
   const prompt = agentSetupPrompt(target);
+  const here = target === 'this';
   return (
     <div className={STAGE}>
-      <p className="m-0 text-meta leading-base text-muted">
-        Paste it into Claude, Codex or any agent with a terminal{' '}
-        <strong className="font-semibold text-fg">on {target === 'this' ? 'this computer' : 'that computer'}</strong> —
-        not into anything on this page.
+      <p className={COPY}>
+        1. Copy this prompt into Claude Code or Codex{' '}
+        <strong className="font-semibold text-fg">on {here ? 'this computer' : 'that computer'}</strong>.
       </p>
-      <div className="flex min-w-0 flex-col rounded-control border border-code-border bg-code-bg">
-        <div className="flex min-w-0 items-center gap-2 border-b border-code-border py-1 pl-2 pr-1">
-          <span className="min-w-0 flex-1 truncate text-meta font-semibold text-fg">Setup prompt for an AI agent</span>
-          <CopyButton text={prompt} label="Copy setup prompt" write={write} />
-        </div>
-        {/*
-          Scrolls inside its own box: it is thirty lines, and a stage that grows
-          to thirty lines pushes its own next action off a phone.
-        */}
+      <CopyAction text={prompt} label="Copy prompt" write={write} demoted={engaged} />
+
+      <Aside summary="Show prompt">
+        {/* Scrolls inside its own box: it is thirty lines, and a stage that grows to thirty lines pushes its own next action off a phone. */}
         <pre
-          className="m-0 max-h-56 overflow-auto px-2 py-2 font-mono text-meta leading-base text-code-fg"
+          className="m-0 max-h-56 overflow-auto rounded-control border border-code-border bg-code-bg px-2 py-2 font-mono text-meta leading-base text-code-fg"
           data-onboarding-prompt=""
         >
           <code>{prompt}</code>
         </pre>
-      </div>
+        <p className={COPY}>
+          It says nothing about you, this browser, or any daemon. It ends by asking your agent to{' '}
+          {here ? (
+            <>
+              run <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code>, which opens Ferretry here
+              already paired
+            </>
+          ) : (
+            <>
+              run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> and show you the code
+            </>
+          )}
+          .
+        </p>
+      </Aside>
 
-      {target === 'other' ? (
+      {here ? null : (
         <div className="flex min-w-0 flex-col gap-2" data-onboarding-prompt-handoff="">
-          <p className="m-0 text-meta leading-base text-muted">
+          <p className={COPY}>
             That agent is on another computer, and this clipboard does not reach it. Send the prompt over — a message to
             yourself, mail, or your team chat.
           </p>
@@ -371,117 +297,67 @@ export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) 
             on this screen there, ready to copy.
           </p>
         </div>
-      ) : null}
-
-      <p className="m-0 text-meta leading-base text-muted">
-        It says nothing about you, this browser, or any daemon. It ends by asking your agent to{' '}
-        {target === 'this' ? (
-          <>
-            run <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code>, which opens Ferretry here
-            already paired
-          </>
-        ) : (
-          <>
-            run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> and show you the code
-          </>
-        )}{' '}
-        — come back here when it does.
-      </p>
-    </div>
-  );
-}
-
-export interface AgentPairStageProps {
-  readonly pairing: ReactNode;
-  /** The pairing failure on screen already says its remedy, so the code-expiry advice is not added. */
-  readonly stated?: boolean;
-  /**
-   * Which computer the agent is on — which decides whether "you may already be
-   * connected" is true or a lie.
-   *
-   * It used to be this device's KIND, on the reasoning that a computer reading
-   * this page was probably the daemon's own machine. That was a guess standing in
-   * for a fact, and it was wrong for every reader on a laptop setting up a server.
-   * The first question settles it, so the fact is passed instead: `fy pair --open`
-   * opens a browser on the daemon's machine, which is this one exactly when the
-   * reader said the daemon runs here.
-   */
-  readonly target: SetupTargetId;
-}
-
-/**
- * THE END OF THE AGENT ROUTE: the code came from the agent, not from the reader.
- *
- * Nothing here is a command, because nobody here has a terminal open — the agent
- * had it, on the other machine, and it was told to print a code and show it. So
- * this stage is the same pairing surface every other route uses, with the one
- * thing that is different about arriving here said plainly: the reader did not
- * produce this code and cannot re-produce it, so if it has expired the fix is to
- * ask the agent again rather than to go and type something.
- *
- * ON THE DAEMON'S OWN MACHINE THE JOURNEY MAY ALREADY BE OVER, and saying so is
- * not optional: the prompt tells the agent to run `fy pair --open` there, and that
- * opens Ferretry already paired IN ANOTHER TAB. Somebody left staring at a pairing
- * field while a finished app sits one tab away concludes the setup failed. It is
- * said only when the daemon is on this machine, because otherwise that tab opened
- * somewhere the reader is not sitting.
- */
-export function AgentPairStage({ pairing, target, stated = false }: AgentPairStageProps) {
-  return (
-    <div className={STAGE}>
-      <div className="min-w-0" data-onboarding-pairing="">
-        {pairing}
-      </div>
-      {target === 'this' ? (
-        <p className="m-0 text-meta leading-base text-muted" data-onboarding-agent-opened="">
-          If your agent ran <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code> on this machine, it
-          has already opened Ferretry in another tab, paired. Nothing to do here — carry on there.
-        </p>
-      ) : null}
-      {stated ? null : (
-        <p className="m-0 text-meta leading-base text-muted">
-          The code is single-use and expires after about two minutes. If it has expired, ask your agent to run{' '}
-          <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again and show you the fresh one.
-        </p>
       )}
+
+      <p className={COPY} data-onboarding-after="">
+        {here
+          ? '2. When it finishes, Ferretry opens here by itself. If it shows a QR:'
+          : '2. When it finishes, it shows a QR or a link. Scan it or paste it here:'}
+      </p>
+      <Pairing>{pairing}</Pairing>
+      <ExpiryNote stated={stated}>
+        The code is single-use and expires after about two minutes. If it has expired, ask your agent to run{' '}
+        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again and show you the fresh one.
+      </ExpiryNote>
     </div>
   );
 }
 
+export interface LocalStageProps {
+  readonly write: ClipboardWriter;
+  /** The real pairing surface, for a terminal that cannot open a browser. */
+  readonly pairing: ReactNode;
+  /** What the runtime advertisement said about the default relay. */
+  readonly fallback: HostedRelayFallback;
+  readonly stated?: boolean;
+}
+
 /**
- * THE SAME-MACHINE COLLAPSE: the step where there is nothing to scan.
+ * THE SAME-MACHINE COLLAPSE: the page where there is nothing to scan.
  *
  * The reader said this machine will run the daemon. The browser reading this
  * sentence is therefore ALREADY on the daemon's machine — it is localhost — and
- * asking them to photograph their own screen with their own phone, so the phone
- * can hand a code back to the browser eighteen inches away, is the single most
- * absurd thing the old flow did. It happened because the old arc could not tell
- * the two machines apart, so it always assumed they were different.
+ * asking them to photograph their own screen with their own phone is the most
+ * absurd thing the old flow did.
  *
  * `fy pair --open` is what makes this real rather than a claim: the daemon mints
  * the same single-use link it would have drawn as a QR, and the CLI hands it to
- * the host's own browser. The reader presses Enter and lands here paired.
+ * the host's own browser. The page finishes by itself when the daemon answers.
  *
- * THE FALLBACK IS NOT HIDDEN BECAUSE IT IS COMMON. A headless box, a remote
- * shell, an SSH session, a browser the OS will not launch — plenty of terminals
- * cannot open a window. So the plain `fy pair` output and the same pairing
- * surface every other route uses are one tap away, not gone.
+ * THE FALLBACK IS NOT HIDDEN BECAUSE IT IS COMMON. A headless box, a remote shell,
+ * an SSH session, a browser the OS will not launch — plenty of terminals cannot
+ * open a window. So the plain `fy pair` output and the same pairing surface are
+ * one tap away, not gone.
+ *
+ * HOW OTHER DEVICES REACH THIS COMPUTER is said here, in a disclosure, because
+ * this is the step where the daemon they will reach is up — there is nothing to
+ * decide, only a fact to be able to read.
  */
-export function LocalStage({ write, pairing }: { readonly write: ClipboardWriter; readonly pairing: ReactNode }) {
+export function LocalStage({ write, pairing, fallback, stated = false }: LocalStageProps) {
   return (
     <div className={STAGE}>
       <CommandBlock command={PAIR_OPEN_COMMAND} copyLabel="Copy open command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        Run it in the same terminal. It opens Ferretry in this browser, already paired — no QR, no code to type.
-      </p>
+      <p className={COPY}>Ferretry opens in this browser, already paired. Nothing to scan.</p>
       <Aside summary="It did not open a browser">
-        <p className="m-0 text-meta leading-base text-muted">
+        <p className={COPY}>
           A headless host, a remote shell or a locked-down desktop cannot launch one. Run{' '}
           <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> instead and paste the link it prints below.
         </p>
-        <div className="min-w-0" data-onboarding-pairing="">
-          {pairing}
-        </div>
+        <Pairing>{pairing}</Pairing>
+        <ExpiryNote stated={stated}>The link is single-use and expires after about two minutes.</ExpiryNote>
+      </Aside>
+      <Aside summary="About connections">
+        <OnboardingConnectionNote fallback={fallback} />
       </Aside>
     </div>
   );
@@ -490,42 +366,43 @@ export function LocalStage({ write, pairing }: { readonly write: ClipboardWriter
 export interface ElsewhereStageProps {
   /** The hand-off, already built by the page — this stage does not know the origin. */
   readonly handoff: ReactNode;
+  /** The real pairing surface, for when that computer shows a QR. */
+  readonly pairing: ReactNode;
   /** Switch to adding this browser as a client of a daemon that already exists. */
   readonly onAddAsClient: () => void;
+  readonly stated?: boolean;
 }
 
 /**
- * THE ENTIRE "ANOTHER COMPUTER, MYSELF" BRANCH — one screen, and it teaches nothing.
+ * THE ENTIRE "ANOTHER COMPUTER, MYSELF" BRANCH — one page, and it teaches nothing.
  *
- * THE RECURSION IS THE SIMPLIFICATION. This screen does not explain how to install
+ * THE RECURSION IS THE SIMPLIFICATION. This page does not explain how to install
  * Ferretry on a machine the reader is not sitting at, because that explanation
- * would be a second copy of the install instructions written in the second person
- * about somebody else's keyboard — and a second copy is a copy that goes wrong.
- * It says to open this page over there, and that computer walks the same subflow
- * answering "this one", where every instruction is about the machine under the
- * reader's hands.
+ * would be a second copy of the install instructions written about somebody else's
+ * keyboard. It hands the setup link over, and that computer walks the same
+ * subflow answering "this one", where every instruction is about the machine
+ * under the reader's hands.
  *
- * IT IS THE SAME SCREEN ON A PHONE AND ON A COMPUTER, which is why it replaced
- * `need-computer`. That screen existed only on a phone and its subject was this
- * device's unsuitability; a reader at a laptop setting up a home server needs
- * exactly this screen and is not being refused anything.
+ * THEN IT WAITS FOR THAT COMPUTER'S QR, here, with the same pairing surface every
+ * other page uses — so a reader never has to come back to a different page to
+ * finish.
  *
- * NO DEAD END AND NO APOLOGY. The hand-off carries the place, and the other thing
- * the reader may have meant — a daemon that already exists, which this browser
- * only wants to watch — is one tap away rather than "go and read the docs".
+ * NO DEAD END AND NO APOLOGY. The other thing the reader may have meant — a daemon
+ * that already exists, which this browser only wants to watch — is one tap away.
  */
-export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) {
+export function ElsewhereStage({ handoff, pairing, onAddAsClient, stated = false }: ElsewhereStageProps) {
   return (
     <div className={STAGE}>
-      <p className="m-0 text-meta leading-base text-muted">
-        Open this page on the computer that will run your agents. It walks you through the install there, on that
-        machine — then come back here to pair this device.
-      </p>
+      <p className={COPY}>Agents need a terminal, so open this link on the computer that will run them.</p>
       {handoff}
+      <p className={COPY}>When that computer shows a QR, scan it here:</p>
+      <Pairing>{pairing}</Pairing>
+      <ExpiryNote stated={stated}>
+        The code is single-use and expires after about two minutes. If it has expired, run{' '}
+        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> there again.
+      </ExpiryNote>
       <Aside summary="A daemon already exists?">
-        <p className="m-0 text-meta leading-base text-muted">
-          Then nothing needs installing. Add this device as a client of it instead.
-        </p>
+        <p className={COPY}>Then nothing needs installing. Add this device as a client of it instead.</p>
         <button
           type="button"
           className="kt-btn min-h-[44px] w-full"
@@ -543,125 +420,41 @@ export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) 
 /**
  * THE OTHER DIRECTION: the computer is done, and the phone is offered the same view.
  *
- * This is what makes first-time setup more than the other two answers in
- * sequence. It is OPTIONAL and says so — the reader is already finished, `Next`
- * skips it, and nothing here is a step they owe anybody.
+ * OPTIONAL, and says so in its title. The QR carries only the public setup link —
+ * a route and a step, no daemon address and no code — so it is safe to photograph;
+ * the pairing code travels the OTHER way, from `fy pair`, and never through here.
  */
 export function HandoffStage({ handoff }: { readonly handoff: ReactNode }) {
   return (
     <div className={STAGE}>
-      <p className="m-0 text-meta leading-base text-muted">
-        Your daemon is running and this browser is connected. Your phone can watch the same fleet — it needs the pairing
-        code your computer is about to print.
-      </p>
       {handoff}
+      <p className={COPY}>Not now? Skip — add a phone any time from the machine menu.</p>
     </div>
   );
 }
 
-export function PairStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock command={PAIR_COMMAND} copyLabel="Copy pair command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        Run this on the computer where the daemon is running. Keep the QR code or link it prints on that screen.
-      </p>
-    </div>
-  );
+export interface PairStageProps {
+  /** The real pairing surface. */
+  readonly pairing: ReactNode;
+  readonly stated?: boolean;
 }
 
 /**
- * The phone/browser half of pairing, without the command.
+ * THE PAIRING ENTRY: the reader is holding (or about to be holding) a QR or a link.
  *
- * Somebody whose camera just opened this page has nothing to run: printing
- * `fy pair` at them describes a thing that has already happened, on a machine
- * they may not be standing at. The pairing surface itself is the same one, and
- * is not forked.
+ * Two sentences and the pairing surface, which here IS the page's action — so it
+ * is drawn loud, unlike the pairing under a copy on the other pages. Somebody whose
+ * camera just opened this page has nothing to run, but somebody who walked here
+ * from the entry may not have run `fy pair` yet, so the command is named once.
  */
-export function ScanStage({ pairing, stated = false }: { readonly pairing: ReactNode; readonly stated?: boolean }) {
+export function PairStage({ pairing, stated = false }: PairStageProps) {
   return (
     <div className={STAGE}>
-      <div className="min-w-0" data-onboarding-pairing="">
-        {pairing}
-      </div>
-      {stated ? null : (
-        <p className="m-0 text-meta leading-base text-muted">
-          This code is single-use and expires after about two minutes. If it has expired, go back to your computer, run{' '}
-          <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again, then return here with the fresh QR or
-          link.
-        </p>
-      )}
-    </div>
-  );
-}
-
-export interface DoneStageProps {
-  readonly fleetReady: boolean;
-  readonly connectionStatus: string | null;
-  /**
-   * What the hosted relay would be able to see, if it ever carried this connection.
-   *
-   * Restated here, where the connection becomes real, because the daemon step
-   * that first said it may be several screens — and possibly several days — back.
-   */
-  readonly fallbackDisclosure?: CarrierDisclosure | null;
-  readonly onOpenFleet: () => void;
-  readonly onBackToPairing: () => void;
-}
-
-export function DoneStage({
-  fleetReady,
-  connectionStatus,
-  fallbackDisclosure = null,
-  onOpenFleet,
-  onBackToPairing,
-}: DoneStageProps) {
-  return (
-    <div className={STAGE}>
-      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted">
-        <li>This browser remembers the pairing.</li>
-        <li>Pair another machine later — each keeps its own data.</li>
-      </ul>
-      {connectionStatus === null ? null : (
-        <p className="m-0 text-2xs leading-base text-faint" role="status">
-          Connection in use: {connectionStatus}
-        </p>
-      )}
-      {fallbackDisclosure === null || fallbackDisclosure.fallbackWouldSee.length === 0 ? null : (
-        <Aside summary={`What ${fallbackDisclosure.fallbackName} would see`}>
-          <ul
-            className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted"
-            data-onboarding-fallback-disclosure=""
-          >
-            {fallbackDisclosure.fallbackWouldSee.map(line => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <p className="m-0 text-2xs leading-base text-faint">
-            It is the fallback, not the carrier: it only ever carries the connection when the direct path cannot.
-          </p>
-        </Aside>
-      )}
-      {/*
-        DAMAGED STATE IS NOT EMPTY STATE. A stored "finished" with nothing paired
-        in this browser is not a fleet to open; it is a step that has to be done
-        again, and the button says so rather than opening onto nothing.
-      */}
-      {fleetReady ? null : (
-        <p className="m-0 text-meta leading-base text-warn" role="status">
-          Nothing is paired in this browser yet.
-        </p>
-      )}
-      <button
-        type="button"
-        className="kt-btn min-h-[44px] w-full"
-        data-variant="primary"
-        onClick={fleetReady ? onOpenFleet : onBackToPairing}
-        data-onboarding-open-fleet=""
-      >
-        {fleetReady ? 'Open my fleet' : 'Back to pairing'}
-        {fleetReady ? <ExternalLink size={16} aria-hidden="true" /> : null}
-      </button>
+      <p className={COPY}>
+        1. On the computer running Ferretry, run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code>.
+      </p>
+      <p className={COPY}>2. Scan the QR it shows.{stated ? '' : ' The code works once, for about two minutes.'}</p>
+      <Pairing>{pairing}</Pairing>
     </div>
   );
 }

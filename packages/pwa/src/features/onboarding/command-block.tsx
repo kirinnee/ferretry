@@ -56,9 +56,12 @@ export interface CommandBlockProps {
 /**
  * A copyable command block.
  *
- * `overflow-x-auto` is paired with `overflow-y-hidden` deliberately: on its own
- * it grows a phantom vertical scrollbar inside the box, which the original UI
- * hit and fixed the same way.
+ * THE COMMAND WRAPS RATHER THAN SCROLLS. A one-line install script is longer than
+ * a phone, and a sideways scroller showed only `curl -fsSL --connect-timeout` of
+ * it — the string a reader has to check before running it on their own machine.
+ * `pre-wrap` keeps the newlines between commands and `overflow-wrap:anywhere`
+ * breaks a URL that has no space to break at; the copy control still carries the
+ * `command` prop, so wrapping is only ever a matter of how it is drawn.
  *
  * The copy control sits beside the code rather than under it — a row saved on
  * every block, and the affordance lands where the eye already is.
@@ -66,7 +69,7 @@ export interface CommandBlockProps {
 export function CommandBlock({ command, copyLabel, write }: CommandBlockProps) {
   return (
     <div className="flex min-w-0 items-start gap-1 rounded-control border border-code-border bg-code-bg py-2 pl-2 pr-1">
-      <pre className="m-0 min-w-0 flex-1 self-center overflow-x-auto overflow-y-hidden font-mono text-title leading-base text-code-fg">
+      <pre className="m-0 min-w-0 flex-1 self-center whitespace-pre-wrap font-mono text-title leading-base text-code-fg [overflow-wrap:anywhere]">
         <code>
           {tokenizeCommand(command).map((token: CommandToken) => (
             <span key={token.start} className={TONE[token.kind]}>

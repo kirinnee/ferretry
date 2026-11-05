@@ -41,7 +41,7 @@ describe('the hand-off payload', () => {
       { route: 'add-client', step: 'pair' },
       { route: 'add-daemon', target: 'this', doer: 'self', step: 'install' },
       { route: 'first-time', target: 'other', doer: 'agent', step: 'brief' },
-      { route: 'first-time', target: 'this', doer: 'self', step: 'daemon' },
+      { route: 'first-time', target: 'this', doer: 'self', step: 'local' },
     ] as const) {
       expect(parseSetupHandoff(encodeSetupHandoff(handoff))).toEqual(handoff);
     }
@@ -108,9 +108,9 @@ describe('the hand-off link', () => {
   });
 
   it('is read back out of a fragment, and never confused with a pairing one', () => {
-    expect(setupHandoffFromHref('https://x.invalid/setup#fy-setup=v2;route=add-client;step=scan')).toEqual({
+    expect(setupHandoffFromHref('https://x.invalid/setup#fy-setup=v2;route=add-client;step=pair')).toEqual({
       route: 'add-client',
-      step: 'scan',
+      step: 'pair',
     });
     // A pairing fragment means something entirely different and has no `=` pairs
     // this parser recognises.
@@ -166,10 +166,10 @@ describe('landing a hand-off', () => {
   });
 
   it('lands a same-machine journey on its daemon step with no carrier question after it', () => {
-    expect(landSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'daemon' }, 'desktop')).toEqual({
+    expect(landSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'local' }, 'desktop')).toEqual({
       kind: 'walk',
       journey: { route: 'first-time', target: 'this', doer: 'self' },
-      step: 'daemon',
+      step: 'local',
     });
   });
 });
