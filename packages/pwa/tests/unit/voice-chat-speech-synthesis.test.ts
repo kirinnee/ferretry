@@ -64,14 +64,14 @@ describe('voice choice', () => {
     expect(chooseVoice(voices, 'en-US')?.name).toBe('Samantha');
   });
 
-  test('falls back to a local voice in the same language, then to a remote one in it', () => {
+  test('falls back to a local voice in the same language, and NEVER to a remote one', () => {
     expect(chooseVoice(voices, 'en-GB')?.name).toBe('Samantha');
     expect(
       chooseVoice(
         voices.filter(v => v.local === false),
         'en-US',
-      )?.name,
-    ).toBe('Google US English');
+      ),
+    ).toBeNull();
     expect(chooseVoice(voices, 'fr_CA')?.name).toBe('Amélie');
   });
 
@@ -86,13 +86,31 @@ describe('voice choice', () => {
     expect(chooseVoice(voices, 'de-DE')?.local).toBe(true);
   });
 
-  test('with nothing local at all, the best remote voice is named so its note can be shown', () => {
+  test('with nothing local at all, NO voice is chosen — remote voices are never picked automatically (owner rule)', () => {
     const remote = [
       { id: 'a', name: 'Remote A', lang: 'en-US', local: false, isDefault: false },
       { id: 'b', name: 'Remote B', lang: 'en-GB', local: false, isDefault: true },
     ];
-    expect(chooseVoice(remote, 'de-DE')?.name).toBe('Remote B');
-    expect(voiceNote(chooseVoice(remote, 'de-DE'))).toBe('Remote B sends this text to its maker to be spoken.');
+    expect(chooseVoice(remote, 'de-DE')).toBeNull();
+    expect(chooseVoice(remote, 'en-US')).toBeNull();
+    expect(chooseVoice(remote, 'en-US', 'gone')).toBeNull();
+  });
+
+  test('a remote voice is used only when the person explicitly picked it, and it says where the text goes', () => {
+    const remote = [
+      { id: 'a', name: 'Remote A', lang: 'en-US', local: false, isDefault: false },
+      { id: 'b', name: 'Google UK English', lang: 'en-GB', local: false, isDefault: true },
+      { id: 'c', name: 'Microsoft Aria Online (Natural)', lang: 'en-US', local: false, isDefault: false },
+    ];
+    expect(chooseVoice(remote, 'de-DE', 'a')?.name).toBe('Remote A');
+    expect(chooseVoice([...voices, ...remote], 'en-US', 'a')?.name).toBe('Remote A');
+    expect(voiceNote(remote[0] ?? null)).toBe('Remote A sends text to its maker to be spoken.');
+    expect(voiceNote(remote[1] ?? null)).toBe('Google UK English sends text to Google to be spoken.');
+    expect(voiceLabel(remote[1] as (typeof remote)[number])).toBe('Google UK English (sends text to Google)');
+    expect(voiceLabel(remote[2] as (typeof remote)[number])).toBe(
+      'Microsoft Aria Online (Natural) (sends text to Microsoft)',
+    );
+    expect(voiceLabel(remote[0] as (typeof remote)[number])).toBe('Remote A (sends text to its maker)');
   });
 
   test('a device that lists no voices (yet) yields none, and the speaker will not guess', () => {
@@ -100,17 +118,17 @@ describe('voice choice', () => {
     expect(chooseVoice([], 'de-DE', 'anything')).toBeNull();
   });
 
-  test('a voice the person picked wins, local or remote; one that is gone falls back to the best', () => {
+  test('a picked voice wins, local or remote; one that is gone is ignored and the automatic order applies', () => {
     expect(chooseVoice(voices, 'en-US', 'karen')?.name).toBe('Karen');
     expect(chooseVoice(voices, 'en-US', 'g')?.name).toBe('Google US English');
     expect(chooseVoice(voices, 'en-US', 'gone')?.name).toBe('Samantha');
   });
 
   test('remote voices say so, local ones do not', () => {
-    expect(voiceNote(voices[0] ?? null)).toBe('Google US English sends this text to its maker to be spoken.');
+    expect(voiceNote(voices[0] ?? null)).toBe('Google US English sends text to Google to be spoken.');
     expect(voiceNote(voices[2] ?? null)).toBeNull();
     expect(voiceNote(null)).toBeNull();
-    expect(voiceLabel(voices[0] as (typeof voices)[number])).toBe('Google US English (sends text away)');
+    expect(voiceLabel(voices[0] as (typeof voices)[number])).toBe('Google US English (sends text to Google)');
     expect(voiceLabel(voices[2] as (typeof voices)[number])).toBe('Samantha');
   });
 

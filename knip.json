@@ -245,6 +245,7 @@
         "harness/surface-fullscreen-screenshot.tsx",
         "harness/parakeet-near-live-smoke.ts",
         "harness/parakeet-near-live-smoke-page.ts",
+        "harness/turn-endpointer-noise.ts",
         "harness/whisper-smoke.ts",
         "harness/whisper-smoke-page.ts",
         "harness/vosk-smoke.ts",

@@ -321,3 +321,8 @@ packages/pwa/src/features/context-rail/machine-skills-model.ts # the On this mac
 packages/pwa/src/hooks/use-auto-read.ts # Auto-read replies: reads a finished turn aloud, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/voice-chat/auto-read.ts # the pure turn watcher behind Auto-read replies, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/voice-chat/reply-picker.ts # picks the words of a finished turn to read aloud, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
+
+
+# The Live voice end-of-turn detector (&F137 slice 3), built and measured before the Live loop hook (slice 4) consumes it.
+packages/pwa/src/lib/voice-chat/turn-endpointer.ts # pure pause detection over level frames, used so far only by its unit tests and harness/turn-endpointer-noise.ts; slice 4's use-live-voice.ts wires it into the composition root and this entry goes then
+packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; goes with the turn-endpointer entry above

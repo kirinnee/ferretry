@@ -85,7 +85,7 @@ const voiceFor = (synth: SynthLike, request: SpeakRequest): BrowserVoiceLike | n
   const named = wanted === null ? undefined : all.find(candidate => candidate.voiceURI === wanted.id);
   if (named !== undefined) return named;
   const chosen = chooseVoice(all.map(asVoice), request.language ?? 'en-US');
-  if (chosen === null || !chosen.local) return null;
+  if (chosen === null) return null;
   return all.find(candidate => candidate.voiceURI === chosen.id) ?? null;
 };
 

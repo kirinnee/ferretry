@@ -483,6 +483,42 @@ describe('speakableSegments: hostile input stays cheap (review round 1, finding 
     expect(said(`${outer} ${'~'.repeat(40)}\ncode\n${outer}`)).toEqual(["Code block, 1 line. It's on screen."]);
   });
 
+  test('a long fence is kept whole whichever way lines end: LF, CRLF or a bare CR (round 3, finding 1)', () => {
+    const outer = '~'.repeat(30);
+    const inner = '~'.repeat(25);
+    for (const eol of ['\n', '\r\n', '\r']) {
+      const source = [
+        'Before.',
+        '',
+        `${outer}ts`,
+        'const a = 1;',
+        inner,
+        'runDangerousCommand();',
+        outer,
+        '',
+        'After.',
+      ].join(eol);
+      expect(said(source)).toEqual(['Before.', "Code block, 3 lines of TypeScript. It's on screen.", 'After.']);
+      // Inside a quote and a list item, and with a long run that is only stray marks.
+      expect(
+        said(['> ' + outer, '> ' + inner, '> runDangerousCommand();', '> ' + outer].join(eol)).join(' '),
+      ).not.toContain('runDangerous');
+      expect(
+        said(['- ' + outer, '  ' + inner, '  runDangerousCommand();', '  ' + outer].join(eol)).join(' '),
+      ).not.toContain('runDangerous');
+      expect(said(['word', `word ${'~'.repeat(40)} word`].join(eol))).toEqual(
+        said('word\nword ' + '~'.repeat(40) + ' word'),
+      );
+      // Markers too deep to nest are cut on every line, not just the first.
+      const deep = ['one', `${'- '.repeat(12)}two`, `${'> '.repeat(12)}three`].join(eol);
+      expect(said(deep)).toEqual(said(deep.replaceAll(eol, '\n')));
+    }
+    // The excess blanked on the second line of a bare-CR source still slices the original at the same offsets.
+    const crOnly = ['one', `${'~'.repeat(40)} two`].join('\r');
+    const last = speakableSegments(crOnly).segments.at(-1);
+    expect(crOnly.slice(last?.sourceRange.start, last?.sourceRange.end)).toBe(`${'~'.repeat(40)} two`);
+  });
+
   test('the excess of a run is blanked, one for one, so offsets still slice the original', () => {
     const source = `Before.\n\n${'*'.repeat(100)}\n\nAfter ${'.'.repeat(60)} here.\n\nLast.`;
     const reading = speakableSegments(source);
