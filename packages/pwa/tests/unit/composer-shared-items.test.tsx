@@ -257,6 +257,26 @@ describe('useSharedComposerItems', () => {
     run(() => root.unmount());
   });
 
+  test('opens a file the + put back in the message box by reading it from the daemon', async () => {
+    const shown: File[] = [];
+    // What `attachExisting` makes: an empty File, the size the tile knew, and the stored view.
+    const putBack: PendingAttachment = {
+      localId: 'local-1',
+      file: new File([], 'shot.png', { type: 'image/png' }),
+      size: 2048,
+      status: 'ready',
+      view: view('att_1', 'shot.png'),
+    };
+    const { items, root } = mount({ entries: [putBack], fetcher: async () => download('att_1') });
+    await settle();
+
+    await runAsync(async () => items().open(items().entries[0] as PendingAttachment, file => shown.push(file)));
+    await settleUntil(() => shown.length === 1, 'the file from the daemon', runAsync);
+
+    expect(shown.map(file => [file.name, file.size])).toEqual([['shot.png', 2]]);
+    run(() => root.unmount());
+  });
+
   test('a document that cannot be read just now leaves the chip as it is', async () => {
     const shown: File[] = [];
     const { items, root } = mount({

@@ -104,6 +104,29 @@ describe('the + on an attachment tile', () => {
     await view.unmount();
   });
 
+  it('says the file could not be attached again when the message box refuses the chip, yet still wrote the token', async () => {
+    const composer = fakeComposer({
+      attachExisting: file => {
+        composer.calls.push(`attach ${file.id}`);
+        return 'refused';
+      },
+    });
+    const view = await mount(
+      <AttachmentReferenceTarget scope={scope}>
+        <TranscriptAttachmentGallery daemon={daemon} images={[stored()]} />
+      </AttachmentReferenceTarget>,
+    );
+
+    await interact(() => must(plusOf(view.container), 'the + button').click());
+
+    expect(composer.calls).toEqual(['attach att_1', 'insert %attachment:shot.png']);
+    expect(view.container.querySelector('[role="status"].sr-only')?.textContent).toBe(
+      'Referenced shot.png; it could not be attached again',
+    );
+    await interact(() => composer.dispose());
+    await view.unmount();
+  });
+
   it('is disabled, with the reason, while no message box is open — and wakes when one mounts', async () => {
     const view = await mount(
       <AttachmentReferenceTarget scope={scope}>

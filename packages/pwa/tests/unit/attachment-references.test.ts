@@ -103,6 +103,14 @@ describe('%attachment: grammar', () => {
     should(parseReferenceHref(`${href}&extra=1`)).be.null();
     should(referenceIdentity(proved)).equal('attachment:daemon-a:sess-1:att_1');
   });
+
+  test('should refuse to write a link for an attachment reference that is not a whole proof', () => {
+    // Arrange: a reference whose name the grammar cannot write.
+    const broken = { ...att('att_1', 'bad name.png'), kind: 'attachment' } as unknown as ResolvedAttachmentReference;
+
+    // Assert
+    should(() => referenceHref(broken)).throw(TypeError);
+  });
 });
 
 describe('%attachment: proof', () => {
@@ -218,6 +226,25 @@ describe('AttachmentIndex', () => {
     // ...and a queued send that landed after the turn does win.
     index.record('queued-new', [{ attachmentId: 'att_q2', filename: 'a.png' }], 300);
     should(index.find('a.png')?.attachmentId).equal('att_q2');
+  });
+
+  test('should put a queued send of unknown time after a turn whichever was read first, and order two such sends by name', () => {
+    // Arrange: the turn is read first, then a queued send with no time.
+    const turnFirst = new AttachmentIndex();
+    turnFirst.record('turn-4', [{ attachmentId: 'att_t', filename: 'a.png' }]);
+    turnFirst.record('queued-a', [{ attachmentId: 'att_qa', filename: 'a.png' }]);
+    // Arrange: two queued sends with no time, read in either order, settle on the same one.
+    const forward = new AttachmentIndex();
+    forward.record('queued-a', [{ attachmentId: 'att_qa', filename: 'a.png' }]);
+    forward.record('queued-b', [{ attachmentId: 'att_qb', filename: 'a.png' }]);
+    const backward = new AttachmentIndex();
+    backward.record('queued-b', [{ attachmentId: 'att_qb', filename: 'a.png' }]);
+    backward.record('queued-a', [{ attachmentId: 'att_qa', filename: 'a.png' }]);
+
+    // Assert
+    should(turnFirst.find('a.png')?.attachmentId).equal('att_qa');
+    should(forward.find('a.png')?.attachmentId).equal('att_qb');
+    should(backward.find('a.png')?.attachmentId).equal('att_qb');
   });
 
   test('should re-rank a message whose time becomes known, and say so to subscribers', () => {
