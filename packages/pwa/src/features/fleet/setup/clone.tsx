@@ -92,6 +92,7 @@ import {
   settingsDocOf,
   settingsToSend,
   undecidedKeys,
+  withoutDefaultRuntimePick,
   withoutDefaultRuntime,
 } from './clone-settings-merge.ts';
 import { CloneSettingsKeys } from './clone-settings-keys.tsx';
@@ -299,7 +300,8 @@ export function CloneMachine(props: CloneMachineProps) {
   // With the fleet copied, the default runtime is the picker's, not a row: see `defaultRuntimeToPicker`.
   const reviewedSettings = copiesFleet ? defaultRuntimeToPicker(reviewedAll) : reviewedAll;
   const shownSettings = copiesFleet ? withoutDefaultRuntime(reviewedAll) : reviewedAll;
-  const undecided = undecidedKeys(reviewedSettings, picks);
+  const settingsPicks = copiesFleet ? withoutDefaultRuntimePick(picks) : picks;
+  const undecided = undecidedKeys(reviewedSettings, settingsPicks);
   const refused = refusedDocuments(reviewedSettings);
   const blockedBy = reviewing
     ? 'Checking what differs…'
@@ -460,7 +462,7 @@ export function CloneMachine(props: CloneMachineProps) {
           reviewed: review.fingerprint,
           decisions: keepItemsDecisions(review.items),
           settings: [...settingsToSend(chosen, files, sourceMachine)],
-          settingsDecisions: settingsDecisions(reviewedSettings, picks),
+          settingsDecisions: settingsDecisions(reviewedSettings, settingsPicks),
         });
         if (applied.kind === 'refused') {
           setCopying(false);

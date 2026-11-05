@@ -2303,6 +2303,30 @@ describe('CloneMachine · settings merged key by key', () => {
       }
     });
 
+    it('forgets an explicit Take on the hidden row once the fleet is ticked again', async () => {
+      const { calls, createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({ [REVIEW_PATH]: reviewing({ controlsKeys: [DEFAULT_ROW] }) }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(tick(screen, 'fleet'), 'untick fleet');
+        const runtime = screen.q('[data-clone-key="controls:defaultRuntime"] input[type="checkbox"]');
+        expect(runtime).not.toBeNull();
+        await click(runtime, 'keep the default');
+        await click(runtime, 'take the default explicitly');
+        await click(tick(screen, 'fleet'), 'tick fleet again');
+        expect(screen.q('[data-clone-key="controls:defaultRuntime"]')).toBeNull();
+        await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+        await click(submit(screen), 'Copy');
+        const [update] = changeBodies(calls.target).map(body => body.change as { settingsDecisions: unknown });
+        expect(update?.settingsDecisions).toMatchObject({ controls: { defaultRuntime: 'keep' } });
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
     it('is a row of its own when the fleet is not copied, where the machine already has the runtime', async () => {
       const { calls, createClient } = daemons({
         work: sourceFiles(),

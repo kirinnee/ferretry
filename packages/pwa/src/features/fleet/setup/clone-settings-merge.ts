@@ -143,6 +143,13 @@ export const defaultRuntimeToPicker = (documents: readonly ReviewedSettings[]): 
       : document,
   );
 
+/**
+ * The picks without one on that row. A saved pick outranks a row's own choice, so a Take made while the fleet was
+ * unticked would otherwise survive re-ticking it and still reach the settings-only update that runs first.
+ */
+export const withoutDefaultRuntimePick = (picks: SettingsPicks): SettingsPicks =>
+  new Map([...picks].filter(([id]) => id !== pickId('controls', DEFAULT_RUNTIME)));
+
 /** The same documents without that row, for the screen: the picker below them is where it is decided. */
 export const withoutDefaultRuntime = (documents: readonly ReviewedSettings[]): readonly ReviewedSettings[] =>
   documents.map(document =>
