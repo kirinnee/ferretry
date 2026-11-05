@@ -96,7 +96,7 @@ describe('<AutoReadSettings>', () => {
     expect(labels).toEqual([
       'Best voice for this device',
       'Samantha — en-US',
-      'Google US English (sends text away) — en-US',
+      'Google US English (sends text to Google) — en-US',
     ]);
     expect(select.value).toBe('best');
   });

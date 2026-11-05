@@ -563,7 +563,7 @@ refused storage keeps the choice in memory and says so. Nothing in it is a secre
 | What to read      | Last message of the turn · Every message             | Last message of the turn |
 
 The voice list groups voices **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as Chrome's
-"Google …" ones), and a remote voice is labelled "(sends text away)" and warns in words when chosen. **Preview voice** speaks one sentence
+"Google …" ones), and a remote voice is labelled in words with who it sends text to ("(sends text to Google)") and warns in words when chosen. **Preview voice** speaks one sentence
 with the chosen voice and speed. Free voices built into the device only: no paid or cloud voice and no new secret.
 
 ### Accessibility
