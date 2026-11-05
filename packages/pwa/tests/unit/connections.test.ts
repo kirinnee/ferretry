@@ -491,6 +491,46 @@ describe('two tabs of one browser', () => {
     should(notified).equal(1);
   });
 
+  it('keeps this tab’s own selected machine when another tab selects a different one', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    original.add(connection('b'));
+    await original.flush();
+    const other = await open(browser, 2);
+    should(original.selected()?.daemonId).equal('b');
+
+    other.select(daemonId('a'));
+    await other.flush();
+    await settle();
+
+    should(original.selected()?.daemonId).equal('b');
+    should(other.selected()?.daemonId).equal('a');
+    should(
+      original
+        .list()
+        .map(record => record.daemonId)
+        .sort(),
+    ).deepEqual(['a', 'b']);
+  });
+
+  it('still adopts the other tab’s selection when this tab’s machine was removed there', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    original.add(connection('b'));
+    await original.flush();
+    const other = await open(browser, 2);
+    original.select(daemonId('a'));
+    await original.flush();
+
+    other.remove(daemonId('a'));
+    await other.flush();
+    await settle();
+
+    should(original.selected()?.daemonId).equal('b');
+  });
+
   it('does not echo: adopting another tab’s registry saves and announces nothing', async () => {
     const browser = new SharedBrowser();
     const original = await open(browser, 1);

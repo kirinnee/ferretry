@@ -397,6 +397,10 @@ function RouteFlow({
    */
   const stranded = at.current === 'handoff' && pairings === 0;
   const back = previousOnboardingStep(path, at.current);
+  const forward =
+    WAITS_FOR_DAEMON.has(at.current) &&
+    pairings > 0 &&
+    onboardingStepIndex(path, at.furthest) > onboardingStepIndex(path, at.current);
   useEffect(() => {
     if (stranded) onGoTo(back);
   }, [stranded, back, onGoTo]);
@@ -420,7 +424,7 @@ function RouteFlow({
     onPaired: settle,
     onStatedFailure,
     onStageChange,
-    quiet: PAIRING_UNDER_A_PRIMARY.has(at.current),
+    quiet: PAIRING_UNDER_A_PRIMARY.has(at.current) || forward,
   });
   /*
    * THE HAND-OFF IS BUILT ONCE, HERE, AND HANDED DOWN AS A NODE.
@@ -521,6 +525,25 @@ function RouteFlow({
             data-onboarding-next=""
           >
             I ran it
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        )}
+        {/*
+          A WAY FORWARD FOR A READER WHO CAME BACK. Back from the phone offer lands on `local`, and
+          `local` ends when the daemon answers — but this reader is already paired, so the count
+          never rises again and the page would be a dead end. Once something is paired and the reader
+          has already been further, the page offers the step they left, as its primary (stepped down
+          while the embedded pairing screen draws its own).
+        */}
+        {forward && (
+          <button
+            type="button"
+            className="kt-btn ml-auto min-h-[44px] flex-1"
+            {...(engaged ? {} : { 'data-variant': 'primary' })}
+            onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
+            data-onboarding-next=""
+          >
+            Continue
             <ArrowRight size={16} aria-hidden="true" />
           </button>
         )}

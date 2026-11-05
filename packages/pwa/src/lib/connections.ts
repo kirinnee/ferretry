@@ -540,12 +540,20 @@ export class DaemonConnectionStore {
         if (generation !== this.#reloads) return;
         if (revision === this.#revision) break;
       }
-      if (serialized(next) === serialized(this.#snapshot)) return;
+      // WHICH MACHINE THIS TAB IS LOOKING AT IS THIS TAB'S OWN. The registry is shared, the selection is
+      // what the person is doing right here, so another tab choosing a machine must not move this one.
+      // Only a selection the registry no longer holds (or none yet) is replaced by the other tab's.
+      const mine = this.#snapshot.selectedDaemonId;
+      const adopted =
+        mine !== null && next.connections.some(candidate => candidate.daemonId === mine)
+          ? { connections: next.connections, selectedDaemonId: mine }
+          : next;
+      if (serialized(adopted) === serialized(this.#snapshot)) return;
       for (const record of this.#snapshot.connections) {
         const kept = next.connections.find(candidate => candidate.daemonId === record.daemonId);
         if (kept === undefined || !sameConnection(kept, record)) this.#clearDaemon(record.daemonId);
       }
-      this.#snapshot = next;
+      this.#snapshot = adopted;
       for (const listener of this.#listeners) listener();
     } catch {
       // Best-effort, like every other repository read: this tab keeps the registry it has.

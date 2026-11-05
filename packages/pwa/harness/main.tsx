@@ -2489,6 +2489,7 @@ const harnessOnboarding = (
   journey: Record<string, string>,
   current: OnboardingStepId,
   device: DeviceKind = 'desktop',
+  furthest: OnboardingStepId = current,
 ): OnboardingProgressStore =>
   new OnboardingProgressStore({
     device,
@@ -2499,7 +2500,7 @@ const harnessOnboarding = (
           stage: 'walk',
           ...journey,
           current,
-          furthest: current,
+          furthest,
         }),
       setItem: () => {},
     },
@@ -2555,6 +2556,7 @@ type HarnessOnboardingScreen =
   | 'brief-failed'
   | 'install'
   | 'local'
+  | 'local-back'
   | 'handoff'
   | 'elsewhere'
   | 'elsewhere-mobile'
@@ -2577,6 +2579,8 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   install: harnessOnboarding(hereByHand(), 'install'),
   /* The same-machine collapse: a daemon on this box, and nothing to scan. */
   local: harnessOnboarding(hereByHand(), 'local'),
+  /* Back from the phone offer: already paired, so the page itself offers the way on. */
+  'local-back': harnessOnboarding(hereByHand(), 'local', 'desktop', 'handoff'),
   /* The optional last page: only reachable once something is paired. */
   handoff: harnessOnboarding(hereByHand(), 'handoff'),
   /* The recursion, on a computer: the reader walks to the machine that will host it. */
@@ -7590,7 +7594,7 @@ function OnboardingStageHarness({ screen }: { readonly screen: HarnessOnboarding
         screen={screen}
         channel="curl"
         pairing
-        pairings={screen === 'handoff' ? 1 : 0}
+        pairings={screen === 'handoff' || screen === 'local-back' ? 1 : 0}
         share={screen === 'brief-elsewhere'}
       />
     </div>

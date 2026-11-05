@@ -33,6 +33,7 @@ const SCREENS = [
   ['brief-failed', 'agent-failed'],
   ['install', 'hand'],
   ['local', 'open'],
+  ['local-back', 'open-back'],
   ['handoff', 'phone'],
   ['elsewhere', 'elsewhere'],
   ['elsewhere-mobile', 'elsewhere-mobile'],

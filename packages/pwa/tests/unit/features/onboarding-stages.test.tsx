@@ -110,6 +110,11 @@ describe('the install stage', () => {
     const view = await mount(<InstallStage write={async () => {}} channel="curl" />);
 
     expect(view.container.querySelector('[data-onboarding-fallback-note]')).not.toBeNull();
+    // The script installs into ~/.local/bin and only prints a PATH note, so `fy daemon start` can miss in this shell.
+    const pathNote = must(view.container.querySelector('[data-onboarding-path-note]'), 'the PATH note');
+    expect(pathNote.textContent).toContain('~/.local/bin');
+    expect(pathNote.textContent).toContain('open a new terminal');
+    expect(pathNote.textContent).toContain(DAEMON_START_COMMAND);
     expect(must(view.container.querySelector('[data-onboarding-other-platforms]'), 'the link').textContent).toBe(
       'Other platforms',
     );

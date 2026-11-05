@@ -632,6 +632,40 @@ describe('this computer, by hand', () => {
     await stranded.view.unmount();
   });
 
+  it('lets a paired reader who went Back from the phone offer go forward again', async () => {
+    const { view, opened } = await pageWith({ progress: walking({ step: 'handoff' }), pairings: 1 });
+    await click(buttonWith(view.container, '[data-onboarding-back]'));
+
+    // The count will never rise again for this reader, so the page itself offers the way on.
+    expect(screenOf(view.container)).toBe('local');
+    const forward = buttonWith(view.container, '[data-onboarding-next]');
+    expect(forward.textContent).toBe('Continue');
+    expect(view.container.querySelectorAll('[data-variant="primary"]')).toHaveLength(1);
+    // The pairing surface is the fallback here, so it is drawn quiet under the primary.
+    expect(quietOf(view.container)).toBe('true');
+
+    // When the embedded pairing screen draws its own primary, this one steps down.
+    await click(buttonWith(view.container, '[data-test-stage="confirm"]'));
+    expect(view.container.querySelectorAll('[data-variant="primary"]')).toHaveLength(0);
+
+    await click(forward);
+    expect(screenOf(view.container)).toBe('handoff');
+    expect(opened).toEqual([]);
+    await view.unmount();
+  });
+
+  it('offers no way forward on a page the reader has not been past, or with nothing paired', async () => {
+    const fresh = await pageWith({ progress: walking({ step: 'local' }), pairings: 1 });
+    expect(fresh.view.container.querySelector('[data-onboarding-next]')).toBeNull();
+    await fresh.view.unmount();
+
+    const damaged = await pageWith({ progress: walking({ step: 'handoff' }), pairings: 1 });
+    await click(buttonWith(damaged.view.container, '[data-onboarding-back]'));
+    await damaged.setPairings(0);
+    expect(damaged.view.container.querySelector('[data-onboarding-next]')).toBeNull();
+    await damaged.view.unmount();
+  });
+
   it('keeps the way through for a terminal that cannot open a browser', async () => {
     const { view } = await pageWith({ progress: walking({ step: 'local' }) });
 

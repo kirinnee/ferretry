@@ -13,9 +13,11 @@
  * "scan this if the other thing shows a QR" is a fallback, not the next move, and
  * two filled buttons is a page with no next move.
  *
- * NOTHING HONEST WAS DROPPED. The verification command, the healthy daemon's
- * output and the two-minute expiry are all still on the page — they are simply no
- * longer competing with the instruction.
+ * NOTHING HONEST WAS DROPPED, EXCEPT THE CHECKS THE PAGE CANNOT MAKE. The
+ * two-minute expiry, the PATH advice for the script route and the way back from a
+ * terminal that cannot open a browser are all still on the page. The separate
+ * verification command (`fy --version`) is not: it stays in the agent prompt,
+ * and a reader who ran the block sees `fy daemon start` fail or work.
  *
  * EVERY STAGE HERE IS REUSED BY EVERY JOURNEY THAT NEEDS IT, including "add
  * another daemon" — a second copy of the daemon instructions is a second copy to
@@ -134,7 +136,13 @@ export function InstallStage({ write, channel }: InstallStageProps) {
       {chosen.fallback === undefined ? null : (
         <p className="m-0 text-meta leading-base text-muted" data-onboarding-fallback-note="">
           The generic fallback. It works on every supported target — but if your machine is named in the list, that
-          route is packaged and, on macOS, clears the Gatekeeper quarantine for you.
+          route is packaged and, on macOS, clears the Gatekeeper quarantine for you.{' '}
+          <span data-onboarding-path-note="">
+            It installs into <code className="font-mono text-syn-string">~/.local/bin</code> and only prints a PATH note
+            — if <code className="font-mono text-syn-string">fy</code> is not found on the last line, add that folder to
+            your PATH or open a new terminal, then run{' '}
+            <code className="font-mono text-syn-string">{DAEMON_START_COMMAND}</code> again.
+          </span>
         </p>
       )}
 
