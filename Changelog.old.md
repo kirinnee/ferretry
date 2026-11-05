@@ -1,3 +1,9 @@
+## [4.281.0](https://github.com/kirinnee/ferretry/compare/v4.280.0...v4.281.0) (2026-11-05)
+
+### Features
+
+* **pwa:** voice turn endpointer, shared energy math and noise measurements (F137 s3) ([#1489](https://github.com/kirinnee/ferretry/issues/1489)) ([fef1b15](https://github.com/kirinnee/ferretry/commit/fef1b159c73d88eb59bbb387f7111e815326cfa5))
+
 ## [4.280.0](https://github.com/kirinnee/ferretry/compare/v4.279.0...v4.280.0) (2026-11-05)
 
 ### Features

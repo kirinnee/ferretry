@@ -252,6 +252,11 @@
         "harness/whisper-smoke-page.ts",
         "harness/vosk-smoke.ts",
         "harness/vosk-smoke-page.ts",
+        "harness/stt-speed-bench.ts",
+        "harness/speed-line-screenshot.tsx",
+        "harness/stt-speed-bench-page.ts",
+        "speed-bench/main.ts",
+        "speed-bench/make-clip.ts",
         "harness/fy-render-safari/probe.ts",
         "harness/fy-render-safari/parent.ts",
         "harness/fy-render-safari/probe-shell.ts",
@@ -306,6 +311,7 @@
         "src/**/*.{ts,tsx}",
         "tests/**/*.{ts,tsx}",
         "harness/**/*.{ts,tsx}",
+        "speed-bench/**/*.ts",
         "scripts/**/*.ts",
         "vite.config.ts"
       ]

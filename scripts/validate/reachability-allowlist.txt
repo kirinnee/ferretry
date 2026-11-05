@@ -323,6 +323,9 @@ packages/pwa/src/lib/voice-chat/auto-read.ts # the pure turn watcher behind Auto
 packages/pwa/src/lib/voice-chat/reply-picker.ts # picks the words of a finished turn to read aloud, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
 
+# The speed benchmark's result schema and arithmetic: dev tooling, reached only from the one-click page (packages/pwa/speed-bench/main.ts, runner.ts) and the headless driver (packages/pwa/harness/stt-speed-bench-page.ts), neither of which is the app's composition root. It lives under src/lib so the unit tier's 100% ledger holds it. Delete this line if the app ever imports it.
+packages/pwa/src/lib/stt/speed-bench-report.ts # benchmark result schema, used by speed-bench/ and harness/stt-speed-bench-page.ts only; not part of the shipped app
+
 # The Live voice end-of-turn detector (&F137 slice 3), built and measured before the Live loop hook (slice 4) consumes it.
 packages/pwa/src/lib/voice-chat/turn-endpointer.ts # pure pause detection over level frames, used so far only by its unit tests and harness/turn-endpointer-noise.ts; slice 4's use-live-voice.ts wires it into the composition root and this entry goes then
 packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; goes with the turn-endpointer entry above

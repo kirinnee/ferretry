@@ -9,6 +9,10 @@
  * per-device "Live words" setting on, `near-live.ts` re-transcribes a rolling window while the
  * person speaks and reports committed and interim words through `onLive`; Stop transcribes only what
  * is not committed yet. With it off, words appear when Stop transcribes the whole take.
+ *
+ * EARLY FINISH (`tentative-take.ts`). With live words off, `beginFinish()` starts decoding what has
+ * been recorded while the caller still confirms the pause; `finish()` then reuses that answer when the
+ * audio since is only quiet. The same session serves the sherpa batch models.
  */
 
 import type { AudioCapturePort, AudioRecording } from './audio-capture.ts';
@@ -22,6 +26,7 @@ import type { SessionTimings } from './dictation-timeline.ts';
 import { MIN_SPEECH_SAMPLES, type NearLiveState, NearLiveTranscriber } from './near-live.ts';
 import { type ParakeetEngine, ParakeetEngineError } from './parakeet-engine.ts';
 import { PARAKEET_VERSION_LABEL } from './parakeet-model.ts';
+import { type TentativeTake, TentativeTranscriber } from './tentative-take.ts';
 
 const MAX_DICTATION_MS = 120_000;
 const SAMPLE_RATE_HZ = 16_000;
@@ -79,10 +84,35 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
   #unwatchHidden: (() => void) | null = null;
   #finishing: Promise<string> | null = null;
   #timings: SessionTimings | undefined;
+  readonly #tentative: TentativeTranscriber;
 
   constructor(ports: ParakeetSessionPorts, options: ParakeetSessionOptions) {
     this.#ports = ports;
     this.#options = options;
+    this.#tentative = new TentativeTranscriber(
+      {
+        peek: async () => await (await this.#whenRecording()).peek(),
+        // A take too short to hold speech is not sent to the model, early or not.
+        transcribe: async (samples, signal) =>
+          samples.length < MIN_SPEECH_SAMPLES ? '' : await this.#ports.engine.transcribe(samples, signal),
+      },
+      this.#abort.signal,
+    );
+  }
+
+  /**
+   * Begin an early finish (`tentative-take.ts`): the words so far are worked out while the caller
+   * confirms the pause. `null` unless the microphone is open, and `null` with near-live words on, which
+   * already re-read a window of their own.
+   */
+  beginFinish(): TentativeTake | null {
+    if (this.#state !== 'recording' || this.#live !== null) return null;
+    return this.#tentative.begin();
+  }
+
+  async #whenRecording(): Promise<AudioRecording> {
+    if (this.#recording === null) throw new BrowserRecognitionError('aborted', 'Dictation has not started.');
+    return await this.#recording;
   }
 
   /** Call synchronously from the reader's gesture: the permission prompt is attributed to it. */
@@ -161,6 +191,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     this.#abort.abort();
     this.#options.onMonitor?.(null);
     this.#live?.cancel();
+    this.#tentative.clear();
     this.#clearLimit();
     void this.#recording?.then(
       opened => opened.cancel(),
@@ -192,6 +223,11 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
       };
     };
     const transcribingAt = now();
+    const early = await this.#tentative.reuse(samples);
+    if (early !== null) {
+      measured(now() - transcribingAt);
+      return early;
+    }
     const live = this.#live;
     if (live !== null) {
       try {

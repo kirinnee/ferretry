@@ -39,7 +39,6 @@ import {
   type BrowserRecognitionSupport,
   browserRecognitionProvider,
 } from '../../lib/stt/browser-recognition.ts';
-import { type DeviceClass, type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-defaults.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
@@ -62,6 +61,14 @@ import {
 import { Badge, Textarea } from '../../shell/primitives.tsx';
 import { AutoReadSettings } from './auto-read-settings.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
+import type { SpeedPlanner } from '../../lib/stt/speed-planner.ts';
+import { SpeedLine } from './speed-line.tsx';
+import {
+  DEFAULT_ON_DEVICE_ENGINE,
+  type DeviceClass,
+  type DeviceClassGlobalLike,
+  deviceClassOf,
+} from '../../lib/stt/engine-defaults.ts';
 import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
 import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
 import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
@@ -171,6 +178,8 @@ export interface DictationSettingsProps {
   readonly daemon?: DaemonConnection;
   /** Test and harness seam: the machine's cleanup settings, instead of reading them through the app. */
   readonly voiceCleanup?: MachineVoiceCleanup;
+  /** Test and harness seam: the speed planner, instead of the page's own. */
+  readonly speedPlanner?: SpeedPlanner;
 }
 
 export function DictationSettings({
@@ -185,6 +194,7 @@ export function DictationSettings({
   deviceClass,
   daemon,
   voiceCleanup,
+  speedPlanner,
 }: DictationSettingsProps) {
   const detectedProvider = useMemo(() => browserRecognitionProvider(), []);
   const pageDeviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
@@ -240,6 +250,12 @@ export function DictationSettings({
               deviceClass={deviceClass ?? pageDeviceClass}
             />
           </section>
+
+          {/* ---- which execution path the engine runs on, chosen by the device ---- */}
+          <SpeedLine
+            engine={settings.engine ?? DEFAULT_ON_DEVICE_ENGINE[deviceClass ?? pageDeviceClass]}
+            {...(speedPlanner === undefined ? {} : { planner: speedPlanner })}
+          />
 
           {/* ---- near-live words, for a model that re-reads a window (Parakeet) ---- */}
           {onDeviceModel(settings.engine)?.nearLive === true && (
