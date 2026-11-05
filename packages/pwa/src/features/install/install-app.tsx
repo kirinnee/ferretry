@@ -18,6 +18,8 @@ import {
   installSetting,
 } from '../../lib/install-prompt.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { SettingRow } from '../settings/setting-row.tsx';
+import { settingDefinition } from '../settings/settings-catalog.ts';
 
 /** The Share sheet steps, with the Share glyph inline because that glyph is what a reader looks for. */
 function ShareSteps() {
@@ -92,48 +94,65 @@ const OUTCOME_WORDS: Readonly<Record<UnfinishedOutcome, string>> = {
   unavailable: 'The browser withdrew its offer. Use its menu instead.',
 };
 
-/** Settings › This device › Install app. */
+const INSTALL_HINT: Readonly<Record<'installed' | 'prompt' | 'ios' | 'manual', string>> = {
+  installed: 'Installed on this device',
+  prompt: 'Add Ferretry to your home screen or app list',
+  ios: 'Share › Add to Home Screen',
+  manual: 'Not offered by this browser — use the browser menu › Install app',
+};
+
+/** Settings › This device › Install app, as one compact row. */
 export function InstallAppSetting() {
   const view = useInstallPrompt();
   const [outcome, setOutcome] = useState<UnfinishedOutcome | null>(null);
   const state = view === null ? 'manual' : installSetting(view.snapshot);
   return (
-    <div className="flex flex-col gap-2 text-ui leading-base" data-install-setting={state}>
-      {state === 'installed' ? (
-        <p className="m-0 text-fg">Ferretry is installed on this device. Open it from your home screen or app list.</p>
-      ) : null}
-      {state === 'prompt' ? (
-        <div>
-          {/* The setting's own description already says what installing gives; the row is just the act. */}
+    <SettingRow
+      settingId="install-app"
+      name="Install app"
+      hint={INSTALL_HINT[state]}
+      explanation={
+        <div className="flex flex-col gap-2" data-install-setting={state}>
+          <p className="m-0">{settingDefinition('install-app').description}</p>
+          {state === 'installed' ? (
+            <p className="m-0">Ferretry is installed on this device. Open it from your home screen or app list.</p>
+          ) : null}
+          {state === 'ios' ? (
+            <p className="m-0">
+              On iPhone and iPad, <ShareSteps /> in the browser’s toolbar. Ferretry then opens from your home screen,
+              full screen.
+            </p>
+          ) : null}
+          {state === 'manual' ? (
+            <p className="m-0">
+              This browser has not offered to install Ferretry. In Chrome or Edge, open the browser menu and choose{' '}
+              <span className="font-semibold">Install app</span> or{' '}
+              <span className="font-semibold">Add to Home screen</span>.
+            </p>
+          ) : null}
+        </div>
+      }
+      control={() =>
+        state === 'prompt' ? (
           <Button
             variant="primary"
+            size="sm"
+            className="min-h-[44px]"
             data-install-accept=""
             onClick={() => {
               void view?.store.install().then(result => setOutcome(result === 'accepted' ? null : result));
             }}
           >
-            Install app
+            Install
           </Button>
-        </div>
-      ) : null}
-      {state === 'ios' ? (
-        <p className="m-0 text-muted">
-          On iPhone and iPad, <ShareSteps /> in the browser’s toolbar. Ferretry then opens from your home screen, full
-          screen.
-        </p>
-      ) : null}
-      {state === 'manual' ? (
-        <p className="m-0 text-muted">
-          This browser has not offered to install Ferretry. In Chrome or Edge, open the browser menu and choose{' '}
-          <span className="font-semibold">Install app</span> or{' '}
-          <span className="font-semibold">Add to Home screen</span>.
-        </p>
-      ) : null}
+        ) : null
+      }
+    >
       {outcome === null ? null : (
-        <p className="m-0 text-meta text-muted" role="status">
+        <p className="m-0 px-panel pb-3 text-meta text-muted" role="status">
           {OUTCOME_WORDS[outcome]}
         </p>
       )}
-    </div>
+    </SettingRow>
   );
 }

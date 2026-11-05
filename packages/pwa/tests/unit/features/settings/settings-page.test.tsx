@@ -229,15 +229,20 @@ describe('SettingsPage sections', () => {
     ]);
     expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined, undefined]);
     expect(settingIds(view)).toEqual([
-      'text-size',
       'theme',
+      'text-size',
       'motion',
       'density',
-      'group-needs-you',
       'chat-width',
+      'group-needs-you',
       'open-links-in',
       'message-marks',
     ]);
+    expect(
+      view.root
+        .findAll(node => node.props['data-setting-group'] !== undefined)
+        .map(node => node.props['data-setting-group']),
+    ).toEqual(['Look', 'Layout']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
     run(() => view.unmount());
@@ -307,19 +312,19 @@ describe('SettingsPage sections', () => {
         view.container.querySelector<HTMLElement>('[data-setting-id="clear-cached-data"]'),
         'the Cached data setting',
       );
-      const press = async (label: string): Promise<void> =>
+      const press = async (scope: Element, label: string): Promise<void> =>
         interact(() =>
           must(
-            [...setting.querySelectorAll('button')].find(node => node.textContent?.includes(label)),
+            [...scope.querySelectorAll('button')].find(node => node.textContent?.trim() === label),
             label,
           ).click(),
         );
-      await press('Clear cached data');
-      await press('Clear');
+      await press(setting, 'Clear');
+      await press(setting, 'Clear');
 
       // Assert
       expect(shownSection(view.container)).toBe('device');
-      expect(setting.querySelector('[data-clear-cached-data]')?.getAttribute('data-clear-cached-data')).toBe('cleared');
+      expect(setting.getAttribute('data-clear-cached-data')).toBe('cleared');
       expect(cleared).toBe(1);
     } finally {
       await view.unmount();
@@ -366,7 +371,7 @@ describe('SettingsPage sections', () => {
     try {
       await visit('#device');
       expect(bare.container.querySelector('[data-setting-id="connection-preference"]')?.textContent).toContain(
-        'The connection choice is unavailable',
+        'Connection choices are not available on this page.',
       );
     } finally {
       await bare.unmount();
@@ -445,13 +450,13 @@ describe('SettingsPage sections', () => {
     const view = render(page({ controls }));
 
     const row = view.root.findByProps({ 'data-setting-id': 'open-links-in' });
-    const choices = () => row.findAll(node => node.type === 'input' && node.props.name === 'appearance-open-links-in');
+    const choices = () => row.findAll(node => node.type === 'input' && node.props.type === 'radio');
     const text = (node: ReactTestInstance): string =>
       node.children.map(child => (typeof child === 'string' ? child : text(child))).join('');
     expect(text(row)).toContain('Open links in');
     expect(text(row)).toContain('Your browser');
     expect(text(row)).toContain('Ferretry side panel');
-    expect(text(row)).toContain('Cmd/Ctrl-click always opens a new tab.');
+    expect(text(row)).toContain('Cmd/Ctrl-click always opens a new tab');
     expect(choices().map(radio => [radio.props.value, radio.props.checked])).toEqual([
       ['browser', true],
       ['panel', false],
@@ -765,7 +770,9 @@ describe('SettingsPage controls', () => {
     const view = render(page({ controls }));
     const compact = view.root
       .findAllByType('input')
-      .find(input => input.props.name === 'dashboard-density' && input.props.value === 'compact');
+      .find(
+        input => input.props.value === 'compact' && input.parent?.parent?.props['aria-label'] === 'Dashboard density',
+      );
 
     for (const control of view.root.findAll(
       node => typeof node.props.className === 'string' && node.props.className.includes('min-h-[44px]'),
@@ -793,9 +800,12 @@ describe('SettingsPage controls', () => {
     Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => false } });
     try {
       const view = render(page());
-      const inputs = view.root.findAllByType('input').filter(input => input.props.name === 'text-scale');
+      const group = view.root.find(
+        node => node.props.role === 'radiogroup' && node.props['aria-label'] === 'Text size',
+      );
+      const inputs = group.findAllByType('input');
       expect(inputs.map(input => input.props.value)).toEqual(['default', 'large', 'larger']);
-      for (const input of inputs) expect(input.props.disabled).toBeUndefined();
+      for (const input of inputs) expect(input.props.disabled).toBeFalsy();
       expect(view.root.findAllByProps({ id: 'text-scale-unsupported' })).toEqual([]);
       run(() => view.unmount());
     } finally {

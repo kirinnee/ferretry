@@ -161,6 +161,8 @@ import { type SecretClientFactory, SecretsSurface } from '../src/features/secret
 import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
 import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../src/features/pack/pack-settings.tsx';
+import { distinctDaemonName } from '../src/features/settings/daemon-settings.tsx';
+import { ConnectionPreferenceSettings } from '../src/features/settings/connection-preference-settings.tsx';
 import { AboutMachineSurface } from '../src/features/settings/about-machine.tsx';
 import { pricingSettingsTab } from '../src/features/settings/pricing-settings.tsx';
 import { terminalSlotsSettingsTab } from '../src/features/settings/terminal-slots-settings.tsx';
@@ -1423,6 +1425,17 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         recognitionSupport: HARNESS_RECOGNITION_AVAILABLE,
         voice: HARNESS_PARAKEET_ABSENT,
       }}
+      connectionPreferences={
+        <ConnectionPreferenceSettings
+          machines={connections.map(machine => ({
+            daemonId: machine.daemonId,
+            label: distinctDaemonName(machine, connections),
+            preference: 'auto',
+            availability: { webrtc: true },
+          }))}
+          onChange={() => {}}
+        />
+      }
       notifications={<NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />}
       probeDaemon={harnessSettingsProbe}
       carrier={activeCarrier.carrier}

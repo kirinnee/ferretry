@@ -5491,7 +5491,7 @@ describe('the navigation cache', () => {
         );
 
       // Act
-      await interact(() => button('Clear cached data').click());
+      await interact(() => button('Clear').click());
       await interact(() => button('Clear').click());
       await settle();
 

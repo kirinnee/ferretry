@@ -16,7 +16,7 @@ import { ChevronLeft } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
-import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
+import { useTheme } from '../../hooks/use-theme.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { machineDisplayOrder } from '../../lib/all-machines.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -51,6 +51,7 @@ import { InstallAppSetting } from '../install/install-app.tsx';
 import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
+import { AppearanceGroups } from './appearance-groups.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
@@ -67,6 +68,7 @@ import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { Toggle } from './notification-settings.tsx';
 import type { PasskeyClientFactory } from './security-settings.tsx';
+import { SettingGroup, SettingRow } from './setting-row.tsx';
 import {
   isSettingId,
   isSettingsSectionId,
@@ -81,12 +83,6 @@ import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './sett
 import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './transcription-log-settings.tsx';
 import { ViewportDetails } from './viewport-details.tsx';
-
-export const TEXT_SCALE_OPTIONS = [
-  { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
-  { id: 'large', label: 'Large', description: '112% of default.' },
-  { id: 'larger', label: 'Larger', description: '125% of default.' },
-] as const;
 
 /**
  * Addresses that used to open the Daemons section or one of its panels. Daemons is part of each
@@ -223,39 +219,6 @@ export function SettingsScope({
           : 'Stored in this browser only, and never copied to another machine.'}
       </span>
     </p>
-  );
-}
-
-export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
-  return (
-    <div role="radiogroup" aria-label="Text size" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-      {TEXT_SCALE_OPTIONS.map(option => {
-        const checked = theme.textScale === option.id;
-        return (
-          <label
-            key={option.id}
-            className={cn(
-              'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
-              'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-              checked
-                ? 'border-accent bg-accent-soft text-accent'
-                : 'border-border bg-surface-2 text-fg hover:border-accent',
-            )}
-          >
-            <input
-              type="radio"
-              name="text-scale"
-              value={option.id}
-              checked={checked}
-              onChange={() => theme.setTextScale(option.id)}
-              className="sr-only"
-            />
-            <span className="text-ui font-semibold">{option.label}</span>
-            <span className="text-meta leading-tight text-muted">{option.description}</span>
-          </label>
-        );
-      })}
-    </div>
   );
 }
 
@@ -440,16 +403,8 @@ export function SettingsPage({
   const activeSection: SettingsSectionId = openedSection ?? 'appearance';
   const section = settingsSectionDefinition(activeSection);
 
-  const controlsById = useMemo<Record<SettingId, ReactNode>>(
+  const controlsById = useMemo<Partial<Record<SettingId, ReactNode>>>(
     () => ({
-      'text-size': (
-        <>
-          <TextScaleControl theme={theme} />
-          <p className="mt-2 text-meta leading-base text-faint">
-            Sizes never go below Default, so existing 44px touch targets are not reduced.
-          </p>
-        </>
-      ),
       density: (
         <>
           <fieldset className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -782,14 +737,48 @@ export function SettingsPage({
             )}
 
             <div className="flex min-w-0 flex-col gap-3">
-              {section.settingIds.map(id => {
-                const definition = settingDefinition(id);
-                return (
-                  <SettingsSection key={definition.id} definition={definition}>
-                    {controlsById[definition.id]}
-                  </SettingsSection>
-                );
-              })}
+              {section.id === 'appearance' ? (
+                <AppearanceGroups
+                  theme={theme}
+                  densityState={densityState}
+                  device={device}
+                  computerAvailable={computerAvailable}
+                  controls={controls}
+                />
+              ) : section.id === 'device' ? (
+                <>
+                  <SettingGroup label="App">
+                    <InstallAppSetting />
+                    <DevicePermissionsSetting />
+                  </SettingGroup>
+                  <SettingGroup label="Connection" settingId="connection-preference">
+                    {connectionPreferences ?? (
+                      <SettingRow name="Connection" hint="Connection choices are not available on this page." />
+                    )}
+                  </SettingGroup>
+                  <SettingGroup label="Dictation">
+                    <SpeedupKeysSettings />
+                    <TranscriptionLogSettings />
+                    <DictationDebugSettings />
+                  </SettingGroup>
+                  <SettingGroup label="Data on this device">
+                    <KeepChatsFreshSetting device={device} onChange={patch => controls.setDeviceControls(patch)} />
+                    <ClearCachedDataSetting
+                      {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })}
+                    />
+                    <ViewportDetails />
+                  </SettingGroup>
+                </>
+              ) : (
+                section.settingIds.map(id => {
+                  const definition = settingDefinition(id);
+                  return (
+                    <SettingsSection key={definition.id} definition={definition}>
+                      {controlsById[definition.id]}
+                    </SettingsSection>
+                  );
+                })
+              )}
 
               {section.id === 'machines' ? (
                 createMachineClient === undefined ? (

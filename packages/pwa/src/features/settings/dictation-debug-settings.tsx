@@ -19,6 +19,7 @@ import { cn } from '../../lib/class-names.ts';
 import { clockOfInstant } from '../../lib/message-clock.ts';
 import { useDictationDebug } from '../../lib/store.tsx';
 import type { DictationDebugLog, DictationDebugRecord, DictationDebugSnapshot } from '../../lib/stt/dictation-debug.ts';
+import { SettingRow, SettingSwitch } from './setting-row.tsx';
 
 const DICTATION_DEBUG_INTRO =
   'Show what a dictation clean-up call sent and what came back: the prompt, the provider’s raw reply and the checks that ran. Off by default.';
@@ -26,7 +27,8 @@ const DICTATION_DEBUG_INTRO =
 const DICTATION_DEBUG_PRIVACY =
   'While on, this tab keeps the last 10 calls in memory only. They are never saved, synced or sent to any machine, they disappear when you reload or switch this off, and your key is never part of one. A record does hold the words you dictated and a little conversation around them.';
 
-export const DICTATION_DEBUG_OFF_HINT = 'Switch it on, then dictate: each clean-up call will be listed here.';
+/** Said while the log is off and empty, where the call list is not shown. */
+const DICTATION_DEBUG_OFF_HINT = 'Switch it on, then dictate: each clean-up call will be listed here.';
 
 export const DICTATION_DEBUG_EMPTY = 'No calls yet. Dictate something and its clean-up call will appear here.';
 
@@ -56,45 +58,6 @@ const OUTCOME_TONES: Readonly<Record<CleanupTrace['outcome'], string>> = {
 /** When a call happened, on the reader's own clock. */
 export const callTime = (at: number): string => clockOfInstant(at)?.full ?? 'Unknown time';
 
-export interface PanelSwitchProps {
-  readonly checked: boolean;
-  readonly label: string;
-  readonly detail: string;
-  readonly onChange: (next: boolean) => void;
-}
-
-/** One labelled on/off row, the same shape as the composer's switches. */
-export function PanelSwitch({ checked, label, detail, onChange }: PanelSwitchProps) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left hover:border-accent"
-      onClick={() => onChange(!checked)}
-    >
-      <span className="min-w-0">
-        <span className="block text-ui font-semibold text-fg">{label}</span>
-        <span className="mt-0.5 block text-meta leading-base text-muted">{detail}</span>
-      </span>
-      <span
-        aria-hidden="true"
-        className={cn(
-          'relative h-6 w-11 shrink-0 rounded-full border transition-colors',
-          checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-        )}
-      >
-        <span
-          className={cn(
-            'absolute top-0.5 h-[18px] w-[18px] rounded-full bg-fg transition-transform',
-            checked ? 'translate-x-[20px]' : 'translate-x-0.5',
-          )}
-        />
-      </span>
-    </button>
-  );
-}
-
 export interface DictationDebugSettingsProps {
   /** This device's debug log; the app store's when omitted. `null` keeps nothing. */
   readonly log?: DictationDebugLog | null;
@@ -107,48 +70,59 @@ export function DictationDebugSettings({ log: injected }: DictationDebugSettings
   const [openId, setOpenId] = useState<string | null>(null);
   const open = snapshot.records.find(record => record.id === openId);
 
-  return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="dictation-debug-settings">
-      <div className="flex min-w-0 flex-col gap-1">
-        <p className="m-0 text-cell leading-base text-fg">{DICTATION_DEBUG_INTRO}</p>
-        <p className="m-0 text-meta leading-base text-muted">{DICTATION_DEBUG_PRIVACY}</p>
-      </div>
-      <PanelSwitch
-        checked={snapshot.enabled}
-        label="Dictation debug"
-        detail={snapshot.enabled ? 'On: this tab is keeping recent calls.' : 'Off: nothing is kept.'}
-        onChange={next => log?.setEnabled(next)}
-      />
+  const showCalls = snapshot.enabled || snapshot.records.length > 0;
 
-      <section className="flex min-w-0 flex-col gap-2" aria-label="Recent calls">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="m-0 text-row font-semibold text-fg">Recent calls</h3>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            disabled={snapshot.records.length === 0}
-            onClick={() => log?.clear()}
-          >
-            <Trash2 size={14} aria-hidden="true" /> Clear calls
-          </button>
+  return (
+    <SettingRow
+      settingId="dictation-debug"
+      name="Dictation debug"
+      hint={snapshot.enabled ? 'On: this tab is keeping recent calls' : 'Off: nothing is kept'}
+      explanation={
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="m-0">{DICTATION_DEBUG_INTRO}</p>
+          <p className="m-0">{DICTATION_DEBUG_PRIVACY}</p>
+          {showCalls ? null : <p className="m-0">{DICTATION_DEBUG_OFF_HINT}</p>}
         </div>
-        {snapshot.records.length === 0 ? (
-          <p className="m-0 text-meta leading-base text-faint" data-debug-empty="">
-            {snapshot.enabled ? DICTATION_DEBUG_EMPTY : DICTATION_DEBUG_OFF_HINT}
-          </p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {snapshot.records.map(record => (
-              <li key={record.id}>
-                <CallRow record={record} onOpen={() => setOpenId(record.id)} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      }
+      control={labelId => (
+        <SettingSwitch checked={snapshot.enabled} labelledBy={labelId} onChange={next => log?.setEnabled(next)} />
+      )}
+    >
+      {showCalls ? (
+        <section
+          className="flex min-w-0 flex-col gap-2 px-panel pb-3"
+          aria-label="Recent calls"
+          data-testid="dictation-debug-settings"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="m-0 text-row font-semibold text-fg">Recent calls</h3>
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              disabled={snapshot.records.length === 0}
+              onClick={() => log?.clear()}
+            >
+              <Trash2 size={14} aria-hidden="true" /> Clear calls
+            </button>
+          </div>
+          {snapshot.records.length === 0 ? (
+            <p className="m-0 text-meta leading-base text-faint" data-debug-empty="">
+              {DICTATION_DEBUG_EMPTY}
+            </p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {snapshot.records.map(record => (
+                <li key={record.id}>
+                  <CallRow record={record} onOpen={() => setOpenId(record.id)} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       {open !== undefined && <DictationDebugSheet record={open} onClose={() => setOpenId(null)} />}
-    </div>
+    </SettingRow>
   );
 }
 

@@ -10,7 +10,7 @@
  */
 
 import { Bug, Clipboard, CornerDownLeft, Search, Trash2 } from 'lucide-react';
-import { useState, useSyncExternalStore } from 'react';
+import { useId, useState, useSyncExternalStore } from 'react';
 import { DictationDebugSheet } from '../../components/dictation-debug-sheet.tsx';
 import { DictationTimelineBar, TimingSummary } from '../../components/dictation-timeline-bar.tsx';
 import { useDictationDebug, useTranscriptionLog } from '../../lib/store.tsx';
@@ -23,7 +23,8 @@ import {
   type TranscriptionLog,
   type TranscriptionLogSnapshot,
 } from '../../lib/stt/transcription-log.ts';
-import { callDuration, callTime, PanelSwitch, useDebugSnapshot } from './dictation-debug-settings.tsx';
+import { callDuration, callTime, useDebugSnapshot } from './dictation-debug-settings.tsx';
+import { SettingRow, SettingSwitch } from './setting-row.tsx';
 
 /** How many matches show before "Show more". */
 export const TRANSCRIPTION_LOG_PAGE = 50;
@@ -100,6 +101,8 @@ export function TranscriptionLogSettings({
   const [limit, setLimit] = useState(TRANSCRIPTION_LOG_PAGE);
   const [note, setNote] = useState<{ readonly id: string; readonly kind: RowNote } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
+  const panelId = useId();
 
   const matches = searchTranscriptionLog(snapshot.entries, query);
   const shown = matches.slice(0, limit);
@@ -128,88 +131,114 @@ export function TranscriptionLogSettings({
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="transcription-log-settings">
-      <div className="flex min-w-0 flex-col gap-1">
-        <p className="m-0 text-cell leading-base text-fg">{TRANSCRIPTION_LOG_INTRO}</p>
-        <p className="m-0 text-meta leading-base text-muted">{TRANSCRIPTION_LOG_PRIVACY}</p>
-      </div>
-      <PanelSwitch
-        checked={snapshot.enabled}
-        label="Transcription log"
-        detail={snapshot.enabled ? 'On: each dictation is kept on this device.' : 'Off: new dictations are not kept.'}
-        onChange={next => log?.setEnabled(next)}
-      />
+    <SettingRow
+      settingId="transcription-log"
+      wide
+      name="Transcription log"
+      hint={snapshot.enabled ? 'On: each dictation is kept on this device' : 'Off: new dictations are not kept'}
+      explanation={
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="m-0">{TRANSCRIPTION_LOG_INTRO}</p>
+          <p className="m-0">{TRANSCRIPTION_LOG_PRIVACY}</p>
+        </div>
+      }
+      control={labelId => (
+        <>
+          <button
+            type="button"
+            className="kt-btn kt-btn--sm max-md:min-h-[44px]"
+            aria-expanded={logOpen}
+            aria-controls={panelId}
+            onClick={() => setLogOpen(value => !value)}
+          >
+            {logOpen ? 'Hide log' : 'Open log'}
+          </button>
+          <SettingSwitch checked={snapshot.enabled} labelledBy={labelId} onChange={next => log?.setEnabled(next)} />
+        </>
+      )}
+    >
       {!snapshot.saved && (
-        <p role="status" className="m-0 text-meta leading-base text-warn" data-log-unsaved="">
+        <p role="status" className="m-0 px-panel pb-3 text-meta leading-base text-warn" data-log-unsaved="">
           {TRANSCRIPTION_LOG_UNSAVED}
         </p>
       )}
+      {logOpen ? (
+        <div
+          id={panelId}
+          className="flex min-w-0 flex-col gap-3 px-panel pb-3"
+          data-testid="transcription-log-settings"
+        >
+          <TimingSummary entries={snapshot.entries} />
 
-      <TimingSummary entries={snapshot.entries} />
-
-      <section className="flex min-w-0 flex-col gap-2" aria-label="Kept dictations">
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="relative min-w-0 flex-1">
-            <span className="sr-only">Search the transcription log</span>
-            <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-2 top-3.5 text-muted" />
-            <input
-              type="search"
-              className="kt-input min-h-[44px] w-full min-w-0 rounded-control border border-border bg-surface-2 pl-7 pr-2 text-fg"
-              placeholder="Search words, conversation, engine"
-              value={query}
-              onChange={event => {
-                setQuery(event.target.value);
-                setLimit(TRANSCRIPTION_LOG_PAGE);
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            disabled={snapshot.entries.length === 0}
-            onClick={() => log?.clear()}
-          >
-            <Trash2 size={14} aria-hidden="true" /> Clear log
-          </button>
-        </div>
-
-        {snapshot.entries.length === 0 ? (
-          <p className="m-0 text-meta leading-base text-faint" data-log-empty="">
-            {TRANSCRIPTION_LOG_EMPTY}
-          </p>
-        ) : matches.length === 0 ? (
-          <p className="m-0 text-meta leading-base text-faint" data-log-empty="">
-            {TRANSCRIPTION_LOG_NO_MATCH}
-          </p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {shown.map(entry => (
-              <li key={entry.id}>
-                <EntryCard
-                  entry={entry}
-                  note={note?.id === entry.id ? note.kind : undefined}
-                  hasDebug={entry.debugId !== undefined && ring.records.some(record => record.id === entry.debugId)}
-                  onCopy={text => void copyText(entry.id, text)}
-                  onReinsert={() => void reinsert(entry)}
-                  onDebug={() => setOpenId(entry.debugId ?? null)}
+          <section className="flex min-w-0 flex-col gap-2" aria-label="Kept dictations">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="relative min-w-0 flex-1">
+                <span className="sr-only">Search the transcription log</span>
+                <Search
+                  size={14}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-2 top-3.5 text-muted"
                 />
-              </li>
-            ))}
-          </ul>
-        )}
-        {matches.length > shown.length && (
-          <button
-            type="button"
-            className="kt-btn min-h-[44px] self-start"
-            onClick={() => setLimit(limit + TRANSCRIPTION_LOG_PAGE)}
-          >
-            Show more ({String(matches.length - shown.length)} left)
-          </button>
-        )}
-      </section>
+                <input
+                  type="search"
+                  className="kt-input min-h-[44px] w-full min-w-0 rounded-control border border-border bg-surface-2 pl-7 pr-2 text-fg"
+                  placeholder="Search words, conversation, engine"
+                  value={query}
+                  onChange={event => {
+                    setQuery(event.target.value);
+                    setLimit(TRANSCRIPTION_LOG_PAGE);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="kt-btn min-h-[44px]"
+                disabled={snapshot.entries.length === 0}
+                onClick={() => log?.clear()}
+              >
+                <Trash2 size={14} aria-hidden="true" /> Clear log
+              </button>
+            </div>
 
-      {open !== undefined && <DictationDebugSheet record={open} onClose={() => setOpenId(null)} />}
-    </div>
+            {snapshot.entries.length === 0 ? (
+              <p className="m-0 text-meta leading-base text-faint" data-log-empty="">
+                {TRANSCRIPTION_LOG_EMPTY}
+              </p>
+            ) : matches.length === 0 ? (
+              <p className="m-0 text-meta leading-base text-faint" data-log-empty="">
+                {TRANSCRIPTION_LOG_NO_MATCH}
+              </p>
+            ) : (
+              <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                {shown.map(entry => (
+                  <li key={entry.id}>
+                    <EntryCard
+                      entry={entry}
+                      note={note?.id === entry.id ? note.kind : undefined}
+                      hasDebug={entry.debugId !== undefined && ring.records.some(record => record.id === entry.debugId)}
+                      onCopy={text => void copyText(entry.id, text)}
+                      onReinsert={() => void reinsert(entry)}
+                      onDebug={() => setOpenId(entry.debugId ?? null)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {matches.length > shown.length && (
+              <button
+                type="button"
+                className="kt-btn min-h-[44px] self-start"
+                onClick={() => setLimit(limit + TRANSCRIPTION_LOG_PAGE)}
+              >
+                Show more ({String(matches.length - shown.length)} left)
+              </button>
+            )}
+          </section>
+
+          {open !== undefined && <DictationDebugSheet record={open} onClose={() => setOpenId(null)} />}
+        </div>
+      ) : null}
+    </SettingRow>
   );
 }
 

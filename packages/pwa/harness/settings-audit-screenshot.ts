@@ -109,6 +109,9 @@ const go = async (page: Page, hash: string): Promise<void> => {
   await settle(page);
 };
 
+/** The tallest single capture; a taller page is split into parts. */
+const PART_HEIGHT = 8_000;
+
 /** The whole scrolled page: the window grows to the scroller's content, then shrinks back. */
 const capture = async (page: Page, name: string, vp: string): Promise<void> => {
   const width = page.viewportSize()?.width ?? 390;
@@ -119,14 +122,25 @@ const capture = async (page: Page, name: string, vp: string): Promise<void> => {
     column: Math.round(document.querySelector('#settings-section-panel')?.getBoundingClientRect().width ?? 0),
   }));
   if (!state.font) fail(`the app's font did not load for ${name}`);
-  const height = Math.min(8_000, Math.max(vp === '390' ? 844 : 900, state.height + 8));
-  await page.setViewportSize({ width, height });
-  await page.waitForTimeout(250);
-  const file = join(outDir, `${name}.png`);
-  await page.screenshot({ path: file, animations: 'disabled' });
-  await page.setViewportSize({ width, height: vp === '390' ? 844 : 900 });
+  const restHeight = vp === '390' ? 844 : 900;
+  const parts = Math.max(1, Math.ceil((state.height + 8) / PART_HEIGHT));
+  for (let part = 0; part < parts; part++) {
+    // A page taller than one capture is split into parts, each scrolled to its own offset, so none is cut off.
+    const height = parts === 1 ? Math.max(restHeight, state.height + 8) : PART_HEIGHT;
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(250);
+    await page.evaluate(top => {
+      const scroller = document.querySelector('[data-settings-scroller]');
+      if (scroller) scroller.scrollTop = top;
+    }, part * PART_HEIGHT);
+    await page.waitForTimeout(150);
+    const file = join(outDir, parts === 1 ? `${name}.png` : `${name}-part${part + 1}of${parts}.png`);
+    await page.screenshot({ path: file, animations: 'disabled' });
+  }
+  await page.setViewportSize({ width, height: restHeight });
+  const file = join(outDir, name);
   process.stdout.write(
-    `📸 ${file}  column=${state.column}px height=${state.height}px${state.overflow > 1 ? ` ⚠ sideways ${state.overflow}px` : ''}\n`,
+    `📸 ${file}  (${parts} part${parts === 1 ? '' : 's'}) column=${state.column}px height=${state.height}px${state.overflow > 1 ? ` ⚠ sideways ${state.overflow}px` : ''}\n`,
   );
 };
 

@@ -84,7 +84,7 @@ export const TUNNEL_OFFER_DETAIL =
 export const TUNNEL_OFF_NOTE = 'Off for this machine — tunnels are opt-in.';
 
 /** The preferences that walk a tunnel, and so are worth turning one on for. */
-const walksTunnel = (preference: CarrierPreference): boolean => preference === 'tunnel' || preference === 'auto';
+export const walksTunnel = (preference: CarrierPreference): boolean => preference === 'tunnel' || preference === 'auto';
 
 /** Said under WebRTC only in a build with no dialer. */
 export const WEBRTC_UNAVAILABLE_NOTE = 'WebRTC isn’t available in this build yet.';
@@ -99,7 +99,10 @@ export interface CarrierPreferenceSelectorProps {
   readonly legendHidden?: boolean;
 }
 
-const noteFor = (preference: CarrierPreference, availability: CarrierPreferenceAvailability): string | undefined => {
+export const noteFor = (
+  preference: CarrierPreference,
+  availability: CarrierPreferenceAvailability,
+): string | undefined => {
   if (preference === 'webrtc' && !availability.webrtc) return WEBRTC_UNAVAILABLE_NOTE;
   if (preference === 'tunnel') return availability.tunnel?.off === true ? TUNNEL_OFF_NOTE : availability.tunnelNote;
   return undefined;
@@ -109,7 +112,7 @@ const noteFor = (preference: CarrierPreference, availability: CarrierPreferenceA
  * "Turn on a Cloudflare tunnel for this machine?" — asked under the group, never as a modal: the choice
  * is already made and kept, and this is only whether to give it a tunnel to walk.
  */
-function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
+export function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
   const id = useId();
   const [phase, setPhase] = useState<'asking' | 'working' | 'dismissed'>('asking');
   const [error, setError] = useState<string | undefined>(undefined);
