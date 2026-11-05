@@ -173,7 +173,7 @@ describe('a sub-card whose ferret finishes with no PR', () => {
     should(ports.store.writes).have.length(1);
   });
 
-  it('should stay open on done while its PR is open, and keep its normal move', async () => {
+  it('should wait in review on done while its PR is open, not close', async () => {
     // Arrange
     const focus = new FakeFocus();
     focus.focused.set('child', { id: 'F2' });
@@ -182,6 +182,21 @@ describe('a sub-card whose ferret finishes with no PR', () => {
 
     // Act
     const done = await service.signalDone('child', 'PR up');
+
+    // Assert
+    should(done?.moved?.id).equal('review');
+    should((ports.store.cards.get('F2') as BoardTask).laneId).equal('review');
+  });
+
+  it('should leave a sub-card whose PR merged where it is on done', async () => {
+    // Arrange
+    const focus = new FakeFocus();
+    focus.focused.set('child', { id: 'F2' });
+    const ports = world({ store: new MemoryBoardStore([sub('implement', [mergedPr()])]), focus });
+    const service = new BoardService(ports);
+
+    // Act
+    const done = await service.signalDone('child', 'merged');
 
     // Assert
     should(done?.moved).be.null();

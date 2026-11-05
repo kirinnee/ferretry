@@ -99,25 +99,34 @@ describe('InstallBannerSlot', () => {
 });
 
 describe('InstallAppSetting', () => {
+  const opened = (renderer: ReactTestRenderer): ReactTestRenderer => {
+    run(() =>
+      renderer.root
+        .find(node => node.type === 'button' && node.props['data-setting-info'] !== undefined)
+        .props.onClick(),
+    );
+    return renderer;
+  };
+
   const state = (renderer: ReactTestRenderer): string =>
     renderer.root.find(node => typeof node.type === 'string' && node.props['data-install-setting'] !== undefined).props[
       'data-install-setting'
     ];
 
   test('says where the browser keeps it when no store or no offer exists, and the Share steps on iOS', () => {
-    const bare = render(<InstallAppSetting />);
+    const bare = opened(render(<InstallAppSetting />));
     expect(state(bare)).toBe('manual');
     expect(textOf(bare)).toContain('Install app');
-    expect(state(within(store('browser'), <InstallAppSetting />))).toBe('manual');
-    expect(textOf(within(store('ios'), <InstallAppSetting />))).toContain('Add to Home Screen');
-    expect(textOf(within(store('installed'), <InstallAppSetting />))).toContain('is installed on this device');
+    expect(state(opened(within(store('browser'), <InstallAppSetting />)))).toBe('manual');
+    expect(textOf(opened(within(store('ios'), <InstallAppSetting />)))).toContain('Add to Home Screen');
+    expect(textOf(opened(within(store('installed'), <InstallAppSetting />)))).toContain('is installed on this device');
   });
 
   test('installs from Settings even after the banner was dismissed, and becomes "installed" when accepted', async () => {
     const installs = store('browser');
     installs.dismiss();
     installs.capture(offer('accepted'));
-    const view = within(installs, <InstallAppSetting />);
+    const view = opened(within(installs, <InstallAppSetting />));
     expect(state(view)).toBe('prompt');
 
     await runAsync(async () => {
@@ -131,7 +140,7 @@ describe('InstallAppSetting', () => {
   test('says so when the reader declines the browser’s dialog', async () => {
     const installs = store('browser');
     installs.capture(offer('dismissed'));
-    const view = within(installs, <InstallAppSetting />);
+    const view = opened(within(installs, <InstallAppSetting />));
 
     await runAsync(async () => {
       view.root.find(node => node.type === 'button' && node.props['data-install-accept'] !== undefined).props.onClick();

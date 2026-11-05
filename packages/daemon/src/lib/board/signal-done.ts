@@ -2,7 +2,7 @@
  * `fy signal done` ON THE BOARD (`board-design.md` §3.1 item 5), as pure rules: the done message becomes a
  * note on the ferret's focus card, and a card still in an `active` lane with no PR moves on to where its
  * work is checked (a review lane, else the verify lane the owner tries it in) — never into a `closed` lane,
- * because only the owner closes. A card with a PR is left where it is: the GitHub watcher owns its lane.
+ * because only the owner closes. A card whose PR is open waits in the review lane for the merge; one whose PR merged is left to the GitHub watcher.
  */
 import {
   type BoardActor,
@@ -42,17 +42,24 @@ export const doneReason = (message: string | undefined): string => {
  * Where a done card goes: the lane its variant enters on `signal.done` when that lies ahead and is not
  * `closed`, else the first `review` or `verify` lane after its own (a review lane before the verify lane is
  * where the work is checked first; with none, the verify lane, where the owner tries it), else the variant's
- * next lane. `null` when it stays — it is not in an `active` lane, it has a PR, it is dropped, or the only
+ * next lane. A card with an OPEN PR goes to the review lane ahead (and stays there until the PR merges); `null` when it stays — it is not in an `active` lane, its PR merged, it is dropped, or the only
  * lane it could reach is `closed`, because only the owner closes.
  */
 export const doneLane = (card: BoardTask, laneSet: LaneSet): Lane | null => {
-  if (card.dropped !== null || card.links.prs.length > 0) return null;
+  if (card.dropped !== null) return null;
+  const prs = card.links.prs;
+  const openPr = prs.some(pr => pr.state === 'open');
+  if (!openPr && prs.some(pr => pr.state === 'merged')) return null;
   const category = categoryOf(laneSet, card.laneId);
   if (!category.ok || category.value !== 'active') return null;
   const lanes = variantLanes(laneSet, card.workflow);
   if (!lanes.ok) return null;
   const from = laneSet.lanes.findIndex(lane => lane.id === card.laneId);
   const later = lanes.value.filter(lane => laneSet.lanes.indexOf(lane) > from && lane.category !== 'closed');
+  if (openPr) {
+    // An open PR is still in review and CI: the card waits in the review lane until the PR merges.
+    return later.find(lane => lane.category === 'review') ?? null;
+  }
   const target =
     later.find(lane => lane.enterOn?.includes('signal.done') === true) ??
     later.find(lane => lane.category === 'review' || lane.category === 'verify') ??

@@ -86,6 +86,17 @@ const show = async (element: Parameters<typeof mount>[0]): Promise<HTMLElement> 
   return view.container;
 };
 
+/** The row keeps the log behind "Open log", so open it the way a reader would. */
+const showLog = async (element: Parameters<typeof mount>[0]): Promise<HTMLElement> => {
+  const container = await show(element);
+  const open = must(
+    [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open log'),
+    'the "Open log" button',
+  );
+  await interact(() => open.click());
+  return container;
+};
+
 afterEach(async () => {
   for (const view of mounted.splice(0)) await view.unmount();
 });
@@ -146,7 +157,7 @@ describe('TranscriptionLogSettings timings', () => {
     log.add(dictation({ raw: 'untimed' }));
 
     // Act
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Assert
     expect(view.querySelector('[data-timing-summary]')?.textContent).toContain('Last 2 timed dictations');
@@ -157,7 +168,7 @@ describe('TranscriptionLogSettings timings', () => {
   it('should show no summary and no bar when nothing was timed', async () => {
     const log = buildLog();
     log.add(dictation());
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
     expect(view.querySelector('[data-timing-summary]')).toBeNull();
     expect(view.querySelector('[data-timeline-bar]')).toBeNull();
   });
@@ -169,13 +180,14 @@ describe('TranscriptionLogSettings', () => {
     const log = buildLog();
 
     // Act
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Assert
     expect(theSwitch(view).getAttribute('aria-checked')).toBe('true');
     expect(view.textContent).toContain(TRANSCRIPTION_LOG_EMPTY);
     expect(view.textContent).not.toContain(TRANSCRIPTION_LOG_UNSAVED);
     expect(buttonWith(view, 'Clear log').disabled).toBe(true);
+    await interact(() => must(view.querySelector<HTMLElement>('[data-setting-info]'), 'the (i)').click());
     expect(view.textContent).toContain('No audio is stored');
   });
 
@@ -195,7 +207,7 @@ describe('TranscriptionLogSettings', () => {
     log.add(dictation({ at: NOW - 2, raw: 'edited words', inserted: 'My edit', prompt: 'fix' }));
 
     // Act
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Assert
     const [first, second, third] = entries(view);
@@ -214,7 +226,7 @@ describe('TranscriptionLogSettings', () => {
     const log = buildLog();
     log.add(dictation({ raw: 'send the invoice' }));
     log.add(dictation({ at: NOW - 1, raw: 'water the plants' }));
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
     const search = must(view.querySelector('input[type="search"]') as HTMLInputElement | null, 'the search box');
 
     // Act
@@ -237,7 +249,7 @@ describe('TranscriptionLogSettings', () => {
     for (let index = 0; index < TRANSCRIPTION_LOG_PAGE + 5; index += 1) {
       log.add(dictation({ at: NOW - index, raw: `dictation ${String(index)}` }));
     }
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Act
     const firstPage = entries(view).length;
@@ -255,7 +267,7 @@ describe('TranscriptionLogSettings', () => {
     for (let index = 0; index < TRANSCRIPTION_LOG_PAGE * 2 + 1; index += 1) {
       log.add(dictation({ at: NOW - index, raw: `note ${String(index)}` }));
     }
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
     await click(buttonWith(view, 'Show more'));
     const search = must(view.querySelector('input[type="search"]') as HTMLInputElement | null, 'the search box');
 
@@ -270,7 +282,7 @@ describe('TranscriptionLogSettings', () => {
     // Arrange
     const log = buildLog();
     log.add(dictation());
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Act
     await click(theSwitch(view));
@@ -289,7 +301,7 @@ describe('TranscriptionLogSettings', () => {
     log.add(dictation());
 
     // Act
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Assert
     expect(view.textContent).toContain(TRANSCRIPTION_LOG_UNSAVED);
@@ -298,9 +310,9 @@ describe('TranscriptionLogSettings', () => {
 
   it('should render, and ignore every control, when there is no log at all', async () => {
     // Act
-    const injected = await show(<TranscriptionLogSettings log={null} debug={null} />);
+    const injected = await showLog(<TranscriptionLogSettings log={null} debug={null} />);
     await click(theSwitch(injected));
-    const ambient = await show(<TranscriptionLogSettings />);
+    const ambient = await showLog(<TranscriptionLogSettings />);
 
     // Assert
     expect(injected.textContent).toContain(TRANSCRIPTION_LOG_UNSAVED);
@@ -314,7 +326,7 @@ describe('copying from the log', () => {
     const log = buildLog();
     log.add(dictation({ cleaned: 'Hello there.' }));
     const { copied, copy } = copier();
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={copy} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} copy={copy} />);
 
     // Act
     await click(buttonWith(view, 'Copy'));
@@ -330,7 +342,7 @@ describe('copying from the log', () => {
     // Arrange
     const log = buildLog();
     log.add(dictation());
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={copier().copy} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} copy={copier().copy} />);
 
     // Assert
     expect(view.textContent).not.toContain('Copy raw');
@@ -340,7 +352,7 @@ describe('copying from the log', () => {
     // Arrange
     const log = buildLog();
     log.add(dictation());
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={refusing} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} copy={refusing} />);
 
     // Act
     await click(buttonWith(view, 'Copy'));
@@ -360,7 +372,7 @@ describe('copying from the log', () => {
     });
     const log = buildLog();
     log.add(dictation());
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} />);
 
     // Act
     try {
@@ -382,7 +394,7 @@ describe('putting an entry back', () => {
     log.add(dictation({ sessionId: 's1', cleaned: 'Hello there.', inserted: 'Hello, you.' }));
     const asked: TranscriptionEntry[] = [];
     const { copied, copy } = copier();
-    const view = await show(
+    const view = await showLog(
       <TranscriptionLogSettings
         log={log}
         debug={null}
@@ -408,7 +420,9 @@ describe('putting an entry back', () => {
     const log = buildLog();
     log.add(dictation({ cleaned: 'Hello there.' }));
     const { copied, copy } = copier();
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={copy} onReinsert={() => false} />);
+    const view = await showLog(
+      <TranscriptionLogSettings log={log} debug={null} copy={copy} onReinsert={() => false} />,
+    );
 
     // Act
     await click(buttonWith(view, 'Insert again'));
@@ -422,7 +436,7 @@ describe('putting an entry back', () => {
     // Arrange
     const log = buildLog();
     log.add(dictation());
-    const view = await show(
+    const view = await showLog(
       <TranscriptionLogSettings log={log} debug={null} copy={refusing} onReinsert={() => false} />,
     );
 
@@ -444,7 +458,7 @@ describe('putting an entry back', () => {
     };
     globalThis.addEventListener(REINSERT_TRANSCRIPTION_EVENT, listener);
     const { copied, copy } = copier();
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={copy} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} copy={copy} />);
 
     // Act
     try {
@@ -463,7 +477,7 @@ describe('putting an entry back', () => {
     const log = buildLog();
     log.add(dictation());
     const { copied, copy } = copier();
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={copy} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} copy={copy} />);
 
     // Act
     await click(buttonWith(view, 'Insert again'));
@@ -478,7 +492,7 @@ describe('putting an entry back', () => {
     const log = buildLog();
     log.add(dictation({ raw: 'first' }));
     log.add(dictation({ at: NOW - 1, raw: 'second' }));
-    const view = await show(<TranscriptionLogSettings log={log} debug={null} copy={copier().copy} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={null} copy={copier().copy} />);
 
     // Act
     await click(buttonWith(view, 'Copy', 1));
@@ -500,7 +514,7 @@ describe('the link to a debug record', () => {
     log.add(dictation({ raw: 'linked', debugId }));
     log.add(dictation({ at: NOW - 1, raw: 'gone', debugId: 'debug-99' }));
     log.add(dictation({ at: NOW - 2, raw: 'never had one' }));
-    const view = await show(<TranscriptionLogSettings log={log} debug={debug} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={debug} />);
 
     // Act
     const offered = [...view.querySelectorAll('[data-log-entry]')].map(entry =>
@@ -523,7 +537,7 @@ describe('the link to a debug record', () => {
     const debugId = debug.record(traceOf(), NOW);
     const log = buildLog();
     log.add(dictation({ debugId }));
-    const view = await show(<TranscriptionLogSettings log={log} debug={debug} />);
+    const view = await showLog(<TranscriptionLogSettings log={log} debug={debug} />);
     await click(buttonWith(view, 'Debug details'));
 
     // Act

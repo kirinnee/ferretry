@@ -33,7 +33,19 @@ describe('KeepChatsFreshSetting', () => {
       />,
     );
     expect(view.root.findAllByProps({ role: 'switch' })).toHaveLength(1);
-    expect(view.root.findByProps({ 'data-keep-chats-fresh': 'off' })).toBeDefined();
+    expect(view.root.findAllByProps({ 'data-setting-row': 'Keep recent chats fresh' })).not.toHaveLength(0);
+    expect(view.root.findAllByProps({ 'data-setting-row': 'Not on cellular' })).toHaveLength(0);
+    run(() => view.unmount());
+  });
+
+  test('keeps the pause sentence behind the (i)', () => {
+    const view = render(<KeepChatsFreshSetting device={DEFAULT_DEVICE_CONTROLS} onChange={() => undefined} />);
+    const row = view.root.findByProps({ 'data-setting-row': 'Keep recent chats fresh' });
+    run(() => row.findByProps({ 'data-setting-info': '' }).props.onClick());
+    const explanation = row.find(node => node.props['data-setting-explanation'] !== undefined);
+    expect(explanation.children.join('')).toContain(
+      'Paused while this tab is hidden or your browser asks to save data.',
+    );
     run(() => view.unmount());
   });
 });

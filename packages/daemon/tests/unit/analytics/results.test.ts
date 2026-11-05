@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type AnalyticsIndexStatus, type AnalyticsRawSession, compareProtocolVersions } from '@ferretry/protocol';
+import {
+  AnalyticsGroupLimitError,
+  type AnalyticsIndexStatus,
+  type AnalyticsRawSession,
+  compareProtocolVersions,
+} from '@ferretry/protocol';
 import should from 'should';
 import { queryAnalyticsRecords } from '../../../src/lib/analytics/results.ts';
 
@@ -113,6 +118,7 @@ describe('queryAnalyticsRecords', () => {
     }
     should(count).have.property('kind', 'aggregate');
     if (count.kind === 'aggregate') should(count.results[0]!.tokens).deepEqual({ value: null, known: 0, total: 0 });
+    should(limited).be.instanceof(AnalyticsGroupLimitError).and.have.property('limit', 2);
     should((limited as Error).message).containEql('more than 2 groups');
   });
 

@@ -421,6 +421,14 @@ function OpenItem({
         : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
     [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
   );
+  // A step's tick goes to the machine the card came from, through the one agenda client (as in the chat). Without a
+  // client or a paired connection the list stays read-only, never a box that looks live and does nothing.
+  const progress = inbox.agendaClient;
+  const onProgress =
+    progress === undefined || connection === undefined
+      ? undefined
+      : (step: number, done: boolean): Promise<void> =>
+          progress.progress(connection, daemonSessionScope(connection, card.view.config.id), card.item.id, step, done);
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
@@ -455,6 +463,7 @@ function OpenItem({
           onAct={act}
           onClose={place.onClose}
           onNext={skip}
+          {...(onProgress === undefined ? {} : { onProgress })}
           {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
           position={{ index: place.index, total: place.total }}
           quoteScope={scopeOf(card)}

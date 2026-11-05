@@ -1,3 +1,17 @@
+## [4.278.0](https://github.com/kirinnee/ferretry/compare/v4.277.0...v4.278.0) (2026-11-05)
+
+### Features
+
+* **pwa:** compact Settings rows for Appearance and This device ([#1412](https://github.com/kirinnee/ferretry/issues/1412)) ([29e86c0](https://github.com/kirinnee/ferretry/commit/29e86c08dab04e06d6af7ef2b84cdee5370e9bfe))
+
+### Fixes
+
+* **analytics:** refuse an over-wide query with a typed, readable 400 ([#1464](https://github.com/kirinnee/ferretry/issues/1464)) ([1e25bb7](https://github.com/kirinnee/ferretry/commit/1e25bb7d873f0d2826e88b3d7498cefab102806a))
+* **board:** a done card with an open PR waits in review until it merges ([#1462](https://github.com/kirinnee/ferretry/issues/1462)) ([e866312](https://github.com/kirinnee/ferretry/commit/e866312f083635a1c5e2f671297a87ffb00e8f6a))
+* **pwa:** draw fy-render blocks authored with CRLF, trailing spaces or leading blank lines ([#1467](https://github.com/kirinnee/ferretry/issues/1467)) ([bd615d9](https://github.com/kirinnee/ferretry/commit/bd615d96fc34369662cd3bcf905f36a85b753791))
+* **pwa:** let a hypermedia block go fullscreen inside the agenda swipe-deck card ([#1466](https://github.com/kirinnee/ferretry/issues/1466)) ([e794f27](https://github.com/kirinnee/ferretry/commit/e794f27a9bbb4d4188bc06e1382ac22b9f3a1ff6))
+* **pwa:** make the Inbox step checkboxes clickable ([#1465](https://github.com/kirinnee/ferretry/issues/1465)) ([d02c49b](https://github.com/kirinnee/ferretry/commit/d02c49b30a47b6fb1bc2d9a23364c1d94f81b22a))
+
 ## [4.277.0](https://github.com/kirinnee/ferretry/compare/v4.276.0...v4.277.0) (2026-11-05)
 
 ### Features

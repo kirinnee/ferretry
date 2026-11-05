@@ -38,14 +38,14 @@ import { Button } from './primitives.tsx';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
 
-interface ModeOption {
+export interface ModeOption {
   readonly id: ThemeMode;
   readonly label: string;
   readonly Icon: typeof Sun;
   readonly hint: string;
 }
 
-const MODE_OPTIONS: readonly ModeOption[] = [
+export const MODE_OPTIONS: readonly ModeOption[] = [
   { id: 'system', label: 'Auto', Icon: Monitor, hint: 'Follow the operating system' },
   { id: 'light', label: 'Light', Icon: Sun, hint: 'Always light' },
   { id: 'dark', label: 'Dark', Icon: Moon, hint: 'Always dark' },
@@ -79,7 +79,7 @@ export function scrollThemeFamilyIntoView(scroller: HTMLElement, target: HTMLEle
 }
 
 /** A live, CSS-only preview of one family/mode pair. */
-function Swatch({ theme, current }: { readonly theme: string; readonly current: boolean }) {
+export function Swatch({ theme, current }: { readonly theme: string; readonly current: boolean }) {
   return (
     <span
       className={cn(

@@ -52,6 +52,16 @@ const within = (host: DevicePermissionsHost | null) => (
   </DevicePermissionsContext.Provider>
 );
 
+const openList = async (container: HTMLElement): Promise<void> => {
+  const toggle = must(
+    [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find(button =>
+      (button.textContent ?? '').includes('Permissions'),
+    ),
+    'the Permissions row',
+  );
+  if (toggle.getAttribute('aria-expanded') !== 'true') await interact(() => toggle.click());
+};
+
 const row = (container: HTMLElement, id: DevicePermissionId): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[data-permission="${id}"]`), `the ${id} row`);
 
@@ -70,6 +80,7 @@ describe('DevicePermissionsSetting', () => {
       location: 'unsupported',
     });
     const view = await mount(within(host));
+    await openList(view.container);
 
     expect(view.container.querySelectorAll('[data-permission]')).toHaveLength(6);
     expect(row(view.container, 'camera').dataset.state).toBe('granted');
@@ -87,6 +98,7 @@ describe('DevicePermissionsSetting', () => {
   it('explains why a permission is unavailable, with no button', async () => {
     const { host } = fakeHost({ ...ALL_PROMPT, location: 'unsupported' });
     const view = await mount(within(host));
+    await openList(view.container);
 
     const location = row(view.container, 'location');
     expect(location.querySelector('[role="note"]')?.textContent).toContain('This browser does not offer this.');
@@ -97,6 +109,7 @@ describe('DevicePermissionsSetting', () => {
   it('asks only when its own button is pressed, and then shows the answer', async () => {
     const { host, requested } = fakeHost(ALL_PROMPT, { camera: 'granted' });
     const view = await mount(within(host));
+    await openList(view.container);
 
     const button = must(
       view.container.querySelector<HTMLButtonElement>('[data-permission-request="camera"]'),
@@ -114,6 +127,7 @@ describe('DevicePermissionsSetting', () => {
   it('starts the browser call inside the click itself', async () => {
     const { host, requested } = fakeHost(ALL_PROMPT);
     const view = await mount(within(host));
+    await openList(view.container);
     const button = must(
       view.container.querySelector<HTMLButtonElement>('[data-permission-request="location"]'),
       'the location button',
@@ -132,6 +146,7 @@ describe('DevicePermissionsSetting', () => {
       { family: 'ios', installed: false, secure: true },
     );
     const view = await mount(within(host));
+    await openList(view.container);
 
     const toggle = must(
       view.container.querySelector<HTMLButtonElement>('[data-permission-howto="camera"]'),
@@ -153,6 +168,7 @@ describe('DevicePermissionsSetting', () => {
   it('re-reads when the reader returns to the page, picking up a change made in system Settings', async () => {
     const { host, current } = fakeHost({ ...ALL_PROMPT, camera: 'denied' });
     const view = await mount(within(host));
+    await openList(view.container);
     expect(row(view.container, 'camera').dataset.state).toBe('denied');
 
     current.camera = 'granted';
@@ -176,6 +192,7 @@ describe('DevicePermissionsSetting', () => {
       request: () => late,
     };
     const view = await mount(within(host));
+    await openList(view.container);
     expect(row(view.container, 'camera').textContent).toContain('Checking…');
     expect(row(view.container, 'camera').dataset.state).toBe('checking');
 
@@ -233,6 +250,15 @@ describe('device permission hooks', () => {
     const before = reads.length;
     await interact(() => controller?.refresh());
     expect(reads.length).toBe(before * 2);
+    await view.unmount();
+  });
+
+  it('keeps the sentence that nothing is asked for until its button is pressed', async () => {
+    const { host } = fakeHost(ALL_PROMPT);
+    const view = await mount(within(host));
+    await openList(view.container);
+
+    expect(view.container.textContent).toContain('Nothing here is asked for until you press its button.');
     await view.unmount();
   });
 });

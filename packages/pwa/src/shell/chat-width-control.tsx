@@ -60,7 +60,7 @@ const PREVIEW_WIDTH_CLASS: Readonly<Record<ChatWidth, string>> = {
   readable: 'w-5/12',
 };
 
-const ACTIVE_EXPLANATION: Readonly<Record<ChatWidth, string>> = {
+export const ACTIVE_EXPLANATION: Readonly<Record<ChatWidth, string>> = {
   full: 'Full is active: messages and the composer use the whole pane.',
   balanced: '1200px is active: messages and the composer stay within a 1200px column.',
   readable: 'Compact is active: messages and the composer stay within a 720px column.',

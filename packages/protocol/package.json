@@ -7,6 +7,8 @@
   "exports": {
     ".": "./src/lib/index.ts",
     "./client": "./src/adapters/fy-api-client.ts",
+    "./fy-render": "./src/lib/fy-render.ts",
+    "./fy-render-caps": "./src/lib/fy-render-caps.ts",
     "./process-incarnation": "./src/adapters/process-incarnation.ts",
     "./pairing-redirect-sweep": "./src/adapters/pairing-redirect-sweep.ts",
     "./io-pressure": "./src/lib/io-pressure.ts",

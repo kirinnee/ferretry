@@ -54,6 +54,14 @@ const textOf = (node: ReactTestInstance | string): string =>
   typeof node === 'string' ? node : node.children.map(textOf).join(' ');
 const text = (node: ReactTestInstance | ReactTestRenderer): string => textOf('root' in node ? node.root : node);
 
+/** The row keeps its cards behind "Add key", and its long explanation behind the (i). */
+const openKeys = (renderer: ReactTestRenderer): void =>
+  run(() => renderer.root.find(node => node.type === 'button' && textOf(node).trim() === 'Add key').props.onClick());
+const openInfo = (renderer: ReactTestRenderer): void =>
+  run(() =>
+    renderer.root.find(node => node.type === 'button' && node.props['data-setting-info'] !== undefined).props.onClick(),
+  );
+
 describe('the speed-up keys lines', () => {
   it('should say only that a key is saved and how it ends', () => {
     expect(savedKeyLine({ kind: 'saved', endsWith: 'XY' })).toBe('Saved · ends with ••XY');
@@ -72,6 +80,8 @@ describe('Settings › This device › Speed-up keys', () => {
     // Act
     const renderer = render(<SpeedupKeysSettings keys={keys} />);
     await settle();
+    openInfo(renderer);
+    openKeys(renderer);
 
     // Assert
     const page = text(renderer);
@@ -90,6 +100,7 @@ describe('Settings › This device › Speed-up keys', () => {
     const { keys } = vault();
     const renderer = render(<SpeedupKeysSettings keys={keys} />);
     await settle();
+    openKeys(renderer);
     const groq = card(renderer, 'groq');
 
     // Act
@@ -112,6 +123,7 @@ describe('Settings › This device › Speed-up keys', () => {
     await keys.save('groq', KEY);
     const renderer = render(<SpeedupKeysSettings keys={keys} />);
     await settle();
+    openKeys(renderer);
 
     // Act
     await runAsync(async () => button(card(renderer, 'groq'), 'Test the Groq key').props.onClick());
@@ -132,6 +144,7 @@ describe('Settings › This device › Speed-up keys', () => {
     const { keys, records } = vault();
     const renderer = render(<SpeedupKeysSettings keys={keys} />);
     await settle();
+    openKeys(renderer);
     const cerebras = card(renderer, 'cerebras');
 
     // Act
@@ -152,6 +165,7 @@ describe('Settings › This device › Speed-up keys', () => {
     // Act
     const renderer = render(<SpeedupKeysSettings keys={keys} />);
     await settle();
+    openKeys(renderer);
 
     // Assert
     expect(text(card(renderer, 'groq'))).toContain('can no longer open the key it saved');
@@ -162,6 +176,7 @@ describe('Settings › This device › Speed-up keys', () => {
   it('should say so when the page has no key store', () => {
     // Act
     const renderer = render(<SpeedupKeysSettings keys={null} />);
+    openKeys(renderer);
 
     // Assert
     expect(text(renderer)).toContain('no key can be saved here');
@@ -171,6 +186,7 @@ describe('Settings › This device › Speed-up keys', () => {
   it('should read the app store’s keys when none are handed in', () => {
     // Act — outside a store there are none, which is the honest answer.
     const renderer = render(<SpeedupKeysSettings />);
+    openKeys(renderer);
 
     // Assert
     expect(text(renderer)).toContain('no key can be saved here');
