@@ -11,6 +11,7 @@
 import { Check, KeyRound, Lock } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Badge, Button } from '../../../shell/primitives.tsx';
+import { LoosensBadge } from './clone-loosens-badge.tsx';
 import { CLONE_KEEP_DEFAULT, CLONE_NO_DEFAULT, type CloneDefaultView } from './clone-model.ts';
 import {
   CLONE_ITEMS,
@@ -336,9 +337,12 @@ export function CloneNeedsList({
 /** How each chosen item ended, with Confirm on the ones that wait for the owner. */
 export function CloneOutcomes({
   outcomes,
+  machineName,
   onConfirm,
 }: {
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
+  /** This machine, as the person names it: the held badge says whose spending or authority it loosens. */
+  readonly machineName: string;
   /** Confirm one held file: the passkey is asked by the carrier when the daemon wants it. */
   readonly onConfirm: (path: string, etag: string) => Promise<string | null>;
 }) {
@@ -364,29 +368,35 @@ export function CloneOutcomes({
               {done ? outcomeSentence(item, { kind: 'copied' }) : outcomeSentence(item, outcome)}
             </span>
             {outcome.kind === 'pending' && !done ? (
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="primary"
-                  data-clone-confirm={outcome.path}
-                  onClick={() =>
-                    void onConfirm(outcome.path, outcome.etag).then(failure => {
-                      if (failure === null) setConfirmed(current => new Set(current).add(outcome.path));
-                      else setProblems(current => ({ ...current, [outcome.path]: failure }));
-                    })
-                  }
-                >
-                  Confirm
-                </Button>
-                {problems[outcome.path] === undefined ? (
-                  <span className="text-meta text-muted">Or run fy config confirm on the machine.</span>
-                ) : (
-                  <span role="alert" className="text-meta text-err">
-                    {problems[outcome.path]}
-                  </span>
-                )}
-              </div>
+              <>
+                <span className="mt-1">
+                  <LoosensBadge machineName={machineName} data-clone-outcome-loosens="" />
+                </span>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="primary"
+                    className="min-h-[44px] min-w-[96px]"
+                    data-clone-confirm={outcome.path}
+                    onClick={() =>
+                      void onConfirm(outcome.path, outcome.etag).then(failure => {
+                        if (failure === null) setConfirmed(current => new Set(current).add(outcome.path));
+                        else setProblems(current => ({ ...current, [outcome.path]: failure }));
+                      })
+                    }
+                  >
+                    Confirm
+                  </Button>
+                  {problems[outcome.path] === undefined ? (
+                    <span className="text-meta text-muted">Or run fy config confirm on the machine.</span>
+                  ) : (
+                    <span role="alert" className="text-meta text-err">
+                      {problems[outcome.path]}
+                    </span>
+                  )}
+                </div>
+              </>
             ) : null}
           </SetupNote>
         );

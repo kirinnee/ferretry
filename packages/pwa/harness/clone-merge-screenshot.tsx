@@ -195,8 +195,19 @@ const shot = async (page: Page, state: string, theme: string, vp: string, from: 
   const box = await page.evaluate(
     ([a, b]) => {
       const top = (document.querySelector(a as string) as HTMLElement).getBoundingClientRect();
-      const bottom = (document.querySelector(b as string) as HTMLElement).getBoundingClientRect();
-      return { y: top.top + window.scrollY - 8, height: bottom.bottom - top.top + 16, width: window.innerWidth };
+      const end = document.querySelector(b as string) as HTMLElement;
+      const bottom = end.getBoundingClientRect();
+      // Whatever follows the frame is hidden (not removed: nothing moves), so the margin below the card is empty
+      // and no heading of the next section shows cut in half at the edge of the capture.
+      for (let node: HTMLElement | null = end; node !== null && node.id !== 'root'; node = node.parentElement)
+        for (let sibling = node.nextElementSibling; sibling !== null; sibling = sibling.nextElementSibling)
+          (sibling as HTMLElement).style.visibility = 'hidden';
+      const margin = 16;
+      return {
+        y: top.top + window.scrollY - 8,
+        height: bottom.bottom - top.top + 8 + margin,
+        width: window.innerWidth,
+      };
     },
     [from, to],
   );
@@ -207,6 +218,12 @@ const shot = async (page: Page, state: string, theme: string, vp: string, from: 
     clip: { x: 0, y: Math.max(0, box.y), width: box.width, height: box.height },
   });
   process.stdout.write(`📸 ${join(shotsDir, file)}\n`);
+};
+
+/** A button a thumb can hit: at least 44px tall, and clear of whatever sits above it. */
+const touchSized = async (page: Page, selector: string, what: string): Promise<void> => {
+  const height = await page.locator(selector).evaluate(el => el.getBoundingClientRect().height);
+  if (height < 44) fail(`${what} is ${height}px tall, under the 44px touch target`);
 };
 
 const ITEMS = '[data-setup-choices="clone-items"]';
@@ -234,7 +251,8 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   // The review could not be made: Copy is blocked and Check again is offered.
   await open(page, theme, 'failed');
   await page.locator('[data-clone-review-retry]').waitFor({ state: 'visible' });
-  await shot(page, 'review-failed', theme, vp, ITEMS, '[data-clone-review-retry]');
+  await touchSized(page, '[data-clone-review-retry]', 'Check again');
+  await shot(page, 'review-failed', theme, vp, ITEMS, '[data-setup-note="settings-undecided"]');
 
   // A merge this machine holds: shown as waiting with its Confirm, then as copied.
   await open(page, theme, 'held');
@@ -242,6 +260,7 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator(SUBMIT).evaluate(el => (el as HTMLButtonElement).click());
   await page.locator('[data-clone-step="done"]').waitFor({ state: 'visible' });
   await page.locator('[data-clone-confirm="warden.yaml"]').waitFor({ state: 'visible' });
+  await touchSized(page, '[data-clone-confirm="warden.yaml"]', 'Confirm');
   await shot(page, 'held-merge', theme, vp, '[data-clone-step="done"]', '[data-clone-step="done"]');
   await page.locator('[data-clone-confirm="warden.yaml"]').click();
   await page.locator('[data-clone-outcome="warden"][data-outcome="copied"]').waitFor({ state: 'visible' });

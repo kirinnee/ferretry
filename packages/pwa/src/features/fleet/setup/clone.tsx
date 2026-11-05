@@ -126,7 +126,7 @@ import {
 import { machineItemHash } from './settings-route.ts';
 import { type Guarded, useSetupAccess } from './setup-access.ts';
 import { RadioChoices, SetupCommand, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
-import { countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
+import { closedSentence, countWords, listWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 export interface CloneMachineProps extends MachineTabProps {
   /** Every OTHER machine this browser has paired. */
@@ -306,7 +306,7 @@ export function CloneMachine(props: CloneMachineProps) {
   const blockedBy = reviewing
     ? 'Checking what differs…'
     : reviewIssue?.kind === 'failed'
-      ? `Couldn’t check what differs in the settings you ticked, so none of them is copied yet: ${reviewIssue.sentence}`
+      ? `Couldn’t check what differs in the settings you ticked, so none of them is copied yet: ${closedSentence(reviewIssue.sentence)}`
       : refused.length > 0
         ? `${refused[0]?.why ?? ''} Untick it to copy the rest.`
         : undecided.length > 0
@@ -713,6 +713,7 @@ export function CloneMachine(props: CloneMachineProps) {
                   type="button"
                   size="sm"
                   variant="outline"
+                  className="mt-2 min-h-[44px] min-w-[96px] self-start"
                   data-clone-review-retry=""
                   onClick={() => reviewAgain(chosen)}
                 >
@@ -1044,7 +1045,7 @@ function DoneStep({
       <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.sourceName}`}>
         <span>{result.summary ?? `${countWords(result.outcomes.length, 'item')} copied.`}</span>
       </SetupNote>
-      <CloneOutcomes outcomes={result.outcomes} onConfirm={onConfirm} />
+      <CloneOutcomes outcomes={result.outcomes} machineName={machineName} onConfirm={onConfirm} />
       <CloneNeedsList
         needs={needsAfterCopy(needs, result.logins, result.after)}
         machineName={machineName}

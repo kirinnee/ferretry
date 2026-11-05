@@ -45,7 +45,7 @@ describe('the per-key settings rows', () => {
     expect(first.textContent).toContain('studio');
     expect(first.textContent).toContain('1');
     expect(first.textContent).toContain('5');
-    expect(first.querySelector('[data-clone-key-loosens]')).not.toBeNull();
+    expect(first.querySelector('[data-clone-key-loosens]')?.textContent).toBe('Loosens what studio may spend or do');
     expect(row(view, 'warden.yaml:layers.llm').textContent).toContain('Changed here, kept');
   });
 

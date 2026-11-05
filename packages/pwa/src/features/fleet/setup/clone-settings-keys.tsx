@@ -17,6 +17,7 @@ import {
   type SettingsPicks,
   takeWords,
 } from './clone-settings-merge.ts';
+import { LoosensBadge } from './clone-loosens-badge.tsx';
 import { CheckChoices, RadioChoices, SetupNote, SetupSection } from './setup-ui.tsx';
 
 function Value({ label, text }: { readonly label: string; readonly text: string }) {
@@ -50,11 +51,7 @@ function KeyRow({
       <span className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="[overflow-wrap:anywhere] font-mono text-row font-semibold text-fg">{row.key}</span>
         <Badge tone={row.outcome === 'both' ? 'warn' : 'pend'}>{outcomeWords(row.outcome, source)}</Badge>
-        {row.loosens === true ? (
-          <Badge tone="warn" className="max-w-full !whitespace-normal" data-clone-key-loosens="">
-            Loosens what {machineName} may spend or do
-          </Badge>
-        ) : null}
+        {row.loosens === true ? <LoosensBadge machineName={machineName} data-clone-key-loosens="" /> : null}
       </span>
       <Value label={machineName} text={row.mine ?? 'not set'} />
       <Value label={source} text={row.theirs ?? 'not set'} />

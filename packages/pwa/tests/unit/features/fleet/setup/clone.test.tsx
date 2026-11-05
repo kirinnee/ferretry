@@ -2238,6 +2238,13 @@ describe('CloneMachine · settings merged key by key', () => {
           // Blocked, with the reason and a way to try again: no settings file is written, whole or otherwise.
           expect(submit(screen).disabled).toBe(true);
           expect(screen.text('[data-setup-note="settings-undecided"]')).toContain('none of them is copied yet');
+          // The message closes with a full stop, and the retry is a real touch target a little apart from it.
+          expect(screen.text('[data-setup-note="settings-undecided"] span')).toMatch(/copied yet: .+[.!?]$/u);
+          const retry = screen.q('[data-clone-review-retry]');
+          expect(retry?.tagName).toBe('BUTTON');
+          expect(retry?.textContent).toBe('Check again');
+          expect(retry?.className).toContain('min-h-[44px]');
+          expect(retry?.className).toContain('mt-2');
           expect(screen.q('[data-setup-note="settings-whole"]')).toBeNull();
           expect(putCalls(calls.target)).toEqual([]);
           expect(changeKinds(calls.target)).toEqual([]);
