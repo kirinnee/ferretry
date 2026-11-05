@@ -97,6 +97,8 @@ describe('createReadAloud', () => {
     expect(remote.previewVoiceNote()).toBe('Google US English sends text to Google to be spoken.');
     expect(remote.getState().status).toBe('idle');
     expect(synth.spoken).toEqual([]);
+    // The voice chosen in Settings (passed at the tap) is the one named, ahead of the controller's own pick.
+    expect(device.previewVoiceNote(picked.voiceURI)).toBe('Google US English sends text to Google to be spoken.');
   });
 
   test('previewVoiceNote is null when there is no voice, or the device cannot say', () => {

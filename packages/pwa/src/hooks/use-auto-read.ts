@@ -22,15 +22,18 @@
  *     timer would have fired changes nothing.
  *   - Leaving the conversation, or switching the setting off.
  *
- * A SEND IS A TOKEN, TAKEN WHEN THE PRESS HAPPENS. The page calls `beginSend` as the composer starts sending,
- * before anything is awaited: that stops a reading under way, drops whatever was pending for an earlier
- * send, remembers the newest turn state and the rows the page already held, and arms the watch. The reply
- * is then judged against that token — never against "now" — so a turn that ends before the send is
- * acknowledged is still read, and the reply is cut at the person's own row, not at a clock. The press reads
- * nothing by itself (the quiet clock restarts at the press), and the send's acknowledgement — which arrives
- * after the request — only stops a reading when no press announced it: otherwise it would cut off the fast
- * reply it belongs to. What the page held at open (the last row) is the anchor for an old daemon's "live
- * record"; records appended after it count, whatever their timestamps say.
+ * A SEND IS A TOKEN, TAKEN WHEN THE PRESS HAPPENS, AND BOUND TO THE SEND'S OWN IDENTITY. The page calls
+ * `beginSend` as the composer starts sending, before anything is awaited: that stops a reading under way,
+ * drops whatever was pending for an earlier send, remembers the newest turn state and the rows the page
+ * already held, and arms the watch. `sent(sendId)` binds the token to the send the request came back with;
+ * the daemon's ledger entry for that id says when the daemon accepted it, and only a turn that began after
+ * that moment — never "now", a browser clock, or a state merely newer than an old snapshot — is its reply.
+ * The press reads nothing by itself, and the send's acknowledgement only stops a reading when no press
+ * announced it: otherwise it would cut off the fast reply it belongs to. A send whose request failed drops
+ * its token (`failed`).
+ *
+ * ONLY A DAEMON THAT DATES ITS TURNS IS WATCHED. With no `turnStateAt` nothing is armed and nothing is read:
+ * there is no guess to fall back on, and Read aloud on a message still works.
  *
  * One reading at a time is the controller's own guarantee: starting this one replaces any other.
  * Nothing here logs, stores or sends the words it hands the controller.
@@ -39,9 +42,10 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   armOnSend,
-  arrivalsAfter,
+  dropSend,
   IDLE_WATCH,
   observeTurn,
+  stopWatching,
   type TurnWatch,
   type WatchedTurn,
 } from '../lib/voice-chat/auto-read.ts';
@@ -58,20 +62,24 @@ import { useDocumentVisible } from './use-document-visible.ts';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from './use-live-voice-settings.ts';
 import { useReadAloudController } from './use-read-aloud.ts';
 
+/** What the page knows of a send's acceptance: the id it went under, and when the DAEMON accepted it (its clock). */
+export interface SendAcceptance {
+  readonly sendId: string;
+  readonly acceptedAt: string;
+}
+
 export interface AutoReadInput {
   /** `daemon/session`: a new scope is a new conversation, so nothing carries over. */
   readonly scope: string;
   readonly entries: readonly PickerRow[];
-  /** Whose turn it is (`sessionTurn`), or null for a session that is not live. */
+  /** Whose turn it is (`state.turnState`), or null for a session that is not live — and for a daemon that sends none. */
   readonly turn: WatchedTurn | null;
-  /** The daemon's `state.turnStateAt`, when it sent one. */
+  /** The daemon's `state.turnStateAt`. Absent (or unreadable): the daemon cannot date its turns and nothing is auto-read. */
   readonly turnStateAt: string | undefined;
-  /** The daemon sent no `turnState`: `turn` is the page's own guess. */
-  readonly legacy: boolean;
   /** The question a `needs-input` turn waits on. */
   readonly question: QuestionLike | null | undefined;
-  /** Bumped by the page each time the person sends: the next end of turn is the reply to it. */
-  readonly sendSignal: number;
+  /** The daemon's own send ledger for this session (not the browser's outbox): where `acceptedAt` comes from. */
+  readonly sends: readonly SendAcceptance[];
   /** The clock, for tests. */
   readonly now?: () => number;
 }
@@ -80,13 +88,18 @@ export interface AutoReadHandle {
   /** A reading this hook started is going on right now. */
   readonly reading: boolean;
   readonly stop: () => void;
-  /** The person pressed send (call it as the send starts, before awaiting it): the next end of turn is its reply. */
+  /** The person pressed send (call it as the send starts, before awaiting it): the next turn that send starts is the one to read. */
   readonly beginSend: () => void;
+  /** The send's request came back under this id (absent when it has none): the reply is judged against the daemon's record of it. */
+  readonly sent: (sendId: string | undefined) => void;
+  /** The send's request failed: nothing is waited on. */
+  readonly failed: () => void;
 }
 
-/** The rows the page held when a send began: the turn it starts is whatever the person adds after them. */
+/** The rows the page held when a send began, and the id it went under once the request came back. */
 interface SendToken {
   readonly knownIds: readonly string[];
+  readonly sendId: string | null;
 }
 
 const parseInstant = (value: string | undefined): number | null => {
@@ -96,7 +109,7 @@ const parseInstant = (value: string | undefined): number | null => {
 };
 
 export function useAutoRead(input: AutoReadInput): AutoReadHandle {
-  const { scope, entries, turn, turnStateAt, sendSignal, now = Date.now } = input;
+  const { scope, entries, turn, turnStateAt, sends, now = Date.now } = input;
   const controller = useReadAloudController();
   const store = useDeviceVoiceSettingsStore();
   const { settings } = useLiveVoiceSettings(store);
@@ -107,12 +120,6 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   latest.current = { ...input, settings, visible };
   const watch = useRef<TurnWatch>(IDLE_WATCH);
   const token = useRef<SendToken | null>(null);
-  /**
-   * The last row the conversation held when it was opened (undefined: not seen yet): records APPENDED after
-   * it are what an old daemon's guess needs as proof of a turn. By position, not by timestamp, so neither
-   * clock skew nor history that hydrates late counts as live.
-   */
-  const anchor = useRef<string | undefined>(undefined);
   const changedAt = useRef(now());
   const seen = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,30 +138,25 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
     const current = latest.current;
-    const fired = { knownIds: token.current?.knownIds };
+    const fired = { knownIds: token.current?.knownIds, sendId: token.current?.sendId ?? null };
     if (!current.settings.autoRead || !controller.supported) {
       // Off: nothing is watched, but what was already read stays read.
-      watch.current = { ...watch.current, armed: null };
+      watch.current = stopWatching(watch.current);
       token.current = null;
       return;
     }
     const at = now();
-    if (anchor.current === undefined) anchor.current = current.entries.at(-1)?.id;
+    const accepted = current.sends.find(send => send.sendId === fired.sendId);
     const step = observeTurn(watch.current, {
-      now: at,
       turn: current.turn,
       turnAt: parseInstant(current.turnStateAt),
-      legacy: current.legacy,
       quietMs: at - changedAt.current,
       visible: current.visible,
-      fresh: arrivalsAfter(
-        current.entries.map(row => row.id),
-        anchor.current,
-      ),
+      boundary: accepted === undefined ? null : parseInstant(accepted.acceptedAt),
       sentRow: fired.knownIds !== undefined && hasRowSince(current.entries, fired.knownIds),
     });
     watch.current = step.watch;
-    if (step.watch.armed === null) token.current = null;
+    if (step.watch.armed?.kind !== 'sent') token.current = null;
     if (step.fire !== null) {
       const pick =
         step.fire.outcome === 'needs-input'
@@ -177,16 +179,16 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     watch.current = IDLE_WATCH;
     token.current = null;
     mine.current = null;
-    anchor.current = undefined;
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
       timer.current = null;
     };
   }, [scope]);
 
-  // The conversation changed (a record, a new turn state): note the moment and look again.
+  // The conversation changed (a record, a new turn state, the daemon's word on a send): note the moment and look again.
   const last = entries.at(-1);
-  const changeKey = `${scope}|${entries.length}|${last?.id ?? ''}|${last?.text.length ?? 0}|${turn ?? ''}|${turnStateAt ?? ''}`;
+  const acceptance = sends.find(send => send.sendId === token.current?.sendId)?.acceptedAt ?? '';
+  const changeKey = `${scope}|${entries.length}|${last?.id ?? ''}|${last?.text.length ?? 0}|${turn ?? ''}|${turnStateAt ?? ''}|${acceptance}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the change key is what says the conversation moved; the rest is read through `latest`.
   useEffect(() => {
     if (seen.current !== changeKey) {
@@ -196,45 +198,63 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     evaluate();
   }, [changeKey, settings.autoRead, evaluate, now]);
 
+  /** Arms a send from what the page has seen up to this moment — or arms nothing when this daemon dates no turns. */
+  const arm = useCallback(
+    (sendId: string | null): void => {
+      const current = latest.current;
+      if (!current.settings.autoRead || !controller.supported || parseInstant(current.turnStateAt) === null) {
+        token.current = null;
+        return;
+      }
+      token.current = { knownIds: current.entries.map(row => row.id), sendId };
+      watch.current = armOnSend(watch.current);
+      // Quiet counts from the press, not from whenever the conversation last changed before it.
+      changedAt.current = now();
+    },
+    [controller, now],
+  );
+
   // THE PRESS: the composer starts a send. Arm now, from what the page has seen up to this moment.
-  const begun = useRef(0);
   const beginSend = useCallback(() => {
-    begun.current += 1;
     stop();
-    const current = latest.current;
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
-    if (!current.settings.autoRead || !controller.supported) return;
-    token.current = { knownIds: current.entries.map(row => row.id) };
-    watch.current = armOnSend(watch.current, now());
-    // Quiet counts from the press, not from whenever the conversation last changed before it.
-    changedAt.current = now();
+    arm(null);
     evaluate();
-  }, [controller, evaluate, now, stop]);
+  }, [arm, evaluate, stop]);
 
-  // The send came back (or happened somewhere that did not announce its press, like answering a form):
-  // stop what is being read, and arm now if the press did not already.
-  const firstSend = useRef(sendSignal);
-  const acknowledged = useRef(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the send signal is the trigger.
-  useEffect(() => {
-    if (sendSignal === firstSend.current) return;
-    firstSend.current = sendSignal;
-    // The acknowledgement of a press `beginSend` already announced: that send is armed, and a fast reply to it
-    // may already be being read. It changes nothing, and above all stops nothing.
-    if (acknowledged.current < begun.current) {
-      acknowledged.current += 1;
-      return;
-    }
-    stop();
-    const current = latest.current;
-    if (current.settings.autoRead) {
-      token.current = { knownIds: current.entries.map(row => row.id) };
-      watch.current = armOnSend(watch.current, now());
-      changedAt.current = now();
+  // The send came back. A press that was announced is bound to its id and stops nothing: a fast reply to it may
+  // already be being read. A send nobody announced (answering a form, a held message sent later) stops what is
+  // being read and, when it has an id, is armed now.
+  const sent = useCallback(
+    (sendId: string | undefined) => {
+      const waiting = token.current;
+      if (waiting !== null && waiting.sendId === null) {
+        if (sendId === undefined) {
+          // No id, nothing to correlate the reply with: the press is dropped.
+          token.current = null;
+          watch.current = dropSend(watch.current);
+        } else {
+          token.current = { ...waiting, sendId };
+        }
+        evaluate();
+        return;
+      }
+      stop();
+      if (sendId !== undefined) arm(sendId);
       evaluate();
+    },
+    [arm, evaluate, stop],
+  );
+
+  // The send's request failed: the press is let go.
+  const failed = useCallback(() => {
+    if (token.current?.sendId === null) {
+      token.current = null;
+      watch.current = dropSend(watch.current);
     }
-  }, [sendSignal]);
+    evaluate();
+  }, [evaluate]);
 
   // Switched off: silence what this hook started.
   useEffect(() => {
@@ -261,5 +281,5 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     };
   }, [reading, stop]);
 
-  return { reading, stop, beginSend };
+  return { reading, stop, beginSend, sent, failed };
 }

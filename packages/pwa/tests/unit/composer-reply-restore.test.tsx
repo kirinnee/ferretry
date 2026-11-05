@@ -133,3 +133,33 @@ describe('Composer onSending', () => {
     expect(order).toEqual(['sending', 'request', 'sent']);
   });
 });
+
+describe('Composer onSendFailed', () => {
+  test('is told when a send that was announced did not go, and onSent is not', async () => {
+    const order: string[] = [];
+    const view = render(
+      <Composer
+        api={{
+          send: async () => {
+            order.push('request');
+            throw new Error('offline');
+          },
+        }}
+        connectionLive
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(new MemoryStorage())}
+        onSendFailed={() => order.push('failed')}
+        onSending={() => order.push('sending')}
+        onSent={() => order.push('sent')}
+        sessionId="s"
+      />,
+    );
+    const field = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
+    run(() => field().props.onChange({ currentTarget: { value: 'hello', selectionStart: 5, selectionEnd: 5 } }));
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    run(() => view.unmount());
+    expect(order).toEqual(['sending', 'request', 'failed']);
+  });
+});

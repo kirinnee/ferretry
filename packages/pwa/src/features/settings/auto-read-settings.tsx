@@ -38,7 +38,7 @@ const AUTO_READ_EXPLANATION =
 const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud unless you press Read aloud on a message.';
 
 const OLDER_DAEMON_NOTE =
-  'A machine running an older Ferretry cannot say when a turn ends. For it, the reply is read after about 3 seconds with no new messages.';
+  'Auto-read needs a newer Ferretry daemon on this machine. On an older one nothing is read on its own, but Read aloud on a message still works.';
 
 const READ_ALOUD_PRIVACY_NOTE =
   'Replies are spoken with the voices built into this device. Nothing is sent to your machine or stored. A voice marked “sends text away” hands the words to its maker to speak them.';
@@ -171,7 +171,9 @@ function Supported({
         <p id="auto-read-explanation" className="text-meta leading-base text-muted">
           {settings.autoRead ? AUTO_READ_EXPLANATION : AUTO_READ_OFF_EXPLANATION}
         </p>
-        {settings.autoRead ? <p className="text-meta leading-base text-faint">{OLDER_DAEMON_NOTE}</p> : null}
+        <p className="text-meta leading-base text-faint" data-auto-read-needs-daemon="">
+          {OLDER_DAEMON_NOTE}
+        </p>
       </div>
 
       {/* ---- the voice, with a preview ---- */}

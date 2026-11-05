@@ -520,32 +520,38 @@ speakable rules above), and one reading stops at the **longest reading** setting
 
 ### When a turn has "ended"
 
-`lib/voice-chat/auto-read.ts` is a small pure state machine over what the page can see; the clock is passed in, so every rule is a plain test.
+`lib/voice-chat/auto-read.ts` is a small pure state machine over what the page can see; it has no clock and no browser object, so every rule is a plain test.
 
-1. It follows a turn **it saw**: the daemon's `turnState` was `working` (with a date) while the page was open, or this page just sent
-   something. A session already at `your-turn` when the page opens, or when the switch is turned on, reads nothing.
-2. **A send is a token taken when the press happens**, before the request is awaited, remembering the newest turn state the page had
-   seen. The reply is judged against that token, never against "now" or a browser clock: a turn that ends before the send is acknowledged is
-   still read, a newer send drops whatever was waiting on the older one, and a replayed snapshot of the earlier turn cannot move the new
-   turn's start. The press itself reads nothing, however long the session sat idle. The acknowledgement of a press the composer already
-   announced changes nothing — above all it does not stop a fast reply that is already being read.
-3. It fires on the move to `your-turn` or `needs-input` with `turnStateAt` **later than the token AND with evidence of the send's own
-   turn**: the person's own row that was not held at the press, or a `working` the daemon dated after the token. A `your-turn` that
-   merely turns up first (the previous turn's completion arriving late, the old one still showing) is the old turn: it only raises the
-   token's floor and is never read. (If the reply's `your-turn` is seen before the person's row has shown, that send is not read — silent,
-   never the wrong reply.)
-4. **Consumed is consumed:** each reading (or skip) moves a per-conversation watermark, so replaying the same working → your-turn pair after a
-   reconnect reads nothing again.
+**It works only on the daemon's own word.** Every date it uses is the daemon's `turnStateAt`, on the daemon's clock; nothing is ever compared
+with the browser's clock. A machine that sends no `turnState` gives it nothing to work with, so **nothing is auto-read there** — the settings
+row says so in plain words ("Auto-read needs a newer Ferretry daemon on this machine"), and **Read aloud** on a message still works. There is
+deliberately no guess for an old daemon: a guess timed by "3 seconds of quiet" read history three reviews in a row.
+
+1. **The watermark.** The newest turn-state date the page has looked at. The first thing it sees seeds it: a session already at `your-turn`
+   when the page opens, or when the switch is turned on, reads nothing. A `working` only starts a watch when it is dated **after** everything
+   already seen, so a replay of an older working → your-turn pair (a reconnect, a snapshot arriving late) is at or below the watermark and arms
+   nothing. Whatever is read, skipped or merely looked at raises it: consumed is consumed.
+2. **A watched turn** is one seen `working` after the watermark. It ends at the next `your-turn` or `needs-input` dated after its `working`.
+3. **A send is a token taken when the press happens**, before the request is awaited, remembering the watermark (the floor). When the request
+   comes back the token is **bound to the send's own id**, and the daemon's send ledger says when the daemon **accepted** it. The reply to a
+   send is a completion that follows a `working` dated at or after that acceptance — a turn that began because of the send. Everything else
+   is the old turn: a previous completion that turns up late, a replayed older working, an idle session at the moment of the press are all
+   dated before the acceptance and prove nothing, and a new row or a state merely newer than an old snapshot is not evidence. Until the
+   ledger shows the send, nothing is read (a turn that was fast enough to finish first is read the moment it does). A newer send drops
+   whatever was waiting on the older one, and a send whose request failed drops its token. The press itself reads nothing, and the
+   acknowledgement of a press the composer already announced stops nothing — above all not a fast reply already being read. A message sent
+   without going through the composer's press (answering a form) stops a reading and is followed like any other turn.
+4. **The person's own row** must be in the conversation before a send is read, because the reply is cut at it. If the completion is seen
+   first it waits; it never reads the wrong reply.
 5. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
    nothing new before it reads.
-6. **Old daemon** (no `turnState`): it waits for 3 seconds with no new records and not working, counted from the press at the earliest.
-   That is a guess, and the setting says so. An idle old daemon reads as "working" for a moment when the page opens, which proves nothing,
-   so it only follows a send (read once the person's row has shown _and_ the guess has been seen working since the press) or a
-   conversation that gained a live record after the page opened — a record _appended_ after the ones held at open, counted by position and
-   never by comparing a timestamp with the browser's clock, so history that hydrates late or a daemon clock running ahead cannot pass for
-   live.
-7. A turn that ends while the tab is **hidden** is never read: it is judged when it is seen (and the moment the tab hides cancels a
+6. A turn that ends while the tab is **hidden** is never read: it is judged when it is seen (and the moment the tab hides cancels a
    pending reading), not when the timer would have fired, so coming back changes nothing.
+7. **History is never a fresh arrival.** The page draws this device's cached transcript first and replaces it with the authoritative log;
+   rows are only ever _picked from_ (cut at the person's own row or at the daemon's start of the turn), never counted as arrivals, so that
+   hydration reads nothing.
+
+A turn whose `working` the page never saw (it finished between two looks) is not read — silent rather than risk the wrong reply.
 
 ### What stops it
 
@@ -581,7 +587,7 @@ animation to turn off); the settings carry no autofocus.
 ### Where it lives
 
 `lib/voice-chat/` — `reply-picker.ts`, `auto-read.ts`, `live-settings.ts`. `hooks/use-auto-read.ts` is the composition point (one timer and a few
-document events), used by the chat page, which hands its `beginSend` to the composer's `onSending`; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
+document events), used by the chat page, which hands its `beginSend` / `sent` / `failed` to the composer's `onSending` / `onSent` / `onSendFailed` and the daemon's send ledger (`sends`, never the browser's outbox) as the source of each send's accepted time; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
 `features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice.
 
 ## Pause detection (the end of a spoken turn)

@@ -60,6 +60,9 @@ const change = async (element: HTMLElement, value: string): Promise<void> => {
   });
 };
 
+const NEEDS_DAEMON =
+  'Auto-read needs a newer Ferretry daemon on this machine. On an older one nothing is read on its own, but Read aloud on a message still works.';
+
 describe('<AutoReadSettings>', () => {
   test('the section is badged "This device" and starts OFF, saying so in words', async () => {
     const root = await show(rig());
@@ -71,6 +74,8 @@ describe('<AutoReadSettings>', () => {
     expect(toggle.textContent).toContain('Off');
     expect(root.textContent).toContain('Off by default.');
     expect(root.textContent).toContain('Replies are spoken with the voices built into this device.');
+    // The daemon requirement is said in plain words whether or not the switch is on: an old machine reads nothing on its own.
+    expect(root.querySelector('[data-auto-read-needs-daemon]')?.textContent).toBe(NEEDS_DAEMON);
   });
 
   test('turning it on saves to this device, says On, and explains what is read and how to stop', async () => {
@@ -84,7 +89,8 @@ describe('<AutoReadSettings>', () => {
     expect(toggle.textContent).toContain('On');
     expect(root.textContent).toContain('Tap anywhere or press a key to stop.');
     expect(root.textContent).toContain('The microphone is never used.');
-    expect(root.textContent).toContain('older Ferretry');
+    expect(root.querySelector('[data-auto-read-needs-daemon]')?.textContent).toBe(NEEDS_DAEMON);
+    expect(root.textContent).not.toContain('3 seconds');
   });
 
   test('the voice list groups voices by where they speak and labels the ones that send text away', async () => {
