@@ -279,4 +279,24 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(browserSpeaker().supported).toBe(false);
     expect(browserSpeaker().voices()).toEqual([]);
   });
+
+  test('over the real browser globals it speaks through them', () => {
+    const g = globalThis as Record<string, unknown>;
+    const before = { synth: g.speechSynthesis, utterance: g.SpeechSynthesisUtterance };
+    const synth = new FakeSynth([voice('Samantha', 'en-US')]);
+    g.speechSynthesis = synth;
+    g.SpeechSynthesisUtterance = FakeUtterance;
+    try {
+      const speaker = browserSpeaker();
+      expect(speaker.supported).toBe(true);
+      expect(speaker.voices()).toHaveLength(1);
+      speaker.speak({ segments: ['Hi.'], rate: 1 }, () => {});
+      expect(synth.spoken.map(u => u.text)).toEqual(['Hi.']);
+    } finally {
+      g.speechSynthesis = before.synth;
+      g.SpeechSynthesisUtterance = before.utterance;
+      if (before.synth === undefined) delete g.speechSynthesis;
+      if (before.utterance === undefined) delete g.SpeechSynthesisUtterance;
+    }
+  });
 });
