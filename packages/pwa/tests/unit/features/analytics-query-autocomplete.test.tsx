@@ -216,6 +216,25 @@ describe('analytics query autocomplete', () => {
     await runAsync(async () => undefined);
   });
 
+  it('wraps a long query on a phone instead of clipping it, and keeps it one logical line', () => {
+    const values: string[] = [];
+    const renderer = render(
+      <AnalyticsQueryAutocomplete
+        value="sum(cost_usd) by (model) [7d]"
+        onValueChange={value => values.push(value)}
+        onRun={() => undefined}
+        loadValues={async () => []}
+      />,
+    );
+    const input = renderer.root.findByProps({ role: 'combobox' });
+    expect(input.type).toBe('textarea');
+    expect(input.props.className).toContain('whitespace-pre-wrap');
+    expect(input.props.className).toContain('[overflow-wrap:anywhere]');
+    expect(input.props.className).toContain('[field-sizing:content]');
+    run(() => input.props.onChange({ currentTarget: { value: 'sum(tokens)\r\nby (model)', selectionStart: 3 } }));
+    expect(values).toEqual(['sum(tokens) by (model)']);
+  });
+
   it('loads pending low-cardinality values through the caller-provided daemon loader', async () => {
     const asked: string[] = [];
     render(
@@ -240,7 +259,7 @@ describe('analytics query autocomplete', () => {
       setSelectionRange: (start: number, end: number) => selections.push([start, end]),
     };
     const renderer = render(<ControlledAutocomplete />, {
-      createNodeMock: element => (element.type === 'input' ? inputNode : {}),
+      createNodeMock: element => (element.type === 'textarea' ? inputNode : {}),
     });
     const input = renderer.root.findByProps({ role: 'combobox' });
     run(() => input.props.onFocus());

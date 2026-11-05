@@ -9,6 +9,7 @@ import {
   type AnalyticsMetric,
   AnalyticsMetricSchema,
   type AnalyticsRange,
+  AnalyticsRangeSchema,
   ParsedAnalyticsQuerySchema,
 } from '../../src/lib/analytics.ts';
 import {
@@ -33,6 +34,13 @@ function meaning(parsed: AnalyticsQueryParts): AnalyticsQueryParts {
     matchers: parsed.matchers,
     ...(parsed.range === undefined ? {} : { range: parsed.range }),
   };
+}
+
+/** The same meaning minus the record of which range bounds were written as dates: the instants alone. */
+function instantsOnly(parts: AnalyticsQueryParts): AnalyticsQueryParts {
+  if (parts.range?.kind !== 'absolute') return parts;
+  const { dates: _dates, ...range } = parts.range;
+  return { ...parts, range };
 }
 
 function refusal(source: string): unknown {
@@ -312,14 +320,67 @@ describe('analytics query grammar v2', () => {
         kind: 'absolute',
         from: '2026-10-01T00:00:00.000Z',
         to: '2026-10-21T00:00:00.000Z',
+        dates: { from: true, to: true },
       });
       should(days.canonical).equal('[2026-10-01..2026-10-20]');
       should(instants.range).deepEqual({
         kind: 'absolute',
         from: '2026-10-01T04:00:00.000Z',
         to: '2026-10-02T00:00:00.000Z',
+        dates: { from: false, to: false },
       });
-      should(instants.canonical).equal('[2026-10-01T04:00:00.000Z..2026-10-01]');
+      should(instants.canonical).equal('[2026-10-01T04:00:00.000Z..2026-10-02T00:00:00.000Z]');
+    });
+
+    it('should leave the order of a mixed date/instant range to the daemon, which knows the zone', () => {
+      // Act — empty in UTC (2026-10-15 00:00Z is after 2026-10-14T20:00Z), four hours in Asia/Singapore
+      const mixed = parseAnalyticsQuery('[2026-10-15..2026-10-14T20:00:00Z]');
+
+      // Assert — it parses, keeps both bounds as written, and round-trips
+      should(mixed.canonical).equal('[2026-10-15..2026-10-14T20:00:00.000Z]');
+      should(mixed.range).have.property('dates', { from: true, to: false });
+      should(parseAnalyticsQuery(mixed.canonical).range).deepEqual(mixed.range);
+      should(refusal('[2026-10-14T20:00:00Z..2026-10-14T20:00:00Z]')).be.instanceof(AnalyticsQueryError);
+    });
+
+    it('should tell a date from the same UTC midnight written as an instant, and keep it so', () => {
+      // Act
+      const date = parseAnalyticsQuery('[2026-10-14..2026-10-14]');
+      const instant = parseAnalyticsQuery('[2026-10-14T00:00:00Z..2026-10-15T00:00:00Z]');
+      const mixed = parseAnalyticsQuery('[2026-10-14..2026-10-15T00:00:00Z]');
+
+      // Assert — one instant, two meanings: the canonical spelling and the marker keep them apart
+      should(date.range).have.property('dates', { from: true, to: true });
+      should(instant.range).have.property('dates', { from: false, to: false });
+      should(mixed.range).have.property('dates', { from: true, to: false });
+      should(date.canonical).equal('[2026-10-14..2026-10-14]');
+      should(instant.canonical).equal('[2026-10-14T00:00:00.000Z..2026-10-15T00:00:00.000Z]');
+      should(mixed.canonical).equal('[2026-10-14..2026-10-15T00:00:00.000Z]');
+      for (const parsed of [date, instant, mixed]) {
+        should(parseAnalyticsQuery(parsed.canonical).range).deepEqual(parsed.range);
+        should(formatAnalyticsQuery(parsed)).equal(parsed.canonical);
+      }
+    });
+
+    it('should read a range an older producer sent, with no date markers, as instants', () => {
+      // Arrange
+      const parts = {
+        groupBy: [],
+        matchers: [],
+        range: { kind: 'absolute' as const, from: '2026-10-14T00:00:00.000Z', to: '2026-10-15T00:00:00.000Z' },
+      };
+
+      // Act / Assert
+      should(formatAnalyticsQuery(parts)).equal('[2026-10-14T00:00:00.000Z..2026-10-15T00:00:00.000Z]');
+      should(AnalyticsRangeSchema.safeParse(parts.range).success).be.true();
+      should(AnalyticsRangeSchema.safeParse({ ...parts.range, dates: { from: true, to: true } }).success).be.true();
+      should(
+        AnalyticsRangeSchema.safeParse({
+          ...parts.range,
+          from: '2026-10-14T01:00:00.000Z',
+          dates: { from: true, to: false },
+        }).success,
+      ).be.false();
     });
 
     it('should accept the v2 labels and keep the metric and range through a session scope', () => {
@@ -426,7 +487,7 @@ describe('analytics query grammar v2', () => {
           const parsed = parseAnalyticsQuery(spelling);
 
           // Assert
-          should(meaning(parsed)).deepEqual(meaning(parts), `seed ${seed} case ${index}: ${spelling}`);
+          should(instantsOnly(meaning(parsed))).deepEqual(meaning(parts), `seed ${seed} case ${index}: ${spelling}`);
         }
       }
     });

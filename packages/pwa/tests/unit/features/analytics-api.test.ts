@@ -43,6 +43,22 @@ describe('analytics transport', () => {
     expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
   });
 
+  it('asks the daemon to count days in the zone it is given, and in UTC when it is given none', async () => {
+    const urls: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify(empty()));
+    };
+
+    await fetchAnalytics(daemon, 'sum by (day)', fetcher, 'Asia/Singapore');
+    await fetchAnalytics(daemon, 'sum by (day)', fetcher);
+
+    expect(urls).toEqual([
+      'https://a.example.test/v1/analytics?q=sum+by+%28day%29&tz=Asia%2FSingapore',
+      'https://a.example.test/v1/analytics?q=sum+by+%28day%29',
+    ]);
+  });
+
   it('keeps daemon failures and malformed replies explicit', async () => {
     await expect(
       fetchAnalytics(

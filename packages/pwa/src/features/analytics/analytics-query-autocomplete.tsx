@@ -234,6 +234,9 @@ function CompletionRow({
   );
 }
 
+/** A query is one logical line: typed or pasted line breaks become single spaces. */
+const normaliseQueryLineBreaks = (text: string): string => text.replace(/\r?\n/g, ' ');
+
 export function AnalyticsQueryAutocomplete({
   value,
   onValueChange,
@@ -255,7 +258,7 @@ export function AnalyticsQueryAutocomplete({
 }) {
   const generatedId = useId();
   const listboxId = `analytics-completions-${generatedId.replace(/:/g, '')}`;
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [caret, setCaret] = useState(value.length);
   const [focused, setFocused] = useState(false);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -303,8 +306,8 @@ export function AnalyticsQueryAutocomplete({
     },
     [candidates, onValueChange, result.replaceRange, value],
   );
-  const syncCaret = (input: HTMLInputElement) => setCaret(input.selectionStart ?? input.value.length);
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const syncCaret = (input: HTMLTextAreaElement) => setCaret(input.selectionStart ?? input.value.length);
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const action = analyticsAutocompleteKeyAction(event.key, {
       open,
       count: candidates.length,
@@ -325,9 +328,9 @@ export function AnalyticsQueryAutocomplete({
       <Search
         size={15}
         aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-faint"
+        className="pointer-events-none absolute left-3 top-[22px] z-10 -translate-y-1/2 text-faint"
       />
-      <input
+      <textarea
         id={inputId}
         ref={inputRef}
         role="combobox"
@@ -341,14 +344,30 @@ export function AnalyticsQueryAutocomplete({
         disabled={disabled}
         // `!` because `.kt-input` sets its padding after the utilities layer: a plain `pl-9` lost to it, and
         // the search icon sat on top of the first letters of the query.
-        className="kt-input mono min-h-[44px] w-full !pl-9 !pr-3"
+        // A phone is ~390px wide: the query wraps onto more lines (and the box grows with it) rather than
+        // clipping its tail behind the Run button. `field-sizing` grows the box where supported; elsewhere it
+        // stays two rows tall and scrolls. A query is one logical line, so Enter runs it and pasted line breaks
+        // become spaces.
+        className="kt-input mono block min-h-[44px] w-full resize-none whitespace-pre-wrap [overflow-wrap:anywhere] !pl-9 !pr-3 [field-sizing:content]"
+        rows={2}
         value={value}
         placeholder={placeholder}
         onChange={event => {
+          const input = event.currentTarget;
+          const normalised = normaliseQueryLineBreaks(input.value);
+          if (normalised !== input.value) {
+            // Applying the normalised value makes the browser drop the caret at the end: re-seat it right
+            // after whatever was typed or pasted (`\r\n` collapses to one space, so measure the prefix).
+            pending.current = {
+              expected: normalised,
+              start: normaliseQueryLineBreaks(input.value.slice(0, input.selectionStart)).length,
+              end: normaliseQueryLineBreaks(input.value.slice(0, input.selectionEnd)).length,
+            };
+          }
           setActiveIndex(0);
           setDismissedAt(null);
-          onValueChange(event.currentTarget.value);
-          syncCaret(event.currentTarget);
+          onValueChange(normalised);
+          syncCaret(input);
         }}
         onSelect={event => syncCaret(event.currentTarget)}
         onFocus={() => setFocused(true)}

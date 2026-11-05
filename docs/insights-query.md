@@ -84,8 +84,10 @@ It re-parses its own output, so it cannot emit a query the grammar refuses.
 
 A relative range is written in the largest unit of `d`, `h`, `m`, `s` that divides it exactly. Weeks
 are read but never written: `[4w]` becomes `[28d]`, and `[14d]` stays `[14d]` rather than turning into
-`[2w]` under a chip. An absolute range is written as dates where both ends fall on UTC midnight, with
-the last day inclusive. Otherwise it is written as ISO instants in UTC.
+`[2w]` under a chip. An absolute range keeps the form each bound was written in: a bound written as a date
+stays a date (the last day inclusive), and a bound written as an instant stays an ISO instant in UTC, even
+on a UTC midnight. `parsed.range.dates` (`{ from, to }`, booleans) records which bounds were dates; a range
+without it (an older producer) is read and written as instants.
 
 ## Metrics
 
@@ -171,22 +173,22 @@ mean of per-session ratios, which would weigh a one-turn session the same as a h
 Labels group and filter. A label whose value is null groups as its own row (sorted last) and never
 matches a matcher.
 
-| Label            | Value                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `runtime`        | the session's runtime (its configured `agent`); alias of `agent`                        |
-| `model`          | the selected model, normalised to its catalog identity                                  |
-| `pricing_model`  | the model the transcript was priced against (may differ from `model`)                   |
-| `harness`        | `claude` or `codex`                                                                     |
-| `machine`        | the answering daemon's name: the one pairing gave it, which is what the app shows       |
-| `project`        | the session's working directory; alias of `repo` (and of `cwd`)                         |
-| `session`        | the session id; alias of `id`                                                           |
-| `day`            | creation day, UTC, `YYYY-MM-DD`                                                         |
-| `week`           | the Monday starting the creation week, UTC, `YYYY-MM-DD`                                |
-| `status`         | terminal status: `completed`, `failed`, `stalled`, `stopped`                            |
-| `mode`, `label`  | the session's mode and its label                                                        |
-| `parent`, `tree` | the parent session id; the root session id of the session's tree (`tree` is exact-only) |
-| `context_window` | the context window, in tokens                                                           |
-| `token_data`     | `known` when the session has a proven token total, else `unknown`                       |
+| Label            | Value                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `runtime`        | the session's runtime (its configured `agent`); alias of `agent`                         |
+| `model`          | the selected model, normalised to its catalog identity                                   |
+| `pricing_model`  | the model the transcript was priced against (may differ from `model`)                    |
+| `harness`        | `claude` or `codex`                                                                      |
+| `machine`        | the answering daemon's name: the one pairing gave it, which is what the app shows        |
+| `project`        | the session's working directory; alias of `repo` (and of `cwd`)                          |
+| `session`        | the session id; alias of `id`                                                            |
+| `day`            | creation day, `YYYY-MM-DD`; UTC unless the request names a `tz` (see Time zone)          |
+| `week`           | the Monday starting the creation week, `YYYY-MM-DD`; UTC unless the request names a `tz` |
+| `status`         | terminal status: `completed`, `failed`, `stalled`, `stopped`                             |
+| `mode`, `label`  | the session's mode and its label                                                         |
+| `parent`, `tree` | the parent session id; the root session id of the session's tree (`tree` is exact-only)  |
+| `context_window` | the context window, in tokens                                                            |
+| `token_data`     | `known` when the session has a proven token total, else `unknown`                        |
 
 `machine` is stamped when the query runs, not stored. The index belongs to one daemon, and a renamed
 machine's history follows the new name. A daemon that names no machine answers `machine: null`. The
@@ -214,10 +216,48 @@ instant is in no range.
   the ingestion clock's reading when the query ran. At most 3,660 days.
 - **Absolute** `[2026-10-01..2026-10-20]`: half-open, `from` inclusive and `to` exclusive, so adjacent
   ranges never count a session twice. A date is a UTC day, and a date as the end includes that whole
-  day. Instants need a timezone. Both ends fall in 1970..9999, and the end is after the start.
+  day. Instants need a timezone. Both ends fall in 1970..9999, and the end is after the start. A range of two
+  dates, or of two instants, is checked when the query is read. One date and one instant
+  (`[2026-10-15..2026-10-14T20:00:00Z]`) are ordered only once the request's zone is applied (empty in UTC,
+  four hours in Singapore), so the daemon checks it then.
+
+A request that names a `tz` reads a **date** bound on that zone's clock (see Time zone). A UTC midnight
+written as an instant (`2026-10-15T00:00:00Z`) is one instant on the wire but not a date: the grammar keeps
+the two apart through `parsed.range.dates`, and only a date moves with the zone.
 
 The response echoes `parsed.range` and states the resolved instants in `scope.window`, so a chart can
 draw a relative range's axis without guessing the daemon's clock.
+
+## Time zone
+
+A session is stored as an instant, so which day it belongs to is a question about a reader's clock. The
+request answers it: `GET /v1/analytics?q=…&tz=Asia/Singapore`.
+
+- `tz` is an **IANA zone name** (`Asia/Singapore`, `America/New_York`, `UTC`): `UTC`, or any `Area/Place`
+  name the runtime can build a formatter for whose resolved zone is a region too (or `UTC`, for `Etc/UTC`).
+  The runtime's own list (`Intl.supportedValuesOf('timeZone')`) is NOT consulted, because engines spell one
+  zone differently (Node lists `Asia/Calcutta`, Bun `Asia/Kolkata`) and both must be honoured, so the zone a
+  device sends always is. An abbreviation (`SGT`), a legacy fixed-offset name (`EST`, `PST`: fixed all year,
+  no daylight saving, resolved without an `Area/`), an offset (`+08:00`, `GMT+8`), a padded name or an
+  unknown name is refused with `400 invalid_time_zone`, never read as UTC. Two `tz` parameters are refused with
+  `400 repeated_parameter`. A daemon older than this contract refuses the
+  parameter itself (`unknown_parameter`).
+- With `tz`, the `day` and `week` labels, in a grouping, a matcher and the `day`/`week` fields of raw rows, are
+  the session's creation instant on that zone's calendar (a week still starts on Monday). A session with no
+  creation instant keeps the day it was stored with.
+- With `tz`, an absolute range's **date** bounds open and close at that zone's midnight, so
+  `[2026-10-01..2026-10-20]` is the days the reader sees. A bound written as an instant (a UTC midnight
+  included) is exactly what it names. `scope.window` states the resolved instants. A window that ends before it
+  starts once the zone is applied (possible only with one date bound and one instant bound) is refused with
+  `400 invalid_query` ("a range must end after it starts"); one that starts and ends together is **empty**
+  and matches no session. That is a day the zone skipped (`Pacific/Apia` 2011-12-30), never a UTC day
+  substituted for it. A day that
+  daylight saving makes 23 or 25 hours long is that long; a day whose midnight does not exist starts at its
+  first clock reading, and one whose midnight repeats (`Asia/Gaza` 2020-10-24) starts at the first.
+- Relative ranges (`[7d]`) are durations, so the zone does not move them.
+- Without `tz` the answer is UTC's, as before. The zone is a property of the **reader**: the app keeps it on
+  the device (`fy-insights-time-zone-v1`, default: the device's own zone) and sends it with every request.
+  Nothing stores a zone on a session.
 
 ## Duration
 
