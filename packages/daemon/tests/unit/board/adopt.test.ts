@@ -1,14 +1,24 @@
 import { describe, it } from 'bun:test';
 import { type BoardTask, BoardTaskActionRequestSchema } from '@ferretry/protocol';
 import should from 'should';
-import { type BoardCaller, BoardError, BoardService } from '../../../src/lib/board/index.ts';
+import {
+  applyAction,
+  type BoardCaller,
+  BoardError,
+  BoardIndex,
+  BoardService,
+  type CardContext,
+} from '../../../src/lib/board/index.ts';
 import {
   card,
   FakeLanes,
   FakeParents,
   FakeSessions,
+  lanes,
   liveSession,
+  MACHINE,
   MemoryBoardStore,
+  NOW,
   OTHER_PROJECT,
   PROJECT,
   rosterOf,
@@ -276,5 +286,28 @@ describe('adopting an orphaned card', () => {
       should(error.message).containEql('cannot be shown to be orphaned');
       unchanged(ports);
     });
+  });
+});
+
+describe('the adopt rule itself', () => {
+  const context = (overrides: Partial<CardContext>): CardContext => ({
+    now: NOW,
+    actor: { kind: 'ferret', sessionId: 'lead' },
+    standing: 'reader',
+    laneSet: lanes(PROJECT),
+    index: new BoardIndex([], MACHINE),
+    laneSets: new Map(),
+    ...overrides,
+  });
+
+  it('should refuse unless the service proved the orphan and a ferret is asking', () => {
+    // Act
+    const unproved = (): unknown => applyAction(orphan(), adoptSilently, context({}));
+    const byOwner = (): unknown =>
+      applyAction(orphan(), adoptSilently, context({ actor: { kind: 'owner' }, adoptedFrom: 'gone' }));
+
+    // Assert
+    should(unproved).throw(/only a live lead may adopt &F1/u);
+    should(byOwner).throw(/only a live lead may adopt &F1/u);
   });
 });

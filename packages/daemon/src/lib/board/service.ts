@@ -1078,7 +1078,7 @@ export class BoardService {
 
   /**
    * The ended owner ferret a live lead may ADOPT this card from, or the refusal: the caller is a lead of this machine (not a
-   * sub-ferret), alive, working on the card's own board; the card is open work; and its owner ferret AND its assignee are
+   * sub-ferret: the sub-ferret limit refused one before this), alive, working on the card's own board; the card is open work; and its owner ferret AND its assignee are
    * both ended, as the session roster says now (a session the roster cannot read is never taken for ended). Nothing else
    * about authority changes: the adopter is then the card's owner ferret and assignee, and judged as one.
    */
@@ -1110,9 +1110,6 @@ export class BoardService {
     }
     if (presenceOf(roster, caller.sessionId) !== 'alive')
       throw new BoardError('forbidden', `only a live ferret may adopt ${ref}`);
-    if ((await this.ports.subFerrets?.leadOf(caller.sessionId).catch(() => undefined)) !== undefined) {
-      throw new BoardError('forbidden', `only a lead may adopt ${ref}: a sub-ferret asks its lead`);
-    }
     if ((await this.ports.lanes.projectOf(caller.sessionId)) !== card.projectId) {
       throw new BoardError(
         'forbidden',
