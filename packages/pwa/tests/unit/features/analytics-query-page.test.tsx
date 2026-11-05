@@ -370,6 +370,89 @@ describe('AnalyticsQueryPage', () => {
     expect(asked).toHaveLength(2);
   });
 
+  it('never shows a stale zone’s answer when the zone changes while the first run is pending', async () => {
+    // Arrange — each zone's requests are held until the test settles them
+    const asked: Array<{ zone: string; query: string | undefined; settle: () => void }> = [];
+    const requestRunIn =
+      (zone: string) =>
+      (query: string | undefined): Promise<FleetAnswer> =>
+        new Promise(resolve => {
+          const response = aggregateResponse(query ?? 'sum by (day)', [group({ model: `${zone}-model` })], {
+            groupBy: ['model'],
+            metric: 'cost_usd',
+          });
+          asked.push({
+            zone,
+            query,
+            settle: () => resolve({ response, failed: [], daemonOf: () => undefined }),
+          });
+        });
+    const page = (zone: string) => (
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={requestRunIn(zone)}
+        timeZone={zone}
+        initialQuery="sum by (day)"
+      />
+    );
+    const renderer = mount(page('UTC'));
+    await settle();
+    expect(asked.map(call => call.zone)).toEqual(['UTC']);
+
+    // Act — the zone changes while the first query is still unanswered
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert — the new zone is asked the same query
+    expect(asked.map(call => [call.zone, call.query])).toEqual([
+      ['UTC', 'sum by (day)'],
+      ['Asia/Singapore', 'sum by (day)'],
+    ]);
+
+    // The old zone's answer arrives late and is dropped; the new zone's is the one shown.
+    await runAsync(async () => {
+      asked[0]!.settle();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text(renderer)).not.toContain('UTC-model');
+    await runAsync(async () => {
+      asked[1]!.settle();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text(renderer)).toContain('Asia/Singapore-model');
+    expect(text(renderer)).not.toContain('UTC-model');
+  });
+
+  it('asks nothing on a zone change when no query was ever submitted', async () => {
+    const asked: Array<string | undefined> = [];
+    const requestRun = async (query: string | undefined): Promise<FleetAnswer> => {
+      asked.push(query);
+      return { response: answer(query ?? 'sum by (day)'), failed: [], daemonOf: () => undefined };
+    };
+    const page = (timeZone: string) => (
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={requestRun}
+        timeZone={timeZone}
+      />
+    );
+    const renderer = mount(page('UTC'));
+    await settle();
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked).toEqual([]);
+  });
+
   it('reads through the paired carrier by default', async () => {
     const original = globalThis.fetch;
     const urls: string[] = [];

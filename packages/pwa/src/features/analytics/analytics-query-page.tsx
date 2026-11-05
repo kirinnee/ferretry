@@ -141,12 +141,16 @@ function QueryBody({
   const [ranAt, setRanAt] = useState<string | null>(null);
   const serial = useRef(0);
   const lastResult = useRef<AnalyticsResponse | null>(null);
-  /** The text last RUN (not whatever is being typed), which a zone change asks again. */
-  const lastText = useRef('');
+  /**
+   * The text last SUBMITTED (not whatever is being typed), noted before its answer is awaited, so a zone
+   * change asks it again even while the first run is still pending. Null until something is run.
+   */
+  const submitted = useRef<string | null>(null);
 
   const run = useCallback(
     async (source: string) => {
       const mine = ++serial.current;
+      submitted.current = source;
       setQuerying(true);
       setError(null);
       try {
@@ -154,7 +158,7 @@ function QueryBody({
         if (mine !== serial.current) return;
         const response = fleet.response;
         lastResult.current = response;
-        lastText.current = response.query;
+        submitted.current = response.query;
         setText(response.query);
         setAnswer(fleet);
         setRanAt(now().toISOString().slice(11, 16));
@@ -181,13 +185,15 @@ function QueryBody({
     };
   }, [initialQuery]);
 
-  // A new zone changes what every day in the answer means, so the answer on screen is asked again. The
-  // first render is not a change, and a page with nothing on screen has nothing to refresh.
+  // A new zone changes what every day in the answer means, so whatever was submitted is asked again — and
+  // a run still in flight is invalidated by that (its serial is superseded), so its answer, read in the
+  // old zone, never lands. The first render is not a change, and a page nothing was run on has nothing
+  // to refresh.
   const shownZone = useRef(timeZone);
   useEffect(() => {
     if (shownZone.current === timeZone) return;
     shownZone.current = timeZone;
-    if (lastResult.current !== null) void runLatest.current(lastText.current);
+    if (submitted.current !== null) void runLatest.current(submitted.current);
   }, [timeZone]);
 
   const runText = useCallback(

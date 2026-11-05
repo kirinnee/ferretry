@@ -222,8 +222,11 @@ function parseGroupBy(source: string): AnalyticsLabel[] {
   return groupBy;
 }
 
-/** One end of an absolute range, in epoch milliseconds. A date is a UTC day; `end` makes it inclusive. */
-function rangeBound(source: string, end: boolean): number {
+/**
+ * One end of an absolute range, in epoch milliseconds, and whether it was written as a date. A date is a
+ * UTC day; `end` makes it inclusive.
+ */
+function rangeBound(source: string, end: boolean): { readonly at: number; readonly date: boolean } {
   const text = source.trim();
   const date = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (date !== null) {
@@ -233,14 +236,14 @@ function rangeBound(source: string, end: boolean): number {
     if (new Date(start).toISOString().slice(0, 10) !== text) {
       throw new AnalyticsQueryError(`range date ${JSON.stringify(text)} is not a calendar date`);
     }
-    return end ? start + DAY_MS : start;
+    return { at: end ? start + DAY_MS : start, date: true };
   }
   if (!InstantSchema.safeParse(text).success) {
     throw new AnalyticsQueryError(
       `range bound ${JSON.stringify(text)} must be a date (2026-10-01) or an ISO instant with a timezone`,
     );
   }
-  return Date.parse(text);
+  return { at: Date.parse(text), date: false };
 }
 
 function parseRange(source: string): AnalyticsRange {
@@ -266,24 +269,32 @@ function parseRange(source: string): AnalyticsRange {
   }
   const from = rangeBound(bounds[0]!, false);
   const to = rangeBound(bounds[1]!, true);
-  if (from < 0 || to > MAX_INSTANT_MS) throw new AnalyticsQueryError('range bounds must fall in 1970..9999');
-  if (!(from < to)) throw new AnalyticsQueryError('a range must end after it starts');
-  return { kind: 'absolute', from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+  if (from.at < 0 || to.at > MAX_INSTANT_MS) throw new AnalyticsQueryError('range bounds must fall in 1970..9999');
+  if (!(from.at < to.at)) throw new AnalyticsQueryError('a range must end after it starts');
+  return {
+    kind: 'absolute',
+    from: new Date(from.at).toISOString(),
+    to: new Date(to.at).toISOString(),
+    dates: { from: from.date, to: to.date },
+  };
 }
 
 function quoteValue(value: string): string {
   return /^[A-Za-z0-9_./:@+*?-]+$/.test(value) ? value : JSON.stringify(value);
 }
 
-function formatBound(instant: string, end: boolean): string {
+/** A bound written as the form it was read in: a date only where it was one, else the exact instant. */
+function formatBound(instant: string, end: boolean, date: boolean): string {
   const at = Date.parse(instant);
-  if (at % DAY_MS !== 0) return new Date(at).toISOString();
+  if (!date || at % DAY_MS !== 0) return new Date(at).toISOString();
   return new Date(end ? at - DAY_MS : at).toISOString().slice(0, 10);
 }
 
 /** The canonical range suffix, without the leading space. */
 function formatRange(range: AnalyticsRange): string {
-  if (range.kind === 'absolute') return `[${formatBound(range.from, false)}..${formatBound(range.to, true)}]`;
+  if (range.kind === 'absolute') {
+    return `[${formatBound(range.from, false, range.dates?.from === true)}..${formatBound(range.to, true, range.dates?.to === true)}]`;
+  }
   const unit = CANONICAL_RANGE_UNITS.find(candidate => range.seconds % ANALYTICS_RANGE_UNIT_SECONDS[candidate] === 0);
   // `s` divides every whole number of seconds, so the find cannot miss; the fallback keeps it total.
   const chosen = unit ?? 's';

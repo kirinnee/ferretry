@@ -19,8 +19,14 @@ export const INSIGHTS_TIME_ZONE_KEY = 'fy-insights-time-zone-v1';
 /** The stored choice that means "whatever this device's clock says". */
 export const DEVICE_TIME_ZONE = 'device';
 
-/** The zone this device's clock is set to; UTC when the runtime leaves it empty. */
-export const deviceTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+/** An IANA region zone's `Area/Place` shape: not an abbreviation such as `EST`, which is fixed-offset. */
+const REGION_ZONE = /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+$/;
+
+/** The zone this device's clock is set to; UTC when the runtime leaves it empty or names no region. */
+export const deviceTimeZone = (): string => {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return REGION_ZONE.test(zone) ? zone : 'UTC';
+};
 
 /** Every IANA zone the runtime lists (an older one lists none): UTC first, this device's own always among them. */
 export const knownTimeZones = (): readonly string[] => {

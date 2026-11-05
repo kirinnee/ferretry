@@ -84,8 +84,10 @@ It re-parses its own output, so it cannot emit a query the grammar refuses.
 
 A relative range is written in the largest unit of `d`, `h`, `m`, `s` that divides it exactly. Weeks
 are read but never written: `[4w]` becomes `[28d]`, and `[14d]` stays `[14d]` rather than turning into
-`[2w]` under a chip. An absolute range is written as dates where both ends fall on UTC midnight, with
-the last day inclusive. Otherwise it is written as ISO instants in UTC.
+`[2w]` under a chip. An absolute range keeps the form each bound was written in: a bound written as a date
+stays a date (the last day inclusive), and a bound written as an instant stays an ISO instant in UTC, even
+on a UTC midnight. `parsed.range.dates` (`{ from, to }`, booleans) records which bounds were dates; a range
+without it (an older producer) is read and written as instants.
 
 ## Metrics
 
@@ -216,7 +218,9 @@ instant is in no range.
   ranges never count a session twice. A date is a UTC day, and a date as the end includes that whole
   day. Instants need a timezone. Both ends fall in 1970..9999, and the end is after the start.
 
-A request that names a `tz` reads a **date** bound on that zone's clock (see Time zone).
+A request that names a `tz` reads a **date** bound on that zone's clock (see Time zone). A UTC midnight
+written as an instant (`2026-10-15T00:00:00Z`) is one instant on the wire but not a date: the grammar keeps
+the two apart through `parsed.range.dates`, and only a date moves with the zone.
 
 The response echoes `parsed.range` and states the resolved instants in `scope.window`, so a chart can
 draw a relative range's axis without guessing the daemon's clock.
@@ -226,17 +230,23 @@ draw a relative range's axis without guessing the daemon's clock.
 A session is stored as an instant, so which day it belongs to is a question about a reader's clock. The
 request answers it: `GET /v1/analytics?q=…&tz=Asia/Singapore`.
 
-- `tz` is an **IANA zone name** (`Asia/Singapore`, `America/New_York`, `UTC`). An abbreviation (`SGT`), an
-  offset (`+08:00`) or an unknown name is refused with `400 invalid_time_zone`, never read as UTC; two `tz`
-  parameters are refused with `400 repeated_parameter`. A daemon older than this contract refuses the
+- `tz` is an **IANA zone name** (`Asia/Singapore`, `America/New_York`, `UTC`), checked against the
+  runtime's canonical list (`Intl.supportedValuesOf('timeZone')`) plus `UTC`. An abbreviation (`SGT`), a
+  legacy fixed-offset name (`EST`, `PST`: fixed all year, no daylight saving), an offset (`+08:00`,
+  `GMT+8`) or an unknown name is refused with `400 invalid_time_zone`, never read as UTC. A runtime that
+  lists no zones accepts any `Area/Place` name `Intl` can format instead, so the zone a device sends is
+  still honoured; the same abbreviations stay refused. Two `tz` parameters are refused with
+  `400 repeated_parameter`. A daemon older than this contract refuses the
   parameter itself (`unknown_parameter`).
 - With `tz`, the `day` and `week` labels, in a grouping, a matcher and the `day`/`week` fields of raw rows, are
   the session's creation instant on that zone's calendar (a week still starts on Monday). A session with no
   creation instant keeps the day it was stored with.
 - With `tz`, an absolute range's **date** bounds open and close at that zone's midnight, so
-  `[2026-10-01..2026-10-20]` is the days the reader sees. A bound at any other instant is exactly what it
-  names. `scope.window` states the resolved instants. A day that daylight saving makes 23 or 25 hours long is
-  that long; a day whose midnight does not exist starts at its first clock reading.
+  `[2026-10-01..2026-10-20]` is the days the reader sees. A bound written as an instant (a UTC midnight
+  included) is exactly what it names. `scope.window` states the resolved instants, and never inverts: if
+  moving a date bound would put the window's end before its start, the stated instants are kept. A day that
+  daylight saving makes 23 or 25 hours long is that long; a day whose midnight does not exist starts at its
+  first clock reading, and one whose midnight repeats (`Asia/Gaza` 2020-10-24) starts at the first.
 - Relative ranges (`[7d]`) are durations, so the zone does not move them.
 - Without `tz` the answer is UTC's, as before. The zone is a property of the **reader**: the app keeps it on
   the device (`fy-insights-time-zone-v1`, default: the device's own zone) and sends it with every request.

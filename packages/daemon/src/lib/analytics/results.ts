@@ -207,17 +207,24 @@ function costGapCounts(rows: readonly AnalyticsRawSession[]): Record<string, num
 /**
  * An absolute range, with a WHOLE-DAY bound read on the zone's clock.
  *
- * The grammar spells `[2026-10-01..2026-10-20]` as UTC midnights and cannot tell that apart from the
- * same instant written in full, so a bound that sits exactly on a UTC midnight is a date: in a zone, it
- * opens (or closes) at THAT zone's midnight, so the range covers the days the reader sees. A bound at any
- * other instant is exactly what it names.
+ * The parsed range says which bounds were WRITTEN as dates (`[2026-10-01..2026-10-20]`): in a zone, only
+ * those open (or close) at THAT zone's midnight, so the range covers the days the reader sees. A bound
+ * written as an instant — a midnight one included — is exactly what it names. Moving the two bounds
+ * independently can cross them (a zone ahead of UTC pulls a date end earlier than an instant start), so
+ * a window that would invert keeps its stated instants instead and can never be silently empty.
  */
-function absoluteWindow(from: string, to: string, timeZone: string | undefined): { from: number; to: number } {
-  const start = Date.parse(from);
-  const end = Date.parse(to);
+function absoluteWindow(
+  range: Extract<NonNullable<ParsedAnalyticsQuery['range']>, { kind: 'absolute' }>,
+  timeZone: string | undefined,
+): { from: number; to: number } {
+  const start = Date.parse(range.from);
+  const end = Date.parse(range.to);
   if (timeZone === undefined) return { from: start, to: end };
-  const onZoneClock = (at: number): number => (at % 86_400_000 === 0 ? zonedMidnight(utcDateOf(at), timeZone) : at);
-  return { from: onZoneClock(start), to: onZoneClock(end) };
+  const onZoneClock = (at: number, date: boolean | undefined): number =>
+    date === true ? zonedMidnight(utcDateOf(at), timeZone) : at;
+  const from = onZoneClock(start, range.dates?.from);
+  const to = onZoneClock(end, range.dates?.to);
+  return from < to ? { from, to } : { from: start, to: end };
 }
 
 /**
@@ -231,7 +238,7 @@ function rangeWindow(
 ): { from: number; to: number } | undefined {
   const { range } = parsed;
   if (range === undefined) return undefined;
-  if (range.kind === 'absolute') return absoluteWindow(range.from, range.to, timeZone);
+  if (range.kind === 'absolute') return absoluteWindow(range, timeZone);
   const end = now === undefined ? Number.NaN : Date.parse(now);
   if (!Number.isFinite(end)) throw new Error('a relative analytics range needs the instant the daemon answers at');
   return { from: end - range.seconds * 1_000, to: end };

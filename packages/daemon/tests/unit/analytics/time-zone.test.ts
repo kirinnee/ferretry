@@ -89,6 +89,19 @@ describe('zoned days', () => {
     should(zonedDay(new Date(start - 60_000).toISOString(), 'America/Sao_Paulo')).equal('2018-11-03');
   });
 
+  it.each([
+    ['Asia/Gaza', '2020-10-24', '2020-10-23T21:00:00.000Z'],
+    ['Asia/Amman', '2021-10-29', '2021-10-28T21:00:00.000Z'],
+  ])('should start %s on %s at its FIRST midnight when the clock repeats it', (zone, date, first) => {
+    // The clock goes back from 01:00 to 00:00, so midnight is read twice; the day starts at the first.
+    const start = zonedMidnight(date, zone);
+    should(new Date(start).toISOString()).equal(first);
+    should(zonedDay(new Date(start).toISOString(), zone)).equal(date);
+    should(zonedDay(new Date(start - 60_000).toISOString(), zone)).equal(
+      new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10),
+    );
+  });
+
   it('should accept IANA names and refuse abbreviations, offsets and junk', () => {
     should(isTimeZone('Asia/Singapore')).equal(true);
     should(isTimeZone('UTC')).equal(true);
@@ -96,6 +109,28 @@ describe('zoned days', () => {
     should(isTimeZone('+08:00')).equal(false);
     should(isTimeZone('')).equal(false);
     should(isTimeZone('Mars/Olympus_Mons')).equal(false);
+  });
+
+  it('should refuse the legacy fixed-offset names Intl accepts', () => {
+    // EST is UTC-05 all year: it would count a New York reader's summer days an hour wrong.
+    for (const name of ['EST', 'PST', 'MST', 'GMT+8', 'GMT', 'EST5EDT']) should(isTimeZone(name)).equal(false);
+  });
+
+  it('should still accept the zone a device sends when the runtime lists no zones', () => {
+    // Arrange — an older runtime has no Intl.supportedValuesOf
+    const intl = Intl as { supportedValuesOf?: unknown };
+    const original = intl.supportedValuesOf;
+    intl.supportedValuesOf = undefined;
+    try {
+      // Act / Assert
+      should(isTimeZone('Asia/Singapore')).equal(true);
+      should(isTimeZone('UTC')).equal(true);
+      for (const name of ['EST', 'PST', 'GMT+8', 'SGT', '+08:00', 'Mars/Olympus_Mons']) {
+        should(isTimeZone(name)).equal(false);
+      }
+    } finally {
+      intl.supportedValuesOf = original;
+    }
   });
 });
 
@@ -144,6 +179,43 @@ describe('queryAnalyticsRecords in a time zone', () => {
     should(sg.results[0]!.tokens.value).equal(70);
     should(utc.results[0]!.tokens.value).equal(60);
     should(sg.scope.window).deepEqual({ from: '2026-10-14T16:00:00.000Z', to: '2026-10-15T16:00:00.000Z' });
+  });
+
+  it('should move only date bounds to the zone, and read an instant on a UTC midnight exactly', () => {
+    // Arrange — the same two instants written as instants, then as dates
+    const inZone = { index, timeZone: 'Asia/Singapore' };
+
+    // Act
+    const instants = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-14T23:00:00Z..2026-10-15T00:00:00Z]', inZone);
+    const midnight = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-14T00:00:00Z..2026-10-15T00:00:00Z]', inZone);
+    const mixed = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-15..2026-10-15T12:00:00Z]', inZone);
+    const dates = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-14..2026-10-14]', inZone);
+
+    // Assert
+    if (
+      instants.kind !== 'aggregate' ||
+      midnight.kind !== 'aggregate' ||
+      mixed.kind !== 'aggregate' ||
+      dates.kind !== 'aggregate'
+    ) {
+      throw new Error('expected aggregate result');
+    }
+    should(instants.scope.window).deepEqual({ from: '2026-10-14T23:00:00.000Z', to: '2026-10-15T00:00:00.000Z' });
+    should(midnight.scope.window).deepEqual({ from: '2026-10-14T00:00:00.000Z', to: '2026-10-15T00:00:00.000Z' });
+    // A date start opens at Singapore's midnight (the 14th, 16:00Z the day before); an instant end is exact.
+    should(mixed.scope.window).deepEqual({ from: '2026-10-14T16:00:00.000Z', to: '2026-10-15T12:00:00.000Z' });
+    should(dates.scope.window).deepEqual({ from: '2026-10-13T16:00:00.000Z', to: '2026-10-14T16:00:00.000Z' });
+    should(mixed.results[0]!.tokens.value).equal(30);
+  });
+
+  it('should never invert a window: a date end that the zone pulls before an instant start keeps the stated instants', () => {
+    // [2026-10-15T20:00Z..2026-10-16] in Singapore would close at 2026-10-16 00:00+08 = 10-15T16:00Z, before 20:00Z.
+    const response = queryAnalyticsRecords(records, 'sum(tokens) [2026-10-15T20:00:00Z..2026-10-15]', {
+      index,
+      timeZone: 'Asia/Singapore',
+    });
+    if (response.kind !== 'aggregate') throw new Error('expected aggregate result');
+    should(response.scope.window).deepEqual({ from: '2026-10-15T20:00:00.000Z', to: '2026-10-16T00:00:00.000Z' });
   });
 
   it('should give raw rows the reader\u2019s day and week as well', () => {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import '../support/dom.ts';
 import {
   DEVICE_TIME_ZONE,
+  deviceTimeZone,
   INSIGHTS_TIME_ZONE_KEY,
   insightsTimeZonePreference,
   knownTimeZones,
@@ -29,7 +30,7 @@ describe('the Insights time zone preference', () => {
   });
 
   it('treats an abbreviation, an offset or junk in storage as the default', () => {
-    for (const stored of ['SGT', '+08:00', 'Mars/Olympus_Mons', '', null])
+    for (const stored of ['SGT', 'EST', 'PST', 'GMT+8', '+08:00', 'Mars/Olympus_Mons', '', null])
       expect(insightsTimeZonePreference.parse(stored)).toBe(DEVICE_TIME_ZONE);
   });
 
@@ -37,5 +38,25 @@ describe('the Insights time zone preference', () => {
     const zones = knownTimeZones();
     expect(zones[0]).toBe('UTC');
     expect(zones).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it('never lists, nor lets storage keep, a fixed-offset abbreviation', () => {
+    expect(knownTimeZones()).not.toContain('EST');
+    expect(insightsTimeZonePreference.parse('EST')).toBe(DEVICE_TIME_ZONE);
+  });
+
+  it('reads a device clock that names no region (EST) as UTC rather than sending it', () => {
+    const original = Intl.DateTimeFormat;
+    const fake = (zone: string) =>
+      (() => ({ resolvedOptions: () => ({ timeZone: zone }) })) as unknown as typeof Intl.DateTimeFormat;
+    try {
+      Intl.DateTimeFormat = fake('EST');
+      expect(deviceTimeZone()).toBe('UTC');
+      expect(knownTimeZones()).not.toContain('EST');
+      Intl.DateTimeFormat = fake('Asia/Singapore');
+      expect(deviceTimeZone()).toBe('Asia/Singapore');
+    } finally {
+      Intl.DateTimeFormat = original;
+    }
   });
 });

@@ -74,15 +74,31 @@ export type AnalyticsMetric = z.infer<typeof AnalyticsMetricSchema>;
  * RELATIVE is a rolling window ending when the daemon answers (`[7d]` = the last 7 × 24 h). ABSOLUTE
  * is half-open, `from` inclusive and `to` exclusive, so two adjacent ranges never count a session
  * twice; the date spelling `[2026-10-01..2026-10-20]` includes the whole of its last day.
+ *
+ * `dates` says which bounds were WRITTEN as dates. A date and the same UTC midnight written as an
+ * instant are one instant on the wire, but a reader's zone moves only the date. Absent (an older
+ * producer), both bounds are instants, exactly what they name. It is a date flag only on a UTC midnight.
  */
 export const AnalyticsRangeSchema = z
   .discriminatedUnion('kind', [
     z.object({ kind: z.literal('relative'), seconds: PositiveIntegerSchema }),
-    z.object({ kind: z.literal('absolute'), from: InstantSchema, to: InstantSchema }),
+    z.object({
+      kind: z.literal('absolute'),
+      from: InstantSchema,
+      to: InstantSchema,
+      dates: z.object({ from: z.boolean(), to: z.boolean() }).optional(),
+    }),
   ])
   .superRefine((value, context) => {
     if (value.kind === 'absolute' && !(Date.parse(value.from) < Date.parse(value.to))) {
       context.addIssue({ code: 'custom', message: 'range must end after it starts', path: ['to'] });
+    }
+    if (value.kind === 'absolute' && value.dates !== undefined) {
+      for (const end of ['from', 'to'] as const) {
+        if (value.dates[end] && Date.parse(value[end]) % 86_400_000 !== 0) {
+          context.addIssue({ code: 'custom', message: 'a date bound must be a UTC midnight', path: ['dates', end] });
+        }
+      }
     }
   });
 export type AnalyticsRange = z.infer<typeof AnalyticsRangeSchema>;

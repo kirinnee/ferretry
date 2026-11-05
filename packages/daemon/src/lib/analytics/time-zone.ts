@@ -31,9 +31,23 @@ function formatter(timeZone: string): Intl.DateTimeFormat {
   return made;
 }
 
-/** Whether `name` is a zone this runtime knows. Names only: `+08:00` and `SGT` are not zones. */
+/** The `Area/Place` shape of an IANA region zone: no abbreviation, offset or legacy fixed-offset name. */
+const REGION_ZONE = /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+$/;
+
+/**
+ * Whether `name` is an IANA REGION zone this runtime knows (or `UTC`). `Intl` also accepts legacy
+ * fixed-offset names (`EST` is UTC-05 all year, with no daylight saving), which would count days wrongly
+ * for a reader in that region, so the answer is the runtime's canonical list (`Intl.supportedValuesOf`)
+ * plus `UTC`. A runtime without that function lists nothing, and the zone a device sends must still be
+ * accepted: there any `Area/Place` name that `Intl` can format is, and `EST`, `PST`, `GMT+8`, `SGT`,
+ * `+08:00` and junk are not.
+ */
 export function isTimeZone(name: string): boolean {
   if (name.trim() !== name || name === '' || /^[+-]?\d/.test(name)) return false;
+  if (name !== 'UTC') {
+    const listed = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone') ?? [];
+    if (listed.length > 0 ? !listed.includes(name) : !REGION_ZONE.test(name)) return false;
+  }
   try {
     formatter(name);
     return true;
@@ -100,7 +114,9 @@ function offsetAt(epochMs: number, timeZone: string): number {
  *
  * Solved by iterating the offset, which converges in two steps except across a transition that skips
  * midnight itself; there the first instant of the day after the gap is the answer, which is what the
- * clock shows first.
+ * clock shows first. When a transition REPEATS midnight (Asia/Gaza 2020-10-24, Asia/Amman 2021-10-29: the
+ * clock goes back from 01:00 to 00:00) the iteration lands on the second reading, so it steps back to
+ * the earliest instant of the day, the one a `day` matcher also starts the day at.
  */
 export function zonedMidnight(date: string, timeZone: string): number {
   const naive = Date.parse(`${date}T00:00:00Z`);
@@ -108,6 +124,8 @@ export function zonedMidnight(date: string, timeZone: string): number {
   guess = naive - offsetAt(guess, timeZone);
   // A gap can leave the guess on the previous day's clock; step forward to the first reading of `date`.
   while (zonedDay(new Date(guess).toISOString(), timeZone)! < date) guess += 60_000;
+  // A repeated midnight leaves the guess an hour late; the first reading is the day's real start.
+  while (zonedDay(new Date(guess - 60_000).toISOString(), timeZone)! >= date) guess -= 60_000;
   return guess;
 }
 
