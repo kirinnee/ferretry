@@ -43,6 +43,22 @@ describe('analytics transport', () => {
     expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
   });
 
+  it('asks the daemon to count days in the zone it is given, and in UTC when it is given none', async () => {
+    const urls: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify(empty()));
+    };
+
+    await fetchAnalytics(daemon, 'sum by (day)', fetcher, 'Asia/Singapore');
+    await fetchAnalytics(daemon, 'sum by (day)', fetcher);
+
+    expect(urls).toEqual([
+      'https://a.example.test/v1/analytics?q=sum+by+%28day%29&tz=Asia%2FSingapore',
+      'https://a.example.test/v1/analytics?q=sum+by+%28day%29',
+    ]);
+  });
+
   it('keeps daemon failures and malformed replies explicit', async () => {
     await expect(
       fetchAnalytics(
@@ -60,6 +76,45 @@ describe('analytics transport', () => {
       status: 500,
       message: 'HTTP 500',
     });
+  });
+
+  it('reads the relay link’s nested handler-failure envelope as the same refusal', async () => {
+    // The relay link answers a different shape than the dispatcher: { error: { code, message } }.
+    await expect(
+      fetchAnalytics(
+        daemon,
+        undefined,
+        async () =>
+          new Response(
+            JSON.stringify({ error: { code: 'internal_error', message: 'the daemon failed to handle this request' } }),
+            { status: 500, headers: { 'x-fy-version': '4.270.0' } },
+          ),
+      ),
+    ).rejects.toMatchObject({
+      status: 500,
+      code: 'internal_error',
+      message: 'the daemon failed to handle this request',
+      daemonVersion: '4.270.0',
+    });
+    await expect(
+      fetchAnalytics(daemon, undefined, async () => new Response(JSON.stringify({ error: {} }), { status: 502 })),
+    ).rejects.toMatchObject({ status: 502, message: 'HTTP 502' });
+  });
+
+  it('keeps the version a refusing daemon says it runs', async () => {
+    // A machine on an older build answers a bare 500 where a current one refuses readably (B149), so the
+    // version is what lets the page say which Ferretry that machine is on.
+    await expect(
+      fetchAnalytics(
+        daemon,
+        'sum(cost_usd) by (id)',
+        async () =>
+          new Response(JSON.stringify({ error: 'the daemon failed to handle this request', code: 'internal_error' }), {
+            status: 500,
+            headers: { 'x-fy-version': '4.270.0' },
+          }),
+      ),
+    ).rejects.toMatchObject({ status: 500, code: 'internal_error', daemonVersion: '4.270.0' });
   });
 });
 

@@ -75,6 +75,31 @@ export const machinesSummary = (outcomes: readonly MachineOutcome<unknown>[], ex
 /** A machine that did not answer, or answered in a form the others' answers cannot be merged with. */
 export type MachineFailure = Extract<MachineOutcome<unknown>, { readonly status: 'failed' }>;
 
+/** A reason as a sentence: machines' reasons are read one after another, so each must end. */
+export const asSentence = (reason: string): string => (/[.!?…]$/u.test(reason) ? reason : `${reason}.`);
+
+/**
+ * A query NO machine answered, with EVERY machine's own reason.
+ *
+ * Keeping only the first machine's reason is how the owner was shown a bare "the daemon failed to
+ * handle this request" from an older machine while the current one had said exactly what was wrong
+ * ("more than 100 groups; add a matcher"). With one machine the message is its reason alone; with more,
+ * each reason is prefixed with the machine that gave it, and `failed` lets a page list them.
+ */
+export class AnalyticsFleetError extends Error {
+  readonly failed: readonly MachineFailure[];
+
+  constructor(failed: readonly MachineFailure[]) {
+    super(
+      failed.length === 1 && failed[0] !== undefined
+        ? failed[0].error
+        : failed.map(outcome => `${outcome.machine.name}: ${asSentence(outcome.error)}`).join(' '),
+    );
+    this.name = 'AnalyticsFleetError';
+    this.failed = failed;
+  }
+}
+
 /** One query's answer from every machine: the merged response, who is missing from it, and where each session lives. */
 export interface FleetAnswer {
   readonly response: AnalyticsResponse;
@@ -117,7 +142,7 @@ const mergeOrder = <T extends { readonly value: AnalyticsResponse }>(answers: re
  * be merged with the rest (a machine on an older build answering a different shape) becomes that
  * machine's failure rather than discarding every machine's answer. Each machine's own `machine` value is kept as it answered: it is the value a
  * `{machine=…}` matcher is compared with on that machine, so what is shown can be typed back.
- * Fails only when no machine answered, with the first machine's reason.
+ * Fails only when no machine answered, with every machine's reason ({@link AnalyticsFleetError}).
  */
 export const askEveryMachine = async (
   machines: readonly AnalyticsMachine[],
@@ -150,6 +175,9 @@ export const askEveryMachine = async (
     if (outcome.value.kind === 'raw')
       for (const row of outcome.value.results) origin.set(row.id, outcome.machine.connection.daemonId);
   }
-  if (merged === undefined) throw new Error(failed[0]?.error ?? 'there is no machine to ask');
+  if (merged === undefined) {
+    if (failed.length === 0) throw new Error('there is no machine to ask');
+    throw new AnalyticsFleetError(failed);
+  }
   return { response: merged, failed, daemonOf: sessionId => origin.get(sessionId) };
 };

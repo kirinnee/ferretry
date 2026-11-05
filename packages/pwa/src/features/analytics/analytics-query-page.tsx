@@ -21,7 +21,7 @@ import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { fetchAnalytics } from './analytics-api.ts';
 import { ANALYTICS_QUERY_DEFAULT, AnalyticsQueryEditor, type AnalyticsRequest } from './analytics-custom-query.tsx';
-import type { FleetAnswer, MachineFailure } from './analytics-fanout.ts';
+import { AnalyticsFleetError, asSentence, type FleetAnswer, type MachineFailure } from './analytics-fanout.ts';
 import { ANALYTICS_QUERY_EXAMPLES } from './analytics-query-examples.ts';
 import { readAnalyticsQuery } from './analytics-query-text.ts';
 import { AnalyticsResponseView, analyticsErrorMessage } from './analytics-response-view.tsx';
@@ -46,6 +46,11 @@ export interface AnalyticsQueryPageProps {
    * lives. Defaults to asking `requestAnalytics` on this machine alone.
    */
   readonly requestRun?: (query: string | undefined) => Promise<FleetAnswer>;
+  /**
+   * The zone the requests were made in. A change re-runs the answer on screen, so the days it shows are
+   * never the old zone's.
+   */
+  readonly timeZone?: string;
   /** The clock "ran at" reads. */
   readonly now?: () => Date;
   /** A query handed in by a link; it is run at once. */
@@ -63,6 +68,7 @@ export function AnalyticsQueryPage({
   connections,
   requestAnalytics: injected,
   requestRun: injectedRun,
+  timeZone,
   now,
   initialQuery,
   onQueryChange,
@@ -95,6 +101,7 @@ export function AnalyticsQueryPage({
         machines={connections?.length ?? 1}
         requestAnalytics={requestAnalytics}
         requestRun={requestRun}
+        timeZone={timeZone}
         now={now ?? (() => new Date())}
         initialQuery={initialQuery ?? null}
         onQueryChange={onQueryChange}
@@ -109,6 +116,7 @@ function QueryBody({
   machines,
   requestAnalytics,
   requestRun,
+  timeZone,
   now,
   initialQuery,
   onQueryChange,
@@ -118,6 +126,7 @@ function QueryBody({
   readonly machines: number;
   readonly requestAnalytics: AnalyticsRequest;
   readonly requestRun: (query: string | undefined) => Promise<FleetAnswer>;
+  readonly timeZone: string | undefined;
   readonly now: () => Date;
   readonly initialQuery: string | null;
   readonly onQueryChange: ((query: string) => void) | undefined;
@@ -127,15 +136,22 @@ function QueryBody({
   // The result, the machines missing from it and where its sessions live are ONE value, set together
   // under the run's serial, so a banner can never describe a different run than the result it sits on.
   const [answer, setAnswer] = useState<FleetAnswer | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The run's failure: one sentence, or — when several machines all refused — each machine's own reason.
+  const [error, setError] = useState<RunFailure | null>(null);
   const [querying, setQuerying] = useState(false);
   const [ranAt, setRanAt] = useState<string | null>(null);
   const serial = useRef(0);
   const lastResult = useRef<AnalyticsResponse | null>(null);
+  /**
+   * The text last SUBMITTED (not whatever is being typed), noted before its answer is awaited, so a zone
+   * change asks it again even while the first run is still pending. Null until something is run.
+   */
+  const submitted = useRef<string | null>(null);
 
   const run = useCallback(
     async (source: string) => {
       const mine = ++serial.current;
+      submitted.current = source;
       setQuerying(true);
       setError(null);
       try {
@@ -143,6 +159,7 @@ function QueryBody({
         if (mine !== serial.current) return;
         const response = fleet.response;
         lastResult.current = response;
+        submitted.current = response.query;
         setText(response.query);
         setAnswer(fleet);
         setRanAt(now().toISOString().slice(11, 16));
@@ -150,7 +167,7 @@ function QueryBody({
       } catch (reason) {
         if (mine === serial.current) {
           setAnswer(null);
-          setError(analyticsErrorMessage(reason));
+          setError(runFailure(reason));
         }
       } finally {
         if (mine === serial.current) setQuerying(false);
@@ -168,6 +185,17 @@ function QueryBody({
       serial.current += 1;
     };
   }, [initialQuery]);
+
+  // A new zone changes what every day in the answer means, so whatever was submitted is asked again — and
+  // a run still in flight is invalidated by that (its serial is superseded), so its answer, read in the
+  // old zone, never lands. The first render is not a change, and a page nothing was run on has nothing
+  // to refresh.
+  const shownZone = useRef(timeZone);
+  useEffect(() => {
+    if (shownZone.current === timeZone) return;
+    shownZone.current = timeZone;
+    if (submitted.current !== null) void runLatest.current(submitted.current);
+  }, [timeZone]);
 
   const runText = useCallback(
     (source: string) => {
@@ -214,14 +242,7 @@ function QueryBody({
             Running the query…
           </p>
         )}
-        {error && (
-          <p
-            role="alert"
-            className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err"
-          >
-            The query failed: {error}
-          </p>
-        )}
+        {error && <RunFailureNotice failure={error} />}
         {!querying && !error && !answer && (
           <p className="m-0 text-cell text-muted">Run a query, or start from an example below.</p>
         )}
@@ -246,6 +267,43 @@ function QueryBody({
   );
 }
 
+/** Why a run has no result: one reason, or every machine's when more than one was asked and none answered. */
+type RunFailure =
+  | { readonly kind: 'one'; readonly message: string }
+  | { readonly kind: 'every'; readonly failed: readonly MachineFailure[] };
+
+const runFailure = (reason: unknown): RunFailure =>
+  reason instanceof AnalyticsFleetError && reason.failed.length > 1
+    ? { kind: 'every', failed: reason.failed }
+    : { kind: 'one', message: analyticsErrorMessage(reason) };
+
+/**
+ * A run no machine answered, said so a person can act on it: with several machines, EACH ONE NAMED with
+ * its own reason. Showing only the first machine's reason hid a readable refusal behind another
+ * machine's bare 500 (B149).
+ */
+function RunFailureNotice({ failure }: { readonly failure: RunFailure }) {
+  const box = 'm-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err';
+  if (failure.kind === 'one')
+    return (
+      <p role="alert" className={box}>
+        The query failed: {failure.message}
+      </p>
+    );
+  return (
+    <div role="alert" className={`${box} grid gap-xs`} data-analytics-run-failed="">
+      <p className="m-0">The query failed on every machine:</p>
+      <ul className="m-0 grid list-disc gap-xs pl-5">
+        {failure.failed.map(outcome => (
+          <li key={outcome.machine.connection.daemonId} className="break-words">
+            {outcome.machine.name}: {asSentence(outcome.error)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** The machines a result leaves out, named under it — never a silent zero for them. */
 function MissingMachines({ failed }: { readonly failed: readonly MachineFailure[] }) {
   if (failed.length === 0) return null;
@@ -253,7 +311,7 @@ function MissingMachines({ failed }: { readonly failed: readonly MachineFailure[
     <ul role="status" className="m-0 grid list-none gap-xs p-0 text-meta text-warn" data-analytics-failed="">
       {failed.map(outcome => (
         <li key={outcome.machine.connection.daemonId}>
-          {outcome.machine.name} did not answer: {outcome.error} Its sessions are not in this result.
+          {outcome.machine.name} did not answer: {asSentence(outcome.error)} Its sessions are not in this result.
         </li>
       ))}
     </ul>

@@ -4,7 +4,7 @@
  * Analytics data is never read from the page origin or a module singleton: the
  * paired connection is an explicit input to every request.
  */
-import { AnalyticsResponseSchema, type AnalyticsResponse } from '@ferretry/protocol';
+import { AnalyticsResponseSchema, type AnalyticsResponse, FY_VERSION_HEADER } from '@ferretry/protocol';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -15,12 +15,23 @@ const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope):
   if (daemon.daemonId !== scope.daemonId) throw new Error('analytics scope must belong to the requested daemon');
 };
 
+const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+
+/**
+ * Two envelopes reach this boundary: the dispatcher's `{ error: "<message>", code }` and the relay
+ * link's handler-failure `{ error: { code, message } }`. Both are read into one refusal here so the
+ * page never has to know which carrier a machine answered through.
+ */
 const responseError = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
+  const nested = typeof body.error === 'object' && body.error !== null ? (body.error as Record<string, unknown>) : {};
   return new DaemonResponseError(
     response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
+    text(body.error) ?? text(nested.message) ?? `HTTP ${response.status}`,
+    text(body.code) ?? text(nested.code),
+    // Kept so a refusal can say which Ferretry the machine runs: an older one is the usual reason a
+    // query the others answer readably comes back as a bare 500.
+    response.headers.get(FY_VERSION_HEADER) ?? undefined,
   );
 };
 
@@ -35,14 +46,21 @@ const analyticsRead = async (
   return AnalyticsResponseSchema.parse(await response.json());
 };
 
-/** Reads one analytics query from exactly the supplied paired daemon. */
+/**
+ * Reads one analytics query from exactly the supplied paired daemon.
+ *
+ * `timeZone` is the IANA zone whose calendar the daemon counts `day` and `week` in; without it the answer
+ * is UTC's, exactly as before.
+ */
 export const fetchAnalytics = async (
   daemon: DaemonConnection,
   query?: string,
   fetcher: DaemonFetch = browserFetch,
+  timeZone?: string,
 ): Promise<AnalyticsResponse> => {
   const search = new URLSearchParams();
   if (query?.trim()) search.set('q', query.trim());
+  if (timeZone) search.set('tz', timeZone);
   return await analyticsRead(daemon, search, fetcher);
 };
 

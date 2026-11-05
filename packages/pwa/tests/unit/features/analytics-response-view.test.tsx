@@ -157,4 +157,15 @@ describe('AnalyticsResponseView', () => {
     // A plain 400 keeps the daemon's own words.
     expect(analyticsErrorMessage(new DaemonResponseError(400, 'bad query', 'invalid_query'))).toBe('bad query');
   });
+
+  it('never shows a bare 500 as its own words, and says to update that machine (B149)', () => {
+    const generic = 'the daemon failed to handle this request';
+    const unversioned = analyticsErrorMessage(new DaemonResponseError(500, generic, 'internal_error'));
+    expect(unversioned).not.toContain('failed to handle');
+    expect(unversioned).toBe(
+      'the daemon hit an unexpected error on this query. If that machine is on an older Ferretry, update it: run “fy daemon update” (Settings › Machine › About & updates), then run the query again.',
+    );
+    const versioned = analyticsErrorMessage(new DaemonResponseError(500, generic, 'internal_error', '4.270.0'));
+    expect(versioned).toStartWith('the daemon hit an unexpected error on this query (it runs Ferretry 4.270.0). ');
+  });
 });

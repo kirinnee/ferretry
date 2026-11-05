@@ -501,7 +501,16 @@ describe('analytics metrics', () => {
       to: '2026-10-02T00:00:00.000Z',
     });
 
+    // A mixed date/instant range is ordered on the reader's clock, so only the daemon can refuse it.
+    const mixed = analytics.AnalyticsRangeSchema.safeParse({
+      kind: 'absolute',
+      from: '2026-10-15T00:00:00.000Z',
+      to: '2026-10-14T20:00:00.000Z',
+      dates: { from: true, to: false },
+    });
+
     // Assert
+    should(mixed.success).be.true();
     should(empty.success).be.false();
     should(ordered.success).be.true();
   });

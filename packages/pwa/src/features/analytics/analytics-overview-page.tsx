@@ -151,14 +151,16 @@ export interface AnalyticsOverviewPageProps {
   readonly machines: readonly AnalyticsMachine[];
   readonly requestAnalytics: AnalyticsRequest;
   readonly now: () => Date;
+  /** The IANA zone days are counted in; absent, UTC. The daemon is asked in the same zone. */
+  readonly timeZone?: string;
 }
 
-export function AnalyticsOverviewPage({ machines, requestAnalytics, now }: AnalyticsOverviewPageProps) {
+export function AnalyticsOverviewPage({ machines, requestAnalytics, now, timeZone }: AnalyticsOverviewPageProps) {
   const [range, setRange] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_RANGE);
   const [bucketing, setBucketing] = useState<AnalyticsBucketing>('day');
   const [reads, setReads] = useState<MachineReads>([]);
   const [clock] = useState(now);
-  const days = useMemo(() => analyticsRangeDays(range, clock), [clock, range]);
+  const days = useMemo(() => analyticsRangeDays(range, clock, timeZone), [clock, range, timeZone]);
 
   useEffect(() => {
     let current = true;
