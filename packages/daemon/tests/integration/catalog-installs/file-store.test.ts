@@ -149,7 +149,9 @@ describe('FileCatalogInstallStore', () => {
       },
       target: { scope: 'project', projectRoot: '/srv/app', harness: 'claude' },
       destination: '/srv/app/.claude/skills/pdf-tools',
-      key: 'project:/srv/app:claude:skill:pdf-tools',
+      key: 'project:/srv/app/.claude/skills/pdf-tools',
+      root: '/srv/app',
+      folder: '.claude/skills/pdf-tools',
       files: [{ path: 'SKILL.md', sha256 }],
       secretBindings: {},
     };
