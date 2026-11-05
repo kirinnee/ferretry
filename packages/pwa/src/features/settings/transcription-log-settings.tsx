@@ -133,6 +133,7 @@ export function TranscriptionLogSettings({
   return (
     <SettingRow
       settingId="transcription-log"
+      wide
       name="Transcription log"
       hint={snapshot.enabled ? 'On: each dictation is kept on this device' : 'Off: new dictations are not kept'}
       explanation={
@@ -145,7 +146,7 @@ export function TranscriptionLogSettings({
         <>
           <button
             type="button"
-            className="kt-btn kt-btn--sm min-h-[44px]"
+            className="kt-btn kt-btn--sm max-md:min-h-[44px]"
             aria-expanded={logOpen}
             aria-controls={panelId}
             onClick={() => setLogOpen(value => !value)}

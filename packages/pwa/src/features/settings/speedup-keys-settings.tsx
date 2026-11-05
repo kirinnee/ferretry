@@ -259,6 +259,7 @@ export function SpeedupKeysSettings({ keys: injected }: SpeedupKeysSettingsProps
   return (
     <SettingRow
       settingId="speedup-keys"
+      wide
       name="Speed-up key"
       hint="Groq or Cerebras, kept encrypted in this browser"
       explanation={
@@ -271,7 +272,7 @@ export function SpeedupKeysSettings({ keys: injected }: SpeedupKeysSettingsProps
       control={() => (
         <button
           type="button"
-          className="kt-btn kt-btn--sm min-h-[44px]"
+          className="kt-btn kt-btn--sm max-md:min-h-[44px]"
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => setOpen(value => !value)}

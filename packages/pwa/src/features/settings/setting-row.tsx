@@ -87,7 +87,7 @@ export function SettingRow({
       data-setting-info=""
       onClick={() => setOpen(value => !value)}
       className={cn(
-        'inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 hover:text-fg',
+        'ml-auto inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 hover:text-fg',
         open ? 'text-accent' : 'text-muted',
       )}
     >
@@ -103,7 +103,7 @@ export function SettingRow({
       {...dataAttributes}
       className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
-      <div className="flex min-h-[var(--row-min-h)] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
+      <div className="flex min-h-[52px] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
         <span className={cn('flex min-w-0 flex-1 flex-col', wide ? 'basis-40 max-md:basis-full' : 'basis-40')}>
           <span id={labelId} className="text-ui font-semibold text-fg">
             {name}
@@ -123,17 +123,13 @@ export function SettingRow({
           )}
           data-setting-controls=""
         >
-          {wide ? (
-            <>
-              {control?.(labelId)}
-              {info}
-            </>
-          ) : (
-            <>
-              {info}
-              {control?.(labelId)}
-            </>
-          )}
+          {control?.(labelId)}
+          {/* The (i) is always the last thing on the row, in a slot of its own: a row with no explanation keeps the
+              slot empty, so every (i) and every control end in the same two columns down a card. */}
+          {info ??
+            (control === undefined ? null : (
+              <span aria-hidden="true" className="ml-auto min-h-[44px] w-[44px] shrink-0" />
+            ))}
         </span>
       </div>
       {open && hasExplanation ? (
@@ -305,7 +301,7 @@ export function SettingDisclosureRow({
           setOpen(!open);
           onOpenChange?.(!open);
         }}
-        className="flex min-h-[44px] w-full min-w-0 items-center gap-2 border-0 bg-transparent py-1 pl-panel pr-3 text-left"
+        className="flex min-h-[52px] w-full min-w-0 items-center gap-2 border-0 bg-transparent py-1 pl-panel pr-3 text-left"
       >
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="text-ui font-semibold text-fg">{name}</span>

@@ -753,10 +753,7 @@ export function SettingsPage({
                   </SettingGroup>
                   <SettingGroup label="Connection" settingId="connection-preference">
                     {connectionPreferences ?? (
-                      <SettingRow
-                        name="Connection"
-                        hint="Unavailable until this page is composed with this device’s preferences"
-                      />
+                      <SettingRow name="Connection" hint="Connection choices are not available on this page." />
                     )}
                   </SettingGroup>
                   <SettingGroup label="Dictation">

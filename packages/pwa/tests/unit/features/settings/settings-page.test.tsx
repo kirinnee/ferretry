@@ -371,7 +371,7 @@ describe('SettingsPage sections', () => {
     try {
       await visit('#device');
       expect(bare.container.querySelector('[data-setting-id="connection-preference"]')?.textContent).toContain(
-        'Unavailable until this page is composed',
+        'Connection choices are not available on this page.',
       );
     } finally {
       await bare.unmount();
