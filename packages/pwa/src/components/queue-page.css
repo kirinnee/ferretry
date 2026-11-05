@@ -238,6 +238,7 @@
     padding: 12px;
   }
   .fy-queue-actions .kt-btn,
+  .fy-queue-ferret,
   .fy-queue-head .kt-btn,
   .fy-queue-empty .kt-btn {
     min-height: 44px;

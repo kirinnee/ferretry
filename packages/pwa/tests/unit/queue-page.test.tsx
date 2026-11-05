@@ -14,6 +14,7 @@ afterEach(() => {
 const queued = (id: string, state: string, extra: object = {}) =>
   queueRowOf('d1', 's1', 'Casen', {
     id,
+    sender: 'human',
     text: `text ${id}`,
     state,
     enqueuedAt: `2026-10-30T10:00:0${id.length}.000Z`,
@@ -61,7 +62,7 @@ const view = (props: Partial<Parameters<typeof QueuePageView>[0]> = {}) =>
           saved,
           queued('q1', 'queued'),
           queued('q22', 'read'),
-          queued('q333', 'queued', { by: { kind: 'ferret', name: 'Mira' } }),
+          queued('q333', 'queued', { sender: 'agent', by: { kind: 'ferret', name: 'Mira' } }),
         ]),
       ]}
       handlers={handlers([])}
@@ -116,7 +117,7 @@ describe('QueuePageView', () => {
   });
 
   test('marks the one message that is delivered next per ferret, in delivery order, not screen order', () => {
-    const mira = { by: { kind: 'ferret', name: 'Mira' } };
+    const mira = { sender: 'agent', by: { kind: 'ferret', name: 'Mira' } };
     mounted = view({
       groups: [
         group([

@@ -29,8 +29,10 @@ export interface QueueRow {
   readonly at: string;
   /** Its kind: the sender's label, or `action` when it set none. */
   readonly kind: QueueKind;
-  /** The owner's own message (typed here or by hand): the daemon delivers these first, alone. */
-  readonly own: boolean;
+  /** Whose message: the owner's own (delivered first, alone), a ferret's, or the daemon's (Board, Warden…). */
+  readonly origin: 'owner' | 'ferret' | 'daemon';
+  /** When the queue stops holding a ferret's message to combine it with others; absent: never held. */
+  readonly holdUntil?: string;
   /** Who sent it, when it is not the owner: a ferret's name or "Ferretry · Board". Never text in the body. */
   readonly sender?: string;
   /** Still changeable: on this device, or queued and not typed yet. */
@@ -38,16 +40,17 @@ export interface QueueRow {
   readonly refused?: true;
 }
 
+const originOf = (message: QueuedMessage): QueueRow['origin'] =>
+  message.sender === 'human' ? 'owner' : message.sender === 'agent' ? 'ferret' : 'daemon';
+
+/** The name the sender goes by: a ferret's, or "Ferretry · Board"; nothing for the owner. */
 const senderOf = (message: QueuedMessage): string | undefined => {
+  const origin = originOf(message);
+  if (origin === 'owner') return undefined;
   const by = message.by;
-  // A message queued before `by` existed still says who it is from in `sender`.
-  if (by === undefined) {
-    if (message.sender === 'agent') return message.fromName ?? message.from ?? 'A ferret';
-    return message.sender === 'daemon' ? 'Ferretry' : undefined;
-  }
-  if (by.kind === 'owner') return undefined;
-  if (by.kind === 'ferret') return by.name ?? message.fromName;
-  return by.feature === undefined ? 'Ferretry' : `Ferretry · ${by.feature}`;
+  if (origin === 'ferret')
+    return (by?.kind === 'ferret' ? by.name : undefined) ?? message.fromName ?? message.from ?? 'A ferret';
+  return by?.kind === 'ferretry' && by.feature !== undefined ? `Ferretry · ${by.feature}` : 'Ferretry';
 };
 
 const WHY: Readonly<Record<Exclude<QueuedMessage['state'], 'queued'>, string>> = {
@@ -74,7 +77,8 @@ export const queueRowOf = (daemonId: string, sessionId: string, ferret: string, 
     why: message.state === 'queued' ? queuedWhy(message) : (message.failure ?? WHY[message.state]),
     at: message.enqueuedAt,
     kind: message.label ?? 'action',
-    own: sender === undefined,
+    origin: originOf(message),
+    ...(message.holdUntil === undefined ? {} : { holdUntil: message.holdUntil }),
     editable: message.state === 'queued',
     ...(sender === undefined ? {} : { sender }),
   };
@@ -90,7 +94,7 @@ export const outboxRowOf = (ferret: string, entry: OutboxEntry): QueueRow => ({
   why: entry.reason ?? WAITING_REASON,
   at: entry.createdAt,
   kind: 'action',
-  own: true,
+  origin: 'owner',
   editable: true,
   ...(entry.refused === true ? { refused: true as const } : {}),
 });
@@ -104,22 +108,29 @@ const isPendingRow = (row: QueueRow): boolean => row.state === 'saved' || row.st
 
 /**
  * Where a row stands in the ferret's delivery, as the daemon plans it (`planDelivery`): one message is typed at a
- * time; the owner's own messages then go first, each alone; a ferret's or Ferretry's messages follow in the order
- * the queue accepted them (a due one carries the rest with it, in that order); what is finished comes last. The
- * kind chip says how soon a ferret's message is due — it does not reorder the list.
+ * time; the owner's own messages go first, each alone; a ferret's message that is due (no hold, or the hold ended)
+ * comes next, in the order the queue accepted them, and a due one carries the rest of the ferret's messages with
+ * it; the daemon's own notices (Board, Warden…) go next and may pass a ferret message still being held; held
+ * ferret messages follow; what is finished comes last. The kind chip says how soon a ferret's message is due — it
+ * does not reorder the list by itself.
  */
-const deliveryRank = (row: QueueRow): number => {
+const deliveryRank = (row: QueueRow, now: number): number => {
   if (row.state === 'typing') return 0;
-  if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 4;
-  return row.own ? 2 : 3;
+  if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 6;
+  if (row.origin === 'owner') return 2;
+  if (row.origin === 'daemon') return 4;
+  return row.holdUntil !== undefined && Date.parse(row.holdUntil) > now ? 5 : 3;
 };
 
 /** The order the ferret will meet its messages in; oldest first within the same standing. */
-export const orderedRows = (rows: readonly QueueRow[]): readonly QueueRow[] =>
-  [...rows].sort((a, b) => deliveryRank(a) - deliveryRank(b) || a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+export const orderedRows = (rows: readonly QueueRow[], now: number = Date.now()): readonly QueueRow[] =>
+  [...rows].sort(
+    (a, b) => deliveryRank(a, now) - deliveryRank(b, now) || a.at.localeCompare(b.at) || a.id.localeCompare(b.id),
+  );
 
 /** The id of the row that is delivered next: the first one still to come, if any. */
-export const nextRowId = (rows: readonly QueueRow[]): string | undefined => orderedRows(rows).find(isPendingRow)?.id;
+export const nextRowId = (rows: readonly QueueRow[], now: number = Date.now()): string | undefined =>
+  orderedRows(rows, now).find(isPendingRow)?.id;
 
 /** Who the message is from: the sender's name, or "You" for the owner's own. */
 export const fromLabel = (row: QueueRow): string => row.sender ?? 'You';
@@ -147,16 +158,20 @@ export const ferretRows = (
   ferret: string,
   messages: readonly QueuedMessage[],
   entries: readonly OutboxEntry[],
+  now: number = Date.now(),
 ): readonly QueueRow[] => {
   const known = new Set(messages.map(message => message.id));
-  return orderedRows([
-    ...messages
-      .filter(message => message.state !== 'cancelled')
-      .map(message => queueRowOf(daemonId, sessionId, ferret, message)),
-    ...entries
-      .filter(entry => entry.daemonId === daemonId && entry.sessionId === sessionId && !known.has(entry.id))
-      .map(entry => outboxRowOf(ferret, entry)),
-  ]);
+  return orderedRows(
+    [
+      ...messages
+        .filter(message => message.state !== 'cancelled')
+        .map(message => queueRowOf(daemonId, sessionId, ferret, message)),
+      ...entries
+        .filter(entry => entry.daemonId === daemonId && entry.sessionId === sessionId && !known.has(entry.id))
+        .map(entry => outboxRowOf(ferret, entry)),
+    ],
+    now,
+  );
 };
 
 /** One heading's worth of the All-queues view: a ferret and what waits for it. */

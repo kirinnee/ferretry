@@ -286,7 +286,7 @@ export function QueuePageView({
           </div>
         ) : null}
         {shown.map(group => {
-          const next = nextRowId(group.rows);
+          const next = nextRowId(group.rows, now);
           return (
             <Fragment key={group.key}>
               {wrapGroup(

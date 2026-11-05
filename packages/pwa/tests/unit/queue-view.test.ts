@@ -20,6 +20,7 @@ import type { OutboxEntry } from '../../src/lib/send-outbox.ts';
 const message = (overrides: Partial<QueuedMessage> = {}): QueuedMessage =>
   ({
     id: 'q1',
+    sender: 'human',
     text: 'hello',
     state: 'queued',
     enqueuedAt: '2026-10-30T10:00:00.000Z',
@@ -61,12 +62,14 @@ describe('queueRowOf', () => {
   });
 
   test('names a sender that is not the owner, as a chip', () => {
-    const by = (value: unknown) => queueRowOf('d', 's', 'f', message({ by: value as never })).sender;
-    expect(by({ kind: 'owner' })).toBeUndefined();
-    expect(by({ kind: 'ferret', name: 'Mira' })).toBe('Mira');
-    expect(by({ kind: 'ferret' })).toBeUndefined();
-    expect(by({ kind: 'feature', feature: 'Board' })).toBe('Ferretry · Board');
-    expect(by({ kind: 'feature' })).toBe('Ferretry');
+    const named = (sender: QueuedMessage['sender'], by?: unknown) =>
+      queueRowOf('d', 's', 'f', message({ sender, ...(by === undefined ? {} : { by: by as never }) })).sender;
+    expect(named('human')).toBeUndefined();
+    expect(named('human', { kind: 'owner' })).toBeUndefined();
+    expect(named('agent', { kind: 'ferret', name: 'Mira' })).toBe('Mira');
+    expect(named('agent', { kind: 'ferret' })).toBe('A ferret');
+    expect(named('daemon', { kind: 'ferretry', feature: 'Board' })).toBe('Ferretry · Board');
+    expect(named('daemon', { kind: 'ferretry' })).toBe('Ferretry');
   });
 });
 
@@ -151,7 +154,9 @@ describe('kind, sender and age chips', () => {
 
   test('"You" is the sender when nobody else is named', () => {
     expect(fromLabel(queueRowOf('d', 's', 'f', message()))).toBe('You');
-    expect(fromLabel(queueRowOf('d', 's', 'f', message({ by: { kind: 'ferret', name: 'Mira' } })))).toBe('Mira');
+    expect(
+      fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'agent', by: { kind: 'ferret', name: 'Mira' } }))),
+    ).toBe('Mira');
   });
 
   test('says how long ago it was queued, and never invents an age', () => {
@@ -167,7 +172,7 @@ describe('kind, sender and age chips', () => {
 describe('delivery order and the next message', () => {
   const row = (id: string, state: QueuedMessage['state'], extra: Partial<QueuedMessage> = {}) =>
     queueRowOf('d', 's', 'f', message({ id, state, ...extra }));
-  const ferret = { by: { kind: 'ferret' as const, name: 'Mira' } };
+  const ferret = { sender: 'agent' as const, by: { kind: 'ferret' as const, name: 'Mira' } };
 
   test("typing first, then the owner's own, then ferrets in the order the queue accepted them, finished last", () => {
     const rows = orderedRows([
@@ -182,6 +187,36 @@ describe('delivery order and the next message', () => {
     expect(rows.map(item => item.id)).toEqual(['typing', 'unconfirmed', 'mine', 'fyi', 'action', 'blocker', 'read']);
   });
 
+  test('a daemon notice goes after a due ferret message but ahead of one still held', () => {
+    const now = Date.parse('2026-10-30T10:00:00.000Z');
+    const daemon = { sender: 'daemon' as const, by: { kind: 'ferretry' as const, feature: 'Board' } };
+    const rows = orderedRows(
+      [
+        row('held', 'queued', {
+          ...ferret,
+          label: 'fyi',
+          holdUntil: '2026-10-30T10:05:00.000Z',
+          enqueuedAt: '2026-10-30T08:00:00.000Z',
+        }),
+        row('board', 'queued', { ...daemon, enqueuedAt: '2026-10-30T08:30:00.000Z' }),
+        row('due', 'queued', {
+          ...ferret,
+          holdUntil: '2026-10-30T09:59:00.000Z',
+          enqueuedAt: '2026-10-30T09:00:00.000Z',
+        }),
+      ],
+      now,
+    );
+    expect(rows.map(item => item.id)).toEqual(['due', 'board', 'held']);
+    expect(nextRowId(rows, now)).toBe('due');
+  });
+
+  test('a ferret author with no name is still a ferret, never "You" and never first', () => {
+    const nameless = queueRowOf('d', 's', 'f', message({ sender: 'agent', from: 's9', by: { kind: 'ferret' } }));
+    expect(nameless.origin).toBe('ferret');
+    expect(fromLabel(nameless)).toBe('s9');
+  });
+
   test('the next one is the first still to come — never one that is being typed or already read', () => {
     expect(nextRowId([row('a', 'typing'), row('b', 'queued', { ...ferret, label: 'fyi' }), row('c', 'queued')])).toBe(
       'c',
@@ -194,13 +229,13 @@ describe('delivery order and the next message', () => {
   test('a message queued before `by` existed still names its sender', () => {
     const named = queueRowOf('d', 's', 'f', message({ sender: 'agent', fromName: 'Mira' }));
     expect(fromLabel(named)).toBe('Mira');
-    expect(named.own).toBe(false);
+    expect(named.origin).toBe('ferret');
     expect(fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'agent', from: 's9' })))).toBe('s9');
     expect(fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'agent' })))).toBe('A ferret');
     expect(fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'daemon' })))).toBe('Ferretry');
     const human = queueRowOf('d', 's', 'f', message({ sender: 'human' }));
     expect(fromLabel(human)).toBe('You');
-    expect(human.own).toBe(true);
+    expect(human.origin).toBe('owner');
   });
 });
 
