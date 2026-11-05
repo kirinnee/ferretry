@@ -1,6 +1,7 @@
 /**
  * Screenshots and checks for A CARD'S OWN AGENDA asking ONE thing (docs/agenda.md § One ask): the open item for a try-it
- * with a preview link, a try-it without one, a typed "not good" answer, and a gate that is not a try-it, on a phone (390)
+ * with a preview link, a try-it without one, a typed "not good" answer, "works now" offered back as "Mark Good?", and a
+ * gate that is not a try-it, on a phone (390)
  * and a desktop (1280), in light and dark.
  *
  *   bun harness/own-card-ask-screenshot.ts [outDir]   # writes <outDir>/<state>-<390|1280>-<light|dark>.png
@@ -8,7 +9,8 @@
  * It bundles `own-card-ask-page.tsx` and FAILS (after writing every picture) when: a page scrolls sideways; "What I need
  * from you" is missing or holds no one-ask block; a "Card &F61: your answer for the card" box or a "Type your answer below"
  * line is drawn; a Not good button is drawn; a try-it lacks Good, its steps or its words line; an approval says "Try it" or
- * shows a preview; a preview comes second; or typing then sending does not leave the open item with a Not good answer.
+ * shows a preview; a preview comes second; a "Mark Good?" offer is missing under "works now" (or drawn without a reply, or not
+ * right above Good); or typing then sending does not leave the open item with a Not good answer.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -81,7 +83,7 @@ const PHONE = {
 } as const;
 const DESKTOP = { viewport: { width: 1_280, height: 900 } } as const;
 const NOW = new Date('2026-08-01T12:00:00.000Z');
-const STATES = ['preview', 'real', 'typed', 'approval'] as const;
+const STATES = ['preview', 'real', 'typed', 'offer', 'approval'] as const;
 
 const problems: string[] = [];
 const check = (ok: boolean, message: string): void => {
@@ -132,6 +134,11 @@ for (const state of STATES)
           tryIt,
           placeholder: document.querySelector<HTMLTextAreaElement>('[data-fixture-composer]')?.placeholder ?? '',
           saysTryIt: need?.textContent?.includes('Try it') === true,
+          offer: document.querySelector('[data-agenda-reply-offer]')?.textContent ?? '',
+          offerAboveTaps:
+            document
+              .querySelector('[data-agenda-reply-offer]')
+              ?.nextElementSibling?.matches('[data-agenda-try-taps]') === true,
         };
       });
       check(found.wide <= 0, `${label}: scrolls sideways by ${found.wide}px`);
@@ -140,6 +147,10 @@ for (const state of STATES)
       check(!found.cardBox, `${label}: a "your answer for the card" box is drawn`);
       check(!found.typeBelow, `${label}: "Type your answer below" is drawn beside the buttons`);
       check(!found.notGoodButton, `${label}: a Not good button is drawn`);
+      if (state === 'offer') {
+        check(found.offer.includes('You wrote “works now”. Mark Good?'), `${label}: offer is "${found.offer}"`);
+        check(found.offerAboveTaps, `${label}: the offer is not right above Good`);
+      } else check(found.offer === '', `${label}: an offer is drawn without a reply: "${found.offer}"`);
       if (state === 'approval') {
         check(found.taps.join() === 'OK to build', `${label}: taps are ${found.taps.join() || 'none'}`);
         check(!found.saysTryIt, `${label}: an approval says "Try it"`);

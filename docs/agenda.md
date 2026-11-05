@@ -1768,6 +1768,15 @@ movements"_). Inside "What I need from you" it draws, in order:
    to type) and sent. At a try-it it is the lane's fail — **Not good**: the card goes back (e.g. → Implement) with the
    typed words as the reopen ask, and files typed with them travel as for any Not good; at an approval it is **Not yet**: the card
    stays and its ferret reads the words. The words are never a chat message about the item, and an empty box sends nothing.
+   **One exception: words that CLEARLY approve a try-it** ("works now", "works", "it works now!", "good", "lgtm", "looks
+   good", "tested, ok", "works fine / great / well", "good now" — the `replyApproval` vocabulary of &B155, read by
+   `typedApproval`). Sent as Not good they would send a finished card BACK, so they are not an answer at all: they are
+   recorded as an **ordinary reply about the item** (the chat path with the `!A404` reference; the item is marked replied
+   like any reply), and the one-ask block offers them back right above Good — **“You wrote “works now”. Mark Good?”** with
+   a one-tap button that answers the lane's pass exactly as Good does. They never move the card by themselves; the owner's
+   tap does. Anything not plainly positive — a "but" clause, a negation ("doesn't work now", "not good"), a question, a
+   longer message, or any words at an approval ("ok" there is a Not yet word) — stays a Not good (or Not yet) with the
+   words, as typed.
 
 There is **no "Not good" button, no "Card &F12: your answer for the card" box and no second place to answer** on a card's
 own agenda: two places to answer read as the card asking. (A ferret's own thread that carries a card ask keeps the
@@ -1780,7 +1789,7 @@ answer is the only thing that moves a gated card.**
 typed answer — the Inbox page sets `typedAnswer` on the item view because it also draws the box under the card. The chat's
 agenda (`features/agenda/agenda.tsx`, the session chat page) draws no such box, so a card's own agenda there keeps the card
 ask's own block with its own **Done** / **Not good** buttons: an ask is never drawn with "type what is wrong" and nowhere to type it.
-What Send does in the Inbox box is exactly one of two things, never a chat message:
+What Send does in the Inbox box is exactly one of two things — never a chat message, except for the approving words above:
 
 - **It answers the ask that was on the card when Send was pressed** (bound by the ask's reference, `gate:<card>:<lane>:<entry>`). If that
   ask was replaced or answered before Send landed, Send fails with a plain line in the box ("That ask has changed. Read the

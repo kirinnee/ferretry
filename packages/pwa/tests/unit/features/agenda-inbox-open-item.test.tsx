@@ -374,6 +374,70 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
+  it('reads “works now” typed under a try-it as a reply, offers it back as Mark Good?, and never sends it as Not good', async () => {
+    const gate = {
+      cardId: 'F907',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 2,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Released',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F907',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const fake = fakeInbox();
+    let typed: { approves: (words: string) => boolean } | undefined;
+    const draw = (said: readonly string[]) =>
+      mount(
+        page(fake, [own], {
+          initialOpen: own.key,
+          renderComposer: (_card, _answerForm, answer) => {
+            typed = answer;
+            return <textarea />;
+          },
+          readConversation: async () =>
+            said.map((text, index) => ({ id: `m${String(index)}`, kind: 'user', text, at: NOW - 60_000 + index })),
+        }),
+      );
+    // Without a reply there is no offer.
+    let mounted = await draw([]);
+    await interact(() => Promise.resolve());
+    expect(mounted.container.querySelector('[data-agenda-reply-offer]')).toBeNull();
+    // The composer reads these as approval (a reply), and these as Not good words.
+    for (const yes of ['works now', 'it works now!', 'Good', 'lgtm']) expect(typed?.approves(yes)).toBe(true);
+    for (const no of ['works but the colour is off', "doesn't work now", 'not good', 'is it fixed?', 'x'.repeat(50)]) {
+      expect(typed?.approves(no)).toBe(false);
+    }
+    await mounted.unmount();
+    // After the reply the card offers it back, and the tap answers the lane's pass exactly as Good does.
+    mounted = await draw(['!A404 works now']);
+    await interact(() => Promise.resolve());
+    const offer = must(mounted.container.querySelector('[data-agenda-reply-offer]'), 'the offer');
+    expect(offer.textContent).toContain('You wrote “works now”. Mark Good?');
+    expect(fake.deferred.getSnapshot().pending).toEqual([]);
+    await interact(() =>
+      must(offer.querySelector<HTMLButtonElement>('[data-agenda-reply-offer-use]'), 'Mark Good').click(),
+    );
+    expect(fake.deferred.getSnapshot().pending.map(entry => entry.action)).toEqual([
+      expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F907:released:2' }),
+    ]);
+    await mounted.unmount();
+  });
+
   it('draws the ask’s own Done and Not good where the Inbox draws no box to type in', async () => {
     const gate = {
       cardId: 'F12',

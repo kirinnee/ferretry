@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaGate, AgendaItem } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
+import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
 import type { InboxAction } from '../../../src/lib/agenda-inbox.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -57,6 +58,7 @@ const draw = async (
   item: AgendaItem,
   howToTestFor?: (id: string) => string | null,
   typedAnswer = true,
+  history: readonly HistoryEvent[] = [],
 ): Promise<InboxAction[]> => {
   const acted: InboxAction[] = [];
   view = await mount(
@@ -64,7 +66,7 @@ const draw = async (
       busy={false}
       error={null}
       ferret="Zoe"
-      history={[]}
+      history={history}
       item={item}
       itemKey="laptop/sess-1/A404"
       now={NOW}
@@ -111,6 +113,35 @@ describe('a card’s own agenda asks ONE thing, inside “What I need from you�
     const acted = await draw(cardAgenda(tryGate, STEPS));
     await interact(() =>
       must(needs().querySelector<HTMLElement>('[data-agenda-answer-option="Done"]'), 'Good').click(),
+    );
+    expect(acted).toEqual([
+      expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' }),
+    ]);
+  });
+
+  test('offers “works now”, typed and sent as a reply, back as “Mark Good?” — one tap, the same as Good, never applied', async () => {
+    const said = (text: string): HistoryEvent => ({
+      kind: 'owner',
+      key: 'o1',
+      at: Date.parse('2026-08-01T11:30:00.000Z'),
+      text,
+    });
+    // No reply, no offer; a reply that is not a plain approval offers nothing either.
+    await draw(cardAgenda(tryGate, STEPS));
+    expect(needs().querySelector('[data-agenda-reply-offer]')).toBeNull();
+    await view?.unmount();
+    await draw(cardAgenda(tryGate, STEPS), undefined, true, [said('works but the colour is off')]);
+    expect(needs().querySelector('[data-agenda-reply-offer]')).toBeNull();
+    await view?.unmount();
+    const acted = await draw(cardAgenda(tryGate, STEPS), undefined, true, [said('works now')]);
+    const own = must(needs().querySelector<HTMLElement>('[data-agenda-own-ask="F12"]'), 'the one ask');
+    const offer = must(own.querySelector<HTMLElement>('[data-agenda-reply-offer]'), 'the offer');
+    expect(offer.textContent).toContain('You wrote “works now”. Mark Good?');
+    // Right above the Good button, and nothing moved by itself.
+    expect(offer.nextElementSibling?.matches('[data-agenda-try-taps]')).toBe(true);
+    expect(acted).toEqual([]);
+    await interact(() =>
+      must(offer.querySelector<HTMLElement>('[data-agenda-reply-offer-use="Done"]'), 'Mark Good').click(),
     );
     expect(acted).toEqual([
       expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' }),

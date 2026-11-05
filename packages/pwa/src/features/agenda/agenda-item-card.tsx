@@ -526,7 +526,8 @@ export function AgendaItemCard({
   const single = ownAsk === undefined ? undefined : allAsks.find(ask => ask.key === gateReference(ownAsk.gate));
   const cardAsks = allAsks.filter(ask => ask !== single);
   // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
-  const replyOffer = cardAsks.length === 0 ? null : replyApproval(item, history);
+  // The card's own ask draws it too: words typed under it that plainly approve ("works now") were sent as a reply.
+  const replyOffer = cardAsks.length === 0 && single === undefined ? null : replyApproval(item, history);
   const replies = (
     <AgendaQuickReplies
       busy={busy}
@@ -689,7 +690,13 @@ export function AgendaItemCard({
               {cardsForm}
               {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
               {single === undefined ? null : (
-                <CardAskAnswer ask={single} busy={busy} onAct={onAct} renderProse={renderProse} />
+                <CardAskAnswer
+                  ask={single}
+                  busy={busy}
+                  offer={replyOffer?.ask === single.key ? replyOffer : null}
+                  onAct={onAct}
+                  renderProse={renderProse}
+                />
               )}
               {choosing && showList ? (
                 <OptionsList

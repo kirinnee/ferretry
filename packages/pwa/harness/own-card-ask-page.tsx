@@ -5,6 +5,7 @@
  *   ?state=preview    a try-it whose card links a preview: "Try it on the preview" first, the steps, the shipped version
  *   ?state=real       a try-it with no preview: it says where to try it for real
  *   ?state=typed      the same, with what is wrong typed in the box under the card
+ *   ?state=offer      a try-it where "works now" was already typed and sent as a reply: the card offers "Mark Good?"
  *   ?state=approval   a gate that is not a try-it: "OK to build?", the lane's own option, words ask for changes first
  *
  * The composer is the Inbox's own stand-in box wired to the page's typed answer (`renderComposer`'s third argument), so the
@@ -140,6 +141,14 @@ function Page() {
             phone={PHONE}
             reducedMotion
             renderComposer={(_card, _form, typed) => <Composer typed={typed} />}
+            // The owner's "works now", sent as a reply about the item (with its reference) five minutes ago.
+            {...(STATE === 'offer'
+              ? {
+                  readConversation: async () => [
+                    { id: 'm1', kind: 'user' as const, text: '!A404 works now', at: NOW - 5 * 60_000 },
+                  ],
+                }
+              : {})}
           />
         )}
       />

@@ -136,6 +136,7 @@ import {
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
+import { typedApproval } from '../../lib/reply-approval.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
@@ -348,6 +349,8 @@ const typedAnswerFor = (
     // The ask's own name: a Send pressed for this ask answers only it, even if it finally runs after another replaced it.
     key: cardAskReference(ask),
     placeholder: gateTypedPlaceholder(ask.gate),
+    // Clear approval ("works now") is a reply the card offers back as Good, never a Not good with those words.
+    approves: words => typedApproval(ask.gate, words) !== null,
     send: send => {
       const answer = typedGateAnswer(ask, send, card.view.config.id);
       if (answer.kind === 'refused') throw new Error(answer.message);

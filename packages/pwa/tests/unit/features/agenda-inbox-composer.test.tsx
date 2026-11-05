@@ -116,7 +116,11 @@ describe('the open Inbox item’s composer', () => {
     };
     const view = render(
       <AgendaInboxComposer
-        answerTyped={{ key: 'gate:F12:tested:3', send: words => void answered.push(words.message) }}
+        answerTyped={{
+          key: 'gate:F12:tested:3',
+          send: words => void answered.push(words.message),
+          approves: words => words === 'works now',
+        }}
         clientFor={async () => api}
         compact
         connection={daemon}
@@ -133,7 +137,6 @@ describe('the open Inbox item’s composer', () => {
     expect(composer.props.placeholder).toBe('What is wrong, or what needs changing?');
     // An empty box has nothing to say: it is never an answer.
     expect(composer.props.allowEmptySend).toBe(false);
-    expect(composer.props.onSent).toBeUndefined();
     // Send is the gate answer or an error in the box — never the device outbox, which would chat it later.
     expect(composer.props.directSend).toBe(true);
     const field = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
@@ -146,6 +149,14 @@ describe('the open Inbox item’s composer', () => {
     expect(answered).toEqual(['the badge is red']);
     expect(sent).toEqual([]);
     expect(replied).toEqual([]);
+    // Words that plainly approve are a reply about the item, with its reference: the card is not answered.
+    run(() => field().props.onChange({ currentTarget: { value: 'works now', selectionStart: 9, selectionEnd: 9 } }));
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    expect(answered).toEqual(['the badge is red']);
+    expect(sent).toEqual(['!A8 works now']);
+    expect(replied).toEqual(['works now']);
     run(() => view.unmount());
   });
 
@@ -153,7 +164,7 @@ describe('the open Inbox item’s composer', () => {
     const api = { send: async () => ({}) as never };
     const view = render(
       <AgendaInboxComposer
-        answerTyped={{ key: 'gate:F12:tested:3', send: () => undefined }}
+        answerTyped={{ key: 'gate:F12:tested:3', send: () => undefined, approves: () => false }}
         clientFor={async () => api}
         compact
         connection={daemon}
@@ -173,7 +184,11 @@ describe('the open Inbox item’s composer', () => {
     const heard: string[] = [];
     const draw = (key: string) => (
       <AgendaInboxComposer
-        answerTyped={{ key, send: words => void heard.push(`${key}: ${words.message}`) }}
+        answerTyped={{
+          key,
+          send: words => void heard.push(`${key}: ${words.message}`),
+          approves: words => words === 'works now',
+        }}
         clientFor={async () => api}
         compact
         connection={daemon}
@@ -189,6 +204,8 @@ describe('the open Inbox item’s composer', () => {
     const pressed = view.root.findByType(Composer).props.api as { send: (s: string, i: unknown) => unknown };
     run(() => view.update(draw('gate:F12:tested:4')));
     expect(() => pressed.send('sess-2', { message: 'The badge is red' })).toThrow(STALE_ASK_COPY);
+    // Even approving words (a reply, not an answer) are not sent from a Send that belonged to a replaced ask.
+    expect(() => pressed.send('sess-2', { message: 'works now' })).toThrow(STALE_ASK_COPY);
     expect(heard).toEqual([]);
     // The replacement ask has its own client, which answers it.
     const fresh = view.root.findByType(Composer).props.api as { send: (s: string, i: unknown) => unknown };

@@ -59,6 +59,8 @@ export interface AgendaInboxComposerProps {
    * this instead of chatting, and `typedPlaceholder` says what to type. It never marks the item replied. The box is
    * bound to the ask's `key`: a Send that lands after the ask was replaced or answered shows an error and answers nothing.
    * The typed words are the owner's exactly — the box sends them raw (no `!A404` prefix) and never through the device outbox.
+   * The one exception is words that plainly approve ("works now"): they are an ordinary reply about the item, with its
+   * reference, and mark it replied; the card shows them back as "Mark Good?" (never applied by themselves).
    */
   readonly answerTyped?: TypedAnswerTarget | undefined;
   readonly typedPlaceholder?: string | undefined;
@@ -118,10 +120,20 @@ export function AgendaInboxComposer({
   const askKey = answerTyped?.key;
   const forTyped = askKey !== undefined;
   // A typed answer goes through the raw client — never the chat's reference prefix — and one client per ask.
+  // Words that plainly approve ("works now") are the one exception: they are a reply about the item, through `chat`.
   const sender = useMemo(
-    () => (forTyped ? (api === null ? null : withTypedSend(api, askKey, () => typing.current)) : form.api),
-    [api, askKey, forTyped, form.api],
+    () =>
+      forTyped
+        ? api === null || chat === null
+          ? null
+          : withTypedSend(api, askKey, () => typing.current, chat)
+        : form.api,
+    [api, askKey, chat, forTyped, form.api],
   );
+  // A typed answer is not a reply (it never marks the item replied) — unless it was the approving words sent as one.
+  const typedReplied = (sent: ComposerSent) => {
+    if (typing.current?.approves(sent.words) === true) onReplied?.(sent);
+  };
   if (sender === null) return null;
   return (
     <Composer
@@ -133,7 +145,7 @@ export function AgendaInboxComposer({
       disabled={disabled}
       draftSlot={itemId}
       {...(forTyped ? { directSend: true } : {})}
-      {...(forForm || forTyped || onReplied === undefined ? {} : { onSent: onReplied })}
+      {...(forForm || onReplied === undefined ? {} : { onSent: forTyped ? typedReplied : onReplied })}
       {...(restore === undefined ? {} : { restore })}
       {...(onRestored === undefined ? {} : { onRestored })}
       {...(dictationSettings === undefined ? {} : { dictationSettings })}

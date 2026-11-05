@@ -42,11 +42,18 @@ export const STALE_ASK_COPY = 'That ask has changed. Read the card again, then s
 export interface TypedAnswerTarget {
   readonly key: string;
   readonly send: (send: TypedSend) => void;
+  /**
+   * Whether these words CLEARLY approve the ask (`typedApproval`: "works now" at a try-it). They are then an ordinary
+   * reply about the item — recorded in its conversation, offered back as "Mark Good?" — and never answer the ask, so a
+   * Good meant in words cannot send a finished card back as Not good.
+   */
+  readonly approves: (words: string) => boolean;
 }
 
 /**
  * A composer client whose Send hands the typed words to the ask it was BUILT FOR instead of chatting: the message is not
- * sent, and `send` may throw the composer's one error line. The client belongs to the ask named `key`; `current` says
+ * sent, and `send` may throw the composer's one error line. Words that clearly approve (`approves`) are the one exception:
+ * they go through `chat` — the item's normal reply, with its reference — and the ask is not answered. The client belongs to the ask named `key`; `current` says
  * which ask is open when Send finally runs (the composer may await before it), and a different one — replaced, answered
  * or gone — throws {@link STALE_ASK_COPY} rather than answering another ask. Every other method is the target's.
  */
@@ -54,14 +61,16 @@ export const withTypedSend = <T extends { readonly send: (...args: never[]) => u
   client: T,
   key: string,
   current: () => TypedAnswerTarget | undefined,
+  chat: T,
 ): T =>
   new Proxy(client, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
       if (prop !== 'send') return typeof value === 'function' ? value.bind(target) : value;
-      return (_session: string, input: TypedSend) => {
+      return (session: string, input: TypedSend) => {
         const open = current();
         if (open === undefined || open.key !== key) throw new Error(STALE_ASK_COPY);
+        if (open.approves(input.message)) return Reflect.apply(chat.send, chat, [session, input]);
         open.send(input);
         return Promise.resolve({});
       };

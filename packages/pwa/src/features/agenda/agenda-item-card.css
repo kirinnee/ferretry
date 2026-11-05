@@ -1870,3 +1870,13 @@
 .fy-card__try-taps .fy-qr__chip {
   flex: 1 1 8rem;
 }
+
+/* "You wrote “works now”. Mark Good?" inside the one ask: its own surface, so it reads as the owner's words offered back. */
+.fy-card__try-it .fy-card__reply-offer {
+  background: var(--surface, transparent);
+  border: var(--border-width, 1px) solid var(--border-strong, currentColor);
+  padding: 8px 10px;
+}
+.fy-card__try-it .fy-card__reply-offer > span {
+  flex: 1 1 12rem;
+}
