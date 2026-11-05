@@ -183,7 +183,11 @@ describe('liveReduce — starting, and refusing to', () => {
   });
 
   it('starts paused when the page is hidden as the take opens', () => {
-    const result = run([{ ...START, visible: false } as LiveEvent, { type: 'listening' }]);
+    const result = run([
+      { ...START, visible: false } as LiveEvent,
+      { type: 'locks', granted: true },
+      { type: 'listening' },
+    ]);
     should(result.state.phase).equal('paused');
     should(result.state.pauseReason).equal('hidden');
     should(types(result.effects)).deepEqual(['cancelTimers', 'closeMic']);
@@ -430,7 +434,8 @@ describe('liveReduce — races', () => {
     should(typing.state.phase).equal('sending');
     should(typing.state.park).deepEqual({ phase: 'hold', reason: 'typing' });
     should(typing.state.countdown).equal(null);
-    should(types(typing.effects)).deepEqual(['cancelCountdown', 'cancelTimers']);
+    should(types(typing.effects)).deepEqual(['cancelCountdown', 'cancelTimers', 'stopCapture']);
+    should(micIsOpen(typing.state)).be.false();
     const words = run([{ type: 'turn-words', attempt: 1, atMs: 5_300, text: 'Fix the bug.' }], typing.state);
     should(words.state.phase).equal('hold');
     should(words.state.holdReason).equal('typing');
@@ -661,6 +666,185 @@ describe('liveReduce — after the send', () => {
   });
 });
 
+/** The three ways to stop the loop, each as the event that does it. */
+const STOPS = [
+  { name: 'Hold', event: { type: 'hold' } as LiveEvent, park: { phase: 'hold', reason: 'user' } },
+  { name: 'typing', event: { type: 'typing' } as LiveEvent, park: { phase: 'hold', reason: 'typing' } },
+  {
+    name: 'a hidden tab',
+    event: { type: 'visibility', visible: false } as LiveEvent,
+    park: { phase: 'paused', reason: 'hidden' },
+  },
+] as const;
+
+const landed = (state: LiveState, stop: (typeof STOPS)[number]): void => {
+  should(state.phase).equal(stop.park.phase);
+  should(state.park).equal(null);
+  should(state.countdown).equal(null);
+  should(state.sendInFlight).be.false();
+  should(micIsOpen(state)).be.false();
+  should(state.holdReason ?? state.pauseReason).equal(stop.park.reason);
+};
+
+describe('liveReduce — a stop is sticky (the surprise-send rule)', () => {
+  for (const stop of STOPS) {
+    describe(stop.name, () => {
+      const parked = run([...SENDING, stop.event]);
+
+      it('stops capture at once and waits for the words, with nothing able to send', () => {
+        should(parked.state.phase).equal('sending');
+        should(parked.state.park).deepEqual(stop.park);
+        should(types(parked.effects)).deepEqual(['cancelCountdown', 'cancelTimers', 'stopCapture']);
+        should(micIsOpen(parked.state)).be.false();
+        // Asking again changes nothing: the first stop stands.
+        const again = run(
+          STOPS.map(other => other.event),
+          parked.state,
+        );
+        should(again.state.park).deepEqual(stop.park);
+        should(types(again.all)).not.containEql('stopCapture');
+      });
+
+      it('is NOT undone by renewed speech: no hearing, no new attempt, no countdown, no send', () => {
+        const speech = run(
+          [
+            { type: 'speech-start' },
+            { type: 'speech-cancel', atMs: 6_000 },
+            { type: 'live-words', text: 'and more' },
+            turnEnd(8_000),
+            { type: 'countdown-done', atMs: 9_500 },
+            { type: 'timer', kind: 'settle', atMs: 10_000 },
+            { type: 'send-now', atMs: 10_000 },
+            { type: 'resume' },
+          ],
+          parked.state,
+        );
+        should(speech.state).deepEqual(parked.state);
+        should(speech.all).deepEqual([]);
+      });
+
+      it('lands where it was asked when the words arrive, even after renewed speech, and a second pause cannot send', () => {
+        const events: LiveEvent[] = [
+          { type: 'speech-start' },
+          turnEnd(8_000),
+          { type: 'countdown-done', atMs: 9_500 },
+          { type: 'turn-words', attempt: 1, atMs: 9_600, text: 'Fix the bug.' },
+        ];
+        const result = run(events, parked.state);
+        landed(result.state, stop);
+        should(result.state.words).equal('Fix the bug.');
+        should(result.state.shown).be.true();
+        should(types(result.all)).not.containEql('send');
+        should(types(result.all)).deepEqual(['showWords', 'closeMic']);
+        // And later events cannot revive it.
+        const later = run([{ type: 'timer', kind: 'settle', atMs: 20_000 }, turnEnd(21_000)], result.state);
+        should(types(later.all)).not.containEql('send');
+        should(later.state.phase).equal(stop.park.phase);
+      });
+
+      it('lands where it was asked when the take comes to nothing: the mic stays shut and nothing listens', () => {
+        const result = run([{ type: 'turn-empty', attempt: 1 }], parked.state);
+        landed(result.state, stop);
+        should(result.state.words).equal('');
+        should(result.state.shown).be.false();
+        should(types(result.effects)).deepEqual(['cancelCountdown', 'cancelTimers', 'clearWords', 'closeMic']);
+        should(types(result.effects)).not.containEql('resumeListening');
+        should(result.state.notice).equal(null);
+      });
+
+      it('lands where it was asked when the take fails, and says so', () => {
+        const result = run([{ type: 'turn-failed', attempt: 1, block: 'engine-failed' }], parked.state);
+        landed(result.state, stop);
+        should(result.state.notice).deepEqual({ kind: 'take-failed', block: 'engine-failed' });
+        should(types(result.effects)).deepEqual(['cancelCountdown', 'cancelTimers', 'clearWords', 'closeMic']);
+        should(types(result.effects)).not.containEql('resumeListening');
+      });
+
+      it('ignores the outcome of an attempt that is no longer current', () => {
+        for (const event of [
+          { type: 'turn-words', attempt: 9, atMs: 1, text: 'x' },
+          { type: 'turn-empty', attempt: 9 },
+          { type: 'turn-failed', attempt: 9, block: 'engine-failed' },
+        ] as LiveEvent[])
+          should(run([event], parked.state).state).equal(parked.state);
+      });
+    });
+  }
+
+  it('keeps the page-hidden fact when a stop was asked for first', () => {
+    const typing = run([...SENDING, { type: 'typing' }, { type: 'visibility', visible: false }]);
+    should(typing.state.park).deepEqual({ phase: 'hold', reason: 'typing' });
+    should(typing.state.hidden).be.true();
+  });
+});
+
+describe('liveReduce — Listening needs the microphone AND the lock', () => {
+  const lock: LiveEvent = { type: 'locks', granted: true };
+  const mic: LiveEvent = { type: 'listening' };
+
+  it('stays starting until both have answered, in either order', () => {
+    should(run([START, mic]).state.phase).equal('starting');
+    should(run([START, lock]).state.phase).equal('starting');
+    for (const order of [
+      [mic, lock],
+      [lock, mic],
+    ]) {
+      const result = run([START, ...order]);
+      should(result.state.phase).equal('listening');
+      should(result.effects).deepEqual([{ type: 'startTimer', kind: 'idle', ms: IDLE_END_MS }]);
+    }
+  });
+
+  it('a lock refused after the microphone was ready ends Live: the second tab never listens', () => {
+    const result = run([START, mic, { type: 'locks', granted: false }]);
+    should(result.state.phase).equal('off');
+    should(result.state.notice).deepEqual({ kind: 'blocked', block: 'other-tab' });
+    should(types(result.effects)).containEql('closeMic');
+    should(types(result.effects)).containEql('releaseLocks');
+    should(types(result.all)).not.containEql('send');
+  });
+
+  it('a lock refused in EVERY other active phase ends Live too', () => {
+    const phases: Record<string, LiveState> = {
+      starting: run([START]).state,
+      listening: run(LISTENING).state,
+      hearing: run(HEARING).state,
+      sending: run(SENDING).state,
+      working: WORKING,
+      reading: run([{ type: 'reply', signal: 'done' }], { ...WORKING, canRead: true }).state,
+      hold: run([...LISTENING, { type: 'hold' }]).state,
+      paused: run([...LISTENING, { type: 'visibility', visible: false }]).state,
+    };
+    for (const [name, state] of Object.entries(phases)) {
+      const result = run([{ type: 'locks', granted: false }], state);
+      should([name, result.state.phase]).deepEqual([name, 'off']);
+      should(result.state.notice).deepEqual({ kind: 'blocked', block: 'other-tab' });
+      should(types(result.effects)).containEql('closeMic');
+    }
+    should(run([{ type: 'locks', granted: false }]).state).equal(INITIAL_LIVE_STATE);
+  });
+
+  it('a hidden tab that opens its mic before the lock only pauses once both are in', () => {
+    const hidden = { ...START, visible: false } as LiveEvent;
+    should(run([hidden, mic]).state.phase).equal('starting');
+    should(run([hidden, mic, lock]).state.phase).equal('paused');
+  });
+
+  it('Resume Live from a pause waits for the lock again, and the other ways back only wait for the mic', () => {
+    const paused = run([...LISTENING, { type: 'visibility', visible: false }]).state;
+    const back = run([{ type: 'visibility', visible: true }, { type: 'resume' }], paused);
+    should(back.state.phase).equal('starting');
+    should(run([mic], back.state).state.phase).equal('starting');
+    should(run([mic, lock], back.state).state.phase).equal('listening');
+    const held = run([...LISTENING, { type: 'hold' }, { type: 'resume' }]).state;
+    should(run([mic], held).state.phase).equal('listening');
+    const again = run([{ type: 'reply', signal: 'done' }], WORKING).state;
+    should(run([mic], again).state.phase).equal('listening');
+    const reading = run([{ type: 'reply', signal: 'done' }, { type: 'speak-done' }], { ...WORKING, canRead: true });
+    should(run([mic], reading.state).state.phase).equal('listening');
+  });
+});
+
 describe('liveReduce — totality', () => {
   const EVENTS: readonly LiveEvent[] = [
     START,
@@ -706,6 +890,9 @@ describe('liveReduce — totality', () => {
     hold: run([...LISTENING, { type: 'hold' }]).state,
     paused: run([...LISTENING, { type: 'visibility', visible: false }]).state,
   };
+  const PARKED: Record<string, LiveState> = Object.fromEntries(
+    STOPS.map(stop => [stop.name, run([...SENDING, stop.event]).state]),
+  );
 
   it('answers every event in every phase with a well-formed step', () => {
     for (const [phase, state] of Object.entries(PHASES)) {
@@ -725,6 +912,21 @@ describe('liveReduce — totality', () => {
           'hold',
           'paused',
         ]).containEql(result.state.phase);
+      }
+    }
+  });
+
+  it('never sends from a parked turn, whatever happens to it', () => {
+    for (const state of Object.values(PARKED)) {
+      should(state.park).not.equal(null);
+      for (const event of EVENTS) {
+        const next = liveReduce(state, event);
+        should(types(next.effects)).not.containEql('send');
+        // Nor in one more step after that — except the person's own "Send now" from the hold it landed in.
+        for (const again of EVENTS) {
+          if (again.type === 'send-now') continue;
+          should(types(liveReduce(next.state, again).effects)).not.containEql('send');
+        }
       }
     }
   });

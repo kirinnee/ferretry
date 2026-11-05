@@ -8,7 +8,7 @@
  * ACCESSIBILITY (ADHD / dyslexia first, docs/voice.md › Live voice):
  *   - The state is always WORDS (`stateWord`, then `detail` under it). Colour only restates it.
  *   - The countdown is also a number. With reduced motion the ring is not drawn and the number is large;
- *     the level bars collapse to one.
+ *     the level bars become one still level meter (a labelled track that fills with the voice).
  *   - A visually hidden polite live region says what changed: the phase, "Sending in 2 seconds" ONCE when
  *     the ring starts (not every tick), the notice line. It never carries the reply (that would speak
  *     over the voice that reads it).
@@ -36,7 +36,7 @@ export interface LiveVoiceBarProps {
 }
 
 export const MAX_BARS = 32;
-const RING_RADIUS = 52;
+const RING_RADIUS = 54;
 const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 const MIN_BAR = 0.06;
 
@@ -94,25 +94,40 @@ function Dot() {
   return <span className="fy-live-dot" aria-hidden="true" />;
 }
 
-function Bars({ levels, reduced, still }: { levels: readonly number[]; reduced: boolean; still: boolean }) {
+/** The microphone's level: moving bars, or with reduced motion ONE still, labelled meter. */
+function Bars({ levels, reduced }: { levels: readonly number[]; reduced: boolean }) {
   const drawn = barLevels(levels, reduced);
+  if (reduced) {
+    const level = drawn[0] ?? 0;
+    return (
+      <span className="fy-live-level" data-level={Math.round(level * 100)} aria-hidden="true">
+        <span className="fy-live-level-label">Mic level</span>
+        <span className="fy-live-level-track">
+          <span className="fy-live-level-fill" style={{ width: `${Math.round(level * 100)}%` }} />
+        </span>
+      </span>
+    );
+  }
   return (
-    <span
-      className="fy-live-bars"
-      data-bars={drawn.length}
-      data-reduced={reduced || undefined}
-      data-still={still || undefined}
-      aria-hidden="true"
-    >
+    <span className="fy-live-bars" data-bars={drawn.length} aria-hidden="true">
       {drawn.map((level, index) => (
         <span
           // Newest last and the window slides, so the position is the identity.
           // biome-ignore lint/suspicious/noArrayIndexKey: a sliding window of anonymous levels
           key={index}
           className="fy-live-bar"
-          style={{ height: `${Math.round((still ? MIN_BAR : Math.max(MIN_BAR, level)) * 100)}%` }}
+          style={{ height: `${Math.round(Math.max(MIN_BAR, level) * 100)}%` }}
         />
       ))}
+    </span>
+  );
+}
+
+/** The countdown as a bar along the strip: it fills from the pause to the send. */
+function Progress({ progress }: { progress: number }) {
+  return (
+    <span className="fy-live-progress" data-progress={Math.round(progress * 100)} aria-hidden="true">
+      <span className="fy-live-progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
     </span>
   );
 }
@@ -185,7 +200,8 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
     );
   }
 
-  const countdownBig = reduced && view.ring !== null;
+  // The big number is for a countdown with seconds left; "Getting your words…" is words, set at the normal size.
+  const countdownBig = reduced && view.ring !== null && view.ring.secondsLeft > 0;
   const region = (
     <span className="fy-live-sr" aria-live="polite" aria-atomic="true" data-live-region>
       {spoken}
@@ -206,7 +222,9 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
       {view.liveWords}
     </p>
   );
-  const bars = <Bars levels={levels} reduced={reduced} still={!view.micOpen || view.ring !== null} />;
+  // Only where the microphone is listening and nothing is counting down: a meter of a closed mic would be a lie.
+  const bars = view.micOpen && view.ring === null ? <Bars levels={levels} reduced={reduced} /> : null;
+  const progress = view.ring !== null && !reduced ? <Progress progress={view.ring.progress} /> : null;
 
   if (layout === 'desktop') {
     const action = (label: string, key: string, shortcut: string, onPress: () => void): ReactNode => (
@@ -243,6 +261,7 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
             {view.canEnd ? action('End', 'Esc', 'Escape', onEnd) : null}
           </span>
         </div>
+        {progress}
         {detailLine}
         {region}
       </section>
@@ -286,11 +305,7 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
         </button>
       </div>
       <div className="fy-live-targets">
-        {view.canHold ? (
-          <button type="button" className="fy-live-btn" onClick={onHold}>
-            Hold
-          </button>
-        ) : null}
+        {/* Hold is the big button wherever it is offered: one Hold on screen, not two. */}
         {view.canSendNow ? (
           <button type="button" className="fy-live-btn" onClick={onSendNow}>
             Send now

@@ -6,13 +6,13 @@
  */
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { useEffect } from 'react';
+import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
 import {
   type LiveVoiceHandle,
   NOTICE_MS,
   type UseLiveVoiceOptions,
   useLiveVoice,
 } from '../../src/hooks/use-live-voice.ts';
-import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import type { LiveComposerBridge } from '../../src/lib/voice-chat/live-assembly.ts';
@@ -218,7 +218,7 @@ describe('useLiveVoice with the ports of the page itself', () => {
     );
     await interact(() => (handle as LiveVoiceHandle | null)?.start());
     await flush();
-    expect((handle as LiveVoiceHandle | null)?.view.detail).toContain('Choose how to dictate first');
+    expect((handle as LiveVoiceHandle | null)?.view.detail).toContain('Pick a voice in Settings');
     await view.unmount();
   });
 
@@ -238,7 +238,7 @@ describe('useLiveVoice with the ports of the page itself', () => {
         );
         await interact(() => (handle as LiveVoiceHandle | null)?.start());
         await flush();
-        expect((handle as LiveVoiceHandle | null)?.view.detail).toContain('not installed');
+        expect((handle as LiveVoiceHandle | null)?.view.detail).toContain("isn't installed");
         await view.unmount();
       }
     }

@@ -15,16 +15,17 @@ import type { LiveBlock } from './ports.ts';
 /** The words for every reason Live cannot start or stops. */
 export const LIVE_BLOCK_COPY: Readonly<Record<LiveBlock, string>> = Object.freeze({
   'mic-blocked': 'Microphone is blocked for this site. Allow it, then press Live.',
-  'engine-not-chosen': 'Choose how to dictate first in Settings › Voice, then press Live.',
-  'engine-missing': 'This speech engine is not installed yet. Install it in Settings › Voice, then press Live.',
-  'engine-failed': 'The speech engine stopped. Press Live to try again.',
+  'engine-not-chosen': 'Pick a voice in Settings › Voice first, then press Live.',
+  'engine-missing': "This voice isn't installed yet — install it in Settings › Voice, then press Live.",
+  'engine-failed': 'The voice stopped. Press Live to try again.',
   'no-send-rights': 'This device cannot send messages, so Live is off.',
   'other-tab': 'Live is on in another tab.',
   'ios-browser-voice':
     'On an iPhone Home Screen app, Live needs a voice that runs on this device. Choose one in Settings › Voice.',
 });
 
-export const LIVE_TAKE_FAILED_COPY = 'Speech service unreachable. Your words were kept.';
+const VOICE_SERVICE_COPY = "Can't reach the voice service.";
+export const LIVE_TAKE_FAILED_COPY = `${VOICE_SERVICE_COPY} Your words were kept.`;
 
 /** The line a notice puts under the state. */
 export function noticeCopy(notice: LiveNotice): string {
@@ -71,11 +72,15 @@ export interface LiveView {
 const mmss = (seconds: number): string => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
 const HOLD_COPY = {
-  user: 'Your words are in the composer. Resume, or send them.',
+  user: 'Your words are in the message box. Resume, or send them.',
   typing: 'Paused while you type. Resume when you are ready.',
-  'send-failed': "Couldn't send. Your words are in the composer.",
-  'needs-input': 'Ferret needs your answer.',
+  'send-failed': "Couldn't send. Your words are in the message box.",
+  'needs-input': 'Your ferret is asking you something.',
 } as const;
+
+/** The line under a hold or a pause; a take that failed while the stop waited for its words says so first. */
+const heldDetail = (state: LiveState, line: string): string =>
+  state.notice?.kind === 'take-failed' ? `${VOICE_SERVICE_COPY} ${line}` : line;
 
 const OFF_VIEW: LiveView = {
   visible: false,
@@ -118,7 +123,13 @@ export function liveView(
         ? OFF_VIEW
         : { ...OFF_VIEW, visible: true, detail: noticeCopy(state.notice), tone: 'warn', stateWord: 'Live is off' };
     case 'starting':
-      return { ...base, stateWord: 'Starting…', big: { label: 'Starting', action: 'none' } };
+      return {
+        ...base,
+        stateWord: 'Starting…',
+        // Only the very first start can be waiting on the browser's permission question.
+        detail: !state.micReady && state.turn === 0 ? 'Allow the microphone if your browser asks.' : null,
+        big: { label: 'Starting', action: 'none' },
+      };
     case 'listening':
       return {
         ...base,
@@ -155,7 +166,8 @@ export function liveView(
         stateWord: waiting ? 'Getting your words…' : secondsLeft > 0 ? `Sending in ${secondsLeft} s` : 'Sending…',
         tone: 'active',
         ring,
-        big: { label: 'Hold', action: 'hold' },
+        // A stop that is waiting for the words is already in force: nothing to press until they land.
+        big: parked ? { label: 'One moment', action: 'none' } : { label: 'Hold', action: 'hold' },
         canHold: !parked,
         canSendNow: !parked,
       };
@@ -178,7 +190,7 @@ export function liveView(
       return {
         ...base,
         stateWord: 'On hold',
-        detail: HOLD_COPY[reason],
+        detail: heldDetail(state, HOLD_COPY[reason]),
         tone: reason === 'send-failed' ? 'error' : 'warn',
         big: { label: 'Resume', action: 'resume' },
         canResume: true,
@@ -189,7 +201,7 @@ export function liveView(
       return {
         ...base,
         stateWord: 'Paused',
-        detail: 'Live paused while away. Resume?',
+        detail: heldDetail(state, 'Live paused while away. Resume?'),
         tone: 'warn',
         big: { label: 'Resume Live', action: 'resume' },
         canResume: !state.hidden,

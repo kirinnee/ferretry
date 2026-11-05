@@ -24,6 +24,7 @@ const run = (events: readonly LiveEvent[], from: LiveState = INITIAL_LIVE_STATE)
 
 const LISTENING: readonly LiveEvent[] = [
   { type: 'start', atMs: 0, canSend: true, visible: true },
+  { type: 'locks', granted: true },
   { type: 'listening' },
 ];
 const HEARING: readonly LiveEvent[] = [...LISTENING, { type: 'speech-start' }, { type: 'live-words', text: 'fix it' }];
@@ -53,6 +54,11 @@ describe('liveView — what the bar says in each state', () => {
     const starting = liveView(run([LISTENING[0] as LiveEvent]), 0);
     should(starting.stateWord).equal('Starting…');
     should(starting.big.action).equal('none');
+    // The first start may be waiting on the browser's permission question: say what to do.
+    should(starting.detail).equal('Allow the microphone if your browser asks.');
+    // Once the microphone is open (waiting only for the lock), or on a later start, there is nothing to say.
+    should(liveView(run([LISTENING[0] as LiveEvent, { type: 'listening' }]), 0).detail).equal(null);
+    should(liveView({ ...run([LISTENING[0] as LiveEvent]), turn: 1 }, 0).detail).equal(null);
     const listening = liveView(run(LISTENING), 0);
     should(listening.stateWord).equal('Listening');
     should(listening.micOpen).be.true();
@@ -91,6 +97,7 @@ describe('liveView — what the bar says in each state', () => {
     should(liveView(run(SENDING), 6_600).stateWord).equal('Getting your words…');
     const noRing = run([
       { type: 'start', atMs: 0, canSend: true, visible: true, graceMs: 0 },
+      { type: 'locks', granted: true },
       { type: 'listening' },
       { type: 'speech-start' },
       { type: 'turn-end', atMs: 5_000, speechEndedAtMs: 4_000, reason: 'pause' },
@@ -141,13 +148,13 @@ describe('liveView — what the bar says in each state', () => {
     const held = run([...WORDS, { type: 'hold' }]);
     const user = liveView(held, 0);
     should(user.stateWord).equal('On hold');
-    should(user.detail).equal('Your words are in the composer. Resume, or send them.');
+    should(user.detail).equal('Your words are in the message box. Resume, or send them.');
     should(user.big).deepEqual({ label: 'Resume', action: 'resume' });
     should(user.canResume && user.canSendNow).be.true();
     const typing = liveView(run([...WORDS, { type: 'typing' }]), 0);
     should(typing.detail).equal('Paused while you type. Resume when you are ready.');
     const failed = liveView(run([...WORDS, { type: 'countdown-done', atMs: 6_500 }, { type: 'send-failed' }]), 0);
-    should(failed.detail).equal("Couldn't send. Your words are in the composer.");
+    should(failed.detail).equal("Couldn't send. Your words are in the message box.");
     should(failed.tone).equal('error');
     const question = liveView(
       run([
@@ -158,7 +165,7 @@ describe('liveView — what the bar says in each state', () => {
       ]),
       0,
     );
-    should(question.detail).equal('Ferret needs your answer.');
+    should(question.detail).equal('Your ferret is asking you something.');
     should(question.canSendNow).be.false();
   });
 
@@ -242,5 +249,45 @@ describe('liveView — the last turn', () => {
       sendNow: false,
     };
     should(liveView(working, 7_000, false, last).detail).equal('Sent 3.1 s after your last word.');
+  });
+
+  it('uses plain words: message box, voice service, voice not installed, pick a voice, your ferret is asking', () => {
+    should(LIVE_TAKE_FAILED_COPY).equal("Can't reach the voice service. Your words were kept.");
+    should(LIVE_BLOCK_COPY['engine-missing']).equal(
+      "This voice isn't installed yet — install it in Settings › Voice, then press Live.",
+    );
+    should(LIVE_BLOCK_COPY['engine-not-chosen']).equal('Pick a voice in Settings › Voice first, then press Live.');
+    for (const copy of [...Object.values(LIVE_BLOCK_COPY), LIVE_TAKE_FAILED_COPY])
+      should(copy).not.match(/composer|speech engine|unreachable/i);
+  });
+
+  it('shows a stop that is waiting for the words as one moment, with nothing to press', () => {
+    const parked = liveView(run([...SENDING, { type: 'hold' }]), 6_600);
+    should(parked.stateWord).equal('Getting your words…');
+    should(parked.big).deepEqual({ label: 'One moment', action: 'none' });
+    should(parked.canHold).be.false();
+    should(parked.canSendNow).be.false();
+    should(parked.micOpen).be.false();
+  });
+
+  it('says a failed take when a stop was waiting for it, then what the stop means', () => {
+    const held = liveView(
+      run([...SENDING, { type: 'hold' }, { type: 'turn-failed', attempt: 1, block: 'engine-failed' }]),
+      0,
+    );
+    should(held.stateWord).equal('On hold');
+    should(held.detail).equal(
+      "Can't reach the voice service. Your words are in the message box. Resume, or send them.",
+    );
+    const hidden = liveView(
+      run([
+        ...SENDING,
+        { type: 'visibility', visible: false },
+        { type: 'turn-failed', attempt: 1, block: 'engine-failed' },
+      ]),
+      0,
+    );
+    should(hidden.stateWord).equal('Paused');
+    should(hidden.detail).equal("Can't reach the voice service. Live paused while away. Resume?");
   });
 });

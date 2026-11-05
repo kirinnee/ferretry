@@ -2,9 +2,10 @@
    Every colour is a theme role, so it reads in light and dark and in every theme family. Colour only RESTATES
    the words ("Sending in 2 s", "On hold"); the tone sets the border and the bars, never the meaning.
 
-   Targets are 48 px, the phone's big button 96 px. Nothing here shifts layout as it updates: the words line, the
+   Targets are at least 48 px on a phone and 44 px on a computer, the phone's big button 96 px. Nothing here shifts layout as it updates: the words line, the
    detail line and the bars have fixed room. Reduced motion (the OS setting or Settings › Appearance › Motion)
-   draws no ring and no pulse, and the countdown number is set large instead. */
+   draws no ring, no pulse and no moving bars, and the countdown number is set large instead (the level is one
+   still, labelled meter). */
 
 .fy-live {
   --fy-live-tone: var(--border-strong);
@@ -16,6 +17,11 @@
   font-family: var(--font-ui);
   min-width: 0;
   width: 100%;
+}
+/* A calm bar's border is quiet, but its level bars and meter must still read: they use the soft text colour. */
+.fy-live[data-tone='calm'] .fy-live-bar,
+.fy-live[data-tone='calm'] .fy-live-level-fill {
+  background: var(--fg-soft);
 }
 .fy-live[data-tone='active'] {
   --fy-live-tone: var(--accent);
@@ -97,7 +103,7 @@
     opacity: 0.35;
   }
 }
-.fy-live-pill {
+.fy-live .fy-live-pill {
   align-items: center;
   background: var(--err-bg);
   border: var(--stroke, 1px) solid var(--err-border);
@@ -114,7 +120,7 @@
   min-height: 48px;
   padding: 0 14px;
 }
-.fy-live-pill--static {
+.fy-live .fy-live-pill--static {
   cursor: default;
   min-height: 28px;
   padding: 0 10px;
@@ -136,11 +142,53 @@
   min-height: 2px;
   width: 4px;
 }
-.fy-live-bars[data-still] .fy-live-bar {
-  opacity: 0.35;
+/* Reduced motion: ONE still meter with its label, instead of moving bars. */
+.fy-live-level {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 8px;
+  height: 32px;
+  justify-content: center;
+  min-width: 0;
 }
-.fy-live-bars[data-reduced] .fy-live-bar {
-  width: 24px;
+.fy-live-level-label {
+  color: var(--fg-soft);
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+}
+.fy-live-level-track {
+  background: var(--surface-2);
+  border: var(--stroke, 1px) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  display: block;
+  height: 12px;
+  overflow: hidden;
+  width: 120px;
+}
+.fy-live-level-fill {
+  background: var(--fy-live-tone);
+  border-radius: var(--radius-pill);
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+/* The countdown along the desktop strip: fills from the pause to the send. */
+.fy-live-progress {
+  background: var(--surface-2);
+  border: var(--stroke, 1px) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  display: block;
+  height: 10px;
+  overflow: hidden;
+  width: 100%;
+}
+.fy-live-progress-fill {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  display: block;
+  height: 100%;
 }
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-motion='reduced']) .fy-live-bar {
@@ -148,8 +196,10 @@
   }
 }
 
-/* ── buttons: real buttons, 48 px high, the focus ring is the page's own ── */
-.fy-live-btn {
+/* ── buttons: real buttons, 48 px high on a phone and 44 px on a computer; the focus ring is the page's own.
+   Written as `.fy-live .fy-live-btn` because the app's coarse-pointer floor (`:root button { min-height: 44px }`)
+   outranks a lone class and would pull a phone's 48 px down to 44. ── */
+.fy-live .fy-live-btn {
   align-items: center;
   background: var(--surface-2);
   border: var(--stroke, 1px) solid var(--border-strong);
@@ -167,7 +217,7 @@
   padding: 0 16px;
   white-space: nowrap;
 }
-.fy-live-btn:hover {
+.fy-live .fy-live-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -232,10 +282,10 @@
 }
 .fy-live-ring circle {
   fill: none;
-  stroke-width: 6;
+  stroke-width: 7;
 }
 .fy-live-ring-track {
-  stroke: var(--border);
+  stroke: var(--border-strong);
 }
 .fy-live-ring-fill {
   stroke: var(--accent);
@@ -308,8 +358,8 @@
   margin-left: auto;
 }
 .fy-live--desktop .fy-live-btn {
-  min-height: 40px;
-  padding: 0 12px;
+  min-height: 44px;
+  padding: 0 14px;
 }
 
 /* ── the refusal notice: a slim row, nothing to press ── */

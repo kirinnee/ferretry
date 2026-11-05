@@ -5,6 +5,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import type { MicMeterPort } from '../../../src/lib/stt/level-monitor.ts';
 import { browserClock } from '../../../src/lib/voice-chat/clock.ts';
 import { meterLevelFrames } from '../../../src/lib/voice-chat/level-frames.ts';
 import { LIVE_LOCK_NAME, webMicLock } from '../../../src/lib/voice-chat/mic-lock.ts';
@@ -12,7 +13,6 @@ import type { ClockPort, ReplySignal, VisibilityPort } from '../../../src/lib/vo
 import { type ReplySnapshot, type ReplySource, sessionReplyFeed } from '../../../src/lib/voice-chat/reply-feed.ts';
 import { documentVisibility } from '../../../src/lib/voice-chat/visibility.ts';
 import { screenWakeLock } from '../../../src/lib/voice-chat/wake-lock.ts';
-import type { MicMeterPort } from '../../../src/lib/stt/level-monitor.ts';
 
 describe('browserClock', () => {
   it('reads performance.now and runs, and cancels, timers', () => {
@@ -109,6 +109,66 @@ describe('webMicLock', () => {
     const lock = webMicLock(fake.api);
     should(await lock.acquire()).be.false();
     lock.release();
+  });
+
+  /** A Web Locks whose grant arrives when the test says so, like the browser's asynchronous queue. */
+  const slowLocks = () => {
+    const waiting: { callback: Callback; settled: Promise<unknown> | null }[] = [];
+    return {
+      waiting,
+      api: {
+        request: (_name: string, _options: { readonly ifAvailable: boolean }, callback: Callback) =>
+          new Promise<unknown>(resolve => {
+            waiting.push({ callback, settled: null });
+            resolve(undefined);
+          }),
+      },
+      /** The browser decides the `index`th request: a lock (true) or nothing (false). Returns when it is released. */
+      decide: (index: number, available: boolean): Promise<unknown> => {
+        const entry = waiting[index];
+        if (entry === undefined) throw new Error('no such request');
+        entry.settled = Promise.resolve(entry.callback(available ? {} : null));
+        return entry.settled;
+      },
+    };
+  };
+
+  it('hands a lock that is granted AFTER release straight back, and tells its asker it did not get it', async () => {
+    const fake = slowLocks();
+    const lock = webMicLock(fake.api);
+    const asked = lock.acquire();
+    lock.release();
+    const returned = fake.decide(0, true);
+    should(await asked).be.false();
+    // It was not held: the callback's promise is already settled, so another tab can take the lock at once.
+    should(await returned).equal(null);
+    // And a later acquire is a fresh ask that can be granted and held.
+    const again = lock.acquire();
+    const held = fake.decide(1, true);
+    should(await again).be.true();
+    let settled = false;
+    void held.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    should(settled).be.false();
+    lock.release();
+    await held;
+    should(settled).be.true();
+  });
+
+  it('a request that fails after a release is not a grant', async () => {
+    let fail: (reason: unknown) => void = () => undefined;
+    const lock = webMicLock({
+      request: () =>
+        new Promise<unknown>((_, reject) => {
+          fail = reject;
+        }),
+    });
+    const asked = lock.acquire();
+    lock.release();
+    fail(new Error('gone'));
+    should(await asked).be.false();
   });
 
   it('grants without the API, and when the browser refuses the request', async () => {
@@ -356,7 +416,9 @@ describe('sessionReplyFeed', () => {
   it('ignores a stale your-turn from before the send, then reports working and done', () => {
     const fake = source(snap('your-turn', 't1'));
     const seen: ReplySignal['kind'][] = [];
-    const stop = sessionReplyFeed(fake.api).watch(signal => void seen.push(signal.kind));
+    const stop = sessionReplyFeed(fake.api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
     fake.set(snap('your-turn', 't1'));
     should(seen).deepEqual([]);
     fake.set(snap('working', 't2'));
@@ -370,7 +432,9 @@ describe('sessionReplyFeed', () => {
   it('counts a changed turnStateAt as the turn having moved, even if working was never seen', () => {
     const fake = source(snap('your-turn', 't1'));
     const seen: ReplySignal['kind'][] = [];
-    sessionReplyFeed(fake.api).watch(signal => void seen.push(signal.kind));
+    sessionReplyFeed(fake.api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
     fake.set(snap('your-turn', 't2'));
     should(seen).deepEqual(['done']);
   });
@@ -378,7 +442,9 @@ describe('sessionReplyFeed', () => {
   it('starts from working when the session is already working, and reads a question', () => {
     const fake = source(snap('working', 't1'));
     const seen: ReplySignal['kind'][] = [];
-    sessionReplyFeed(fake.api).watch(signal => void seen.push(signal.kind));
+    sessionReplyFeed(fake.api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
     should(seen).deepEqual(['working']);
     fake.set(snap('needs-input', 't2'));
     should(seen).deepEqual(['working', 'needs-input']);
@@ -387,7 +453,9 @@ describe('sessionReplyFeed', () => {
   it('says nothing for a daemon without turnState, and ends when the session finishes or goes', () => {
     const quiet = source(snap(undefined, undefined));
     const seen: ReplySignal['kind'][] = [];
-    sessionReplyFeed(quiet.api).watch(signal => void seen.push(signal.kind));
+    sessionReplyFeed(quiet.api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
     quiet.set(snap(undefined, undefined));
     should(seen).deepEqual([]);
     // A state that changed but names no turn state (an older daemon) still says nothing.
@@ -397,15 +465,69 @@ describe('sessionReplyFeed', () => {
     should(seen).deepEqual(['ended']);
     const gone = source(snap('working', 't1'));
     const goneSeen: ReplySignal['kind'][] = [];
-    sessionReplyFeed(gone.api).watch(signal => void goneSeen.push(signal.kind));
+    sessionReplyFeed(gone.api)
+      .arm()
+      .attach(signal => void goneSeen.push(signal.kind));
     gone.set(null);
     should(goneSeen).deepEqual(['working', 'ended']);
   });
 
+  it('remembers a turn that finished while the send was still being acknowledged', () => {
+    // The watch is ARMED before the message goes; working → your-turn happens inside the send's await.
+    const fake = source(snap('your-turn', 't1'));
+    const watch = sessionReplyFeed(fake.api).arm();
+    const seen: ReplySignal['kind'][] = [];
+    fake.set(snap('working', 't2'));
+    fake.set(snap('your-turn', 't3'));
+    should(seen).deepEqual([]);
+    // The send is acknowledged: the finished turn is reported at once, not lost.
+    watch.attach(signal => void seen.push(signal.kind));
+    should(seen).deepEqual(['done']);
+  });
+
+  it('remembers a finished turn even when only the time of the state moved before the ack', () => {
+    const fake = source(snap('your-turn', 't1'));
+    const watch = sessionReplyFeed(fake.api).arm();
+    fake.set(snap('your-turn', 't2'));
+    const seen: ReplySignal['kind'][] = [];
+    watch.attach(signal => void seen.push(signal.kind));
+    should(seen).deepEqual(['done']);
+  });
+
+  it('still ignores a stale your-turn that never moved before the ack', () => {
+    const fake = source(snap('your-turn', 't1'));
+    const watch = sessionReplyFeed(fake.api).arm();
+    const seen: ReplySignal['kind'][] = [];
+    watch.attach(signal => void seen.push(signal.kind));
+    should(seen).deepEqual([]);
+  });
+
+  it('a cancelled watch stops listening and never reports, before or after the ack', () => {
+    const fake = source(snap('working', 't1'));
+    const watch = sessionReplyFeed(fake.api).arm();
+    should(fake.listeners.size).equal(1);
+    watch.cancel();
+    watch.cancel();
+    should(fake.listeners.size).equal(0);
+    const seen: ReplySignal['kind'][] = [];
+    fake.set(snap('your-turn', 't2'));
+    should(seen).deepEqual([]);
+    const attached = sessionReplyFeed(fake.api).arm();
+    const stop = attached.attach(signal => void seen.push(signal.kind));
+    fake.set(snap('working', 't3'));
+    stop();
+    fake.set(snap('your-turn', 't4'));
+    should(seen).deepEqual(['working']);
+  });
+
   it('ends at once when the session is already finished or missing at the send', () => {
     const seen: ReplySignal['kind'][] = [];
-    sessionReplyFeed(source(null).api).watch(signal => void seen.push(signal.kind));
-    sessionReplyFeed(source(snap('working', 't1', 'failed')).api).watch(signal => void seen.push(signal.kind));
+    sessionReplyFeed(source(null).api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
+    sessionReplyFeed(source(snap('working', 't1', 'failed')).api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
     should(seen).deepEqual(['ended', 'ended']);
   });
 });

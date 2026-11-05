@@ -99,9 +99,21 @@ export type ReplySignal =
   | { readonly kind: 'needs-input' }
   | { readonly kind: 'ended' };
 
+/** One send's watch on the ferret, armed before the message goes and attached once it is acknowledged. */
+export interface ReplyWatch {
+  /**
+   * The send was acknowledged: report what the ferret did since the watch was armed (a turn that finished
+   * while the send was still being acknowledged is not lost), then every change from here on. Returns the
+   * unsubscribe, which also ends the watch.
+   */
+  attach(onSignal: (signal: ReplySignal) => void): () => void;
+  /** The send did not happen, or Live ended first: stop listening. Idempotent. */
+  cancel(): void;
+}
+
 export interface ReplyFeedPort {
-  /** Called with every change of the ferret's state from now on (the send has just landed); returns the unsubscribe. */
-  watch(onSignal: (signal: ReplySignal) => void): () => void;
+  /** Take the baseline and start listening. Called BEFORE the message is submitted. */
+  arm(): ReplyWatch;
 }
 
 /**

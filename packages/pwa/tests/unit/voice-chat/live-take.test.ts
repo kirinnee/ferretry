@@ -195,6 +195,142 @@ describe('a take over an engine that ends at the end of the turn', () => {
     should(cleaned.at(-1)).equal('fix the bug and run the tests');
   });
 
+  const deferred = () => {
+    let resolve: (text: string) => void = () => undefined;
+    let reject: (reason: unknown) => void = () => undefined;
+    const promise = new Promise<string>((ok, no) => {
+      resolve = ok;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+
+  it('speech returning while the finish is still pending opens a fresh session NOW and carries the old words when they arrive', async () => {
+    const { port, sessions, cleaned, events, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const first = sessions[0] as PlainSession;
+    const answer = deferred();
+    first.finishResult = answer.promise;
+    const ended = take.endTurn();
+    // The voice is back before the engine has given its words.
+    should(await take.resume()).be.true();
+    should(sessions.length).equal(2);
+    const second = sessions[1] as PlainSession;
+    should(second.started).equal(1);
+    // The old session was told to finish and is left to; it was not aborted or cancelled.
+    should(first.finishes).equal(1);
+    should(first.cancelled).equal(0);
+    second.callbacks.onLiveText('and run');
+    should(events).deepEqual(['live:and run']);
+    // The old words arrive: they go in front of what is being said, at once.
+    answer.resolve('fix the bug');
+    should(await ended).deepEqual({ kind: 'empty' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(events).deepEqual(['live:and run', 'live:fix the bug and run']);
+    second.finishResult = Promise.resolve('and run the tests');
+    should(await take.endTurn()).deepEqual({
+      kind: 'words',
+      text: 'Fix the bug and run the tests.',
+      raw: 'fix the bug and run the tests',
+      cleaned: true,
+    });
+    should(cleaned).deepEqual(['fix the bug and run the tests']);
+  });
+
+  it('a pending finish that arrives with no live text yet says nothing new', async () => {
+    const { port, sessions, events, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const answer = deferred();
+    (sessions[0] as PlainSession).finishResult = answer.promise;
+    void take.endTurn();
+    await take.resume();
+    answer.resolve('fix the bug');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(events).deepEqual([]);
+  });
+
+  it('what the replaced session says afterwards cannot touch the new one', async () => {
+    const { port, sessions, events, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const first = sessions[0] as PlainSession;
+    const answer = deferred();
+    first.finishResult = answer.promise;
+    void take.endTurn();
+    await take.resume();
+    first.callbacks.onLiveText('stale words');
+    first.callbacks.onTranscript('stale words');
+    first.callbacks.onAbort();
+    first.callbacks.onLimit();
+    first.callbacks.onFailure(new BrowserRecognitionError('no-microphone', 'gone'));
+    should(events).deepEqual([]);
+    answer.resolve('fix the bug');
+  });
+
+  it('a finish that fails is carried as nothing, and recording still carries on in a new session', async () => {
+    const { port, sessions, cleaned, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const first = sessions[0] as PlainSession;
+    first.finishResult = Promise.reject(new BrowserRecognitionError('recognition-network', 'down'));
+    should(await take.endTurn()).deepEqual({ kind: 'failed', block: 'engine-failed' });
+    should(await take.resume()).be.true();
+    should(sessions.length).equal(2);
+    (sessions[1] as PlainSession).finishResult = Promise.resolve('try again');
+    should((await take.endTurn()).kind).equal('words');
+    should(cleaned).deepEqual(['try again']);
+  });
+
+  it('a finish that fails AFTER the voice came back is carried as nothing too', async () => {
+    const { port, sessions, cleaned, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const answer = deferred();
+    (sessions[0] as PlainSession).finishResult = answer.promise;
+    const ended = take.endTurn();
+    await take.resume();
+    answer.reject(new BrowserRecognitionError('recognition-network', 'down'));
+    should(await ended).deepEqual({ kind: 'empty' });
+    (sessions[1] as PlainSession).finishResult = Promise.resolve('and run');
+    should((await take.endTurn()).kind).equal('words');
+    should(cleaned).deepEqual(['and run']);
+  });
+
+  it('chains the words of every earlier session, in order, even when they arrive late', async () => {
+    const { port, sessions, cleaned, events, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const one = deferred();
+    (sessions[0] as PlainSession).finishResult = one.promise;
+    void take.endTurn();
+    await take.resume();
+    const second = sessions[1] as PlainSession;
+    // The second phrase ends and the voice returns again BEFORE the first phrase's words are in.
+    second.finishResult = Promise.resolve('and run');
+    void take.endTurn();
+    await Promise.resolve();
+    await take.resume();
+    should(sessions.length).equal(3);
+    const third = sessions[2] as PlainSession;
+    third.callbacks.onLiveText('the tests');
+    one.resolve('fix the bug');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(events.at(-1)).equal('live:fix the bug and run the tests');
+    third.finishResult = Promise.resolve('the tests');
+    await take.endTurn();
+    should(cleaned.at(-1)).equal('fix the bug and run the tests');
+  });
+
+  it('cancelling while earlier words are pending says nothing afterwards', async () => {
+    const { port, sessions, events, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const answer = deferred();
+    (sessions[0] as PlainSession).finishResult = answer.promise;
+    void take.endTurn();
+    await take.resume();
+    (sessions[1] as PlainSession).callbacks.onLiveText('and more');
+    take.cancel();
+    answer.resolve('fix the bug');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(events).deepEqual(['live:and more']);
+  });
+
   it('keeps the earlier words when the new session heard nothing', async () => {
     const { port, sessions, listener } = rig({ plain: true });
     const take = port.start(listener);

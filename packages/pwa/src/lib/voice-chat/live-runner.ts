@@ -13,6 +13,15 @@
  * is dropped (and its meter released), so a slow permission prompt can never reopen a microphone
  * the person already closed.
  *
+ * LOCK GENERATIONS. The one-Live-tab lock is asked for asynchronously, so an answer can arrive after Live
+ * ended (End, a refusal, the page leaving, a hidden tab at start-up). Every ask carries the lock generation
+ * it was made in; `releaseLocks` advances it, and a grant from an older one is handed straight back, so a
+ * late Web Lock can never be held by a Live that is gone.
+ *
+ * THE REPLY IS ARMED BEFORE THE SEND. The ferret can finish a short turn while the send is still being
+ * acknowledged, so the feed takes its baseline and starts listening BEFORE the message goes
+ * (`ReplyFeedPort.arm`) and is only attached to the machine once the send is acknowledged.
+ *
  * THE ENDPOINTER IS RESTARTED, NOT RESET, after a turn ends: a fresh one is seeded with the room's
  * recent levels, so the voice coming back during the countdown is heard as "speech starts" and the
  * countdown is cancelled — the microphone stays open for exactly that.
@@ -32,6 +41,7 @@ import type {
   LevelMeterHandle,
   MicLockPort,
   ReplyFeedPort,
+  ReplyWatch,
   SendPort,
   SpeakerPort,
   TakeHandle,
@@ -91,6 +101,10 @@ export class LiveRunner {
   #screenMayTurnOff = false;
   #lockHeld = false;
   #lockAsked = false;
+  /** Advances whenever the locks are released: an answer to an older ask is stale. */
+  #lockGen = 0;
+  /** The reply feed, armed before the send and attached when it is acknowledged. */
+  #armedReply: ReplyWatch | null = null;
 
   constructor(ports: LiveRunnerPorts, options: LiveRunnerOptions) {
     this.#ports = ports;
@@ -205,6 +219,9 @@ export class LiveRunner {
       case 'closeMic':
         this.#closeMic();
         break;
+      case 'stopCapture':
+        this.#stopCapture();
+        break;
       case 'beginTurnWords':
         this.#beginTurnWords(effect.attempt);
         break;
@@ -263,7 +280,14 @@ export class LiveRunner {
     }
     if (this.#lockAsked) return;
     this.#lockAsked = true;
+    const gen = this.#lockGen;
     void this.#ports.micLock.acquire().then(granted => {
+      if (gen !== this.#lockGen) {
+        // Live ended (or was released) while the lock was being asked for: a grant now is nobody's, unless a
+        // newer ask has been made since — that one owns the adapter and must not be released from under it.
+        if (granted && !this.#lockAsked && !this.#lockHeld) this.#ports.micLock.release();
+        return;
+      }
       this.#lockAsked = false;
       this.#lockHeld = granted;
       this.dispatch({ type: 'locks', granted });
@@ -271,6 +295,8 @@ export class LiveRunner {
   }
 
   #releaseLocks(): void {
+    this.#lockGen += 1;
+    this.#lockAsked = false;
     this.#lockHeld = false;
     this.#ports.micLock.release();
     this.#ports.wakeLock.release();
@@ -324,6 +350,18 @@ export class LiveRunner {
     this.#handle = null;
     this.#meter = null;
     handle?.cancel();
+    meter?.release();
+  }
+
+  /**
+   * Stop hearing NOW: no more level frames, no endpointer, no bars. The take stays open (its pending words are
+   * still coming — a stop never loses what was said), and the machine closes it when they land.
+   */
+  #stopCapture(): void {
+    this.#endpointer = null;
+    this.#levels = [];
+    const meter = this.#meter;
+    this.#meter = null;
     meter?.release();
   }
 
@@ -420,20 +458,33 @@ export class LiveRunner {
   // — the send and the reply ——————————————————————————————————————————————————
 
   #send(): void {
+    // The feed is armed (baseline taken, listening) BEFORE the message goes: a fast turn can finish while the
+    // send is still being acknowledged.
+    this.#armedReply?.cancel();
+    const armed = this.#ports.reply.arm();
+    this.#armedReply = armed;
     void this.#ports.send.send().then(outcome => {
       if (outcome.kind === 'sent') this.dispatch({ type: 'sent', atMs: this.#ports.clock.now() });
-      else this.dispatch({ type: 'send-failed' });
+      else {
+        if (this.#armedReply === armed) this.#armedReply = null;
+        armed.cancel();
+        this.dispatch({ type: 'send-failed' });
+      }
     });
   }
 
   #watchReply(): void {
-    this.#stopReply();
-    this.#replyCancel = this.#ports.reply.watch(signal => this.dispatch({ type: 'reply', signal: signal.kind }));
+    const armed = this.#armedReply ?? this.#ports.reply.arm();
+    this.#armedReply = null;
+    this.#replyCancel?.();
+    this.#replyCancel = armed.attach(signal => this.dispatch({ type: 'reply', signal: signal.kind }));
   }
 
   #stopReply(): void {
     this.#replyCancel?.();
     this.#replyCancel = null;
+    this.#armedReply?.cancel();
+    this.#armedReply = null;
   }
 
   #speak(): void {

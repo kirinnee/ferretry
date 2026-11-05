@@ -16,12 +16,14 @@ import type { LiveEvent } from '../../../src/lib/voice-chat/live-machine.ts';
 import { LEVEL_HISTORY, LiveRunner, type LiveRunnerPorts } from '../../../src/lib/voice-chat/live-runner.ts';
 import type {
   LevelMeterHandle,
+  ReplyFeedPort,
   ReplySignal,
   SendOutcome,
   TakeHandle,
   TakeListener,
   TakeOutcome,
 } from '../../../src/lib/voice-chat/ports.ts';
+import { type ReplySnapshot, type ReplySource, sessionReplyFeed } from '../../../src/lib/voice-chat/reply-feed.ts';
 import type { LevelFrame } from '../../../src/lib/voice-chat/turn-endpointer.ts';
 
 const LOUD = 0.1;
@@ -98,6 +100,10 @@ interface Rig {
   sendResult: { current: SendOutcome | 'pending' };
   releaseSend(outcome: SendOutcome): void;
   lock: { granted: boolean };
+  /** `pending`: the lock is not decided until `answerLock` says so (like the browser's asynchronous queue). */
+  lockControl: { pending: boolean };
+  /** Decide the `index`th lock request. */
+  answerLock(index: number, granted: boolean): Promise<void>;
   wake: { granted: boolean };
   meterOpen: { mode: 'ok' | 'null' | 'reject' | 'pending' };
   openMeter(): void;
@@ -105,7 +111,7 @@ interface Rig {
   speaker: { spoke: number; stopped: number; done: () => void };
 }
 
-const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown } = {}): Rig => {
+const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown; reply?: ReplyFeedPort } = {}): Rig => {
   const clock = new FakeClock();
   const takes: FakeTake[] = [];
   const listeners: TakeListener[] = [];
@@ -120,6 +126,8 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
   const sendResult: Rig['sendResult'] = { current: { kind: 'sent', sentAtMs: 0 } };
   let releaseSend: (outcome: SendOutcome) => void = () => undefined;
   const lock = { granted: true };
+  const lockControl = { pending: false };
+  const lockAnswers: ((granted: boolean) => void)[] = [];
   const wake = { granted: true };
   const meterOpen: Rig['meterOpen'] = { mode: 'ok' };
   let pendingMeter: (() => void) | null = null;
@@ -161,6 +169,7 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
       clear: () => void shown.push('<cleared>'),
       shown: () => shown.at(-1) ?? '',
       send: () => {
+        log.push('send');
         sends.push(clock.now());
         if (sendResult.current === 'pending')
           return new Promise<SendOutcome>(resolve => {
@@ -169,13 +178,19 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
         return Promise.resolve(sendResult.current);
       },
     },
-    reply: {
-      watch: listener => {
-        replyListener = listener;
-        log.push('reply.watch');
-        return () => {
-          replyListener = null;
-          log.push('reply.stop');
+    reply: options.reply ?? {
+      arm: () => {
+        log.push('reply.arm');
+        return {
+          attach: listener => {
+            replyListener = listener;
+            log.push('reply.watch');
+            return () => {
+              replyListener = null;
+              log.push('reply.stop');
+            };
+          },
+          cancel: () => void log.push('reply.cancel'),
         };
       },
     },
@@ -202,7 +217,14 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
       },
     },
     micLock: {
-      acquire: () => Promise.resolve(lock.granted),
+      acquire: () => {
+        log.push('lock.acquire');
+        if (lockControl.pending)
+          return new Promise<boolean>(resolve => {
+            lockAnswers.push(resolve);
+          });
+        return Promise.resolve(lock.granted);
+      },
       release: () => void log.push('lock.release'),
     },
     clock,
@@ -243,6 +265,11 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
     sendResult,
     releaseSend: outcome => releaseSend(outcome),
     lock,
+    lockControl,
+    answerLock: async (index, granted) => {
+      lockAnswers[index]?.(granted);
+      await rigResult.settle();
+    },
     wake,
     meterOpen,
     openMeter: () => pendingMeter?.(),
@@ -275,7 +302,7 @@ describe('LiveRunner — one whole turn', () => {
     const r = rig();
     r.runner.start();
     // The microphone opens inside the tap, before anything is awaited.
-    should(r.log).deepEqual(['take.start']);
+    should(r.log).deepEqual(['lock.acquire', 'take.start']);
     should(r.runner.state.phase).equal('starting');
     await r.settle();
     should(r.runner.state.phase).equal('listening');
@@ -454,6 +481,350 @@ describe('LiveRunner — races', () => {
     await r.settle();
     should(r.runner.state.phase).equal('off');
     should(r.meterReleased).equal(1);
+  });
+});
+
+/** The words/empty/failed answers a pending transcription can come to. */
+const OUTCOMES: readonly (readonly [string, TakeOutcome])[] = [
+  ['words', { kind: 'words', text: 'Fix the bug.', raw: 'fix the bug', cleaned: true }],
+  ['nothing', { kind: 'empty' }],
+  ['a failure', { kind: 'failed', block: 'engine-failed' }],
+];
+
+describe('LiveRunner — a stop is sticky (THE SURPRISE-SEND RULE, with the real endpointer)', () => {
+  const STOPS: readonly (readonly [string, (r: Rig) => void, 'hold' | 'paused'])[] = [
+    ['Hold', r => r.runner.hold(), 'hold'],
+    ['typing', r => r.runner.typing(), 'hold'],
+    ['a hidden tab', r => r.setVisible(false), 'paused'],
+  ];
+
+  for (const [name, stop, landing] of STOPS) {
+    for (const [outcomeName, outcome] of OUTCOMES) {
+      it(`${name} while the words are worked out: capture stops now, renewed speech and a second pause cannot undo it, and ${outcomeName} lands on ${landing}`, async () => {
+        const r = await listening();
+        const take = r.takes[0] as FakeTake;
+        let answer: (outcome: TakeOutcome) => void = () => undefined;
+        take.outcome = new Promise(resolve => {
+          answer = resolve;
+        });
+        await speakTurn(r);
+        should(r.runner.state.phase).equal('sending');
+        const metersReleased = r.meterReleased;
+
+        stop(r);
+        // Capture and level frames stop IMMEDIATELY; the take stays open so the pending words are not lost.
+        should(r.meterReleased).equal(metersReleased + 1);
+        should(r.runner.levels()).deepEqual([]);
+        should(take.cancelled).be.false();
+        should(r.runner.state.phase).equal('sending');
+
+        // The room speaks again, pauses, speaks again and pauses again: a second pause would auto-send.
+        r.talk(LOUD, 900);
+        r.talk(QUIET, 1_800);
+        r.talk(LOUD, 900);
+        r.talk(QUIET, 1_800);
+        r.clock.advance(10_000);
+        await r.settle();
+        should(r.runner.state.phase).equal('sending');
+        should(r.runner.state.park).not.equal(null);
+        should(r.runner.levels()).deepEqual([]);
+        should(take.resumes).equal(0);
+        should(take.endTurns).equal(1);
+        should(r.sends.length).equal(0);
+
+        answer(outcome);
+        await r.settle();
+        r.talk(LOUD, 900);
+        r.talk(QUIET, 1_800);
+        r.clock.advance(10_000);
+        await r.settle();
+
+        // It lands where the person put it, never back on listening, never a send, never a reopened engine.
+        should(r.runner.state.phase).equal(landing);
+        should(r.runner.state.park).equal(null);
+        should(r.sends.length).equal(0);
+        should(r.takes.length).equal(1);
+        should(take.cancelled).be.true();
+        should(r.log.filter(entry => entry === 'take.start').length).equal(1);
+        should(r.clock.live).equal(0);
+        if (outcome.kind === 'words') should(r.shown.at(-1)).equal('Fix the bug.');
+        else should(r.shown.at(-1)).equal('<cleared>');
+        if (outcome.kind === 'failed')
+          should(r.runner.state.notice).deepEqual({ kind: 'take-failed', block: 'engine-failed' });
+      });
+    }
+  }
+
+  it('Resume after a stop that waited for the words listens again, and nothing was sent', async () => {
+    const r = await listening();
+    const take = r.takes[0] as FakeTake;
+    let answer: (outcome: TakeOutcome) => void = () => undefined;
+    take.outcome = new Promise(resolve => {
+      answer = resolve;
+    });
+    await speakTurn(r);
+    r.runner.hold();
+    answer({ kind: 'empty' });
+    await r.settle();
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.sends.length).equal(0);
+  });
+});
+
+describe('LiveRunner — the one-tab lock', () => {
+  const pendingRig = (): Rig => {
+    const r = rig();
+    r.lockControl.pending = true;
+    return r;
+  };
+  const watchPhases = (r: Rig): string[] => {
+    const phases: string[] = [];
+    r.runner.subscribe(() => void phases.push(r.runner.state.phase));
+    return phases;
+  };
+  const releases = (r: Rig): number => r.log.filter(entry => entry === 'lock.release').length;
+
+  it('does not listen until the lock is granted, even when the microphone is ready first', async () => {
+    const r = pendingRig();
+    const phases = watchPhases(r);
+    r.runner.start();
+    await r.settle();
+    should(r.runner.state.phase).equal('starting');
+    should(phases).not.containEql('listening');
+    await r.answerLock(0, true);
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('a lock refused after the microphone was ready ends Live: the second tab never listens, hears or sends', async () => {
+    const r = pendingRig();
+    const phases = watchPhases(r);
+    r.runner.start();
+    await r.settle();
+    r.talk(LOUD, 1_000);
+    r.talk(QUIET, 2_000);
+    await r.answerLock(0, false);
+    should(r.runner.state.phase).equal('off');
+    should(r.runner.state.notice).deepEqual({ kind: 'blocked', block: 'other-tab' });
+    should(phases).not.containEql('listening');
+    should(phases).not.containEql('hearing');
+    should(phases).not.containEql('sending');
+    should(r.takes[0]?.cancelled).be.true();
+    should(r.meterReleased).equal(1);
+    should(r.sends.length).equal(0);
+  });
+
+  it('a refusal ends Live in every active phase', async () => {
+    const setups: readonly (readonly [string, (r: Rig) => Promise<void>])[] = [
+      ['listening', async () => undefined],
+      ['hearing', async r => r.talk(LOUD, 600)],
+      ['sending', speakTurn],
+      [
+        'hold',
+        async r => {
+          r.runner.hold();
+        },
+      ],
+      [
+        'paused',
+        async r => {
+          r.setVisible(false);
+        },
+      ],
+    ];
+    for (const [name, setup] of setups) {
+      const r = await listening();
+      await setup(r);
+      r.runner.dispatch({ type: 'locks', granted: false });
+      await r.settle();
+      should([name, r.runner.state.phase]).deepEqual([name, 'off']);
+      should(r.runner.state.notice).deepEqual({ kind: 'blocked', block: 'other-tab' });
+    }
+  });
+
+  it('End while the lock is pending: the late grant is handed straight back and Live stays off', async () => {
+    const r = pendingRig();
+    r.runner.start();
+    await r.settle();
+    r.runner.end();
+    const before = releases(r);
+    await r.answerLock(0, true);
+    should(r.runner.state.phase).equal('off');
+    should(releases(r)).equal(before + 1);
+    should(r.takes.length).equal(1);
+  });
+
+  it('dispose while the lock is pending: the late grant is handed straight back', async () => {
+    const r = pendingRig();
+    r.runner.start();
+    await r.settle();
+    r.runner.dispose();
+    const before = releases(r);
+    await r.answerLock(0, true);
+    should(releases(r)).equal(before + 1);
+  });
+
+  it('a late refusal after End changes nothing and releases nothing more', async () => {
+    const r = pendingRig();
+    r.runner.start();
+    await r.settle();
+    r.runner.end();
+    const before = releases(r);
+    await r.answerLock(0, false);
+    should(r.runner.state.phase).equal('off');
+    should(r.runner.state.notice).equal(null);
+    should(releases(r)).equal(before);
+  });
+
+  it("a start right after End: the old ask's grant is ignored and does not release the new ask", async () => {
+    const r = pendingRig();
+    r.runner.start();
+    await r.settle();
+    r.runner.end();
+    r.runner.start();
+    await r.settle();
+    should(r.log.filter(entry => entry === 'lock.acquire').length).equal(2);
+    const before = releases(r);
+    await r.answerLock(0, true);
+    should(r.runner.state.phase).equal('starting');
+    should(releases(r)).equal(before);
+    await r.answerLock(1, true);
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('a stale grant does not release a lock the new Live already holds', async () => {
+    const r = pendingRig();
+    r.runner.start();
+    await r.settle();
+    r.runner.end();
+    r.lockControl.pending = false;
+    r.runner.start();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    const before = releases(r);
+    await r.answerLock(0, true);
+    should(r.runner.state.phase).equal('listening');
+    should(releases(r)).equal(before);
+  });
+
+  it('hidden while the lock is pending: it stays paused, a late refusal ends it, a grant is kept for Resume', async () => {
+    const refused = pendingRig();
+    refused.runner.start();
+    await refused.settle();
+    refused.setVisible(false);
+    should(refused.runner.state.phase).equal('paused');
+    await refused.answerLock(0, false);
+    should(refused.runner.state.phase).equal('off');
+    should(refused.runner.state.notice).deepEqual({ kind: 'blocked', block: 'other-tab' });
+
+    const granted = pendingRig();
+    granted.runner.start();
+    await granted.settle();
+    granted.setVisible(false);
+    await granted.answerLock(0, true);
+    should(granted.runner.state.phase).equal('paused');
+    granted.setVisible(true);
+    granted.runner.resume();
+    await granted.settle();
+    should(granted.runner.state.phase).equal('listening');
+    should(granted.log.filter(entry => entry === 'lock.acquire').length).equal(1);
+  });
+
+  it('Resume Live from a pause waits for a pending lock before it listens', async () => {
+    const r = pendingRig();
+    r.runner.start();
+    await r.settle();
+    r.setVisible(false);
+    r.setVisible(true);
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('starting');
+    await r.answerLock(0, true);
+    should(r.runner.state.phase).equal('listening');
+  });
+});
+
+describe('LiveRunner — the reply is watched from BEFORE the send', () => {
+  const snapshot = (turnState: ReplySnapshot['turnState'], turnStateAt: string, status = 'running'): ReplySnapshot => ({
+    turnState,
+    turnStateAt,
+    status,
+  });
+  const session = (first: ReplySnapshot) => {
+    let current: ReplySnapshot = first;
+    const listeners = new Set<() => void>();
+    const api: ReplySource = {
+      current: () => current,
+      subscribe: listener => {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      },
+    };
+    return {
+      api,
+      set: (next: ReplySnapshot) => {
+        current = next;
+        for (const listener of [...listeners]) listener();
+      },
+      listeners,
+    };
+  };
+
+  it('arms the feed before the message goes', async () => {
+    const r = await listening();
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.log.indexOf('reply.arm')).be.above(-1);
+    should(r.log.indexOf('reply.arm')).be.below(r.log.indexOf('send'));
+    should(r.log.indexOf('send')).be.below(r.log.indexOf('reply.watch'));
+  });
+
+  it('a turn that finishes while the send is still being acknowledged is not lost: Live listens again, not Working forever', async () => {
+    const fake = session(snapshot('your-turn', 't1'));
+    const r = rig({ reply: sessionReplyFeed(fake.api) });
+    r.sendResult.current = 'pending';
+    r.runner.start();
+    await r.settle();
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.sends.length).equal(1);
+    should(r.runner.state.sendInFlight).be.true();
+    // The ferret takes the turn and finishes it, all inside the send's await.
+    fake.set(snapshot('working', 't2'));
+    fake.set(snapshot('your-turn', 't3'));
+    r.releaseSend({ kind: 'sent', sentAtMs: 0 });
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.takes.length).equal(2);
+    should(fake.listeners.size).equal(0);
+  });
+
+  it('a failed send cancels the armed feed and watches nothing', async () => {
+    const r = await listening();
+    r.sendResult.current = { kind: 'failed', reason: 'offline' };
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.log).containEql('reply.cancel');
+    should(r.log).not.containEql('reply.watch');
+  });
+
+  it('ending Live while the send is pending cancels the armed feed, and the late ack watches nothing', async () => {
+    const r = await listening();
+    r.sendResult.current = 'pending';
+    await speakTurn(r);
+    r.clock.advance(1_500);
+    await r.settle();
+    r.runner.end();
+    should(r.log).containEql('reply.cancel');
+    r.releaseSend({ kind: 'sent', sentAtMs: 0 });
+    await r.settle();
+    should(r.log).not.containEql('reply.watch');
+    should(r.runner.state.phase).equal('off');
   });
 });
 

@@ -1,6 +1,11 @@
 /**
  * THE FERRET'S SIDE OF A LIVE TURN, read from the session the page already holds — no new route.
  *
+ * Live ARMS the feed BEFORE it submits the message (`arm`): the baseline is the session as it was before the
+ * send, and the feed listens from then on, so a short turn that finishes while the send is still being
+ * acknowledged (working → your-turn inside that await) is remembered and reported the moment the send is
+ * attached (`attach`) — never lost, which would leave Live "Working" with the microphone off forever.
+ *
  * After a send, Live waits for `turnState` (derived by the daemon from the transcript and the pane,
  * never from "a message was sent") to say the turn is over. The trap is a stale `your-turn` from
  * BEFORE the send, still on the session for the moment before it flips to `working`. So a finished
@@ -12,7 +17,7 @@
  * ends it or answers by hand (docs/voice.md › Live voice › What is not built).
  */
 
-import type { ReplyFeedPort, ReplySignal } from './ports.ts';
+import type { ReplyFeedPort, ReplySignal, ReplyWatch } from './ports.ts';
 
 type ReplyTurnState = 'working' | 'your-turn' | 'needs-input';
 
@@ -35,16 +40,12 @@ const FINISHED = new Set(['completed', 'failed', 'stopped']);
 
 export function sessionReplyFeed(source: ReplySource): ReplyFeedPort {
   return {
-    watch: onSignal => {
+    arm: (): ReplyWatch => {
       const baseline = source.current();
       const baselineAt = baseline?.turnStateAt;
       let seenWorking = baseline?.turnState === 'working';
       let last: ReplySignal['kind'] | null = null;
-      const emit = (signal: ReplySignal): void => {
-        if (signal.kind === last) return;
-        last = signal.kind;
-        onSignal(signal);
-      };
+      let onSignal: ((signal: ReplySignal) => void) | null = null;
       /** What the session is saying now, or null while nothing is yet to say (a state left over from before). */
       const read = (): ReplySignal | null => {
         const now = source.current();
@@ -59,13 +60,29 @@ export function sessionReplyFeed(source: ReplySource): ReplyFeedPort {
         if (now.turnState === 'needs-input') return { kind: 'needs-input' };
         return null;
       };
+      /** Reads the session (which latches "working was seen"); tells the machine only once the send is attached. */
       const evaluate = (): void => {
         const signal = read();
-        if (signal !== null) emit(signal);
+        if (signal === null || onSignal === null || signal.kind === last) return;
+        last = signal.kind;
+        onSignal(signal);
       };
       const unsubscribe = source.subscribe(evaluate);
-      evaluate();
-      return unsubscribe;
+      let ended = false;
+      const cancel = (): void => {
+        if (ended) return;
+        ended = true;
+        onSignal = null;
+        unsubscribe();
+      };
+      return {
+        attach: handler => {
+          onSignal = handler;
+          evaluate();
+          return cancel;
+        },
+        cancel,
+      };
     },
   };
 }

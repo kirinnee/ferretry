@@ -104,12 +104,17 @@ export const fakeLive = (): FakeLive => {
       },
     },
     reply: {
-      watch: listener => {
-        reply = listener;
-        return () => {
+      arm: () => ({
+        attach: listener => {
+          reply = listener;
+          return () => {
+            reply = null;
+          };
+        },
+        cancel: () => {
           reply = null;
-        };
-      },
+        },
+      }),
     },
     speaker: null,
     wakeLock: { acquire: async () => true, release: () => undefined },

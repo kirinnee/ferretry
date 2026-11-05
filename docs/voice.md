@@ -698,22 +698,23 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 
 ### What it does
 
-| State             | What you see                                  | Mic     |
-| ----------------- | --------------------------------------------- | ------- |
-| Starting          | "Starting…" until the mic is open             | opening |
-| Listening         | level bars, "Listening"                       | open    |
-| Hearing           | the words appearing in the composer           | open    |
-| Sending in 1.5 s  | a ring counting down, **Hold**, **Send now**  | open    |
-| Working           | "Working 0:12", **End**                       | **off** |
-| Reading (slice 5) | reserved: the reply being read aloud          | **off** |
-| On hold           | "On hold — paused while you type", **Resume** | off     |
-| Paused            | the tab is hidden                             | off     |
+| State             | What you see                                                                                                                          | Mic     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Starting          | "Starting…" until the mic is open **and** the Live-tab lock is ours ("Allow the microphone if your browser asks." on the first start) | opening |
+| Listening         | level bars (one labelled "Mic level" meter with reduced motion), "Listening"                                                          | open    |
+| Hearing           | the words appearing in the composer                                                                                                   | open    |
+| Sending in 1.5 s  | a ring counting down, **Hold**, **Send now**                                                                                          | open    |
+| Working           | "Working 0:12", **End**                                                                                                               | **off** |
+| Reading (slice 5) | reserved: the reply being read aloud                                                                                                  | **off** |
+| On hold           | "On hold — paused while you type", **Resume**                                                                                         | off     |
+| Paused            | the tab is hidden                                                                                                                     | off     |
 
 - **The words are in the composer, visibly, during the countdown.** What is sent is exactly what the composer
   shows at that moment. Edit them, add to them or delete them: typing pauses the countdown and holds, and
   nothing is sent until you press **Send now** or **Resume**.
 - **The countdown is 1.5 s** (`DEFAULT_GRACE_MS`, adjustable in the machine's range) and always visible: a
-  ring, plus a text count when reduced motion is on. **Hold** stops it, **Send now** skips it.
+  ring on a phone and a bar along the strip on a computer, both filling from the moment the pause was heard,
+  plus a large text count when reduced motion is on. **Hold** stops it, **Send now** skips it.
 - **The words must be on screen for 500 ms before an automatic send** (`SETTLE_MS`), so a late transcript can
   never be sent before you could see it. **Send now** skips that too. With a countdown of 0 the send follows
   the words as soon as they are shown.
@@ -727,6 +728,23 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **Keys** (only when focus is not in a text field): **Enter** = Send now, **H** = Hold, **Space** = Resume
   (or Skip while the ferret works), **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat
   page).
+- **A stop is sticky (the surprise-send rule).** Nothing sends unless the visible countdown elapsed in an
+  un-parked state. **Hold**, typing and a hidden tab pressed while the words are still being worked out stop
+  capture and the level frames at once (the transcription already under way is allowed to finish, so nothing
+  said is lost); renewed speech and a second pause cannot revive the turn, and when the words arrive — or come
+  to nothing, or fail — Live lands on **On hold** / **Paused** with the microphone shut, never back on
+  Listening and never on a send. The first stop stands: a later one does not change where it lands. The bar
+  says "Getting your words…" with nothing to press until they land.
+- **Both the microphone and the lock before Listening.** The microphone and the one-tab Web Lock are asked for
+  in parallel and Live listens only when both have answered; a refusal of the lock ends Live in any phase, so
+  two tabs can never both capture and send. A lock granted after Live ended (End, the page leaving, a hidden
+  tab at start-up) is handed straight back (`live-runner.ts` lock generations; `mic-lock.ts` honours a
+  release before the grant).
+- **Voice returning while an engine is still finishing a turn** (Vosk, Browser voice, near-live Parakeet) opens
+  a fresh recognition session at once and carries the finishing session's words in front when they arrive; the
+  old session is never aborted and cannot change the new one (`live-take.ts`).
+- **The reply is watched from before the send** (`ReplyFeedPort.arm()`, attached on the acknowledgement), so a
+  turn the ferret finishes while the send is still being acknowledged is not lost.
 - **A failed send is never retried automatically.** The loop goes to **On hold** with your words kept in the
   composer and the reason said; **Resume** sends again by your hand. While a message is on the wire, Hold,
   typing and hiding the tab do nothing to it.
@@ -734,6 +752,8 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **One Live tab:** it takes a Web Lock; a second tab says "Live is on in another tab". It asks for a Screen
   Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. A hidden tab
   **pauses** Live (mic closed) and resumes when visible.
+- **Buttons are at least 48 px tall on a phone and 44 px on a computer** (the harness measures them; the CSS
+  outranks the app's coarse-pointer 44 px floor). On a phone **Hold** is the big round button only — there is no second one.
 - **The button is an icon** (44 px on a phone), and on a desktop it is **not drawn in a pane narrower than 300 px of row**
   (a split agent pane beside Info): five buttons would push Send past the pane. The palette entry still starts it.
 - **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
@@ -749,7 +769,7 @@ clean-up is Polish with only a machine key (no device key) leaves the words **ra
 ### Refusals, in words
 
 The bar says why Live did not start, then goes away after 10 s: microphone blocked (with how to allow it),
-no engine chosen (open Settings › Voice), the chosen engine not installed, the engine failed, Live open in
+no voice chosen ("Pick a voice in Settings › Voice first"), the chosen voice not installed ("This voice isn't installed yet — install it in Settings › Voice"), the voice stopped, Live open in
 another tab, no send rights, and — on an iPhone Home Screen app — that Browser voice cannot run there (choose an
 on-device engine). The words live in `lib/voice-chat/live-view.ts` (`LIVE_BLOCK_COPY`).
 
@@ -791,6 +811,8 @@ real microphones, noise suppression, phones, Safari, any GPU.
 - **Reading the reply aloud is not wired.** The **Reading** state, the `speak` / `stopSpeaking` effects and a
   `SpeakerPort` exist and are tested with a fake port; nothing is connected to them yet (slice 5).
 - **No `⌥L` chord yet;** the palette entry and the button are the ways in.
+- **No separate "connection lost" state.** A lost connection shows as the send failing (**On hold**, "Couldn't
+  send. Your words are in the message box."), or as Live ending when the composer can no longer send.
 - **A daemon without `turnState`** never reports a reply, so Live stays in **Working** until you press **Skip**
   or **End**.
 - **The iOS mic reopen is unproven:** whether Safari lets Live reopen the mic after the ferret works, without a
