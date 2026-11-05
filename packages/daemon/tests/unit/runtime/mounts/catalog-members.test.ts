@@ -238,7 +238,9 @@ describe('the route table', () => {
     'GET /v1/catalog-shares',
     'GET /v1/catalog-members',
     'PATCH /v1/catalog-members/:memberId',
-    // Removing a browser can reopen join admission (joinNeed), so it is not a pure narrowing.
+    // Removing a browser, or a person (a partial revoke plus a restart leaves a live spare invite with no person), can
+    // reopen join admission (joinNeed), so neither is a pure narrowing.
+    'DELETE /v1/catalog-members/:memberId',
     'DELETE /v1/catalog-members/:memberId/keys/:keyId',
   ]);
 

@@ -10,8 +10,9 @@
  * atomically (a replayed proof is refused) exactly as a catalog install claims its own. The mint and the "new
  * passkey" mark are the `narrowing` boundary demand (below) so the boundary cannot spend that proof first; the
  * handler then SPENDS the general step-up too, so a zero-minute window admits exactly that one act.
- * Ending, revoking and removing a catalog only take access away and ask for nothing: they are `narrowing` too.
- * Removing a BROWSER is the exception: it can reopen join admission (`joinNeed`), so it keeps the generic demand.
+ * Ending a share, taking back the new-passkey mark and removing a catalog only take access away and ask for nothing:
+ * they are `narrowing` too. Removing a BROWSER or a PERSON are the exceptions: each can leave `joinNeed` wider than
+ * it was (see the routes), so they keep the generic demand.
  *
  * THE CODE AND THE LINK LEAVE THIS MACHINE IN ONE ANSWER: the mint's. Nothing else here can return either —
  * the list view has no field for one, and the audit decorator reads only the named response fields.
@@ -48,7 +49,8 @@ const SHARING_USE: CapabilityDemand = { capability: 'sharing', axis: 'use' };
  * and NOT a generic per-action proof. The boundary cannot tell a widening from a narrowing, and with a zero-minute
  * step-up window it would spend the held proof before the handler claims the fresh `share-catalog` one that a mint
  * or the mark needs, so that act could never succeed; the handler asks that itself. Removing access asks nothing more.
- * NOT used by removing a person's browser: that can change `joinNeed` (docs/grants.md § Narrowing never asks again).
+ * NOT used by removing a person or a person's browser: either can change `joinNeed` (docs/grants.md § Narrowing
+ * never asks again).
  */
 const SHARING_NARROWING: CapabilityDemand = { ...SHARING_USE, narrowing: true };
 
@@ -193,6 +195,8 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-shares/:shareId/new-passkey',
       minimum: 'operator',
       caller: 'person',
+      // Narrowing: one shares write that only clears the mark, so a failed write leaves the mark set and a success
+      // moves `joinNeed` from `owner-approved` to something no looser (`first-browser` needs nothing either way).
       capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
@@ -215,6 +219,8 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-shares/:shareId',
       minimum: 'operator',
       caller: 'person',
+      // Narrowing: one shares write that ends that one invite. It touches no member and no other invite, so no other
+      // code's `joinNeed` changes, and a failed write leaves the invite live exactly as it was.
       capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
@@ -254,7 +260,11 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-members/:memberId',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_NARROWING,
+      // Generic, NOT narrowing: `revokeMember` writes the members file BEFORE it ends the person's invites. If the
+      // shares write fails and the daemon restarts before a retry, the person is gone while a spare `memberKind: new`
+      // invite is still live, and `joinNeed` turns from `proof` into `first-browser`: its holder is admitted with no
+      // proof of a passkey. That can widen who joins, so it takes a per-act proof like a widening.
+      capability: SHARING_USE,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'remove a person');
@@ -283,6 +293,10 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       path: '/v1/catalog-members/:memberId/catalogs/:catalogId',
       minimum: 'operator',
       caller: 'person',
+      // Narrowing: `removeCatalog` writes the members file (the person keeps every browser and their record) and then
+      // the shares. A failure between the two, even across a restart, leaves the person and their browsers as they
+      // were, so `joinNeed` is unchanged; the only residue is an invite that still names a catalog the person no
+      // longer has, which a retry removes and which grants nothing the person did not have before the call.
       capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
