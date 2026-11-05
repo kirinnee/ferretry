@@ -12,6 +12,7 @@ import {
   CATALOG_INSTALLS_MISPLACED,
   CATALOG_INSTALLS_UNPINNED_LINK,
   EMPTY_CATALOG_INSTALL_STATE,
+  installPlaceOf,
   linkSequenceKey,
 } from '../../../src/lib/catalog-installs/store.ts';
 
@@ -249,7 +250,68 @@ describe('the file of installs', () => {
           root: '/srv/./app/',
           folder: '.claude/./skills/pdf-tools',
         };
-        should(reasons(v2([projectSkill, clone], { [pinKey]: 1 }))).deepEqual([CATALOG_INSTALLS_DUPLICATE_INSTALL]);
+        // The respelled folder is not canonical, so the clone is refused for that as well as for being the same place.
+        should(reasons(v2([projectSkill, clone], { [pinKey]: 1 }))).deepEqual([
+          CATALOG_INSTALLS_DUPLICATE_INSTALL,
+          CATALOG_INSTALLS_MISPLACED,
+        ]);
+      });
+
+      it('refuses a parent-relative alias of a place already there, filed under a key and prefixes that match it', () => {
+        const alias = {
+          ...projectSkill,
+          installId: idOf('b'),
+          key: 'project:/srv/app/../app/.claude/skills/pdf-tools',
+          folder: '../app/.claude/skills/pdf-tools',
+        };
+        should(refused(alias)).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        should(reasons(v2([projectSkill, alias], { [pinKey]: 1 }))).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        const normalised = { ...alias, key: projectSkill.key };
+        should(reasons(v2([projectSkill, normalised], { [pinKey]: 1 }))).deepEqual([
+          CATALOG_INSTALLS_DUPLICATE_INSTALL,
+          CATALOG_INSTALLS_MISPLACED,
+        ]);
+      });
+
+      it('refuses a folder that is absolute, leaves its root, is the root itself, or is not canonical', () => {
+        for (const folder of ['/etc/skills/x', '..', '../x', '../../x', '.', 'a/../b', './a', 'a//b', 'a/'])
+          should(refused({ ...projectSkill, folder, key: `project:/srv/app/${folder}` })).deepEqual([
+            CATALOG_INSTALLS_MISPLACED,
+          ]);
+      });
+
+      it('refuses a project server whose record also names a folder (the clone that removal would take for a server)', () => {
+        const server = {
+          ...projectSkill,
+          installId: idOf('b'),
+          provenance: { ...projectSkill.provenance, kind: 'mcp', name: 'docs' },
+          key: 'project:/srv/app/.mcp.json#docs',
+          files: [{ path: '.mcp.json', sha256: SHA, entry: 'docs' }],
+        };
+        // folder is still .claude/skills/pdf-tools: a fake skill folder beside a real server entry.
+        should(refused(server)).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        should(refused({ ...server, key: projectSkill.key })).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        const original = { ...server, installId: idOf('a') };
+        const { folder: _folder, ...plainServer } = original;
+        should(reasons(v2([plainServer, server], { [pinKey]: 1 }))).deepEqual([
+          CATALOG_INSTALLS_DUPLICATE_INSTALL,
+          CATALOG_INSTALLS_MISPLACED,
+        ]);
+      });
+
+      it('refuses a runtime record that also names a root or a folder', () => {
+        const {
+          root: _root,
+          folder: _folder,
+          ...bare
+        } = {
+          ...projectSkill,
+          target: { scope: 'runtime', runtime: 'claude-main', profile: 'main' },
+          key: 'fleet:skills/pdf-tools',
+        };
+        should(refused(bare)).deepEqual([]);
+        should(refused({ ...bare, root: '/srv/app' })).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        should(refused({ ...bare, folder: '.claude/skills/pdf-tools' })).deepEqual([CATALOG_INSTALLS_MISPLACED]);
       });
 
       it('refuses a key that names some other place, and a project install that does not say where it is', () => {
@@ -296,6 +358,67 @@ describe('the file of installs', () => {
         should(refused(server)).deepEqual([]);
         should(refused({ ...server, key: 'fleet:skills/docs' })).deepEqual([CATALOG_INSTALLS_MISPLACED]);
       });
+    });
+
+    describe('every destination kind a daemon writes still loads, in both versions', () => {
+      const kinds = {
+        'a project skill': { ...record, key: 'project:/srv/app/.claude/skills/pdf-tools' },
+        'a project server': {
+          ...record,
+          folder: undefined,
+          key: 'project:/srv/app/.mcp.json#docs',
+          provenance: { ...record.provenance, kind: 'mcp', name: 'docs' },
+          files: [{ path: '.mcp.json', sha256: SHA, entry: 'docs' }],
+        },
+        'a runtime skill': {
+          ...record,
+          root: undefined,
+          folder: undefined,
+          target: { scope: 'runtime', runtime: 'claude-main', profile: 'main' },
+          key: 'fleet:skills/pdf-tools',
+        },
+        'a runtime server': {
+          ...record,
+          root: undefined,
+          folder: undefined,
+          target: { scope: 'runtime', runtime: 'claude-main', profile: 'main' },
+          key: 'fleet:mcp/docs',
+          provenance: { ...record.provenance, kind: 'mcp', name: 'docs' },
+        },
+      };
+      for (const [name, install] of Object.entries(kinds))
+        it(`reads ${name}`, () => {
+          const clean = JSON.parse(JSON.stringify(install)) as Record<string, unknown>;
+          should(
+            CatalogInstallStateV1Schema.safeParse({ ...EMPTY_CATALOG_INSTALL_STATE, installs: [clean] }).success,
+          ).be.true();
+          should(reasons(v2([clean], {}))).deepEqual([]);
+        });
+    });
+
+    it('knows where an install is, once, for the reader and for removal', () => {
+      const parsed = (install: unknown) => CatalogInstallRecordSchema.parse(JSON.parse(JSON.stringify(install)));
+      should(installPlaceOf(parsed(record))).deepEqual({
+        kind: 'folder',
+        key: 'project:/srv/app/.claude/skills/pdf-tools',
+        root: '/srv/app',
+        folder: '.claude/skills/pdf-tools',
+      });
+      const { folder: _folder, ...noFolder } = record;
+      should(
+        installPlaceOf(
+          parsed({ ...noFolder, root: '/srv/./app/', files: [{ path: '.mcp.json', sha256: SHA, entry: 'docs' }] }),
+        ),
+      ).deepEqual({ kind: 'server', key: 'project:/srv/app/.mcp.json#docs', root: '/srv/app', entry: 'docs' });
+      should(
+        installPlaceOf(parsed({ ...record, files: [{ path: '.mcp.json', sha256: SHA, entry: 'docs' }] })),
+      ).be.undefined();
+      should(installPlaceOf(parsed(noFolder))).be.undefined();
+      const { root: _root, ...noRoot } = record;
+      should(installPlaceOf(parsed(noRoot))).be.undefined();
+      const runtime = { ...noFolder, root: undefined, target: { scope: 'runtime', runtime: 'r', profile: 'p' } };
+      should(installPlaceOf(parsed(runtime))).deepEqual({ kind: 'runtime', key: 'fleet:skills/pdf-tools' });
+      should(installPlaceOf(parsed({ ...runtime, root: '/srv/app' }))).be.undefined();
     });
 
     it('does not hold a version 1 file to either rule: it has no pins and is upgraded, not refused', () => {

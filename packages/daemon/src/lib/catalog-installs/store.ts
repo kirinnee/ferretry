@@ -114,25 +114,55 @@ export const PROJECT_MCP_FILE = '.mcp.json';
 /** A path as the service files it: normalised, without a trailing slash. */
 export const withoutTrailingSlash = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
 
+/** Where an install really is. `key` is its one-line identity; the rest is what removal works from. */
+export type InstallPlace =
+  | { readonly kind: 'runtime'; readonly key: string }
+  | { readonly kind: 'server'; readonly key: string; readonly root: string; readonly entry: string }
+  | { readonly kind: 'folder'; readonly key: string; readonly root: string; readonly folder: string };
+
+/** A folder under a root that stays under it: relative, already canonical, never `.`, never leaving by `..`. */
+const isContainedFolder = (folder: string): boolean =>
+  folder !== '.' &&
+  !posix.isAbsolute(folder) &&
+  posix.normalize(folder) === folder &&
+  !folder.endsWith('/') &&
+  folder !== '..' &&
+  !folder.startsWith('../');
+
 /**
  * Where an install REALLY is, recomputed from what the record says it wrote (its root, folder, server entry, kind and
  * name), never from `key`. A project skill is its folder under its root; a project server is its entry in the root's
- * `.mcp.json`; a runtime item is its name in the fleet. `undefined` when the record does not say enough to tell.
+ * `.mcp.json`; a runtime item is its name in the fleet. The ONE function both the reader's validation and removal use,
+ * so a record can never be filed under a place other than the one removal will touch.
+ *
+ * `undefined` when the record does not say enough, or says two things: a project record names a root and exactly one
+ * of a server entry or a folder (both, or neither, is contradictory), a folder is canonical and stays under its root
+ * (so `../app/x` under `/work/app` is refused rather than filed as a second spelling of `x`: root and folder joined are already canonical), and a runtime
+ * record names neither a root nor a folder.
  */
-const placeOf = (install: CatalogInstallRecord): string | undefined => {
-  if (install.target.scope === 'runtime')
-    return `fleet:${install.provenance.kind === 'mcp' ? 'mcp' : 'skills'}/${install.provenance.name}`;
+export const installPlaceOf = (install: CatalogInstallRecord): InstallPlace | undefined => {
+  if (install.target.scope === 'runtime') {
+    if (install.root !== undefined || install.folder !== undefined) return undefined;
+    return {
+      kind: 'runtime',
+      key: `fleet:${install.provenance.kind === 'mcp' ? 'mcp' : 'skills'}/${install.provenance.name}`,
+    };
+  }
   if (install.root === undefined) return undefined;
   const root = withoutTrailingSlash(install.root);
-  if (install.folder !== undefined) return `project:${root}/${posix.normalize(install.folder)}`;
   const entry = install.files[0]?.entry;
-  return entry === undefined ? undefined : `project:${root}/${PROJECT_MCP_FILE}#${entry}`;
+  if (install.folder !== undefined) {
+    if (entry !== undefined || !isContainedFolder(install.folder)) return undefined;
+    return { kind: 'folder', key: `project:${root}/${install.folder}`, root, folder: install.folder };
+  }
+  if (entry === undefined) return undefined;
+  return { kind: 'server', key: `project:${root}/${PROJECT_MCP_FILE}#${entry}`, root, entry };
 };
 
 /**
  * What a version 2 document says against itself. Three rules, all fail closed:
  *  - an install id and a place each belong to ONE record, or replacing either would drop the other;
- *  - each record's `key` is the place it really wrote to ({@link placeOf}), so a variant spelling (`/./`) cannot
+ *  - each record's `key` is the place it really wrote to ({@link installPlaceOf}), so a variant spelling (`/./`) cannot
  *    make one physical install look like two, or hide it from the conflict check;
  *  - every link install is covered by a pin at or above its own sequence, or an older signed copy of that link
  *    would pass the sequence check and the next apply would write the pin back down.
@@ -152,7 +182,7 @@ export const installStateProblems = (state: {
     if (ids.has(install.installId) || keys.has(install.key)) duplicated = true;
     ids.add(install.installId);
     keys.add(install.key);
-    if (placeOf(install) !== install.key) misplaced = true;
+    if (installPlaceOf(install)?.key !== install.key) misplaced = true;
     const { provenance } = install;
     if (!isLinkProvenance(provenance)) continue;
     const pinned = state.linkSequences[linkSequenceKey(provenance.publisher, provenance.link.linkId)];

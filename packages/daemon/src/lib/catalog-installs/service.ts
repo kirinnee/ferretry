@@ -102,6 +102,7 @@ import {
   type CatalogInstallState,
   type CatalogInstallStore,
   CatalogInstallStateError,
+  installPlaceOf,
   installStateProblems,
   linkSequenceKey,
   PROJECT_MCP_FILE,
@@ -1168,18 +1169,26 @@ export class CatalogInstallService {
   }
 
   async #removeProject(record: CatalogInstallRecord): Promise<void> {
-    const root = record.root as string;
-    const first = record.files[0];
-    if (first?.entry !== undefined) {
+    // The place comes from the same function the reader files the record by, so removal can only touch the place the
+    // record is listed under; a record that names two places (or none) is refused, never guessed at.
+    const place = installPlaceOf(record);
+    if (place === undefined || place.kind === 'runtime')
+      return refuse(
+        'catalog_install_conflict',
+        `The record of ${record.destination} does not say consistently where it was written, so nothing was removed.`,
+      );
+    const { root } = place;
+    if (place.kind === 'server') {
+      const first = record.files[0] as CatalogInstalledFile;
       const { path, reading, document } = await this.#readProjectMcp(root);
       const servers = (document.mcpServers ?? {}) as Record<string, unknown>;
-      if (!Object.hasOwn(servers, first.entry)) return;
-      if ((await this.#hash(JSON.stringify(servers[first.entry]))) !== first.sha256)
+      if (!Object.hasOwn(servers, place.entry)) return;
+      if ((await this.#hash(JSON.stringify(servers[place.entry]))) !== first.sha256)
         refuse(
           'catalog_install_conflict',
-          `The server ${first.entry} in ${PROJECT_MCP_FILE} was edited on this machine since it was installed, so it was not removed.`,
+          `The server ${place.entry} in ${PROJECT_MCP_FILE} was edited on this machine since it was installed, so it was not removed.`,
         );
-      const { [first.entry]: _removed, ...rest } = servers;
+      const { [place.entry]: _removed, ...rest } = servers;
       try {
         await this.deps.mcpFiles.replace(path, renderMcpProjectFile({ ...document, mcpServers: rest }), reading.etag);
       } catch (error) {
@@ -1188,7 +1197,7 @@ export class CatalogInstallService {
       }
       return;
     }
-    const folder = record.folder as string;
+    const { folder } = place;
     const reading = await this.#inspectProjectSkill(root, folder);
     const { remove, expected } = this.#removal(record, reading, `${folder}/`, `${folder}/`);
     try {

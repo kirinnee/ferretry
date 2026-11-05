@@ -2,6 +2,7 @@ import { beforeAll, describe, it } from 'bun:test';
 import type { CatalogInstallPreview, SharedCatalogItem } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
+import type { CatalogInstallRecord } from '../../../src/lib/catalog-installs/store.ts';
 import { CatalogInstallRefusalError } from '../../../src/lib/catalog-installs/ports.ts';
 import { McpProjectFileError } from '../../../src/lib/session-mcp/project-file.ts';
 import { artifactItem, CATALOG_ID, mcpItem, newIdentity, skillItem } from '../../support/catalog-fixtures.ts';
@@ -846,6 +847,22 @@ describe('catalog install: removing', () => {
     await r.service.remove('project', installed.install.installId, GOVERNANCE, STEP_UP);
     const file = JSON.parse(r.mcp.text ?? '{}') as { mcpServers: Record<string, unknown> };
     should(Object.keys(file.mcpServers)).eql(['mine']);
+  });
+
+  it('should refuse to remove a record that names both a server and a folder, and touch nothing', async () => {
+    const r = rig();
+    const { installed } = await installMcp(r);
+    const before = r.mcp.text;
+    const [original] = r.store.state.installs;
+    r.store.state = {
+      ...r.store.state,
+      installs: [{ ...(original as CatalogInstallRecord), folder: '.claude/skills/fake' }],
+    };
+    const error = await refusal(r.service.remove('project', installed.install.installId, GOVERNANCE, STEP_UP));
+    should(error.code).equal('catalog_install_conflict');
+    should(error.message).match(/does not say consistently where it was written/u);
+    should(r.mcp.text).equal(before);
+    should(r.store.state.installs.length).equal(1);
   });
 
   it('should treat a server already gone from .mcp.json as removed', async () => {

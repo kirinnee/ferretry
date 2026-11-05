@@ -1771,7 +1771,11 @@ from a link never has a version 2 file.
 - **A version 2 file must agree with itself, or it is damaged.** Every link install needs a `linkSequences` pin at or
   above its own recorded sequence; no two installs share an install id or a place (`key`); and each install's `key`
   must be the place its own root, folder, server entry, kind and name say it wrote to (a respelling such as `/./`
-  cannot make one physical install look like two). A file that breaks a rule is refused on read
+  cannot make one physical install look like two). That place comes from ONE function that the reader and removal
+  both use, so removal can only touch the place a record is filed under. A record must name exactly one destination
+  shape: a project install has a root and either a server entry or a folder (never both, never neither), a runtime
+  install has neither root nor folder, and a folder is relative, canonical and stays under its root (`../app/x` beside
+  `x` is refused, not filed as a second spelling). A file that breaks a rule is refused on read
   (`500 catalog_installs_unreadable`, "contradicts itself", no word of the file in the message) and is never repaired or
   reset: otherwise a pin wiped from a damaged file would let an older signed copy of a link in, and the apply would
   write the pin back down; two records with one id would make replacing either one drop the other; and a cloned record
