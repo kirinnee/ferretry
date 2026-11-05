@@ -14,7 +14,7 @@ export function ReplaceKeyCommand({ name, write }: { readonly name: string; read
   const command = replaceKeyCommand(name);
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-1" data-replace-key-command={name}>
-      <code className="min-w-0 flex-1 select-all break-all rounded-control bg-code-bg px-2 py-1 font-mono text-cell text-code-fg">
+      <code className="min-w-0 flex-1 select-all break-all rounded-control border border-code-border bg-code-bg px-2 py-1 font-mono text-cell text-code-fg">
         {command}
       </code>
       <CopyButton label="Copy command" text={command} touch write={write} />
