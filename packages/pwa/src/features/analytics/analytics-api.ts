@@ -15,12 +15,20 @@ const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope):
   if (daemon.daemonId !== scope.daemonId) throw new Error('analytics scope must belong to the requested daemon');
 };
 
+const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+
+/**
+ * Two envelopes reach this boundary: the dispatcher's `{ error: "<message>", code }` and the relay
+ * link's handler-failure `{ error: { code, message } }`. Both are read into one refusal here so the
+ * page never has to know which carrier a machine answered through.
+ */
 const responseError = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
+  const nested = typeof body.error === 'object' && body.error !== null ? (body.error as Record<string, unknown>) : {};
   return new DaemonResponseError(
     response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
+    text(body.error) ?? text(nested.message) ?? `HTTP ${response.status}`,
+    text(body.code) ?? text(nested.code),
     // Kept so a refusal can say which Ferretry the machine runs: an older one is the usual reason a
     // query the others answer readably comes back as a bare 500.
     response.headers.get(FY_VERSION_HEADER) ?? undefined,

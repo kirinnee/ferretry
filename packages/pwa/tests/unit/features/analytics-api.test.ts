@@ -62,6 +62,29 @@ describe('analytics transport', () => {
     });
   });
 
+  it('reads the relay link’s nested handler-failure envelope as the same refusal', async () => {
+    // The relay link answers a different shape than the dispatcher: { error: { code, message } }.
+    await expect(
+      fetchAnalytics(
+        daemon,
+        undefined,
+        async () =>
+          new Response(
+            JSON.stringify({ error: { code: 'internal_error', message: 'the daemon failed to handle this request' } }),
+            { status: 500, headers: { 'x-fy-version': '4.270.0' } },
+          ),
+      ),
+    ).rejects.toMatchObject({
+      status: 500,
+      code: 'internal_error',
+      message: 'the daemon failed to handle this request',
+      daemonVersion: '4.270.0',
+    });
+    await expect(
+      fetchAnalytics(daemon, undefined, async () => new Response(JSON.stringify({ error: {} }), { status: 502 })),
+    ).rejects.toMatchObject({ status: 502, message: 'HTTP 502' });
+  });
+
   it('keeps the version a refusing daemon says it runs', async () => {
     // A machine on an older build answers a bare 500 where a current one refuses readably (B149), so the
     // version is what lets the page say which Ferretry that machine is on.

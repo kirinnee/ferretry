@@ -3,6 +3,7 @@ import type { AnalyticsResponse } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
 import { act, type ReactTestRenderer } from 'react-test-renderer';
 
+import { fetchAnalytics } from '../../../src/features/analytics/analytics-api.ts';
 import type { AnalyticsRequest } from '../../../src/features/analytics/analytics-custom-query.tsx';
 import {
   askEveryMachine,
@@ -698,6 +699,36 @@ describe('GlobalAnalyticsPage', () => {
     expect(shown).not.toContain('failed to handle this request');
     expect(shown).toContain('studio-mac did not answer: the daemon hit an unexpected error on this query.');
     expect(shown).toContain('Its sessions are not in this result.');
+  });
+
+  it('reads the relay link’s nested failure envelope as the same readable refusal (B149)', async () => {
+    const relayFailure = async () =>
+      new Response(
+        JSON.stringify({ error: { code: 'internal_error', message: 'the daemon failed to handle this request' } }),
+        { status: 500 },
+      );
+    const renderer = mount(
+      <GlobalAnalyticsPage
+        connection={daemonA}
+        machines={MACHINES}
+        view="query"
+        onNavigate={() => {}}
+        onQueryChange={() => {}}
+        now={NOW}
+        initialQuery="{}"
+        requestAnalytics={async (daemon, query) => {
+          if (daemon.daemonId === 'daemon-a') return await fetchAnalytics(daemon, query, relayFailure);
+          return rawResponse(FLEET_B, query);
+        }}
+      />,
+    );
+    // A real Response body resolves on the event loop, not within the microtask-only settle().
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+    await settle();
+    const shown = text(renderer);
+    expect(shown).not.toContain('HTTP 500');
+    expect(shown).not.toContain('failed to handle this request');
+    expect(shown).toContain('the daemon hit an unexpected error on this query');
   });
 
   it('reads the query a link brought', () => {
