@@ -583,3 +583,66 @@ describe('opening an item takes its alerts down (docs/notifications.md § When a
     await deck.unmount();
   });
 });
+
+describe('the open Inbox item’s steps', () => {
+  const withSteps = inboxCard(
+    agendaItem('A7', {
+      subject: 'Try it',
+      steps: ['Open the app', 'Press the button'],
+      ask: { kind: 'task' },
+    } as never),
+    sessionView('sess-5', { config: { teammate: 'kai', name: 'Try it' } as never }),
+    'Laptop',
+    daemonId('laptop'),
+  );
+
+  it('ticks a step on the machine the card came from when its checkbox is clicked (#B161)', async () => {
+    // Arrange
+    const ticks: unknown[][] = [];
+    const fake = fakeInbox();
+    const mounted = await mount(
+      <InboxHarness
+        cards={[withSteps]}
+        fake={fake}
+        reading={false}
+        render={inbox => (
+          <AgendaInboxPage
+            clock={fake.clock.now}
+            inbox={{
+              ...inbox,
+              connectionFor: () => laptop,
+              agendaClient: {
+                progress: (...args: unknown[]) => {
+                  ticks.push(args);
+                  return Promise.resolve();
+                },
+              } as never,
+            }}
+            initialOpen={withSteps.key}
+            now={NOW}
+            onNavigate={() => undefined}
+            phone
+            reducedMotion
+          />
+        )}
+      />,
+    );
+
+    // Act
+    const box = must(topView(mounted).querySelector<HTMLInputElement>('[data-agenda-tick="1"]'), 'the second step');
+    expect(box.disabled).toBe(false);
+    await interact(() => box.click());
+
+    // Assert
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0]?.slice(2)).toEqual(['A7', 1, true]);
+    await mounted.unmount();
+  });
+
+  it('leaves the steps read-only, never a live-looking box, when no machine can take the tick', async () => {
+    const mounted = await mount(page(fakeInbox(), [withSteps], { initialOpen: withSteps.key }));
+    const box = must(topView(mounted).querySelector<HTMLInputElement>('[data-agenda-tick="0"]'), 'the first step');
+    expect(box.disabled).toBe(true);
+    await mounted.unmount();
+  });
+});
