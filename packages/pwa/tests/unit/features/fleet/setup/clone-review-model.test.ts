@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'bun:test';
-import { CLONE_REVIEW_KINDS, CLONE_REVIEW_STALE } from '@ferretry/protocol';
+import {
+  CLONE_REVIEW_KINDS,
+  CLONE_REVIEW_STALE,
+  type CloneLoginTarget,
+  type CloneReviewItem,
+} from '@ferretry/protocol';
 import {
   applyHold,
   chooseItem,
+  compareItem,
   isStaleReview,
   lastCopiedWords,
   lineDiff,
+  linksOnly,
   loginChoices,
   loginTarget,
   nothingDiffers,
   reviewDecisions,
+  reviewedLoginTargets,
   reviewGroups,
   reviewItemTitle,
   reviewOutcomes,
@@ -19,8 +27,10 @@ import {
   unchosenBoth,
   updateCount,
   updateLabel,
+  updateWrites,
 } from '../../../../../src/features/fleet/setup/clone-review-model.ts';
 import { FULL_REVIEW, ITEMS, NOTHING_REVIEW, review, UPDATE_BUNDLE } from './clone-review-support.ts';
+import { bundle } from './setup-support.ts';
 
 describe('the update review, grouped', () => {
   it('lists the groups in reading order, each heading saying what will happen, and never an empty one', () => {
@@ -217,5 +227,215 @@ describe('the line diff', () => {
   it('gives up on documents too long to compare line by line, so the caller shows the whole file', () => {
     const long = Array.from({ length: 2500 }, (_, index) => `line ${String(index)}`).join('\n');
     expect(lineDiff(long, `${long}\nmore`)).toBeNull();
+  });
+});
+
+describe('what the button counts, besides the reviewed items', () => {
+  const NONE = { files: 0, controls: false, keys: 0 };
+
+  it('counts each settings file, the controls and each key the one apply handler writes', () => {
+    const kept = review({ items: [ITEMS.mineInstructions, ITEMS.goneRuntime] });
+    expect(updateWrites(kept, {}, {}, NONE)).toBe(0);
+    expect(updateWrites(kept, {}, {}, { files: 2, controls: false, keys: 0 })).toBe(2);
+    expect(updateWrites(kept, {}, {}, { files: 0, controls: true, keys: 0 })).toBe(1);
+    expect(updateWrites(kept, {}, {}, { files: 0, controls: false, keys: 3 })).toBe(3);
+    expect(updateWrites(kept, {}, {}, { files: 1, controls: true, keys: 2 })).toBe(4);
+  });
+
+  it('adds them to the reviewed items and the empty slots, never instead of them', () => {
+    expect(updateWrites(FULL_REVIEW, { 'settings/shared': 'take' }, {}, NONE)).toBe(
+      updateCount(FULL_REVIEW, { 'settings/shared': 'take' }, {}) + 0,
+    );
+    expect(updateWrites(FULL_REVIEW, { 'settings/shared': 'take' }, {}, { files: 1, controls: true, keys: 1 })).toBe(
+      updateCount(FULL_REVIEW, { 'settings/shared': 'take' }, {}) + 3,
+    );
+  });
+
+  it('knows a review that only links names: nothing differs and some were matched by name', () => {
+    expect(linksOnly(NOTHING_REVIEW)).toBe(true);
+    expect(linksOnly(review({ same: { count: 12, probable: 0 } }))).toBe(false);
+    expect(linksOnly(FULL_REVIEW)).toBe(false);
+  });
+});
+
+describe('the logins as the review settled them', () => {
+  const predicted = new Map<string, CloneLoginTarget>([
+    ['claude-work', { kind: 'new', id: 'claude-work-2' }],
+    ['codex-work', { kind: 'new', id: 'codex-work', candidates: ['codex-main', 'codex-spare'] }],
+    ['api', { kind: 'new', id: 'api' }],
+  ]);
+  const asking = review({
+    logins: [
+      { sourceId: 'claude-work', outcome: 'matched', target: 'claude-main' },
+      { sourceId: 'codex-work', outcome: 'ask', candidates: ['codex-main', 'codex-spare'] },
+      { sourceId: 'api', outcome: 'slot' },
+    ],
+  });
+
+  it('uses the login the review matched, over the generic rule', () => {
+    expect(reviewedLoginTargets(asking, {}, predicted).get('claude-work')).toEqual({
+      kind: 'matched',
+      id: 'claude-main',
+    });
+  });
+
+  it('reads a match with no target as the login of the same id', () => {
+    const bare = review({ logins: [{ sourceId: 'claude-work', outcome: 'matched' }] });
+    expect(reviewedLoginTargets(bare, {}, predicted).get('claude-work')).toEqual({
+      kind: 'matched',
+      id: 'claude-work',
+    });
+  });
+
+  it('uses the existing login the person picked, and keeps the predicted slot for an empty one or none', () => {
+    expect(reviewedLoginTargets(asking, { 'codex-work': 'codex-spare' }, predicted).get('codex-work')).toEqual({
+      kind: 'matched',
+      id: 'codex-spare',
+    });
+    expect(reviewedLoginTargets(asking, { 'codex-work': 'slot' }, predicted).get('codex-work')).toEqual(
+      predicted.get('codex-work'),
+    );
+    expect(reviewedLoginTargets(asking, {}, predicted).get('codex-work')).toEqual(predicted.get('codex-work'));
+  });
+
+  it('leaves a login that becomes a new slot as the generic rule named it', () => {
+    expect(reviewedLoginTargets(asking, {}, predicted).get('api')).toEqual({ kind: 'new', id: 'api' });
+  });
+});
+
+describe('this machine’s value beside the source’s', () => {
+  const HERE = bundle({
+    credentials: [],
+    components: {
+      settings: { shared: { flags: ['--verbose', '--quiet'] }, empty: { flags: [] } },
+      mcp: { notes: { command: 'notes-here' } },
+      modelSets: { claude: { models: ['opus'], default: 'opus' } },
+    },
+    profiles: { default: { layers: ['instructions/default', 'mcp/other'], compactAt: 80 } },
+    runtimes: { 'claude-default': { credential: 'claude-mine', profile: 'default', agent: true } },
+    files: [],
+  });
+  const SOURCE = bundle({
+    credentials: [],
+    components: {
+      settings: { shared: { flags: ['--verbose'] } },
+      modelSets: { claude: { models: ['opus', 'sonnet'], default: 'opus' } },
+    },
+    profiles: { default: { layers: ['instructions/default'] } },
+    runtimes: { 'claude-default': { credential: 'claude-work', profile: 'default', agent: true } },
+    files: [],
+  });
+  const both = (over: Partial<CloneReviewItem>): CloneReviewItem => ({
+    ref: 'settings/shared',
+    sourceRef: 'settings/shared',
+    kind: 'settings',
+    outcome: 'both',
+    match: 'key',
+    files: [],
+    ...over,
+  });
+  const entry = (label: string, text: string) => ({ label, text, document: false });
+  const rows = (item: CloneReviewItem, here: typeof HERE | null = HERE, source: typeof SOURCE | null = SOURCE) => {
+    const found = compareItem(item, here, source);
+    return found.kind === 'rows' ? found.rows : found.kind;
+  };
+
+  it('has nothing to compare for an item that only changed a document', () => {
+    expect(compareItem(ITEMS.bothHooks, HERE, SOURCE)).toEqual({ kind: 'none' });
+  });
+
+  it('says it could not read this machine, rather than guess, when its own setup is missing or unsound', () => {
+    expect(compareItem(ITEMS.bothSettings, null, SOURCE)).toEqual({ kind: 'unreadable' });
+    const unsound = bundle({ ...HERE, files: [{ path: 'components/x.md', content: 'orphan' }] });
+    expect(compareItem(ITEMS.bothSettings, unsound, SOURCE)).toEqual({ kind: 'unreadable' });
+  });
+
+  it('pairs what an item runs line by line, in order, and marks the lines that differ', () => {
+    expect(rows(ITEMS.bothSettings)).toEqual([
+      { label: 'Launch flag', here: '--verbose', source: '--verbose', differs: false },
+      { label: 'Launch flag', here: '--quiet', source: '--dangerously-skip-permissions', differs: true },
+    ]);
+  });
+
+  it('lists a line only the source has with no value here, and a line only this machine has with none there', () => {
+    const only = both({
+      runnable: {
+        reference: 'settings/shared',
+        kind: 'settings',
+        name: 'shared',
+        entries: [entry('Launch flag', '--verbose'), entry('Environment A', '1')],
+      },
+    });
+    expect(rows(only)).toEqual([
+      { label: 'Launch flag', here: '--verbose', source: '--verbose', differs: false },
+      { label: 'Environment A', here: null, source: '1', differs: true },
+      { label: 'Launch flag', here: '--quiet', source: null, differs: true },
+    ]);
+  });
+
+  it('leaves a whole document to its line diff, and cuts a very long value', () => {
+    const long = 'x'.repeat(500);
+    const item = both({
+      runnable: {
+        reference: 'settings/shared',
+        kind: 'settings',
+        name: 'shared',
+        entries: [
+          { label: 'Settings file components/settings/shared.json', text: '{}', document: true },
+          entry('Launch flag', long),
+        ],
+      },
+    });
+    const found = compareItem(item, HERE, SOURCE);
+    if (found.kind !== 'rows') throw new Error('expected rows');
+    expect(found.rows).toHaveLength(2);
+    expect(found.rows[0]?.source).toBe(`${'x'.repeat(400)}…`);
+  });
+
+  it('compares the named fields of a component, a profile and a runtime, each from its own table', () => {
+    expect(
+      rows(both({ ref: 'modelSets/claude', sourceRef: 'modelSets/claude', kind: 'modelSets', fields: ['models'] })),
+    ).toEqual([{ label: 'models', here: '["opus"]', source: '["opus","sonnet"]', differs: true }]);
+    expect(
+      rows(
+        both({
+          ref: 'profile/default',
+          sourceRef: 'profile/default',
+          kind: 'profile',
+          fields: ['layers', 'compactAt'],
+        }),
+      ),
+    ).toEqual([
+      {
+        label: 'layers',
+        here: '["instructions/default","mcp/other"]',
+        source: '["instructions/default"]',
+        differs: true,
+      },
+      { label: 'compactAt', here: '80', source: null, differs: true },
+    ]);
+    expect(
+      rows(
+        both({
+          ref: 'runtime/claude-default',
+          sourceRef: 'runtime/claude-default',
+          kind: 'runtime',
+          fields: ['login'],
+        }),
+      ),
+    ).toEqual([{ label: 'login', here: 'claude-mine', source: 'claude-work', differs: true }]);
+  });
+
+  it('reads the source’s side under the name the source calls the item, and says not set for what is absent', () => {
+    const renamed = both({
+      ref: 'modelSets/claude-2',
+      sourceRef: 'modelSets/claude',
+      kind: 'modelSets',
+      fields: ['default'],
+    });
+    expect(rows(renamed)).toEqual([{ label: 'default', here: null, source: 'opus', differs: true }]);
+    expect(rows(both({ ref: 'modelSets/claude', kind: 'modelSets', fields: ['models'] }), HERE, null)).toEqual([
+      { label: 'models', here: '["opus"]', source: null, differs: true },
+    ]);
   });
 });

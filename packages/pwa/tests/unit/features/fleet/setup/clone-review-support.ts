@@ -127,6 +127,15 @@ export const ITEMS = {
     match: 'key',
     files: [{ path: 'components/hooks/lint/run.sh', change: 'changed', lines: { added: 1, removed: 1 } }],
   },
+  bothProfile: {
+    ref: 'profile/default',
+    sourceRef: 'profile/default',
+    kind: 'profile',
+    outcome: 'both',
+    match: 'key',
+    files: [],
+    fields: ['layers'],
+  },
   mineInstructions: {
     ref: 'instructions/main',
     sourceRef: 'instructions/main',

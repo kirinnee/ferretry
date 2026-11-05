@@ -517,6 +517,15 @@ first because it decides what Changes shows (below).
     or the document is too long to compare, the whole file is shown instead.
   - **A relocated item says where it lands and why**: the file list shows the path it is written to and the
     item's note carries the reason ("… is also used by hooks/format here, so taking this writes it to …").
+  - **A both-changed item that is not a document shows both values** (§6b). A component that runs something
+    lists, beside the source's lines, the same lines from **this machine's own export** (`cloneRunnables` of
+    it): **Here (mine)** and the source, paired line by line (the nth launch flag with the nth launch flag), a
+    line only one side has reading "Not set" on the other, and a differing line saying "differs" in words as
+    well as colour. Any other item (a profile, a runtime, a model set) compares the top-level fields the
+    review named, from the two exports (a runtime's `login` is the `credential` it stores). Long values are
+    cut at 400 characters in the comparison; the full list of what it runs stays below it. When this
+    machine's own setup cannot be read, the sheet says so and shows only the source's side. A document is
+    compared by its line diff, not here.
   - **Dependencies follow** (L11): ticking a profile that needs a new component ticks the component; unticking
     the component unticks whatever needs it.
   - **Logins** (§4.7 K10–K18, L13). A matched login reads "_email or label_ — already here, no new sign-in".
@@ -524,10 +533,22 @@ first because it decides what Changes shows (below).
     empty slot**, which is the answer when nothing is picked). An unmatched sign-in is an empty slot to sign
     in to; an API-key login lists its variables in full. **There is no control that removes a login or touches
     its credentials**, and a Gone row is only ever an item of the setup, never a login.
-  - **The button** counts what will be written: "Update _n_ things" (chosen items, plus each login that becomes
-    an empty slot), "Nothing to copy" when the choices write nothing. When nothing differs there is no
-    section at all: one note ("Everything from _source_ is already here. Nothing to copy."), tone ok, and a
-    **Done** button.
+  - **The button** counts everything the one apply handler will do: the chosen items, each login that becomes
+    an empty slot, each ticked settings file, the agent controls when ticked, and each sealed key. "Nothing to
+    copy" means none of those, so a button that writes configuration never says it. When nothing differs
+    there is no section at all: one note ("Everything from _source_ is already here. Nothing to copy."),
+    tone ok, and a **Done** button.
+  - **An identical old copy is linked, not just closed.** When nothing differs but names were **matched by
+    name alone** (a copy made before origin links existed), the same note is followed by "_n_ items matched by
+    name" and the button reads **Finish and link _n_ items**. It sends the ordinary reviewed Update — the
+    review's fingerprint and no decision — so the daemon stamps the origin links and saves the record of the
+    copy, writes **no** asset document, seals no key and touches no login; a stale or refused apply is worded
+    as any other. Leaving through a bare Done would have saved no baseline, and the next edit on the source
+    would have read as a conflict (§14.3, L10).
+  - **A login the person chose is the login Done uses.** A matched login, and an existing login picked from
+    several that fit, are reused as they are; Done and the preview derive the sign-ins still to do from
+    those (and from the slots the copy actually made), never from the generic matcher alone, so a chosen
+    signed-in login is not asked for again and no link points at a slot that was never created.
   - **Apply names the review's fingerprint** (`reviewed`) with one decision per item. If this machine moved
     since, the refusal is shown as "Something changed since you reviewed. Review again." with a **Review
     again** button that reads the source and the review afresh (nothing is carried over: the both-changed
@@ -541,10 +562,11 @@ first because it decides what Changes shows (below).
   runtimes (E31). After an Update, **What changed** lists the outcome per group (added, updated, removed,
   kept as they were), and a held setting offers **Confirm**, as today.
 - **Screenshots**: `bun harness/clone-review-screenshot.tsx [out-dir]` renders every state (first copy, the
-  three-choice step, every group, both-changed unchosen and chosen, nothing to copy, a login to ask, a
-  relocated item, a stale review, Done with a held setting) at 390px and 1440px in the light and dark
-  themes, with invented data only (`tests/unit/features/fleet/setup/clone-review-support.ts`), and fails
-  on any sideways scroll.
+  three-choice step, every group, both-changed unchosen and chosen, two conflicts with this machine's value
+  beside the source's, nothing to copy, an identical old copy that finishes by linking, only kept items with
+  a settings file ticked, a login to ask, a relocated item, a stale review, Done with a held setting) at 390px
+  and 1440px in the light and dark themes, with invented data only
+  (`tests/unit/features/fleet/setup/clone-review-support.ts`), and fails on any sideways scroll.
 
 ### 4.8 Other flows the prototype covers
 

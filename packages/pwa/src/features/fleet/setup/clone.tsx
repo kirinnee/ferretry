@@ -88,19 +88,23 @@ import { CloneReviewSheet, RunnableEntries } from './clone-review.tsx';
 import {
   applyHold,
   chooseItem,
+  compareItem,
   lastCopiedWords,
+  linksOnly,
   type LoginPicks,
   loginChoices,
   nothingDiffers,
+  type OtherWrites,
   type ReviewOutcomeGroup,
   type ReviewPicks,
   reviewDecisions,
+  reviewedLoginTargets,
   reviewOutcomes,
   sameNames,
   isStaleReview,
   unchosenBoth,
-  updateCount,
   updateLabel,
+  updateWrites,
 } from './clone-review-model.ts';
 import {
   defaultRuntimeToPicker,
@@ -251,6 +255,8 @@ export function CloneMachine(props: CloneMachineProps) {
   const [loginPicks, setLoginPicks] = useState<LoginPicks>({});
   // This machine's own documents and logins, read only so a changed file can show a line diff against them.
   const [mineFiles, setMineFiles] = useState<ReadonlyMap<string, string>>(new Map());
+  // This machine's own export, read for the same reason: an item both sides changed shows its value here.
+  const [hereBundle, setHereBundle] = useState<FleetCloneBundle | null>(null);
   const [hereLogins, setHereLogins] = useState<readonly FleetCredentialView[]>([]);
   const [skip, setSkip] = useState<readonly string[]>([]);
   // Why there is no review although settings were ticked: this machine cannot review (older), or the review failed.
@@ -419,6 +425,9 @@ export function CloneMachine(props: CloneMachineProps) {
 
   /** Read the source's setup and the review of what a copy would change here. `advance` moves on from Source. */
   const readSource = (advance = true): void => {
+    // Only reachable with a source picked: Next waits for one, and Review again comes after reading one.
+    const from = pickedRecord;
+    if (from === undefined) return;
     changes.clear();
     setSourceIssue(null);
     setReading(true);
@@ -442,27 +451,28 @@ export function CloneMachine(props: CloneMachineProps) {
       ]);
       // What differs from an earlier copy, when there was one. A machine that cannot answer (an older
       // Ferretry) leaves the first-copy preview as it has always been.
-      const asked =
-        pickedRecord === undefined
-          ? null
-          : await target.read(client =>
-              reviewFleetClone(client, {
-                bundle: { ...exported.value },
-                source: { daemonId: String(pickedRecord.daemonId) },
-                names: { source: sourceName, target: machineName },
-              }),
-            );
-      const found = asked?.kind === 'done' ? asked.value : null;
+      const asked = await target.read(client =>
+        reviewFleetClone(client, {
+          bundle: { ...exported.value },
+          source: { daemonId: String(from.daemonId) },
+          names: { source: sourceName, target: machineName },
+        }),
+      );
+      const found = asked.kind === 'done' ? asked.value : null;
       const updatable = found?.mode === 'update';
       const nextMine = new Map<string, string>();
       let nextLogins: readonly FleetCredentialView[] = [];
+      let nextHere: FleetCloneBundle | null = null;
       if (updatable) {
         // Only to show a changed document against what is here: both are best-effort and never block the review.
         const [here, logins] = await Promise.all([
           target.read(client => readFleetExport(client)),
           target.read(client => readFleetCredentials(client)),
         ]);
-        if (here.kind === 'done') for (const file of here.value.files) nextMine.set(file.path, file.content);
+        if (here.kind === 'done') {
+          nextHere = here.value;
+          for (const file of here.value.files) nextMine.set(file.path, file.content);
+        }
         if (logins.kind === 'done') nextLogins = logins.value.credentials;
       }
       setReview(found);
@@ -470,6 +480,7 @@ export function CloneMachine(props: CloneMachineProps) {
       setLoginPicks({});
       setMineFiles(nextMine);
       setHereLogins(nextLogins);
+      setHereBundle(nextHere);
       setMode(updatable ? 'update' : 'alongside');
       setSpeedups(view.kind === 'done' ? view.value : null);
       setSourceSecrets(
@@ -532,10 +543,10 @@ export function CloneMachine(props: CloneMachineProps) {
       let summary: string | null = null;
       const outcomes: { item: CloneOutcomeItem; outcome: CloneItemOutcome }[] = [];
       const item = (id: CloneItemId): CloneItem => CLONE_ITEMS.find(candidate => candidate.id === id) as CloneItem;
+      // An Update names the review it was chosen from: this machine re-plans and refuses it if anything moved.
+      const asked = mode === 'update' && review !== null ? review : null;
       // This machine's logins BEFORE the copy: the sign-ins it already has, which the copy matches against.
       const before = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
-      // An Update names the review it was chosen from: this machine re-plans and refuses it if anything moved.
-      const asked = copiesFleet && mode === 'update' && review !== null ? review : null;
       // What the daemon reviewed key by key, to decide in the same apply as the items (an Update) or on its own first.
       const settingsApply =
         review === null || perKeyItems.length === 0
@@ -556,7 +567,7 @@ export function CloneMachine(props: CloneMachineProps) {
       // Settings the daemon reviewed key by key go first, in one update that decides settings and nothing else; the
       // files and controls it handled are not written again below. An Update's items and settings name ONE review,
       // so they are one apply below: a second would find this machine already moved.
-      if (review !== null && settingsApply !== null && asked === null) {
+      if (review !== null && settingsApply !== null && (asked === null || !copiesFleet)) {
         const applied = await changes.apply({
           kind: 'clone.import' as const,
           mode: 'update',
@@ -633,16 +644,20 @@ export function CloneMachine(props: CloneMachineProps) {
         await readHeld();
       }
       const credentials = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
+      // What each source sign-in became: the generic rule on the logins from before the copy, then what the
+      // review settled (a login matched here, or the one the person picked) over it.
+      const predicted: ReadonlyMap<string, CloneLoginTarget> =
+        before?.kind === 'done' ? cloneLoginTargets(bundle.credentials, before.value.credentials) : new Map();
       setResult({
         source: bundle.machine,
         summary,
         preview: copiesFleet ? preview : null,
         slots: credentials?.kind === 'done' ? cloneSlots(credentials.value.credentials, bundle.machine) : [],
-        logins: before?.kind === 'done' ? cloneLoginTargets(bundle.credentials, before.value.credentials) : new Map(),
+        logins: asked === null ? predicted : reviewedLoginTargets(asked, loginPicks, predicted),
         after: credentials?.kind === 'done' ? credentials.value.credentials : [],
         outcomes,
         sourceName,
-        updated: mode === 'update' && review !== null ? reviewOutcomes(review, picks) : [],
+        updated: asked === null ? [] : reviewOutcomes(asked, picks),
       });
       setCopying(false);
       setStepper(current => stepForward(withSteps(current, steps)));
@@ -661,7 +676,9 @@ export function CloneMachine(props: CloneMachineProps) {
   };
 
   const needs: readonly CloneNeed[] = cloneNeeds(chosen, bundle, files, speedups, held);
-  const keyNames = copyKeys ? keysToCopy(needs, sourceSecrets) : [];
+  // An update that only links names written nothing else: no key is sealed across for it.
+  const linking = mode === 'update' && review !== null && linksOnly(review);
+  const keyNames = copyKeys && !linking ? keysToCopy(needs, sourceSecrets) : [];
   // Secrets come only when a person picks them, by name, and the source asks for a passkey (docs/secrets.md).
   // The ones the copied settings need here start ticked.
   const neededSecrets = needs
@@ -767,7 +784,20 @@ export function CloneMachine(props: CloneMachineProps) {
     unavailable: Partial<Record<CloneItemId, string>>,
     problem: string | null,
   ): ReactNode => {
-    if (nothingDiffers(sheet))
+    const stale = isStaleReview(changes.refusal);
+    /** The stale-review note and the Review again action: an apply of this review can be refused as moved. */
+    const staleNote = stale ? (
+      <SetupNote live tone="warn" name="stale-review" title={CLONE_REVIEW_STALE}>
+        <span>Nothing was changed. Review again to see what is different now.</span>
+      </SetupNote>
+    ) : null;
+    const reviewAgainButton = stale ? (
+      <Button type="button" data-review-again="" disabled={reading} onClick={() => readSource(false)}>
+        {reading ? 'Reviewing…' : 'Review again'}
+      </Button>
+    ) : null;
+    if (nothingDiffers(sheet)) {
+      const matched = sheet.same.probable;
       return (
         <div className="flex min-w-0 flex-col gap-3" data-clone-step="preview" data-clone-review-state="nothing">
           <SetupNote live tone="ok" name="nothing-to-copy">
@@ -775,17 +805,55 @@ export function CloneMachine(props: CloneMachineProps) {
               Everything from <span className="font-mono">{sourceName}</span> is already here. Nothing to copy.
             </span>
           </SetupNote>
-          <Foot>
-            <Button type="button" variant="primary" data-clone-finish="" onClick={onDone}>
-              Done
-            </Button>
-          </Foot>
+          {matched === 0 ? (
+            <Foot>
+              <Button type="button" variant="primary" data-clone-finish="" onClick={onDone}>
+                Done
+              </Button>
+            </Foot>
+          ) : (
+            // An older copy has no record of where it came from: finishing writes only that link, so the next
+            // update shows what changed on the source instead of calling every edit a conflict.
+            <>
+              <SetupNote name="link-by-name" title={`${countWords(matched, 'item')} matched by name`}>
+                <span>
+                  They have the same name and the same content as on <span className="font-mono">{sourceName}</span>.
+                  Finishing links them to it, so the next update shows only what changed there. Nothing else is written.
+                </span>
+              </SetupNote>
+              {staleNote}
+              <ChangeApplyPanel
+                machineName={machineName}
+                authority={changes.authority}
+                busy={changes.busy || copying}
+                refusal={stale ? null : changes.refusal}
+                submitLabel={`Finish and link ${countWords(matched, 'item')}`}
+                busyLabel="Linking…"
+                onSubmit={copy}
+              >
+                {reviewAgainButton}
+              </ChangeApplyPanel>
+            </>
+          )}
         </div>
       );
+    }
     const unchosen = unchosenBoth(sheet, picks);
     const hold = applyHold(unchosen, sourceName);
-    const count = updateCount(sheet, picks, loginPicks);
-    const stale = isStaleReview(changes.refusal);
+    // Everything the one apply handler will do: the reviewed items, and the settings files, controls and keys
+    // it writes after them. A button that writes any of them is never labelled "Nothing to copy".
+    const others: OtherWrites = {
+      files: CLONE_SETTINGS_FILES.filter(item => chosen.includes(item.id) && files.has(item.file)).length,
+      controls: chosen.includes('controls') && sourceMachine !== null,
+      keys: keyNames.length,
+    };
+    const count = updateWrites(sheet, picks, loginPicks, others);
+    // The sign-ins still to do: one this machine already has, signed in, is not asked for again.
+    const stillNeeded = needsAfterCopy(
+      needs,
+      reviewedLoginTargets(sheet, loginPicks, cloneLoginTargets(bundle?.credentials ?? [], hereLogins)),
+      hereLogins,
+    );
     const theirFiles = new Map((bundle?.files ?? []).map(file => [file.path, file.content] as const));
     const keys = keysToCopy(needs, sourceSecrets);
     const filesOffered = CLONE_SETTINGS_FILES.some(item => summaries[item.id] !== undefined);
@@ -812,6 +880,7 @@ export function CloneMachine(props: CloneMachineProps) {
           mineFiles={mineFiles}
           theirFiles={theirFiles}
           sameNames={bundle === null ? null : sameNames(bundle, sheet)}
+          compare={item => compareItem(item, hereBundle, bundle)}
           keysAccessory={
             keys.length === 0 ? undefined : (
               <CloneKeysBox
@@ -843,7 +912,7 @@ export function CloneMachine(props: CloneMachineProps) {
           />
         ) : null}
         {settingsReview}
-        <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
+        <CloneNeedsList needs={stillNeeded} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
         {problem !== null ? (
           <SetupNote live tone="err" name="bundle-refused" title={`${sourceName}’s setup can’t be copied`}>
             <span>{problem}</span>
@@ -855,11 +924,7 @@ export function CloneMachine(props: CloneMachineProps) {
                 {hold}
               </p>
             )}
-            {stale ? (
-              <SetupNote live tone="warn" name="stale-review" title={CLONE_REVIEW_STALE}>
-                <span>Nothing was changed. Review again to see what is different now.</span>
-              </SetupNote>
-            ) : null}
+            {staleNote}
             <ChangeApplyPanel
               machineName={machineName}
               authority={changes.authority}
@@ -870,11 +935,7 @@ export function CloneMachine(props: CloneMachineProps) {
               disabled={unchosen.length > 0 || blockedBy !== null}
               onSubmit={copy}
             >
-              {stale ? (
-                <Button type="button" data-review-again="" disabled={reading} onClick={() => readSource(false)}>
-                  {reading ? 'Reviewing…' : 'Review again'}
-                </Button>
-              ) : null}
+              {reviewAgainButton}
             </ChangeApplyPanel>
           </div>
         )}

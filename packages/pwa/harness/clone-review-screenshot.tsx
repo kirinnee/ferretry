@@ -13,6 +13,9 @@
  *   both-unchosen      the same, nothing chosen for the both-changed items: Apply off, and said so
  *   both-chosen        both-changed items chosen, their changes opened
  *   nothing-to-copy    nothing differs: one note and Done
+ *   identical-legacy   an identical old copy matched by name: the note, what finishing links, and its button
+ *   two-conflicts      two both-changed items with this machine's value beside the source's, one chosen
+ *   kept-with-settings only kept items, a settings file ticked: the button counts it, not "Nothing to copy"
  *   logins-ask         a sign-in several logins here fit, a matched one, an empty slot, an API-key login
  *   relocated          an item that lands elsewhere, and why
  *   stale-review       the apply refused because the review moved, with Review again
@@ -101,7 +104,10 @@ const REVIEWS = {
   'update-all-groups': FULL_REVIEW,
   'both-unchosen': FULL_REVIEW,
   'both-chosen': review({ items: [ITEMS.bothSettings, ITEMS.bothHooks, ITEMS.newMcp], same: { count: 9, probable: 0 } }),
-  'nothing-to-copy': NOTHING_REVIEW,
+  'nothing-to-copy': review({ same: { count: 12, probable: 0 } }),
+  'identical-legacy': NOTHING_REVIEW,
+  'two-conflicts': review({ items: [ITEMS.bothSettings, ITEMS.bothProfile], same: { count: 8, probable: 0 } }),
+  'kept-with-settings': review({ items: [ITEMS.mineInstructions, ITEMS.goneRuntime], same: { count: 8, probable: 0 } }),
   'logins-ask': MORE_LOGINS,
   relocated: review({ items: [ITEMS.relocated, ITEMS.theirsHooks], same: { count: 9, probable: 1 } }),
   'stale-review': FULL_REVIEW,
@@ -118,18 +124,27 @@ const MORE_BUNDLE = bundle({
   ],
 });
 
+// This machine's own export: its guard script differs, its launch flags are fewer, and its default profile has a layer more.
 const HERE_BUNDLE = bundle({
   files: [{ path: 'components/hooks/guard/send.sh', content: HERE_GUARD_SCRIPT }],
-  components: { hooks: { guard: { directory: 'components/hooks/guard' } } },
-  profiles: {},
+  components: {
+    hooks: { guard: { directory: 'components/hooks/guard' } },
+    settings: { shared: { flags: ['--verbose'] } },
+  },
+  profiles: { default: { layers: ['instructions/default', 'mcp/other'] } },
   runtimes: {},
   credentials: [],
 });
 
+// Signed-in logins here, so a source sign-in that matches one is not asked for again.
+const signedIn = overrides => credentialView(overrides.id, {
+  ...overrides.rest,
+  status: { ...credentialView('x').status, word: 'ready', label: 'Ready' },
+});
 const HERE_LOGINS = credentials([
-  credentialView('claude-work', { email: 'me@work.example' }),
-  credentialView('codex-main', { harness: 'codex', email: undefined, label: 'Main' }),
-  credentialView('codex-spare', { harness: 'codex', email: undefined, label: 'Spare' }),
+  signedIn({ id: 'claude-work', rest: { email: 'me@work.example' } }),
+  signedIn({ id: 'codex-main', rest: { harness: 'codex', email: undefined, label: 'Main' } }),
+  signedIn({ id: 'codex-spare', rest: { harness: 'codex', email: undefined, label: 'Spare' } }),
 ]);
 
 const STACKS = { format: 'version-2', profiles: [
@@ -328,6 +343,19 @@ const walk = async (page: Page, state: string, scheme: string, vp: string): Prom
       await toChanges(page);
       await page.locator('[data-setup-note="nothing-to-copy"]').waitFor({ state: 'visible' });
       break;
+    case 'identical-legacy':
+      await toChanges(page);
+      await page.locator('[data-setup-note="link-by-name"]').waitFor({ state: 'visible' });
+      break;
+    case 'two-conflicts':
+      await toChanges(page);
+      await click(page, '[data-review-pick="settings/shared:keep"]');
+      await page.locator('[data-review-hold]').waitFor({ state: 'visible' });
+      break;
+    case 'kept-with-settings':
+      await toChanges(page);
+      await click(page, '[data-setup-choice="warden"]');
+      break;
     case 'logins-ask':
       await toChanges(page);
       await click(page, '[data-review-login-pick="codex-work:codex-main"]');
@@ -362,6 +390,9 @@ const STATES = [
   'both-unchosen',
   'both-chosen',
   'nothing-to-copy',
+  'identical-legacy',
+  'two-conflicts',
+  'kept-with-settings',
   'logins-ask',
   'relocated',
   'stale-review',

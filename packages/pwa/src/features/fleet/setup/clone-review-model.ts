@@ -18,9 +18,12 @@ import {
   CLONE_OUTCOME_CHOICES,
   CLONE_REVIEW_STALE,
   type CloneChoice,
+  type CloneLoginTarget,
   type CloneReviewItem,
   type CloneReviewKind,
   type CloneReviewLogin,
+  cloneBundleProblem,
+  cloneRunnables,
   type FleetCloneBundle,
   type FleetCloneReview,
 } from '@ferretry/protocol';
@@ -367,3 +370,157 @@ export const lineDiff = (before: string, after: string): readonly DiffLine[] | n
 /** "+3 −1 lines", for a file the review counted. */
 export const lineCountWords = (lines: { readonly added: number; readonly removed: number }): string =>
   `+${String(lines.added)} −${String(lines.removed)} ${lines.added + lines.removed === 1 ? 'line' : 'lines'}`;
+
+// ── What the button says: every write, not just the fleet's ──────────────────────────────────────
+
+/**
+ * What the shared apply handler writes besides the fleet: each ticked settings file the source shared,
+ * the agent controls, and each sealed key. The button counts these with the reviewed items, so a screen
+ * that writes configuration is never labelled "Nothing to copy".
+ */
+export interface OtherWrites {
+  /** Ticked settings files the source shared, which `copy` writes whole. */
+  readonly files: number;
+  /** The agent controls are ticked and the source answered, so `copy` proposes them. */
+  readonly controls: boolean;
+  /** API keys that will be sealed across. */
+  readonly keys: number;
+}
+
+/** How many things the button writes in all: the fleet's, then {@link OtherWrites}. */
+export const updateWrites = (
+  review: FleetCloneReview,
+  picks: ReviewPicks,
+  logins: LoginPicks,
+  others: OtherWrites,
+): number => updateCount(review, picks, logins) + others.files + (others.controls ? 1 : 0) + others.keys;
+
+/** The review lists nothing to write, but names were matched by name alone: finishing only links them. */
+export const linksOnly = (review: FleetCloneReview): boolean => nothingDiffers(review) && review.same.probable > 0;
+
+// ── Logins, as the copy settled them ─────────────────────────────────────────────────────────────
+
+/**
+ * What each source sign-in becomes on this machine, from the review the person saw and the logins they
+ * picked: a login already here (`matched`, or an explicit pick from several that fit) is reused as it is; the
+ * rest take the slot the generic rule predicts (`predicted`). The generic rule alone knows nothing of the
+ * review, so it would call a chosen login a new slot.
+ */
+export const reviewedLoginTargets = (
+  review: FleetCloneReview,
+  picks: LoginPicks,
+  predicted: ReadonlyMap<string, CloneLoginTarget>,
+): ReadonlyMap<string, CloneLoginTarget> => {
+  const settled = new Map(predicted);
+  for (const login of review.logins) {
+    const target = loginTarget(login, picks);
+    if (login.outcome === 'matched')
+      settled.set(login.sourceId, { kind: 'matched', id: login.target ?? login.sourceId });
+    else if (login.outcome === 'ask' && target !== NEW_SLOT)
+      settled.set(login.sourceId, { kind: 'matched', id: target });
+  }
+  return settled;
+};
+
+// ── Local values beside the source's ─────────────────────────────────────────────────────────────
+
+/** One line of a comparison: the value here and the value on the source, `null` when a side has none. */
+interface CompareRow {
+  readonly label: string;
+  readonly here: string | null;
+  readonly source: string | null;
+  readonly differs: boolean;
+}
+
+/** What the comparison for one both-changed item says. */
+export type ItemCompare =
+  | { readonly kind: 'none' }
+  /** This machine's own setup could not be read, so only the source's side is known. */
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'rows'; readonly rows: readonly CompareRow[] };
+
+/** A value long enough to hide the rest of the sheet is cut; the item's own entries show it in full. */
+const COMPARE_CLIP = 400;
+const clip = (text: string): string => (text.length > COMPARE_CLIP ? `${text.slice(0, COMPARE_CLIP)}…` : text);
+
+const isPlain = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const entityOf = (bundle: FleetCloneBundle, kind: CloneReviewKind, name: string): unknown =>
+  kind === 'profile'
+    ? bundle.profiles[name]
+    : kind === 'runtime'
+      ? bundle.runtimes[name]
+      : bundle.components[kind]?.[name];
+
+/** The top-level field of an item, as text; a runtime's `login` is the `credential` it stores. */
+const fieldText = (entity: unknown, field: string): string | null => {
+  if (!isPlain(entity)) return null;
+  const value = entity[field === 'login' ? 'credential' : field];
+  if (value === undefined) return null;
+  return clip(typeof value === 'string' ? value : JSON.stringify(value));
+};
+
+/** Each line keyed by its label and how many lines of that label came before it, so repeated labels pair in order. */
+const numbered = (
+  lines: readonly { readonly label: string; readonly text: string }[],
+): readonly (readonly [string, string, string])[] => {
+  const counts = new Map<string, number>();
+  return lines.map(line => {
+    const count = counts.get(line.label) ?? 0;
+    counts.set(line.label, count + 1);
+    return [`${line.label}\u0000${String(count)}`, line.label, line.text] as const;
+  });
+};
+
+/** Pairs two lists line by line, the nth line of a label with the nth line of the same label on the other side. */
+const pairRows = (
+  source: readonly { readonly label: string; readonly text: string }[],
+  here: readonly { readonly label: string; readonly text: string }[],
+): CompareRow[] => {
+  const mine = new Map(numbered(here).map(([key, , text]) => [key, text] as const));
+  const theirs = numbered(source);
+  const known = new Set(theirs.map(([key]) => key));
+  return [
+    ...theirs.map(([key, label, text]) => {
+      const local = mine.get(key);
+      return { label, here: local === undefined ? null : clip(local), source: clip(text), differs: local !== text };
+    }),
+    ...numbered(here)
+      .filter(([key]) => !known.has(key))
+      .map(([, label, text]) => ({ label, here: clip(text), source: null, differs: true })),
+  ];
+};
+
+/**
+ * This machine's value beside the source's for an item both sides changed (design §6b). A component that
+ * runs something compares what it runs, line by line, from this machine's own export; any other item
+ * compares the top-level fields the review named. Documents are compared as documents, by their line diff.
+ */
+export const compareItem = (
+  item: CloneReviewItem,
+  here: FleetCloneBundle | null,
+  source: FleetCloneBundle | null,
+): ItemCompare => {
+  const theirs = (item.runnable?.entries ?? []).filter(entry => !entry.document);
+  const fields = item.fields ?? [];
+  if (theirs.length === 0 && fields.length === 0) return { kind: 'none' };
+  if (here === null || cloneBundleProblem(here) !== null) return { kind: 'unreadable' };
+  if (theirs.length > 0) {
+    const mine = (cloneRunnables(here).find(runnable => runnable.reference === item.ref)?.entries ?? []).filter(
+      entry => !entry.document,
+    );
+    return { kind: 'rows', rows: pairRows(theirs, mine) };
+  }
+  const kind = item.kind;
+  const theirEntity = source === null ? undefined : entityOf(source, kind, reviewItemName(item.sourceRef ?? item.ref));
+  const hereEntity = entityOf(here, kind, reviewItemName(item.ref));
+  return {
+    kind: 'rows',
+    rows: fields.map(field => {
+      const mine = fieldText(hereEntity, field);
+      const their = fieldText(theirEntity, field);
+      return { label: field, here: mine, source: their, differs: mine !== their };
+    }),
+  };
+};

@@ -21,6 +21,7 @@ import {
   type Call,
   credentials,
   credentialView,
+  type FleetCredentialView,
   machineAnswer,
   machineView,
   STAGED,
@@ -57,15 +58,18 @@ const HERE_LOGINS = credentials([
 /** This machine's own export: its copy of the guard script differs from the other machine's. */
 const HERE_BUNDLE = bundle({
   files: [{ path: 'components/hooks/guard/send.sh', content: HERE_GUARD_SCRIPT }],
-  components: { hooks: { guard: { directory: 'components/hooks/guard' } } },
-  profiles: {},
+  components: {
+    hooks: { guard: { directory: 'components/hooks/guard' } },
+    settings: { shared: { flags: ['--verbose'] } },
+  },
+  profiles: { default: { layers: ['instructions/default', 'mcp/other'] } },
   runtimes: {},
   credentials: [],
 });
 
 type Answers = Record<string, unknown>;
 
-const daemons = (target: Answers = {}) => {
+const daemons = (target: Answers = {}, work: Answers = {}) => {
   const calls: { target: Call[]; work: Call[] } = { target: [], work: [] };
   const clients: Record<string, FleetClient> = {
     studio: scriptedClient(
@@ -82,7 +86,11 @@ const daemons = (target: Answers = {}) => {
       calls.target,
     ),
     work: scriptedClient(
-      { '/v1/fleet/machine': machineView({ name: 'work-linux', runtimeCount: 3 }), '/v1/fleet/export': UPDATE_BUNDLE },
+      {
+        '/v1/fleet/machine': machineView({ name: 'work-linux', runtimeCount: 3 }),
+        '/v1/fleet/export': UPDATE_BUNDLE,
+        ...work,
+      },
       calls.work,
     ),
   };
@@ -431,7 +439,9 @@ describe('CloneMachine · Update · Changes', () => {
   });
 
   it('shows one note and a Done button when nothing differs, with no empty section and nothing to apply', async () => {
-    const { createClient, calls } = daemons({ '/v1/fleet/clone/review': NOTHING_REVIEW });
+    const { createClient, calls } = daemons({
+      '/v1/fleet/clone/review': review({ same: { count: 12, probable: 0 } }),
+    });
     let done = 0;
     const screen = await render(createClient, () => {
       done += 1;
@@ -526,6 +536,12 @@ describe('CloneMachine · Update · Logins', () => {
       expect(ask.textContent).toContain('Use Spare');
       expect(ask.textContent).toContain('Add an empty slot');
       expect(options.map(option => option.checked)).toEqual([false, false, true]);
+      // Nothing is picked for the person, and the help says so; picking one says what happens instead.
+      expect(ask.querySelector('[data-review-login-help]')?.textContent).toContain('none is picked for you');
+      await click(screen.q('[data-review-login-pick="codex-work:codex-spare"]'), 'use Spare');
+      const help = must(screen.q('[data-review-login-ask="codex-work"] [data-review-login-help]'), 'help').textContent;
+      expect(help).toContain('Uses Spare as it is: no new sign-in, and no login is changed.');
+      expect(help).not.toContain('none is picked for you');
     } finally {
       await screen.view.unmount();
     }
@@ -545,6 +561,551 @@ describe('CloneMachine · Update · Logins', () => {
         .all('[data-setup-section="review-gone"] [data-review-item]')
         .map(row => row.getAttribute('data-review-item'));
       expect(gone).toEqual(['runtime/old-codex']);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+describe('CloneMachine · Update · An identical copy made before origin links existed', () => {
+  it('finishes by linking the names it matched, writes nothing else, and says so', async () => {
+    const { createClient, calls } = daemons({ '/v1/fleet/clone/review': NOTHING_REVIEW });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      expect(screen.text('[data-setup-note="nothing-to-copy"]')).toBe(
+        'Everything from work-linux is already here. Nothing to copy.',
+      );
+      expect(screen.text('[data-setup-note="link-by-name"]')).toContain('3 items matched by name');
+      expect(screen.text('[data-setup-note="link-by-name"]')).toContain('Nothing else is written.');
+      // Not a bare Done: leaving here would save no link, and the next edit on the source would read as a conflict.
+      expect(screen.q('[data-clone-finish]')).toBeNull();
+      expect(screen.submit()?.textContent).toBe('Finish and link 3 items');
+      expect(screen.submit()?.disabled).toBe(false);
+
+      await click(screen.submit(), 'Finish and link');
+
+      const bodies = changeBodies(calls.target);
+      expect(bodies).toHaveLength(1);
+      // The same apply as any Update: the reviewed fingerprint, and no decision because no item differs.
+      expect(bodies[0]?.change).toMatchObject({
+        kind: 'clone.import',
+        mode: 'update',
+        reviewed: 'fingerprint-1',
+        source: { daemonId: 'work' },
+        decisions: {},
+      });
+      expect(bodies[0]?.change).not.toHaveProperty('skip');
+      expect(bodies[0]?.change).not.toHaveProperty('logins');
+      expect(bodies[0]?.change).not.toHaveProperty('defaultRuntime');
+      // Nothing was written but that one reviewed change: no settings file, no key, no login.
+      const allowed = new Set(['/v1/fleet/clone/review', '/v1/fleet/proposals', APPLY_PATH]);
+      const sent = calls.target.filter(call => call.body !== undefined).map(call => call.path);
+      expect(sent.filter(path => !allowed.has(path))).toEqual([]);
+      expect(screen.step()).toBe('done');
+      expect(screen.q('[data-setup-section="update-outcomes"]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('seals no key for a link-only finish, even when the source holds one the copied setup names', async () => {
+    const named = {
+      ...UPDATE_BUNDLE,
+      components: {
+        ...UPDATE_BUNDLE.components,
+        mcp: { notes: { command: 'npx', args: ['-y', 'notes'], env: { TOKEN: `\${secret:NOTES_TOKEN}` } } },
+      },
+    };
+    const { createClient, calls } = daemons(
+      { '/v1/fleet/clone/review': NOTHING_REVIEW, '/v1/secrets': secretNames([]) },
+      { '/v1/fleet/export': named, '/v1/secrets': secretNames(['NOTES_TOKEN']) },
+    );
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.submit(), 'Finish and link');
+      expect(screen.step()).toBe('done');
+      // The source was only read, and this machine was sent the one reviewed change.
+      expect(calls.work.filter(call => call.body !== undefined)).toEqual([]);
+      expect(calls.target.filter(call => call.path.startsWith('/v1/secrets') && call.body !== undefined)).toEqual([]);
+      expect(screen.q('[data-clone-outcome="keys"]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('refuses a stale link in words with Review again, and words any other refusal as the daemon did', async () => {
+    let reviews = 0;
+    const stale = daemons({
+      '/v1/fleet/clone/review': () => {
+        reviews += 1;
+        return review({ ...NOTHING_REVIEW, fingerprint: `fingerprint-${String(reviews)}` });
+      },
+      '/v1/fleet/proposals': new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused'),
+    });
+    const screen = await render(stale.createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.submit(), 'Finish and link');
+      expect(screen.step()).toBe('preview');
+      expect(screen.text('[data-setup-note="stale-review"]')).toContain(CLONE_REVIEW_STALE);
+      expect(screen.q('[data-change-refusal]')).toBeNull();
+      await click(screen.q('[data-review-again]'), 'Review again');
+      expect(reviews).toBe(2);
+      expect(screen.q('[data-setup-note="stale-review"]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+
+    const other = daemons({
+      '/v1/fleet/clone/review': NOTHING_REVIEW,
+      '/v1/fleet/proposals': new FyHttpError('The names changed.', 409, 'fleet_change_refused'),
+    });
+    const again = await render(other.createClient);
+    try {
+      await toChanges(again);
+      await click(again.submit(), 'Finish and link');
+      expect(again.text('[data-change-refusal]')).toBe('The names changed.');
+      expect(again.q('[data-review-again]')).toBeNull();
+    } finally {
+      await again.view.unmount();
+    }
+  });
+});
+
+// ── What the button counts ───────────────────────────────────────────────────────────────────────
+
+const KEPT_ONLY = review({ items: [ITEMS.mineInstructions, ITEMS.goneRuntime], same: { count: 8, probable: 0 } });
+const sourceFile = (path: string, text: string) => ({
+  path,
+  absolutePath: `/home/me/.fy/config/${path}`,
+  kind: path.replace('.yaml', ''),
+  schema: path.replace('.yaml', ''),
+  exists: true,
+  text,
+  etag: `etag-${path}`,
+  state: 'ok',
+  issues: [],
+});
+const fileRoute = (path: string): string => `/v1/config/file?path=${encodeURIComponent(path)}`;
+const secretNames = (names: readonly string[]) => ({
+  v: 1,
+  health: 'ready',
+  secrets: names.map(name => ({
+    name,
+    createdAt: '2026-10-13T07:00:00.000Z',
+    updatedAt: '2026-10-13T07:00:00.000Z',
+  })),
+  references: [],
+});
+const WARDEN = `enabled: true\nlabel: \${secret:JEV_API_KEY}\n`;
+const settingsAnswers = (): { target: Answers; work: Answers } => ({
+  target: {
+    '/v1/fleet/clone/review': KEPT_ONLY,
+    '/v1/secrets': secretNames([]),
+    '/v1/speedups': { vault: 'ok', providers: [] },
+    [fileRoute('warden.yaml')]: sourceFile('warden.yaml', '# here\n'),
+    '/v1/config/file': (call: Call) => ({
+      path: (call.body as { path: string }).path,
+      etag: 'etag-written',
+      outcome: 'applied',
+    }),
+  },
+  work: {
+    '/v1/secrets': secretNames(['JEV_API_KEY']),
+    [fileRoute('warden.yaml')]: sourceFile('warden.yaml', WARDEN),
+  },
+});
+const tickItem = (screen: Screen, id: string) =>
+  screen.q(`[data-setup-choices="clone-items"] [data-setup-choice="${id}"] input`);
+
+describe('CloneMachine · Update · The button counts every write the apply makes', () => {
+  it('never says Nothing to copy while a ticked settings file, the agent controls or a key will be written', async () => {
+    const { target, work } = settingsAnswers();
+    const { createClient } = daemons(target, work);
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      // Only kept items: nothing is written, and the button says so.
+      expect(screen.submit()?.textContent).toBe('Nothing to copy');
+
+      // A settings file is written whole by the same handler, so it counts.
+      await click(tickItem(screen, 'warden'), 'tick warden');
+      expect(screen.q('[data-clone-keys-copy]')).not.toBeNull();
+      // The file and the key it names.
+      expect(screen.submit()?.textContent).toBe('Update 2 things');
+
+      await click(screen.q('[data-clone-keys-copy]'), 'leave the key');
+      expect(screen.submit()?.textContent).toBe('Update 1 thing');
+
+      await click(tickItem(screen, 'controls'), 'tick controls');
+      expect(screen.submit()?.textContent).toBe('Update 2 things');
+
+      await click(tickItem(screen, 'warden'), 'untick warden');
+      await click(tickItem(screen, 'controls'), 'untick controls');
+      expect(screen.submit()?.textContent).toBe('Nothing to copy');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('writes the ticked settings file when it is applied, under the label that said so', async () => {
+    const { target, work } = settingsAnswers();
+    const { createClient, calls } = daemons(target, work);
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(tickItem(screen, 'warden'), 'tick warden');
+      await click(screen.q('[data-clone-keys-copy]'), 'leave the key');
+      expect(screen.submit()?.textContent).toBe('Update 1 thing');
+      await click(screen.submit(), 'Update');
+      const written = calls.target.filter(call => call.path === '/v1/config/file' && call.body !== undefined);
+      expect(written.map(call => (call.body as { path: string }).path)).toEqual(['warden.yaml']);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── Logins the person chose ──────────────────────────────────────────────────────────────────────
+
+const ready = (id: string, overrides: Partial<FleetCredentialView> = {}): FleetCredentialView =>
+  credentialView(id, {
+    ...overrides,
+    status: { ...credentialView('x').status, word: 'ready', label: 'Ready' },
+  });
+const CODEX = { harness: 'codex', email: undefined } as const;
+const SIGNED_IN = credentials([
+  ready('claude-work', { email: 'me@work.example' }),
+  ready('codex-main', { ...CODEX, label: 'Main' }),
+  ready('codex-spare', { ...CODEX, label: 'Spare' }),
+]);
+const SPARE_NOT_SIGNED_IN = credentials([
+  ready('claude-work', { email: 'me@work.example' }),
+  ready('codex-main', { ...CODEX, label: 'Main' }),
+  credentialView('codex-spare', { ...CODEX, label: 'Spare' }),
+]);
+const signInNeeds = (screen: Screen) =>
+  screen.all('[data-clone-need^="sign-in:"]').map(need => need.getAttribute('data-clone-need'));
+
+describe('CloneMachine · Update · The login the person chose', () => {
+  it('asks for no sign-in the review already settled, before the update and on Done', async () => {
+    const { createClient, calls } = daemons({ '/v1/fleet/credentials': SIGNED_IN });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.q('[data-review-login-pick="codex-work:codex-main"]'), 'use Main');
+      await click(screen.q('[data-review-pick="settings/shared:keep"]'), 'Keep mine');
+      // claude-work is matched and signed in here, and codex-work is the signed-in login picked: neither is
+      // missing, so the preview does not say a sign-in is still to do.
+      expect(signInNeeds(screen)).toEqual([]);
+      await click(screen.submit(), 'Update');
+
+      expect(changeBodies(calls.target)[0]?.change).toMatchObject({ logins: { 'codex-work': 'codex-main' } });
+      expect(screen.step()).toBe('done');
+      // Done neither asks to sign in again nor links to a slot the copy never made.
+      expect(signInNeeds(screen)).toEqual([]);
+      expect(screen.q('[data-clone-need-sign-in]')).toBeNull();
+      expect(screen.q('[data-clone-slot]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('keeps the sign-in of a login that is not signed in, and links it to the login the person picked', async () => {
+    const { createClient } = daemons({ '/v1/fleet/credentials': SPARE_NOT_SIGNED_IN });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.q('[data-review-login-pick="codex-work:codex-spare"]'), 'use Spare');
+      await click(screen.q('[data-review-pick="settings/shared:keep"]'), 'Keep mine');
+      expect(signInNeeds(screen)).toEqual(['sign-in:codex-work']);
+      await click(screen.submit(), 'Update');
+      expect(screen.step()).toBe('done');
+      expect(signInNeeds(screen)).toEqual(['sign-in:codex-work']);
+      // The chosen login, not the slot the generic rule would have made.
+      expect(
+        screen
+          .q('[data-clone-need="sign-in:codex-work"] [data-clone-need-sign-in]')
+          ?.getAttribute('data-clone-need-sign-in'),
+      ).toBe('codex-spare');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('still names a new empty slot when none was picked', async () => {
+    let applied = false;
+    const slot = credentialView('codex-work', { ...CODEX, label: 'Work', clonedFrom: 'work-linux' });
+    const { createClient } = daemons({
+      [APPLY_PATH]: () => {
+        applied = true;
+        return EXECUTED;
+      },
+      '/v1/fleet/credentials': () => (applied ? credentials([...SIGNED_IN.credentials, slot]) : SIGNED_IN),
+    });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.q('[data-review-pick="settings/shared:keep"]'), 'Keep mine');
+      expect(signInNeeds(screen)).toEqual(['sign-in:codex-work']);
+      await click(screen.submit(), 'Update');
+      expect(
+        screen
+          .q('[data-clone-need="sign-in:codex-work"] [data-clone-need-sign-in]')
+          ?.getAttribute('data-clone-need-sign-in'),
+      ).toBe('codex-work');
+      expect(screen.all('[data-clone-slot]').map(link => link.getAttribute('data-clone-slot'))).toEqual(['codex-work']);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+describe('CloneMachine · Update · A login and its keys are never touched', () => {
+  it('sends only the reviewed change: no sign-out, no secret write and no credential route, whatever was chosen', async () => {
+    const { createClient, calls } = daemons({ '/v1/fleet/credentials': SIGNED_IN });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.q('[data-review-login-pick="codex-work:codex-main"]'), 'use Main');
+      await click(screen.q('[data-review-pick="settings/shared:take"]'), 'Use theirs');
+      await click(screen.q('[data-review-pick="runtime/old-codex"]'), 'remove old-codex');
+      await click(screen.submit(), 'Update');
+      expect(screen.step()).toBe('done');
+
+      // Every request that carried a body, on either machine.
+      const sent = [...calls.target, ...calls.work].filter(call => call.body !== undefined).map(call => call.path);
+      expect(sent.toSorted()).toEqual(['/v1/fleet/clone/review', '/v1/fleet/proposals', APPLY_PATH].toSorted());
+      // The one change names the existing login to use; it carries no login to remove and no secret.
+      const [body] = changeBodies(calls.target);
+      const change = JSON.stringify(body?.change);
+      expect(change).not.toContain('signOut');
+      expect(change).not.toContain('secrets');
+      expect(body?.change).toMatchObject({ logins: { 'codex-work': 'codex-main' } });
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── Here beside the source ───────────────────────────────────────────────────────────────────────
+
+const BOTH_FLAGS_ONLY = review({ items: [ITEMS.bothSettings, ITEMS.bothProfile], same: { count: 4, probable: 0 } });
+
+describe('CloneMachine · Update · A change both machines made shows both values', () => {
+  it('shows this machine’s launch flags beside the source’s, and which line differs', async () => {
+    const { createClient } = daemons({ '/v1/fleet/clone/review': BOTH_FLAGS_ONLY });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      const row = must(screen.q('[data-review-item="settings/shared"]'), 'settings conflict');
+      const rows = [...row.querySelectorAll('[data-review-compare-row]')];
+      expect(rows.map(line => line.getAttribute('data-differs'))).toEqual(['no', 'yes']);
+      expect(rows[0]?.textContent).toContain('Here (mine)');
+      expect(rows[0]?.textContent).toContain('work-linux');
+      // The line both machines hold, and the one only the source has.
+      expect(rows[0]?.querySelector('[data-review-compare-side="here"]')?.textContent).toContain('--verbose');
+      expect(rows[1]?.querySelector('[data-review-compare-side="here"]')?.textContent).toContain('Not set');
+      expect(rows[1]?.querySelector('[data-review-compare-side="source"]')?.textContent).toContain(
+        '--dangerously-skip-permissions',
+      );
+      expect(rows[1]?.textContent).toContain('differs');
+      // The full list of what it would run stays.
+      expect(row.querySelector('[data-review-runs]')?.textContent).toContain('--dangerously-skip-permissions');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('compares the fields of an item with nothing to run, and a side the item does not have as not set', async () => {
+    const { createClient } = daemons({ '/v1/fleet/clone/review': BOTH_FLAGS_ONLY });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      const row = must(screen.q('[data-review-item="profile/default"]'), 'profile conflict');
+      const line = must(row.querySelector('[data-review-compare-row="layers"]'), 'layers');
+      expect(line.getAttribute('data-differs')).toBe('yes');
+      expect(line.querySelector('[data-review-compare-side="here"]')?.textContent).toContain('mcp/other');
+      expect(line.querySelector('[data-review-compare-side="source"]')?.textContent).toContain('instructions/default');
+      expect(line.querySelector('[data-review-compare-side="source"]')?.textContent).not.toContain('mcp/other');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('says so when this machine’s own setup could not be read, and still shows the source’s side', async () => {
+    const { createClient } = daemons({
+      '/v1/fleet/clone/review': BOTH_FLAGS_ONLY,
+      '/v1/fleet/export': new FyHttpError('unreadable', 500, undefined),
+    });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      const row = must(screen.q('[data-review-item="settings/shared"]'), 'settings conflict');
+      expect(row.querySelector('[data-review-compare="unreadable"]')?.textContent).toContain(
+        'What is on studio-mac now couldn’t be read, so only work-linux’s version is shown.',
+      );
+      expect(row.querySelector('[data-review-runs]')?.textContent).toContain('--dangerously-skip-permissions');
+      expect(row.querySelector('[data-review-compare-row]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('shows no comparison for an item that is not both-changed, or one whose only change is a document', async () => {
+    const { createClient } = daemons({
+      '/v1/fleet/clone/review': review({ items: [ITEMS.newMcp, ITEMS.bothHooks], same: { count: 4, probable: 0 } }),
+    });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      expect(screen.q('[data-review-compare]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── The rest of the sheet ────────────────────────────────────────────────────────────────────────
+
+describe('CloneMachine · Update · Logins and keys, in every state', () => {
+  const KEYS_REVIEW = review({
+    items: [ITEMS.theirsHooks],
+    logins: [
+      { sourceId: 'claude-work', outcome: 'matched', target: 'codex-main' },
+      { sourceId: 'codex-work', outcome: 'slot' },
+      {
+        sourceId: 'api-env',
+        outcome: 'slot',
+        runnable: {
+          entries: [
+            { label: 'Harness', text: 'claude', document: false },
+            { label: 'Environment ANTHROPIC_API_KEY', text: '${secret:ANTHROPIC_API_KEY}', document: false },
+          ],
+        },
+      },
+    ],
+    keys: [
+      { name: 'NOTES_TOKEN', outcome: 'missing' },
+      { name: 'JEV_API_KEY', outcome: 'newer' },
+      { name: 'GROQ_API_KEY', outcome: 'both' },
+      { name: 'SAME_KEY', outcome: 'same' },
+    ],
+    settings: [
+      {
+        path: 'warden.yaml',
+        keys: [
+          { key: 'caps.daily', outcome: 'both', mine: '20', theirs: '40', loosens: true },
+          { key: 'triage', outcome: 'theirs', mine: 'off', theirs: 'jev' },
+        ],
+      },
+      { path: 'voice.yaml', keys: [] },
+    ],
+    same: { count: 4, probable: 0 },
+  });
+
+  it('says a login matched under another name is already here as that login, an API-key login copies as new, and a sign-in is an empty slot', async () => {
+    const { createClient } = daemons({ '/v1/fleet/clone/review': KEYS_REVIEW });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      expect(screen.text('[data-setup-row="login-claude-work"]')).toContain('Already here as Main, no new sign-in');
+      expect(screen.text('[data-setup-row="login-codex-work"]')).toContain('Adds an empty slot: sign in on studio-mac');
+      const api = screen.text('[data-setup-row="login-api-env"]');
+      expect(api).toContain('Copies as a new API-key login on studio-mac');
+      expect(api).toContain('Environment ANTHROPIC_API_KEY');
+      // A name, never a value.
+      expect(api).toContain('${secret:ANTHROPIC_API_KEY}');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('names each key that differs by what happens to it, hides the ones that are the same, and lists the settings keys that differ', async () => {
+    const { createClient } = daemons({ '/v1/fleet/clone/review': KEYS_REVIEW });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      expect(screen.text('[data-setup-row="key-NOTES_TOKEN"]')).toContain('Missing here: copied with its login');
+      expect(screen.text('[data-setup-row="key-JEV_API_KEY"]')).toContain('A newer one exists on work-linux');
+      expect(screen.text('[data-setup-row="key-GROQ_API_KEY"]')).toContain('Changed on both machines');
+      expect(screen.q('[data-setup-row="key-SAME_KEY"]')).toBeNull();
+      expect(screen.text('[data-setup-row="settings-warden.yaml"]')).toContain('2 settings differ: caps.daily, triage');
+      expect(screen.q('[data-setup-row="settings-voice.yaml"]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+describe('CloneMachine · Update · Other states of the sheet', () => {
+  it('words the Existing setup step without a date when the copy has no record of when it was made', async () => {
+    const { createClient } = daemons({
+      '/v1/fleet/clone/review': review({ ...FULL_REVIEW, source: { name: 'work-linux', verified: 'browser' } }),
+    });
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      expect(screen.text('[data-clone-step="existing"]')).toContain(
+        'studio-mac already has some of work-linux’s setup. What should happen this time?',
+      );
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('lists no Logins and keys group when the review has no login, key or settings key to say anything about', async () => {
+    const { createClient } = daemons({
+      '/v1/fleet/clone/review': review({ items: [ITEMS.newMcp], logins: [], same: { count: 3, probable: 0 } }),
+    });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      expect(screen.q('[data-review-group="logins"]')).toBeNull();
+      expect(screen.q('[data-review-item="mcp/notes"]')).not.toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('offers no Update for a setup this machine would refuse, and says why', async () => {
+    const orphan = { ...UPDATE_BUNDLE, files: [...UPDATE_BUNDLE.files, { path: 'components/lost.md', content: 'x' }] };
+    const { createClient, calls } = daemons({}, { '/v1/fleet/export': orphan });
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      const note = must(screen.q('[data-setup-note="bundle-refused"]'), 'refusal');
+      expect(note.textContent).toContain('work-linux’s setup can’t be copied');
+      expect(note.textContent).toContain('components/lost.md');
+      expect(screen.q('[data-change-submit]')).toBeNull();
+      expect(changeBodies(calls.target)).toEqual([]);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('starts over only when asked, with no reviewed fingerprint and no login named, and keeps every login', async () => {
+    const { createClient, calls } = daemons({ '/v1/fleet/credentials': SIGNED_IN });
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await screen.choose('replace');
+      await click(screen.q('[data-step-next]'), 'Next');
+      expect(screen.step()).toBe('preview');
+      expect(screen.submit()?.textContent).toBe('Replace and copy');
+      await click(screen.submit(), 'Replace and copy');
+
+      const [body] = changeBodies(calls.target);
+      expect(body?.change).toMatchObject({ kind: 'clone.import', mode: 'replace' });
+      expect(body?.change).not.toHaveProperty('reviewed');
+      expect(body?.change).not.toHaveProperty('logins');
+      expect(body?.change).not.toHaveProperty('decisions');
+      const sent = [...calls.target, ...calls.work].filter(call => call.body !== undefined).map(call => call.path);
+      expect(sent.filter(path => path.startsWith('/v1/secrets') || path.includes('credentials'))).toEqual([]);
     } finally {
       await screen.view.unmount();
     }

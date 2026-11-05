@@ -21,6 +21,7 @@ import { cn } from '../../../lib/class-names.ts';
 import { documentSize } from './clone-model.ts';
 import {
   type DiffLine,
+  type ItemCompare,
   type LoginPicks,
   lineCountWords,
   lineDiff,
@@ -147,6 +148,60 @@ function FileChange({
   );
 }
 
+// ── Here beside the source ───────────────────────────────────────────────────────────────────────
+
+/**
+ * What an item both sides changed holds on each side, line by line: the value here (the one "Keep mine"
+ * keeps) beside the source's (the one "Use …’s" writes). A row that differs says so in words, not only in
+ * colour. The item's full list of what it would run stays below, unchanged.
+ */
+function ComparePanel({
+  compare,
+  source,
+  machineName,
+}: {
+  readonly compare: ItemCompare;
+  readonly source: string;
+  readonly machineName: string;
+}) {
+  if (compare.kind === 'none') return null;
+  if (compare.kind === 'unreadable') {
+    return (
+      <span className="[overflow-wrap:anywhere] text-cell text-warn" data-review-compare="unreadable">
+        What is on {machineName} now couldn’t be read, so only {source}’s version is shown.
+      </span>
+    );
+  }
+  const side = (value: string | null, label: string, name: string) => (
+    <div className="flex min-w-0 flex-col gap-1" data-review-compare-side={name}>
+      <span className="text-meta text-muted">{label}</span>
+      {value === null ? <span className="text-cell text-faint">Not set</span> : <SetupCommand>{value}</SetupCommand>}
+    </div>
+  );
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-review-compare="">
+      <span className="text-meta font-semibold text-muted">Here and on {source}</span>
+      {compare.rows.map((row, index) => (
+        <div
+          key={`${row.label}-${String(index)}`}
+          className="flex min-w-0 flex-col gap-1"
+          data-review-compare-row={row.label}
+          data-differs={row.differs ? 'yes' : 'no'}
+        >
+          <span className="[overflow-wrap:anywhere] text-meta text-muted">
+            {row.label}
+            {row.differs ? ' · differs' : ''}
+          </span>
+          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+            {side(row.here, 'Here (mine)', 'here')}
+            {side(row.source, source, 'source')}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── One row ──────────────────────────────────────────────────────────────────────────────────────
 
 /** The choice a ticked and an unticked box stand for, by outcome. */
@@ -183,6 +238,7 @@ function ReviewItemRow({
   onPick,
   mineFiles,
   theirFiles,
+  compare,
 }: {
   readonly item: CloneReviewItem;
   readonly picks: ReviewPicks;
@@ -191,6 +247,7 @@ function ReviewItemRow({
   readonly onPick: (ref: string, choice: CloneChoice) => void;
   readonly mineFiles: ReadonlyMap<string, string>;
   readonly theirFiles: ReadonlyMap<string, string>;
+  readonly compare: ItemCompare;
 }) {
   const group = useId();
   const choice = chosenFor(item, picks);
@@ -220,6 +277,7 @@ function ReviewItemRow({
           Changed: <span className="font-mono">{item.fields.join(', ')}</span>
         </span>
       ) : null}
+      {item.outcome === 'both' ? <ComparePanel compare={compare} source={source} machineName={machineName} /> : null}
       {item.files.map(file => (
         <FileChange key={file.path} file={file} mine={mineFiles.get(file.path)} theirs={theirFiles.get(file.path)} />
       ))}
@@ -368,9 +426,18 @@ function LoginRow({
             </label>
           ))}
         </fieldset>
-        <span className="text-cell text-muted">
-          More than one login here fits, so none is picked for you. An empty slot needs a sign-in on {machineName}; no
-          login is changed.
+        <span className="text-cell text-muted" data-review-login-help="">
+          {chosen === NEW_SLOT ? (
+            <>
+              More than one login here fits, so none is picked for you. An empty slot needs a sign-in on {machineName};
+              pick a login to use it as it is instead. No login is changed.
+            </>
+          ) : (
+            <>
+              Uses <span className="font-mono">{targetName(chosen)}</span> as it is: no new sign-in, and no login is
+              changed.
+            </>
+          )}
         </span>
       </div>
     );
@@ -420,6 +487,8 @@ interface CloneReviewSheetProps {
   readonly mineFiles: ReadonlyMap<string, string>;
   /** The documents the other machine carried, by path. */
   readonly theirFiles: ReadonlyMap<string, string>;
+  /** This machine's value beside the source's for an item both sides changed. */
+  readonly compare: (item: CloneReviewItem) => ItemCompare;
   /** The names behind the "already the same" count, or `null` when they could not be told. */
   readonly sameNames: readonly string[] | null;
   /** Extra rows for the Logins and keys group (the sealed key copy). */
@@ -435,9 +504,14 @@ export function CloneReviewSheet(props: CloneReviewSheetProps) {
   const hasLogins = shownLogins.length > 0 || shownKeys.length > 0 || showSettings || keysAccessory !== undefined;
 
   const groupSection = (group: ReviewGroup) => (
-    <div key={group.id} className="mb-4 min-w-0 lg:break-inside-auto" data-review-group={group.id}>
+    // A short group stays whole in one column; a long one may flow, but its heading and hint stay with its first row.
+    <div
+      key={group.id}
+      className={cn('mb-4 min-w-0', group.items.length <= 2 ? 'break-inside-avoid' : 'lg:break-inside-auto')}
+      data-review-group={group.id}
+    >
       <SetupSection title={`${group.title} · ${String(group.items.length)}`} name={`review-${group.id}`}>
-        <p className="m-0 text-cell leading-base text-muted">{group.hint}</p>
+        <p className="m-0 break-after-avoid text-cell leading-base text-muted">{group.hint}</p>
         {group.items.map(item => (
           <ReviewItemRow
             key={item.ref}
@@ -448,6 +522,7 @@ export function CloneReviewSheet(props: CloneReviewSheetProps) {
             onPick={onPick}
             mineFiles={props.mineFiles}
             theirFiles={props.theirFiles}
+            compare={props.compare(item)}
           />
         ))}
       </SetupSection>
