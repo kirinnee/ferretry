@@ -14,7 +14,7 @@
 
 import type { ReplyFeedPort, ReplySignal } from './ports.ts';
 
-export type ReplyTurnState = 'working' | 'your-turn' | 'needs-input';
+type ReplyTurnState = 'working' | 'your-turn' | 'needs-input';
 
 /** The few things Live reads from the session view. */
 export interface ReplySnapshot {

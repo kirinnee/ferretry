@@ -6,7 +6,7 @@
 
 import type { VisibilityPort, WakeLockPort } from './ports.ts';
 
-export interface WakeSentinelLike {
+interface WakeSentinelLike {
   release(): Promise<void>;
 }
 

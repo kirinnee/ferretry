@@ -57,10 +57,10 @@ export type LivePhase =
   | 'reading'
   | 'hold'
   | 'paused';
-export type HoldReason = 'user' | 'typing' | 'send-failed' | 'needs-input';
-export type PauseReason = 'hidden';
+type HoldReason = 'user' | 'typing' | 'send-failed' | 'needs-input';
+type PauseReason = 'hidden';
 /** Why a turn ended: the endpointer's rule, or the person's "Send now". */
-export type EndReason = 'pause' | 'engine-hint' | 'max-turn' | 'user';
+type EndReason = 'pause' | 'engine-hint' | 'max-turn' | 'user';
 
 /** What the bar says besides the state: a refusal to start, why Live ended, or a take that came to nothing. */
 export type LiveNotice =
@@ -127,7 +127,7 @@ export interface TurnNumbers {
   readonly sendNow: boolean;
 }
 
-export type LiveTimerKind = 'settle' | 'idle';
+type LiveTimerKind = 'settle' | 'idle';
 
 /** What the world is asked to do. The machine never does any of it. */
 export type LiveEffect =

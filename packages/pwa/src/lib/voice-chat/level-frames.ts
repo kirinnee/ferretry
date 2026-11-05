@@ -13,7 +13,7 @@ import { FRAME_MS, rms } from '../stt/energy.ts';
 import type { MicMeterPort } from '../stt/level-monitor.ts';
 import type { ClockPort, LevelFramesPort } from './ports.ts';
 
-export interface AnalyserLike {
+interface AnalyserLike {
   fftSize: number;
   getFloatTimeDomainData(buffer: Float32Array<ArrayBuffer>): void;
 }

@@ -124,7 +124,7 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
   const meterOpen: Rig['meterOpen'] = { mode: 'ok' };
   let pendingMeter: (() => void) | null = null;
   let meterReleased = 0;
-  const speaker = { spoke: 0, stopped: 0, done: () => undefined as void };
+  const speaker: { spoke: number; stopped: number; done: () => void } = { spoke: 0, stopped: 0, done: () => undefined };
   let frameAt = 0;
 
   const meter: LevelMeterHandle = {
@@ -149,7 +149,10 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
         onFrame = frameHandler;
         if (meterOpen.mode === 'reject') return Promise.reject(new Error('no mic'));
         if (meterOpen.mode === 'null') return Promise.resolve(null);
-        if (meterOpen.mode === 'pending') return new Promise(resolve => void (pendingMeter = () => resolve(meter)));
+        if (meterOpen.mode === 'pending')
+          return new Promise(resolve => {
+            pendingMeter = () => resolve(meter);
+          });
         return Promise.resolve(meter);
       },
     },
@@ -159,7 +162,10 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
       shown: () => shown.at(-1) ?? '',
       send: () => {
         sends.push(clock.now());
-        if (sendResult.current === 'pending') return new Promise<SendOutcome>(resolve => void (releaseSend = resolve));
+        if (sendResult.current === 'pending')
+          return new Promise<SendOutcome>(resolve => {
+            releaseSend = resolve;
+          });
         return Promise.resolve(sendResult.current);
       },
     },
@@ -179,7 +185,9 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown 
             speaker.spoke += 1;
             speaker.done = onDone;
           },
-          stop: () => void (speaker.stopped += 1),
+          stop: () => {
+            speaker.stopped += 1;
+          },
         }
       : null,
     wakeLock: {

@@ -38,10 +38,10 @@ export function noticeCopy(notice: LiveNotice): string {
   }
 }
 
-export type LiveTone = 'calm' | 'active' | 'warn' | 'error';
+type LiveTone = 'calm' | 'active' | 'warn' | 'error';
 
 /** What a tap on the big (phone) button does. */
-export type LiveBigAction = 'hold' | 'resume' | 'skip' | 'none';
+type LiveBigAction = 'hold' | 'resume' | 'skip' | 'none';
 
 export interface LiveView {
   /** The bar is on screen: Live is on, or says why it is not. */
