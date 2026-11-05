@@ -9,6 +9,7 @@ import {
   locationFenceBody,
   Markdown,
   referenceHasTrustedOrigin,
+  tolerateAuthoringNoise,
 } from '../../src/components/markdown.tsx';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
@@ -246,6 +247,35 @@ describe('Markdown fy-render fences authored with noise (B162)', () => {
   test('should still refuse what the contract refuses', () => {
     should(drawn(squareFence().replace('---', '----'))).equal(0);
     should(drawn(squareFence().replace('type: svg', 'Type: svg'))).equal(0);
+  });
+
+  describe('payload after the boundary is verbatim', () => {
+    const payloadOf = (body: string): string => {
+      const parsed = parseFyRender(tolerateAuthoringNoise(body));
+      if (!parsed.ok) throw new Error(`expected a parse, got: ${parsed.reason}`);
+      return parsed.block.payload;
+    };
+
+    test('should keep CRLF and trailing spaces in an html payload', () => {
+      const payload = '<div>  \r\n  <p>hi</p>   \r\n</div>\r\n\r\n  ';
+      should(payloadOf(`type: html\r\nalt: x  \r\n---  \r\n${payload}`)).equal(payload);
+    });
+
+    test('should keep CRLF and trailing spaces in an svg payload', () => {
+      const payload =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4">  \r\n<rect width="4" height="4"/> \r\n</svg>  ';
+      should(payloadOf(`\r\n\r\ntype: svg \t\r\nalt: sq\r\n---\r\n${payload}`)).equal(payload);
+    });
+
+    test('should keep an LF payload and a payload that itself contains ---', () => {
+      const payload = '<p>a</p>  \n---  \n<p>b</p>\r\n';
+      should(payloadOf(`type: html\nalt: x\n---\n${payload}`)).equal(payload);
+    });
+
+    test('should keep a bare CR inside the payload', () => {
+      const payload = '<p>a\rb</p>';
+      should(payloadOf(`type: html\r\nalt: x\r\n---\r\n${payload}`)).equal(payload);
+    });
   });
 });
 
