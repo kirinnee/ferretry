@@ -3,6 +3,7 @@ import { AccountListSchema, type AgendaRecipeProposalRef, type SignInRuleView } 
 import { RecipeProposalCard } from '../../../src/features/input-request/recipe-proposal-card.tsx';
 import { RecipeProposalHost } from '../../../src/features/input-request/recipe-proposal-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { daemonSettingsPath } from '../../../src/lib/pages/routes.ts';
 import {
   RECIPE_APPROVED_WORDS,
   RECIPE_DECLINED_WORDS,
@@ -12,6 +13,7 @@ import {
   recipeDecideFailureWords,
   recipeProposalView,
 } from '../../../src/lib/recipe-proposal-card.ts';
+import { RouterProvider } from '../../../src/lib/router.tsx';
 import { suspendWarning } from '../../../src/lib/sign-in-rules.ts';
 import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
@@ -182,6 +184,35 @@ describe('the recipe card on the agenda', () => {
 
     expect(card.q('[data-recipe-failed]')?.textContent).toBe(RECIPE_STALE_WORDS);
     expect((card.q('[data-recipe-approve]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('should say the proposal is gone when the daemon no longer knows it at the moment of the answer', async () => {
+    const card = await draw({ failDecide: Object.assign(new Error('gone'), { code: 'unknown_proposal' }) });
+
+    await click(card.q('[data-recipe-decline]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+
+    expect(card.q('[data-recipe-done]')?.textContent).toBe(RECIPE_GONE_WORDS);
+    expect(card.q('[data-recipe-decline]')).toBeNull();
+  });
+
+  it('should link the host’s card to this machine’s Settings › Accounts inside the app router', async () => {
+    const machine = fakeClient((call: Call) => (call.path === '/v1/accounts' ? list() : {}));
+    const view = await mount(
+      <RouterProvider>
+        <RecipeProposalHost
+          connection={connection}
+          createClient={async () => machine.client}
+          item={{ recipeProposal: REF }}
+        />
+      </RouterProvider>,
+    );
+    mounted.push(view);
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+
+    expect(view.container.querySelector('[data-recipe-settings]')?.getAttribute('href')).toBe(
+      `${daemonSettingsPath('workshop')}#accounts`,
+    );
   });
 
   it('should say when the proposal is no longer waiting, and when it cannot be read', async () => {
