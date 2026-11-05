@@ -146,6 +146,9 @@ device starts at off and only a choice made after this shipped can turn it on.
 - **Cost:** passes run only while the microphone is open; the worker idles otherwise. Off, the take is
   transcribed once on Stop, as before.
 
+The loudness math behind "pause" (RMS, noise floor, quiet threshold) lives in `lib/stt/energy.ts`, shared with
+the [turn endpointer](#pause-detection-the-end-of-a-spoken-turn).
+
 `packages/pwa/harness/parakeet-near-live-smoke.ts` measures it in a real browser (manual, like the
 smoke below): it plays LibriSpeech dev-clean clips into the shipped transcriber in real time and
 reports pass times, how far live words trail the speech, Stop-to-final time and the word error rate
@@ -390,8 +393,130 @@ device), and a cooldown wait (a rate-limited call fails and keeps the raw words;
 one retry is the same call without the conversation after the provider found it too big, shown as two attempts.
 Browser speech cannot see inside the browser's recogniser, so it reports only how long Stop waited.
 
+## Pause detection (the end of a spoken turn)
+
+**Built as a library and measured; no screen uses it yet.** Live voice (a mode that listens, notices
+you stopped, sends, and reads the reply) needs one answer that does not depend on which speech engine a
+device uses: _has this person finished their turn?_ `lib/voice-chat/turn-endpointer.ts` is that answer.
+It is pure and total, takes **no clock and starts no timer**, and is fed the same 20 ms loudness frames
+the input meter already measures. Everything below is what it does and what was measured, so the
+defaults are not guesses.
+
+### What it does
+
+`endpointerFeed(state, { atMs, rms })` returns the next state and the events that frame caused. Each
+frame carries its own time, so a test feeds synthetic frames and asserts exact milliseconds.
+
+| Rule                        | Value                                                                     | Why                                                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Loud / quiet                | quiet is under 2.8 × the 10th-percentile level of the last 10 s, clamped  | the same floor rule as near-live (`lib/stt/energy.ts`, shared); a fan raises the bar instead of reading as speech              |
+| Highest the bar may rise to | RMS **0.03** (near-live uses 0.015)                                       | measured below: 0.015 loses fans from about 0.012 up, 0.05 does no better                                                      |
+| Speech starts after         | 200 ms of loud time                                                       | a click or a cough is shorter                                                                                                  |
+| A turn can end only after   | 400 ms of loud time in total                                              | a lone "uh" is retracted (`speech-cancel`), never sent                                                                         |
+| Hangover                    | 250 ms                                                                    | a breath between words is not a pause                                                                                          |
+| **Pause that ends a turn**  | **1.5 s Normal** · 0.9 s Quick · 2.5 s Thinker · any 0.8–4 s              | counted from the last loud frame; see the trade-off below                                                                      |
+| Engine hint                 | 600 ms of quiet ends a turn early, only after a pause is already detected | Web Speech "final" or Vosk "committed" can only **shorten** a pause; it never ends a turn while the level says you are talking |
+| Longest turn                | 120 s                                                                     | same as the dictation limit; the turn ends there whatever the level says                                                       |
+| Stalled stream              | frames more than 500 ms apart restart the quiet count                     | a throttled tab can delay the end of a turn, never cause one                                                                   |
+
+Events: `speech-start`, `speech-cancel` (a burst too short to be a turn), `pause` (quiet longer than the
+hangover), `resume` (the voice came back, so the pause is withdrawn) and `turn-end` (with the reason:
+`pause`, `engine-hint` or `max-turn`). A new turn gets a fresh state; `endpointerStart(pause, { floorLevels })`
+seeds the noise floor with levels heard before, so the first words of the next turn are not judged blind.
+
+The `lib/stt/energy.ts` module (RMS, frame levels, noise floor, quiet threshold) was lifted out of
+`near-live.ts` with no change in behaviour, so the two can never disagree about what "quiet" is.
+
+### How it was measured
+
+`packages/pwa/harness/turn-endpointer-noise.ts` (manual, never in CI; about 5 minutes) **generates** its
+audio, so there is nothing to download and no recording of any person anywhere:
+
+```sh
+cd packages/pwa && bun harness/turn-endpointer-noise.ts --turns 200 --seed 7 --explain
+# options: --max-quiet <rms>  --beds room,fan  --noise-minutes <n>  --no-fixtures
+```
+
+- **Speech** is synthetic: harmonic voices with vowel formants, syllable envelopes with shallow valleys,
+  fricative bursts, breaths between words, phrase pauses, and a last word that trails off in 30 % of
+  turns. Every word's true start and end is known. Talkers are 75 % normal (voiced RMS 0.05–0.12) and
+  25 % soft (0.025–0.05).
+- **Noise beds** are synthetic too: an empty room; a fan (low-passed noise, a 100/200/300 Hz hum and a slow
+  wobble); a café (distant babble and clinks); a TV (a competing voice and a steady chord).
+- **Fixtures** are three scripted pause habits: _steady_ (reads a prepared sentence), _coding_ (mostly
+  short, some thinking pauses) and _hesitant_ (long hesitations are common). The pause lengths are
+  **invented** to span those habits.
+- Each turn is 1.5 s of bed, the turn mixed into it, then 6 s of bed. The audio is cut into 20 ms
+  frames by the shipped `energy.ts` and fed to the real endpointer with all three presets.
+- **False send (noise)** — the turn ended although the person had really been quiet for less than the
+  pause (speech lost under the threshold). This is the endpointer's own error and what the 2 % target is
+  about. **Cut-off (by design)** — the person really paused at least as long as the setting, then spoke.
+  Nothing is wrong; it is the price of a setting, and it depends only on the invented pause habits.
+  **Late** — the turn ended more than 1 s after the last word plus the pause. **Missed** — it never ended
+  in the 6 s after the last word.
+
+**Normal (1.5 s), 200 turns per row, seed 7, 0.03 ceiling:**
+
+| Bed (RMS)  | False sends (noise) | Cut-offs (by design, _coding_) | Late > 1 s | Missed | Ended vs. last word + 1.5 s, p50 / p95 | False starts per hour, nobody talking |
+| ---------- | ------------------: | -----------------------------: | ---------: | -----: | -------------------------------------: | ------------------------------------: |
+| room 0.002 |                0.0% |                          22.5% |       0.0% |   0.0% |                            +5 / +16 ms |                                     0 |
+| fan 0.004  |                0.0% |                          17.5% |       0.0% |   0.0% |                            −2 / +13 ms |                                     0 |
+| fan 0.008  |                0.0% |                          25.0% |       0.0% |   0.5% |                           −16 / +11 ms |                                     0 |
+| fan 0.012  |                0.5% |                          23.0% |       0.0% |   2.5% |                            −22 / +5 ms |                                     0 |
+| fan 0.02   |                0.5% |                          24.0% |       0.5% |   0.5% |                           −20 / +10 ms |                                     0 |
+| café 0.008 |                0.0% |                           2.0% |      13.0% |  64.0% |                        +762 / +3036 ms |                                   258 |
+| café 0.015 |                0.0% |                           4.5% |      21.0% |  54.5% |                       +1117 / +3904 ms |                                   258 |
+| café 0.025 |                0.0% |                           0.0% |       0.0% | 100.0% |                                      – |                                    78 |
+| TV 0.01    |                0.0% |                           0.5% |       0.5% |  97.0% |                        +595 / +3528 ms |                                    66 |
+| TV 0.02    |                0.0% |                           0.5% |       2.0% |  96.5% |                       +1786 / +2473 ms |                                    66 |
+
+**Fan-like noise meets the target, café and TV do not.**
+
+- In the five room and fan rows at Normal the endpointer cut someone off by mistake in **2 of 1,000**
+  turns (0.2 %; the 95 % upper bound is about 0.7 %). Both were soft talkers (RMS 0.036–0.038) under the
+  two loudest fans, which is the real limit: a voice about as loud as the noise is not separable by
+  loudness. Ending lands within about ±25 ms of the ideal, and at most 0.5 % of turns are late.
+- **Quick is not as safe** (false sends 3.0 % at fan 0.012, 2.5 % at fan 0.02, same cause); Thinker is
+  safer (0.5 % and 0 %). The 2 % target is for Normal.
+- **The ceiling.** With near-live's 0.015 ceiling a 0.012 fan ended 30 % of turns more than a second
+  late and a 0.02 fan never ended one (150 turns each). At 0.05 a 0.02 fan left 24 % of turns
+  unfinished and false sends crept to 1.3 %. 0.03 was the best of the three.
+- **Café and TV babble is a known gap.** Babble is speech-shaped, so no loudness rule can tell it from
+  you: turns end late (13–21 % over a second) or never (55–100 %), and an unattended room starts 66–258
+  phantom "speech" an hour. It fails in the **safe direction**: it does not send early, it
+  waits, and the 120 s cap, **Send now** and the **End** button still work. A real fix needs a speech
+  detector rather than a loudness one (a small Silero VAD in the speech worker, plan §4.1) or a spoken
+  "send it" mode for noisy rooms. Neither is built.
+
+### Why 1.5 s is the default
+
+| Fixture (fan 0.008)           | Quick 0.9 s | Normal 1.5 s | Thinker 2.5 s |
+| ----------------------------- | ----------: | -----------: | ------------: |
+| _steady_ (prepared sentence)  |       10.5% |         0.0% |          0.0% |
+| _coding_ (thinking pauses)    |       54.5% |        25.0% |          6.0% |
+| _hesitant_ (long hesitations) |       81.5% |        53.5% |         27.0% |
+
+Cut-offs here are **properties of the three invented scripts, not measurements of people**; read them
+as the shape of the trade-off. Quick cuts off more than half of the _coding_ turns, which is why it is
+not the default. Thinker costs one extra second on **every** turn to bring the _coding_ cut-offs from 25 % to
+6 %, and Normal is the point where a prepared sentence is never cut (0 %). A cut-off is
+also recoverable: after the pause comes the 1.5 s send countdown (**Hold** / **Send now**), and
+speaking again during it cancels the send. Total time from your last word to "sent" is therefore the
+pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the defaults.
+
+### Still to do
+
+- **Real-device proof.** Everything above is synthetic audio. A real fan, a real café, accents and real
+  microphones (browser noise suppression and auto-gain change the levels) need an on-device check with
+  the in-app timing numbers (pause → STT done, countdown held/used), which tune the defaults.
+- **Café/TV** — see above.
+- **No screen yet.** The Live bar, the countdown and the loop that uses these events come in later slices.
+
 ## Not built yet
 
+- **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
+  only its end-of-turn detector exists so far — see [Pause detection](#pause-detection-the-end-of-a-spoken-turn).
+  There is no Live button, bar or loop yet.
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
   downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
   channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per
