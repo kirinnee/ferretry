@@ -319,14 +319,12 @@ packages/pwa/src/features/shared/shared-installs.ts # which skills and MCP serve
 packages/pwa/src/features/catalogs/local-skill-installs-api.ts # the copy-from-this-machine reads and installs, used by add-skills-page.tsx and local-skill-install-sheet.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/context-rail/machine-skills-model.ts # the On this machine rows, used by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
-# The Live voice end-of-turn detector (&F137 slice 3), built and measured before the Live loop hook (slice 4) consumes it.
-packages/pwa/src/lib/voice-chat/turn-endpointer.ts # pure pause detection over level frames, used so far only by its unit tests and harness/turn-endpointer-noise.ts; slice 4's use-live-voice.ts wires it into the composition root and this entry goes then
-packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; goes with the turn-endpointer entry above
+# The Live voice noise harness's judging rules (&F137 slice 3), dev tooling only.
+packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; not part of the shipped app
 
 # The speed benchmark's result schema and arithmetic: dev tooling, reached only from the one-click page (packages/pwa/speed-bench/main.ts, runner.ts) and the headless driver (packages/pwa/harness/stt-speed-bench-page.ts), neither of which is the app's composition root. It lives under src/lib so the unit tier's 100% ledger holds it. Delete this line if the app ever imports it.
 packages/pwa/src/lib/stt/speed-bench-report.ts # benchmark result schema, used by speed-bench/ and harness/stt-speed-bench-page.ts only; not part of the shipped app
 
-# The Live voice loop (&F137 slice 4), landing in pieces: the pure core first, the hook that wires it into the composer next.
-packages/pwa/src/lib/voice-chat/live-machine.ts # the pure loop reducer, used so far only by live-view.ts and its unit tests; use-live-voice.ts wires it into the app and this entry goes then
-packages/pwa/src/lib/voice-chat/live-view.ts # what the Live bar says, used so far only by its unit tests; components/live-voice-bar.tsx draws it and this entry goes then
-packages/pwa/src/lib/voice-chat/ports.ts # the interfaces Live voice touches the world through, used so far by the pure core's tests; the adapters and use-live-voice.ts import it and this entry goes then
+
+# The Live voice reply source (&F137 slice 4).
+packages/pwa/src/hooks/use-session-reply-source.ts # the session page's turn state as a ReplySource for Live voice, used by lib/pages/session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
