@@ -263,6 +263,10 @@ export function CloneMachine(props: CloneMachineProps) {
   // before (every item, login and key); for a copy of the settings, key by key what differs (design §5). One review,
   // so one fingerprint is what the apply names. `null` for a first copy that sends no settings.
   const [review, setReview] = useState<FleetCloneReview | null>(null);
+  // The newest Update review made with NO settings sent: its fingerprint names the fleet alone. Finish and link
+  // writes only that link and sends no settings, so it names this review, never the settings-bound one on screen
+  // (a ticked document, even one identical here, is part of that fingerprint and would make the link stale).
+  const [fleetReview, setFleetReview] = useState<FleetCloneReview | null>(null);
   // Whether any settings file the source shared differs from this machine, from the review asked with all of them:
   // an Update whose fleet part is empty still offers them, so a settings-only difference is not "nothing to copy".
   const [settingsDiffer, setSettingsDiffer] = useState(false);
@@ -427,6 +431,9 @@ export function CloneMachine(props: CloneMachineProps) {
    * settings review that could not be made leaves that review as it was and says why beside the settings.
    */
   const keepReview = (answer: SettingsReview): void => {
+    if (answer.kind === 'reviewed' && answer.review.mode === 'update' && answer.review.settings.length === 0) {
+      setFleetReview(answer.review);
+    }
     setReview(current =>
       answer.kind === 'reviewed'
         ? answer.review
@@ -554,6 +561,7 @@ export function CloneMachine(props: CloneMachineProps) {
         if (logins.kind === 'done') nextLogins = logins.value.credentials;
       }
       setReview(found);
+      setFleetReview(found?.mode === 'update' && found.settings.length === 0 ? found : null);
       setSettingsDiffer(differing);
       setPicks({});
       setLoginPicks({});
@@ -641,7 +649,7 @@ export function CloneMachine(props: CloneMachineProps) {
       const outcomes: { item: CloneOutcomeItem; outcome: CloneItemOutcome }[] = [];
       const item = (id: CloneItemId): CloneItem => CLONE_ITEMS.find(candidate => candidate.id === id) as CloneItem;
       // An Update names the review it was chosen from: this machine re-plans and refuses it if anything moved.
-      const asked = mode === 'update' && review !== null ? review : null;
+      const asked = mode === 'update' && review !== null ? (link ? (fleetReview ?? review) : review) : null;
       // This machine's logins BEFORE the copy: the sign-ins it already has, which the copy matches against.
       const before = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
       // What the daemon reviewed key by key, to decide in the same apply as the items (an Update) or on its own first.

@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'bun:test';
+import { analyseCloneSettings, reviewCloneSettings } from '@ferretry/fleet';
 import {
   CLONE_REVIEW_STALE,
   CLONE_SOURCE_SECRETS_LIMIT,
   CloneableSecretNameSchema,
+  FleetAccountChangeSchema,
   type CloneSettingsDoc,
   type FleetCloneReview,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
+import { controlsText } from '../../../../../src/features/fleet/setup/clone-settings-merge.ts';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import type { DaemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
@@ -1814,5 +1817,182 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
         await screen.view.unmount();
       }
     });
+  });
+
+  describe('when Finish and link is the primary action (reviewer M2)', () => {
+    // A daemon that does what `clone.import` does with a review: the fingerprint it recomputes is bound to the
+    // fleet AND the documents the request carries (`#reviewFingerprint`), using the real settings analysis and
+    // the real request schema. A request whose fingerprint names a different set of documents is refused as stale.
+    const THEIRS_CONTROLS = controlsText(machineView({ name: 'work-linux', runtimeCount: 3 }));
+    /** This machine's own documents: the Warden differs from the source's, the controls are identical. */
+    const HERE: Readonly<Record<string, string>> = { 'warden.yaml': '# here\n', controls: THEIRS_CONTROLS };
+    const analysed = (sent: readonly { path: CloneSettingsDoc; text: string }[]) =>
+      analyseCloneSettings(
+        sent.map(document => ({
+          path: document.path,
+          theirs: document.text,
+          mine: HERE[document.path] ?? '',
+          mineExists: true,
+        })),
+        undefined,
+      );
+    const bound = (sent: readonly { path: CloneSettingsDoc; text: string }[] | undefined): string =>
+      sent === undefined || sent.length === 0 ? 'fleet' : `fleet+${analysed(sent).fingerprint}`;
+    const daemon = (items: FleetCloneReview['items'] = []) =>
+      setup({
+        '/v1/fleet/clone/review': (call: Call): unknown => {
+          const sent = (call.body as { settings?: { path: CloneSettingsDoc; text: string }[] }).settings;
+          return review({
+            items,
+            same: { count: 12, probable: 3 },
+            settings: sent === undefined ? [] : reviewCloneSettings(analysed(sent)),
+            fingerprint: bound(sent),
+          });
+        },
+        '/v1/fleet/proposals': (call: Call): unknown => {
+          const change = FleetAccountChangeSchema.parse((call.body as { change: unknown }).change);
+          if (change.kind === 'clone.import' && change.reviewed !== bound(change.settings)) {
+            return new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused');
+          }
+          return STAGED;
+        },
+      });
+    /** Take every undecided key (the differing Warden has keys both machines hold), so Update can be pressed. */
+    const decideAll = async (screen: Screen): Promise<void> => {
+      for (const group of screen.all('[data-clone-key]')) {
+        const radios = [...group.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
+        if (radios.length > 0 && !radios.some(radio => radio.checked)) await click(radios[1] ?? null, 'take theirs');
+      }
+    };
+    const warden = (screen: Screen) => click(tickItem(screen, 'warden'), 'toggle warden');
+    const controls = (screen: Screen) => click(tickItem(screen, 'controls'), 'toggle controls');
+    const paths = (change: Record<string, unknown> | undefined) =>
+      ((change?.settings as { path: string }[] | undefined) ?? []).map(document => document.path);
+
+    /** Each way of ticking, what the screen then offers, and the documents the request must carry. */
+    const MATRIX: readonly {
+      readonly name: string;
+      readonly tick: (screen: Screen) => Promise<void>;
+      readonly button: string;
+      readonly carries: readonly string[];
+    }[] = [
+      { name: 'ticks nothing', tick: async () => undefined, button: 'Finish and link 3 items', carries: [] },
+      {
+        name: 'ticks only the document that differs',
+        tick: warden,
+        button: 'Update 2 things',
+        carries: ['warden.yaml'],
+      },
+      {
+        name: 'ticks only a document that is identical here',
+        tick: controls,
+        button: 'Finish and link 3 items',
+        carries: [],
+      },
+      {
+        name: 'ticks both',
+        tick: async screen => {
+          await warden(screen);
+          await controls(screen);
+        },
+        button: 'Update 2 things',
+        carries: ['warden.yaml', 'controls'],
+      },
+      {
+        name: 'ticks then unticks the document that differs',
+        tick: async screen => {
+          await warden(screen);
+          await warden(screen);
+        },
+        button: 'Finish and link 3 items',
+        carries: [],
+      },
+      {
+        name: 'ticks the identical one, then the one that differs',
+        tick: async screen => {
+          await controls(screen);
+          await warden(screen);
+        },
+        button: 'Update 2 things',
+        carries: ['warden.yaml', 'controls'],
+      },
+      {
+        name: 'ticks both, then unticks the one that differs',
+        tick: async screen => {
+          await controls(screen);
+          await warden(screen);
+          await warden(screen);
+        },
+        button: 'Finish and link 3 items',
+        carries: [],
+      },
+      {
+        name: 'ticks both, then unticks the identical one',
+        tick: async screen => {
+          await warden(screen);
+          await controls(screen);
+          await controls(screen);
+        },
+        button: 'Update 2 things',
+        carries: ['warden.yaml'],
+      },
+    ];
+
+    it('binds an Update that also changes the fleet to the identical document it ticked, and sends it', async () => {
+      const { createClient, calls } = daemon([ITEMS.newMcp]);
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        await controls(screen);
+        expect(screen.submit()?.disabled).toBe(false);
+        await click(screen.submit(), 'Update');
+
+        expect(screen.step()).toBe('done');
+        const change = changeBodies(calls.target)[0]?.change;
+        expect(paths(change)).toEqual(['controls']);
+        expect(change).toMatchObject({ mode: 'update', reviewed: bound(change?.settings as never) });
+        expect(change?.reviewed).not.toBe('fleet');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    for (const row of MATRIX) {
+      it(`sends a request this machine accepts when the person ${row.name}`, async () => {
+        const { createClient, calls } = daemon();
+        const screen = await render(createClient);
+        try {
+          await toChanges(screen);
+          await row.tick(screen);
+          await decideAll(screen);
+          expect(screen.submit()?.textContent).toBe(row.button);
+          expect(screen.submit()?.disabled).toBe(false);
+
+          await click(screen.submit(), row.button);
+
+          // The daemon took it: a refusal as stale would have left the person on this step.
+          expect(screen.step()).toBe('done');
+          const bodies = changeBodies(calls.target);
+          expect(bodies).toHaveLength(1);
+          const change = bodies[0]?.change;
+          expect(change).toMatchObject({
+            kind: 'clone.import',
+            mode: 'update',
+            reviewed: bound(change?.settings as never),
+          });
+          // The documents the request carries are exactly the ones whose review the person was shown.
+          expect(paths(change)).toEqual([...row.carries]);
+          if (row.carries.length === 0) {
+            // Metadata only: the link names the plain review and writes no setting and no file.
+            expect(change).toMatchObject({ reviewed: 'fleet' });
+            expect(change).not.toHaveProperty('settings');
+            expect(change).not.toHaveProperty('settingsDecisions');
+          }
+          expect(configWrites(calls.target)).toEqual([]);
+        } finally {
+          await screen.view.unmount();
+        }
+      });
+    }
   });
 });
