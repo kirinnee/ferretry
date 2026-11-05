@@ -146,6 +146,25 @@ describe('webAudioEarcons', () => {
     should(calls).containEql(`ramp:${EARCON_GAIN}`);
   });
 
+  it('unlock is silent when the context breaks while being read', () => {
+    const port = webAudioEarcons(function Ctor() {
+      return {
+        currentTime: 0,
+        destination: {},
+        get state(): string {
+          throw new Error('broken');
+        },
+        createOscillator: () => {
+          throw new Error('no');
+        },
+        createGain: () => {
+          throw new Error('no');
+        },
+      };
+    } as never);
+    port.unlock();
+  });
+
   it('is silent — never an error — with no Web Audio, a constructor that throws, or a context that breaks', () => {
     const none = webAudioEarcons(undefined);
     none.unlock();

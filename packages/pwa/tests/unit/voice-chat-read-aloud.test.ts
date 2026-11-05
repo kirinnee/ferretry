@@ -29,6 +29,22 @@ const scripted = (supported = true, voices: SpeakerVoice[] = [LOCAL]) => {
   return { port, requests, listeners, say: (event: SpeakerEvent) => listeners.at(-1)?.(event), stops: () => stops };
 };
 
+describe('createReadAloud — unlock', () => {
+  test('reaches the speaker, and a speaker that throws is no error', () => {
+    const calls: string[] = [];
+    const port: SpeakerPort = { ...scripted().port, unlock: () => void calls.push('unlock') };
+    createReadAloud({ speaker: port }).unlock();
+    expect(calls).toEqual(['unlock']);
+    const broken: SpeakerPort = {
+      ...scripted().port,
+      unlock: () => {
+        throw new Error('no audio');
+      },
+    };
+    expect(() => createReadAloud({ speaker: broken }).unlock()).not.toThrow();
+  });
+});
+
 describe('createReadAloud', () => {
   test('reads a message: captions, current sentence, then finished', () => {
     const synth = new FakeSynth([voice('Samantha', 'en-US', { isDefault: true })]);

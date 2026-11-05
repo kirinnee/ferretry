@@ -1251,6 +1251,18 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
     should(r.takes.filter(take => !take.cancelled).length).equal(1);
   });
 
+  it('a reading asked for with no reader to do it ends as "no voice" and Live listens again', async () => {
+    // Only the machine believes it can read (a start event says so); the runner has no reader.
+    const r = rig();
+    r.runner.dispatch({ type: 'start', atMs: 0, canSend: true, visible: true, canRead: true });
+    await r.settle();
+    await working(r);
+    r.signal({ kind: 'done' });
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.runner.state.notice).deepEqual({ kind: 'read-failed', why: 'unavailable' });
+  });
+
   it('ending Live while reading stops the speech', async () => {
     const r = await worked();
     r.signal({ kind: 'done' });
