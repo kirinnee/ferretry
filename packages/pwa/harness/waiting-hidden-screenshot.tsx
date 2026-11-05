@@ -55,6 +55,9 @@ const records: Record<string, object> = {
   failed: { fate: 'timed_out', retryable: true, ...queue('failed', { failure: 'it never reached the ferret' }) },
   queued: { fate: 'accepted', ...queue('queued', { waitReason: 'busy' }) },
   held: { fate: 'accepted', from: 'tomi', fromName: 'tomi', ...queue('queued') },
+  // The chat twin of the queue fixture's second held note (avary, q3), so both surfaces count the
+  // same waiting set: four here, four rows on the Queue page, one story.
+  held2: { fate: 'accepted', from: 'avary', fromName: 'avary', ...queue('queued') },
   saved: {
     fate: 'accepted',
     queue: { state: 'queued', stateAt: at, revision: 0 },
@@ -66,6 +69,7 @@ const texts: Record<string, string> = {
   failed: 'This one failed, so it stays in the chat',
   queued: 'Queued on the machine: hidden here',
   held: 'A ferret’s held note: hidden here',
+  held2: 'Another ferret’s held note: hidden here',
   saved: 'Saved on this device only: hidden here',
 };
 const all = Object.keys(records).map(key => {
