@@ -23,7 +23,12 @@ const memory = () => {
 function Probe({ store }: { readonly store: LiveVoiceSettingsStore | null }) {
   const { settings, update, persisted } = useLiveVoiceSettings(store);
   return (
-    <button data-on={String(settings.autoRead)} data-persisted={String(persisted)} onClick={() => update({ autoRead: true })} type="button">
+    <button
+      data-on={String(settings.autoRead)}
+      data-persisted={String(persisted)}
+      onClick={() => update({ autoRead: true })}
+      type="button"
+    >
       {settings.whatToRead}
     </button>
   );
@@ -35,7 +40,7 @@ const storageEvent = (key: string | null): void => {
 };
 
 describe('useLiveVoiceSettings', () => {
-  test('another tab\'s write to the settings key, or a whole-storage clear, is picked up; other keys are not', async () => {
+  test("another tab's write to the settings key, or a whole-storage clear, is picked up; other keys are not", async () => {
     const storage = memory();
     const store = new LiveVoiceSettingsStore(storage);
     mounted = await mount(
@@ -67,7 +72,7 @@ describe('useLiveVoiceSettings', () => {
   test('a write through the hook reaches the store and the screen', async () => {
     const store = new LiveVoiceSettingsStore(memory());
     mounted = await mount(<Probe store={store} />);
-    await interact(() => button(mounted?.container as HTMLElement).querySelector('button') ?? (mounted?.container.querySelector('button') as HTMLButtonElement).click());
+    await interact(() => button(mounted?.container as HTMLElement).click());
     expect(store.get().autoRead).toBe(true);
     expect(button(mounted.container).dataset['on']).toBe('true');
   });
