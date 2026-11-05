@@ -8,33 +8,38 @@ import { mount } from '../../../support/dom.ts';
 const ISOLATED = { ...NO_SIGNALS, crossOriginIsolated: true, hardwareConcurrency: 8, deviceMemoryGb: 8 };
 
 describe('<SpeedLine>', () => {
-  it('says which path the chosen engine runs on, and why, as plain read-only text', async () => {
+  it('says how fast the chosen engine runs, what that means, and why, as plain read-only text', async () => {
     const view = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} />);
     const section = view.container.querySelector('section[aria-label="Speed"]');
-    expect(section?.textContent).toContain('Using: single-thread WebAssembly');
-    expect(section?.textContent).toContain('More threads need a browser feature this page does not turn on.');
+    expect(section?.textContent).toContain('Speech speed: standard (one core)');
+    expect(section?.textContent).toContain('Your words appear a moment after you stop talking.');
+    expect(section?.textContent).toContain('A faster mode (several cores) is not available on this site yet');
     expect(view.container.querySelector('button, input, [role="switch"]')).toBeNull();
   });
 
-  it('says multi-thread when the device is isolated and the engine can use threads', async () => {
+  it('says fast when the device is isolated and the engine can use threads', async () => {
     const planner = new SpeedPlanner({ signals: ISOLATED, memory: new SpeedMemoryStore(null), now: () => 1 });
     const view = await mount(<SpeedLine engine="whisper-base-en" planner={planner} />);
-    expect(view.container.textContent).toContain('Using: multi-thread WebAssembly');
-    expect(view.container.textContent).toContain('The fastest option this device offers.');
+    expect(view.container.textContent).toContain('Speech speed: fast (several cores)');
+    expect(view.container.textContent).toContain('about 2–3 times faster than standard');
+    expect(view.container.textContent).toContain('This is the fastest mode this device offers.');
   });
 
   it('says why an engine stays on one thread when it has nothing faster', async () => {
     const planner = new SpeedPlanner({ signals: ISOLATED, memory: new SpeedMemoryStore(null), now: () => 1 });
     const view = await mount(<SpeedLine engine="vosk-small-en" planner={planner} />);
-    expect(view.container.textContent).toContain('Using: single-thread WebAssembly');
-    expect(view.container.textContent).toContain('This engine runs on one thread.');
+    expect(view.container.textContent).toContain('Speech speed: standard (one core)');
+    expect(view.container.textContent).toContain('This voice has no faster mode.');
   });
 
   it('says a failed path is skipped, after one failed', async () => {
     const planner = new SpeedPlanner({ signals: ISOLATED, memory: new SpeedMemoryStore(null), now: () => 1 });
     planner.threadsFailed('parakeet');
     const view = await mount(<SpeedLine engine="parakeet" planner={planner} />);
-    expect(view.container.textContent).toContain('A faster option failed on this device, so it is skipped for now.');
+    expect(view.container.textContent).toContain('Speech speed: standard (one core)');
+    expect(view.container.textContent).toContain(
+      'A faster mode (several cores) is available on this device but turned off for now, because it did not work here last time.',
+    );
   });
 
   it('draws nothing for Browser voice or an engine it does not know', async () => {
@@ -60,7 +65,7 @@ describe('<SpeedLine> inside Settings', () => {
       />,
     );
     expect(view.container.querySelector('section[aria-label="Speed"]')?.textContent).toContain(
-      'Using: single-thread WebAssembly',
+      'Speech speed: standard (one core)',
     );
   });
 });

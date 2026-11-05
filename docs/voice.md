@@ -330,8 +330,10 @@ RTF is decode time over audio time (below 1 is faster than speaking).
 
 - **Threads are worth ~2.5–2.8×** for the two ONNX Runtime engines on this CPU. Parakeet 110M (sherpa) and
   Vosk cannot use them.
-- **"After early finish"** is the new `beginFinish()` (below): the decode starts when speech stops, so by the
-  time the 1.5 s countdown ends only the remainder is left to wait for. Parakeet 0.6B drops from 1.76 s to
+- **"After early finish"** is the benchmark result for the new `beginFinish()` API (below), measured by calling
+  it directly; no shipped code calls it yet (the countdown integration lands with the Live loop, slice 4). The
+  decode starts when speech stops, so by the time a 1.5 s countdown ends only the remainder is left to wait
+  for. Parakeet 0.6B drops from 1.76 s to
   0.22 s after the pause is confirmed (0.22–0.40 s over three runs), Whisper from 3.22 s to 1.79 s, with no
   change to the model, the headers or the audio. Run-to-run noise on this box is about ±5 %.
 - **Not measured, and the numbers must not be assumed for them:** phones (the defaults assume a phone-speed
@@ -382,7 +384,9 @@ the page stays non-isolated and runs single-thread, which is correct and silent.
 **Shipped: single-thread everywhere, and everything needed to switch.** Turning isolation on gets
 Parakeet 0.6B from 1.76 s to 0.65 s and Whisper from 3.22 s to 1.34 s on a fast desktop, but it breaks
 https media, blanks maps and needs the sandbox frames re-proved, and the phone cannot use the milder variant.
-The early finish already hides most of the wait (Parakeet 1.76 s → 0.22 s) without any of that.
+The early-finish API (`beginFinish()`) is built to hide most of the wait without any of that — the benchmark
+above measured Parakeet 1.76 s → 0.22 s after the pause — but nothing calls it yet: the countdown integration
+lands with the Live loop (slice 4).
 
 The work to enable it, if wanted: add the two headers to `/*` in `public/_headers`; add COEP to the two
 sandbox-frame rules; give the map tile layer `crossOrigin: ''`; decide what `fy-render` does with a video or
@@ -398,17 +402,26 @@ it** (`navigator.gpu` adapter, `crossOriginIsolated`, `hardwareConcurrency`, `de
 candidate wins. Threads are half the cores, between 2 and 4, and not at all at or below 4 GB. `wasm-single`
 is always a candidate, so there is no input for which nothing is chosen.
 
-- **A failure is remembered, never shown.** If threads do not start or a threaded decode fails, the worker
+- **A failure is remembered, never shown as an error.** If threads do not start or a threaded decode fails, the worker
   answers `threads-failed`, the engine starts a **fresh** worker on one thread and repeats the audio still
   waiting (ONNX Runtime initialises once per worker, so it cannot retry in place), and the device records
-  the failure. The person sees a slightly slower take.
+  the failure. The person sees a slightly slower take. The thread count is **pinned per worker** by its first
+  message: a worker keeps the audio of every request while it is threaded, whatever the planner says later,
+  and a request that cannot be repeated is rejected with an error rather than left waiting.
 - **Remembered per device** in `fy-stt-speed-v1` (`lib/stt/speed-memory.ts`): zod-parsed, versioned, at
   most 24 entries, one per model and path, forgotten after a week so a fixed driver or a new header is tried
   again. It holds a model id, a path and a time — no words.
-- **Settings › Voice** shows one read-only line under the engine list: **"Using: single-thread
-  WebAssembly"**, with a sentence of why (for example "More threads need a browser feature this page does
-  not turn on."). There is nothing to press. There is no manual override: with one path available it would
-  be a switch that does nothing.
+- **Settings › Voice** shows a read-only block under the engine list, in plain words (no technical names on
+  screen): **"Speech speed: standard (one core)"** or **"Speech speed: fast (several cores)"**, one sentence
+  of what that means ("Your words appear a moment after you stop talking." — or, for the fast mode, "sooner…
+  about 2–3 times faster than standard on a desktop we tested", the only number, from the table above), and one
+  sentence of why. When a faster mode was left out the sentence names it and says which it is: "A faster mode
+  (several cores) is not available on this site yet: it needs a browser setting the site has not switched
+  on." (this page is not isolated) or "…is available on this device but turned off for now, because it did
+  not work here last time." (a failure is remembered). The words live in `SPEED_PATH_LABEL`,
+  `SPEED_CONSEQUENCE_TEXT` and `SPEED_REASON_TEXT`; a test keeps WebAssembly, WebGPU and thread talk out of
+  them. There is nothing to press and no link to the speed test page. There is no manual override: with one
+  path available it would be a switch that does nothing.
 
 ### Starting to transcribe during the send countdown
 
@@ -422,8 +435,9 @@ const take = session.beginFinish(); // null when this engine cannot, or the mic 
 // the pause held:  await session.finish()   // reuses the decode when only quiet followed it
 ```
 
-`finish()` reuses the early answer only when the audio since the snapshot is **quiet** (RMS under 0.01);
-otherwise it decodes the whole take afresh, so the words are always those of the audio that was said. It
+`finish()` reuses the early answer only when **every 20 ms frame** of the audio since the snapshot is quiet
+(RMS under 0.01) — a short burst of resumed speech followed by a long pause is not averaged away — and the
+attempt was not discarded, replaced or cleared meanwhile; otherwise it decodes the whole take afresh, so the words are always those of the audio that was said. It
 never stops the microphone and never sends anything. Offered by the whole-take engines (Parakeet 0.6B and
 110M, the other sherpa batch models, Whisper); not by Vosk (already ~0.05 s), Browser voice, or Parakeet
 with near-live words on. The Live loop calls it (see [Live voice](#live-voice-the-one-place-voice-sends)); nothing in dictation does.

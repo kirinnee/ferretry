@@ -93,6 +93,8 @@ export interface SpeedMemoryStorage {
 export class SpeedMemoryStore {
   readonly #storage: SpeedMemoryStorage | null;
   #fallback: SpeedMemory = NO_MEMORY;
+  /** The last write was refused: `#fallback` holds failures storage does not, so reads must include them. */
+  #unpersisted = false;
 
   constructor(storage: SpeedMemoryStorage | null) {
     this.#storage = storage;
@@ -100,11 +102,15 @@ export class SpeedMemoryStore {
 
   read(): SpeedMemory {
     if (this.#storage === null) return this.#fallback;
+    let persisted: SpeedMemory;
     try {
-      return parseSpeedMemory(this.#storage.getItem(SPEED_MEMORY_KEY));
+      persisted = parseSpeedMemory(this.#storage.getItem(SPEED_MEMORY_KEY));
     } catch {
       return this.#fallback;
     }
+    // After a refused write (quota) what this page learned is held only here: merge it with what storage
+    // says, newest per model and path, so a failure never vanishes from the next plan.
+    return this.#unpersisted ? { failures: normalise([...persisted.failures, ...this.#fallback.failures]) } : persisted;
   }
 
   /** Record that `path` failed for `model` at `now` (epoch ms). Returns whether storage took it. */
@@ -117,8 +123,10 @@ export class SpeedMemoryStore {
     if (this.#storage === null) return false;
     try {
       this.#storage.setItem(SPEED_MEMORY_KEY, serialiseSpeedMemory(next));
+      this.#unpersisted = false;
       return true;
     } catch {
+      this.#unpersisted = true;
       return false;
     }
   }

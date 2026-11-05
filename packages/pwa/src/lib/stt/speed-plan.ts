@@ -30,11 +30,27 @@ export type SpeedPath = 'webgpu' | 'wasm-threads' | 'wasm-single';
 /** Fastest first. The order IS the preference. */
 export const SPEED_PATH_ORDER: readonly SpeedPath[] = ['webgpu', 'wasm-threads', 'wasm-single'];
 
-/** What a person reads, in the words Settings uses. */
+/**
+ * What a person reads, in plain words: how fast, and how many cores. No technical names — the paths'
+ * technical names (WebGPU, WebAssembly, threads) live in the code and docs/voice.md, not on screen.
+ * The "fast" paths say "several" cores, not "all": the plan uses half the cores, between 2 and 4.
+ */
 export const SPEED_PATH_LABEL: Readonly<Record<SpeedPath, string>> = {
-  webgpu: 'WebGPU',
-  'wasm-threads': 'multi-thread WebAssembly',
-  'wasm-single': 'single-thread WebAssembly',
+  webgpu: 'fast (graphics chip)',
+  'wasm-threads': 'fast (several cores)',
+  'wasm-single': 'standard (one core)',
+};
+
+/**
+ * What the speed means for the person, in one plain sentence. The only number is the one that was
+ * measured (docs/voice.md › Measured): several cores finished 2.5–2.8× sooner than one on a desktop; a
+ * phone and a graphics chip were not measured, so those say no number.
+ */
+export const SPEED_CONSEQUENCE_TEXT: Readonly<Record<SpeedPath, string>> = {
+  webgpu: 'Your words appear sooner after you stop talking.',
+  'wasm-threads':
+    'Your words appear sooner after you stop talking: about 2–3 times faster than standard on a desktop we tested.',
+  'wasm-single': 'Your words appear a moment after you stop talking.',
 };
 
 /**
@@ -193,15 +209,23 @@ export function chooseSpeedPlan(
 }
 
 /** The sentence Settings shows, read-only. */
-export const speedLine = (plan: SpeedPlan): string => `Using: ${SPEED_PATH_LABEL[plan.path]}`;
+export const speedLine = (plan: SpeedPlan): string => `Speech speed: ${SPEED_PATH_LABEL[plan.path]}`;
 
-/** Why that path, in a sentence a person can read under the line. */
+/**
+ * One plain sentence under the line, saying why the speed is what it is. When a faster mode was left
+ * out it names it ("several cores") and says whether it is unavailable or available but turned off.
+ * This build ships one faster mode (several cores), so the blockers that are not about a graphics chip
+ * name it; if WebGPU ships, these need the path's name too.
+ */
 export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
-  fastest: 'The fastest option this device offers.',
-  'only-path': 'This engine runs on one thread.',
-  'not-isolated': 'More threads need a browser feature this page does not turn on.',
-  'no-gpu': 'No graphics-card speed-up is available on this device.',
-  'low-memory': 'Kept to one thread to save memory.',
-  'few-cores': 'Too few cores for more threads to help.',
-  'failed-before': 'A faster option failed on this device, so it is skipped for now.',
+  fastest: 'This is the fastest mode this device offers.',
+  'only-path': 'This voice has no faster mode.',
+  'not-isolated':
+    'A faster mode (several cores) is not available on this site yet: it needs a browser setting the site has not switched on.',
+  'no-gpu':
+    'A faster mode (graphics chip) is not available: this device has no graphics chip the browser can use for it.',
+  'low-memory': 'A faster mode (several cores) is available on this device but turned off, to save memory.',
+  'few-cores': 'A faster mode (several cores) is not used: this device has too few cores for it to help.',
+  'failed-before':
+    'A faster mode (several cores) is available on this device but turned off for now, because it did not work here last time.',
 };

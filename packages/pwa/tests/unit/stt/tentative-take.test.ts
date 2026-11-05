@@ -117,6 +117,26 @@ describe('TentativeTranscriber.reuse', () => {
     should(await w.transcriber.reuse(loud)).equal(null);
   });
 
+  it('refuses it when a short burst of speech is followed by a long pause (an averaged tail would call it quiet)', async () => {
+    const w = world(samples(16_000, 0.1));
+    w.transcriber.begin();
+    // 100 ms of 220 Hz at 0.04 peak, then 1.5 s of silence: the whole-tail RMS is under the floor.
+    const final = new Float32Array(16_000 + 1_600 + 24_000);
+    final.fill(0.1, 0, 16_000);
+    for (let i = 0; i < 1_600; i += 1) final[16_000 + i] = 0.04 * Math.sin((2 * Math.PI * 220 * i) / 16_000);
+    const whole = Math.sqrt(final.subarray(16_000).reduce((sum, x) => sum + x * x, 0) / (1_600 + 24_000));
+    should(whole < QUIET_TAIL_RMS).equal(true);
+    should(await w.transcriber.reuse(final)).equal(null);
+  });
+
+  it('looks at a last partial frame too, not only whole ones', async () => {
+    const w = world(samples(16_000, 0.1));
+    w.transcriber.begin();
+    const final = new Float32Array(16_000 + 700);
+    final.fill(0.2, 16_000 + 640);
+    should(await w.transcriber.reuse(final)).equal(null);
+  });
+
   it('refuses it when the final take is SHORTER than the snapshot (the recording is not the one heard)', async () => {
     const w = world(samples(16_000, 0.1));
     w.transcriber.begin();
@@ -148,5 +168,46 @@ describe('TentativeTranscriber.reuse', () => {
     finish('late words');
     should(await reused).equal('late words');
     should(w.transcribed.length).equal(1);
+  });
+
+  it('does not hand back an answer that was discarded while it was being awaited', async () => {
+    let finish: (text: string) => void = () => undefined;
+    const w = world(samples(16_000, 0.1), () => new Promise<string>(resolve => (finish = resolve)));
+    const take = w.transcriber.begin();
+    await tick();
+    const reused = w.transcriber.reuse(samples(16_000, 0));
+    take.discard();
+    finish('stale words');
+    should(await reused).equal(null);
+  });
+
+  it('does not hand back an answer replaced by a new begin while it was being awaited', async () => {
+    let finish: (text: string) => void = () => undefined;
+    const w = world(samples(16_000, 0.1), () => new Promise<string>(resolve => (finish = resolve)));
+    w.transcriber.begin();
+    await tick();
+    const reused = w.transcriber.reuse(samples(16_000, 0));
+    w.transcriber.begin();
+    finish('stale words');
+    should(await reused).equal(null);
+  });
+
+  it('does not hand back an answer cleared or session-aborted while it was being awaited', async () => {
+    let finish: (text: string) => void = () => undefined;
+    const cleared = world(samples(16_000, 0.1), () => new Promise<string>(resolve => (finish = resolve)));
+    cleared.transcriber.begin();
+    await tick();
+    const first = cleared.transcriber.reuse(samples(16_000, 0));
+    cleared.transcriber.clear();
+    finish('stale words');
+    should(await first).equal(null);
+
+    const aborted = world(samples(16_000, 0.1), () => new Promise<string>(resolve => (finish = resolve)));
+    aborted.transcriber.begin();
+    await tick();
+    const second = aborted.transcriber.reuse(samples(16_000, 0));
+    aborted.outer.abort();
+    finish('stale words');
+    should(await second).equal(null);
   });
 });

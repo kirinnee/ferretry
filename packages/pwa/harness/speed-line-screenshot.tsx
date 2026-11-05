@@ -1,9 +1,10 @@
 /**
- * Screenshots of Settings › Voice › the engine list and the read-only Speed line under it, in the three
- * states a person can see: the app as it ships (single-thread, this page is not isolated), a device that
- * would run multi-thread (isolated, cores and memory to spare), and one where threads failed and are
- * skipped. Phone (390) and desktop (1440), the light and dark studio themes. Review evidence; nothing
- * compares the PNGs.
+ * Screenshots of Settings › Voice › the engine list and the read-only speed block under it, in the states a
+ * person can see: standard (the app as it ships, this site is not isolated), fast (a device that would run
+ * several cores), skipped (the faster mode failed here and is turned off), no-faster (an engine with no
+ * faster mode) and no-data (Browser voice: nothing of ours runs, so no block at all). Phone (390) and
+ * desktop (1280), the light and dark studio themes. Each shot ends well BELOW the block (its bottom edge
+ * plus padding), so a clip is never mistaken for the page. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/speed-line-screenshot.tsx    # writes harness/out/speed-line-<state>-<viewport>-<scheme>.png
  *
@@ -12,7 +13,7 @@
  * leaves the loopback origin.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 
@@ -30,7 +31,9 @@ const run = (command: string, args: readonly string[]): void => {
   if (result.status !== 0) fail(`${command} exited ${result.status}`);
 };
 
-const STATES = ['shipped', 'threads', 'skipped'] as const;
+const STATES = ['standard', 'fast', 'skipped', 'no-faster', 'no-data'] as const;
+/** Pixels of page kept visible under the block (or, with no block, under the engine list). */
+const MARGIN_BELOW = 72;
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
@@ -44,10 +47,11 @@ import { SpeedPlanner } from '../../src/lib/stt/speed-planner.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { AVAILABLE_RECOGNITION, fakeRecognitionProvider } from '../../tests/support/browser-recognition.ts';
 
-const state = new URLSearchParams(location.search).get('state') ?? 'shipped';
+const state = new URLSearchParams(location.search).get('state') ?? 'standard';
+const engine = state === 'no-faster' ? 'vosk-small-en' : state === 'no-data' ? 'browser' : 'parakeet';
 const ISOLATED = { ...NO_SIGNALS, crossOriginIsolated: true, hardwareConcurrency: 8, deviceMemoryGb: 8 };
 const planner = new SpeedPlanner({
-  signals: state === 'shipped' ? { ...NO_SIGNALS, hardwareConcurrency: 8, deviceMemoryGb: 8 } : ISOLATED,
+  signals: state === 'standard' || state === 'no-faster' ? { ...NO_SIGNALS, hardwareConcurrency: 8, deviceMemoryGb: 8 } : ISOLATED,
   memory: new SpeedMemoryStore(null),
   now: () => 1,
 });
@@ -77,9 +81,9 @@ const voices = new OnDeviceVoices(
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  <div style={{ margin: '0 auto', maxWidth: 760, padding: 16 }}>
+  <div style={{ margin: '0 auto', maxWidth: 760, padding: '16px 16px 160px' }}>
     <DictationSettings
-      settings={{ ...DEFAULT_STT_SETTINGS, engine: 'parakeet' }}
+      settings={{ ...DEFAULT_STT_SETTINGS, engine }}
       update={() => undefined}
       persisted
       recognitionSupport={AVAILABLE_RECOGNITION}
@@ -97,11 +101,16 @@ const html = (theme: string) => `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/app.css" />
+    <!-- The app shell scrolls its own panes; this page scrolls the window. Chrome paints nothing far down a tall
+         overflow:hidden root, so let it overflow like an ordinary page. -->
+    <style>html, body { overflow: visible !important; height: auto !important; }</style>
   </head>
   <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/speed-entry.js"></script></body>
 </html>`;
 
 mkdirSync(outDir, { recursive: true });
+// The page's CSS asks for the self-hosted fonts at /assets/fonts/…; serve the real files so the shots use them.
+cpSync(join(packageDir, 'src', 'assets', 'fonts'), join(outDir, 'assets', 'fonts'), { recursive: true });
 await Bun.write(join(outDir, 'speed-entry.tsx'), PAGE_ENTRY);
 run('bun', ['build', join(outDir, 'speed-entry.tsx'), '--outdir', outDir, '--target', 'browser']);
 run('./node_modules/.bin/tailwindcss', [
@@ -131,8 +140,8 @@ const executablePath =
   Bun.which('google-chrome') ?? Bun.which('chromium') ?? fail('no system Chrome or Chromium found');
 const browser = await chromium.launch({ executablePath, headless: true });
 const VIEWPORTS = [
-  { name: 'phone', width: 390, height: 3200, mobile: true },
-  { name: 'desktop', width: 1440, height: 1800, mobile: false },
+  { name: 'phone', width: 390, height: 900, mobile: true },
+  { name: 'desktop', width: 1280, height: 900, mobile: false },
 ] as const;
 
 try {
@@ -154,26 +163,31 @@ try {
           });
           const page = await context.newPage();
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
-          const speed = page.locator('section[aria-label="Speed"]');
+          // No-data has no speed block: anchor on the engine list and prove the block is absent.
+          const speed = page
+            .locator(state === 'no-data' ? 'section[aria-label="Voice engine"]' : 'section[aria-label="Speed"]')
+            .first();
           await speed.waitFor({ state: 'visible' });
+          const blocks = await page.locator('section[aria-label="Speed"]').count();
+          if ((state === 'no-data') !== (blocks === 0)) fail(`${state}: speed block count ${blocks}`);
           const sideways = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (sideways > 0) fail(`${state} ${scheme} ${viewport.name} scrolls sideways by ${sideways}px`);
-          // The line with the last engine rows above it, scrolled into the viewport: a clip is viewport-relative.
-          await speed.evaluate(element => element.scrollIntoView({ block: 'end' }));
+          // Scroll so MARGIN_BELOW px of real page sit under the block (it ends in the middle of a screen, never
+          // flush with its bottom edge), then take the viewport: nothing is clipped by a made-up rectangle.
+          const first = await speed.boundingBox();
+          if (first === null) fail('the speed block has no box');
+          const wanted =
+            (first as { y: number; height: number }).y + (first as { height: number }).height + MARGIN_BELOW;
+          await page.evaluate(target => window.scrollTo(0, target - window.innerHeight), wanted);
+          await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+          await page.waitForTimeout(300);
           const line = await speed.boundingBox();
-          if (line === null) fail('the speed line has no box');
+          if (line === null) fail('the speed block has no box');
           const { y, height } = line as { y: number; height: number };
-          const top = Math.max(0, y - 520);
-          const target = join(outDir, `speed-line-${state}-${viewport.name}-${scheme}.png`);
-          await page.screenshot({
-            path: target,
-            clip: {
-              x: 0,
-              y: top,
-              width: viewport.width,
-              height: Math.min(page.viewportSize()?.height ?? 900, y + height + 16) - top,
-            },
-          });
+          const below = viewport.height - (y + height);
+          if (below < MARGIN_BELOW - 1) fail(`${state} ${viewport.name} ${scheme}: only ${below}px below the block`);
+          const target = join(outDir, `speed-${state}-${viewport.name}-${scheme}.png`);
+          await page.screenshot({ path: target });
           process.stdout.write(`📸 ${target}\n`);
         } finally {
           await context.close();
