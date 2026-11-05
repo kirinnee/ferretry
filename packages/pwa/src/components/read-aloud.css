@@ -1,0 +1,77 @@
+/* READ ALOUD on an assistant message (read-aloud.tsx). Calm and quiet when idle: one small control that says
+   what it does in words. While reading, the sentence being said is marked three ways — a tinted background,
+   an underline and a heavier weight — so colour is never the only signal. Theme tokens only. */
+.fy-read-aloud {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--flow-2);
+  min-width: 0;
+}
+.fy-read-aloud-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-md);
+}
+.fy-read-aloud-button {
+  align-items: center;
+  background: transparent;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--accent-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium, 600);
+  gap: var(--gap-sm);
+  min-height: max(var(--target-floor, 0px), 44px);
+  padding: 0 14px;
+}
+.fy-read-aloud-button:hover {
+  background: var(--accent-soft);
+}
+.fy-read-aloud-button:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+.fy-read-aloud-button[data-reading] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.fy-read-aloud-state {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+.fy-read-aloud-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-read-captions {
+  background: var(--surface-2);
+  border: var(--stroke-control) solid var(--border-soft);
+  border-radius: var(--radius-control);
+  font-size: var(--text-lg);
+  line-height: 1.6;
+  margin: 0;
+  max-height: 12.5em;
+  overflow-y: auto;
+  padding: var(--gap-md) var(--flow-3);
+}
+.fy-read-caption {
+  border-radius: var(--radius-xs);
+  padding: 1px 2px;
+}
+.fy-read-caption[data-current] {
+  background: var(--accent-soft);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-read-caption {
+    transition: background-color 120ms ease-out;
+  }
+}

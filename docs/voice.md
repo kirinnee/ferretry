@@ -390,6 +390,71 @@ device), and a cooldown wait (a rate-limited call fails and keeps the raw words;
 one retry is the same call without the conversation after the provider found it too big, shown as two attempts.
 Browser speech cannot see inside the browser's recogniser, so it reports only how long Stop waited.
 
+## Read aloud: hearing a reply
+
+Every assistant message has a **Read aloud** button (icon and words, never an emoji alone). Press it and the device's own voice reads
+the reply; the same button becomes **Stop** (it is the same element, so keyboard focus stays on it). It is the first slice of live voice
+chat (F137): reading on request now, hands-free turns later. Nothing is read by itself, and the microphone is not
+involved.
+
+- **Captions.** While it reads, a block under the message shows the sentences, the one being spoken marked with a tint, an underline and a
+  heavier weight (colour is never the only signal) and scrolled into view. With reduced motion the scroll is instant and nothing fades.
+- **Words for the state.** A visible note and a polite live region say **Reading**, **Stopped**, **Finished** or **Couldn't read this
+  aloud**. The reply text is never put in the live region: a screen reader would say it twice over the voice.
+- **One voice at a time.** Pressing Read aloud on another message moves the reading there; leaving the conversation stops it.
+- **Nothing is shown** where the browser has no speech, or where a message has nothing worth saying (markup only).
+
+### What is read, and what is described
+
+`lib/voice-chat/speakable.ts` is pure and total (any text in, a list of sentences out, never an exception). Prose is read; things that
+are for the eyes are **described** and left on screen.
+
+| In the reply                          | Said as                                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Paragraphs, headings                  | Read a sentence at a time; a heading ends with a stop                                                |
+| Lists                                 | Each item; more than 8 items reads the first 5, then "and 6 more"                                    |
+| **Bold**, _italic_, links `[text](u)` | The plain words, and the link text                                                                   |
+| A bare URL                            | "a link to github.com"                                                                               |
+| Inline code                           | Short word-like code is read ("use dictation"); a path as its file name; otherwise "a code snippet"  |
+| Code block                            | "Code block, 14 lines of TypeScript. It's on screen." — never the code                               |
+| Table                                 | "A table with 4 rows. Columns: name, status, cost."                                                  |
+| `fy-render` block                     | Its required `alt`: "A diagram: login flow from browser to daemon." (a broken block is a code block) |
+| Image                                 | "An image: {alt}"                                                                                    |
+| `@file`, `:agent`, `&F12`, `!A3`      | "file.ts", "ferret dev", "task F12", "agenda item A3" — the one reference grammar, not a second one  |
+| Commit hashes, UUIDs                  | "a commit", "an ID"; numbers and versions ("4.277.0") are read as they are                           |
+| Emoji, HTML                           | Dropped, stripped                                                                                    |
+| Blockquote                            | "Quote:" then the words                                                                              |
+
+**One reading is capped at about a minute** (≈ 900 characters at normal speed, scaled with the rate), then it says "There's more on
+screen." and stops. Code, tables and pictures count toward the minute, so a code-heavy reply is not a lecture either.
+
+### Which voice
+
+Free voices **built into the device** (`speechSynthesis`): no paid or cloud voice, no new secret, no download.
+
+- **Local voices first.** The browser says which voices are `localService`; one in the reply's language wins. A voice that sends text to
+  its maker (Chrome's "Google …" voices) is used only when the device has no local voice in that language, and then the row **says so**
+  in words ("… sends this text to its maker to be spoken.").
+- **Rate** is 1.1 by default and always kept between 0.8 and 2.0 (a rate and voice picker arrive with the settings slice).
+- **Chrome stops long speech** after about fifteen seconds, so each sentence is spoken as short pieces, one at a time
+  (`speech-chunks.ts`); the captions still move one sentence at a time.
+- **iOS** only lets speech start from a tap. Read aloud starts inside the tap itself, and `SpeakerPort.unlock()` (a silent, zero-volume
+  space, once) is there for the later slices that speak without a fresh tap.
+
+### Privacy
+
+- The text is handed to the browser's speech engine and **nothing else**: it is not sent to the daemon, not logged, not written to
+  storage, not put in a test snapshot or a screenshot (committed captures use fake replies).
+- The controller (`lib/voice-chat/read-aloud.ts`) keeps only the sentences being read, in memory, until the next reading.
+- The microphone stays off: Read aloud never opens it.
+
+### Where it lives
+
+`lib/voice-chat/` — `speakable.ts` (markdown → sentences), `ports.ts` (`SpeakerPort` and its events), `speech-synthesis.ts` (the adapter
+over `speechSynthesis`, with the browser objects injected so every path is tested with a fake and no audio), `speech-chunks.ts`,
+`voice-choice.ts` (voice and rate, pure), `read-aloud.ts` (which message is being read and which sentence). `hooks/use-read-aloud.ts` is
+the composition point and `components/read-aloud.tsx` is the control and captions, drawn by `TranscriptTextRow` for assistant text.
+
 ## Not built yet
 
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):

@@ -30,6 +30,7 @@
 @import '../features/occupied-composer/occupied-composer-notice.css';
 @import '../components/pack-call.css';
 @import '../components/agenda-message.css';
+@import '../components/read-aloud.css';
 
 /* ============================================================================
    Ferretry UI design system — base elements, shell/layout and component classes.
