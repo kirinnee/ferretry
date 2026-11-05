@@ -384,7 +384,9 @@ describe('CloneMachine · Preview', () => {
     try {
       await toPreview(screen);
       const preview = screen.text('[data-clone-step="preview"]');
-      expect(preview).toContain('This is a one-time copy. Later changes on work-linux don’t follow.');
+      expect(preview).toContain(
+        'This copies work-linux’s setup now. Later changes on it don’t follow by themselves: copy again to see just what changed.',
+      );
 
       const copies = screen.text('[data-setup-section="copies"]');
       expect(copies).toContain('2 components');

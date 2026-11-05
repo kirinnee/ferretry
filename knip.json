@@ -147,6 +147,7 @@
         "harness/clone-keys-screenshot.tsx",
         "harness/clone-default-runtime-screenshot.tsx",
         "harness/clone-merge-screenshot.tsx",
+        "harness/clone-review-screenshot.tsx",
         "harness/cleanup-kept-screenshot.tsx",
         "harness/device-cleanup-screenshot.tsx",
         "harness/connection-status-screenshot.tsx",
