@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
 import {
   applyTextOp,
+  diffToTextOp,
   type SharedDraftClientFrame,
   SharedDraftClientFrameSchema,
   type SharedDraftSent,
@@ -25,7 +26,7 @@ import type { DaemonStreamOpener } from '../../src/lib/event-transport.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import type { RelayClientSession } from '../../src/lib/relay-session.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
-import type { ReplySnapshot, ReplySource } from '../../src/lib/voice-chat/reply-feed.ts';
+import { type ReplySnapshot, type ReplySource, sessionReplyFeed } from '../../src/lib/voice-chat/reply-feed.ts';
 import { fakeRecognitionProvider } from '../support/browser-recognition.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { typeInto } from '../support/dom-form.ts';
@@ -303,7 +304,8 @@ class Machine {
     this.apply(frame.edit, frame.id, deliver);
   }
 
-  private apply(
+  /** An edit from another device, or this device's own send-clear. */
+  apply(
     edit: { readonly text?: readonly (number | string)[]; readonly sent?: boolean },
     id: string,
     own: ((frame: SharedDraftServerFrame) => void) | undefined,
@@ -338,11 +340,16 @@ const gate = (): Gate => {
   return { promise, open };
 };
 
-const integrated = async (options: { machine?: Machine; sendGate?: Gate; rich?: boolean } = {}) => {
+const integrated = async (
+  options: { machine?: Machine; sendGate?: Gate; rich?: boolean; actualReply?: ReplySource } = {},
+) => {
   const fake = fakeLive();
   const page = new FakeDocument(true);
   const hardware = realRig(fake, page);
-  const { send: _send, ...ports } = hardware.ports;
+  const { send: _send, ...basePorts } = hardware.ports;
+  // With `actualReply` the runner reads the REAL reply feed over that session; otherwise the fake one.
+  const ports =
+    options.actualReply === undefined ? basePorts : { ...basePorts, reply: sessionReplyFeed(options.actualReply) };
   const sent: string[] = [];
   const drafts = new DaemonDraftStore(memoryStorage());
   const api = {
@@ -638,6 +645,92 @@ describe('Live send boundaries through the real composer, runner, take, Parakeet
     await flush();
     expect(textareaOf(w.composer.container).value).toBe('Held words. Held words.');
     expect(w.sent).toEqual([]);
+    await w.composer.unmount();
+  });
+
+  it('a turn that was already working when the message was sent never reopens the microphone for the new turn', async () => {
+    let snapshot: ReplySnapshot = { turnState: 'working', turnStateAt: 'prior-working', status: 'running' };
+    const watchers = new Set<() => void>();
+    const reply: ReplySource = {
+      current: () => snapshot,
+      subscribe: fn => {
+        watchers.add(fn);
+        return () => watchers.delete(fn);
+      },
+    };
+    const update = (next: ReplySnapshot): void => {
+      snapshot = next;
+      for (const fn of [...watchers]) fn();
+    };
+    const sendGate = gate();
+    const w = await integrated({ sendGate, actualReply: reply });
+    await finishReal(w);
+    await interact(() => w.fake.advance(1500));
+    await settle();
+    expect(w.sent).toEqual(['Fix the bug.']);
+    expect(w.hardware.tracks.live).toBe(0);
+    // The prior turn finishes while the new send's acknowledgement is still on its way.
+    await interact(() => update({ turnState: 'your-turn', turnStateAt: 'prior-done', status: 'running' }));
+    await interact(() => sendGate.open());
+    await settle();
+    await flush();
+    expect({ phase: phaseOf(w.composer.container), mic: w.hardware.tracks.live }).toEqual({ phase: 'working', mic: 0 });
+    // The new turn starts working: Live is still Working with the microphone shut.
+    await interact(() => update({ turnState: 'working', turnStateAt: 'new-working', status: 'running' }));
+    await settle();
+    await flush();
+    expect({ phase: phaseOf(w.composer.container), mic: w.hardware.tracks.live }).toEqual({ phase: 'working', mic: 0 });
+    // Only the new turn's own end reopens it.
+    await interact(() => update({ turnState: 'your-turn', turnStateAt: 'new-done', status: 'running' }));
+    await settle();
+    await flush();
+    expect(phaseOf(w.composer.container)).toBe('listening');
+    expect(w.hardware.tracks.live).toBe(1);
+    await w.composer.unmount();
+  });
+
+  it("another device's next instruction typed while the send awaits its acknowledgement holds Live after the reply", async () => {
+    const machine = new Machine();
+    const sendGate = gate();
+    const w = await integrated({ machine, sendGate });
+    await finishReal(w);
+    await interact(() => w.fake.advance(1500));
+    await settle();
+    await flush();
+    expect(w.sent).toEqual(['Fix the bug.']);
+    await interact(() =>
+      machine.apply({ text: diffToTextOp(machine.text, 'UNFINISHED NEXT INSTRUCTION') }, 'remote-device', undefined),
+    );
+    await settle();
+    await flush();
+    expect(boxText(w.composer.container)).toBe('UNFINISHED NEXT INSTRUCTION');
+    await interact(() => sendGate.open());
+    await settle();
+    await flush();
+    expect(phaseOf(w.composer.container)).toBe('working');
+    expect(boxText(w.composer.container)).toBe('UNFINISHED NEXT INSTRUCTION');
+    await interact(() => w.fake.signal({ kind: 'done' }));
+    await settle();
+    await flush();
+    expect({ phase: phaseOf(w.composer.container), mic: w.hardware.tracks.live }).toEqual({ phase: 'hold', mic: 0 });
+    expect(boxText(w.composer.container)).toBe('UNFINISHED NEXT INSTRUCTION');
+    await w.composer.unmount();
+  });
+
+  it("the composer's own emptying of the box after a send is not typing: Live listens again after the reply", async () => {
+    const machine = new Machine();
+    const w = await integrated({ machine });
+    await finishReal(w);
+    await interact(() => w.fake.advance(1500));
+    await settle();
+    await flush();
+    expect(w.sent).toEqual(['Fix the bug.']);
+    expect(phaseOf(w.composer.container)).toBe('working');
+    await interact(() => w.fake.signal({ kind: 'done' }));
+    await settle();
+    await flush();
+    expect(phaseOf(w.composer.container)).toBe('listening');
+    expect(w.hardware.tracks.live).toBe(1);
     await w.composer.unmount();
   });
 });

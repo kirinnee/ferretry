@@ -13,6 +13,10 @@
  * or `turnStateAt` changed from what it was then. Both are the daemon's own words about itself; no
  * browser clock is compared with the daemon's, so clock skew cannot read a reply early or late.
  *
+ * A turn already RUNNING when the message is sent is not this message's reply: the message queues behind it, so that turn
+ * ending never counts (and never reopens the microphone). The watch keeps observing until a turn begins after it
+ * (`working` seen again), and only that turn's end is the reply.
+ *
  * A daemon that predates `turnState` never says anything: Live keeps showing Working, and the person
  * ends it or answers by hand (docs/voice.md › Live voice › What is not built).
  */
@@ -38,51 +42,70 @@ export interface ReplySource {
 
 const FINISHED = new Set(['completed', 'failed', 'stopped']);
 
+/**
+ * Queued — the session was already WORKING when this watch began, and the message about to be sent waits behind that
+ * turn: the first time that turn stops it is NOT this message's reply, whatever it says. The watch keeps observing
+ * until a turn begins AFTER it (`working` seen again) and only that turn's end counts. Nothing here reopens the
+ * microphone on another turn's completion; if the queued message was folded into the running turn so that no second
+ * `working` ever shows, Live stays Working until End (the safe side of the doubt).
+ */
 export function sessionReplyFeed(source: ReplySource): ReplyFeedPort {
+  const watch = (): ReplyWatch => {
+    const baseline = source.current();
+    const baselineAt = baseline?.turnStateAt;
+    let seenWorking = baseline?.turnState === 'working';
+    const queued = seenWorking;
+    /** Queued behind a turn: it has ended (not this send's reply), and a fresh turn must now be seen to work. */
+    let priorEnded = false;
+    let freshWorking = !queued;
+    let last: ReplySignal['kind'] | null = null;
+    let onSignal: ((signal: ReplySignal) => void) | null = null;
+    /** What the session is saying now, or null while nothing is yet to say (a state left over from before). */
+    const read = (): ReplySignal | null => {
+      const now = source.current();
+      if (now === null || FINISHED.has(now.status)) return { kind: 'ended' };
+      if (now.turnState === 'working') {
+        seenWorking = true;
+        if (priorEnded) freshWorking = true;
+        return { kind: 'working' };
+      }
+      if (!freshWorking) {
+        // The turn that was already running stopped (or the state moved while it ran): that is not this message's reply.
+        priorEnded = true;
+        // A question is safe to surface: it only holds Live, it never opens the microphone.
+        return now.turnState === 'needs-input' ? { kind: 'needs-input' } : null;
+      }
+      const moved = seenWorking || now.turnStateAt !== baselineAt;
+      if (!moved) return null;
+      if (now.turnState === 'your-turn') return { kind: 'done' };
+      if (now.turnState === 'needs-input') return { kind: 'needs-input' };
+      return null;
+    };
+    /** Reads the session (which latches "working was seen"); tells the machine only once the send is attached. */
+    const evaluate = (): void => {
+      const signal = read();
+      if (signal === null || onSignal === null || signal.kind === last) return;
+      last = signal.kind;
+      onSignal(signal);
+    };
+    const unsubscribe = source.subscribe(evaluate);
+    let ended = false;
+    const cancel = (): void => {
+      if (ended) return;
+      ended = true;
+      onSignal = null;
+      unsubscribe();
+    };
+    return {
+      attach: handler => {
+        onSignal = handler;
+        evaluate();
+        return cancel;
+      },
+      cancel,
+    };
+  };
   return {
-    arm: (): ReplyWatch => {
-      const baseline = source.current();
-      const baselineAt = baseline?.turnStateAt;
-      let seenWorking = baseline?.turnState === 'working';
-      let last: ReplySignal['kind'] | null = null;
-      let onSignal: ((signal: ReplySignal) => void) | null = null;
-      /** What the session is saying now, or null while nothing is yet to say (a state left over from before). */
-      const read = (): ReplySignal | null => {
-        const now = source.current();
-        if (now === null || FINISHED.has(now.status)) return { kind: 'ended' };
-        if (now.turnState === 'working') {
-          seenWorking = true;
-          return { kind: 'working' };
-        }
-        const moved = seenWorking || now.turnStateAt !== baselineAt;
-        if (!moved) return null;
-        if (now.turnState === 'your-turn') return { kind: 'done' };
-        if (now.turnState === 'needs-input') return { kind: 'needs-input' };
-        return null;
-      };
-      /** Reads the session (which latches "working was seen"); tells the machine only once the send is attached. */
-      const evaluate = (): void => {
-        const signal = read();
-        if (signal === null || onSignal === null || signal.kind === last) return;
-        last = signal.kind;
-        onSignal(signal);
-      };
-      const unsubscribe = source.subscribe(evaluate);
-      let ended = false;
-      const cancel = (): void => {
-        if (ended) return;
-        ended = true;
-        onSignal = null;
-        unsubscribe();
-      };
-      return {
-        attach: handler => {
-          onSignal = handler;
-          evaluate();
-          return cancel;
-        },
-        cancel,
-      };
-    },
+    arm: () => watch(),
   };
 }
