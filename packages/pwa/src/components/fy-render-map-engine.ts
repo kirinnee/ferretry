@@ -17,6 +17,12 @@
  * THE TILE REQUEST CARRIES AN ORIGIN REFERER. The page sends `Referrer-Policy: no-referrer`, and
  * OpenStreetMap's tile policy asks for a valid Referer; the per-image `referrerPolicy` attribute is the one
  * narrow exception, for the tile host and nothing else.
+ *
+ * THE TILE IMAGE IS A CORS REQUEST. `crossOrigin: ''` (anonymous) costs nothing today — OpenStreetMap
+ * answers `Access-Control-Allow-Origin: *` — and keeps the tiles allowed should the page ever turn on
+ * cross-origin isolation (COEP `require-corp`), where a no-CORS `<img>` from a host that sends no CORP
+ * header is blocked (docs/voice.md). CORS mode does not touch the Referer: the `referrerPolicy`
+ * exception above still carries it.
  */
 
 import 'leaflet/dist/leaflet.css';
@@ -88,6 +94,9 @@ export function mountMap(host: HTMLElement, spec: MapSpec): MapHandle {
   });
   L.tileLayer(MAP_TILE_URL, {
     attribution: MAP_ATTRIBUTION.text,
+    // Anonymous CORS: OSM answers `Access-Control-Allow-Origin: *`, so this costs nothing today and keeps
+    // the tiles allowed under a COEP `require-corp` page (docs/voice.md). Still img-src, never connect-src.
+    crossOrigin: '',
     keepBuffer: 1,
     maxZoom: MAP_MAX_ZOOM,
     // OSM's policy asks for a Referer, and the page's own policy sends none; this is the tile images' alone.

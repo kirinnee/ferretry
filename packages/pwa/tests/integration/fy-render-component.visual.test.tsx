@@ -235,7 +235,13 @@ const openScene = async (
     if (!request.url().startsWith(server.url.origin) && !request.url().startsWith('data:')) outside.push(request.url());
   });
   await page.route('https://tile.openstreetmap.org/**', route =>
-    route.fulfill({ body: Buffer.from(fakeTilePng()), contentType: 'image/png' }),
+    route.fulfill({
+      body: Buffer.from(fakeTilePng()),
+      contentType: 'image/png',
+      // The tile layer loads in anonymous CORS mode, so a fulfilled answer must carry the header the real
+      // OSM does, or the browser refuses the tile as a failed CORS response.
+      headers: { 'access-control-allow-origin': '*' },
+    }),
   );
   const theme =
     options.themeName !== undefined
