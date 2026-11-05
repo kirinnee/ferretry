@@ -56,6 +56,15 @@ const ended = (rows: readonly PickerRow[], extra: Partial<AutoReadInput> = {}): 
   ...extra,
 });
 
+/**
+ * A clock that reads `base` now and then runs at the speed of the process's own: rows and turn states in these
+ * fixtures are dated near `AT`, so the hook's "now" must be too, whatever the process's real date is.
+ */
+const clockFrom = (base: number): (() => number) => {
+  const started = Date.now();
+  return () => base + (Date.now() - started);
+};
+
 const rig = (autoRead: boolean) => {
   const synth = new FakeSynth([voice('Samantha', 'en-US', { isDefault: true }), voice('Karen', 'en-AU')]);
   const speaker = createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
@@ -186,25 +195,28 @@ describe('useAutoRead', () => {
 
   test('a new send stops the reading and the next end of turn is its reply', async () => {
     const r = rig(true);
-    mounted = await mount(tree(r, working()));
-    await mounted.render(tree(r, ended([user, reply('First reply.')])));
+    // The fixtures' dates are near AT, so the hook's clock is too.
+    const now = clockFrom(AT + 12_000);
+    const treeAt = (input: AutoReadInput): ReactElement => tree(r, { ...input, now });
+    mounted = await mount(treeAt(working()));
+    await mounted.render(treeAt(ended([user, reply('First reply.')])));
     await settle();
     expect(r.controller.getState().status).toBe('reading');
     // The person sends: the page bumps its send signal and the reply under way is cut off.
-    await mounted.render(tree(r, ended([user, reply('First reply.')], { sendSignal: 1 })));
+    await mounted.render(treeAt(ended([user, reply('First reply.')], { sendSignal: 1 })));
     expect(r.controller.getState().status).toBe('stopped');
     // The daemon is still showing the old your-turn: nothing new is read from it.
     await settle();
     expect(said(r)).toBe('First reply.');
     expect(r.controller.getState().status).toBe('stopped');
     // The reply to the new message ends its own turn later than the send.
-    const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Second reply.', at: Date.now() + 5000 };
+    const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Second reply.', at: AT + 15_000 };
     await mounted.render(
       tree(
         r,
         ended([user, reply('First reply.'), second], {
           sendSignal: 1,
-          turnStateAt: new Date(Date.now() + 6000).toISOString(),
+          turnStateAt: new Date(AT + 20_000).toISOString(),
         }),
       ),
     );
@@ -367,11 +379,13 @@ describe('useAutoRead', () => {
 
   test('REGRESSION (round 1, #1): an idle old daemon read as working then idle on page load reads nothing', async () => {
     const r = rig(true);
+    // Older than the page, on whatever clock this process runs.
+    const before = Date.now();
     const legacy = (turn: 'working' | 'your-turn'): AutoReadInput => ({
       ...BASE,
       entries: [
-        { ...user, at: AT - 600_000 },
-        { ...reply('Historic reply.'), at: AT - 590_000 },
+        { ...user, at: before - 600_000 },
+        { ...reply('Historic reply.'), at: before - 590_000 },
       ],
       turn,
       turnStateAt: undefined,
@@ -385,15 +399,18 @@ describe('useAutoRead', () => {
 
   test('a send the composer did not announce (a form answer) still arms, from the acknowledgement', async () => {
     const r = rig(true);
-    mounted = await mount(tree(r, ended([user, reply('First reply.')])));
-    await mounted.render(tree(r, ended([user, reply('First reply.')], { sendSignal: 1 })));
-    const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Answer reply.', at: Date.now() + 5000 };
+    // The fixtures' dates are near AT, so the hook's clock is too.
+    const now = clockFrom(AT + 12_000);
+    const treeAt = (input: AutoReadInput): ReactElement => tree(r, { ...input, now });
+    mounted = await mount(treeAt(ended([user, reply('First reply.')])));
+    await mounted.render(treeAt(ended([user, reply('First reply.')], { sendSignal: 1 })));
+    const second: PickerRow = { id: 'a2', kind: 'assistant', text: 'Answer reply.', at: AT + 15_000 };
     await mounted.render(
       tree(
         r,
         ended([user, reply('First reply.'), second], {
           sendSignal: 1,
-          turnStateAt: new Date(Date.now() + 6000).toISOString(),
+          turnStateAt: new Date(AT + 20_000).toISOString(),
         }),
       ),
     );
