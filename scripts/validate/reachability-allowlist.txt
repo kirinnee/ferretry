@@ -318,6 +318,10 @@ packages/pwa/src/features/shared/store-row-model.ts # the store row status, Upda
 packages/pwa/src/features/shared/shared-installs.ts # which skills and MCP servers a publisher's catalogs have installed, used by shared-with-me.tsx ← sharing-page.tsx ← App.tsx ← main.tsx and by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/catalogs/local-skill-installs-api.ts # the copy-from-this-machine reads and installs, used by add-skills-page.tsx and local-skill-install-sheet.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/context-rail/machine-skills-model.ts # the On this machine rows, used by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-auto-read.ts # Auto-read replies: reads a finished turn aloud, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/voice-chat/auto-read.ts # the pure turn watcher behind Auto-read replies, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/voice-chat/reply-picker.ts # picks the words of a finished turn to read aloud, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
+
 
 # The Live voice noise harness's judging rules (&F137 slice 3), dev tooling only.
 packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; not part of the shipped app

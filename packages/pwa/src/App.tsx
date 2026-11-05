@@ -1877,6 +1877,7 @@ function SessionRoute({
             // reference surface as a fleet with nobody in it.
             daemonSessions={fleetSlice?.sessions ?? undefined}
             entries={placedEntries}
+            sends={sends}
             history={history}
             {...(conversationSearch === undefined ? {} : { conversationSearch })}
             onRetry={retrySend}

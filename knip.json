@@ -194,6 +194,8 @@
         "harness/context-ring-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
         "harness/chat-images-screenshot.tsx",
+        "harness/read-aloud-screenshot.tsx",
+        "harness/auto-read-screenshot.tsx",
         "harness/agenda-message-screenshot.tsx",
         "harness/agenda-card-quote-screenshot.tsx",
         "harness/inbox-item-history-screenshot.ts",

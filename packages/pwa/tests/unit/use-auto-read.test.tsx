@@ -1,0 +1,643 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import type { ReactElement } from 'react';
+import { AutoReadChip } from '../../src/components/auto-read-chip.tsx';
+import {
+  type AutoReadHandle,
+  type AutoReadInput,
+  type SendAcceptance,
+  useAutoRead,
+} from '../../src/hooks/use-auto-read.ts';
+import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
+import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
+import { LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
+import { createReadAloud, type ReadAloudController } from '../../src/lib/voice-chat/read-aloud.ts';
+import type { PickerRow } from '../../src/lib/voice-chat/reply-picker.ts';
+import { createSpeechSynthesisSpeaker } from '../../src/lib/voice-chat/speech-synthesis.ts';
+import { interact, type Mounted, mount } from '../support/dom.ts';
+import { FakeSynth, FakeUtterance, voice } from '../support/fake-speech.ts';
+
+/**
+ * Auto-read replies, end to end over a fake voice: off by default, reads the last message of a turn it
+ * SAW end (after the 500 ms text-settled guard), a question is read not answered, a tap or key or a new
+ * send stops it, a hidden tab is silent — and it never speaks at all unless the device switched it on.
+ * Every date is the daemon's: there is no browser-clock comparison anywhere to fake.
+ */
+
+let mounted: Mounted | null = null;
+afterEach(async () => {
+  await mounted?.unmount();
+  mounted = null;
+  setVisibility('visible');
+});
+
+const setVisibility = (state: 'visible' | 'hidden'): void => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  document.dispatchEvent(new Event('visibilitychange'));
+};
+
+const memory = (): { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void } => {
+  const data = new Map<string, string>();
+  return { getItem: key => data.get(key) ?? null, setItem: (key, value) => void data.set(key, value) };
+};
+
+const AT = Date.UTC(2026, 10, 5, 3, 0, 0);
+const iso = (ms: number): string => new Date(AT + ms).toISOString();
+/** The daemon's ledger entry for a send: when the DAEMON accepted it. */
+const accepted = (sendId: string, ms: number): SendAcceptance => ({ sendId, acceptedAt: iso(ms) });
+const user: PickerRow = { id: 'u1', kind: 'user', text: 'fix it', at: AT };
+const reply = (text: string, id = 'a1'): PickerRow => ({ id, kind: 'assistant', text, at: AT + 9000 });
+const asked = (id: string, ms: number): PickerRow => ({ id, kind: 'user', text: 'and this', at: AT + ms });
+
+const BASE: AutoReadInput = {
+  scope: 'd/s',
+  entries: [user],
+  turn: 'your-turn',
+  turnStateAt: iso(-1000),
+  question: null,
+  sends: [],
+};
+const working = (extra: Partial<AutoReadInput> = {}): AutoReadInput => ({
+  ...BASE,
+  turn: 'working',
+  turnStateAt: iso(1000),
+  ...extra,
+});
+const ended = (rows: readonly PickerRow[], extra: Partial<AutoReadInput> = {}): AutoReadInput => ({
+  ...BASE,
+  entries: rows,
+  turn: 'your-turn',
+  turnStateAt: iso(10_000),
+  ...extra,
+});
+
+const rig = (autoRead: boolean) => {
+  const synth = new FakeSynth([voice('Samantha', 'en-US', { isDefault: true }), voice('Karen', 'en-AU')]);
+  const speaker = createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
+  const controller: ReadAloudController = createReadAloud({ speaker, language: () => 'en-US' });
+  const store = new LiveVoiceSettingsStore(memory());
+  if (autoRead) store.update({ autoRead: true });
+  return { synth, controller, store };
+};
+
+let handle: AutoReadHandle | null = null;
+function Probe({ input }: { readonly input: AutoReadInput }) {
+  handle = useAutoRead(input);
+  return <AutoReadChip onStop={handle.stop} reading={handle.reading} />;
+}
+
+const tree = (r: ReturnType<typeof rig>, input: AutoReadInput): ReactElement => (
+  <LiveVoiceSettingsProvider store={r.store}>
+    <ReadAloudProvider controller={r.controller}>
+      <Probe input={input} />
+    </ReadAloudProvider>
+  </LiveVoiceSettingsProvider>
+);
+
+const settle = async (ms = 560): Promise<void> => {
+  await interact(() => new Promise(resolve => setTimeout(resolve, ms)));
+};
+/** What the controller is (or last was) saying, a caption at a time: the fake voice only plays what the test lets it. */
+const said = (r: { readonly controller: ReadAloudController }): string => r.controller.getState().segments.join(' ');
+
+const OLD = reply('Previous reply.', 'a0');
+const press = async (id: string | undefined = 's1'): Promise<void> => {
+  await interact(() => handle?.beginSend());
+  await interact(() => handle?.sent(id));
+};
+
+describe('useAutoRead', () => {
+  test('OFF by default: a turn ends and nothing is said', async () => {
+    const r = rig(false);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('All done.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('ON: reads only the last message of the turn once the text has settled, with the chosen voice and rate', async () => {
+    const r = rig(true);
+    r.store.update({ voiceId: 'uri:Karen', rate: 1.5 });
+    mounted = await mount(tree(r, working()));
+    await mounted.render(
+      tree(r, ended([user, { ...reply('Let me look.', 'a0'), at: AT + 2000 }, reply('The fix is in.')])),
+    );
+    // Not at once: the text-settled guard waits for 500 ms of quiet.
+    expect(r.synth.spoken).toHaveLength(0);
+    await settle();
+    expect(said(r)).toBe('The fix is in.');
+    expect(r.synth.spoken[0]?.rate).toBe(1.5);
+    expect((r.synth.spoken[0]?.voice as { name: string } | null)?.name).toBe('Karen');
+    expect(r.controller.getState().key).toBe('a1');
+  });
+
+  test('a turn with no text says "Done. No message."', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, { id: 't1', kind: 'tool', text: 'ran', at: AT + 3000 }])));
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+
+  test('needs-input reads the question and its options, and offers no way to answer by voice', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(
+      tree(
+        r,
+        ended([user], {
+          turn: 'needs-input',
+          question: { questions: [{ question: 'Which one?', options: [{ label: 'Alpha' }, { label: 'Beta' }] }] },
+        }),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('The ferret asks. Which one? Options: one, Alpha; two, Beta.');
+    expect(mounted.container.querySelector('input,textarea,[contenteditable]')).toBeNull();
+  });
+
+  test('a session already at your-turn when it is switched on reads nothing', async () => {
+    const r = rig(false);
+    mounted = await mount(tree(r, ended([user, reply('Old reply.')])));
+    await interact(() => r.store.update({ autoRead: true }));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('the "Reading the reply" chip appears with a Stop that works, and the live region never says the reply', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Secret words.')])));
+    await settle();
+    const chip = mounted.container.querySelector('[data-auto-read]');
+    expect(chip?.textContent).toContain('Reading the reply');
+    expect(chip?.textContent).toContain('Tap anywhere or press a key to stop.');
+    expect(mounted.container.querySelector('[role="status"]')?.textContent).toBe('Reading the reply');
+    expect(mounted.container.textContent).not.toContain('Secret words');
+    const stop = chip?.querySelector('button') as HTMLButtonElement;
+    expect(stop.textContent).toBe('Stop');
+    await interact(() => stop.click());
+    expect(r.controller.getState().status).toBe('stopped');
+    expect(mounted.container.querySelector('[data-auto-read]')).toBeNull();
+  });
+
+  test('a tap anywhere stops it; so does a key', async () => {
+    for (const fire of [
+      () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })),
+      () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })),
+    ]) {
+      const r = rig(true);
+      mounted = await mount(tree(r, working()));
+      await mounted.render(tree(r, ended([user, reply('Reply.')])));
+      await settle();
+      expect(r.controller.getState().status).toBe('reading');
+      await interact(fire);
+      expect(r.controller.getState().status).toBe('stopped');
+      await mounted.unmount();
+    }
+  });
+
+  test('a tap does NOT stop a reading the person started by hand', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, BASE));
+    await interact(() => r.controller.read('manual', 'Read me.'));
+    await interact(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(r.controller.getState().status).toBe('reading');
+  });
+
+  test('switching it off silences a reading', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Reply.')])));
+    await settle();
+    expect(r.controller.getState().status).toBe('reading');
+    await interact(() => r.store.update({ autoRead: false }));
+    expect(r.controller.getState().status).toBe('stopped');
+  });
+
+  test('a hidden tab stops speech, and a turn that ends while hidden is not read on return', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Reply.')])));
+    await settle();
+    expect(r.controller.getState().status).toBe('reading');
+    await interact(() => setVisibility('hidden'));
+    expect(r.controller.getState().status).toBe('stopped');
+
+    const hiddenRig = rig(true);
+    await mounted.unmount();
+    mounted = await mount(tree(hiddenRig, working()));
+    await mounted.render(tree(hiddenRig, ended([user, reply('Missed reply.')])));
+    await settle();
+    await interact(() => setVisibility('visible'));
+    await settle();
+    expect(hiddenRig.synth.spoken).toHaveLength(0);
+  });
+
+  test('another conversation starts clean: a turn seen in the first is not read in the second', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, { ...ended([user, reply('Other conversation.')]), scope: 'd/other' }));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('no speech on the device: the hook does nothing and the chip is empty', async () => {
+    const synth = new FakeSynth([]);
+    const unsupported = createReadAloud({
+      speaker: {
+        ...createSpeechSynthesisSpeaker({ synth, createUtterance: t => new FakeUtterance(t) }),
+        supported: false,
+      },
+    });
+    const store = new LiveVoiceSettingsStore(memory());
+    store.update({ autoRead: true });
+    const r = { synth, controller: unsupported, store };
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Reply.')])));
+    await settle();
+    expect(synth.spoken).toHaveLength(0);
+    await press();
+    expect(synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #2): hiding the tab cancels a reading that was waiting out its settle time', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Pending.')])));
+    await interact(() => setVisibility('hidden'));
+    await interact(() => setVisibility('visible'));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #6): the turn ends while the tab is hidden; coming back before the timer reads nothing', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await interact(() => setVisibility('hidden'));
+    await mounted.render(tree(r, ended([user, reply('Missed.')])));
+    await interact(() => setVisibility('visible'));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 1, #5): a replay of a turn that was already read is not read again', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Read once.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+    await interact(() => handle?.stop());
+    // A reconnect replays the same working → your-turn pair.
+    await mounted.render(tree(r, { ...working(), entries: [user, reply('Read once.')] }));
+    await mounted.render(tree(r, ended([user, reply('Read once.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+  });
+});
+
+describe('useAutoRead: a daemon that dates no turns is never auto-read', () => {
+  /** What the page hands the hook for an old daemon: no `turnState`, so no turn and no date. */
+  const old = (rows: readonly PickerRow[]): AutoReadInput => ({
+    ...BASE,
+    entries: rows,
+    turn: null,
+    turnStateAt: undefined,
+  });
+
+  test('nothing is read when the conversation grows and goes quiet, however long', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, old([user])));
+    await mounted.render(tree(r, old([user, reply('Live-looking reply.')])));
+    await settle(3600);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('a turn state without a date is not enough either', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, { ...working(), turnStateAt: undefined }));
+    await mounted.render(tree(r, { ...ended([user, reply('Reply.')]), turnStateAt: undefined }));
+    await settle(3600);
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.render(tree(r, { ...ended([user, reply('Reply.')]), turnStateAt: 'not a date' }));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('pressing send arms nothing, and the send’s id does not either', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, old([user, OLD])));
+    await press('s1');
+    await mounted.render(
+      tree(r, { ...old([user, OLD, asked('u2', 30_000), reply('New reply.', 'a2')]), sends: [accepted('s1', 30_000)] }),
+    );
+    await settle(3600);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+});
+
+describe('useAutoRead: a send is judged against the daemon’s acceptance of it', () => {
+  /** An idle session at your-turn@-1000 with an old reply, as the page opens. */
+  const idle = (extra: Partial<AutoReadInput> = {}): AutoReadInput => ({ ...BASE, entries: [user, OLD], ...extra });
+  const BOUNDARY = 30_000;
+
+  test('the send’s own turn is read once the ledger has shown when the daemon accepted it', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await press('s1');
+    const sends = [accepted('s1', BOUNDARY)];
+    const rows = [user, OLD, asked('u2', 30_100)];
+    await mounted.render(tree(r, idle({ entries: rows, turn: 'working', turnStateAt: iso(30_500), sends })));
+    await mounted.render(
+      tree(r, idle({ entries: [...rows, reply('New reply.', 'a2')], turnStateAt: iso(40_000), sends })),
+    );
+    // The press and the request read nothing by themselves.
+    expect(r.synth.spoken).toHaveLength(0);
+    await settle();
+    expect(said(r)).toBe('New reply.');
+    expect(r.controller.getState()).toMatchObject({ status: 'reading', key: 'a2' });
+  });
+
+  test('a fast turn that ends before the ledger shows the send is read when it does', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await interact(() => handle?.beginSend());
+    const rows = [user, OLD, asked('u2', 30_100), reply('Quick answer.', 'a2')];
+    await mounted.render(tree(r, idle({ entries: rows.slice(0, 3), turn: 'working', turnStateAt: iso(30_500) })));
+    await mounted.render(tree(r, idle({ entries: rows, turnStateAt: iso(31_000) })));
+    await interact(() => handle?.sent('s1'));
+    await settle();
+    // The daemon has not told the page when it accepted the send yet: nothing is read.
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.render(tree(r, idle({ entries: rows, turnStateAt: iso(31_000), sends: [accepted('s1', BOUNDARY)] })));
+    await settle();
+    expect(said(r)).toBe('Quick answer.');
+    expect(r.synth.spoken).toHaveLength(1);
+  });
+
+  test('REGRESSION (round 3, #1): a delayed prior completion@10000 with the send accepted at 30000 is not read', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle({ turnStateAt: iso(1000) })));
+    await press('s1');
+    const sends = [accepted('s1', BOUNDARY)];
+    // The new user row appears in the same render as the old turn's completion arriving late.
+    await mounted.render(tree(r, idle({ entries: [user, OLD, asked('u2', 30_100)], turnStateAt: iso(10_000), sends })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    // …and it did not consume the token: the real reply is still read.
+    await mounted.render(
+      tree(r, idle({ entries: [user, OLD, asked('u2', 30_100)], turn: 'working', turnStateAt: iso(30_500), sends })),
+    );
+    await mounted.render(
+      tree(
+        r,
+        idle({
+          entries: [user, OLD, asked('u2', 30_100), reply('Real reply.', 'a2')],
+          turnStateAt: iso(40_000),
+          sends,
+        }),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('Real reply.');
+  });
+
+  test('REGRESSION (round 3, #1): replaying the previous working@2000 does not prove the new turn', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle({ turnStateAt: iso(1000) })));
+    await press('s1');
+    const sends = [accepted('s1', BOUNDARY)];
+    await mounted.render(tree(r, idle({ turn: 'working', turnStateAt: iso(2000), sends })));
+    await mounted.render(tree(r, idle({ turnStateAt: iso(10_000), sends })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('without the ledger’s word on the send nothing is read, whatever else is seen', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await press('s1');
+    const rows = [user, OLD, asked('u2', 30_100), reply('Reply.', 'a2')];
+    await mounted.render(tree(r, idle({ entries: rows.slice(0, 3), turn: 'working', turnStateAt: iso(30_500) })));
+    await mounted.render(tree(r, idle({ entries: rows, turnStateAt: iso(40_000) })));
+    // A ledger entry for some other send, or one whose date cannot be read, proves nothing either.
+    await mounted.render(
+      tree(
+        r,
+        idle({
+          entries: rows,
+          turnStateAt: iso(40_000),
+          sends: [accepted('other', 30_000), { sendId: 's1', acceptedAt: 'x' }],
+        }),
+      ),
+    );
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('a reading under way is cut off by a new send, and the next end of turn is the new send’s reply', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('First reply.')])));
+    await settle();
+    expect(r.controller.getState().status).toBe('reading');
+    await interact(() => handle?.beginSend());
+    expect(r.controller.getState().status).toBe('stopped');
+    await interact(() => handle?.sent('s2'));
+    // The daemon is still showing the old your-turn: nothing new is read from it.
+    await settle();
+    expect(said(r)).toBe('First reply.');
+    expect(r.synth.spoken).toHaveLength(1);
+    const sends = [accepted('s2', 13_000)];
+    const rows = [user, reply('First reply.'), asked('u2', 13_100)];
+    await mounted.render(tree(r, ended(rows, { turn: 'working', turnStateAt: iso(14_000), sends })));
+    await mounted.render(
+      tree(
+        r,
+        ended([...rows, { id: 'a2', kind: 'assistant', text: 'Second reply.', at: AT + 15_000 }], {
+          turnStateAt: iso(20_000),
+          sends,
+        }),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('Second reply.');
+    expect(r.controller.getState()).toMatchObject({ status: 'reading', key: 'a2' });
+  });
+
+  test('a newer send drops the reading that was waiting on the older turn', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    // working → your-turn, with the text still arriving (the settle timer is pending)…
+    await mounted.render(tree(r, ended([user, reply('Older reply.')])));
+    // …and the person sends again before it fires.
+    await interact(() => handle?.beginSend());
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('the acknowledgement of a press stops nothing and binds the id; a failed request drops the press', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await interact(() => handle?.beginSend());
+    await interact(() => r.controller.read('theirs', 'Read me.'));
+    // The press was announced: its acknowledgement does not cut a reading off.
+    await interact(() => handle?.sent('s1'));
+    expect(r.controller.getState().status).toBe('reading');
+
+    // A press whose request failed lets go: the next live turn is watched as any other.
+    await interact(() => handle?.beginSend());
+    await interact(() => handle?.failed());
+    await mounted.render(tree(r, idle({ turn: 'working', turnStateAt: iso(5000) })));
+    await mounted.render(tree(r, idle({ entries: [user, OLD, reply('Next reply.', 'a2')], turnStateAt: iso(9000) })));
+    await settle();
+    expect(said(r)).toBe('Next reply.');
+  });
+
+  test('a press that was never told how it went blocks the live path until it is, and failing with no press is harmless', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await interact(() => handle?.failed());
+    await interact(() => handle?.beginSend());
+    await mounted.render(tree(r, idle({ turn: 'working', turnStateAt: iso(5000) })));
+    await mounted.render(tree(r, idle({ entries: [user, OLD, reply('Unproven.', 'a2')], turnStateAt: iso(9000) })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('a send with no id (a form answer) stops the reading and drops the press; the live turn is then watched', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('First reply.')])));
+    await settle();
+    expect(handle?.reading).toBe(true);
+    // Unannounced and without an id: it only stops the reading.
+    await interact(() => handle?.sent(undefined));
+    expect(r.controller.getState().status).toBe('stopped');
+    expect(handle?.reading).toBe(false);
+    // The answer's turn is seen working and ending, and is read.
+    await mounted.render(tree(r, ended([user, reply('First reply.')], { turn: 'working', turnStateAt: iso(14_000) })));
+    await mounted.render(
+      tree(
+        r,
+        ended([user, reply('First reply.'), { id: 'a2', kind: 'assistant', text: 'Answer reply.', at: AT + 15_000 }], {
+          turnStateAt: iso(20_000),
+        }),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('Answer reply.');
+
+    // A press announced without an id is dropped too.
+    await interact(() => handle?.beginSend());
+    await interact(() => handle?.sent(undefined));
+    await mounted.render(tree(r, ended([user, reply('First reply.')], { turn: 'working', turnStateAt: iso(24_000) })));
+    await mounted.render(
+      tree(
+        r,
+        ended(
+          [user, reply('First reply.'), { id: 'a3', kind: 'assistant', text: 'After the press.', at: AT + 25_000 }],
+          { turnStateAt: iso(30_000) },
+        ),
+      ),
+    );
+    await settle();
+    expect(said(r)).toBe('After the press.');
+  });
+
+  test('a send nobody announced but that has an id is armed from its acknowledgement', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await interact(() => handle?.sent('s9'));
+    const sends = [accepted('s9', BOUNDARY)];
+    const rows = [user, OLD, asked('u2', 30_100)];
+    await mounted.render(tree(r, idle({ entries: rows, turn: 'working', turnStateAt: iso(30_500), sends })));
+    await mounted.render(
+      tree(r, idle({ entries: [...rows, reply('Held message reply.', 'a2')], turnStateAt: iso(40_000), sends })),
+    );
+    await settle();
+    expect(said(r)).toBe('Held message reply.');
+  });
+
+  test('a send while Auto-read is off arms nothing', async () => {
+    const off = rig(false);
+    mounted = await mount(tree(off, idle()));
+    await press('s1');
+    const sends = [accepted('s1', BOUNDARY)];
+    await mounted.render(tree(off, idle({ turn: 'working', turnStateAt: iso(30_500), sends })));
+    await mounted.render(
+      tree(
+        off,
+        idle({ entries: [user, OLD, asked('u2', 30_100), reply('R.', 'a2')], turnStateAt: iso(40_000), sends }),
+      ),
+    );
+    await settle();
+    expect(off.synth.spoken).toHaveLength(0);
+  });
+
+  test('a newer send whose id never comes keeps the older one’s token only until it is replaced', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idle()));
+    await press('s1');
+    await interact(() => handle?.beginSend());
+    // The first send's ledger entry arrives: it is no longer the token's send, so it proves nothing.
+    await mounted.render(
+      tree(r, idle({ turn: 'working', turnStateAt: iso(30_500), sends: [accepted('s1', BOUNDARY)] })),
+    );
+    await mounted.render(
+      tree(
+        r,
+        idle({
+          entries: [user, OLD, reply('Not yours.', 'a2')],
+          turnStateAt: iso(40_000),
+          sends: [accepted('s1', BOUNDARY)],
+        }),
+      ),
+    );
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+});
+
+describe('useAutoRead: history is never a fresh arrival', () => {
+  test('REGRESSION (round 3, #2): a stale cached transcript replaced by the authoritative log reads nothing', async () => {
+    const r = rig(true);
+    const cached = [user, reply('Cached old answer.')];
+    const authoritative = [
+      ...cached,
+      asked('u2', 20_000),
+      { id: 'a2', kind: 'assistant', text: 'Historical reply from before opening this page.', at: AT + 30_000 },
+    ];
+    // The page draws the cache, then replaces it with the log; the daemon's state is a finished turn throughout.
+    const idle = (rows: readonly PickerRow[]): AutoReadInput => ({ ...BASE, entries: rows, turnStateAt: iso(30_500) });
+    mounted = await mount(tree(r, idle(cached)));
+    await mounted.render(tree(r, idle(authoritative)));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 3, #2): the same hydration while the turn is shown working → your-turn at open reads only what the turn wrote', async () => {
+    const r = rig(true);
+    const cached = [user, reply('Cached old answer.')];
+    const authoritative = [
+      ...cached,
+      asked('u2', 20_000),
+      { id: 'a2', kind: 'assistant', text: 'Historical reply from before opening this page.', at: AT + 30_000 },
+    ];
+    // A turn that was running when the page opened, hydrated while it ran, then ended: that IS seen, and cut at its start.
+    mounted = await mount(tree(r, { ...BASE, entries: cached, turn: 'working', turnStateAt: iso(60_000) }));
+    await mounted.render(tree(r, { ...BASE, entries: authoritative, turn: 'working', turnStateAt: iso(60_000) }));
+    await mounted.render(tree(r, { ...BASE, entries: authoritative, turnStateAt: iso(70_000) }));
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+
+  test('REGRESSION (round 3, #3): open idle, then a replay of an older working → your-turn with no send reads nothing', async () => {
+    const r = rig(true);
+    const history = [user, reply('Historical reply.')];
+    mounted = await mount(tree(r, ended(history)));
+    await mounted.render(tree(r, { ...working(), entries: history }));
+    await mounted.render(tree(r, ended(history)));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+});

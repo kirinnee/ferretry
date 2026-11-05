@@ -4,10 +4,11 @@ import { Pause, Play, Search } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
+import { AutoReadChip } from '../../components/auto-read-chip.tsx';
 import { CacheUpdating } from '../../components/cache-updating.tsx';
 import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
-import { Composer } from '../../components/composer.tsx';
+import { Composer, type ComposerSent } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
 import { FastToggle } from '../../components/composer-fast.tsx';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
@@ -94,6 +95,7 @@ import { useSessionWorkspace } from '../../features/workspace/use-session-worksp
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
+import { type SendAcceptance, useAutoRead } from '../../hooks/use-auto-read.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
@@ -113,11 +115,11 @@ import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
+import { useFormComposer } from '../agenda-form-send.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
-import { useFormComposer } from '../agenda-form-send.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { ChatTasksView } from '../board-chat-url.ts';
 import type { DaemonBoardStore } from '../board-store.ts';
@@ -143,6 +145,7 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
+import { needsInputOf } from '../voice-chat/reply-picker.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
@@ -184,6 +187,11 @@ export interface SessionChatPageProps {
   readonly browserLogin?: DaemonBrowserLoginStore;
   readonly session: SessionView;
   readonly entries: readonly TranscriptEntry[];
+  /**
+   * The daemon's own send ledger for this session (never the browser's outbox or queue): Auto-read replies
+   * judges a send's reply against the `acceptedAt` the DAEMON stamped on it.
+   */
+  readonly sends?: readonly SendAcceptance[];
   readonly client: SessionChatClient;
   readonly presentation: SidePaneTabPresentation;
   readonly canControl?: boolean;
@@ -386,6 +394,7 @@ const UTILITY_LABEL: Readonly<Record<SessionUtility, string>> = {
 };
 
 const NO_CONTRIBUTIONS: readonly SessionActionContribution<CoreActionContext>[] = [];
+const NO_SENDS: readonly SendAcceptance[] = [];
 
 /** The browser's clipboard, or a refusal a reader can be told about. */
 const browserCopyText = async (text: string): Promise<void> => {
@@ -440,6 +449,7 @@ export function SessionChatPage({
   usage,
   session,
   entries,
+  sends = NO_SENDS,
   client,
   presentation,
   canControl = true,
@@ -943,6 +953,31 @@ export function SessionChatPage({
     TERMINAL_STATUSES.has(session.state.status) || permissionRequest !== undefined
       ? undefined
       : session.state.harnessDialog;
+  // "Auto-read replies" (F137): off unless this device switched it on in Settings › Voice. It watches this
+  // conversation's turn and reads the reply aloud. Whatever parks a turn on the person — a question, a
+  // permission prompt, a harness dialog, the daemon's one-line reason — is only ever READ, never answered by voice.
+  const spokenPrompt = useMemo(
+    () =>
+      TERMINAL_STATUSES.has(session.state.status)
+        ? null
+        : needsInputOf({ question, permissionRequest, harnessDialog, turnPrompt: session.state.turnPrompt }),
+    [harnessDialog, permissionRequest, question, session.state.status, session.state.turnPrompt],
+  );
+  const autoRead = useAutoRead({
+    scope: `${connection.daemonId}/${session.config.id}`,
+    entries,
+    // Only a daemon that dates its turns is watched: with no `turnState` there is no turn to be sure of.
+    turn: session.state.turnState === undefined ? null : turn,
+    turnStateAt: session.state.turnState === undefined ? undefined : session.state.turnStateAt,
+    question: spokenPrompt,
+    sends,
+  });
+  // A form answered in the chat is a message from this page too (it carries no id to judge a reply by).
+  const autoReadSent = autoRead.sent;
+  const onAnswered = useCallback(() => {
+    onSent();
+    autoReadSent(undefined);
+  }, [autoReadSent, onSent]);
   const compact = presentation === 'sheet';
   // ---- SEARCH WITHIN THE CONVERSATION (`components/chat-search.tsx`) ----------------------------------
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1254,7 +1289,7 @@ export function SessionChatPage({
         />
       ) : undefined,
     entries,
-    onAnswered: onSent,
+    onAnswered,
     scope,
     snapshot: agendaModel?.snapshot ?? null,
     status: agendaModel?.status ?? 'idle',
@@ -1592,10 +1627,14 @@ export function SessionChatPage({
   // composer's row reserves the transcript scrollbar's width so both centre on one axis.
   const { references: agendaReferences, composer: agendaComposer } = agenda;
   const agendaSent = agendaComposer.onSent;
-  const onSentWithAgenda = useCallback(() => {
-    agendaSent();
-    onSent();
-  }, [agendaSent, onSent]);
+  const onSentWithAgenda = useCallback(
+    (sent?: ComposerSent) => {
+      agendaSent();
+      onSent();
+      autoReadSent(sent?.sendId);
+    },
+    [agendaSent, autoReadSent, onSent],
+  );
   // An open form item's Send answers the form, the Inbox's way (`useFormComposer`); otherwise it chats about the item.
   const agendaForm = useFormComposer(
     useMemo(() => withReferencePrefix(client, agendaReferences), [client, agendaReferences]),
@@ -1672,6 +1711,7 @@ export function SessionChatPage({
         <div className="fy-chat-input__column">
           {/* THE AGENDA: the drawer, the line and the "about" chip, all siblings above the composer, so the
               composer's own box never moves. */}
+          <AutoReadChip onStop={autoRead.stop} reading={autoRead.reading} />
           {agenda.above}
           {permissionRequest === undefined || !canControl ? null : (
             <ApprovalCard
@@ -1749,6 +1789,8 @@ export function SessionChatPage({
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               onSent={onSentWithAgenda}
+              onSending={autoRead.beginSend}
+              onSendFailed={autoRead.failed}
               {...(agendaComposer.onEscape === undefined ? {} : { onEscape: agendaComposer.onEscape })}
               connectionLive={connectionState?.kind === 'connected'}
               quota={quota}

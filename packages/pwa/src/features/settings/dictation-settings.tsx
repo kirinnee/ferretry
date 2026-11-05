@@ -59,6 +59,7 @@ import {
   sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
 import { Badge, Textarea } from '../../shell/primitives.tsx';
+import { AutoReadSettings } from './auto-read-settings.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
 import type { SpeedPlanner } from '../../lib/stt/speed-planner.ts';
 import { SpeedLine } from './speed-line.tsx';
@@ -461,6 +462,9 @@ export function DictationSettings({
           Dictation is disabled. Turn it on above whenever you want the microphone available again.
         </p>
       )}
+
+      {/* ---- hearing a reply: independent of dictation, so it stays whether dictation is on or off ---- */}
+      <AutoReadSettings />
 
       {!persisted && (
         <p className="text-meta leading-base text-warn" role="status">

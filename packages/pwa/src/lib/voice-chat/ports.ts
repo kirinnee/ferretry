@@ -116,12 +116,27 @@ export interface ReplyFeedPort {
   arm(): ReplyWatch;
 }
 
+/** How one reading of a reply ended. `stopped` is a stop (the person's, or another reading replacing this one). */
+export type ReadEnd = 'finished' | 'stopped' | 'failed' | 'unavailable';
+
+/** What Live reads when a turn ends: the ferret's reply, or the question it is waiting on. */
+export type ReadWhat = 'reply' | 'question';
+
 /**
- * Reading a reply aloud. Slice 5 wires a real one; in this slice the runner holds `null` and the
- * machine's Reading state and `speak` / `stopSpeaking` effects are exercised with a fake.
+ * Reading a turn's words aloud, as Live sees it. The words come from the conversation on the page, never
+ * from the machine: Live only says WHEN to read and WHAT KIND of thing (`reply` or `question`), and hears
+ * how it ended. `read` calls `onEnd` exactly once, however it ends, and never throws.
  */
-export interface SpeakerPort {
-  speak(onDone: () => void): void;
+export interface ReaderPort {
+  /** False where the device has no speech at all: Live then shows the reply and listens again. */
+  readonly supported: boolean;
+  /** Make later speech allowed. Called INSIDE the person's tap (iOS only lets speech start from one). */
+  unlock(): void;
+  /** A message is about to be sent: remember what the page holds, so the reply is the first thing after it. */
+  mark(): void;
+  /** Read the turn's reply or question. Replaces a reading still going (which is told `stopped`). */
+  read(what: ReadWhat, onEnd: (end: ReadEnd) => void): void;
+  /** Stop at once. The reading in progress hears `stopped`; with none, nothing happens. */
   stop(): void;
 }
 
@@ -149,4 +164,73 @@ export interface ClockPort {
   now(): number;
   /** Run `callback` once after `ms`; returns its cancel. */
   after(ms: number, callback: () => void): () => void;
+}
+/** One voice the device can speak with. `local` is the browser's own `localService`: it stays on the device. */
+export interface SpeakerVoice {
+  /** The browser's `voiceURI`: stable enough to name the voice again. */
+  readonly id: string;
+  readonly name: string;
+  /** BCP 47, as the browser reports it ("en-US"). */
+  readonly lang: string;
+  /** True when the voice is built into the device and speaks without sending text anywhere. */
+  readonly local: boolean;
+  /** The device's own pick for its language. */
+  readonly isDefault: boolean;
+}
+
+/** What a speaker tells the one who asked it to speak. Every reading ends in exactly one of the last three. */
+export type SpeakerEvent =
+  /** This segment has just started to be said: the caption moves to it. */
+  | { readonly type: 'segment'; readonly index: number }
+  /** Everything was said. */
+  | { readonly type: 'end' }
+  /** `stop()` was called, or another reading replaced this one. */
+  | { readonly type: 'stopped' }
+  /** Speech was not possible or broke off. `unavailable`: this device cannot speak at all. */
+  | { readonly type: 'error'; readonly reason: 'unavailable' | 'failed' };
+
+export interface SpeakRequest {
+  /** One entry per caption: the speaker may split an entry further for the engine, but reports it as one. */
+  readonly segments: readonly string[];
+  /** Speech rate, 0.8 – 2.0 (the speaker clamps). */
+  readonly rate: number;
+  /**
+   * The voice to use, already vetted by the caller (who says in words if it sends text away). Absent or no
+   * longer there: the speaker picks a voice that stays on the device for `language` itself — and when it
+   * cannot, it refuses (`error`) rather than hand the text to the browser's unset default, which may be remote.
+   */
+  readonly voice?: SpeakerVoice | null;
+  /** BCP 47 language of the text, for a speaker that has to choose its own voice. */
+  readonly language?: string;
+}
+
+export interface SpeakerPort {
+  /** False where the device has no speech at all, so a screen offers no Read aloud. */
+  readonly supported: boolean;
+  /** What the device can speak with right now. May be empty at first: browsers load voices late. */
+  voices(): readonly SpeakerVoice[];
+  /**
+   * Make later speech allowed. iOS only lets speech start from a tap, so a caller that will speak later
+   * calls this INSIDE the tap. Safe to call any number of times, and never audible.
+   */
+  unlock(): void;
+  /** Say the request, replacing any reading already going (which hears `stopped`). */
+  speak(request: SpeakRequest, onEvent: (event: SpeakerEvent) => void): void;
+  /** Stop at once. The reading in progress hears `stopped`; with none, nothing happens. */
+  stop(): void;
+}
+
+/** The short tones Live makes so a person who is not looking knows where it is. */
+export type EarconKind = 'listening' | 'sent' | 'reply-ready' | 'stopped';
+
+export interface EarconPort {
+  /** Make the tone's sound. Never throws; silent where the device cannot. */
+  play(kind: EarconKind): void;
+  /** Allow later sound. Called INSIDE the person's tap (a page may not sound before one). */
+  unlock(): void;
+}
+
+/** A short buzz where the device has one (Android; iOS web has none). */
+export interface HapticsPort {
+  pulse(kind: 'sent' | 'reply-ready'): void;
 }
