@@ -192,14 +192,6 @@ export const labelsError = (older: string, newer: string): string | null => {
   return older.trim() === newer.trim() ? 'Use two different labels.' : null;
 };
 
-/** A new login's id: the harness name, numbered past every id this machine already has. */
-export const nextCredentialId = (list: FleetCredentialList | null, harness: HarnessKind): string => {
-  const taken = new Set((list?.credentials ?? []).map(credential => credential.id));
-  let index = 2;
-  while (taken.has(`${harness}-${String(index)}`)) index += 1;
-  return taken.has(harness) ? `${harness}-${String(index)}` : harness;
-};
-
 // ── Budgets (docs/budgets.md) ─────────────────────────────────────────────────────────────────────
 
 /** `$12.40` — two decimals, as a bill reads. */

@@ -1,7 +1,8 @@
 /**
  * Settings › Machines › Sign-ins › **Add a login**: the one screen that picks a provider and asks only
- * for what that provider needs — a Claude Code sign-in with its link, an API-key provider with its key, and
- * the same provider refused — on a phone and a desktop, light and dark.
+ * for what that provider needs — a Claude Code sign-in with its Name, runtime box, "What happens next" and
+ * link, a first login, a Name that clashes, the same account twice, a Codex sign-in, an API-key provider
+ * with its key, and the same provider refused — on a phone and a desktop, light and dark.
  *
  *   bun harness/add-login-screenshot.tsx      # writes harness/out/add-login-*.png
  *
@@ -35,15 +36,29 @@ import { CredentialsTab } from '../../src/features/fleet/credentials/credentials
 import { PROVIDERS } from '../../tests/unit/features/fleet/credentials/environment-support.ts';
 import { APPLIED, CREDENTIALS, DATA, STUDIO, claudeFlow, credential, machine, runtime, scripted, stagedFrom, withStatus } from '../../tests/unit/features/fleet/account-support.ts';
 
-const refuse = new URLSearchParams(location.search).get('refuse') === '1';
-// A machine with a Codex login and its runtime, and nothing for Claude Code yet.
-const existing = [CREDENTIALS.credentials.find(item => item.harness === 'codex')];
-const runtimes = { ...DATA.runtimes, runtimes: [runtime({ name: 'codex-default', harness: 'codex', credential: { id: existing[0].id, store: 'ferretry', status: 'ready' } })] };
+const params = new URLSearchParams(location.search);
+const refuse = params.get('refuse') === '1';
+// 'first': a machine with a Codex login and nothing for Claude Code yet. Otherwise (the owner's state): it
+// already runs Claude Code on the claude-default profile for the login personal, and has a Codex login.
+const first = params.get('scenario') === 'first';
+// The sign-in lands on the account personal already has.
+const same = params.get('same') === '1';
+const codex = CREDENTIALS.credentials.find(item => item.harness === 'codex');
+const personal = credential({ id: 'claude-personal', label: 'personal', email: 'you@example.com' });
+const existing = first ? [codex] : [personal, codex];
+const profiles = { ...DATA.profiles, profiles: DATA.profiles.profiles.map(item => (item.name === 'Default' ? { ...item, name: 'claude-default' } : item)) };
+const runtimes = {
+  ...DATA.runtimes,
+  runtimes: [
+    runtime({ name: 'codex-default', harness: 'codex', profile: 'claude-default', credential: { id: codex.id, store: 'ferretry', status: 'ready' } }),
+    ...(first ? [] : [runtime({ name: 'claude-default', profile: 'claude-default', credential: { id: 'claude-personal', store: 'ferretry', status: 'ready' } })]),
+  ],
+};
 const made = [];
 const client = scripted({
   'GET /v1/fleet/credentials': () => ({ ...CREDENTIALS, credentials: [...existing, ...made] }),
   'GET /v1/fleet/runtimes': () => runtimes,
-  'GET /v1/fleet/profiles': DATA.profiles,
+  'GET /v1/fleet/profiles': profiles,
   'GET /v1/fleet/components': DATA.components,
   'GET /v1/fleet/machine': machine(),
   'GET /v1/fleet/presets': PROVIDERS,
@@ -55,13 +70,14 @@ const client = scripted({
     if (change.kind === 'credential.add')
       made.push(change.store === 'environment'
         ? credential({ id: change.id, store: 'environment', harness: change.harness })
-        : credential({ id: change.id, harness: change.harness, email: 'new@example.com', ...withStatus('needs_sign_in') }));
+        : credential({ id: change.id, harness: change.harness, label: change.label, email: same ? 'you@example.com' : 'new@example.com', ...withStatus('needs_sign_in') }));
     if (change.kind === 'runtime.put') runtimes.runtimes.push(runtime({ name: change.name, profile: change.profile }));
     return stagedFrom(call);
   },
   'POST /v1/fleet/proposals/fy_fprop_abcdefghijklmnopqrstuv/apply': APPLIED,
   'POST /v1/fleet/login': claudeFlow('awaiting-code', 'claude'),
   'GET /v1/fleet/login/flow-1': claudeFlow('awaiting-code', 'claude'),
+  'POST /v1/fleet/login/flow-1': { outcome: 'accepted', flow: claudeFlow('complete', 'claude') },
 });
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
@@ -131,9 +147,21 @@ const shot = async (page: Page, name: string, theme: string, vp: string): Promis
 /** A fixed placeholder, never a key: the field is a password field, so it shows as dots. */
 const FAKE_KEY = 'harness-placeholder-not-a-key';
 
-const open = async (page: Page, theme: string, refuse = false): Promise<void> => {
-  await page.goto(`${server.url}?theme=${theme}${refuse ? '&refuse=1' : ''}`);
+const open = async (page: Page, theme: string, extra = ''): Promise<void> => {
+  await page.goto(`${server.url}?theme=${theme}${extra}`);
   await page.locator('[data-add-login]').first().click();
+};
+
+/** Types into the Name box. */
+const nameIt = async (page: Page, value: string): Promise<void> => {
+  await page.locator('#add-login-name').fill(value);
+};
+
+/** Fails if the screen shows the doubled prefix the owner saw, or the old "already has a runtime" line. */
+const noOldWords = async (page: Page, what: string): Promise<void> => {
+  const text = (await page.locator('[data-add-login-screen]').textContent()) ?? '';
+  if (text.includes('claude-claude')) fail(`${what} shows claude-claude`);
+  if (text.includes('already has a runtime')) fail(`${what} shows "already has a runtime"`);
 };
 
 /** The one screen: pick a tile, fill what it asks, press the one button. */
@@ -141,12 +169,44 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await open(page, theme);
   await page.locator('[data-add-login-choices]').waitFor({ state: 'visible' });
   await shot(page, 'claude-pick', theme, vp);
+  // The owner's state: a second Claude Code login, with claude-default already running.
   await page.locator('[data-add-login-choice="claude"]').click();
   await page.locator('[data-add-login-fields="claude"]').waitFor({ state: 'visible' });
-  await shot(page, 'claude-ready', theme, vp);
+  await nameIt(page, 'work');
+  await noOldWords(page, 'second login');
+  await shot(page, 'second-ready', theme, vp);
+  await nameIt(page, 'personal');
+  await page.locator('[data-add-login-name-error]').waitFor({ state: 'visible' });
+  await shot(page, 'second-clash', theme, vp);
+  await nameIt(page, 'work');
   await page.locator('[data-add-login-fields] [data-change-submit]').click();
   await page.locator('[data-claude-login="awaiting-code"]').waitFor({ state: 'visible' });
+  await noOldWords(page, 'signing in');
   await shot(page, 'claude-signing-in', theme, vp);
+
+  // The sign-in lands on the account personal already has.
+  await open(page, theme, '&same=1');
+  await page.locator('[data-add-login-choice="claude"]').click();
+  await nameIt(page, 'work');
+  await page.locator('[data-add-login-fields] [data-change-submit]').click();
+  await page.locator('[data-claude-login="awaiting-code"]').waitFor({ state: 'visible' });
+  await page.locator('textarea').fill('harness-fake-code');
+  await page.getByRole('button', { name: 'Finish sign-in' }).click();
+  await page.locator('[data-add-login-same-account]').waitFor({ state: 'visible' });
+  await shot(page, 'same-account', theme, vp);
+
+  // A first Claude Code login: the Name is optional.
+  await open(page, theme, '&scenario=first');
+  await page.locator('[data-add-login-choice="claude"]').click();
+  await page.locator('[data-add-login-name]').waitFor({ state: 'visible' });
+  await noOldWords(page, 'first login');
+  await shot(page, 'first-ready', theme, vp);
+
+  // Codex, second login: its own words in steps 2 and 3.
+  await open(page, theme);
+  await page.locator('[data-add-login-choice="codex"]').click();
+  await nameIt(page, 'side');
+  await shot(page, 'codex-ready', theme, vp);
 
   await open(page, theme);
   await page.locator('[data-provider-tile="deepseek"]').click();
@@ -157,7 +217,7 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator('[data-add-login-done]').waitFor({ state: 'visible' });
   await shot(page, 'key-added', theme, vp);
 
-  await open(page, theme, true);
+  await open(page, theme, '&refuse=1');
   await page.locator('[data-provider-tile="deepseek"]').click();
   await page.locator('[data-env-secret-input="DEEPSEEK_API_KEY"]').fill(FAKE_KEY);
   await page.locator('[data-add-login-fields] [data-change-submit]').click();

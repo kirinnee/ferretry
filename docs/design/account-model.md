@@ -118,7 +118,7 @@ instructions", "settings", "MCP servers" and "skills" (§4.3).
 | C6   | Ferretry **never refreshes a token on a timer.** A refresh happens when the harness does it naturally, at a launch that is due, or on an explicit **Check now**.                                                                                                                                                                                                                                                                         |
 | C7   | Signing a credential in or out affects **every runtime that uses it**, and every surface says how many ("Finish sign-in for 3 runtimes", "3 runtimes will need sign-in").                                                                                                                                                                                                                                                                |
 | C8   | An **empty slot** is a credential with no login yet: status **Needs sign-in**. Clone creates one per credential the source runtimes used (E31). Runtimes keep pointing at the slot, so one sign-in fixes all of them.                                                                                                                                                                                                                    |
-| C9   | Two credentials of one harness may share an email. Each then carries a **label** the person chose (`personal`, `work`) and the add flow asks for both labels, which must differ (E26). Labels are display only.                                                                                                                                                                                                                          |
+| C9   | Two credentials of one harness may share an email. Each then carries a **label** the person chose (`personal`, `work`) — the **Name** on Add a login, required for the second login of a CLI — and labels must differ **per CLI**, checked when the login is added and by the daemon (any case). Labels are display only.                                                                                                                |
 | C10  | A credential cannot be removed while a runtime uses it.                                                                                                                                                                                                                                                                                                                                                                                  |
 | C11  | The sharing mechanism for each harness is pinned by a **CI guard** (§8.5) that fails when a harness update breaks it.                                                                                                                                                                                                                                                                                                                    |
 
@@ -411,18 +411,32 @@ form. Components are created in the Components section of the Profiles tab; the 
 a tool that is not installed says so and opens nothing), then every API-key provider the machine offers
 (docs/provider-presets.md § One-click add) and **Paste variables…**. A tap folds the tiles to the one
 chosen (**Change** while nothing is made) and shows under it only what that provider needs, and ONE
-button. It adds the login and, when no runtime on the machine runs that CLI yet, the runtime on it — the
-profile a runtime of that CLI already uses, else the first that fits, under the suggested name; a
-checked box says which, and turns it off or on. No fitting profile: no runtime, said in place.
+button. It adds the login and the runtime on it — the profile a runtime of that CLI already uses, else
+the first that fits. The runtime box is **ticked by default whenever a profile fits** (a login nothing runs
+on does nothing) and says what it makes: "Also make the runtime _name_ — Runs _Tool_ on this login, with the
+_profile_ profile." The runtime is **named after the login**, not the profile (`claude-work`). No fitting
+profile: no runtime, said in place.
 
-- **Sign in**: the same click makes the empty login (`store: ferretry`) and starts the harness's sign-in;
-  the existing link-and-code panel appears under it (Claude: open the page, paste the code; Codex: device
-  code, §8.2). "The login is kept on _machine_." Signed in to an email that already has a login of that
-  harness asks for both **labels** in place (E26).
+**One owner of the names.** The login id and the runtime name come from `loginIdFor` / `runtimeNameFor`
+in `@ferretry/protocol` (`fleet-names.ts`), which add the harness prefix **once** — never
+`claude-claude-default`. The PWA, `fy login add`, the first-run import and the daemon all use them.
+
+- **Sign in**: asks for a **Name** first (placeholder "e.g. work, personal"). It is **required when the
+  machine already has a login of that CLI** and optional for the first. It is saved as the login's label
+  and the id is made from it (`work` → `claude-work`; no name → `claude-login`, then `-2`…). At most 40
+  characters, at least one letter or digit, and no other login of the same CLI may have it (any case).
+  A short **What happens next** list says what Sign in does — including that the provider signs in
+  **whichever account the browser is already signed in to**, so open the link in a private window for
+  another. The same click then makes the empty login (`store: ferretry`), its runtime, and starts the
+  harness's sign-in; the existing link-and-code panel appears under it with an **Open sign-in page** link
+  beside Copy (Claude: open the page, paste the code; Codex: device code, §8.2). "The login is kept on
+  _machine_." Signed in to an email that already has a login of that harness asks "Did your browser sign in
+  as the wrong account?": **Sign in with a different account** signs the login out and starts over;
+  **Keep both** asks only for the label that is still missing (E26) and finishes at once when both have one.
 - **API key**: the provider's minimal form; the key is stored first, then the login added, then
   **Test** is offered.
 
-Progress is the button's own words ("Creating claude-default…", "Starting sign-in…"); a refusal is
+Progress is the button's own words ("Adding the login…", "Making claude-work…", "Starting sign-in…"); a refusal is
 one sentence beside it. A refused runtime keeps the login and says so. Leaving once a provider is
 chosen asks first; a machine asleep or offline pauses the screen (O5).
 
@@ -626,24 +640,24 @@ Every write goes through the same reviewed-proposal path the daemon uses and **a
 so nobody types `apply`. Every verb is a plain word a person would say; a read takes `--json`, a write
 takes `--dry-run` and `--yes`.
 
-| Command                                                                                                    | Purpose                                                                                                |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `fy daemon setup`                                                                                          | the first run (§4.3) in a terminal, one question at a time; Import again on a machine already set up   |
-| `fy daemon import claude\|codex [--name <runtime>]`                                                        | one tool's own login and setup, no questions (for scripts); refuses a tool that is not installed       |
-| `fy machine` / `fy machine set agent-permissions auto\|skip`                                               | machine facts, tools, Agent permissions                                                                |
-| `fy machine install claude\|codex`                                                                         | install a harness tool (§8.6); shows the command first                                                 |
-| `fy machine export > setup.json` / `fy machine clone setup.json [--replace]`                               | Clone without a browser: export from the source, import on the target                                  |
-| `fy runtimes`                                                                                              | the Runtimes tab                                                                                       |
-| `fy runtime add <name> --credential <id> --profile <name> [--agent] [--add-another]`                       | Add runtime                                                                                            |
-| `fy runtime show <name>` / `set <name> [--credential …] [--profile …] [--agent\|--no-agent]` / `rm <name>` | one runtime: stack, fixed layer, models                                                                |
-| `fy credentials`                                                                                           | the Sign-ins tab, with status and usage                                                                |
-| `fy credential add claude\|codex [--label L] [--id <id>] [--no-sign-in]`                                   | Add a login (link + code, or device code)                                                              |
-| `fy credential check <id>` / `signin <id>` / `signout <id>` / `label <id> <L>` / `rm <id>`                 | Check now; sign in again; sign out (names every runtime, confirms); label; remove (refused while used) |
-| `fy profiles` / `fy profile ls` / `fy profile show <name>`                                                 | scope (Generic, Claude only, Codex only), layers, conflicts, where used                                |
-| `fy profile build <name> --layer <kind>/<name>…` / `edit <name> --layer …` / `rm <name>`                   | Build / Edit layers / Delete (P6)                                                                      |
-| `fy components [<kind>]` / `fy component show\|add\|edit\|rm <kind>/<name>`                                | the Components section of the Profiles tab                                                             |
-| `fy start --agent <runtime>`                                                                               | refused unless the runtime is an agent runtime                                                         |
-| `fy fleet recommend <task…>`                                                                               | the routing suggestion; **the only verb `fleet` keeps**                                                |
+| Command                                                                                                    | Purpose                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `fy daemon setup`                                                                                          | the first run (§4.3) in a terminal, one question at a time; Import again on a machine already set up                                   |
+| `fy daemon import claude\|codex [--name <runtime>]`                                                        | one tool's own login and setup, no questions (for scripts); refuses a tool that is not installed                                       |
+| `fy machine` / `fy machine set agent-permissions auto\|skip`                                               | machine facts, tools, Agent permissions                                                                                                |
+| `fy machine install claude\|codex`                                                                         | install a harness tool (§8.6); shows the command first                                                                                 |
+| `fy machine export > setup.json` / `fy machine clone setup.json [--replace]`                               | Clone without a browser: export from the source, import on the target                                                                  |
+| `fy runtimes`                                                                                              | the Runtimes tab                                                                                                                       |
+| `fy runtime add <name> --credential <id> --profile <name> [--agent] [--add-another]`                       | Add runtime                                                                                                                            |
+| `fy runtime show <name>` / `set <name> [--credential …] [--profile …] [--agent\|--no-agent]` / `rm <name>` | one runtime: stack, fixed layer, models                                                                                                |
+| `fy credentials`                                                                                           | the Sign-ins tab, with status and usage                                                                                                |
+| `fy credential add claude\|codex [--label L] [--id <id>] [--no-sign-in]`                                   | Add a login (link + code, or device code). `--label` is the page's **Name**; prints the `fy runtime add` line the page would have made |
+| `fy credential check <id>` / `signin <id>` / `signout <id>` / `label <id> <L>` / `rm <id>`                 | Check now; sign in again; sign out (names every runtime, confirms); label; remove (refused while used)                                 |
+| `fy profiles` / `fy profile ls` / `fy profile show <name>`                                                 | scope (Generic, Claude only, Codex only), layers, conflicts, where used                                                                |
+| `fy profile build <name> --layer <kind>/<name>…` / `edit <name> --layer …` / `rm <name>`                   | Build / Edit layers / Delete (P6)                                                                                                      |
+| `fy components [<kind>]` / `fy component show\|add\|edit\|rm <kind>/<name>`                                | the Components section of the Profiles tab                                                                                             |
+| `fy start --agent <runtime>`                                                                               | refused unless the runtime is an agent runtime                                                                                         |
+| `fy fleet recommend <task…>`                                                                               | the routing suggestion; **the only verb `fleet` keeps**                                                                                |
 
 The old `fy fleet init`, `apply`, `ls`, `usage`, `health`, `sharing`, `login` and `migrate` are
 deleted, with no alias: `fy runtimes` and `fy credentials` answer what `ls`, `usage` and `health`
@@ -1052,7 +1066,7 @@ screen.
 | E23 | Model not available on this login                 | The model set lists unavailable models struck through, "Not available on this login"; the default falls back to the first available one, and the page says so.                                                                                                                             |
 | E24 | User settings vs the fixed layer                  | The agent runtime shows the locked Fixed layer, and the user value it overrides struck through: "From your Agent settings · Overridden for agents by Ferretry".                                                                                                                            |
 | E25 | Sign out of a login shared with the terminal      | "Sign out of _email_ (_label_)? This also signs out claude in your terminal on _machine_. 3 runtimes will need sign-in." **Sign out** / **Keep signed in**.                                                                                                                                |
-| E26 | Two logins, same email                            | Both carry the labels the person chose; adding the second asks for a label for each, and they must differ.                                                                                                                                                                                 |
+| E26 | Two logins, same email                            | Both carry the labels the person chose. The second is named when it is added; if its sign-in lands on the same account as the first, the page asks whether the browser signed in as the wrong account, and keeping both asks only for a label that is missing — the two must differ.       |
 | E27 | Clone source is offline                           | The source is listed but disabled: "asleep or offline. Wake it to copy from it." A source not set up: "Nothing to copy".                                                                                                                                                                   |
 | E28 | Clone target already set up                       | **Add alongside (rename clashes)** — copies get `-2`, e.g. `claude-default-2` — or **Replace** — the target's components, profiles and runtimes go first; its logins stay. In both, a sign-in the target already has (L2) is reused as it is, not duplicated as a `-2` slot.               |
 | E29 | Clone target lacks a harness                      | Runtimes are copied anyway; the row says "Codex isn't installed here · Install", and Launch reads "Install Codex to launch".                                                                                                                                                               |

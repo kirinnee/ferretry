@@ -190,9 +190,15 @@ const open = async (world: World = {}, props: Opened = {}) => {
   return { view, calls, events };
 };
 
-/** Through a Claude Code sign-in to "Signed in": the tile, the button, the code. */
-const signInToClaude = async (c: HTMLElement): Promise<void> => {
+/** Types into the Name box. */
+const nameIt = async (c: HTMLElement, value: string): Promise<void> => {
+  await type(c.querySelector('#add-login-name'), value);
+};
+
+/** Through a Claude Code sign-in to "Signed in": the tile, the Name, the button, the code. */
+const signInToClaude = async (c: HTMLElement, name = 'side'): Promise<void> => {
   await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+  await nameIt(c, name);
   await click(submit(c), 'the one button');
   await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
   await type(c.querySelector('textarea'), 'code-from-page');
@@ -279,31 +285,37 @@ describe('AddLogin · one screen', () => {
 });
 
 describe('AddLogin · a subscription sign-in', () => {
-  it('folds to the tile chosen, asks only to sign in, and one click makes the login, its runtime and the sign-in', async () => {
+  it('folds to the tile chosen, asks for a Name, and one click makes the login, its runtime and the sign-in', async () => {
     const { view, calls, events } = await open({ routes: CLAUDE_SIGNS_IN });
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
     expect(c.querySelector('[data-add-login-choices]')).toBeNull();
     expect(text(c, '[data-add-login-chosen="signin"]')).toBe('Claude CodeClaude subscriptionChange');
-    expect(text(c, '[data-add-login-fields="claude"] > p')).toBe(
-      'You sign in on Claude Code’s own page; the login is kept on studio-mac, and nothing here sees your password.',
+    expect(text(c, '[data-add-login-name] label')).toBe('Name');
+    expect(c.querySelector<HTMLInputElement>('#add-login-name')?.placeholder).toBe('e.g. work, personal');
+    expect(text(c, '[data-add-login-name-hint]')).toBe(
+      'So you can tell it from your other 2 Claude Code logins. Saved as claude-login.',
     );
-    // No runtime runs Claude Code here yet, so the button makes one.
-    const runtime = must(c.querySelector<HTMLInputElement>('[data-add-login-runtime="claude-default"] input'), 'it');
+    await nameIt(c, 'side');
+    expect(text(c, '[data-add-login-name-hint]')).toBe(
+      'So you can tell it from your other 2 Claude Code logins. Saved as claude-side.',
+    );
+    // Ticked by default: a login that nothing runs on does nothing. Named after the login, not the profile.
+    const runtime = must(c.querySelector<HTMLInputElement>('[data-add-login-runtime="claude-side"] input'), 'it');
     expect(runtime.checked).toBe(true);
-    expect(text(c, '[data-add-login-runtime="claude-default"]')).toBe(
-      'Also create the runtime claude-defaultClaude Code · Default profile',
+    expect(text(c, '[data-add-login-runtime="claude-side"]')).toBe(
+      'Also make the runtime claude-sideRuns Claude Code on this login, with the Default profile.',
     );
-    expect(submit(c).textContent).toBe('Sign in and create claude-default');
+    expect(submit(c).textContent).toBe('Sign in and make claude-side');
 
-    await click(submit(c), 'Sign in and create claude-default');
+    await click(submit(c), 'Sign in and make claude-side');
     await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
     expect(changeBodies(calls)).toEqual([
-      { kind: 'credential.add', id: 'claude', harness: 'claude' },
+      { kind: 'credential.add', id: 'claude-side', harness: 'claude', label: 'side' },
       {
         kind: 'runtime.put',
-        name: 'claude-default',
-        credential: 'claude',
+        name: 'claude-side',
+        credential: 'claude-side',
         profile: 'Default',
         agent: false,
         create: true,
@@ -311,10 +323,15 @@ describe('AddLogin · a subscription sign-in', () => {
     ]);
     expect(only(calls, APPLY)).toHaveLength(2);
     expect(only(calls, LOGIN)).toHaveLength(1);
-    expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude' });
+    expect(only(calls, LOGIN)[0]?.body).toEqual({ credentialId: 'claude-side' });
     expect(c.querySelector('[data-add-login-change]')).toBeNull();
-    expect(text(c, '[data-add-login-runtime-made="claude-default"]')).toBe('Created the runtime claude-default');
+    expect(text(c, '[data-add-login-added]')).toBe('Added side (claude-side)');
+    expect(text(c, '[data-add-login-runtime-made="claude-side"]')).toBe('Made the runtime claude-side');
     expect(c.textContent).toContain('https://claude.ai/oauth/authorize?code=true');
+    const link = must(c.querySelector<HTMLAnchorElement>('[data-open-sign-in]'), 'Open sign-in page');
+    expect(link.href).toBe('https://claude.ai/oauth/authorize?code=true');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toContain('noopener');
 
     await type(c.querySelector('textarea'), 'code-from-page');
     await click(
@@ -327,33 +344,131 @@ describe('AddLogin · a subscription sign-in', () => {
     expect(events).toEqual([]);
     // Done leaves straight away: nothing is left to lose.
     await click(c.querySelector('[data-add-login-finish]'), 'Done');
-    expect(events).toEqual(['added claude']);
+    expect(events).toEqual(['added claude-side']);
     await click(c.querySelector('[data-add-login-back]'), 'Logins');
-    expect(events).toEqual(['added claude', 'left']);
+    expect(events).toEqual(['added claude-side', 'left']);
     await view.unmount();
   });
 
-  it('makes no runtime when one already runs that CLI, unless asked to', async () => {
+  it('shows what happens next for Claude Code and for Codex, and not for an API-key provider', async () => {
+    const { view } = await open({ existing: [] });
+    const c = view.container;
+    await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    expect(text(c, '[data-add-login-next] h4')).toBe('What happens next');
+    const steps = (): string[] =>
+      Array.from(c.querySelectorAll('[data-add-login-next] li')).map(item => item.textContent ?? '');
+    expect(steps()).toEqual([
+      '1studio-mac starts Claude Code’s sign-in and shows you a link here.',
+      '2Open the link and sign in with the Claude account you want here.Already signed in to Claude in this browser as someone else? Open the link in a private window, or sign out of claude.ai first.',
+      '3Claude shows a code. Paste it back here.',
+    ]);
+    await nameIt(c, 'side');
+    expect(steps()[1]).toContain('Open the link and sign in with the Claude account you want for "side".');
+    expect(text(c, '[data-add-login-next] > p')).toBe(
+      'Your password stays on Claude Code’s page. The login is kept on studio-mac.',
+    );
+
+    await click(c.querySelector('[data-add-login-change]'), 'Change');
+    await click(c.querySelector('[data-add-login-choice="codex"]'), 'the Codex tile');
+    await nameIt(c, 'side');
+    expect(steps()[1]).toContain('sign in with the ChatGPT account you want for "side".');
+    expect(steps()[1]).toContain('sign out of chatgpt.com first.');
+    expect(steps()[2]).toBe('3Enter the code this page shows on the Codex page. This page finishes by itself.');
+
+    await click(c.querySelector('[data-add-login-change]'), 'Change');
+    await click(c.querySelector('[data-provider-tile="deepseek"]'), 'DeepSeek');
+    expect(c.querySelector('[data-add-login-next]')).toBeNull();
+    expect(c.querySelector('#add-login-name')).toBeNull();
+    await view.unmount();
+  });
+
+  it('asks for a Name only when the machine already has a login of that tool', async () => {
+    const first = await open({ existing: [], routes: CLAUDE_SIGNS_IN });
+    const f = first.view.container;
+    await click(f.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    expect(text(f, '[data-add-login-name-hint]')).toBe('Optional. Saved as claude-login.');
+    await nameIt(f, 'home');
+    expect(text(f, '[data-add-login-name-hint]')).toBe('Saved as claude-home.');
+    await nameIt(f, '');
+    await click(submit(f), 'Sign in');
+    await until(() => f.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
+    expect(changeBodies(first.calls)[0]).toEqual({ kind: 'credential.add', id: 'claude-login', harness: 'claude' });
+    await first.view.unmount();
+
+    const second = await open({ routes: CLAUDE_SIGNS_IN });
+    const c = second.view.container;
+    await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    // Said when Sign in is pressed, and nothing is sent.
+    expect(c.querySelector('[data-add-login-name-error]')).toBeNull();
+    await click(submit(c), 'Sign in');
+    expect(text(c, '[data-add-login-name-error]')).toBe('Give it a name so you can tell the two apart.');
+    expect(changeBodies(second.calls)).toEqual([]);
+    await nameIt(c, '---');
+    expect(text(c, '[data-add-login-name-error]')).toBe('Use at least one letter or digit.');
+    expect(submit(c).disabled).toBe(true);
+    await nameIt(c, 'x'.repeat(41));
+    expect(text(c, '[data-add-login-name-error]')).toBe('Keep it to 40 characters.');
+    await nameIt(c, 'Personal');
+    expect(text(c, '[data-add-login-name-error]')).toBe(
+      'You already have a Claude Code login named Personal. Pick another name.',
+    );
+    expect(submit(c).disabled).toBe(true);
+    await nameIt(c, 'side');
+    expect(c.querySelector('[data-add-login-name-error]')).toBeNull();
+    expect(submit(c).disabled).toBe(false);
+    // A Codex login named work does not block a Claude Code one.
+    await second.view.unmount();
+  });
+
+  it('names the one other login of the tool in the hint, with its email and label', async () => {
+    const { view } = await open({ existing: [credential({ id: 'claude-personal', label: 'personal' })] });
+    const c = view.container;
+    await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await nameIt(c, 'Side Gig');
+    expect(text(c, '[data-add-login-name-hint]')).toBe(
+      'So you can tell it from your other Claude Code login, you@example.com (personal). Saved as claude-side-gig.',
+    );
+    await view.unmount();
+  });
+
+  it('never shows claude-claude- or "already has a runtime", with a claude-default runtime and profile on the machine', async () => {
+    const runtimes = { ...RUNTIMES, runtimes: RUNTIMES.runtimes.map(item => ({ ...item, profile: 'claude-default' })) };
+    const profiles = {
+      ...DATA.profiles,
+      profiles: DATA.profiles.profiles.map(item => ({ ...item, name: 'claude-default' })),
+    };
+    const { view } = await open({ runtimes, profiles });
+    const c = view.container;
+    await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    expect(c.textContent).not.toContain('claude-claude');
+    await nameIt(c, 'side');
+    expect(c.textContent).not.toContain('claude-claude');
+    expect(c.textContent).not.toContain('already has a runtime');
+    const box = must(c.querySelector<HTMLInputElement>('[data-add-login-runtime] input'), 'the box');
+    expect(box.checked).toBe(true);
+    expect(c.querySelector('[data-add-login-runtime]')?.getAttribute('data-add-login-runtime')).toBe('claude-side');
+    expect(text(c, '[data-add-login-runtime]')).toContain('with the claude-default profile.');
+    await view.unmount();
+  });
+
+  it('can turn the runtime off, and Change starts the choice over', async () => {
     const { view, calls } = await open({ runtimes: RUNTIMES, routes: CLAUDE_SIGNS_IN });
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await nameIt(c, 'side');
     const runtime = must(c.querySelector<HTMLInputElement>('[data-add-login-runtime] input'), 'the runtime choice');
-    expect(runtime.checked).toBe(false);
-    expect(text(c, '[data-add-login-runtime]')).toContain('Claude Code already has a runtime here');
-    expect(c.querySelector('[data-add-login-runtime]')?.getAttribute('data-add-login-runtime')).toBe(
-      'claude-default-2',
-    );
+    expect(runtime.checked).toBe(true);
+    expect(c.querySelector('[data-add-login-runtime]')?.getAttribute('data-add-login-runtime')).toBe('claude-side');
+    await click(runtime, 'the runtime choice');
     expect(submit(c).textContent).toBe('Sign in to Claude Code');
     await click(runtime, 'the runtime choice');
-    expect(submit(c).textContent).toBe('Sign in and create claude-default-2');
+    expect(submit(c).textContent).toBe('Sign in and make claude-side');
     await click(runtime, 'the runtime choice');
-    // Change starts the choice over, the runtime default with it.
-    await click(c.querySelector('[data-add-login-change]'), 'Change');
-    expect(c.querySelector('[data-add-login-choices]')).not.toBeNull();
-    await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
     await click(submit(c), 'Sign in to Claude Code');
     await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
-    expect(changeBodies(calls)).toEqual([{ kind: 'credential.add', id: 'claude', harness: 'claude' }]);
+    expect(changeBodies(calls)).toEqual([
+      { kind: 'credential.add', id: 'claude-side', harness: 'claude', label: 'side' },
+    ]);
     expect(c.querySelector('[data-add-login-runtime-made]')).toBeNull();
     await view.unmount();
   });
@@ -366,6 +481,7 @@ describe('AddLogin · a subscription sign-in', () => {
     });
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await nameIt(c, 'side');
     expect(text(c, '[data-add-login-runtime="none"]')).toBe(
       'No profile runs Claude Code yet, so no runtime is made. Add one later in Runtimes.',
     );
@@ -387,12 +503,13 @@ describe('AddLogin · a subscription sign-in', () => {
     });
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await nameIt(c, 'side');
     await click(submit(c), 'the one button');
     await until(() => c.querySelector('[data-change-refusal]') !== null, 'the refusal');
     expect(text(c, '[data-change-refusal]')).toBe('Account setup changes are switched off on this machine for now.');
     expect(only(calls, APPLY)).toHaveLength(0);
     expect(only(calls, LOGIN)).toHaveLength(0);
-    expect(submit(c).textContent).toBe('Sign in and create claude-default');
+    expect(submit(c).textContent).toBe('Sign in and make claude-side');
     // Nothing was made, so the choice can still change.
     expect(c.querySelector('[data-add-login-change]')).not.toBeNull();
     await view.unmount();
@@ -408,6 +525,7 @@ describe('AddLogin · a subscription sign-in', () => {
     });
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await nameIt(c, 'side');
     await click(submit(c), 'the one button');
     await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
     expect(text(c, '[data-add-login-runtime-refused]')).toBe(
@@ -428,7 +546,8 @@ describe('AddLogin · a subscription sign-in', () => {
     const { view, calls } = await open({ runtimes: RUNTIMES, routes: { [LOGIN]: () => answer } });
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
-    await click(submit(c), 'Sign in to Claude Code');
+    await nameIt(c, 'side');
+    await click(submit(c), 'Sign in and make claude-side');
     await until(() => c.querySelector('[data-add-login-start-refused]') !== null, 'the refusal');
     expect(text(c, '[data-add-login-start-refused]')).toBe('Claude Code is not installed on studio-mac.');
     expect(c.querySelector('[data-credential-sign-in="start"]')).not.toBeNull();
@@ -437,18 +556,18 @@ describe('AddLogin · a subscription sign-in', () => {
     await click(c.querySelector('[data-credential-sign-in="start"] [data-change-submit]'), 'its own start');
     await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
     expect(only(calls, LOGIN)).toHaveLength(2);
-    expect(changeBodies(calls)).toHaveLength(1);
+    expect(changeBodies(calls)).toHaveLength(2);
     await view.unmount();
   });
 
   it('signs in to Codex with its device code, polling until it is approved', async () => {
-    const fresh = { ...credential({ id: 'codex-2', harness: 'codex' }) };
+    const fresh = { ...credential({ id: 'codex-side', harness: 'codex' }) };
     delete fresh.email;
     let approved = false;
     const awaiting = {
       harness: 'codex',
       flowId: 'flow-1',
-      credentialId: 'codex-2',
+      credentialId: 'codex-side',
       identity: 'codex:new',
       startedAt: '2026-10-13T08:00:00.000Z',
       expiresAt: '2026-10-13T08:10:00.000Z',
@@ -474,85 +593,103 @@ describe('AddLogin · a subscription sign-in', () => {
     const c = view.container;
     await click(c.querySelector('[data-add-login-choice="codex"]'), 'the Codex tile');
     expect(text(c, '[data-add-login-chosen]')).toContain('ChatGPT subscription');
-    await click(submit(c), 'Sign in to Codex');
+    await nameIt(c, 'side');
+    await click(submit(c), 'Sign in and make codex-side');
     await until(() => c.querySelector('[data-codex-login="awaiting-approval"]') !== null, 'the device code');
-    expect(changeBodies(calls)).toEqual([{ kind: 'credential.add', id: 'codex-2', harness: 'codex' }]);
+    expect(changeBodies(calls)[0]).toEqual({
+      kind: 'credential.add',
+      id: 'codex-side',
+      harness: 'codex',
+      label: 'side',
+    });
+    expect(c.querySelector('[data-open-sign-in]')?.getAttribute('href')).toBe('https://auth.openai.com/codex/device');
     approved = true;
     await until(() => c.querySelector('[data-add-login-done]') !== null, 'signed in');
     expect(text(c, '[data-add-login-done] > p')).toBe('Signed in to Codex as Codex login');
     await click(c.querySelector('[data-add-login-finish]'), 'Done');
-    expect(events).toEqual(['added codex-2']);
+    expect(events).toEqual(['added codex-side']);
     await view.unmount();
   });
 });
 
-describe('AddLogin · Label (E26)', () => {
-  it('asks for two different labels when this email already has a login, inline, and saves both', async () => {
-    const { view, calls, events } = await open({
-      fresh: credential({ id: 'claude' }),
-      runtimes: RUNTIMES,
-      routes: CLAUDE_SIGNS_IN,
-    });
+describe('AddLogin · the same account twice (E26)', () => {
+  const SAME = { fresh: credential({ id: 'claude-side', label: 'side' }), runtimes: RUNTIMES, routes: CLAUDE_SIGNS_IN };
+
+  it('asks whether the browser signed in as the wrong account, instead of going straight to labels', async () => {
+    const { view } = await open(SAME);
     const c = view.container;
     await signInToClaude(c);
     expect(text(c, '[data-add-login-done] > p')).toBe('Signed in to Claude Code as you@example.com');
-    const finish = must(c.querySelector('[data-add-login-finish]'), 'the next button');
-    expect(finish.textContent).toBe('Next: label them');
-    await click(finish, 'Next: label them');
-
-    expect(text(c, '[data-add-login-label] > p')).toBe(
-      'You already have a Claude Code login for you@example.com. Label both so you can tell them apart.',
+    expect(text(c, '[data-add-login-same-account] p')).toBe(
+      'This is the same Claude account as your login personal (you@example.com). Did your browser sign in as the wrong account?',
     );
-    const older = must(c.querySelector<HTMLInputElement>('#add-login-label-old'), 'the old label');
-    const newer = must(c.querySelector<HTMLInputElement>('#add-login-label-new'), 'the new label');
-    expect(older.value).toBe('personal');
-    expect(newer.value).toBe('work');
-    expect(c.textContent).toContain('Used by 3 runtimes.');
-    expect(c.querySelector('[data-stepper-position]')).toBeNull();
-    const save = (): HTMLButtonElement => submit(c);
-    expect(save().textContent).toBe('Save labels');
-
-    await type(newer, 'personal');
-    expect(text(c, '[data-add-login-label-error]')).toBe('Use two different labels.');
-    expect(save().disabled).toBe(true);
-    await type(older, 'home');
-    await type(newer, ' side ');
-    expect(c.querySelector('[data-add-login-label-error]')).toBeNull();
-    await click(save(), 'Save labels');
-    await until(() => events.length > 0, 'added');
-    expect(changeBodies(calls).slice(1)).toEqual([
-      { kind: 'credential.label', id: 'claude-personal', label: 'home' },
-      { kind: 'credential.label', id: 'claude', label: 'side' },
-    ]);
-    expect(events).toEqual(['added claude']);
+    expect(text(c, '[data-add-login-different-account]')).toBe('Sign in with a different account');
+    expect(text(c, '[data-add-login-keep-both]')).toBe('Keep both');
+    expect(c.querySelector('[data-add-login-finish]')).toBeNull();
     await view.unmount();
   });
 
-  it('a twin labelled work makes the new one "side", and a refused label stays with its refusal', async () => {
-    let refuseId: string | null = 'claude-work';
+  it('Sign in with a different account signs the login out and starts its sign-in again, with the tip in bold', async () => {
+    const { view, calls } = await open(SAME);
+    const c = view.container;
+    await signInToClaude(c);
+    await click(c.querySelector('[data-add-login-different-account]'), 'Sign in with a different account');
+    await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the new Claude link');
+    expect(changeBodies(calls).slice(2)).toEqual([{ kind: 'credential.signout', id: 'claude-side' }]);
+    expect(only(calls, LOGIN)).toHaveLength(2);
+    expect(only(calls, LOGIN)[1]?.body).toMatchObject({ credentialId: 'claude-side', restart: true });
+    const tip = must(c.querySelector('[data-add-login-other-account-tip]'), 'the tip');
+    expect(tip.textContent).toContain('Open the link in a private window');
+    expect(tip.className).toContain('font-semibold');
+    expect(c.querySelector('[data-add-login-same-account]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('Keep both finishes at once when both logins already have different labels', async () => {
+    const { view, events } = await open(SAME);
+    const c = view.container;
+    await signInToClaude(c);
+    await click(c.querySelector('[data-add-login-keep-both]'), 'Keep both');
+    expect(events).toEqual(['added claude-side']);
+    expect(c.querySelector('[data-add-login-label]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('Keep both asks only for the older login’s label when it has none, and a refusal stays with its refusal', async () => {
+    let refuse = true;
     const { view, calls, events } = await open({
-      existing: [credential({ id: 'claude-work', label: 'work' })],
-      fresh: credential({ id: 'claude' }),
-      runtimes: RUNTIMES,
-      routes: CLAUDE_SIGNS_IN,
+      ...SAME,
+      existing: [credential({ id: 'claude-personal' })],
       refuse: change =>
-        change.kind === 'credential.label' && change.id === refuseId
+        change.kind === 'credential.label' && refuse
           ? new FyHttpError(`Could not label ${change.id}.`, 409, 'fleet_change_refused')
           : undefined,
     });
     const c = view.container;
     await signInToClaude(c);
-    await click(c.querySelector('[data-add-login-finish]'), 'Next: label them');
-    expect(must(c.querySelector<HTMLInputElement>('#add-login-label-old'), 'old').value).toBe('work');
-    expect(must(c.querySelector<HTMLInputElement>('#add-login-label-new'), 'new').value).toBe('side');
+    await click(c.querySelector('[data-add-login-keep-both]'), 'Keep both');
+    expect(text(c, '[data-add-login-label] > p')).toBe(
+      'You already have a Claude Code login for you@example.com. Label the one that has no label.',
+    );
+    expect(c.querySelector('#add-login-label-new')).toBeNull();
+    const older = must(c.querySelector<HTMLInputElement>('#add-login-label-old'), 'the old label');
+    expect(older.value).toBe('');
+    expect(text(c, '[data-add-login-label-error]')).toBe('Give each login a label.');
+    expect(submit(c).disabled).toBe(true);
+    await type(older, 'side');
+    expect(text(c, '[data-add-login-label-error]')).toBe('Use two different labels.');
+    await type(older, 'personal');
+    expect(c.querySelector('[data-add-login-label-error]')).toBeNull();
+    expect(c.textContent).toContain('Used by 0 runtimes.');
     await click(submit(c), 'Save labels');
     await until(() => c.querySelector('[data-change-refusal]') !== null, 'the refusal');
-    expect(text(c, '[data-change-refusal]')).toBe('Could not label claude-work.');
-    refuseId = 'claude';
-    await click(submit(c), 'Save labels');
-    await until(() => text(c, '[data-change-refusal]') === 'Could not label claude.', 'the second refusal');
-    expect(only(calls, APPLY)).toHaveLength(2);
+    expect(text(c, '[data-change-refusal]')).toBe('Could not label claude-personal.');
     expect(events).toEqual([]);
+    refuse = false;
+    await click(submit(c), 'Save labels');
+    await until(() => events.length > 0, 'added');
+    expect(changeBodies(calls).at(-1)).toEqual({ kind: 'credential.label', id: 'claude-personal', label: 'personal' });
+    expect(events).toEqual(['added claude-side']);
     await view.unmount();
   });
 });
@@ -590,7 +727,7 @@ describe('AddLogin · an API-key provider', () => {
       // One login drives both CLIs, so the runtime says which it runs.
       {
         kind: 'runtime.put',
-        name: 'claude-default',
+        name: 'claude-deepseek',
         credential: 'deepseek',
         profile: 'Default',
         harness: 'claude',
@@ -641,7 +778,9 @@ describe('AddLogin · an API-key provider', () => {
     const { view, calls } = await open({ runtimes: { ...RUNTIMES, runtimes: [] } });
     const c = view.container;
     await click(c.querySelector('[data-provider-tile="azure-openai"]'), 'Azure');
-    expect(c.querySelector('[data-add-login-runtime]')?.getAttribute('data-add-login-runtime')).toBe('codex-default');
+    expect(c.querySelector('[data-add-login-runtime]')?.getAttribute('data-add-login-runtime')).toBe(
+      'codex-azure-openai',
+    );
     await type(c.querySelector('[data-env-variable="AZURE_OPENAI_RESOURCE"] input'), 'acme');
     await type(c.querySelector('[data-env-secret-input="AZURE_OPENAI_API_KEY"]'), 'azure-key');
     await click(submit(c), 'Add login and runtime');
@@ -649,7 +788,7 @@ describe('AddLogin · an API-key provider', () => {
     // A login that drives one CLI runs it: the runtime names no harness.
     expect(changeBodies(calls)[1]).toEqual({
       kind: 'runtime.put',
-      name: 'codex-default',
+      name: 'codex-azure-openai',
       credential: 'azure-openai',
       profile: 'Default',
       agent: false,
@@ -699,11 +838,12 @@ describe('AddLogin · leaving and pausing', () => {
 
     await click(c.querySelector('[data-add-login-change]'), 'Change');
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await nameIt(c, 'side');
     await click(submit(c), 'the one button');
     await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the Claude link');
     await click(c.querySelector('[data-add-login-back]'), 'Logins');
     expect(text(c, '[data-add-login-confirm] > p:nth-child(2)')).toBe(
-      'The login you added is kept, and can be signed in from its own page.',
+      'The login side (claude-side) is kept as Needs sign-in. Sign it in later from its own page, or remove it there.',
     );
     await click(c.querySelector('[data-add-login-stop]'), 'Stop');
     expect(events).toEqual(['left', 'left']);
@@ -739,7 +879,7 @@ describe('AddLogin · progress', () => {
     await type(c.querySelector('[data-env-secret-input="DEEPSEEK_API_KEY"]'), 'held-key');
     await click(submit(c), 'Add login and runtime');
     await until(() => c.querySelector('[data-add-login-working]') !== null, 'the progress line');
-    expect(text(c, '[data-add-login-working]')).toBe('Creating claude-default…');
+    expect(text(c, '[data-add-login-working]')).toBe('Making claude-deepseek…');
     expect(must(c.querySelector<HTMLButtonElement>('[data-add-login-finish]'), 'Done').disabled).toBe(true);
     release();
     await until(() => c.querySelector('[data-add-login-runtime-made]') !== null, 'the runtime made');

@@ -1244,7 +1244,14 @@ describe('deriveAccountChange: credential.add', () => {
   it('should refuse a label another login of the harness has (C9)', () => {
     // Act + Assert
     should(refusalOf({ kind: 'credential.add', id: 'fresh', harness: 'claude', label: 'Work' })).equal(
-      'another Claude Code login is already labelled Work; pick a different label',
+      'You already have a Claude Code login named Work.',
+    );
+  });
+
+  it('should refuse a label another login of the harness has in another case, or with spaces round it', () => {
+    // Act + Assert
+    should(refusalOf({ kind: 'credential.add', id: 'fresh', harness: 'claude', label: ' work ' })).equal(
+      'You already have a Claude Code login named work.',
     );
   });
 
@@ -1326,7 +1333,7 @@ describe('deriveAccountChange: credential.label', () => {
   it('should refuse a label another login of the harness has (C9)', () => {
     // Act + Assert
     should(refusalOf({ kind: 'credential.label', id: 'spare', label: 'Home' })).equal(
-      'another Claude Code login is already labelled Home; pick a different label',
+      'You already have a Claude Code login named Home.',
     );
   });
 });

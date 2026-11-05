@@ -143,6 +143,16 @@ describe('CodexLoginPanel', () => {
     expect(texts(mount({ flow: codexFlow('starting') }))).toContain('Starting sign-in…');
   });
 
+  it('offers the link as an Open sign-in page link that opens a new tab without a back reference', () => {
+    const view = mount({ flow: codexFlow('awaiting-approval') });
+
+    const link = view.root.findByProps({ 'data-open-sign-in': '' });
+
+    expect(link.props.href).toBe(CODEX_URL);
+    expect(link.props.target).toBe('_blank');
+    expect(link.props.rel).toContain('noopener');
+  });
+
   it('copies both values through the injected writer', async () => {
     const copied: string[] = [];
     const view = mount({

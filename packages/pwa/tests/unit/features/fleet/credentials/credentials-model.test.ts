@@ -25,7 +25,6 @@ import {
   hasSharedEmails,
   LOGIN_SCOPE_WORDS,
   labelsError,
-  nextCredentialId,
   otherHarness,
   parseBudgetAmount,
   plural,
@@ -295,25 +294,6 @@ describe('labelsError', () => {
     expect(labelsError('home', '   ')).toBe('Give each login a label.');
     expect(labelsError(' work ', 'work')).toBe('Use two different labels.');
     expect(labelsError('home', 'work')).toBeNull();
-  });
-});
-
-describe('nextCredentialId', () => {
-  it('uses the bare harness name when it is free', () => {
-    expect(nextCredentialId(null, 'claude')).toBe('claude');
-    expect(nextCredentialId(listOf(), 'codex')).toBe('codex');
-    expect(nextCredentialId(listOf(credential({ id: 'claude-2' })), 'claude')).toBe('claude');
-  });
-
-  it('numbers past every id this machine already has', () => {
-    expect(nextCredentialId(listOf(credential({ id: 'claude' })), 'claude')).toBe('claude-2');
-    expect(
-      nextCredentialId(
-        listOf(credential({ id: 'claude' }), credential({ id: 'claude-2' }), credential({ id: 'claude-3' })),
-        'claude',
-      ),
-    ).toBe('claude-4');
-    expect(nextCredentialId(CREDENTIALS, 'codex')).toBe('codex-2');
   });
 });
 

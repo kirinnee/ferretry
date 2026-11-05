@@ -19,6 +19,7 @@ import type {
   FleetMachineView,
   FleetRuntimeView,
 } from '@ferretry/protocol';
+import { nameSlug, runtimeNameFor } from '@ferretry/protocol';
 import { HARNESS_NAMES, SCOPE_WORDS } from '../components/component-model.ts';
 import { HARNESS_SHORT, type HarnessKind, otherHarness, plural } from '../credentials/credentials-model.ts';
 
@@ -33,11 +34,7 @@ export const uniqueName = (base: string, taken: ReadonlySet<string>): string => 
 };
 
 /** Letters, digits and dashes only, lower case. */
-export const slug = (value: string): string =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '');
+export const slug = nameSlug;
 
 export interface NameProblem {
   readonly message: string;
@@ -60,12 +57,12 @@ export const runtimeNameProblem = (
   return null;
 };
 
-/** The prefilled name: harness plus profile, made unique (`claude-default`, `claude-default-2`). */
+/** The prefilled name: the harness once, then the profile, made unique (`claude-default`, `claude-default-2`). */
 export const suggestedRuntimeName = (
   harness: HarnessKind,
   profile: string,
   runtimes: readonly FleetRuntimeView[],
-): string => uniqueName(`${harness}-${slug(profile) || 'runtime'}`, new Set(runtimes.map(runtime => runtime.name)));
+): string => runtimeNameFor(harness, profile, new Set(runtimes.map(runtime => runtime.name)));
 
 /** A runtime that already uses this login and profile (R4, E15). */
 export const sameLoginAndProfile = (
@@ -245,20 +242,21 @@ export const runtimeProfileLine = (runtime: FleetRuntimeView, profile: FleetLaye
 export interface FirstRuntime {
   readonly harness: HarnessKind;
   readonly profile: string;
+  /** Named after the login it runs on, not the profile: `claude-work`. */
   readonly name: string;
-  /** No runtime on the machine runs this CLI yet, so the runtime is made unless the person says not to. */
-  readonly needed: boolean;
 }
 
 /**
  * The runtime for a new login that drives `harnesses`: the first of them a profile runs — the profile a
  * runtime of that CLI already uses, else the first that fits — with the suggested name. `null` when no
- * profile runs any of them, so there is nothing to make it from.
+ * profile runs any of them, so there is nothing to make it from. The runtime is named after the login
+ * (`loginId`), so two logins on one profile give two runtimes you can tell apart.
  */
 export const firstRuntimeFor = (
   harnesses: readonly HarnessKind[],
   runtimes: readonly FleetRuntimeView[],
   profiles: readonly FleetLayeredProfileView[],
+  loginId: string,
 ): FirstRuntime | null => {
   for (const harness of harnesses) {
     const profile =
@@ -268,8 +266,7 @@ export const firstRuntimeFor = (
     return {
       harness,
       profile,
-      name: suggestedRuntimeName(harness, profile, runtimes),
-      needed: !runtimes.some(runtime => runtime.harness === harness),
+      name: runtimeNameFor(harness, loginId, new Set(runtimes.map(runtime => runtime.name))),
     };
   }
   return null;
