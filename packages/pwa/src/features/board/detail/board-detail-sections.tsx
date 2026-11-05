@@ -244,7 +244,6 @@ export function DependencyChips({
     <div className="fy-board-detail__chips">
       {task.dependsOn.length === 0 ? null : (
         <fieldset aria-label="Depends on" className="fy-board-detail__chiprow">
-          <span className="fy-board-detail__quiet">Depends on</span>
           {task.dependsOn.map(dependency => {
             const label = formatTaskRef(dependency.task);
             return (

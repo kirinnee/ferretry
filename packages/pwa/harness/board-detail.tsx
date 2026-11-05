@@ -113,7 +113,7 @@ const REVIEW_CARD = card('F2', {
   assignee: OTTILIE,
   summary: 'Open any card from the Board: its ask, asks waiting on you, children, links and history in one place.',
   ask: {
-    text: '(sada, found live) Open a card to see everything about it, and act on it from there.',
+    text: '(sada, found live) Open a card to see everything about it in one place.',
     source: 'owner (board)',
   },
   clarifications: [
@@ -124,12 +124,12 @@ const REVIEW_CARD = card('F2', {
     doneSoFar: [
       '- Side drawer and full-screen page ([#972](https://github.com/kirinnee/ferretry/pull/972))',
       '- Ask, children, links and history sections',
-      '- Move path from the lane pill',
+      '- Lane shown as a plain badge',
     ].join('\n'),
     next: '1. Back button on the phone page\n2. Review fixes, then merge',
   },
   premise: 'Today the owner reads a card in a terminal; the Board shows only a compact card.',
-  context: 'The Board page (#972) is merged; this builds on its compact card and its move path.',
+  context: 'The Board page (#972) is merged; this builds on its compact card.',
   terms: [
     { term: 'Card', meaning: 'The only record of a piece of work; it replaces the per-session task.' },
     { term: 'Lane', meaning: 'A stage on the way from backlog to closed.' },
@@ -211,20 +211,6 @@ const REVIEW_CARD = card('F2', {
   ],
 });
 
-/** Assembled, never typed: `no-fy-render-in-docs.sh` refuses the literal fence opener in a tracked file. */
-const FENCE = '`'.repeat(3);
-const PAIRING_DIAGRAM = [
-  `${FENCE}fy-render`,
-  'type: mermaid',
-  'alt: The phone pairs once, then only ever holds a device grant',
-  '---',
-  'flowchart TB',
-  '  Code[Two-minute pairing code] --> Phone[Phone]',
-  '  Phone --> Grant[Device grant]',
-  '  Grant --> Daemon[Daemon keeps only a hash]',
-  FENCE,
-].join('\n');
-
 /** `?nested=1`: premise and context stored with a marker inside each point ("- - x"), as old cards are. */
 const NESTED = new URLSearchParams(window.location.search).get('nested') === '1';
 const nest = (text: string): string => (NESTED ? text.replaceAll(/^- /gmu, '- - ') : text);
@@ -249,7 +235,9 @@ const TESTED_CARD = card('F10', {
   howToTest: richRequested()
     ? RICH_HOW_TO_TEST
     : 'On your phone, once the Mac runs 4.109.0:\n\n1. Open **Settings › Devices** and pair this phone.\n2. Open the new device row.\n3. You should see its name and when it paired, and no token anywhere.',
-  brief: richRequested() ? RICH_BRIEF : `The device grant replaces the token on every route.\n\n${PAIRING_DIAGRAM}`,
+  brief: richRequested()
+    ? RICH_BRIEF
+    : 'The device grant replaces the token on every route.\n\n- A phone pairs once with a two-minute code\n- After that it holds only a device grant\n- The daemon keeps only a hash of each grant',
   links: links([
     pr(918, {
       state: 'merged',

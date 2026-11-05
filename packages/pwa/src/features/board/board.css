@@ -454,6 +454,10 @@
   font-size: var(--text-xs);
   line-height: 1.3;
 }
+/* On the wide page a narrow column wraps the meta line onto a second line rather than cutting segments off. */
+.fy-board:not([data-phone]) .fy-board-card[data-density='page'] .fy-board-card__meta {
+  max-height: 2lh;
+}
 .fy-board-seg {
   display: inline-flex;
   flex: none;

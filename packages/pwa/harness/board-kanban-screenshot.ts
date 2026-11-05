@@ -141,7 +141,10 @@ const open = async (context: BrowserContext, theme: string, extra = ''): Promise
   page.on('pageerror', error => process.stderr.write(`page error: ${error.message}\n`));
   await page.goto(`${server.url}?theme=${theme}&big=1${extra}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
-  await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
+  await page
+    .locator('.fy-board-card, .fy-board-table__row, .fy-board-summary__row')
+    .first()
+    .waitFor({ state: 'visible' });
   await page.waitForTimeout(300);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (wide > 0) fail(`the Kanban scrolls sideways by ${wide}px`);
@@ -181,30 +184,33 @@ try {
     }
   }
 
+  // Every view, phone and desktop, light and dark: none draws a hand control. The phone carries the tab bar.
+  const VIEWS = ['kanban', 'list', 'tree', 'dependencies', 'archive'] as const;
   for (const scheme of ['light', 'dark'] as const) {
     for (const [label, options] of [
       ['desktop', DESKTOP],
       ['phone', PHONE],
     ] as const) {
-      const context = await browser.newContext({ ...options, colorScheme: scheme });
-      try {
-        const page = await open(context, `studio-${scheme}`);
-        if (label === 'desktop') {
+      for (const view of VIEWS) {
+        const context = await browser.newContext({ ...options, colorScheme: scheme });
+        try {
+          const page = await open(context, `studio-${scheme}`, `&view=${view}${label === 'phone' ? '&bar=1' : ''}`);
+          if (label === 'phone' && view === 'kanban') {
+            await page.locator('[role="tab"]', { hasText: 'To test' }).click();
+            await page.waitForTimeout(200);
+          }
           await checkNoOwnerButtons(page);
-          await shot(page, `board-kanban-${scheme}-desktop`);
-        } else {
-          await page.locator('[role="tab"]', { hasText: 'To test' }).click();
-          await page.waitForTimeout(200);
-          await checkNoOwnerButtons(page);
-          await shot(page, `board-kanban-${scheme}-phone`);
+          await checkReadOnly(page, `${view} ${scheme} ${label}`);
+          await shot(page, `board-${view}-${scheme}-${label}`);
+          await page.close();
+        } finally {
+          await context.close();
         }
-        await page.close();
-      } finally {
-        await context.close();
       }
     }
   }
-  process.stdout.write('✅ the Kanban captured; read-only at every width and in every theme\n');
+
+  process.stdout.write('✅ every Board view captured; read-only at every width and in every theme\n');
 } finally {
   await browser.close();
   server.stop();
