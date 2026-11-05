@@ -72,7 +72,7 @@ describe('useLiveVoiceControl', () => {
     }
   });
 
-  it('uses the layout of the chrome: the 44 px icon on a phone, the word on a desktop', async () => {
+  it('is the 44 px icon on a phone and on a desktop, so it fits a narrow agent pane', async () => {
     const compact = await mount(
       <Host props={props({ compact: true, shortcutHint: '⌥L' })} onControl={() => undefined} />,
     );
@@ -81,7 +81,7 @@ describe('useLiveVoiceControl', () => {
     expect(phone?.getAttribute('title')).toContain('⌥L');
     await compact.unmount();
     const desktop = await mount(<Host props={props()} onControl={() => undefined} />);
-    expect(desktop.container.querySelector('button[aria-label="Live voice"]')?.textContent).toContain('Live');
+    expect(desktop.container.querySelector('button[aria-label="Live voice"]')?.textContent).toBe('');
     await desktop.unmount();
   });
 

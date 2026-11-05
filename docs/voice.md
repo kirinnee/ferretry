@@ -734,6 +734,8 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **One Live tab:** it takes a Web Lock; a second tab says "Live is on in another tab". It asks for a Screen
   Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. A hidden tab
   **pauses** Live (mic closed) and resumes when visible.
+- **The button is an icon** (44 px on a phone), and on a desktop it is **not drawn in a pane narrower than 300 px of row**
+  (a split agent pane beside Info): five buttons would push Send past the pane. The palette entry still starts it.
 - **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
   The mic button is held back while Live is on, and Live while the mic is recording.
 

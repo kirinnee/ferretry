@@ -105,7 +105,9 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
 
   const button = offered ? (
     <LiveVoiceButton
-      layout={props.compact ? 'compact' : 'full'}
+      // Icon-only on both layouts: the word does not fit a narrow agent pane beside another pane (the geometry
+      // harness found a 19px sideways overflow at 1100px), and the Live bar carries the word once Live is on.
+      layout="compact"
       active={live.active}
       disabled={props.busyElsewhere}
       onPress={live.active ? live.end : live.start}
