@@ -15,6 +15,7 @@ import type { WhisperCatalogModel } from './model-catalog.ts';
 import type { ModelInstaller } from './model-store.ts';
 import { OnDeviceVoice, type OnDeviceSupport } from './on-device-voice.ts';
 import type { ParakeetGlobalLike } from './parakeet-voice.ts';
+import { flatSpeedPlanner, type SpeedPlanner } from './speed-planner.ts';
 import { WhisperEngine, type WhisperWorkerLike } from './whisper-engine.ts';
 import { WhisperRecognitionSession } from './whisper-session.ts';
 import { WhisperModelStore } from './whisper-store.ts';
@@ -93,6 +94,7 @@ export function browserWhisperVoice(
   assets: WhisperAssets | null | undefined,
   model: WhisperCatalogModel,
   runtimeInUse: () => boolean,
+  planner: SpeedPlanner = flatSpeedPlanner(),
 ): OnDeviceVoice {
   const support = readWhisperSupport(global, assets, model);
   if (!support.available || assets === null || assets === undefined)
@@ -114,6 +116,11 @@ export function browserWhisperVoice(
         type: 'module',
         name: `fy-${model.id}`,
       }) as unknown as WhisperWorkerLike,
+    undefined,
+    {
+      threads: () => planner.threadsFor(model.id),
+      onThreadsFailed: () => planner.threadsFailed(model.id),
+    },
   );
   const host: WhisperSessionHost = {
     capture: browserAudioCapture(global),

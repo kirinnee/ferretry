@@ -15,6 +15,7 @@ import {
   type ParakeetGlobalLike,
   type ParakeetVoice,
 } from './parakeet-voice.ts';
+import { flatSpeedPlanner, type SpeedPlanner } from './speed-planner.ts';
 import { browserSherpaVoice, type SherpaAssets, type SherpaGlobalLike } from './sherpa-voice.ts';
 import { browserVoskVoice, type VoskAssets } from './vosk-voice.ts';
 import { browserWhisperVoice, type WhisperAssets } from './whisper-voice.ts';
@@ -67,6 +68,7 @@ export function browserOnDeviceVoices(
   global: SpeechGlobalLike,
   assets: SpeechAssets | null,
   parakeet: ParakeetVoice = browserParakeetVoice(global, assets),
+  planner: SpeedPlanner = flatSpeedPlanner(),
 ): OnDeviceVoices {
   // A shared runtime asks the registry at Remove time, once every voice exists.
   let registry: OnDeviceVoices | null = null;
@@ -76,7 +78,7 @@ export function browserOnDeviceVoices(
     if (model.runtime === 'onnxruntime-web') return parakeet;
     if (model.runtime === 'vosk-wasm') return browserVoskVoice(global, assets?.vosk ?? null);
     if (model.runtime === 'transformers-js')
-      return browserWhisperVoice(global, assets?.whisper, model, runtimeInUse(model));
+      return browserWhisperVoice(global, assets?.whisper, model, runtimeInUse(model), planner);
     return browserSherpaVoice(model, global, assets?.sherpa ?? null, runtimeInUse(model));
   };
   registry = new OnDeviceVoices(ON_DEVICE_MODELS.map(voiceFor));

@@ -683,3 +683,95 @@ describe('ParakeetRecognitionSession — another whole-take engine', () => {
     should(failures.map(failure => failure.message)).eql(['Install Moonshine.']);
   });
 });
+
+describe('ParakeetRecognitionSession — early finish', () => {
+  const quietTail = (heard: number, tail: number): Float32Array => {
+    const take = new Float32Array(heard + tail);
+    take.fill(0.2, 0, heard);
+    return take;
+  };
+
+  it('is not offered before the microphone is open, or once the take is ending', async () => {
+    const w = world();
+    w.session.start();
+    should(w.session.beginFinish()).equal(null);
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.session.beginFinish()).not.equal(null);
+    await w.session.finish();
+    should(w.session.beginFinish()).equal(null);
+  });
+
+  it('is not offered with near-live words on, which re-read a window of their own', async () => {
+    const w = await recordingWorld({ liveWords: true });
+    should(w.session.beginFinish()).equal(null);
+  });
+
+  it('decodes what is recorded while recording carries on, and finish reuses it when only quiet followed', async () => {
+    const w = await recordingWorld();
+    w.recording.peeked = quietTail(16_000, 0).fill(0.2);
+    const take = w.session.beginFinish();
+    should(await take?.text).equal('hello world');
+    should(w.recording.stops).equal(0);
+    w.recording.samples = quietTail(16_000, 24_000);
+    const text = await w.session.finish();
+    should(text).equal('hello world');
+    // One decode in all: the early one.
+    should(w.transcribed.length).equal(1);
+    should(w.recording.stops).equal(1);
+  });
+
+  it('decodes the whole take afresh when speech followed the early finish', async () => {
+    const w = await recordingWorld();
+    w.recording.peeked = new Float32Array(16_000).fill(0.2);
+    const take = w.session.beginFinish();
+    await take?.text;
+    w.recording.samples = new Float32Array(32_000).fill(0.2);
+    await w.session.finish();
+    should(w.transcribed.length).equal(2);
+    should(w.transcribed[1]?.samples.length).equal(32_000);
+  });
+
+  it('discarding it leaves the recording open and finish does its own work', async () => {
+    const w = await recordingWorld();
+    w.recording.peeked = new Float32Array(16_000).fill(0.2);
+    const take = w.session.beginFinish();
+    await tick();
+    take?.discard();
+    should(w.recording.stops).equal(0);
+    w.recording.samples = quietTail(16_000, 24_000);
+    await w.session.finish();
+    should(w.transcribed.length).equal(2);
+  });
+
+  it('never sends a snapshot too short to hold speech to the model', async () => {
+    const w = await recordingWorld();
+    w.recording.peeked = new Float32Array(100).fill(0.2);
+    should(await w.session.beginFinish()?.text).equal('');
+    should(w.transcribed.length).equal(0);
+  });
+
+  it('cancel aborts an early finish in flight', async () => {
+    const w = await recordingWorld();
+    const pending = deferred<string>();
+    w.engine.transcribe = (samples, signal) => {
+      w.transcribed.push({ samples, signal });
+      return pending.promise;
+    };
+    w.session.beginFinish();
+    await tick();
+    w.session.cancel();
+    should(w.transcribed[0]?.signal?.aborted).equal(true);
+  });
+
+  it('times a finish that reused the early answer as the (tiny) reuse, not the decode', async () => {
+    let clock = 0;
+    const w = await recordingWorld({ now: () => clock });
+    w.recording.peeked = new Float32Array(16_000).fill(0.2);
+    await w.session.beginFinish()?.text;
+    w.recording.samples = quietTail(16_000, 24_000);
+    clock = 5;
+    await w.session.finish();
+    should(w.session.timings()?.transcribeMs).equal(0);
+  });
+});
