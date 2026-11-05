@@ -416,6 +416,20 @@ describe('applyPrUpdate', () => {
     should(apply(task as BoardTask, { observed: [observed({ checks: 'failing' })] }).nudges).be.empty();
   });
 
+  it('should cache a merge conflict, keep it while GitHub is unsure, and drop it once the PR is no longer open', () => {
+    const open = withPr({ state: 'open', checks: 'passing', polledAt: NOW }, { laneId: 'review' });
+    const conflicted = apply(open, { observed: [observed({ checks: 'passing', mergeable: 'conflicting' })] }).task;
+    should(conflicted?.links.prs[0]?.mergeable).equal('conflicting');
+    // GitHub still working it out: the cached answer stands, and nothing is written.
+    should(apply(conflicted as BoardTask, { observed: [observed({ checks: 'passing' })] }).task).be.null();
+    const fixed = apply(conflicted as BoardTask, {
+      observed: [observed({ checks: 'passing', mergeable: 'mergeable' })],
+    }).task;
+    should(fixed?.links.prs[0]?.mergeable).equal('mergeable');
+    const closed = apply(conflicted as BoardTask, { observed: [observed({ state: 'closed' })] }).task;
+    should(closed?.links.prs[0]).not.have.property('mergeable');
+  });
+
   it('should refresh an unchanged PR label only once it is old, and leave an unobserved one alone', () => {
     const old = new Date(Date.parse(NOW) - PR_POLL_LABEL_REFRESH_MS).toISOString();
     const stale = withPr({ state: 'open', checks: 'pending', polledAt: old }, { laneId: 'review' });

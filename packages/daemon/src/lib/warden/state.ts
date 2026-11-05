@@ -49,6 +49,7 @@ import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './prove
 import type { InboxStuckMemory } from './inbox-stuck.ts';
 import type { StuckInputMemory } from './input-stuck.ts';
 import type { OverdueMemory } from './report-overdue.ts';
+import type { ReviewBlockedMemory } from './review-blocked.ts';
 import type { ReviveState } from './revive.ts';
 import type { ReviveWatch } from './revive-watch.ts';
 import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
@@ -429,6 +430,11 @@ export interface WardenRuntimeState {
    * keyed by session id, kept while each is flagged: what stops it re-checking or noticing again every sweep.
    */
   readonly stuckInbox?: InboxStuckMemory;
+  /**
+   * The review-lane cards whose pull request cannot merge (`review-blocked.ts`), keyed by card id, kept while each
+   * stays blocked: when each blocking state was first seen, and whether its ferret was woken for it.
+   */
+  readonly reviewBlocked?: ReviewBlockedMemory;
 }
 
 /**
@@ -533,6 +539,9 @@ const RuntimeStateSchema = z.object({
         investigatedAt: Instant.optional(),
       }),
     )
+    .optional(),
+  reviewBlocked: z
+    .record(z.string(), z.object({ state: z.string().min(1), since: Instant, nudgedAt: Instant.optional() }))
     .optional(),
 });
 

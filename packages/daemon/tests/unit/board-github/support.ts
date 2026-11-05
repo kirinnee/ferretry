@@ -13,6 +13,8 @@ export interface NodeOptions {
   readonly createdAt?: string | null;
   readonly mergedAt?: string | null;
   readonly sha?: string | null;
+  /** GitHub's `mergeable` enum; left off the node when not given, as an older answer would be. */
+  readonly mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
 }
 
 /** One `PullRequest` node. */
@@ -25,6 +27,7 @@ export const prNode = (number: number, options: NodeOptions = {}) => {
     url: prUrl(number, options.repo),
     state,
     isDraft: options.draft ?? false,
+    ...(options.mergeable === undefined ? {} : { mergeable: options.mergeable }),
     createdAt: options.createdAt === undefined ? '2026-10-30T08:00:00Z' : options.createdAt,
     mergedAt: options.mergedAt === undefined ? (merged ? '2026-10-30T09:00:00Z' : null) : options.mergedAt,
     mergeCommit:

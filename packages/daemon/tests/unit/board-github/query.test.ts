@@ -36,7 +36,7 @@ describe('pollArguments', () => {
     should(query).containEql('b1: pullRequests(headRefName: $b1, first: 5');
     should(query).containEql('releases(first: 50');
     should(query).containEql(
-      'fragment pr on PullRequest { number url state isDraft createdAt mergedAt mergeCommit { oid }',
+      'fragment pr on PullRequest { number url state isDraft mergeable createdAt mergedAt mergeCommit { oid }',
     );
     // A caller's string is a variable, never a piece of the query.
     should(query).not.containEql('evil');
@@ -122,6 +122,25 @@ describe('parseRepositoryAnswer', () => {
     should(parsed?.prs.get(3)?.observation).match({ state: 'closed', draft: true, checks: 'failing' });
     should(parsed?.prs.get(3)?.headRefName).equal('feat/pr-3');
     should(parsed?.releases).be.null();
+  });
+
+  it('should read whether an open PR conflicts, and say nothing while GitHub has not worked it out', () => {
+    const parsed = parseRepositoryAnswer(
+      answer({
+        prs: {
+          1: prNode(1, { mergeable: 'CONFLICTING' }),
+          2: prNode(2, { mergeable: 'MERGEABLE' }),
+          3: prNode(3, { mergeable: 'UNKNOWN' }),
+          4: prNode(4, { mergeable: null }),
+          5: prNode(5),
+          6: prNode(6, { state: 'CLOSED', mergeable: 'CONFLICTING' }),
+        },
+      }),
+      poll({ numbers: [1, 2, 3, 4, 5, 6] }),
+    );
+    should(parsed?.prs.get(1)?.observation.mergeable).equal('conflicting');
+    should(parsed?.prs.get(2)?.observation.mergeable).equal('mergeable');
+    for (const number of [3, 4, 5, 6]) should(parsed?.prs.get(number)?.observation).not.have.property('mergeable');
   });
 
   it('should leave unobserved a PR that is missing, malformed, from another repository, or a merge it cannot name', () => {
