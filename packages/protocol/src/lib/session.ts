@@ -827,6 +827,12 @@ export const SessionStateSchema = z.object({
   usageAtLimit: z.boolean().optional(),
   usageAuthOk: z.boolean().optional(),
   launchedAt: InstantSchema.optional(),
+  /**
+   * How long the harness took, from launch, to take its first turn and finish its own startup. Codex 0.166+ waits
+   * on an account check with chatgpt.com, so a large value is the network. Absent for a session launched before it
+   * was measured, or one whose start launched nothing.
+   */
+  harnessStartupMs: NonNegativeIntegerSchema.optional(),
   /** What the current pane was told at launch; absent for a session last launched before it was recorded. */
   launchInstructions: SessionLaunchInstructionsSchema.optional(),
   observedModel: z.string().optional(),

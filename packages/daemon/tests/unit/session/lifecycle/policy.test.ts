@@ -9,6 +9,7 @@ import {
   type CreateSessionLifecycleRequest,
   createSessionRecord,
   defaultSessionLifecycleSettings,
+  elapsedMs,
   firstTurnInstruction,
   isAgentAccount,
   lifecyclePhase,
@@ -20,6 +21,7 @@ import {
   sessionTmuxName,
   transitionSessionRecord,
   unrunnableAccountRefusal,
+  withHarnessStartup,
 } from '../../../../src/lib/session/lifecycle/index.ts';
 
 const NOW = '2026-07-31T10:00:00.000Z';
@@ -542,5 +544,31 @@ describe('session lifecycle policy', () => {
           '`fy runtime add <name> --credential <login> --profile <profile> --agent`; `fy runtimes` marks the agent runtimes.',
       );
     });
+  });
+});
+
+describe('how long a harness took to start', () => {
+  it('should measure whole milliseconds between two clock readings', () => {
+    should(elapsedMs('2026-07-31T10:00:00.000Z', '2026-07-31T10:00:04.234Z')).equal(4_234);
+    should(elapsedMs('2026-07-31T10:00:00.000Z', '2026-07-31T10:00:00.000Z')).equal(0);
+    should(elapsedMs('2026-07-31T10:00:00.000+00:00', '2026-07-31T11:00:01.000+01:00')).equal(1_000);
+  });
+
+  it('should never answer a negative or unreadable measurement', () => {
+    should(elapsedMs('2026-07-31T10:00:05.000Z', '2026-07-31T10:00:00.000Z')).equal(0);
+    should(elapsedMs('not a time', '2026-07-31T10:00:00.000Z')).equal(0);
+  });
+
+  it('should carry the measurement on the record, through the transition to running', () => {
+    // Arrange
+    const created = createSessionRecord(request(), context()).record;
+    const starting = transitionSessionRecord(created, 'starting', NOW).record;
+
+    // Act
+    const running = transitionSessionRecord(withHarnessStartup(starting, 4_200), 'running', NOW).record;
+
+    // Assert
+    should(running.state.harnessStartupMs).equal(4_200);
+    should(starting.state.harnessStartupMs).be.undefined();
   });
 });

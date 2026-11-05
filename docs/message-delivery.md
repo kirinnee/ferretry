@@ -338,6 +338,39 @@ loopback proxy held every connection, then the pane was killed before startup co
   once with that server deliberately delayed 8 s; no line was drawn below the wait line, and MCP
   start-up did not hold startup.
 
+#### Why a Codex start is slow
+
+A slow Codex start is the network, not the machine. Measured on one box, start of the process until
+`Waiting for startup` clears:
+
+| Condition                                                     | Startup completes                                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Normal link to chatgpt.com                                    | ~0.8–1.1 s                                                                                       |
+| A 216 MB `thread_history` sqlite database vs a near-empty one | the same                                                                                         |
+| Six starts in parallel                                        | the same                                                                                         |
+| +1.5 s of latency to chatgpt.com                              | 2.45 s                                                                                           |
+| +3 s of latency to chatgpt.com                                | 3.9 s                                                                                            |
+| No answer for ~15 s                                           | Codex exits: `account/read failed during TUI bootstrap: … workspace routing discovery timed out` |
+| A brand-new sqlite home                                       | one-time ~4–5 s backfill on top                                                                  |
+
+Every millisecond of latency adds one, and the size of Codex's history adds nothing. So the start is made
+visible instead of guessed at:
+
+- **`harnessStartupMs`** (on the session's state, `fy status <id> --json`) is the time from just before the
+  pane was launched until the first turn was delivered **and** the harness had finished its own startup,
+  read from the lifecycle's clock port. The start waits for that after delivery
+  (`TmuxPaneDelivery.waitStartupSettled`, deciding each frame with `startupSettleStep`): while the last line
+  is the park line it polls every `pollMs` (250 ms) for up to `startupSettleMs` (30 s). Claude, and a Codex
+  that was not parked, are settled on the first frame and wait for nothing. A bound that passes is **not**
+  a failure — the time is recorded as measured. A pane that dies while waiting **fails the start** with
+  the harness's own reason (`harnessExitReason`), so `account/read failed during TUI bootstrap … timed
+out` is reported at start time rather than by a session that dies later. Only a launch the start made
+  is measured; a retried start that finds its pane already live, and a revive, leave any earlier value.
+- **`fy new`** appends `, harness ready in 4.2 s` to the started attempt's line, and for a Codex that took
+  3 s or more prints one more line: `Codex waited on its account check with chatgpt.com; a slow start is
+the network, not this machine (docs/message-delivery.md).` `fy status <id>` shows `ready in 4.2 s` with
+  the session's other vitals.
+
 ## Measured Claude Code behaviour
 
 Measured on **Claude Code 2.1.281** from live captures of the incident below (fixtures:

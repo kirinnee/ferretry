@@ -57,6 +57,12 @@ export class RuntimeSupervisedLauncher implements SessionLifecycleLauncher {
     });
   }
 
+  async settled(record: SessionLifecycleRecord): Promise<void> {
+    await this.inner.settled?.(record).catch(async (error: unknown) => {
+      throw await this.#explained(record, error);
+    });
+  }
+
   async snapshot(record: SessionLifecycleRecord): Promise<void> {
     await this.inner.snapshot(record);
   }

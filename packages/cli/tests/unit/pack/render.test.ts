@@ -177,6 +177,56 @@ describe('renderPackNewOutcome', () => {
     should(none).not.containEql('card');
   });
 
+  it("should say how long the harness took to be ready on the started attempt's line", () => {
+    // Arrange
+    const outcome = (state: Record<string, unknown>) =>
+      started({
+        view: { ...startedView(), state: { status: 'running', ...state } } as ReturnType<typeof startedView>,
+        attempts: [
+          attempt({ runtime: 'a', outcome: 'refused', refusal: { code: 'out_of_quota', message: 'q' } }),
+          attempt({ runtime: 'b', probe: 'ran', probeMs: 3770 }),
+        ],
+      });
+
+    // Act
+    const measured = renderPackNewOutcome(outcome({ harnessStartupMs: 4_200 }), 'fy');
+    const unmeasured = renderPackNewOutcome(outcome({}), 'fy');
+
+    // Assert
+    should(measured).containEql('  started b (probe OK 3770 ms), harness ready in 4.2 s\n');
+    should(measured).containEql('  refused a — out_of_quota: q\n');
+    should(measured).not.containEql('chatgpt.com');
+    should(unmeasured).containEql('  started b (probe OK 3770 ms)\n');
+    should(unmeasured).not.containEql('harness ready');
+  });
+
+  it('should explain a Codex start of three seconds or more, once, and only for Codex', () => {
+    // Arrange
+    const outcome = (harness: string, harnessStartupMs: number) =>
+      started({
+        view: {
+          ...startedView(),
+          config: { ...startedView().config, harness },
+          state: { status: 'running', harnessStartupMs },
+        } as ReturnType<typeof startedView>,
+        attempts: [attempt({ runtime: 'b', probe: 'ran', probeMs: 640 })],
+      });
+    const note =
+      'Codex waited on its account check with chatgpt.com; a slow start is the network, not this machine (docs/message-delivery.md).';
+
+    // Act
+    const slow = renderPackNewOutcome(outcome('codex', 4_200), 'fy');
+    const fast = renderPackNewOutcome(outcome('codex', 2_999), 'fy');
+    const claude = renderPackNewOutcome(outcome('claude', 20_000), 'fy');
+
+    // Assert
+    should(slow.split('\n').filter(line => line === note)).have.length(1);
+    should(slow).containEql(`harness ready in 4.2 s\n${note}\nWait for its result: fy wait child-1`);
+    should(fast).not.containEql('chatgpt.com');
+    should(claude).not.containEql('chatgpt.com');
+    should(claude).containEql('harness ready in 20.0 s');
+  });
+
   it('should time a probe that passed and one that failed, and name a failed probe another start shared', () => {
     // Arrange
     const outcome = refused({

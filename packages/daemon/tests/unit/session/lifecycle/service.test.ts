@@ -1830,3 +1830,171 @@ describe('SessionLifecycleService credential per launch', () => {
     should(await built.resolve('created-capability')).be.undefined();
   });
 });
+
+/** A clock that only moves when a test says so, so a measured span is exactly what the test advanced. */
+class ControlledClock implements ClockPort {
+  private ms = Date.parse('2026-07-31T10:00:00.000Z');
+  now(): string {
+    return new Date(this.ms).toISOString();
+  }
+  advance(by: number): void {
+    this.ms += by;
+  }
+}
+
+/** A launcher that can wait out its harness's own startup, taking `settleMs` of the clock to do it. */
+class SettlingLauncher extends RecordingLauncher {
+  settleError?: unknown;
+  constructor(
+    private readonly clock: ControlledClock,
+    private readonly settleMs: number,
+  ) {
+    super();
+  }
+  async settled(_record: SessionLifecycleRecord): Promise<void> {
+    this.calls.push('settled');
+    this.clock.advance(this.settleMs);
+    if (this.settleError !== undefined) throw this.settleError;
+  }
+}
+
+describe('SessionLifecycleService harness startup time', () => {
+  function startup(settleMs = 4_200): {
+    readonly clock: ControlledClock;
+    readonly launcher: SettlingLauncher;
+    readonly repository: MemoryRepository;
+    readonly subject: SessionLifecycleService;
+  } {
+    const clock = new ControlledClock();
+    const launcher = new SettlingLauncher(clock, settleMs);
+    launcher.livenessFromLaunch = true;
+    const { repository, subject } = harness({ launcher, clock });
+    return { clock, launcher, repository, subject };
+  }
+
+  it('should record how long the launch took to deliver turn one and finish its own startup', async () => {
+    // Arrange
+    const { launcher, repository, subject } = startup(4_200);
+
+    // Act
+    const actual = await subject.createAndStart(input());
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(actual.state.harnessStartupMs).equal(4_200);
+    should(repository.current().state.harnessStartupMs).equal(4_200);
+    should(launcher.calls).deepEqual(['alive', 'alive', 'launch', `deliver:${FIRST_TURN_INSTRUCTION}`, 'settled']);
+  });
+
+  it('should settle only after the first turn is admitted and delivered, and before the session is running', async () => {
+    // Arrange
+    const { launcher, repository, subject } = startup();
+
+    // Act
+    await subject.createAndStart(input());
+
+    // Assert
+    should(launcher.calls.indexOf('settled')).be.above(launcher.calls.findIndex(call => call.startsWith('deliver:')));
+    should(repository.events.map(entry => entry.type)).deepEqual([
+      'session.created',
+      'session.starting',
+      'session.running',
+    ]);
+  });
+
+  it('should treat a wait that ran out its bound as a started session, with the time it took', async () => {
+    // Arrange — the launcher returns normally after the bound, as the tmux adapter does.
+    const { subject } = startup(30_000);
+
+    // Act
+    const actual = await subject.createAndStart(input());
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(actual.state.harnessStartupMs).equal(30_000);
+  });
+
+  it('should fail the start with the harness’s own reason when its pane dies during startup', async () => {
+    // Arrange
+    const { launcher, repository, subject } = startup(15_000);
+    const reason =
+      'the interactive harness exited (1): its last output was "account/read failed during TUI bootstrap: workspace routing discovery timed out"';
+    launcher.settleError = new Error(reason);
+
+    // Act + Assert
+    await should(subject.createAndStart(input())).be.rejectedWith(reason);
+    should(repository.current().state).containDeep({ status: 'failed', reason });
+    should(repository.current().state.harnessStartupMs).be.undefined();
+    should(repository.events.map(entry => entry.type)).deepEqual([
+      'session.created',
+      'session.starting',
+      'session.failed',
+    ]);
+    should(launcher.calls).containEql('snapshot');
+  });
+
+  it('should measure a launcher that cannot wait on startup without waiting, so Claude is unaffected', async () => {
+    // Arrange — the plain recording launcher has no `settled`, like any harness that never parks a turn.
+    const clock = new ControlledClock();
+    const { launcher, subject } = harness({ clock });
+    launcher.livenessFromLaunch = true;
+
+    // Act
+    const actual = await subject.createAndStart(input());
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(actual.state.harnessStartupMs).equal(0);
+    should(launcher.calls).deepEqual(['alive', 'alive', 'launch', `deliver:${FIRST_TURN_INSTRUCTION}`]);
+  });
+
+  it('should time an interactive session with no assignment as nothing, and wait on nothing', async () => {
+    // Arrange
+    const { launcher, subject } = startup();
+
+    // Act
+    const actual = await subject.createAndStart(input({ mode: 'interactive', prompt: undefined }));
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(actual.state.harnessStartupMs).be.undefined();
+    should(launcher.calls).not.containEql('settled');
+  });
+
+  it('should leave an earlier measurement alone when this start launched nothing', async () => {
+    // Arrange — a crash left the record starting with a live pane; the pane is not this call's.
+    const clock = new ControlledClock();
+    const launcher = new SettlingLauncher(clock, 9_000);
+    const { repository, subject } = harness({ launcher, clock });
+    const created = await subject.create(input());
+    await repository.write(
+      { ...created, state: { ...created.state, status: 'starting', harnessStartupMs: 777 } },
+      { type: 'session.starting', data: {} },
+    );
+    launcher.live = true;
+
+    // Act
+    const actual = await subject.start(ID);
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(actual.state.harnessStartupMs).equal(777);
+    should(launcher.launches()).equal(0);
+    should(launcher.calls).not.containEql('settled');
+  });
+
+  it('should leave the measurement of an already running session alone', async () => {
+    // Arrange
+    const { launcher, subject } = startup(4_200);
+    const running = await subject.createAndStart(input());
+    launcher.calls.length = 0;
+
+    // Act
+    const restarted = await subject.start(ID);
+
+    // Assert
+    should(restarted).deepEqual(running);
+    should(restarted.state.harnessStartupMs).equal(4_200);
+    should(launcher.calls).not.containEql('settled');
+  });
+});

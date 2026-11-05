@@ -14,10 +14,12 @@ import type { LaunchGate } from '../resume/types.ts';
 import {
   assignedTaskDocument,
   createSessionRecord,
+  elapsedMs,
   firstTurnInstruction,
   lifecyclePhase,
   lifecycleSessionId,
   transitionSessionRecord,
+  withHarnessStartup,
   withLaunchInstructions,
 } from './policy.ts';
 import type { SessionLifecycleSettings } from './settings.ts';
@@ -194,6 +196,8 @@ export class SessionLifecycleService {
           : await this.persist(transitionSessionRecord(current, 'starting', this.ports.clock.now()));
       if (firstTurnStanding === 'unsettled' || firstTurnStanding === 'conflict')
         throw await this.recordFailure(starting, this.firstTurnRefusal(parsed, firstTurnStanding));
+      // Set only by a launch THIS call makes: a resumed or idempotent start measured nothing.
+      let launchedAt: string | undefined;
       if (!live) {
         try {
           await this.ports.leases?.claim(parsed, starting.config.command);
@@ -203,6 +207,7 @@ export class SessionLifecycleService {
         }
         // Carried from here on, so the `running` write — or a failure after the pane exists — records
         // what THIS pane was told rather than what the previous one was.
+        launchedAt = this.ports.clock.now();
         starting = withLaunchInstructions(starting, await this.launch(starting));
       }
       if (beforeFirstTurn !== undefined) {
@@ -216,6 +221,9 @@ export class SessionLifecycleService {
         }
       }
       await this.deliverFirstTurn(starting, firstTurn);
+      // A session with no assignment never takes a first turn, so there is nothing to time.
+      if (launchedAt !== undefined && firstTurn !== undefined)
+        starting = await this.settleStartup(starting, launchedAt);
       return await this.persist(transitionSessionRecord(starting, 'running', this.ports.clock.now()));
     });
   }
@@ -365,6 +373,22 @@ export class SessionLifecycleService {
       if (error instanceof FirstTurnSettledReplay && admission === 'settled') return;
       throw await this.recordFailure(record, error);
     }
+  }
+
+  /**
+   * Waits for the harness to finish its own startup, then records how long the launch took.
+   *
+   * Delivery is not startup — Codex parks a first turn until its account check answers — so a pane that
+   * dies in that window fails THIS start with the harness's own reason, rather than reporting a running
+   * session that dies later. A wait that runs out its bound is not a failure; the time is recorded as is.
+   */
+  private async settleStartup(record: SessionLifecycleRecord, launchedAt: string): Promise<SessionLifecycleRecord> {
+    try {
+      await this.ports.launcher.settled?.(record);
+    } catch (error) {
+      throw await this.recordFailure(record, error);
+    }
+    return withHarnessStartup(record, elapsedMs(launchedAt, this.ports.clock.now()));
   }
 
   /** The one initial turn this lifecycle may type, keyed beneath the session it acts on. */

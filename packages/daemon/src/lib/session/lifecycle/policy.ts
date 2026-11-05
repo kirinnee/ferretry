@@ -277,6 +277,22 @@ export function withLaunchInstructions(
 }
 
 /**
+ * Whole milliseconds from one clock reading to a later one, never below zero.
+ *
+ * The lifecycle reads time only through its clock port, whose readings are instants; a clock that steps
+ * backwards or a reading that does not parse is a measurement that is wrong, not one worth a thrown error.
+ */
+export function elapsedMs(from: string, to: string): number {
+  const span = Date.parse(to) - Date.parse(from);
+  return Number.isFinite(span) ? Math.max(0, Math.round(span)) : 0;
+}
+
+/** The record carrying how long its pane's harness took to start, as measured by the launch that opened it. */
+export function withHarnessStartup(record: SessionLifecycleRecord, harnessStartupMs: number): SessionLifecycleRecord {
+  return { ...record, state: { ...record.state, harnessStartupMs } };
+}
+
+/**
  * The lifecycle phase a recorded status implies.
  *
  * The six lifecycle statuses are their own phase. Every turn-level status the watcher writes while a

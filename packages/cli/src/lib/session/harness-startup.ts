@@ -1,0 +1,28 @@
+import type { SessionView } from '@ferretry/protocol';
+
+/**
+ * From this long a Codex start is worth explaining. A healthy one is ready in about a second; every
+ * extra millisecond to chatgpt.com adds one (docs/message-delivery.md § "Why a Codex start is slow").
+ */
+export const SLOW_CODEX_START_MS = 3_000;
+
+/** `4.2 s`: one decimal, so a start that took 4234 ms and one that took 4249 ms read the same. */
+export function harnessReadySeconds(milliseconds: number): string {
+  return `${(Math.round(Math.max(0, milliseconds) / 100) / 10).toFixed(1)} s`;
+}
+
+/** `harness ready in 4.2 s`, or nothing when this session's start was never measured. */
+export function harnessReadyWords(view: SessionView): string | undefined {
+  const measured = view.state.harnessStartupMs;
+  return measured === undefined ? undefined : `harness ready in ${harnessReadySeconds(measured)}`;
+}
+
+/**
+ * The one line a slow Codex start earns, so nobody blames this machine for the network; nothing for a fast
+ * start, an unmeasured one, or any other harness (Claude never waits on an account check).
+ */
+export function slowCodexStartNote(view: SessionView): string | undefined {
+  const measured = view.state.harnessStartupMs;
+  if (view.config.harness !== 'codex' || measured === undefined || measured < SLOW_CODEX_START_MS) return undefined;
+  return 'Codex waited on its account check with chatgpt.com; a slow start is the network, not this machine (docs/message-delivery.md).';
+}

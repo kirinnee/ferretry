@@ -9,6 +9,7 @@ import {
   type RoutingPromptView,
   type RoutingSuggested,
 } from '@ferretry/protocol';
+import { harnessReadyWords, slowCodexStartNote } from '../session/harness-startup.ts';
 
 /**
  * Which routing prompt is in effect, in words: "your routing prompt", "cleaned up by gpt-oss-120b on
@@ -90,11 +91,12 @@ const probeWords = (attempt: PackAttempt): string => {
   return attempt.probeMs === undefined ? ' (probe OK)' : ` (probe OK ${String(attempt.probeMs)} ms)`;
 };
 
-const attemptLine = (attempt: PackAttempt): string => {
+/** `ready` is how long the started attempt's harness took to be up (`, harness ready in 4.2 s`); only a started attempt has one. */
+const attemptLine = (attempt: PackAttempt, ready = ''): string => {
   const model = attempt.model === undefined ? '' : ` ${attempt.model}`;
   const probe = probeWords(attempt);
   return attempt.outcome === 'started'
-    ? `  started ${attempt.runtime}${model}${probe}`
+    ? `  started ${attempt.runtime}${model}${probe}${ready}`
     : `  refused ${attempt.runtime}${model}${probe} — ${attempt.refusal?.code ?? 'refused'}: ${attempt.refusal?.message ?? ''}`;
 };
 
@@ -130,7 +132,10 @@ function cardLines(card: PackChildCard | undefined): readonly string[] {
 
 /** What `new` did: the ferret it started and how, or the refusal and every attempt. */
 export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): string {
-  const attempts = outcome.attempts.map(attemptLine);
+  const ready = outcome.outcome === 'started' ? harnessReadyWords(outcome.view) : undefined;
+  const attempts = outcome.attempts.map(attempt =>
+    attemptLine(attempt, attempt.outcome === 'started' && ready !== undefined ? `, ${ready}` : ''),
+  );
   if (outcome.outcome === 'refused')
     return [
       `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
@@ -138,12 +143,14 @@ export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): stri
       ...(attempts.length === 0 ? [] : ['', 'Tried:', ...attempts]),
     ].join('\n');
   const view = outcome.view;
+  const slow = slowCodexStartNote(view);
   const who = view.config.teammate === undefined ? view.config.id : `${view.config.teammate} (${view.config.id})`;
   return [
     `Started ${who} on ${view.config.agent}${view.config.model === undefined ? '' : `, ${view.config.model}`} — decided by ${DECIDED_BY[outcome.decidedBy]}.`,
     ...(outcome.note === undefined ? [] : [outcome.note]),
     ...cardLines(outcome.card),
     ...attempts,
+    ...(slow === undefined ? [] : [slow]),
     `Wait for its result: ${bin} wait ${view.config.id}`,
   ].join('\n');
 }

@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path';
 import {
   type BoardProjectId,
   BoardProjectIdSchema,
+  NonNegativeIntegerSchema,
   type SessionLaunchInstructions,
   SessionLaunchInstructionsSchema,
   SessionStatusSchema,
@@ -114,6 +115,11 @@ export const SessionLifecycleStateSchema = z.object({
   reason: z.string().min(1).optional(),
   /** What the current pane was told at launch (`SessionLaunchInstructions`), refreshed by every launch. */
   launchInstructions: SessionLaunchInstructionsSchema.optional(),
+  /**
+   * How long the harness took, from launch, to take its first turn and finish its own startup. Written once, by
+   * the start that launched the pane; a start that launched nothing leaves the value it found.
+   */
+  harnessStartupMs: NonNegativeIntegerSchema.optional(),
 });
 export type SessionLifecycleState = z.infer<typeof SessionLifecycleStateSchema>;
 
@@ -193,6 +199,15 @@ export interface SessionLifecycleLauncher {
    * while a crash after the callback can never cause the instruction to be typed twice.
    */
   deliver(record: SessionLifecycleRecord, instruction: string, beforeWrite?: () => Promise<void>): Promise<void>;
+  /**
+   * Waits, boundedly, until the harness has finished its OWN startup after the first turn was delivered.
+   *
+   * Delivery is not startup: Codex 0.166 takes a submission while it is still starting and parks it until an
+   * account check with chatgpt.com answers. Resolves when the harness is up — or when the bound passes, which
+   * is not a failure — and rejects with the harness's own reason when the pane dies first. Optional: a launcher
+   * that cannot tell never waits, and the start then measures delivery alone.
+   */
+  settled?(record: SessionLifecycleRecord): Promise<void>;
   /** Captures a live final frame before a durable terminal transition, if one exists. */
   snapshot(record: SessionLifecycleRecord): Promise<void>;
   stop(record: SessionLifecycleRecord): Promise<void>;

@@ -26,6 +26,7 @@ import {
   paneBlockingPrompt,
   paneResponded,
   retryDelays,
+  startupSettleStep,
   type StartupDialogAction,
   type StartupDialogOptions,
   type TmuxController,
@@ -57,6 +58,11 @@ export interface PaneDeliveryOptions {
   readonly submitPolls?: number;
   /** How long to wait between composer and submit observations. */
   readonly pollMs?: number;
+  /**
+   * The longest `waitStartupSettled` watches a parked first turn, counted in `pollMs` steps. Past it the
+   * wait ends without failing: a harness that is merely slow is not a failed start.
+   */
+  readonly startupSettleMs?: number;
 }
 
 const DEFAULTS = {
@@ -72,6 +78,7 @@ const DEFAULTS = {
   submitAttempts: 3,
   submitPolls: 12,
   pollMs: 250,
+  startupSettleMs: 30_000,
 } as const;
 
 /** A payload could not be delivered, and the message says which half failed. */
@@ -173,6 +180,25 @@ export class TmuxPaneDelivery {
     await beforeWrite?.();
     const evidence = await this.fill(session, text);
     return await this.submit(session, text, evidence);
+  }
+
+  /**
+   * Wait, boundedly, until the harness has finished its OWN startup after a first turn was delivered.
+   *
+   * Codex 0.166 takes a submission before its startup ends and parks it under `Waiting for startup`
+   * (`paneShowsStartupWait`), so delivery is already proven while the harness is not yet running. Any
+   * other pane answers on the first frame. A pane that dies meanwhile fails the wait with the harness's
+   * own exit reason, so the start reports it instead of a session that dies later; a bound that passes
+   * returns quietly, because a slow harness is not a failed one.
+   */
+  async waitStartupSettled(session: string): Promise<void> {
+    for (let waited = 0; ; waited += this.settings.pollMs) {
+      const step = startupSettleStep(await captureFrame(this.tmux, session));
+      if (step.kind === 'settled') return;
+      if (step.kind === 'exited') throw new PaneDeliveryError(`${step.reason}; tmux session ${session}`);
+      if (waited >= this.settings.startupSettleMs) return;
+      await this.sleep(this.settings.pollMs);
+    }
   }
 
   private async fill(session: string, text: string): Promise<LandingEvidence> {

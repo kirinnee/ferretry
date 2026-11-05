@@ -5,6 +5,7 @@ import {
   type SessionState,
   type SessionView,
 } from '@ferretry/protocol';
+import { harnessReadySeconds } from './harness-startup.ts';
 import type { ICellColour } from './ports.ts';
 
 /** Statuses a session never leaves; `ps` hides them unless asked for everything. */
@@ -72,6 +73,7 @@ function vitals(view: SessionView): string[] {
   const quota = quotaLabel(view.state);
   const parts = [
     view.config.compactAt === undefined ? '' : `compact at ${describeCompactAt(view.config.compactAt)}`,
+    view.state.harnessStartupMs === undefined ? '' : `ready in ${harnessReadySeconds(view.state.harnessStartupMs)}`,
     view.state.contextPercent === undefined ? '' : `context ${view.state.contextPercent}% used`,
     quota === undefined ? '' : `quota ${quota}`,
     view.state.lastToolStartedAt === undefined ? '' : `last tool started ${view.state.lastToolStartedAt}`,
