@@ -69,6 +69,16 @@ class FakeLinks implements Links {
   async copy(linkId: string) {
     return this.#record('copy', { url: URL_SECRET }, linkId);
   }
+  widening = false;
+  async move(linkId: string, request: unknown) {
+    return this.#record('move', { linkId, version: 2 }, linkId, request);
+  }
+  async widens(linkId: string, request: unknown) {
+    return this.#record('widens', this.widening, linkId, request);
+  }
+  async update(linkId: string, request: unknown, proven: boolean) {
+    return this.#record('update', { linkId }, linkId, request, proven);
+  }
   async revoke(linkId: string) {
     return this.#record('revoke', { linkId, state: 'ended' }, linkId);
   }
@@ -150,22 +160,30 @@ const MINT = { item: { itemId: ITEM, version: 1, digest: DIGEST }, kind: 'public
 
 describe('the route table', () => {
   const routes = catalogLinkRoutes({ links: new FakeLinks() });
-  it('has the seven routes, the fixed paths before :linkId', () => {
+  it('has the nine routes, the fixed paths before :linkId', () => {
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual([
       'GET /v1/catalog-links/store',
       'POST /v1/catalog-links/preview',
       'GET /v1/catalog-links',
       'POST /v1/catalog-links',
       'GET /v1/catalog-links/:linkId',
+      'PUT /v1/catalog-links/:linkId/version',
+      'PATCH /v1/catalog-links/:linkId',
       'POST /v1/catalog-links/:linkId/copy',
       'DELETE /v1/catalog-links/:linkId',
     ]);
   });
   it("is the operator's, uncached, behind sharing.use, on every route", () => {
+    const narrowing = new Set(['PUT /version', 'PATCH /:linkId', 'POST /copy', 'DELETE /:linkId']);
     for (const route of routes) {
       should(route.minimum).equal('operator');
       should(route.noStore).equal(true);
-      should(route.capability).deepEqual({ capability: 'sharing', axis: 'use' });
+      const key = `${route.method} ${route.path.replace('/v1/catalog-links', '').replace(/^\/:linkId(?=\/)/, '')}`;
+      should(route.capability).deepEqual(
+        narrowing.has(key)
+          ? { capability: 'sharing', axis: 'use', narrowing: true }
+          : { capability: 'sharing', axis: 'use' },
+      );
     }
   });
   it('routes /store to the status, not to a link called "store"', () => {
@@ -279,6 +297,80 @@ describe('minting', () => {
     should(
       (await drive(links, 'POST', '/v1/catalog-links', { ...MINT, kind: 'one-time', expires: '7d' })).status,
     ).equal(400);
+    should(links.calls).deepEqual([]);
+  });
+});
+
+const MOVE = { version: 2, from: 1, digest: DIGEST };
+
+describe('moving', () => {
+  it('moves for the machine itself with no proof asked', async () => {
+    const links = new FakeLinks();
+    const answer = await drive(links, 'PUT', `/v1/catalog-links/${LINK_ID}/version`, MOVE);
+    should(answer.status).equal(200);
+    should(links.calls).deepEqual([{ act: 'move', args: [LINK_ID, MOVE] }]);
+  });
+  it('asks a governed device for the passkey, and the service is not reached', async () => {
+    const links = new FakeLinks();
+    const answer = await drive(links, 'PUT', `/v1/catalog-links/${LINK_ID}/version`, MOVE, DEVICE);
+    should(answer.status).equal(403);
+    should(answer.body.code).equal(STEP_UP_REQUIRED_CODE);
+    should(answer.claimedActs).deepEqual([STEP_UP_ACTS.shareLink]);
+    should(links.calls).deepEqual([]);
+    const proven = await drive(links, 'PUT', `/v1/catalog-links/${LINK_ID}/version`, MOVE, DEVICE, [], true);
+    should(proven.status).equal(200);
+  });
+  it('refuses a ferret, a bad id and a body that is not a move', async () => {
+    const links = new FakeLinks();
+    const ferret = await drive(links, 'PUT', `/v1/catalog-links/${LINK_ID}/version`, MOVE, FERRET, [], true);
+    should([ferret.status, ferret.code]).deepEqual([403, 'forbidden']);
+    should((await drive(links, 'PUT', '/v1/catalog-links/x/version', MOVE)).code).equal('link_unknown');
+    should((await drive(links, 'PUT', `/v1/catalog-links/${LINK_ID}/version`, { version: 2 })).status).equal(400);
+    should(links.calls).deepEqual([]);
+  });
+});
+
+describe('changing', () => {
+  const PATH = `/v1/catalog-links/${LINK_ID}`;
+  it('changes a narrowing with no proof, and passes proven=false on', async () => {
+    const links = new FakeLinks();
+    const answer = await drive(links, 'PATCH', PATH, { installCap: 3 }, DEVICE);
+    should(answer.status).equal(200);
+    should(answer.claimedActs).deepEqual([]);
+    should(links.calls.map(c => c.act)).deepEqual(['widens', 'update']);
+    should(links.calls[1]?.args).deepEqual([LINK_ID, { installCap: 3 }, false]);
+  });
+  it('asks a governed device for the passkey when the change widens', async () => {
+    const links = new FakeLinks();
+    links.widening = true;
+    const asked = await drive(links, 'PATCH', PATH, { installCap: null }, DEVICE);
+    should(asked.status).equal(403);
+    should(asked.body.code).equal(STEP_UP_REQUIRED_CODE);
+    should(asked.claimedActs).deepEqual([STEP_UP_ACTS.shareLink]);
+    should(links.calls.map(c => c.act)).deepEqual(['widens']);
+    const proven = await drive(links, 'PATCH', PATH, { installCap: null }, DEVICE, [], true);
+    should(proven.status).equal(200);
+    should(links.calls.at(-1)?.args).deepEqual([LINK_ID, { installCap: null }, true]);
+  });
+  it('maps a refusal while working out the widening, and lets anything else through', async () => {
+    const links = new FakeLinks();
+    links.failure = new CatalogLinkRefusal('link_unknown', 'no such link');
+    const refused = await drive(links, 'PATCH', PATH, { installCap: 3 });
+    should([refused.status, refused.code]).deepEqual([LINK_STATUS.link_unknown, 'link_unknown']);
+    links.failure = new Error('boom');
+    let thrown: unknown;
+    try {
+      await drive(links, 'PATCH', PATH, { installCap: 3 });
+    } catch (error) {
+      thrown = error;
+    }
+    should((thrown as Error).message).equal('boom');
+  });
+  it('refuses a ferret, a bad id and an empty change', async () => {
+    const links = new FakeLinks();
+    should((await drive(links, 'PATCH', PATH, { installCap: 3 }, FERRET)).code).equal('forbidden');
+    should((await drive(links, 'PATCH', '/v1/catalog-links/x', { installCap: 3 })).code).equal('link_unknown');
+    should((await drive(links, 'PATCH', PATH, {})).status).equal(400);
     should(links.calls).deepEqual([]);
   });
 });

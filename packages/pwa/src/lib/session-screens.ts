@@ -39,6 +39,11 @@ export interface TranscriptEntry {
    * (`SessionLogPage.offsets`). A search hit names one; the chat finds its row by it.
    */
   readonly offset?: number;
+  /**
+   * The other bytes this row stands for, in order: each record a tool run draws, and the untimed copies
+   * Claude wrote of a record (`session-workspace-model.ts`). A search hit on any of them is this row.
+   */
+  readonly alsoAt?: readonly number[];
   /** `system` is Ferretry speaking INTO the session (a send that did not arrive), or — with `event` — the
    *  harness's own event typed into the user channel; `notice` is daemon bookkeeping, shown only as an alert. */
   readonly kind: 'user' | 'assistant' | 'tool' | 'command' | 'notice' | 'system' | 'ledger';

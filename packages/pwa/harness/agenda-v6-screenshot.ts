@@ -11,7 +11,7 @@
  * sideways; the card, the History or the title column is not the composer's width; "Why now" is drawn; anything in
  * the card has a left accent bar; the answer row holds more than three buttons or wraps; Not needed is not in the
  * card's top bar; a term's meaning does not open; or the History holds tool text, unrelated chat, a ferret bubble,
- * or no "Card updated to v2".
+ * or an edit line ("Updated to v2" is the folded activity log's).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -251,8 +251,8 @@ const checkHistory = async (page: Page, label: string): Promise<void> => {
   check(text.includes('does pause kill a running turn?'), `${label}: the owner's question is missing`);
   check(text.includes('A running turn finishes'), `${label}: the ferret's paragraph under the !A90 heading is missing`);
   check(text.includes('It only stops new turns from starting'), `${label}: the recap pair about the item is missing`);
-  check(text.includes('Card updated to v2'), `${label}: no "Card updated to v2"`);
-  check(text.includes('Context: added'), `${label}: the edit's change summary is missing`);
+  // An edit is the folded activity log's line, never the conversation's (`agenda-parts-screenshot.ts` checks the log).
+  check(!text.includes('Updated to v2'), `${label}: an edit is drawn in the conversation`);
   const backgrounds = await history
     .locator('[data-history="ferret"]')
     .evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
@@ -303,23 +303,17 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     `choice ${form} ${theme}: the card is drawn in a fallback font (${faces.family}; loaded: ${faces.loaded.join(', ')})`,
   );
   await checkLayout(choice, `choice ${form} ${theme}`);
+  // Not needed and the version picker are behind the head's ⋯ now (&F920).
+  await choice.locator('[data-agenda-menu-toggle]').click();
   check(
-    (await choice.locator('.fy-card__top [data-agenda-dismiss]').count()) === 1,
-    `choice ${form} ${theme}: Not needed is not in the card's top bar`,
+    (await choice.locator('[data-agenda-menu] [data-agenda-dismiss]').count()) === 1,
+    `choice ${form} ${theme}: Not needed is not in the ⋯ menu`,
   );
   check(
-    ((await choice.locator('[data-agenda-version-picker]').textContent()) ?? '').includes('v2 of 2'),
+    ((await choice.locator('[data-agenda-menu] [data-agenda-version-picker]').textContent()) ?? '').includes('v2 of 2'),
     `choice ${form} ${theme}: the version picker does not say v2 of 2`,
   );
-  const heights = await choice.evaluate(() =>
-    ['.fy-card__top [data-agenda-dismiss]', '.fy-card__top [data-agenda-version-picker]'].map(selector =>
-      Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? -1),
-    ),
-  );
-  check(
-    heights[0] === heights[1],
-    `choice ${form} ${theme}: Not needed is ${heights[0]}px tall, the version picker ${heights[1]}px`,
-  );
+  await choice.keyboard.press('Escape');
   await shot(choice, 'choice', form, theme);
   // A term opened: its meaning shows under it, inside the card (the Terms list is already open: nothing folds).
   await choice.locator('.fy-card a[href^="#fy-term-"]').nth(1).click();
@@ -339,6 +333,14 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(choice, 'terms', form, theme);
   // The conversation about it, at the bottom.
   await choice.mouse.click(2, 60);
+  await scrollTo(choice, 'bottom');
+  // The conversation starts folded (&F920): it is opened before it is read.
+  const conversation = choice.locator('[data-agenda-fold="conversation"]').first();
+  check(
+    (await conversation.getAttribute('aria-expanded')) === 'false',
+    `history ${form} ${theme}: the conversation does not start folded`,
+  );
+  await press(conversation);
   await scrollTo(choice, 'bottom');
   await checkHistory(choice, `history ${form} ${theme}`);
   // The reply's Markdown is laid out after the first scroll: scroll again so the last row is not under the composer.

@@ -135,13 +135,13 @@ describe('the Machine group in the Inbox', () => {
     expect(view?.container.querySelector('[data-inbox-open-chat]')).toBeNull();
   });
 
-  test('lets the detail title wrap, and draws no moves for a notice that lists no ferret', async () => {
+  test('keeps the detail title on one line, and draws no moves for a notice that lists no ferret', async () => {
     // Arrange
     const card = inboxCard(moved, must(machineView, 'the machine view'));
     await open([card], card.key);
 
     // Assert
-    expect(view?.container.querySelector('[data-agenda-title][data-wrap]')).not.toBeNull();
+    expect(view?.container.querySelector('[data-agenda-title]')?.hasAttribute('data-wrap')).toBe(false);
     expect(view?.container.querySelector('[data-inbox-machine-moves]')).toBeNull();
   });
 

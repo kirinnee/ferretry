@@ -4,13 +4,19 @@ set -euo pipefail
 # Judges the attempts of .github/workflows/smoke-darwin.yaml. Reads ADVISORY (true on a pull request)
 # and NEEDS (the workflow's `toJSON(needs)`: each `attempt-N` with its `result` and `outputs.started`).
 #
-# A macOS job GitHub never gave a runner is cancelled with no step run and `started` empty: that
-# proves nothing about the product, so it is told apart from a smoke that ran and failed.
+# A macOS job GitHub never gave a runner runs no step, so its `started` output is empty: that proves
+# nothing about the product, so it is told apart from a smoke that ran and failed. `outputs.started` is
+# the source of truth, NOT `result`: GitHub reports such a job as "cancelled" in the UI but hands the
+# workflow `result: "abandoned"` (seen in the Verdict log of run 41856821125), and may use other words.
 #
-#   an attempt passed                     -> pass
-#   an attempt ran and failed             -> fail (never retried, on a pull request or off one)
-#   every attempt cancelled, ADVISORY     -> pass with a warning: "macOS runner not available; advisory on PRs"
-#   every attempt cancelled, not advisory -> fail, saying the runner was unavailable and how often it was tried
+#   never started = not success, not skipped, and `started` is not "true"  (any result: cancelled, abandoned, failure)
+#   ran and failed = `started` is "true" and the result is "failure"
+#   cut short      = `started` is "true" and the result is anything else that is not success or skipped
+#
+#   an attempt passed                           -> pass
+#   an attempt ran and failed                   -> fail (never retried, on a pull request or off one)
+#   no attempt ran, ADVISORY                    -> pass with a warning: "macOS runner not available; advisory on PRs"
+#   no attempt ran, not advisory                -> fail, saying the runner was unavailable and how often it was tried
 #
 # It writes the same facts to the job summary so a reader of the check sees why it is green or red.
 
@@ -23,9 +29,9 @@ count() {
 }
 
 passed="$(count '.result == "success"')"
-failed="$(count '.result == "failure"')"
-never_started="$(count '.result == "cancelled" and ((.outputs.started // "") != "true")')"
-cut_short="$(count '.result == "cancelled" and ((.outputs.started // "") == "true")')"
+failed="$(count '.result == "failure" and ((.outputs.started // "") == "true")')"
+never_started="$(count '(.result != "success" and .result != "skipped") and ((.outputs.started // "") != "true")')"
+cut_short="$(count '(.result != "success" and .result != "failure" and .result != "skipped") and ((.outputs.started // "") == "true")')"
 tried=$((passed + failed + never_started + cut_short))
 
 say() {

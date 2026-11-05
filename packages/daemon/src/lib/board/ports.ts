@@ -121,7 +121,7 @@ export interface CardActivity {
 
 /**
  * What the activity deriver judges a board by: every card (a parent's roll-up needs its children), the
- * lanes (staleness is per lane) and the agenda's answer (a blocking ask makes a card `waiting`).
+ * lanes (staleness is per lane) and the agenda's answer (a card whose agenda carries its open ask is never stale).
  */
 export interface ActivityInputs {
   readonly cards: readonly BoardTask[];
@@ -135,12 +135,12 @@ export interface ActivityDeriver {
   derive(inputs: ActivityInputs): Promise<ReadonlyMap<BoardTaskId, CardActivity>>;
 }
 
-/** The agenda items raised against a card. */
+/** The open agendas that carry a card (docs/agenda.md § Card asks). */
 export interface CardAsks {
-  /** Every open item. */
+  /** Every open agenda that carries the card: about it, or carrying one of its asks. */
   readonly open: readonly AgendaRef[];
-  /** The open items blocking the work now; always a subset of `open`. */
-  readonly blocking: readonly AgendaRef[];
+  /** The ones carrying the card's ask that the owner has yet to answer; always a subset of `open`. */
+  readonly asking: readonly AgendaRef[];
 }
 
 /** The agenda store's link to cards. U7 implements it; until then no card has asks. */
@@ -249,8 +249,8 @@ export interface BoardOptIn {
 
 /** What the owner said to a session, for deciding whether a card's ask is theirs. */
 export interface OwnerWords {
-  /** The owner's messages to a session, first turn included; empty when it cannot tell. Never throws. */
-  said(sessionId: string): Promise<readonly string[]>;
+  /** Best effort by default. Strict reads reject incomplete/unreadable records instead of guessing nobody spoke. */
+  said(sessionId: string, options?: { readonly strict?: boolean }): Promise<readonly string[]>;
 }
 
 /** The agenda threads a card may be made to carry out (`fy task create --thread`): linked to the card, nothing more. */

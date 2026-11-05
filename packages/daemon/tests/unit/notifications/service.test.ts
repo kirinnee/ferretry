@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { AgendaItemSchema, AgendaSnapshotSchema, type PushDeliveryResult } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import { agendaAlertLane } from '../../../src/lib/notifications/policy.ts';
 import { NotificationService } from '../../../src/lib/notifications/service.ts';
 import { NotificationRecordSchema } from '../../../src/lib/notifications/types.ts';
 import type {
@@ -43,6 +44,12 @@ class MemoryLedger implements NotificationDeliveryLedger {
       requested,
       ...(outcome === undefined || outcome.phase !== 'outcome' ? {} : { outcome }),
     };
+  }
+
+  async entries(): Promise<readonly NotificationLedgerEntry[]> {
+    const keys = this.records.filter(record => record.phase === 'requested').map(record => record.key);
+    const found = await Promise.all(keys.map(async key => await this.find(key)));
+    return found.filter(entry => entry !== undefined);
   }
 
   async append(record: NotificationRecord): Promise<void> {
@@ -99,6 +106,8 @@ function fixture(
     readonly warnings?: string[];
     readonly subjectOf?: ConstructorParameters<typeof NotificationService>[0]['subjectOf'];
     readonly now?: () => string;
+    readonly landed?: (sessionId: string) => void;
+    readonly lanes?: ConstructorParameters<typeof NotificationService>[0]['lanes'];
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -126,6 +135,8 @@ function fixture(
             },
           }),
       ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
+      ...(options.landed === undefined ? {} : { landed: options.landed }),
+      ...(options.lanes === undefined ? {} : { lanes: options.lanes }),
     }),
   };
 }
@@ -178,7 +189,13 @@ describe('NotificationService stop push', () => {
       title: 'Release agent is stopped · 2 need you',
       url: `/session/${SESSION}?attention=A1`,
     });
-    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:stopped:${AT}`, stoppedAt: AT });
+    // A stop is about the ferret: its line goes under the ferret's tag, recorded so a clear can name it.
+    should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}`);
+    should(requested(world)[0]).containDeep({
+      key: `agenda:${SESSION}:stopped:${AT}`,
+      stoppedAt: AT,
+      tag: `attention-${SESSION}`,
+    });
   });
 
   it('should push again for the next stop of the same ferret', async () => {
@@ -219,7 +236,13 @@ describe('NotificationService deadline push', () => {
     // Assert
     should(world.push.calls).equal(1);
     should(world.push.dispatches[0]?.payload.body).startWith('Needed in about 2 h');
-    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:A1:deadline`, deadline: true });
+    // An item's push goes under its own tag (one line per item), recorded so a clear can name it.
+    should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}:A1`);
+    should(requested(world)[0]).containDeep({
+      key: `agenda:${SESSION}:A1:deadline`,
+      deadline: true,
+      tag: `attention-${SESSION}:A1`,
+    });
   });
 
   it('should keep its own key apart from a stop of the same item', async () => {
@@ -257,7 +280,7 @@ describe('NotificationService woke push', () => {
   });
 });
 
-/** A card's gate item (docs/board.md § Gates ask the owner): raised by the daemon, answered only by the owner. */
+/** A card's gate item (docs/board.md § Cards show progress): raised by the daemon, answered only by the owner. */
 const gated = AgendaItemSchema.parse({
   id: 'A5',
   source: 'task',
@@ -629,7 +652,8 @@ describe('NotificationService high priority', () => {
     should(shown.push.dispatches[0]?.urgency).equal('high');
     should(shown.push.dispatches[0]?.payload).containDeep({
       urgency: 'high',
-      tag: `attention-${SESSION}:A2`,
+      // The group's line keeps the ferret's tag even when loud, so a clear of the code card never takes it down.
+      tag: `attention-${SESSION}`,
       url: `/session/${SESSION}?attention=A2`,
     });
     should(behind.push.dispatches[0]?.urgency).be.undefined();
@@ -846,5 +870,160 @@ describe('NotificationService approve-on-phone push', () => {
       'Ferret “Approve on your phone”',
       'Ferret “Аpprove оn your phone now”',
     ]);
+  });
+});
+
+describe("NotificationService sends in the ferret's alert lane (review round 5: a clear never follows a newer push)", () => {
+  it('should record, send and record the outcome of a push inside that lane, and tell of its landing there', async () => {
+    // Arrange
+    const order: string[] = [];
+    const world = fixture({
+      callLog: order,
+      lanes: {
+        run: async (key, work) => {
+          order.push(`enter ${key}`);
+          try {
+            return await work();
+          } finally {
+            order.push(`leave ${key}`);
+          }
+        },
+      },
+      landed: () => void order.push('landed'),
+    });
+
+    // Act
+    await world.service.deadline(SESSION, due, snapshot);
+
+    // Assert
+    should(order[0]).equal(`enter ${agendaAlertLane(SESSION)}`);
+    should(order.at(-1)).equal(`leave ${agendaAlertLane(SESSION)}`);
+    should(order).containEql('landed');
+    should(order.filter(line => line.startsWith('enter'))).have.length(1);
+  });
+});
+
+describe('NotificationService tells the clearer a push landed (review round 1: a push on its way when its item was handled)', () => {
+  it('should say so once the outcome of a push that reached a device is recorded, and not for one that reached none', async () => {
+    // Arrange
+    const landed: string[] = [];
+    const world = fixture({ landed: sessionId => landed.push(sessionId) });
+
+    // Act
+    await world.service.deadline(SESSION, due, snapshot);
+    world.push.result = { delivered: 0, failed: 2 };
+    await world.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(landed).deepEqual([SESSION]);
+  });
+
+  it('should not say so when the outcome could not be recorded, and stay total when the listener throws', async () => {
+    // Arrange
+    const ledger = new MemoryLedger();
+    ledger.failOutcome = true;
+    const landed: string[] = [];
+    const failing = fixture({ ledger, landed: sessionId => landed.push(sessionId) });
+    const throwing = fixture({
+      landed: () => {
+        throw new Error('the clearer is down');
+      },
+    });
+
+    // Act
+    await failing.service.deadline(SESSION, due, snapshot);
+    await throwing.service.deadline(SESSION, due, snapshot);
+
+    // Assert
+    should(landed).deepEqual([]);
+    should(throwing.push.calls).equal(1);
+  });
+});
+
+/** A card's agenda carrying its ask (docs/agenda.md § Card asks): opened by the daemon on its ferret's behalf. */
+const carrying = AgendaItemSchema.parse({
+  id: 'A6',
+  source: 'task',
+  sourceRef: 'card-agenda:F412',
+  subject: 'Try it: open the Board',
+  why: '&F412 reached Released.',
+  waitingSince: AT,
+  howToResolve:
+    "Answer the card's ask here (its buttons move the card); reply to talk it over. The ferret marks this done.",
+  kind: 'reply',
+  ask: { kind: 'open-question' },
+  task: { id: 'F412' },
+  cardAsks: [{ gate: { ...gated.gate, laneName: 'Released', cardTitle: 'Badge fix' }, at: AT }],
+  raisedBy: 'daemon',
+  raisedBySession: null,
+  raisedByName: null,
+});
+
+describe('NotificationService card-ask push', () => {
+  it('should say which card waits where, and what the owner can answer, at its raise and when it wakes the agenda', async () => {
+    // Arrange
+    const world = fixture();
+    const woken = AgendaItemSchema.parse({ ...carrying, waitingSince: '2026-08-07T09:00:00.000Z' });
+
+    // Act
+    await world.service.raised(SESSION, carrying, snapshot);
+    await world.service.woke(SESSION, woken, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(2);
+    for (const dispatch of world.push.dispatches) {
+      should(dispatch.payload).match({
+        body: '&F412 Badge fix is at Released: Done or Not good',
+        eventKey: 'agenda-gate:A6',
+      });
+    }
+  });
+
+  it('should leave an agenda whose sole open items are card asks out of a stop: alone it is no stop, beside another it is not counted', async () => {
+    // Arrange
+    const alone = fixture();
+    const beside = fixture();
+    const onlyAsk = AgendaSnapshotSchema.parse({ ...snapshot, items: [carrying], count: 1 });
+    const both = AgendaSnapshotSchema.parse({ ...snapshot, items: [carrying, item], count: 2 });
+
+    // Act
+    await alone.service.stopped(SESSION, AT, onlyAsk);
+    await beside.service.stopped(SESSION, AT, both);
+
+    // Assert
+    should(alone.push.calls).equal(0);
+    should(beside.push.calls).equal(1);
+    should(beside.push.dispatches[0]?.payload.url).containEql('A1');
+  });
+
+  it('should count a ferret’s own thread that carries an ask once the ferret asked something after it', async () => {
+    // Arrange — the ask was put on the thread at AT; the ferret asked its question later
+    const asked = { ...carrying.cardAsks?.[0], at: AT };
+    const askedOnly = AgendaItemSchema.parse({
+      ...item,
+      id: 'A7',
+      task: { id: 'F412' },
+      cardAsks: [asked],
+      waitingSince: '2026-08-06T10:30:00.000Z',
+    });
+    const quiet = AgendaItemSchema.parse({ ...askedOnly, waitingSince: '2026-08-06T09:00:00.000Z' });
+    const talked = fixture();
+    const silent = fixture();
+
+    // Act
+    await talked.service.stopped(
+      SESSION,
+      '2026-08-06T11:00:00.000Z',
+      AgendaSnapshotSchema.parse({ ...snapshot, items: [askedOnly], count: 1 }),
+    );
+    await silent.service.stopped(
+      SESSION,
+      '2026-08-06T11:00:00.000Z',
+      AgendaSnapshotSchema.parse({ ...snapshot, items: [quiet], count: 1 }),
+    );
+
+    // Assert
+    should(talked.push.calls).equal(1);
+    should(silent.push.calls).equal(0);
   });
 });

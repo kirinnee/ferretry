@@ -5,6 +5,7 @@ import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } f
 import {
   defaultSendTrackerSettings,
   lookBeforeReading,
+  OWED_NOTICE_RETRY_LIMIT,
   SEND_READ_LOOK_BUDGET_MS,
   type SendEvidenceReading,
   type SendHeldAt,
@@ -114,6 +115,13 @@ class World {
   enterTakes = false;
   resubmitDeclines = false;
   readonly notices: Array<{ sender: string; recipient: string; record: SendRecord }> = [];
+  /** What reached a sender, keyed as the real notifier keys it — a repeated attempt lands once, as in the send service. */
+  readonly told = new Set<string>();
+  /** The notifier throws, so a notice is attempted and not sent. */
+  noticeFails = false;
+  /** The daemon dies on this write of a notice crossed off a record (1 = the first), before the line is written. */
+  crashOnCrossOff: number | undefined;
+  private crossOffs = 0;
   reading: SendEvidenceReading = { readable: true, inputs: [] };
   readFails = false;
   readonly sinces: string[] = [];
@@ -134,6 +142,8 @@ class World {
   /** When set, each look waits here until the test releases it. */
   readonly holds: Array<() => void> = [];
   holdLooks = false;
+  /** The ledger cannot be read at all, so a look and the debt behind it both fail. */
+  listFails = false;
   readonly tracker: SendTracker;
 
   constructor(...initial: SendRecord[]) {
@@ -148,10 +158,13 @@ class World {
         ledger: {
           list: async id => {
             this.looked.push(id);
+            if (this.listFails) throw new Error('ledger unreadable');
             if (this.holdLooks) await new Promise<void>(resolve => this.holds.push(resolve));
             return [...this.records.values()];
           },
           settle: async (_id, sendId, patch: SendSettlement) => {
+            if (Object.keys(patch).join() === 'noticesOwed' && ++this.crossOffs === this.crashOnCrossOff)
+              throw new Error('daemon died');
             const current = this.records.get(sendId);
             if (current === undefined) return undefined;
             const merged: Record<string, unknown> = { ...current, ...patch };
@@ -231,7 +244,11 @@ class World {
           },
         },
         notifier: {
-          notify: async (sender, recipient, entry) => void this.notices.push({ sender, recipient, record: entry }),
+          notify: async (sender, recipient, entry) => {
+            this.notices.push({ sender, recipient, record: entry });
+            if (this.noticeFails) throw new Error('sender unreachable');
+            this.told.add(`send-failed:${recipient}:${entry.sendId}`);
+          },
         },
         scheduler: {
           schedule: (id, delayMs, run) => void this.scheduled.push({ id, delayMs, run }),
@@ -257,6 +274,15 @@ class World {
 
   get events(): string[] {
     return this.journal.map(entry => entry.event);
+  }
+
+  /** Runs the look the tracker last asked the scheduler for — what the daemon's timer would do — and lets it finish. */
+  async fireScheduled(): Promise<void> {
+    const next = this.scheduled.pop();
+    if (next === undefined) throw new Error('nothing was scheduled');
+    this.scheduled.length = 0;
+    next.run();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
 
   async checkAt(ms: number): Promise<void> {
@@ -554,6 +580,321 @@ describe('an agent-to-agent send', () => {
     await world.checkAt(15_000);
 
     should(world.notices[0]?.record).match({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
+  });
+});
+
+describe('a combined send that fails', () => {
+  const combined = () =>
+    record({
+      senderKind: 'agent',
+      from: SENDER,
+      batch: [
+        { queueId: 'send-1', from: SENDER },
+        { queueId: 'q-2', from: 'session-3' },
+        { queueId: 'q-3', from: SENDER },
+      ],
+    });
+
+  it('tells every sender whose message was in it, each under its own message id', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+
+    await world.checkAt(15_000);
+
+    should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([
+      [SENDER, 'send-1'],
+      ['session-3', 'q-2'],
+      [SENDER, 'q-3'],
+    ]);
+    should(world.notices.every(notice => notice.record.fate === 'unaccounted')).be.true();
+  });
+
+  it('tells them once more after a restart re-derives the failure, under the same ids so the notice dedupes', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    await world.checkAt(15_000);
+    const first = world.notices.map(notice => notice.record.sendId);
+    world.notices.length = 0;
+    world.records.set('send-1', combined());
+
+    await world.checkAt(15_000);
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(first);
+  });
+
+  it('still tells the one sender of an ordinary send', async () => {
+    const world = new World(record({ senderKind: 'agent', from: SENDER }));
+    world.reading = { readable: false, inputs: [] };
+
+    await world.checkAt(15_000);
+
+    should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([[SENDER, 'send-1']]);
+  });
+});
+
+describe('a failure notice a crash interrupted', () => {
+  const owedAll = [
+    { from: SENDER, sendId: 'send-1' },
+    { from: 'session-3', sendId: 'q-2' },
+    { from: SENDER, sendId: 'q-3' },
+  ];
+  const combined = () =>
+    record({
+      senderKind: 'agent',
+      from: SENDER,
+      batch: [
+        { queueId: 'send-1', from: SENDER },
+        { queueId: 'q-2', from: 'session-3' },
+        { queueId: 'q-3', from: SENDER },
+      ],
+    });
+  // A revive-carried send has no composer to look in, so the only look it asks for is the debt's own.
+  const quiet = () => ({ ...combined(), path: 'revive' as const });
+  const keys = (...sendIds: string[]) => sendIds.map(sendId => `send-failed:${ID}:${sendId}`);
+  const reboot = async (world: World) => {
+    world.notices.length = 0;
+    world.crashOnCrossOff = undefined;
+    world.noticeFails = false;
+    await world.tracker.check(ID);
+  };
+
+  it('writes the debt with the fate, so a notice that cannot be sent is still owed afterwards', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted' });
+    should(world.only.noticesOwed).eql(owedAll);
+    should(world.told.size).equal(0);
+  });
+
+  it('crash after the fate, before any notice: a reboot tells every member once and clears the debt', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+    await world.checkAt(15_000);
+    world.notices.length = 0;
+    world.noticeFails = false;
+
+    await world.tracker.check(ID);
+
+    should(world.notices.map(notice => [notice.sender, notice.record.sendId])).eql([
+      [SENDER, 'send-1'],
+      ['session-3', 'q-2'],
+      [SENDER, 'q-3'],
+    ]);
+    should(world.notices.every(notice => notice.record.fate === 'unaccounted')).be.true();
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+  });
+
+  it('crash mid-loop: a reboot tells only the members not yet crossed off, and nobody twice', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.crashOnCrossOff = 2;
+    await world.checkAt(15_000).catch(() => undefined);
+    // send-1 was told and crossed off; q-2 was told but the daemon died before it was crossed off.
+    should(world.only.noticesOwed).eql(owedAll.slice(1));
+    should([...world.told]).eql(keys('send-1', 'q-2'));
+
+    await reboot(world);
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+  });
+
+  it('a boot that finds nothing owed stays quiet, however many times it looks', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    await world.checkAt(15_000);
+    world.notices.length = 0;
+
+    await world.tracker.check(ID);
+    await world.tracker.check(ID);
+
+    should(world.notices).be.empty();
+  });
+
+  it('keeps quiet for final records that owe nothing, and for one delivered after the failure was written', async () => {
+    const settled = record({ sendId: 'a', senderKind: 'agent', from: SENDER, fate: 'timed_out', fateAt: at(10_000) });
+    const delivered = record({
+      sendId: 'b',
+      senderKind: 'agent',
+      from: SENDER,
+      fate: 'delivered',
+      noticesOwed: [{ from: SENDER, sendId: 'b' }],
+    });
+    const world = new World(settled, delivered);
+
+    await world.tracker.check(ID);
+
+    should(world.notices).be.empty();
+  });
+
+  it('crosses a debt off when the send turns out to have been delivered', async () => {
+    const world = new World(combined());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+    await world.checkAt(15_000);
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 400, 'late')]);
+    world.notices.length = 0;
+    world.noticeFails = false;
+
+    await world.checkAt(16_000);
+
+    should(world.only.fate).equal('delivered');
+    should(world.only.noticesOwed).be.undefined();
+    should(world.notices).be.empty();
+  });
+
+  it('keeps a look scheduled while a notice is unsent, and pays each member once when the scheduled look runs', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+
+    await world.checkAt(15_000);
+
+    should(world.only.noticesOwed).eql(owedAll);
+    should(world.scheduled.map(entry => [entry.id, entry.delayMs])).eql([[ID, 60_000]]);
+
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.fireScheduled();
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['send-1', 'q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('retries a partly paid debt without telling anyone twice, and stops once it is cleared', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+    world.crashOnCrossOff = 2;
+    await world.checkAt(15_000).catch(() => undefined);
+    world.crashOnCrossOff = undefined;
+    world.notices.length = 0;
+    world.scheduled.length = 0;
+    world.noticeFails = true;
+
+    await world.tracker.check(ID).catch(() => undefined);
+    world.scheduled.splice(0, world.scheduled.length - 1);
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.fireScheduled();
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('backs off between retries, gives up scheduling after a bounded number, and a later look still pays', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+    world.noticeFails = true;
+    await world.checkAt(15_000);
+    const delays = [world.scheduled.at(-1)?.delayMs];
+
+    for (let retry = 0; retry < OWED_NOTICE_RETRY_LIMIT; retry += 1) {
+      await world.fireScheduled().catch(() => undefined);
+      delays.push(world.scheduled.at(-1)?.delayMs);
+    }
+
+    should(delays).eql([60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, undefined]);
+    should(world.scheduled).be.empty();
+    should(world.only.noticesOwed).eql(owedAll);
+    should(await world.tracker.watching(ID)).be.true();
+
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.tracker.check(ID);
+
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('pays an old debt found at boot from the scheduled look once the notifier recovers, however old the send', async () => {
+    const world = new World({ ...quiet(), fate: 'unaccounted', fateAt: at(15_000), noticesOwed: owedAll });
+    world.nowMs = T0 + 4 * 24 * 60 * 60_000;
+    world.noticeFails = true;
+
+    should(await world.tracker.watching(ID)).be.true();
+    await world.tracker.check(ID);
+
+    should(world.notices).have.length(3);
+    should(world.only.noticesOwed).eql(owedAll);
+    should(world.scheduled.map(entry => entry.delayMs)).eql([60_000]);
+
+    world.noticeFails = false;
+    world.notices.length = 0;
+    await world.fireScheduled();
+
+    should(world.notices.map(notice => notice.record.sendId)).eql(['send-1', 'q-2', 'q-3']);
+    should([...world.told]).eql(keys('send-1', 'q-2', 'q-3'));
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+    should(await world.tracker.watching(ID)).be.false();
+  });
+
+  it('keeps a debt it cannot read owed, and looks again once the ledger is readable', async () => {
+    const world = new World({ ...quiet(), fate: 'unaccounted', fateAt: at(15_000), noticesOwed: owedAll });
+    world.nowMs = T0 + 15_000;
+    world.listFails = true;
+
+    await world.tracker.check(ID).catch(() => undefined);
+
+    should(world.notices).be.empty();
+    should(world.scheduled.length).be.above(0);
+    should(world.scheduled.every(entry => entry.delayMs === 60_000)).be.true();
+
+    world.listFails = false;
+    await world.fireScheduled();
+
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('schedules nothing for a debt that is paid on the first look', async () => {
+    const world = new World(quiet());
+    world.reading = { readable: false, inputs: [] };
+
+    await world.checkAt(15_000);
+
+    should(world.only.noticesOwed).be.undefined();
+    should(world.scheduled).be.empty();
+  });
+
+  it('schedules nothing from a look still in flight when it is disarmed, and schedules again once re-armed', async () => {
+    const world = new World({ ...quiet(), fate: 'unaccounted', fateAt: at(15_000), noticesOwed: owedAll });
+    world.nowMs = T0 + 15_000;
+    world.noticeFails = true;
+    world.holdLooks = true;
+
+    const disarm = world.tracker.arm();
+    await Bun.sleep(0);
+    disarm();
+    while (world.holds.length > 0) {
+      world.holds.shift()?.();
+      await Bun.sleep(0);
+    }
+
+    should(world.notices).have.length(3);
+    should(world.scheduled).be.empty();
+    world.tracker.track(ID);
+    should(world.scheduled).be.empty();
+
+    world.holdLooks = false;
+    world.tracker.arm();
+    await Bun.sleep(0);
+    should(world.scheduled.map(entry => entry.delayMs)).eql([60_000]);
+    should(world.scheduled).have.length(1);
+    world.tracker.track(ID);
+    should(world.scheduled.at(-1)?.delayMs).equal(2_000);
   });
 });
 

@@ -227,22 +227,47 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       return { events, issues, recognized: true };
     }
 
+    // A SNAPSHOT OF THE NEXT REQUEST, NOT SOMETHING THAT HAPPENED (&B157). Claude Code (seen on 2.1.317) writes each
+    // message it sends the model again as `api-request-blob`: an earlier tool call, a result, the owner's words, its own
+    // system reminders — untimed, after the records they copy. Read as conversation they drew every `fy send` twice
+    // (the copy with no time, and stealing the call's result so both said "Sending…") and leaked the reminders as
+    // messages. Every block in one is either a copy of a real record or request scaffolding, so it says nothing.
+    if (recordType === 'api-request-blob') return { events, issues, recognized: true };
+
     if (recordType === 'attachment') {
       const attachment = transcriptObject(record.attachment);
       const origin = transcriptObject(attachment?.origin);
-      const text = transcriptString(attachment?.prompt);
-      if (
-        attachment?.type === 'queued_command' &&
-        attachment.commandMode === 'prompt' &&
-        origin?.kind === 'human' &&
-        text !== undefined &&
-        text.trim().length > 0
-      ) {
-        events.push({
-          ...metadata('user'),
-          kind: 'message',
-          text,
-          inputSource: 'native-queue',
+      if (attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' && origin?.kind === 'human') {
+        // A prompt queued while Claude was busy is a string, or (seen on 2.1.281) content blocks: its text, and a
+        // pasted image among them. This record is its only place in the chat once the request snapshots that
+        // repeat it are dropped (&B157), so both shapes draw: the words as one message, each picture after them.
+        const prompt = attachment.prompt;
+        const parts = Array.isArray(prompt) ? prompt : [prompt];
+        const words = parts
+          .map((part, blockIndex) => ({
+            blockIndex,
+            text:
+              typeof part === 'string'
+                ? part
+                : transcriptObject(part)?.type === 'text'
+                  ? transcriptString(transcriptObject(part)?.text)
+                  : undefined,
+          }))
+          .filter((part): part is { blockIndex: number; text: string } => (part.text?.trim().length ?? 0) > 0);
+        // The words sit at their first block, so a picture pasted BEFORE them keeps a point of its own.
+        const at = Array.isArray(prompt) ? words[0]?.blockIndex : undefined;
+        if (words.length > 0)
+          events.push({
+            ...metadata('user', at),
+            kind: 'message',
+            text: words.map(part => part.text).join('\n'),
+            inputSource: 'native-queue',
+          });
+        parts.forEach((part, blockIndex) => {
+          const block = transcriptObject(part);
+          const file = block === undefined ? undefined : claudeAttachment(block);
+          if (file !== undefined)
+            events.push({ ...metadata('user', blockIndex), kind: 'attachment', attachment: file });
         });
       }
       return { events, issues, recognized: true };

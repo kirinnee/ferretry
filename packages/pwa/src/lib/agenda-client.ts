@@ -1,17 +1,27 @@
 import {
+  AGENDA_CHANNEL_HEADER,
+  AGENDA_CHANNEL_VERSION,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
+  type AgendaConversationEntry,
+  AgendaConversationPageSchema,
   type AgendaCountResponse,
+  type AgendaId,
   type AgendaResponse,
+  AgendaSeenResponseSchema,
   type AgendaSnapshot,
   AgendaSnapshotSchema,
+  type AgendaVersion,
+  type AgendaVersionList,
+  AgendaVersionListSchema,
+  AgendaVersionSchema,
   type BoardReopenAttachments,
   FY_REQUEST_ID_HEADER,
   isMachineAgendaId,
 } from '@ferretry/protocol';
-import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
+import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
@@ -46,7 +56,9 @@ const fetchAgenda = async (
   fetcher: DaemonFetch,
 ): Promise<unknown> => {
   assertScopeDaemon(daemon, scope);
-  const request = daemonRequest(daemon, path, init);
+  const headers = new Headers(init.headers);
+  headers.set(AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION);
+  const request = daemonRequest(daemon, path, { ...init, headers });
   const response = await fetcher(request.url, request.init);
   if (!response.ok) throw await responseError(response);
   return await response.json();
@@ -83,6 +95,9 @@ export const fetchAgendaCount = async (
 /** Applies one protocol-validated board mutation and returns the daemon's authoritative snapshot. */
 /** What snoozing says on a machine whose daemon predates `agenda.snooze.1`. */
 export const SNOOZE_NEEDS_UPDATE = `This machine needs an update to snooze: ${UPDATE_MACHINE_WHERE}.`;
+
+/** What merging says on a machine whose daemon predates `agenda.conversation.1`. */
+export const MERGE_NEEDS_UPDATE = `This machine needs an update to merge agendas: ${UPDATE_MACHINE_WHERE}.`;
 
 /** A request the daemon's schema refused: from a machine not yet read, an unknown action reads this way. */
 const isInvalidRequest = (error: unknown): boolean =>
@@ -128,6 +143,112 @@ export const sendAgendaReplies = async (
       fetcher,
     ),
   );
+
+const itemVersionsPath = (sessionId: string, id: AgendaId): string =>
+  `/v1/sessions/${encodeURIComponent(sessionId)}/agenda/${encodeURIComponent(id)}/versions`;
+
+/**
+ * Every version an item has been kept as (`agenda.conversation.1`), with the one this device last opened. A daemon
+ * without the feature answers 404, which the caller reads as "no versions": the app ships before the daemon.
+ */
+export const fetchAgendaVersions = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AgendaVersionList> =>
+  AgendaVersionListSchema.parse(
+    await fetchAgenda(daemon, scope, itemVersionsPath(scope.sessionId, id), { method: 'GET' }, fetcher),
+  );
+
+/** One whole version of an item, as it was left. */
+export const fetchAgendaVersion = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version: number,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AgendaVersion> =>
+  AgendaVersionSchema.parse(
+    await fetchAgenda(daemon, scope, `${itemVersionsPath(scope.sessionId, id)}/${version}`, { method: 'GET' }, fetcher),
+  );
+
+/** The most fragment reads one call takes: a runaway cursor ends the read instead of looping. */
+export const MAX_CONVERSATION_FRAGMENTS = 2_000;
+
+/** Which entries of the stored conversation to read: `from` up to (not including) `until`, of the current thread or a frozen `version`. */
+export interface AgendaConversationRange {
+  readonly version?: number;
+  readonly from?: number;
+  readonly until?: number;
+}
+
+/** What a conversation read got: the entries read whole, and whether it stopped at its read limit before the end. */
+export interface AgendaConversationRead {
+  /** The entries from `from`, each read WHOLE and in order; an entry the read stopped inside is not among them. */
+  readonly entries: readonly AgendaConversationEntry[];
+  /** The read hit {@link MAX_CONVERSATION_FRAGMENTS} before it reached `until` or the end: more is still unread. */
+  readonly capped: boolean;
+}
+
+/**
+ * The item's stored conversation (`agenda.conversation.1`), oldest first, read through `GET …/conversation` in its
+ * bounded fragments, each entry's fragments joined verbatim. The item itself carries only a recent tail, so a reader
+ * asks for the entries before it (`until`) and, on a later read, only the entries it does not have yet (`from`).
+ * A read that stops at its limit SAYS so (`capped`) and never hands back a partial entry as a whole one.
+ */
+export const fetchAgendaConversation = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  range: AgendaConversationRange = {},
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AgendaConversationRead> => {
+  const base = `/v1/sessions/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/conversation`;
+  const from = range.from ?? 0;
+  const until = range.until ?? Number.POSITIVE_INFINITY;
+  const entries: AgendaConversationEntry[] = [];
+  let cursor: { readonly index: number; readonly offset: number } | undefined = { index: from, offset: 0 };
+  let reads = 0;
+  while (cursor !== undefined && cursor.index < until && reads < MAX_CONVERSATION_FRAGMENTS) {
+    const query = new URLSearchParams({ index: String(cursor.index), offset: String(cursor.offset) });
+    if (range.version !== undefined) query.set('version', String(range.version));
+    const page = AgendaConversationPageSchema.parse(
+      await fetchAgenda(daemon, scope, `${base}?${query.toString()}`, { method: 'GET' }, fetcher),
+    );
+    reads += 1;
+    if (page.entry !== undefined) {
+      const at = page.index - from;
+      const earlier = entries[at];
+      entries[at] = earlier === undefined ? page.entry : { ...earlier, text: earlier.text + page.entry.text };
+    }
+    cursor = page.next;
+  }
+  const capped = cursor !== undefined && cursor.index < until;
+  return { entries: capped ? entries.slice(0, (cursor?.index ?? from) - from) : entries, capped };
+};
+
+/** Tells the daemon this device opened `version` of an item; answers the mark that stands. */
+export const markAgendaVersionSeen = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version: number,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<number> =>
+  AgendaSeenResponseSchema.parse(
+    await fetchAgenda(
+      daemon,
+      scope,
+      `/v1/sessions/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/seen`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ version }),
+      },
+      fetcher,
+    ),
+  ).seen;
 
 /**
  * How many boards one daemon is asked for at once.
@@ -277,8 +398,25 @@ export class DaemonAgendaClient {
     return promise;
   }
 
-  resolve(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'resolve', id, ...(note === undefined ? {} : { note }) });
+  resolve(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    note?: string,
+    askVersion?: number,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, {
+      action: 'resolve',
+      id,
+      ...(note === undefined ? {} : { note }),
+      ...this.#versioned(daemon, askVersion),
+    });
+  }
+
+  /** The ask version, when the machine checks it (`agenda.asks.1`) or an ask was replaced (so it does): else nothing. */
+  #versioned(daemon: DaemonConnection, askVersion: number | undefined): { readonly askVersion?: number } {
+    const checked = askVersion !== undefined && (this.wires.asksOf(daemon.daemonId) === true || askVersion > 1);
+    return checked ? { askVersion } : {};
   }
 
   respond(
@@ -289,6 +427,8 @@ export class DaemonAgendaClient {
     note?: string,
     gate?: true,
     attachments?: BoardReopenAttachments,
+    askVersion?: number,
+    cardAsk?: string,
   ): Promise<void> {
     return this.#mutate(daemon, scope, {
       action: 'resolve',
@@ -296,12 +436,27 @@ export class DaemonAgendaClient {
       response,
       ...(note === undefined ? {} : { note }),
       ...(gate === undefined ? {} : { gate }),
+      ...(cardAsk !== undefined && gate !== undefined && this.wires.cardAsksOf(daemon.daemonId) === true
+        ? { cardAsk }
+        : {}),
       ...(attachments === undefined ? {} : { attachments }),
+      ...this.#versioned(daemon, askVersion),
     });
   }
 
-  dismiss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'dismiss', id, ...(note === undefined ? {} : { note }) });
+  dismiss(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    note?: string,
+    askVersion?: number,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, {
+      action: 'dismiss',
+      id,
+      ...(note === undefined ? {} : { note }),
+      ...this.#versioned(daemon, askVersion),
+    });
   }
 
   /** Ticks (or unticks) one 0-based step of an item's checklist; every device sees it. */
@@ -333,6 +488,15 @@ export class DaemonAgendaClient {
   /** Puts a parked item (snoozed or replied) back on the owner's list now. */
   unsnooze(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<void> {
     return this.#mutate(daemon, scope, { action: 'unsnooze', id });
+  }
+
+  /**
+   * Merges `from` into `id` (`agenda.conversation.1`): both conversations and every card are kept, `id` survives and
+   * `from` closes as "merged into !id". Never sent to a machine that has not said it merges.
+   */
+  merge(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, from: string): Promise<void> {
+    if (this.wires.conversationOf(daemon.daemonId) !== true) return Promise.reject(new Error(MERGE_NEEDS_UPDATE));
+    return this.#mutate(daemon, scope, { action: 'merge', id, from });
   }
 
   /** Unpair one daemon without perturbing any other daemon's cache or work. */

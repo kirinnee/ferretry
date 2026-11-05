@@ -1,3 +1,214 @@
+## [4.276.0](https://github.com/kirinnee/ferretry/compare/v4.275.1...v4.276.0) (2026-11-04)
+
+### Features
+
+* self-running board, always-current agenda and a card Status section ([#1459](https://github.com/kirinnee/ferretry/issues/1459)) ([5814e5a](https://github.com/kirinnee/ferretry/commit/5814e5ab35f91a052e16a65dc7d8fdec7ae3e29f))
+
+## [4.275.1](https://github.com/kirinnee/ferretry/compare/v4.275.0...v4.275.1) (2026-11-04)
+
+### Fixes
+
+* **chat:** draw a ferret's send once, and its card compact (B157, F949) ([#1456](https://github.com/kirinnee/ferretry/issues/1456)) ([94b0a53](https://github.com/kirinnee/ferretry/commit/94b0a536e346ac2bc53ffa0be2b3abd2b3047d41))
+
+## [4.275.0](https://github.com/kirinnee/ferretry/compare/v4.274.0...v4.275.0) (2026-11-04)
+
+### Features
+
+* **agenda:** a horizontal tab row on a phone, and tabs split by content type (F946) ([#1454](https://github.com/kirinnee/ferretry/issues/1454)) ([4433463](https://github.com/kirinnee/ferretry/commit/443346374c4e49dc0b9367a4dfc6f46b4c9fc486))
+
+## [4.274.0](https://github.com/kirinnee/ferretry/compare/v4.273.0...v4.274.0) (2026-11-04)
+
+### Features
+
+* **agenda:** the item's live document as tabs, the main tab first (F923) ([#1452](https://github.com/kirinnee/ferretry/issues/1452)) ([eed8f52](https://github.com/kirinnee/ferretry/commit/eed8f52c32c9da6487d7256b17a71e0dab91b2bb))
+* **pwa:** compact agenda item head — one-line title, one ⋯ menu, folded terms and conversation (F920) ([#1448](https://github.com/kirinnee/ferretry/issues/1448)) ([75b15a7](https://github.com/kirinnee/ferretry/commit/75b15a7b29c91ecae80d7f589cde089726327a11))
+* **pwa:** draw an agenda item's conversation with the chat's own rows and ticks (F921) ([#1449](https://github.com/kirinnee/ferretry/issues/1449)) ([3184d11](https://github.com/kirinnee/ferretry/commit/3184d11501787a4bb4cfe10314d5589c181b2566))
+
+## [4.273.0](https://github.com/kirinnee/ferretry/compare/v4.272.0...v4.273.0) (2026-11-04)
+
+### Features
+
+* **agenda:** every form field and question is optional; one Send sends any subset (F922) ([#1450](https://github.com/kirinnee/ferretry/issues/1450)) ([4a26ebe](https://github.com/kirinnee/ferretry/commit/4a26ebecb1e7f46bd34b70fa0ab420ffb2009c9f))
+
+### Fixes
+
+* **pwa:** offer a plain "yes" reply as the card ask's answer (B155) ([#1453](https://github.com/kirinnee/ferretry/issues/1453)) ([e6ce6ee](https://github.com/kirinnee/ferretry/commit/e6ce6eedb8c751abecbd4c1f88f3a1ca7c7f8a2e))
+
+## [4.272.0](https://github.com/kirinnee/ferretry/compare/v4.271.2...v4.272.0) (2026-11-04)
+
+### Features
+
+* **fleet:** teach that the owner's asks are public top-level cards ([#1451](https://github.com/kirinnee/ferretry/issues/1451)) ([71c3712](https://github.com/kirinnee/ferretry/commit/71c37125e5f47afd5cd278e626e3f1157f2f8a87))
+
+## [4.271.2](https://github.com/kirinnee/ferretry/compare/v4.271.1...v4.271.2) (2026-11-04)
+
+### Fixes
+
+* **pwa:** draw a message once when Claude also writes an untimed copy (B157) ([#1447](https://github.com/kirinnee/ferretry/issues/1447)) ([ec07fdd](https://github.com/kirinnee/ferretry/commit/ec07fddabb620778808e110fc9812f99fbf83d9d))
+
+## [4.271.1](https://github.com/kirinnee/ferretry/compare/v4.271.0...v4.271.1) (2026-11-04)
+
+### Fixes
+
+* **pwa:** draw a card ask's buttons on a thread of questions (B156) ([#1446](https://github.com/kirinnee/ferretry/issues/1446)) ([4ab69fe](https://github.com/kirinnee/ferretry/commit/4ab69fe9ffe8e254cee6e9ea7dc58b5f1fcc1159))
+
+## [4.271.0](https://github.com/kirinnee/ferretry/compare/v4.270.0...v4.271.0) (2026-11-04)
+
+### Features
+
+* **warden:** flag a stuck inbox and re-check it safely (B148) ([#1445](https://github.com/kirinnee/ferretry/issues/1445)) ([2c92cb1](https://github.com/kirinnee/ferretry/commit/2c92cb135afa93dd855531ad4b16b225a57a032b))
+
+## [4.270.0](https://github.com/kirinnee/ferretry/compare/v4.269.0...v4.270.0) (2026-11-04)
+
+### Features
+
+* **agenda:** item layout v2 — the body is the live document ([#1443](https://github.com/kirinnee/ferretry/issues/1443)) ([68af3ef](https://github.com/kirinnee/ferretry/commit/68af3efa299195f610ed4b020b26978f084248ec))
+
+## [4.269.0](https://github.com/kirinnee/ferretry/compare/v4.268.0...v4.269.0) (2026-11-04)
+
+### Features
+
+* **pwa:** diff any two agenda versions, merge two agendas, show split links ([#1441](https://github.com/kirinnee/ferretry/issues/1441)) ([7c83aba](https://github.com/kirinnee/ferretry/commit/7c83aba8662cc208281d6fc01de5f7a6b56d53a5))
+
+## [4.268.0](https://github.com/kirinnee/ferretry/compare/v4.267.0...v4.268.0) (2026-11-04)
+
+### Features
+
+* **pwa:** draw the agenda item view in the spec's nine parts ([#1439](https://github.com/kirinnee/ferretry/issues/1439)) ([e4647f9](https://github.com/kirinnee/ferretry/commit/e4647f97e1efef2d0bd4f3f6ed747f8b30c0b290))
+
+## [4.267.0](https://github.com/kirinnee/ferretry/compare/v4.266.0...v4.267.0) (2026-11-03)
+
+### Features
+
+* **pwa:** add the side panel's Agenda tab and remove the card views ([#1437](https://github.com/kirinnee/ferretry/issues/1437)) ([4895275](https://github.com/kirinnee/ferretry/commit/489527523862558a8c9aec15b589c45fc3fbec5c))
+
+## [4.266.0](https://github.com/kirinnee/ferretry/compare/v4.265.0...v4.266.0) (2026-11-03)
+
+### Features
+
+* **board:** a card's ask rides its agenda; cards stop waiting on the owner ([#1436](https://github.com/kirinnee/ferretry/issues/1436)) ([8a01838](https://github.com/kirinnee/ferretry/commit/8a0183821604e4f107b1bc6b38a3b8b9b790b751))
+
+## [4.265.0](https://github.com/kirinnee/ferretry/compare/v4.264.0...v4.265.0) (2026-11-03)
+
+### Features
+
+* **agenda:** a plain meaning for every agenda link ([#1440](https://github.com/kirinnee/ferretry/issues/1440)) ([d346e43](https://github.com/kirinnee/ferretry/commit/d346e4386cce4b3dd605b6823434b57d271af1fe))
+
+## [4.264.0](https://github.com/kirinnee/ferretry/compare/v4.263.0...v4.264.0) (2026-11-03)
+
+### Features
+
+* **agenda:** conversation on the item, log, versions, merge and split ([#1428](https://github.com/kirinnee/ferretry/issues/1428)) ([b5f40d5](https://github.com/kirinnee/ferretry/commit/b5f40d55d75dccedf1b30dfc409699728aeb3d5a))
+
+## [4.263.0](https://github.com/kirinnee/ferretry/compare/v4.262.0...v4.263.0) (2026-11-03)
+
+### Features
+
+* **pwa:** show a live card or mini board inline with fy-render ([#1438](https://github.com/kirinnee/ferretry/issues/1438)) ([2621f62](https://github.com/kirinnee/ferretry/commit/2621f62fb88a10401be76b18d59a850d07a53677))
+
+## [4.262.0](https://github.com/kirinnee/ferretry/compare/v4.261.0...v4.262.0) (2026-11-03)
+
+### Features
+
+* **agenda:** editable asks, one Needs-you queue and the silence nudge ([#1413](https://github.com/kirinnee/ferretry/issues/1413)) ([79d273d](https://github.com/kirinnee/ferretry/commit/79d273de4438bdee67a08ac8ec8c253cf0267f82))
+
+## [4.261.0](https://github.com/kirinnee/ferretry/compare/v4.260.0...v4.261.0) (2026-11-03)
+
+### Features
+
+* **agenda:** rest an item on the owner's answer instead of closing it ([#1409](https://github.com/kirinnee/ferretry/issues/1409)) ([3b564ee](https://github.com/kirinnee/ferretry/commit/3b564eebc563a0f906805a3b09d261d207f98b74))
+
+## [4.260.0](https://github.com/kirinnee/ferretry/compare/v4.259.0...v4.260.0) (2026-11-03)
+
+### Features
+
+* **push:** clear a handled agenda item's alerts on every device ([#1434](https://github.com/kirinnee/ferretry/issues/1434)) ([8f868b3](https://github.com/kirinnee/ferretry/commit/8f868b3069a3d325aaa3da4b156ada321e089242))
+
+## [4.259.0](https://github.com/kirinnee/ferretry/compare/v4.258.0...v4.259.0) (2026-11-03)
+
+### Features
+
+* **board:** claim a card your lead holds; fy start --card ([#1435](https://github.com/kirinnee/ferretry/issues/1435)) ([c8bbaac](https://github.com/kirinnee/ferretry/commit/c8bbaaceb1a82b4016b74cc2f9c7adf2eda1abaa))
+
+## [4.258.0](https://github.com/kirinnee/ferretry/compare/v4.257.3...v4.258.0) (2026-11-03)
+
+### Features
+
+* **status:** add fy status --subtree and the lead/child progress lines ([#1433](https://github.com/kirinnee/ferretry/issues/1433)) ([cb09a05](https://github.com/kirinnee/ferretry/commit/cb09a05ecfed07e75200882d1f948c2776af72d1))
+
+## [4.257.3](https://github.com/kirinnee/ferretry/compare/v4.257.2...v4.257.3) (2026-11-03)
+
+### Fixes
+
+* **board:** never type a board alert into an interactive session ([#1430](https://github.com/kirinnee/ferretry/issues/1430)) ([536f3a6](https://github.com/kirinnee/ferretry/commit/536f3a63c63759ee27a7e0ec3ca2ed74be785880))
+
+## [4.257.2](https://github.com/kirinnee/ferretry/compare/v4.257.1...v4.257.2) (2026-11-03)
+
+### Fixes
+
+* **agenda:** refuse an over-long body with the count and the remedy ([#1429](https://github.com/kirinnee/ferretry/issues/1429)) ([2b138b4](https://github.com/kirinnee/ferretry/commit/2b138b4d95757cdf2fbf2cb764872e82ee16c0dd)), closes [#1404](https://github.com/kirinnee/ferretry/issues/1404)
+* **fleet:** accept compactAt in profile files ([#1432](https://github.com/kirinnee/ferretry/issues/1432)) ([03aa19d](https://github.com/kirinnee/ferretry/commit/03aa19d3cc577a951d317b51688df4027d0f63cb))
+
+## [4.257.1](https://github.com/kirinnee/ferretry/compare/v4.257.0...v4.257.1) (2026-11-03)
+
+### Fixes
+
+* **send:** carry the session's harness into the send target ([#1431](https://github.com/kirinnee/ferretry/issues/1431)) ([c5bea75](https://github.com/kirinnee/ferretry/commit/c5bea75be224b2d16fa89fc00510a8a9ed0fea49)), closes [#1398](https://github.com/kirinnee/ferretry/issues/1398)
+
+## [4.257.0](https://github.com/kirinnee/ferretry/compare/v4.256.1...v4.257.0) (2026-11-03)
+
+### Features
+
+* **queue:** message labels, action batching and the ferret FYI digest ([#1400](https://github.com/kirinnee/ferretry/issues/1400)) ([7a8082a](https://github.com/kirinnee/ferretry/commit/7a8082afee04122b45a83d8b34933ea0f5a9646d))
+
+## [4.256.1](https://github.com/kirinnee/ferretry/compare/v4.256.0...v4.256.1) (2026-11-03)
+
+### Fixes
+
+* **daemon:** keep the board watch's git answers while the checkout is unchanged ([#1422](https://github.com/kirinnee/ferretry/issues/1422)) ([ea49938](https://github.com/kirinnee/ferretry/commit/ea4993887d5b4b1998a3368606e0a18a12de389b))
+* **daemon:** size the session document cache to the fleet instead of 4,096 ([#1416](https://github.com/kirinnee/ferretry/issues/1416)) ([7d22107](https://github.com/kirinnee/ferretry/commit/7d22107c76af5661800e50e471c6962403d7f5b9))
+* **daemon:** stop re-parsing and re-serialising an unchanged session list ([#1424](https://github.com/kirinnee/ferretry/issues/1424)) ([d0c3754](https://github.com/kirinnee/ferretry/commit/d0c3754a6528485a056684fdb821dcd55bf9751f))
+
+## [4.256.0](https://github.com/kirinnee/ferretry/compare/v4.255.1...v4.256.0) (2026-11-03)
+
+### Features
+
+* **agenda:** teach the agenda-first model; search, check, then open ([#1404](https://github.com/kirinnee/ferretry/issues/1404)) ([fe23c54](https://github.com/kirinnee/ferretry/commit/fe23c54360c471871a2fd1b7437d8a01842cc89e))
+
+## [4.255.1](https://github.com/kirinnee/ferretry/compare/v4.255.0...v4.255.1) (2026-11-03)
+
+### Fixes
+
+* **daemon:** resolve known session credentials by digest ([#1417](https://github.com/kirinnee/ferretry/issues/1417)) ([815eb40](https://github.com/kirinnee/ferretry/commit/815eb408710024d04212dda9acad3207cd468cf0))
+* **pwa:** close an input card's agenda view when its request ends (#B147) ([#1419](https://github.com/kirinnee/ferretry/issues/1419)) ([4113241](https://github.com/kirinnee/ferretry/commit/4113241a1e2b4c96ed1c64d1807258aec9f97425)), closes [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147) [#B147](https://github.com/kirinnee/ferretry/issues/B147)
+
+## [4.255.0](https://github.com/kirinnee/ferretry/compare/v4.254.1...v4.255.0) (2026-11-03)
+
+### Features
+
+* **board:** public and private cards; the board shows public by default ([#1401](https://github.com/kirinnee/ferretry/issues/1401)) ([efeb0bc](https://github.com/kirinnee/ferretry/commit/efeb0bc2e4d6b3348d850810e8c48bb8d4a901d8))
+* **pwa:** give Settings a set width and a tighter rhythm ([#1406](https://github.com/kirinnee/ferretry/issues/1406)) ([cfaabf5](https://github.com/kirinnee/ferretry/commit/cfaabf56f046f4b7809d0b78652867418dd66fc1))
+
+## [4.254.1](https://github.com/kirinnee/ferretry/compare/v4.254.0...v4.254.1) (2026-11-03)
+
+### Fixes
+
+* **pwa:** keep the owner's cards a lead filed in its own words ([#1402](https://github.com/kirinnee/ferretry/issues/1402)) ([007cde0](https://github.com/kirinnee/ferretry/commit/007cde0df9a2b0145afea46bacd402a80038800a))
+
+## [4.254.0](https://github.com/kirinnee/ferretry/compare/v4.253.0...v4.254.0) (2026-11-03)
+
+### Features
+
+* **board:** finished helper cards go back to their lead ([#1399](https://github.com/kirinnee/ferretry/issues/1399)) ([1f833ec](https://github.com/kirinnee/ferretry/commit/1f833ec9b62d92fea349256a75005cbd1a84909a))
+* **daemon:** move, change, refresh and revive download links (catalogs 3f-5) ([#1403](https://github.com/kirinnee/ferretry/issues/1403)) ([2957cad](https://github.com/kirinnee/ferretry/commit/2957cad991b0d59c7eb5cb1e15eb9b0a0954df66))
+
+## [4.253.0](https://github.com/kirinnee/ferretry/compare/v4.252.1...v4.253.0) (2026-11-03)
+
+### Features
+
+* **relay:** bind the hosted link store behind the relay origin ([#1396](https://github.com/kirinnee/ferretry/issues/1396)) ([f59c89d](https://github.com/kirinnee/ferretry/commit/f59c89df398c395c6166349d2f7682ac0b90ee3e))
+* **send:** paste short peer messages whole instead of a turn-file pointer ([#1398](https://github.com/kirinnee/ferretry/issues/1398)) ([e6cbe0f](https://github.com/kirinnee/ferretry/commit/e6cbe0f472fc7b5c3a7b78e03f22349c912a9e00))
+
 ## [4.252.1](https://github.com/kirinnee/ferretry/compare/v4.252.0...v4.252.1) (2026-11-03)
 
 ### Fixes

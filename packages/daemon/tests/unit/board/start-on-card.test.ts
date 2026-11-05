@@ -589,6 +589,7 @@ describe('the brief of a ferret started on a card', () => {
       premise: 'cards get lost',
       context: 'see the relay',
       howToTest: 'run the suite',
+      status: { now: 'half way', doneSoFar: '- the route', next: '' },
     });
 
     // Act
@@ -599,6 +600,8 @@ describe('the brief of a ferret started on a card', () => {
     should(brief).containEql('Why it exists:\ncards get lost');
     should(brief).containEql('Context:\nsee the relay');
     should(brief).containEql('How to test:\nrun the suite');
+    should(brief).containEql('Status:\nNow:\nhalf way\n\nDone so far:\n- the route');
+    should(brief).not.containEql('Next:');
     should(brief).containEql('`fy task note`');
   });
 
@@ -609,5 +612,6 @@ describe('the brief of a ferret started on a card', () => {
     // Assert
     should(brief).not.containEql('Why it exists:');
     should(brief).not.containEql('How to test:');
+    should(brief).not.containEql('Status:');
   });
 });

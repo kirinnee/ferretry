@@ -52,7 +52,7 @@ describe('attention listing', () => {
     // Assert
     should(row(actual, 3)).equal('      why: nothing else can proceed');
     should(row(actual, 4)).equal('      resolve: answer on the board');
-    should(row(actual, 5)).equal('      since 2026-07-31T09:05:00.000Z · raised by agent sol');
+    should(row(actual, 5)).equal('      stage: explainer · since 2026-07-31T09:05:00.000Z · raised by agent sol');
   });
 
   it('should print a legacy default howToResolve as the current agenda default', () => {
@@ -614,8 +614,9 @@ describe('agenda turns', () => {
     should(snoozed).containEql('snoozed by the owner until 2026-07-31T15:00:00.000Z');
     should(snoozed).containEql('agenda surface --now');
     should(snoozed).not.containEql("owner's turn");
-    should(replied).containEql("replied 2026-07-31T09:10:00.000Z: off the owner's list");
-    should(replied).containEql('agenda edit A3 --back --summary … --premise … --context …');
+    should(replied).containEql('resting (since 2026-07-31T09:10:00.000Z), waiting on you: the owner replied');
+    should(replied).containEql('agenda answer A3');
+    should(replied).containEql('agenda rest A3 --why');
     should(replied).not.containEql('agenda surface');
     should(replied).containEql('agenda done');
   });
@@ -662,7 +663,28 @@ describe('attention cards', () => {
     // Assert
     should(row(actual, 1)).equal('  !A1  [question]  Release');
     should(row(actual, 2)).equal('      ask: Ship the release now?');
-    should(row(actual, 3)).equal('      answers: ← Yes · → No');
+    should(row(actual, 3)).equal('      answers: ← No · → Yes');
+  });
+
+  it('should print Yes and No as ← No · → Yes whichever order the ferret listed them in', () => {
+    // Act
+    const printed = (labels: readonly string[]) =>
+      row(
+        renderAgendaList(
+          snapshot([
+            humanItem('A1', 'Ship the release now?', {
+              title: 'Release',
+              kind: 'yesno',
+              ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
+            }),
+          ]),
+        ),
+        3,
+      );
+
+    // Assert
+    should(printed(['Yes', 'No'])).equal('      answers: ← No · → Yes');
+    should(printed(['No', 'Yes'])).equal('      answers: ← No · → Yes');
   });
 
   it('should lay a permission card with an up answer out left, up, right', () => {
@@ -684,6 +706,46 @@ describe('attention cards', () => {
 
     // Assert
     should(actual).containEql('answers: ← Deny · ↑ Always allow · → Allow');
+  });
+
+  it('should name a row of three in its buttons’ shorter words, cut at a word, and a row of two in longer ones', () => {
+    // Act
+    const printed = (labels: readonly string[]) =>
+      renderAgendaList(
+        snapshot([
+          humanItem('A1', 'Which fix?', {
+            title: 'Fix',
+            kind: 'choice',
+            ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
+          }),
+        ]),
+      );
+
+    // Assert
+    should(printed(['Lock the whole session row', 'Retry with backoff', 'Do nothing at all'])).containEql(
+      'answers: ← Lock the whole… · ↑ Retry with backoff · → Do nothing at all',
+    );
+    should(printed(['Lock the whole session row', 'Wait'])).containEql('answers: ← Lock the whole session… · → Wait');
+  });
+
+  it('should say a Markdown label in its button’s plain words, cut where the button cuts it', () => {
+    // Act
+    const actual = renderAgendaList(
+      snapshot([
+        humanItem('A1', 'Which fix?', {
+          title: 'Fix',
+          kind: 'choice',
+          ask: {
+            kind: 'multiple-choice',
+            options: [{ label: '**Ship** it' }, { label: '**Lock** the whole session row' }, { label: '`Wait`' }],
+          },
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('answers: ← Ship it · ↑ Lock the whole… · → Wait');
+    should(actual).not.containEql('**');
   });
 
   it('should keep an old item headed by its ask and still show derived answers', () => {
@@ -709,5 +771,60 @@ describe('attention cards', () => {
     // Assert
     should(actual).containEql('also "');
     should(actual).containEql('"d"');
+  });
+});
+
+describe('a resting item in the list', () => {
+  const RESTED = '2026-07-31T09:00:00.000Z';
+  const resting = (rest: Record<string, unknown>) =>
+    snapshot([
+      {
+        ...agentItem('A3', 'pick a region'),
+        whereWeAre: 'The two regions are priced.',
+        parked: { reason: 'replied', at: RESTED },
+        resting: { at: RESTED, ...rest },
+      } as never,
+    ]);
+
+  it('should say how long it has rested, in minutes, hours or days, and where things stand', () => {
+    // Act
+    const minutes = renderAgendaList(resting({ sub: 'waiting-on-ferret' }), '2026-07-31T09:45:00.000Z');
+    const hours = renderAgendaList(resting({ sub: 'waiting-on-ferret' }), '2026-07-31T12:00:00.000Z');
+    const days = renderAgendaList(resting({ sub: 'waiting-on-ferret' }), '2026-08-03T09:00:00.000Z');
+    const unknown = renderAgendaList(resting({ sub: 'waiting-on-ferret' }));
+
+    // Assert
+    should(minutes).containEql('resting 45m (since 2026-07-31T09:00:00.000Z), waiting on you');
+    should(hours).containEql('resting 3h (since');
+    should(days).containEql('resting 3d (since');
+    should(unknown).containEql('resting (since 2026-07-31T09:00:00.000Z)');
+    should(minutes).containEql('where we are: The two regions are priced.');
+  });
+
+  it('should say what the ferret is working on, and how to bring it back or close it', () => {
+    // Act
+    const working = renderAgendaList(resting({ sub: 'working', why: 'checking the prices' }), RESTED);
+
+    // Assert
+    should(working).containEql('resting 0m (since 2026-07-31T09:00:00.000Z), working: checking the prices');
+    should(working).containEql('`agenda answer A3 "<text>"` when you need the owner');
+    should(working).containEql('`agenda done A3` when nothing more is expected');
+  });
+
+  it('should show the resting age of an item waiting on the ferret for information or a discussion, keeping its instructions', () => {
+    // Arrange
+    const asked = '2026-07-31T09:10:00.000Z';
+    const board = snapshot([
+      agentItem('A2', 'log in', { waitingOn: 'ferret', waitingFor: 'info', askedAt: asked }),
+      agentItem('A3', 'pick a region', { waitingOn: 'ferret', waitingFor: 'discussion', askedAt: asked }),
+    ]);
+
+    // Act
+    const text = renderAgendaList(board, '2026-07-31T12:10:00.000Z');
+
+    // Assert
+    should(text).containEql(`resting 3h (since ${asked}), ferret's turn: more information asked`);
+    should(text).containEql(`resting 3h (since ${asked}), ferret's turn: the owner wrote about this`);
+    should(text).containEql('`agenda surface`');
   });
 });

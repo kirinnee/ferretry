@@ -2,8 +2,8 @@
  * THE BOARD'S VIEWS of one model: Kanban (the default), Table (see `board-table.tsx`), Tree, Dependencies and Archive.
  *
  * Every view draws the same `BoardCard`; they differ only in how the cards are arranged. The page owns
- * the data, the drag and the move flow and hands each view a `BoardCardEnv`, so a view never reads the
- * network and never decides what a move means.
+ * the data and hands each view a `BoardCardEnv`, so a view never reads the network. The views are READ-ONLY:
+ * nothing is draggable and no lane takes a drop, the board moves its own cards.
  */
 
 import { formatTaskRef } from '@ferretry/protocol';
@@ -18,19 +18,10 @@ import {
   buildTree,
   flattenTree,
 } from '../../lib/board-view.ts';
-import { type BoardAnswerState, type BoardDone, doneLaneOf } from '../../lib/board-done.ts';
-import { BoardCard, type BoardCardMoves } from './board-card.tsx';
+import { BoardCard } from './board-card.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
 import { archiveRowsOf, TableRows } from './board-table.tsx';
-
-/** The Done control of one card: which one it is, and what a press does. */
-export interface BoardDoneControl {
-  readonly done: BoardDone;
-  readonly press: () => void;
-  /** The card sits in the release lane, where the Done row is drawn on the card itself. */
-  readonly atRelease: boolean;
-}
 
 /** What every view needs to draw and wire a card. */
 export interface BoardCardEnv {
@@ -39,20 +30,9 @@ export interface BoardCardEnv {
   readonly showMachine: boolean;
   readonly hrefFor: (card: BoardCardOf) => string;
   readonly onNavigate: (to: string) => void;
-  /** `undefined` for a card the owner cannot move from here (the Archive). */
-  readonly movesFor: (card: BoardCardOf, place: BoardCardPlace) => BoardCardMoves | undefined;
   readonly places: ReadonlyMap<string, BoardCardPlace>;
-  /**
-   * The owner's "Done ✓" (or "Reopen", on a closed card) for a card, and what pressing it does; `undefined` where
-   * this view is not the owner's to close from, such as a ferret's own scope.
-   */
-  readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
-  /** The card being dragged, and the board it came from: only that board's lanes take the drop. */
-  readonly dragging: { readonly cardKey: string; readonly groupKey: string } | null;
-  /** A phone: thumb-sized cards and the To test buttons spelled out. */
+  /** A phone: thumb-sized cards. */
   readonly touch?: boolean;
-  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
-  readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
 interface PlacedProps {
@@ -64,26 +44,19 @@ interface PlacedProps {
 
 export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
-  const moves = place === undefined ? undefined : env.movesFor(card, place);
-  const done = place === undefined ? undefined : env.doneFor?.(card, place);
-  const answer = env.answerFor?.(card);
   return (
     <BoardCard
       card={card}
       category={place?.category ?? null}
       density="page"
-      dragging={env.dragging?.cardKey === card.key}
       href={env.hrefFor(card)}
       names={env.names}
       now={env.now}
       onNavigate={env.onNavigate}
       showMachine={env.showMachine}
       touch={env.touch === true}
-      {...(moves === undefined ? {} : { moves })}
-      {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
-      {...(answer === undefined ? {} : { answer })}
     />
   );
 }
@@ -96,40 +69,24 @@ export interface KanbanViewProps {
   readonly model: BoardModel;
   readonly env: BoardCardEnv;
   readonly projectName: (group: BoardGroupOf) => string;
-  /** The Closed lane is not drawn (closed is hidden by default); a drop target stands in for it. */
+  /** The Closed lane is not drawn (closed is hidden by default). */
   readonly hideClosed: boolean;
-  readonly onDropCard: (groupKey: string, laneId: string) => void;
-  /** Opens a project's lane editor; drawn beside each project heading when there is more than one. */
-  readonly onEditLanes?: (group: BoardGroupOf) => void;
 }
 
 function KanbanBoard({
   group,
   env,
   hideClosed,
-  onDropCard,
 }: {
   readonly group: BoardGroupOf;
   readonly env: BoardCardEnv;
   readonly hideClosed: boolean;
-  readonly onDropCard: (groupKey: string, laneId: string) => void;
 }) {
-  const inAir = env.dragging !== null && env.dragging.groupKey === group.key;
-  const closeLane = doneLaneOf(group.laneSet);
-  const dragged = inAir ? env.dragging?.cardKey : undefined;
   const lanes = hideClosed ? group.lanes.filter(lane => lane.category !== 'closed') : group.lanes;
   return (
     <div className="fy-board-kanban">
       {lanes.map(lane => (
-        <BoardLane
-          accepts={inAir && !lane.cards.some(card => card.key === dragged)}
-          category={lane.category}
-          count={lane.cards.length}
-          density="page"
-          key={lane.id}
-          onDropCard={() => onDropCard(group.key, lane.id)}
-          name={lane.name}
-        >
+        <BoardLane category={lane.category} count={lane.cards.length} density="page" key={lane.id} name={lane.name}>
           {lane.cards.length === 0 ? (
             <li className="fy-board-lane__empty">Nothing here</li>
           ) : (
@@ -144,23 +101,12 @@ function KanbanBoard({
           ))}
         </BoardLane>
       )}
-      {hideClosed && inAir && closeLane !== null ? (
-        <BoardLane
-          accepts
-          category="closed"
-          count={0}
-          density="page"
-          name="Done"
-          onDropCard={() => onDropCard(group.key, closeLane)}
-          variant="target"
-        />
-      ) : null}
     </div>
   );
 }
 
 /** One row of lanes per project (and machine); with a single project the heading is left out. */
-export function KanbanView({ model, env, projectName, hideClosed, onDropCard, onEditLanes }: KanbanViewProps) {
+export function KanbanView({ model, env, projectName, hideClosed }: KanbanViewProps) {
   const headed = model.groups.length > 1;
   return (
     <div className="fy-board-rows">
@@ -170,19 +116,9 @@ export function KanbanView({ model, env, projectName, hideClosed, onDropCard, on
             <h2 className="fy-board-project__head">
               {projectName(group)}
               {model.multiMachine ? <span className="fy-board-project__machine">{group.machine}</span> : null}
-              {onEditLanes === undefined ? null : (
-                <button
-                  className="fy-board-project__lanes"
-                  data-board-lanes={group.key}
-                  onClick={() => onEditLanes(group)}
-                  type="button"
-                >
-                  Lanes ✎
-                </button>
-              )}
             </h2>
           ) : null}
-          <KanbanBoard env={env} group={group} hideClosed={hideClosed} onDropCard={onDropCard} />
+          <KanbanBoard env={env} group={group} hideClosed={hideClosed} />
         </section>
       ))}
     </div>

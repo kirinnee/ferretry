@@ -246,7 +246,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     should(timers.armed.get(SESSION)).equal(AGENDA_REPLY_SETTLE_MS);
     should([...sends.sent.entries()]).deepEqual([
       [
-        `agenda-${SESSION}-${id}-${STAMP}`,
+        `agenda-${SESSION}-${id}~1-${STAMP}`,
         { sessionId: SESSION, message: `[answer to !${id} «Does the loop work?»] Something’s off` },
       ],
     ]);
@@ -271,7 +271,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     // Assert
     should([...sends.sent.entries()]).deepEqual([
       [
-        `agenda-${SESSION}-${named}-${doneInApp}-${doneAtShell}-${dismissed}-${STAMP}`,
+        `agenda-${SESSION}-${named}~1-${doneInApp}-${doneAtShell}-${dismissed}-${STAMP}`,
         {
           sessionId: SESSION,
           message: [

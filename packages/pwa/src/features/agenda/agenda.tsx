@@ -19,8 +19,8 @@
  * - A FORM is filled in here exactly as in the Inbox: the same fields on the card, the same picks (the Inbox's key for
  *   the item), and the composer's Send answers it (`sendForm`) instead of chatting. The view stays until the answer
  *   lands, so a refusal is read on the card; once it has, a "Sent to …" line above the composer says what was picked.
- * - The same rows, with the parked and resolved ones, are this ferret's one list in Info (`section`): the agenda has
- *   no side bar of its own.
+ * - The same items, in four filters (Needs you · Resting · Snoozed · Resolved), are this ferret's Agenda tab in Info
+ *   (`tab`): the agenda has no side bar of its own. Overview carries only a one-line count that opens the tab.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request, and EVERY id
  *   the ledger holds opens the same view, agenda mode or not: an open item to answer, a parked one with "Back to my
  *   list", a resolved one read-only (`agenda-settled.tsx`). A proved link is never a dead click; only an id the
@@ -30,10 +30,13 @@
 import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { InboxAction } from '../../lib/agenda-answers.ts';
+import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
+import { type InboxAction, withAskVersion } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
+import { type AgendaTabFilter, agendaTabModel } from '../../lib/agenda-tab.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
+import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
@@ -56,18 +59,19 @@ import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
-import { AgendaInfoList } from './agenda-info-list.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine } from './agenda-line.tsx';
 import { agendaProse } from './agenda-prose.tsx';
-import { byNewestResolution } from './agenda-resolved.tsx';
 import { AgendaSettled, isResolved } from './agenda-settled.tsx';
+import { AgendaTab } from './agenda-tab.tsx';
+import { useItemLifecycle } from './use-item-lifecycle.ts';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
   DaemonAgendaClient,
   'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress' | 'snooze' | 'unsnooze'
->;
+> &
+  Partial<Pick<DaemonAgendaClient, 'merge'>>;
 
 /** A request to show one item. `seq` makes a repeated request a new one. */
 export interface AgendaFocus {
@@ -106,7 +110,21 @@ const stepTicker =
 const NO_ITEMS: readonly AgendaItem[] = [];
 /** How long the "Sent to …" line of a form answered here stays above the composer. */
 const SENT_FORM_MS = 12_000;
+
+/**
+ * An item the daemon closes the moment its request ends: an input card (typed, sent, cancelled or expired) and an
+ * approve-on-phone card. Its view closes with it rather than sit on a closed record (#B147).
+ */
+const endsItself = (item: AgendaItem | ResolvedAgendaItem): boolean =>
+  item.kind === 'input' || item.phoneApproval !== undefined;
+
+/** What the line above the composer says when such an item closed under its open view. */
+const endedWords = (item: ResolvedAgendaItem): string =>
+  item.resolutionNote === null || item.resolutionNote.trim() === ''
+    ? `${agendaReference(item.id)} is closed.`
+    : `${agendaReference(item.id)} is closed. ${item.resolutionNote}`;
 const NO_RECORDS: readonly ResolvedAgendaItem[] = [];
+const NO_HOLDS: ReadonlySet<AgendaId> = new Set();
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
 
@@ -144,6 +162,11 @@ export interface UseAgendaInput {
   readonly entries?: readonly TranscriptEntry[];
   /** An answer went and the view closed: the conversation returns to the newest message. */
   readonly onAnswered?: () => void;
+  /**
+   * An item's card came up here, however it was opened (a row, a `!A3`, a notification tap, paging): its alerts come
+   * down on this device and the owner's others (docs/notifications.md § When an alert is cleared).
+   */
+  readonly onItemOpened?: (daemon: DaemonConnection, sessionId: string, agendaId: string) => unknown;
   readonly now?: number;
 }
 
@@ -163,11 +186,13 @@ export interface Agenda {
   /** The line's slot for the transcript's Jump-to-latest pill; `null` while the line is not drawn. */
   readonly jumpHost: HTMLElement | null;
   /**
-   * The ferret's agenda as its one list in Info: open, parked and resolved, each row opening the same view.
-   * `afterOpen` runs when a row opened its card, so a phone's Info sheet can get out of the card's way.
-   * `null` while this ferret is not in agenda mode and its ledger is empty.
+   * The ferret's agenda as Info's Agenda tab: four filters, each row opening the same view.
+   * `afterOpen` runs when a row opened its card, so a phone's Info sheet can get out of the card's way; `lead` says
+   * where a sub-ferret's items live. `null` while this ferret is not in agenda mode and its ledger is empty.
    */
-  readonly section: (afterOpen?: () => void) => ReactNode;
+  readonly tab: (afterOpen?: () => void, lead?: { readonly name: string; readonly open: () => void }) => ReactNode;
+  /** The tab's counts for Overview's one line, each the length of that filter's rows; `null` where `tab` is. */
+  readonly counts: (() => Readonly<Record<AgendaTabFilter, number>>) | null;
   /** The ids the next message is about: the open item. */
   readonly references: () => readonly AgendaId[];
   /** The composer's placeholder while an item is open ("Reply to Piper…"); absent in plain chat. */
@@ -199,6 +224,7 @@ export const useAgenda = ({
   live,
   entries = NO_ENTRIES,
   onAnswered,
+  onItemOpened,
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
@@ -217,13 +243,17 @@ export const useAgenda = ({
     readonly key: string;
     readonly drawer: boolean;
     readonly card: AgendaId | null;
-  }>({ key: scopeKey, drawer: false, card: null });
-  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null };
+    readonly opening: number;
+  }>({ key: scopeKey, drawer: false, card: null, opening: 0 });
+  const here = shown.key === scopeKey ? shown : { key: scopeKey, drawer: false, card: null, opening: 0 };
+  // Every change of the card shown is a NEW opening of the view: what an earlier opening saw or held is not this one's.
+  const openings = useRef(0);
   const update = useCallback(
     (change: (current: typeof here) => Partial<typeof here>): void =>
       setShown(current => {
-        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null };
-        return { ...base, ...change(base) };
+        const base = current.key === scopeKey ? current : { key: scopeKey, drawer: false, card: null, opening: 0 };
+        const next = { ...base, ...change(base) };
+        return next.card === base.card ? next : { ...next, opening: ++openings.current };
       }),
     [scopeKey],
   );
@@ -244,7 +274,11 @@ export const useAgenda = ({
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
   // A form answered from here, said above the composer once it has landed: the view closing is not the confirmation.
-  const [sentForm, setSentForm] = useState<{ readonly id: AgendaId; readonly text: string } | null>(null);
+  const [sentForm, setSentForm] = useState<{
+    readonly id: AgendaId;
+    readonly text: string;
+    readonly tone?: 'ok' | 'info';
+  } | null>(null);
   useEffect(() => {
     if (sentForm === null) return undefined;
     const timer = setTimeout(() => setSentForm(null), SENT_FORM_MS);
@@ -273,7 +307,7 @@ export const useAgenda = ({
   const act = (item: AgendaItem, action: InboxAction, composer: string): void => {
     if (client === undefined || busy.get(item.id) === null) return;
     const note = composerNoteFor(item, composer);
-    const sent = withComposerNote(action, note);
+    const sent = withAskVersion(withComposerNote(action, note), item);
     setCard(item.id, null);
     setAnnouncement('');
     sendAgendaAction(client, connection, scope, item.id, sent).then(
@@ -294,6 +328,56 @@ export const useAgenda = ({
     );
   };
 
+  // An input card holds its view while a Send from it is on its way or a follow-up offer is on screen (`onHold`).
+  // Holds belong to the opening that made them: a card that went with its opening leaves nothing behind in the next.
+  const [held, setHeld] = useState<{ readonly opening: number; readonly ids: ReadonlySet<AgendaId> }>({
+    opening: here.opening,
+    ids: new Set(),
+  });
+  const holding = held.opening === here.opening ? held.ids : NO_HOLDS;
+  const latestOpening = useRef(here.opening);
+  latestOpening.current = here.opening;
+  // Whether the item was still open during THIS opening of the view: only then does it close by itself when it ends,
+  // never a closed record the owner opened from the history to read, nor one opened again after it ended.
+  const seenOpen = useRef<number | null>(null);
+  if (shownItem === undefined || seenOpen.current !== here.opening) seenOpen.current = null;
+  if (shownItem !== undefined && !closed) seenOpen.current = here.opening;
+  const closeEnded = (id: AgendaId, text: string, tone: 'ok' | 'info'): void => {
+    update(current => (current.card === id ? { card: null } : {}));
+    setSentForm({ id, text, tone });
+    setAnnouncement(text);
+    onAnswered?.();
+  };
+  const holdFor =
+    (id: AgendaId) =>
+    (isHeld: boolean, settled?: string): void => {
+      const opening = here.opening;
+      // A card from an earlier opening speaks for nothing now.
+      if (opening !== latestOpening.current) return;
+      setHeld(current => {
+        const ids = current.opening === opening ? current.ids : NO_HOLDS;
+        if (ids.has(id) === isHeld) return current.opening === opening ? current : { opening, ids };
+        const next = new Set(ids);
+        if (isHeld) next.add(id);
+        else next.delete(id);
+        return { opening, ids: next };
+      });
+      // Sent from here with nothing more to show: the card's own words, at once, before any board says so.
+      if (!isHeld && settled !== undefined) closeEnded(id, settled, 'ok');
+    };
+  const ended =
+    shownItem !== undefined &&
+    isResolved(shownItem) &&
+    endsItself(shownItem) &&
+    seenOpen.current === here.opening &&
+    !holding.has(shownItem.id)
+      ? shownItem
+      : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the item that ended under the view is the one trigger
+  useEffect(() => {
+    if (ended !== undefined) closeEnded(ended.id, endedWords(ended), 'info');
+  }, [ended?.id]);
+
   const openCard = (item: AgendaItem | ResolvedAgendaItem): void => {
     setSentForm(null);
     update(() => ({ card: item.id, drawer: false }));
@@ -303,13 +387,28 @@ export const useAgenda = ({
   const handled = useRef<number | null>(null);
   const focusTarget = focus?.target ?? null;
   const focusSeq = focus?.seq ?? null;
+  const focusOnEntry = focus?.onEntry === true;
+  // The item a link or a notification tap opened: it opens at its ask, so the owner lands on what to do.
+  const [askAt, setAskAt] = useState<{ readonly id: AgendaId; readonly tap: number } | null>(null);
+  // Paging or closing leaves the item the request was for: the next time the owner opens one it starts at the top.
+  const askedFor = askAt?.id;
+  useEffect(() => {
+    if (askedFor !== undefined && here.card !== askedFor) setAskAt(null);
+  }, [askedFor, here.card]);
+  const inbox = useAgendaInbox();
+  const howToTestFor = useCallback(
+    (card: string): string | null | undefined => inbox?.howToTestFor?.(connection.daemonId, card),
+    [inbox, connection.daemonId],
+  );
   const location = focusTarget === null ? null : locateAgenda(snapshot, focusTarget);
   useEffect(() => {
     if (focusTarget === null || focusSeq === null || handled.current === focusSeq) return;
     if (location === 'pending') return;
     handled.current = focusSeq;
-    if (location !== 'unknown') update(() => ({ card: focusTarget, drawer: false }));
-  }, [focusTarget, focusSeq, location, update]);
+    if (location === 'unknown') return;
+    setAskAt(focusOnEntry ? { id: focusTarget, tap: focusSeq } : null);
+    update(() => ({ card: focusTarget, drawer: false }));
+  }, [focusTarget, focusSeq, focusOnEntry, location, update]);
   const missing = focusTarget !== null && location === 'unknown';
 
   const delivering = useMemo(() => deliveringIds(snapshot), [snapshot]);
@@ -348,8 +447,12 @@ export const useAgenda = ({
         <AgendaDrawer counts={counts} id={drawerId} items={agenda} onClose={closeDrawer} {...rows} />
       ) : null}
       {sentForm === null ? null : (
-        <p className="fy-agenda-note" data-agenda-sent={sentForm.id} data-tone="ok">
-          <CircleCheck aria-hidden="true" size={14} />
+        <p className="fy-agenda-note" data-agenda-sent={sentForm.id} data-tone={sentForm.tone ?? 'ok'}>
+          {sentForm.tone === 'info' ? (
+            <CircleAlert aria-hidden="true" size={14} />
+          ) : (
+            <CircleCheck aria-hidden="true" size={14} />
+          )}
           <span className="fy-agenda-note__text">{sentForm.text}</span>
           <button
             aria-label="Dismiss"
@@ -394,11 +497,24 @@ export const useAgenda = ({
   );
 
   const cardItem = shownItem;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the item whose card came up, on this board, is the one trigger
+  useEffect(() => {
+    if (cardItem !== undefined) onItemOpened?.(connection, scope.sessionId, cardItem.id);
+  }, [cardItem?.id, scopeKey]);
   // Only an open item pages; a parked, notice or resolved one is shown on its own.
   const paged = cardItem !== undefined && !isResolved(cardItem) ? openItems.indexOf(cardItem) : -1;
   const previous = paged > 0 ? openItems[paged - 1] : undefined;
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
-  const history = useMemo(() => (cardItem === undefined ? [] : itemHistory(cardItem, entries)), [cardItem, entries]);
+  const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems, records });
+  const history = useMemo(
+    () =>
+      cardItem === undefined
+        ? []
+        : lifecycle.conversation === null
+          ? itemHistory(cardItem, entries)
+          : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap),
+    [cardItem, entries, lifecycle.conversation, lifecycle.conversationGap],
+  );
   const cardError = cardItem === undefined ? null : busy.get(cardItem.id);
   // A question the owner replied to is not answered by the reply: its options stay live under the "replied" line.
   const questionKept =
@@ -407,8 +523,10 @@ export const useAgenda = ({
     cardItem.parked?.reason === 'replied' &&
     cardModel(cardItem).shape !== 'info' &&
     cardModel(cardItem).shape !== 'input';
+  // An input card that holds the view keeps its form on screen, closed or not: what it says after a Send is in there.
+  const cardHeld = cardItem !== undefined && holding.has(cardItem.id);
   const standing =
-    cardItem === undefined || (!closed && cardItem.parked === undefined) ? undefined : (
+    cardItem === undefined || cardHeld || (!closed && cardItem.parked === undefined) ? undefined : (
       <AgendaSettled
         busy={busyIds.has(cardItem.id)}
         error={typeof cardError === 'string' ? cardError : null}
@@ -446,7 +564,13 @@ export const useAgenda = ({
           ferret={ferret}
           history={history}
           item={cardItem}
+          itemKey={inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id)}
           key={cardItem.id}
+          {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
+          {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
+          {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
+          {...(askAt?.id === cardItem.id ? { startAt: 'ask' as const, startTap: askAt.tap } : {})}
+          howToTestFor={howToTestFor}
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
@@ -511,6 +635,7 @@ export const useAgenda = ({
                     agentName={ferret}
                     connection={connection}
                     item={cardItem}
+                    onHold={holdFor(cardItem.id)}
                     sessionId={scope.sessionId}
                   />
                 ),
@@ -545,25 +670,33 @@ export const useAgenda = ({
     />
   ) : null;
 
-  const section = (afterOpen?: () => void): ReactNode => {
-    const parked = board.filter(item => item.parked !== undefined && item.notice !== true);
-    if (!agendaMode && openItems.length + parked.length + records.length === 0) return null;
-    return (
+  const hasTab = agendaMode || board.some(item => item.notice !== true) || records.length > 0;
+  const modelNow = (): ReturnType<typeof agendaTabModel> =>
+    agendaTabModel({ items: board, resolved: records, ferret, now: now ?? Date.now() });
+  const tab = (afterOpen?: () => void, lead?: { readonly name: string; readonly open: () => void }): ReactNode =>
+    hasTab ? (
       <AgendaDeliveryContext.Provider value={deliveryState}>
-        <AgendaInfoList
-          ferret={ferret}
+        <AgendaTab
+          model={modelNow()}
           onOpen={item => {
             openCard(item);
             afterOpen?.();
           }}
-          open={openItems}
-          parked={parked}
-          resolved={[...records].sort(byNewestResolution)}
-          {...(now === undefined ? {} : { now })}
+          {...(lead === undefined ? {} : { lead })}
         />
       </AgendaDeliveryContext.Provider>
-    );
-  };
+    ) : null;
+  const tabCounts = hasTab
+    ? () => {
+        const { rows } = modelNow();
+        return {
+          'needs-you': rows['needs-you'].length,
+          resting: rows.resting.length,
+          snoozed: rows.snoozed.length,
+          resolved: rows.resolved.length,
+        };
+      }
+    : null;
 
   return {
     above,
@@ -573,7 +706,8 @@ export const useAgenda = ({
     close: () => update(() => ({ drawer: false, card: null })),
     hostsLive,
     jumpHost,
-    section,
+    tab,
+    counts: tabCounts,
     references: () => aboutRef.current,
     placeholder:
       cardId === null || closed

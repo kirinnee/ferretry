@@ -310,27 +310,28 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 
 /**
  * The hypermedia teaching. Short on purpose — it is in every prompt, so only mermaid, svg and html are taught
- * whole; chart keeps one line and every other type is one `render guide <type>` away. docs/hypermedia.md quotes it.
+ * whole; chart keeps one line and every other type is one `render guide <type>` away. Its second line is the
+ * owner's explainer rule (2026-11-04: "for explainers, make sure its ADHD Firendly (make sure you say that) and user hypermeida to
+ * walk user through things", "give example to illustrate your points etc"). docs/hypermedia.md quotes it.
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
-    'Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, change over time), show it, not just say it. Do not overdo it: simple answers stay plain.',
-    'Always inline: never publish an artifact, page, gist or link to explain, unless asked.',
-    'Let the reader drive: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).',
-    'Write a fenced block whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, a `---` line, then the payload.',
-    '- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.',
-    '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
-    '- html: a fragment with inline CSS and <script> for interaction (runs isolated); no network loads.',
+    'Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.',
+    'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).',
+    'A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.',
+    '- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.',
+    '- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.',
+    '- html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.',
     `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
-    `- map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
+    `- card, board (live cards), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
     '```fy-render',
     'type: mermaid',
-    'alt: How a request flows',
+    'alt: Request flow',
     '---',
     'flowchart TB',
     '  Phone --> Relay --> Daemon',
     '```',
-    'Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.',
+    'Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.',
   ].join('\n');
 
 /**
@@ -344,12 +345,13 @@ export const PACK_ENV = 'FY_PACK';
 /** The Pack mode teaching. Short on purpose — it is in every prompt. */
 export const PACK_INSTRUCTION = (fy: string): string =>
   [
-    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits it. Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line below.`,
-    `1. \`${fy} recommend\` lists the models usable now, most quota first, with the command to start each.`,
-    `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.`,
-    `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
-    `4. \`${fy} wait <id>\` prints its result when it finishes; check it, then combine the results yourself.`,
-    `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
+    `Pack mode: hand self-contained parts of your task to sub-ferrets (each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.`,
+    `1. \`${fy} recommend\` lists usable models, most quota first, with start commands.`,
+    `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\`: Ferretry chooses). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: what to do, where, what to report.`,
+    `3. If refused (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, try the next. limit_reached or depth_exceeded: do it yourself.`,
+    `4. \`${fy} wait <id>\` prints its result; check it, then combine. Label sends: \`--kind blocker|action|fyi\` (fyi rarely).`,
+    `Check your children with \`${fy} status --subtree\` instead of asking them. Delegate screenshot review to a sub-agent and keep only its verdict.`,
+    `Stop unneeded sub-ferrets: \`${fy} stop children <your id> --yes\`.`,
   ].join('\n');
 
 /**
@@ -380,7 +382,7 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
-  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); both write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in; account_propose to fix it after. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value on a card; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The card flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask.";
+  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in; account_propose to fix it after. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value on a card; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The card flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask.";
 
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
 export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
@@ -440,18 +442,26 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
   `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (the owner runs \`${fy} secret set NAME\`; then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
 
 /**
- * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps a list of what only the owner can
- * do or decide, and the daemon pushes the phone once when it stops with items waiting. Off unless the
- * daemon writes {@link AGENDA_ENV} `1`. docs/agenda.md quotes this text verbatim.
+ * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps the owner's agendas, each ONE channel of
+ * their attention, and the daemon pushes the phone once when it stops with items waiting. Off unless the
+ * daemon writes {@link AGENDA_ENV} `1`. docs/notifications.md quotes this text verbatim.
  */
 export const AGENDA_ENV = 'FY_AGENDA';
 
-/** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
+/**
+ * The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. It teaches the model first
+ * (what an agenda is, the three-part test, search-check-open, the states, the tabs as the live document rewritten
+ * whole on every update with the chat as its log, tabs holding any kind of content, splitting, chat discussion),
+ * then the commands that open, answer, rest, log, split and merge one (docs/pack-mode.md records their budget). It
+ * teaches no item type: the tabs hold any kind of content (the owner, 2026-11-04: "now agenda doesn't have a "main"
+ * type any more"), so the stage chain is the daemon's and `--stage`'s help, not the prompt's.
+ */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY what the owner alone can give: info, a decision or action. No tracking items (test/verify): gates/\`${fy} notify\` cover it; after Not good, open one only for input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`); not \`-k info\`. Search first (\`${fy} search\`). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤80 (rest: \`--body\`). Many bugs/asks: ONE \`-k info\`, line each + where tracked. Read cold (no "as above", ticket/PR ids, paths, acronyms: \`--term "X=meaning"\`): short Markdown points, no headings, answer first; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
-    `\`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `"[answer to !A3 …]"=answer; "[re !A3 …]"=chat, parks it: do the work, \`done <id>\` (question: \`--reason "<why>"\`); \`edit <id> --back\` + refreshed card only for NEW asks. KEEP CURRENT: \`edit\` if changed, \`done\` if settled.`,
+    `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest. \`split\` misfits, \`merge\` items that share.`,
+    `Open: \`${fy} agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"\`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (\`--term X=meaning\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
+    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working. Every update: \`show <id> --yaml\` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then \`patch <id> --file f\`; chat points there. Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there. Only you mark it \`done\` when nothing's left. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
+    'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');
 
 /**
@@ -470,10 +480,16 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * (`board/opt-in.ts`), and the rule says it overrides other instructions, because a person's own CLAUDE.md that
  * says to record every task was outvoting it. The board moves what a signal moves (a
  * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
- * up on a board that is on (`board/turn-check.ts` in the daemon). docs/board.md quotes this text verbatim.
+ * up on a board that is on (`board/turn-check.ts` in the daemon). The board runs itself (the owner, 2026-11-04: "TASK
+ * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — every answer, test and
+ * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy task
+ * create` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
+ * the board answers "what's the sitrep?"; planning is a phase, not a reason to skip a card; the title and summary say
+ * what the work is doing; and the card's `status` (Now / Done so far / Next) is rewritten whole at each step.
+ * docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or the owner said Yes to \`${fy} agenda add -k yesno\` "Track this on the board?" (\`--approval !A<n>\`). \`${fy} search\` first; link a match. Make: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\`. A card (&F412; agenda !A48): before To test \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move; owner closes. Gate? The daemon asks; raise nothing.`;
+  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -483,11 +499,14 @@ export const BOARD_INSTRUCTION = (fy: string): string =>
  */
 export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 
-/** What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. */
+/**
+ * What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. The one card edit a
+ * sub-ferret may make is its card's `status` (the owner: "sub-ferrets and ferrets should update them!").
+ */
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
-    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; report to your lead: \`${fy} send <lead-callsign> "<message>"\`. Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`), progress \`${fy} task note\`; it moves itself (start, PR, merge, \`${fy} signal done\`). No card? Make none. Your final report says how the owner tests it.`,
+    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
+    `With a card: each step, \`${fy} task show <id> --yaml\`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

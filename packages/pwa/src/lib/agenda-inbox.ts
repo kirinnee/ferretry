@@ -30,7 +30,13 @@ import {
   type SessionAgendaSummary,
   type SessionView,
 } from '@ferretry/protocol';
-import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } from './agenda-answers.ts';
+import {
+  answerActions,
+  type InboxAction,
+  type SwipeDirection,
+  swipeTargets,
+  withAskVersion,
+} from './agenda-answers.ts';
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonId as toDaemonId } from './daemon-connection.ts';
@@ -682,13 +688,17 @@ export class DeferredAgendaActions {
     return new Set([...this.#state.pending.map(entry => entry.key), ...this.#state.sending]);
   }
 
-  /** Holds `action` for `card`. Answering the same card again replaces what was held. */
+  /**
+   * Holds `action` for `card`, stamped with the ask version the card SHOWS now, so an undo window that outlasts the
+   * ferret's replacing the ask still sends the answer to the ask it was given to. Answering the same card again
+   * replaces what was held.
+   */
   schedule(card: InboxCard, action: InboxAction): void {
     this.#cancelTimer(card.key);
     const entry: PendingAgendaAction = {
       key: card.key,
       card,
-      action,
+      action: withAskVersion(action, card.item),
       deadline: this.timers.now() + this.windowMs,
     };
     this.#timers.set(

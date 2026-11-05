@@ -178,13 +178,13 @@
   cursor: default;
 }
 
-/* A QUIET PLANE where a picture, a player or a first diagram will be, so the
-   prose under it does not jump twice. The faintest surface the theme has. */
+/* AN INVISIBLE PLANE where a picture, a player or a first diagram will be, so the
+   prose under it does not jump twice. It paints nothing: a grey box that later
+   "renders" is exactly what made a block look bolted on. Its height is the one the
+   block last drew at when the block has drawn before (set inline), else this. */
 .fy-render-placeholder {
   height: 160px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  opacity: 0.6;
+  background: transparent;
 }
 
 /* OFF STAGE: Mermaid compiles here and hands back an image. Hidden rather than
@@ -867,4 +867,86 @@
   height: auto;
   min-height: 0;
   flex: 1 1 auto;
+}
+
+/* ---- a card or a board, inline ------------------------------------------------
+   The real board card in a transcript column. The card brings its own look (`board.css`); this only
+   keeps it to the column and spaces the lanes of a mini board. */
+.fy-card-embed {
+  display: flex;
+  min-width: 0;
+  max-width: min(100%, 560px);
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: var(--gap-xs) 0;
+}
+
+.fy-card-embed-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The mini board's frame: one visible surface the lanes sit in, so a board reads as a board next to a lone card. */
+.fy-card-embed-board {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+/* The Board's own lane, stacked: it is a column on the Board page, here it is a band the full width of the frame. */
+.fy-card-embed-board .fy-board-lane {
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+/* The agenda body (`.fy-attn-sec--open .md ul`, 0,3,1) and chat prose (`.md ul/li/h3`) restyle every list and heading
+   inside them; each rule below is written to out-rank the strongest of those so the Board's own lane and card look wins. */
+.md .fy-card-embed ul.fy-board-lane__cards,
+.md .fy-card-embed ul.fy-card-embed-list,
+.fy-attn-sec--open .md .fy-card-embed ul.fy-board-lane__cards,
+.fy-attn-sec--open .md .fy-card-embed ul.fy-card-embed-list {
+  margin: 0;
+  padding: 0;
+  gap: var(--fy-board-list-gap);
+  list-style: none;
+}
+.md .fy-card-embed li.fy-board-card,
+.fy-attn-sec--open .md .fy-card-embed li.fy-board-card {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: var(--fy-board-card-padding);
+}
+.md .fy-card-embed h3.fy-board-lane__head {
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+
+/* A link inside Markdown turns accent and underlined; a card on the Board is not that, and nor is one here. */
+.md .fy-card-embed .fy-board-card__main {
+  color: inherit;
+  text-decoration: none;
+}
+
+.fy-card-embed-more {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+.fy-card-embed-loading {
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  opacity: 0.6;
 }

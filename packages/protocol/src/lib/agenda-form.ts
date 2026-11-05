@@ -12,8 +12,8 @@ import type { AgendaFormAnswer, AgendaFormField } from './agenda.ts';
 export const FORM_YES = 'Yes';
 export const FORM_NO = 'No';
 
-/** What a line says for a field the owner left empty. */
-export const FORM_UNANSWERED = '(no answer)';
+/** What a line says for a field the owner skipped: every field may be left empty (&F922). */
+export const FORM_UNANSWERED = '(skipped)';
 
 /** The short word a field's line uses: its own `name`, else its question without the closing mark. */
 export const formFieldName = (field: Pick<AgendaFormField, 'name' | 'label'>): string =>
@@ -22,10 +22,6 @@ export const formFieldName = (field: Pick<AgendaFormField, 'name' | 'label'>): s
     .replaceAll(/\s+/gu, ' ')
     .trim()
     .replace(/[?:.!\s]+$/u, '');
-
-/** Whether the owner must fill the field in before Send: every field but the reply box, unless it says otherwise. */
-export const formFieldRequired = (field: Pick<AgendaFormField, 'type' | 'required'>): boolean =>
-  field.required ?? field.type !== 'text';
 
 /** The value a field is answered with, as a list: a pick-many holds several, every other field one. */
 export const formValues = (answer: AgendaFormAnswer | undefined): readonly string[] =>
@@ -37,16 +33,9 @@ export const formAnswerOf = (
   field: Pick<AgendaFormField, 'id'>,
 ): AgendaFormAnswer | undefined => answers.find(answer => answer.id === field.id);
 
-/** The fields the owner has not answered that they must: what Send asks about once. */
-export const formMissing = (
-  fields: readonly AgendaFormField[],
-  answers: readonly AgendaFormAnswer[],
-): AgendaFormField[] =>
-  fields.filter(field => formFieldRequired(field) && formValues(formAnswerOf(answers, field)).length === 0);
-
 /**
- * The form as the numbered answer: one `N. Name: value` entry per field in order (a field left empty says
- * `(no answer)`), joined by `separator` — a line break for the ferret, ` · ` for a one-line summary.
+ * The form as the numbered answer: one `N. Name: value` entry per field in order (a field the owner skipped says
+ * `(skipped)`), joined by `separator` — a line break for the ferret, ` · ` for a one-line summary.
  */
 export const formWords = (
   fields: readonly AgendaFormField[],
@@ -63,7 +52,8 @@ export const formWords = (
 /**
  * Everything wrong with answers to a form, each in plain words — empty when they fit: an answer to no field, a
  * field answered twice, a value that is not one of the field's options, or several values for a pick-one. A field
- * left empty is NOT a problem here: the card asks about it once, and the owner may send anyway.
+ * left empty is NOT a problem: every field is optional to the owner (&F922); a form answered with only words is sent
+ * as a plain reply to its ask (`open-question`) instead.
  */
 export const formAnswerProblems = (
   fields: readonly AgendaFormField[],
@@ -88,7 +78,7 @@ export const formAnswerProblems = (
     }
     if (field.type !== 'many' && values.length !== 1) problems.push(`field "${field.id}" takes exactly one answer`);
     const allowed =
-      field.type === 'yesno' ? [FORM_YES, FORM_NO] : (field.options ?? []).map(option => option.label.trim());
+      field.type === 'yesno' ? [FORM_NO, FORM_YES] : (field.options ?? []).map(option => option.label.trim());
     for (const value of values) {
       if (!allowed.includes(value.trim())) {
         problems.push(`"${value}" is not an option of field "${field.id}" (${allowed.join(', ')})`);

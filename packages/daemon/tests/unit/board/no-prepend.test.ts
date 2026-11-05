@@ -218,8 +218,9 @@ describe('board news', () => {
     };
     const sent: string[] = [];
     const sweep = new BoardSweep({
-      board: { sweepBoard: async () => swept, closeEndedHelper: async () => false },
+      board: { sweepBoard: async () => swept, closeEndedHelper: async () => false, returnToLead: async () => false },
       sessions: new FakeSessions(),
+      guard: new FakeSessions(),
       memory: { read: async () => memory, write: async () => undefined },
       nudges: { send: async (sessionId, message) => void sent.push(`${sessionId}: ${message}`) },
       clock: { now: () => NOW },
@@ -232,7 +233,7 @@ describe('board news', () => {
 
     // Assert
     should(sent).eql([]);
-    should(report).eql({ nudged: [], unblocked: [], closed: [] });
+    should(report).eql({ nudged: [], unblocked: [], closed: [], returned: [] });
     should(baseline.nudges).eql([]);
   });
 });

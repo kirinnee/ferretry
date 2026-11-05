@@ -21,6 +21,16 @@ const item = (id: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
     ...extra,
   }) as AgendaItem;
 
+const gate = (cardId: string) => ({
+  cardId,
+  laneId: 'tested',
+  laneName: 'Ready to try',
+  entry: 1,
+  projectId: 'p1',
+  options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+});
+const ANSWER = { at: NOW, response: { kind: 'multiple-choice' as const, choice: 'Done' }, receipt: 'a'.repeat(64) };
+
 class FakeAgendas implements AgendaItemsReader {
   readonly reads: string[] = [];
 
@@ -40,13 +50,14 @@ const links = (agendas: FakeAgendas, warnings: string[] = []) =>
   new AgendaCardLinks(agendas, () => MACHINE, { warn: message => warnings.push(message) });
 
 describe("the agenda's link to cards", () => {
-  it('should count every open ask naming a card, and the blocking ones as waiting on the owner', async () => {
+  it('should count every open agenda carrying a card, and the ones with its unanswered card ask as asking', async () => {
     // Arrange
     const agendas = new FakeAgendas({
       child: [
-        item('A1', { task: { id: 'F2' }, blockingNow: true }),
+        item('A1', { task: { id: 'F2' }, cardAsks: [{ gate: gate('F2'), at: NOW }] }),
         item('A2', { task: { id: 'F2' } }),
         item('A3', { task: { id: 'F1', machineId: MACHINE } }),
+        item('A4', { task: { id: 'F9' }, cardAsks: [{ gate: gate('F1'), at: NOW, answer: ANSWER }] }),
       ],
       lead: [item('A1', { task: { id: 'F2' } })],
     });
@@ -62,9 +73,15 @@ describe("the agenda's link to cards", () => {
         { sessionId: 'child', id: 'A1' },
         { sessionId: 'child', id: 'A2' },
       ],
-      blocking: [{ sessionId: 'child', id: 'A1' }],
+      asking: [{ sessionId: 'child', id: 'A1' }],
     });
-    should(asks.get('F1')).deepEqual({ open: [{ sessionId: 'child', id: 'A3' }], blocking: [] });
+    should(asks.get('F1')).deepEqual({
+      open: [
+        { sessionId: 'child', id: 'A3' },
+        { sessionId: 'child', id: 'A4' },
+      ],
+      asking: [],
+    });
     should(agendas.reads).deepEqual(['lead', 'child']);
   });
 

@@ -18,7 +18,8 @@
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
  *   - push / notificationclick: show a daemon's Web Push notification and open what it names, after
  *     applying this device's own notification filter (`lib/notification-filter.ts`) — see the `push`
- *     listener's own comment for what is shown when the filter says hide it.
+ *     listener's own comment for what is shown when the filter says hide it — or, for a `clear` push,
+ *     take that item's notifications down (`lib/push-clear.ts`).
  *
  * ONE FILE, TWO KINDS OF REGISTRATION. The app registers this worker at `/`, and once per machine at
  * `/push/<daemonId>/` for that machine's own push subscription (`lib/push-scope.ts`). Every copy runs
@@ -35,11 +36,12 @@
  * trusted, because any page on this origin can write IndexedDB and Cache Storage.
  */
 
-import { isLoopbackHost, PushNotificationPayloadSchema } from '@ferretry/protocol';
+import { isLoopbackHost, PushPayloadSchema } from '@ferretry/protocol';
 import { shouldShowNotification } from '../lib/notification-filter.ts';
 import { readMirroredNotificationFilter } from '../lib/notification-filter-mirror.ts';
 import { notificationWindow, openInWindow } from '../lib/notification-open.ts';
 import { notificationBrand, showGroupedNotification } from '../lib/notify.ts';
+import { applyClear, type ClearRegistration, RecentlyCleared, settleIfCleared } from '../lib/push-clear.ts';
 import {
   filteredPushNotification,
   machineNotification,
@@ -86,7 +88,7 @@ interface WindowClientLike {
 }
 interface WorkerScope {
   readonly location: { readonly origin: string; readonly hostname: string; readonly href: string };
-  readonly registration: Parameters<typeof showGroupedNotification>[0] & { readonly scope: string };
+  readonly registration: Parameters<typeof showGroupedNotification>[0] & ClearRegistration & { readonly scope: string };
   readonly clients: {
     claim(): Promise<void>;
     matchAll(options: { type: 'window'; includeUncontrolled?: boolean }): Promise<readonly WindowClientLike[]>;
@@ -104,6 +106,9 @@ const worker = globalThis as unknown as WorkerScope;
 const origin = worker.location.origin;
 /** The machine this copy serves, or `null` for the app-wide registration. Fixed for the worker's life. */
 const machine = pushMachineOf(worker.registration.scope, worker.location.href);
+
+/** The tags this worker cleared a moment ago, so a push still on its way through it cannot put a stale line back. */
+const recentlyCleared = new RecentlyCleared(() => Date.now());
 
 const network = new FetchReleaseNetwork((input, init) => globalThis.fetch(input, init), origin);
 const keeper = new ReleaseKeeper({
@@ -173,13 +178,15 @@ worker.addEventListener('message', event => {
 });
 
 worker.addEventListener('push', event => {
+  // Its place in arrival order, taken before anything is awaited (`RecentlyCleared`).
+  const place = recentlyCleared.arrived();
   let payload: unknown = null;
   try {
     payload = event.data?.json() ?? null;
   } catch {
     payload = null;
   }
-  const parsed = PushNotificationPayloadSchema.safeParse(payload);
+  const parsed = PushPayloadSchema.safeParse(payload);
   event.waitUntil(
     (async () => {
       if (!parsed.success) {
@@ -190,6 +197,14 @@ worker.addEventListener('push', event => {
           ...notificationBrand(),
           body: 'Something is waiting in your Inbox.',
         });
+        return;
+      }
+      // A handled item: its notifications come down here, never through the filter — a clear carries nothing to hide.
+      if (parsed.data.kind === 'clear') {
+        const clear = parsed.data;
+        await recentlyCleared.serial(
+          async () => await applyClear(worker.registration, clear, machine, origin, { recent: recentlyCleared, place }),
+        );
         return;
       }
       // Every daemon sends every event now (no server-side filter left to consult — see
@@ -209,12 +224,16 @@ worker.addEventListener('push', event => {
         await worker.registration.showNotification(quiet.title, quiet.options);
         return;
       }
-      await showGroupedNotification(
-        worker.registration,
+      const shown =
         machine === null
           ? unverifiedNotification(parsed.data, origin)
-          : machineNotification(parsed.data, machine, origin),
-      );
+          : machineNotification(parsed.data, machine, origin);
+      // One show or clear at a time, so a clear always sees this line once it is up; and a clear that arrived after this
+      // push, while it read its filter, settles it as the clear would have instead of letting it show.
+      await recentlyCleared.serial(async () => {
+        if (await settleIfCleared(worker.registration, shown.tag, recentlyCleared, place, machine, origin)) return;
+        await showGroupedNotification(worker.registration, shown);
+      });
     })().catch(() => undefined),
   );
 });

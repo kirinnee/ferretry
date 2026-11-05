@@ -67,7 +67,7 @@ export type DoneMove = { readonly task: BoardTask } | { readonly held: string };
  * The move a done makes, as the daemon's automatic `signal.done` move with the message as its reason. It
  * is the ferret's claim, not a fact the world reported, so it passes no owner gate and no unfinished
  * blocker: either holds the card where it is, and the reason is said. A gate on the way is where it stops
- * (docs/board.md § Gates ask the owner): only the owner passes one.
+ * (docs/board.md § Cards show progress): only the owner passes one.
  */
 export const doneMove = (
   card: BoardTask,

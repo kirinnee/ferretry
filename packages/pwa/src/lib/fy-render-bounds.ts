@@ -21,6 +21,11 @@ export const FY_RENDER_LIMITS = {
   mermaidCharacters: 20_000,
   /** A `map` payload: JSON or YAML, a few markers and routes. Larger is a data dump, not an illustration. */
   mapBytes: 32 * 1024,
+  /** A `card` or `board` payload: card references, nothing else. A board lists at most `embedCards` of them. */
+  embedBytes: 2 * 1024,
+  embedCards: 12,
+  /** A board built from a parent card draws at most this many of its children; the rest are counted, not drawn. */
+  embedChildren: 24,
   /** A map draws at most this many pins, shapes (lines plus polygons) and vertices across all of them. */
   mapMarkers: 100,
   mapShapes: 50,
@@ -104,10 +109,12 @@ export const FY_RENDER_SANDBOX_LIMITS = {
   htmlLifetimeMs: 600_000,
   /**
    * The tallest an `html` frame may grow INLINE, whatever height the page
-   * reports. A transcript row is not the place for a 6000px document; the page
-   * scrolls inside its frame past this, and fullscreen gives it the plane.
+   * reports. Inline the page never scrolls inside itself — the frame takes its
+   * height — so this is generous: a visualization with its controls fits with
+   * room to spare. A transcript row is still not the place for a 6000px
+   * document; past this the page is clipped, and fullscreen gives it the plane.
    */
-  htmlInlineMaxHeightPx: 640,
+  htmlInlineMaxHeightPx: 1200,
   /**
    * How long an interactive page may go without its heartbeat, while the tab is visible, before it is
    * stopped as unresponsive. Five beats missed: long enough that one slow frame never trips it, short

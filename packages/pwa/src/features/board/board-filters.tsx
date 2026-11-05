@@ -38,7 +38,7 @@ export interface BoardFiltersProps {
   readonly archive?: boolean;
   /** A ferret that is the page's own default scope: it is not an advanced filter, so it is not counted. */
   readonly quietFerret?: string | null;
-  /** Whether the daemons tell human cards from agent cards: the "Ferret cards" filter is offered only then. */
+  /** Whether the daemons tell human cards from agent cards: the "Show private" filter is offered only then. */
   readonly splitsAgents?: boolean;
 }
 
@@ -49,10 +49,10 @@ const cleared = (filters: BoardFilters): BoardFilters => ({
 });
 
 /**
- * "Ferret cards": cards ferrets made for their own work (sub-cards and helper cards, not asked for by a person),
- * off by default. It is on whenever a ferret or an activity is chosen (those show ferret cards by themselves), so
- * it is drawn pressed and locked then. The filter's field and URL parameter stay `agents`, so a saved link keeps
- * working.
+ * "Show private": the private cards, the ferrets' own bookkeeping (sub-cards and helper cards), off by default and
+ * remembered per device. It is on whenever a ferret or an activity is chosen (those show private cards by
+ * themselves), so it is drawn pressed and locked then. It absorbs the older "Ferret cards" filter; its field and
+ * URL parameter stay `agents`, so a saved link keeps working.
  */
 export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' | 'onChange'>) {
   const forced = !filters.agents && (filters.ferret !== null || filters.activity !== null);
@@ -62,8 +62,8 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
       data-forced={forced ? '' : undefined}
       title={
         forced
-          ? 'Ferret cards show while a ferret or an activity is chosen'
-          : 'Cards ferrets made for their own work (sub-cards and helper cards)'
+          ? 'Private cards show while a ferret or an activity is chosen'
+          : 'Private cards: the ferrets’ own bookkeeping, sub-cards and helper cards'
       }
     >
       <input
@@ -74,7 +74,7 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
         type="checkbox"
       />
       <Bot aria-hidden="true" size={12} />
-      Ferret cards
+      Show private
     </label>
   );
 }
@@ -89,6 +89,9 @@ const ACTIVITY_LABEL: Readonly<Record<string, string>> = {
   waiting_on_you: 'Waiting on you',
   blocked: 'Blocked',
 };
+
+/** Activities no card has any more: the owner's asks live on the agenda. An old URL still parses; the menu no longer offers them. */
+const RETIRED_ACTIVITIES: readonly string[] = ['waiting', 'to_test', 'waiting_on_you'];
 
 const PR_LABEL: Readonly<Record<string, string>> = {
   none: 'No PR',
@@ -280,7 +283,12 @@ function BoardFilterFields({ filters, onChange, choices, archive }: FieldsProps)
         any="Any activity"
         name="activity"
         onPick={value => set({ activity: BoardActivityFilterSchema.safeParse(value).data ?? null })}
-        options={optionsOf(BoardActivityFilterSchema.options, ACTIVITY_LABEL)}
+        options={optionsOf(
+          BoardActivityFilterSchema.options.filter(
+            activity => !RETIRED_ACTIVITIES.includes(activity) || activity === filters.activity,
+          ),
+          ACTIVITY_LABEL,
+        )}
         title="Activity"
         value={filters.activity ?? ''}
       />
@@ -367,7 +375,7 @@ export function BoardFilterBar({
 }
 
 /**
- * The phone's filters: a button that opens a bottom sheet holding every field, "Ferret cards" included (a touch-sized
+ * The phone's filters: a button that opens a bottom sheet holding every field, "Show private" included (a touch-sized
  * toggle would add a row to the header), so the page keeps its height.
  * Fields apply as they are picked (the URL is the state); "Done" only closes the sheet.
  */

@@ -6,6 +6,7 @@ import {
   EMPTY_CHAT_SEARCH,
   matchLabel,
   occurrences,
+  rowAnchors,
   rowForOffset,
   stepMatch,
   withResults,
@@ -64,6 +65,28 @@ describe('the chat search model', () => {
     expect(rowForOffset(rows, 300)).toBe('c');
     expect(rowForOffset(rows, 999)).toBe('c');
     expect(rowForOffset([{ offset: 50, row: 'z' }], 10)).toBeUndefined();
+  });
+
+  test('finds the row a record belongs to though rows interleave, by every byte each stands for', () => {
+    const rows = rowAnchors([
+      { offset: 100, also: [300], row: 'alpha' },
+      { offset: 400, also: [200], row: 'beta' },
+      { offset: 500, row: 'gamma' },
+    ]);
+    expect(rows.map(row => [row.offset, row.row])).toEqual([
+      [100, 'alpha'],
+      [200, 'beta'],
+      [300, 'alpha'],
+      [400, 'beta'],
+      [500, 'gamma'],
+    ]);
+    expect([100, 200, 300, 400, 550].map(offset => rowForOffset(rows, offset))).toEqual([
+      'alpha',
+      'beta',
+      'alpha',
+      'beta',
+      'gamma',
+    ]);
   });
 
   test('finds every occurrence, in any case', () => {

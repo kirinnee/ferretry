@@ -38,9 +38,16 @@ export const ownsKeys = (target: EventTarget | null): boolean => {
 const INTERACTIVE =
   'a[href], button, input, textarea, select, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="slider"], [contenteditable="true"], [data-agenda-no-swipe]';
 
-/** Whether a touch went down on a link, a button, a field or anything else that answers a touch itself. */
-export const startsOnInteractive = (target: EventTarget | null): boolean =>
-  target instanceof Element && target.closest(INTERACTIVE) !== null;
+/**
+ * Whether a touch went down on a link, a button, a field or anything else that answers a touch itself. The title's own
+ * open-the-whole-title button (`MarqueeTitle`) is not: a swipe or a pull down from the title still moves the card, and
+ * only a tap that did not move opens it.
+ */
+export const startsOnInteractive = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) return false;
+  const control = target.closest(INTERACTIVE);
+  return control !== null && !control.matches('[data-agenda-title-toggle]');
+};
 
 const scrollsSideways = (element: Element): boolean => {
   if (element.scrollWidth <= element.clientWidth + 1) return false;

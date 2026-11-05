@@ -43,6 +43,7 @@ describe('InfoPanel — head and tabs', () => {
     expect(root.querySelector('.fy-info__name')?.textContent).toBe('Hadi');
     expect([...root.querySelectorAll('[role="tab"]')].map(button => button.textContent)).toEqual([
       'Overview',
+      'Agenda',
       'Runtime',
       'Usage',
       'Context',

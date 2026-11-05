@@ -5,7 +5,6 @@
  * never touch the DOM, the URL or the clock, so each is a plain value-to-value test.
  */
 
-import type { BoardCounts } from '@ferretry/protocol';
 import type { BoardGroupOf } from './board-view.ts';
 
 /** How far a swipe must travel sideways to switch lanes, in CSS pixels. */
@@ -69,7 +68,3 @@ export const shownLane = (lanes: readonly PhoneLane[], wanted: string | null): P
   const named = lanes.find(lane => lane.id === wanted);
   return named ?? lanes.find(lane => lane.count > 0) ?? lanes[0] ?? null;
 };
-
-/** What the Board tab's badge counts: the cards the owner is the next move on. */
-export const boardBadgeCount = (counts: Pick<BoardCounts, 'toTest' | 'waitingOnYou'>): number =>
-  counts.toTest + counts.waitingOnYou;

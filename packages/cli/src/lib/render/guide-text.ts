@@ -12,7 +12,7 @@
 export const RENDER_GUIDE_SECTION = `
 ## Guide for agents
 
-\`fy render guide [type]\` prints this section and nothing else: the \`### overview\` body when no type is named, or that type's \`###\` body when one is. \`image\`, \`video\`, \`audio\` and \`pdf\` share the \`### media\` section, because they name bytes the same way. The CLI ships a byte-exact copy of this whole section in the binary (\`RENDER_GUIDE_SECTION\` in \`packages/cli/src/lib/render/guide-text.ts\`), and the \`render-guide-doc\` contract in \`scripts/validate/cli-contracts.sh\` fails the commit that lets the copy disagree with this section — so this section is the one owner of the text: edit it here, then copy the section whole into that constant.
+\`fy render guide [type]\` prints this section and nothing else: the \`### overview\` body when no type is named, or that type's \`###\` body when one is. \`image\`, \`video\`, \`audio\` and \`pdf\` share the \`### media\` section, because they name bytes the same way, and \`card\` and \`board\` share \`### card\`, because they name cards the same way. The CLI ships a byte-exact copy of this whole section in the binary (\`RENDER_GUIDE_SECTION\` in \`packages/cli/src/lib/render/guide-text.ts\`), and the \`render-guide-doc\` contract in \`scripts/validate/cli-contracts.sh\` fails the commit that lets the copy disagree with this section — so this section is the one owner of the text: edit it here, then copy the section whole into that constant.
 
 Two shapes are deliberately absent from this section. An example fence, because the copy ships in the CLI's TypeScript source, where \`no-fy-render-in-docs.sh\` refuses a fence opener. And the per-type detail: the sections below distil the contract the rest of this document holds, and where the two disagree the contract wins and this section is wrong.
 
@@ -30,7 +30,48 @@ One self-contained \`<svg>…</svg>\` (CSS animation welcome). No \`<script>\` o
 
 ### html
 
-A fragment with inline CSS — tables, lists, \`<details>\`/\`<summary>\`, code, inline SVG, \`<style>\` — drawn straight into the message; nothing in it runs. Add a \`<script>\` or \`on…=\` handler only when the reader must do something: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline \`<style>\` and \`<script>\`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). Theme tokens such as \`var(--fg)\` work; the fragment's styles cannot reach the app and the app's cannot reach it. ≤ 200 KiB, bounded in height, scrollable past that.
+A fragment with inline CSS — tables, lists, \`<details>\`/\`<summary>\`, code, inline SVG, \`<style>\` — drawn straight into the message; nothing in it runs. Add a \`<script>\` or \`on…=\` handler only when the reader must do something: the block then runs as a live page in an isolated frame, marked "interactive" — one self-contained page with inline \`<style>\` and \`<script>\`, loading nothing from the network (no fetch, XHR, WebSocket, no CDN), no storage, no forms, no popups, never navigating, and no long loops (it stops after five seconds unresponsive or ten minutes). ≤ 200 KiB. The fragment's styles cannot reach the app and the app's cannot reach it.
+
+**Interactive means a visualization the reader changes.** Draw something — bars, a curve, a grid, a diagram — and give it parameters (sliders, toggles, a select, segmented buttons); every change redraws it at once. Never a stepper, a slideshow, a quiz or Next/Back pages: a sequence is prose.
+
+**It looks native when it uses the app's theme.** The page sits on the chat or agenda surface, so leave its background transparent and set no colour of your own unless the colour is the content (a swatch). Every colour comes from a theme token; light, dark and a theme switch while it runs follow by themselves.
+
+- Tokens, as \`var(--name)\`, the same in a static fragment: ink \`--fg\` \`--fg-soft\` \`--muted\` \`--faint\`; surfaces \`--bg\` \`--surface\` \`--surface-2\` \`--surface-3\`; lines \`--border\` \`--border-soft\` \`--border-strong\`; accent \`--accent\` \`--accent-soft\` \`--accent-fg\`; status \`--ok\` \`--warn\` \`--err\` and \`--ok-bg\` \`--warn-bg\` \`--err-bg\`; series \`--viz-1\` … \`--viz-8\`; type \`--font-body\` \`--font-mono\` \`--text-xs\` \`--text-sm\` \`--text-base\` \`--text-lg\`; shape \`--radius-sm\` \`--radius-md\` \`--radius-pill\`; space \`--gap-xs\` \`--gap-sm\` \`--gap-md\`.
+- Plain \`<button>\`, \`<input>\`, \`<select>\`, \`<table>\`, headings and text are already styled in a live page. Classes add the rest, live or static: \`fy-btn\` (\`fy-btn--primary\`, \`fy-btn--quiet\`; \`aria-pressed="true"\` marks one on), \`fy-segmented\` (a row of \`fy-btn\`), \`fy-range\` (a slider), \`fy-toggle\` (\`<label class="fy-toggle"><input type="checkbox"> Label</label>\`), \`fy-input\`, \`fy-select\`, \`fy-field\` (\`<label class="fy-field">Rate <input class="fy-range" type="range"> <output>3</output></label>\`), \`fy-card\`, \`fy-row\`, \`fy-stack\`, \`fy-grid\`, \`fy-muted\`, \`fy-num\`, \`fy-chip\`, \`fy-stat\` (\`<div class="fy-stat">Cost <b>$42</b></div>\`), \`fy-table\`, \`fy-legend\` with \`fy-swatch\`.
+- Bars without a library: \`fy-bars\` holds \`fy-bar\` elements, each \`style="--v:40"\` (0–100, its height in percent) with optional \`data-value\` and \`data-label\`; \`fy-meter\` with \`style="--v:70"\` is one horizontal bar. \`data-tone\` is \`1\`–\`8\` (the series) or \`accent\`, \`good\`, \`warn\`, \`bad\`, \`muted\`, on a bar, swatch, meter, chip, or an inline-SVG shape (it sets \`fill\`, or \`stroke\` on \`fill="none"\`).
+- Size: the frame grows to the page's height, up to 1200px, and never scrolls inside. Nothing may be wider than the column — a phone is about 360px — so let rows wrap (\`fy-row\` does) and give an SVG a \`viewBox\` with \`width="100%"\`. Fonts the app downloads are not available inside, so \`--font-body\` falls back to the reader's installed ones.
+
+A slider that redraws bars:
+
+\`\`\`html
+<div class="fy-stack">
+  <label class="fy-field"
+    >Growth <input class="fy-range" id="g" type="range" min="0" max="50" value="20" /> <output id="o"></output
+  ></label>
+  <div class="fy-bars" id="bars"></div>
+  <div class="fy-legend">
+    <span><i class="fy-swatch"></i>Revenue, year 1 = 1.00</span>
+  </div>
+</div>
+<script>
+  const g = document.getElementById('g'),
+    o = document.getElementById('o'),
+    bars = document.getElementById('bars');
+  function draw() {
+    const values = [1, 2, 3, 4, 5].map(year => Math.pow(1 + g.value / 100, year - 1));
+    const top = Math.max(...values);
+    o.textContent = g.value + '%';
+    bars.innerHTML = values
+      .map(
+        (v, i) =>
+          \`<div class="fy-bar" style="--v:\${(v / top) * 100}" data-value="\${v.toFixed(2)}" data-label="Y\${i + 1}"></div>\`,
+      )
+      .join('');
+  }
+  g.addEventListener('input', draw);
+  draw();
+</script>
+\`\`\`
 
 ### chart
 
@@ -49,6 +90,10 @@ JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{poi
 save files you make into $FY_MEDIA_DIR and put \`src: media:<file name>\` before \`---\`, with no payload; \`src: @workspace/path\` and \`src: https://…\` also work.
 
 That is \`image\`, \`video\`, \`audio\` and \`pdf\` — they name bytes instead of carrying them, and nothing follows the \`---\`. \`media:<file>\` is the one for anything you MADE: \`$FY_MEDIA_DIR\` is your session's media folder, outside every repository, so no ignore rules decide whether it can be shown; name the file by its path inside that folder. \`src: @workspace/path\` is written as an \`@file\` reference without a line, read with the reader's access — gitignored and protected files are never served, at most 1 MiB. For \`src: https://…\`, video and audio play directly; an image must come from a host that allows cross-origin reads (at most 2 MiB) or becomes a link; a pdf is always a link. \`http:\`, \`data:\` and \`blob:\` are refused. Extensions: image png/jpg/jpeg/gif/webp, video mp4/m4v/webm/ogv/mov, audio mp3/m4a/aac/wav/ogg/oga/opus/weba/flac, pdf. An \`image\` may instead be inline — \`mime: image/png|jpeg|gif|webp\` with a base64 payload, still, matching the declared type, ≤ 2 MiB decoded — \`src:\` or \`mime:\`, never both.
+
+### card
+
+\`card\` and \`board\` point at cards on the board and show them live; they draw no picture and carry no bytes. \`card\`: the payload is one reference, \`&F12\`. \`board\`: references one per line or separated by spaces (at most 12, none twice), or a single line \`parent: &F12\` to show that card's children. Either form draws a framed mini board grouped by lane. The reader sees the real board card — title, lane, progress, its PRs — and it redraws by itself when the card moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A card that does not exist or cannot be read shows as a quiet note, never a link. Chat messages and agenda bodies only. Caps: 2 KiB, 12 listed cards, 24 children shown. A repeated or non-card reference, a \`parent:\` mixed with a list, or \`parent:\` on a \`card\` makes the block a plain code fence.
 
 ### lottie
 

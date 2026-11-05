@@ -29,6 +29,7 @@ export * from './prompt.ts';
 export * from './provenance.ts';
 export * from './remedy.ts';
 export * from './input-stuck.ts';
+export * from './inbox-stuck.ts';
 export * from './report-overdue.ts';
 export * from './reports.ts';
 export * from './revive.ts';

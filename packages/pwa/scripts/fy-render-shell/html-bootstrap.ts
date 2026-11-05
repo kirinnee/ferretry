@@ -34,6 +34,7 @@
  * particular is bound before any author byte arrives.
  */
 import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/lib/fy-render-bounds.ts';
+import { admittedFyRenderHtmlTokens, FY_RENDER_HTML_TOKENS } from '../../src/lib/fy-render-html-kit.ts';
 
 type Reply =
   | { kind: 'shell-ready' }
@@ -55,6 +56,11 @@ type Reply =
   const dispatchOnDocument = document.dispatchEvent.bind(document);
   const dispatchOnWindow = window.dispatchEvent.bind(window);
   const root = document.documentElement;
+  const rootStyle = root.style;
+  const setRootProperty = rootStyle.setProperty.bind(rootStyle);
+  const removeRootProperty = rootStyle.removeProperty.bind(rootStyle);
+  const setRootAttribute = root.setAttribute.bind(root);
+  const removeRootAttribute = root.removeAttribute.bind(root);
   const head = document.head;
   const body = document.body;
   const ceil = Math.ceil;
@@ -138,30 +144,46 @@ type Reply =
   const reportHeight = (): void => send({ height: bounded(pageHeight()), kind: 'height' });
 
   /**
-   * THE APP'S PAINT AS THE PAGE'S DEFAULT, so a frameless page reads as part of
-   * the message: background, text colour and font, set on the root where any
-   * author stylesheet overrides them. Each is a short string handed to
-   * `setProperty`, which ignores a value that does not parse — and none of the
-   * three properties can name a URL, so a value is paint and nothing else.
+   * THE APP'S THEME AS THE PAGE'S VARIABLES, so a page written with `var(--fg)`,
+   * `var(--accent)` or a kit class (`src/lib/fy-render-html-kit.ts`, inlined into
+   * this document's head at build time) reads as part of the message. Each token
+   * the parent sends is admitted by the kit's one rule — a listed name, a bounded
+   * value that cannot name a resource — and set on the root as `--name`; a token
+   * the parent stopped sending is removed, so a repaint is the whole theme, never
+   * a blend of two. The root paints NOTHING itself: it is transparent, and the
+   * frame is too, because the parent gives the frame element the same
+   * `color-scheme` this sets here (a mismatch paints an opaque backdrop).
    */
   const applyPaint = (paint: unknown): void => {
     if (paint === null || typeof paint !== 'object') return;
-    const value = paint as { background?: unknown; color?: unknown; font?: unknown; scheme?: unknown };
-    const set = (property: string, text: unknown): void => {
-      if (typeof text === 'string' && text.length > 0 && text.length <= 300) root.style.setProperty(property, text);
-    };
-    if (value.scheme === 'dark' || value.scheme === 'light') root.style.colorScheme = value.scheme;
-    set('background-color', value.background);
-    set('color', value.color);
-    set('font-family', value.font);
+    const value = paint as { scheme?: unknown; tokens?: unknown };
+    if (value.scheme === 'dark' || value.scheme === 'light') setRootProperty('color-scheme', value.scheme);
+    const admitted = new Map(admittedFyRenderHtmlTokens(value.tokens));
+    for (const name of FY_RENDER_HTML_TOKENS) {
+      const token = admitted.get(name);
+      if (token === undefined) removeRootProperty(`--${name}`);
+      else setRootProperty(`--${name}`, token);
+    }
   };
 
-  const renderHtml = (source: unknown, theme: unknown, paint: unknown): void => {
+  /**
+   * INLINE THE PAGE NEVER SCROLLS: the kit's root is `overflow: hidden` and the
+   * frame takes the height the page reports. Fullscreen is the one place the
+   * page may scroll, since the screen is all there is — the parent says when.
+   */
+  const applyLayout = (layout: unknown): void => {
+    if (layout === null || typeof layout !== 'object') return;
+    if ((layout as { fullscreen?: unknown }).fullscreen === true) setRootAttribute('data-fy-fullscreen', '');
+    else removeRootAttribute('data-fy-fullscreen');
+  };
+
+  const renderHtml = (source: unknown, theme: unknown, paint: unknown, layout: unknown): void => {
     if (typeof source !== 'string') return send({ class: 'render', kind: 'error', message: 'The page was not text.' });
     // The reader's mode, as the page's DEFAULT — `Canvas`/`CanvasText` follow it,
     // and an author stylesheet overrides it like any other user-agent default.
-    root.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
+    setRootProperty('color-scheme', theme === 'dark' ? 'dark' : 'light');
     applyPaint(paint);
+    applyLayout(layout);
 
     // Escape is forwarded from a CAPTURE listener registered before any author
     // code exists, so a page cannot swallow the one key that leaves fullscreen.
@@ -205,12 +227,13 @@ type Reply =
   const onCommand = (event: MessageEvent): void => {
     const data: unknown = event.data;
     if (data === null || typeof data !== 'object') return;
-    const command = data as { kind?: unknown; source?: unknown; theme?: unknown; paint?: unknown };
+    const command = data as { kind?: unknown; source?: unknown; theme?: unknown; paint?: unknown; layout?: unknown };
     // A repaint follows the reader's theme for as long as the page runs.
     if (command.kind === 'paint') return applyPaint(command.paint);
+    if (command.kind === 'layout') return applyLayout(command.layout);
     if (command.kind !== 'render-html' || consumed) return;
     consumed = true;
-    renderHtml(command.source, command.theme, command.paint);
+    renderHtml(command.source, command.theme, command.paint, command.layout);
   };
 
   const onGlobalMessage = (event: MessageEvent): void => {

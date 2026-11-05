@@ -266,7 +266,7 @@ describe('a card asked several things', () => {
     expect(root.querySelector('[data-agenda-send-answers], [data-agenda-pick], [data-agenda-answer]')).toBeNull();
     expect(root.querySelector('textarea, input[type="text"]')).toBeNull();
     expect(root.querySelector('[data-agenda-composer-hint]')?.textContent).toBe(
-      'Reply with your answers below, numbered.',
+      'Reply with your answers below, numbered. Skip any you like.',
     );
     const wanted = [...root.querySelectorAll('[data-agenda-wanted-answer]')].map(each => each.textContent);
     expect(wanted[0]).toContain('Which engine?');

@@ -3,6 +3,7 @@ import {
   type AgendaId,
   type AgendaItem,
   type AgendaSnapshot,
+  DAEMON_FEATURES,
   LANE_PROPOSAL_ANSWERS,
   laneProposalReference,
 } from '@ferretry/protocol';
@@ -15,14 +16,18 @@ import {
   agendaLedgerIds,
   useAgenda,
 } from '../../../src/features/agenda/agenda.tsx';
+import { AgendaInboxContext, type AgendaInbox } from '../../../src/hooks/use-agenda-inbox.ts';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
-import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
+import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
+import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import '../../support/dom.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
@@ -93,7 +98,12 @@ interface HostProps {
   readonly live?: ReactElement;
   readonly entries?: readonly TranscriptEntry[];
   readonly onAnswered?: () => void;
+  readonly onItemOpened?: (daemon: unknown, sessionId: string, agendaId: string) => unknown;
   readonly projectId?: string;
+  /** The board's How to test for a card, as the shell's Inbox model gives it. */
+  readonly boardSteps?: (daemonId: string, cardId: string) => string | null;
+  /** A store that says what the machine speaks, for the item view's lifecycle reads. */
+  readonly store?: AppStore;
 }
 
 let current: Agenda | undefined;
@@ -117,6 +127,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     ...(rest.live === undefined ? {} : { live: rest.live }),
     ...(rest.entries === undefined ? {} : { entries: rest.entries }),
     ...(rest.onAnswered === undefined ? {} : { onAnswered: rest.onAnswered }),
+    ...(rest.onItemOpened === undefined ? {} : { onItemOpened: rest.onItemOpened }),
     ...(rest.projectId === undefined ? {} : { projectId: rest.projectId }),
   });
   current = agenda;
@@ -130,7 +141,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
         {agenda.above}
         <div data-composer="" />
       </div>
-      <div data-section="">{agenda.section(rest.afterOpen)}</div>
+      <div data-section="">{agenda.tab(rest.afterOpen)}</div>
     </div>
   );
 }
@@ -147,7 +158,17 @@ afterEach(() => {
   }
 });
 const mount = (props: HostProps) => {
-  const view = render(<Host {...props} />);
+  const hosted = <Host {...props} />;
+  const host = props.store === undefined ? hosted : <StoreProvider store={props.store}>{hosted}</StoreProvider>;
+  const view = render(
+    props.boardSteps === undefined ? (
+      host
+    ) : (
+      <AgendaInboxContext.Provider value={{ howToTestFor: props.boardSteps } as unknown as AgendaInbox}>
+        {host}
+      </AgendaInboxContext.Provider>
+    ),
+  );
   mounted.push(view);
   return view;
 };
@@ -342,6 +363,26 @@ describe('the full card', () => {
     view.root.findAllByType(AgendaItemView)[0]?.props.item.id;
   const withDrawer = (view: ReturnType<typeof render>) => run(() => toggle(view.root)[0]?.props.onClick());
 
+  test('draws the item’s own stored words when the machine keeps the conversation', () => {
+    const wires = new AgendaWireDirectory();
+    wires.note(connection.daemonId, {
+      kind: 'read',
+      health: { features: [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation] },
+    } as never);
+    const stored = item('A3', {
+      conversationCount: 1,
+      conversation: [{ at: '2026-07-31T11:40:00.000Z', by: 'owner', via: 'reply', text: 'Stored words' }],
+    });
+    const view = mount({
+      snapshot: board([stored]),
+      store: { agendaWire: wires, connections: { list: () => [] } } as unknown as AppStore,
+    });
+    withDrawer(view);
+    open(view, 'A3');
+    const history = view.root.findByType(AgendaItemView).props.history as readonly { readonly text?: string }[];
+    expect(history.some(event => event.text === 'Stored words')).toBe(true);
+  });
+
   test('pages through the agenda with ‹ ›, and stops at its ends', () => {
     const view = mount({ snapshot: board(MIXED) });
     withDrawer(view);
@@ -355,6 +396,23 @@ describe('the full card', () => {
     expect(view.root.findByType(AgendaItemView).props.onNext).toBeUndefined();
     run(() => view.root.findByType(AgendaItemView).props.onPrevious());
     expect(cardId(view)).toBe('A2');
+  });
+
+  test('says each item whose card comes up in the conversation was opened, so its alerts come down', () => {
+    const opened: string[] = [];
+    const view = mount({
+      snapshot: board([item('A1'), item('A2')]),
+      focus: { target: 'A2' as AgendaId, seq: 1 },
+      onItemOpened: (daemon, sessionId, agendaId) => {
+        expect(daemon).toBe(connection);
+        opened.push(`${sessionId}:${agendaId}`);
+      },
+    });
+    expect(opened).toEqual([`${scope.sessionId}:A2`]);
+    run(() => view.root.findByType(AgendaItemView).props.onPrevious());
+    expect(cardId(view)).toBe('A1');
+    run(() => view.root.findByType(AgendaItemView).props.onClose());
+    expect(opened).toEqual([`${scope.sessionId}:A2`, `${scope.sessionId}:A1`]);
   });
 
   test('draws swipe arrows on a touch screen and none on a wide screen with a mouse', () => {
@@ -437,9 +495,51 @@ describe('a request to show an item (`?attention=A5`)', () => {
     expect(view.root.findAll(node => node.props?.['data-agenda-missing'] !== undefined)).toHaveLength(0);
   });
 
-  test('an open item named on entry still opens its card', () => {
+  test('an open item named on entry (a link, a notification tap) opens its card AT ITS ASK', () => {
     const view = mount({ snapshot: board(MIXED), focus: { ...target('A2'), onEntry: true } });
+    const card = view.root.findByType(AgendaItemView);
+    expect(card.props.item.id).toBe('A2');
+    expect(card.props.startAt).toBe('ask');
+  });
+
+  test('an item the owner opened by clicking a reference opens at its top', () => {
+    const view = mount({ snapshot: board(MIXED), focus: target('A2') });
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBeUndefined();
+  });
+
+  test('each new request for the item is a new tap, so an item already at its ask is brought to it again', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { ...target('A2'), onEntry: true } });
+    expect(view.root.findByType(AgendaItemView).props.startTap).toBe(1);
+    run(() => view.update(<Host focus={{ ...target('A2', 2), onEntry: true }} snapshot={board(MIXED)} />));
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBe('ask');
+    expect(view.root.findByType(AgendaItemView).props.startTap).toBe(2);
+  });
+
+  test('paging to another item leaves the request: the next one opens at its top', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { ...target('A3'), onEntry: true } });
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBe('ask');
+    run(() => view.root.findByType(AgendaItemView).props.onNext());
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+    expect(view.root.findByType(AgendaItemView).props.startAt).toBeUndefined();
+  });
+
+  test('reads a card ask’s How to test from the board the shell holds, for this machine', () => {
+    const asked: string[] = [];
+    const view = mount({
+      snapshot: board(MIXED),
+      focus: target('A2'),
+      boardSteps: (daemon, card) => {
+        asked.push(`${daemon}:${card}`);
+        return '1. Open it.';
+      },
+    });
+    expect(view.root.findByType(AgendaItemView).props.howToTestFor('F12')).toBe('1. Open it.');
+    expect(asked).toEqual(['agenda:F12']);
+  });
+
+  test('has no steps to give when the shell holds no board', () => {
+    const view = mount({ snapshot: board(MIXED), focus: target('A2') });
+    expect(view.root.findByType(AgendaItemView).props.howToTestFor('F12')).toBeUndefined();
   });
 
   test('opens a resolved item read-only: how it ended, no quick replies, no snooze, no reply prefix', () => {
@@ -680,71 +780,82 @@ describe('what the item view sends', () => {
   });
 });
 
-describe('the agenda as a section of Info', () => {
-  const rowIds = (view: ReturnType<typeof render>) =>
-    section(view.root)
-      .findAllByType(AgendaRow)
-      .map(row => row.props.item.id);
+describe('the agenda as the Agenda tab of Info', () => {
+  const rowButtons = (view: ReturnType<typeof render>) =>
+    section(view.root).findAll(node => node.type === 'button' && node.props['data-agenda-tab-row'] !== undefined);
+  const rowIds = (view: ReturnType<typeof render>) => rowButtons(view).map(row => row.props['data-agenda-row']);
+  const chips = (view: ReturnType<typeof render>) =>
+    section(view.root).findAll(node => node.props?.['data-context-chip'] !== undefined && node.type === 'button');
+  const choose = (view: ReturnType<typeof render>, key: string) =>
+    run(() =>
+      chips(view)
+        .find(chip => chip.props['data-context-chip'] === key)
+        ?.props.onClick(),
+    );
 
-  test('shows the ferret’s open items as rows, most pressing first', () => {
+  test('opens on what needs the owner, blockers first', () => {
     const view = mount({ snapshot: board(MIXED) });
-    expect(rowIds(view)).toEqual(['A3', 'A2', 'A1']);
+    expect(rowIds(view)).toEqual(['A3', 'A2']);
   });
 
-  test('says so when there is nothing on the agenda', () => {
+  test('draws the four filters, each count the length of its list', () => {
+    const view = mount({ snapshot: board(MIXED, {}, [resolvedItem('A9')]) });
+    expect(chips(view).map(chip => chip.props['data-context-chip'])).toEqual([
+      'needs-you',
+      'resting',
+      'snoozed',
+      'resolved',
+    ]);
+    const counts = chips(view).map(chip => Number(/(\d+)$/u.exec(textOf(chip))?.[1]));
+    for (const [index, key] of ['needs-you', 'resting', 'snoozed', 'resolved'].entries()) {
+      choose(view, key);
+      expect(rowIds(view).length).toBe(counts[index] ?? -1);
+    }
+  });
+
+  test('keeps a ferret’s-turn item in Resting and never in Needs you', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    choose(view, 'resting');
+    expect(rowIds(view)).toEqual(['A1']);
+    expect(textOf(section(view.root).find(node => node.props['data-agenda-tab-state'] !== undefined))).toBe(
+      'Resting · waiting on Johnnie',
+    );
+  });
+
+  test('says so when a filter has nothing in it', () => {
     const view = mount({ snapshot: board([]) });
     expect(rowIds(view)).toEqual([]);
-    expect(textOf(section(view.root))).toBe('Nothing on the agenda.');
+    expect(textOf(section(view.root).find(node => node.props['data-agenda-tab-empty'] !== undefined))).toBe(
+      'Nothing needs you.',
+    );
   });
 
   test('draws nothing when the ferret is not in agenda mode and its ledger is empty', () => {
     const view = mount({ snapshot: board([]), agendaMode: false });
     expect(section(view.root).children).toHaveLength(0);
+    expect(live().counts).toBeNull();
   });
 
   test('still lists the ledger without agenda mode: there is one agenda list in Info, never a dead one', () => {
     const view = mount({ snapshot: board(MIXED), agendaMode: false });
-    expect(rowIds(view)).toEqual(['A3', 'A2', 'A1']);
+    expect(rowIds(view)).toEqual(['A3', 'A2']);
   });
 
-  test('filters Open / Parked / Resolved, and a parked or resolved row opens the same card', () => {
-    const view = mount({
-      snapshot: board([...MIXED, item('A89', { parked: { reason: 'replied', at: '2026-07-31T11:50:00.000Z' } })], {}, [
-        resolvedItem('A9'),
-      ]),
-    });
-    const chips = section(view.root).findAll(
-      node => node.props?.['data-context-chip'] !== undefined && node.type === 'button',
-    );
-    expect(chips.map(chip => chip.props['data-context-chip'])).toEqual(['open', 'parked', 'resolved']);
-    run(() => chips[1]?.props.onClick());
-    expect(rowIds(view)).toEqual(['A89']);
-    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
-    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A89');
-    run(() => view.root.findByType(AgendaItemView).props.onClose());
-    run(() =>
-      section(view.root)
-        .findAll(node => node.props?.['data-context-chip'] === 'resolved' && node.type === 'button')[0]
-        ?.props.onClick(),
-    );
+  test('a resolved row opens the same card, read-only', () => {
+    const view = mount({ snapshot: board(MIXED, {}, [resolvedItem('A9')]) });
+    choose(view, 'resolved');
     expect(rowIds(view)).toEqual(['A9']);
-    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
+    run(() => rowButtons(view)[0]?.props.onClick());
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A9');
-  });
-
-  test('shows only Open when nothing is parked or resolved', () => {
-    const view = mount({ snapshot: board(MIXED) });
-    expect(section(view.root).findAll(node => node.props?.['data-context-chip'] !== undefined)).toHaveLength(0);
   });
 
   test('opens the item’s card when a row is opened, then tells the host', () => {
     const opened: string[] = [];
     const view = mount({ snapshot: board(MIXED), afterOpen: () => opened.push('closed-info') });
     run(() =>
-      section(view.root)
-        .findAllByType(AgendaRow)
-        .find(row => row.props.item.id === 'A2')
-        ?.props.onOpen(),
+      rowButtons(view)
+        .find(row => row.props['data-agenda-row'] === 'A2')
+        ?.props.onClick(),
     );
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
     expect(live().covered).toBe(true);
@@ -753,8 +864,13 @@ describe('the agenda as a section of Info', () => {
 
   test('opens the card without a host callback', () => {
     const view = mount({ snapshot: board(MIXED) });
-    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
+    run(() => rowButtons(view)[0]?.props.onClick());
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A3');
+  });
+
+  test('gives Overview the same counts the tab shows', () => {
+    mount({ snapshot: board(MIXED, {}, [resolvedItem('A9')]) });
+    expect(live().counts?.()).toEqual({ 'needs-you': 2, resting: 1, snoozed: 0, resolved: 1 });
   });
 
   test('keeps the composer last', () => {
@@ -1152,7 +1268,8 @@ describe('a form opened in the chat (#B143)', () => {
     const view = openForm('A61', { clientOverride: recording(landing), onAnswered: () => answered.push('answered') });
     run(() => inputs(view, 'radio')[1]?.props.onChange());
     run(() => inputs(view, 'checkbox')[0]?.props.onChange());
-    run(() => yesNo(view)[0]?.props.onClick());
+    // Yes is the second button: No ←, Yes →.
+    run(() => yesNo(view)[1]?.props.onClick());
 
     run(() => live().composer.answerForm?.());
     // The composer reports its send at once; the form's view stays until the machine has the answer.
@@ -1185,10 +1302,8 @@ describe('a form opened in the chat (#B143)', () => {
     dispose();
   });
 
-  test('asks once about an empty required field, then sends it as it is', async () => {
+  test('sends a form answered in part on the first Send: every field is optional (&F922)', async () => {
     const view = openForm('A62', { clientOverride: recording() });
-    expect(() => live().composer.answerForm?.()).toThrow('Not answered yet: 2. Alerts, 3. Restart.');
-    expect(calls).toEqual([]);
     await runAsync(async () => {
       live().composer.answerForm?.();
     });
@@ -1219,5 +1334,214 @@ describe('a form opened in the chat (#B143)', () => {
     expect(view.root.findByType(AgendaItemView).props.formKey).toBeUndefined();
     expect(inputs(view, 'radio')).toHaveLength(0);
     expect(live().composer.answerForm).toBeUndefined();
+  });
+});
+
+describe('an input card that ends while it is open (#B147)', () => {
+  // The owner typed the value or tapped Send: the daemon closes the item, and the view must not sit on it.
+  const REQUEST = { requestId: 'ab'.repeat(16) };
+  const inputItem = (id: string): AgendaItem => item(id, { kind: 'input', ask: undefined, input: REQUEST });
+  const closedRecord = (id: string, note: string | null, extra: Record<string, unknown> = {}) => ({
+    ...inputItem(id),
+    resolvedAt: '2026-07-31T12:00:05.000Z',
+    resolvedBy: 'daemon',
+    resolvedBySession: null,
+    resolvedByName: null,
+    resolutionNote: note,
+    disposition: 'done',
+    ...extra,
+  });
+  const openInput = (id = 'A7') =>
+    mount({ snapshot: board([inputItem(id), item('A2')]), focus: { target: id as AgendaId, seq: 1 } });
+  const inputHost = (view: ReturnType<typeof render>) => view.root.findByType(InputCardHost);
+  const sentLine = (view: ReturnType<typeof render>) =>
+    view.root.findAll(node => node.type === 'p' && node.props['data-agenda-sent'] !== undefined);
+
+  test('closes its view the moment the daemon closes the item, and says how it ended above the composer', () => {
+    const view = openInput();
+    expect(live().covered).toBe(true);
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', 'Input request expired: expired.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
+    expect(live().covered).toBe(false);
+    const said = sentLine(view);
+    expect(said).toHaveLength(1);
+    expect(said[0]?.props['data-agenda-sent']).toBe('A7');
+    expect(said[0]?.props['data-tone']).toBe('info');
+    expect(textOf(said[0])).toContain('closed');
+  });
+
+  test('says only that it is closed when the daemon closed it without a note', () => {
+    const view = openInput();
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', null)])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(false);
+    expect(textOf(sentLine(view)[0])).toContain('!A7 is closed.');
+  });
+
+  test('closes its view once the card sent from here has nothing more to show, in the card’s own words', () => {
+    const view = openInput();
+    run(() => inputHost(view).props.onHold(true));
+    expect(live().covered).toBe(true);
+    run(() => inputHost(view).props.onHold(false, 'Sent to %terminal:dev.'));
+    expect(live().covered).toBe(false);
+    const said = sentLine(view);
+    expect(said[0]?.props['data-tone']).toBe('ok');
+    expect(textOf(said[0])).toContain('Sent to %terminal:dev.');
+  });
+
+  test('stays open while the card holds it (a Send in flight, or a follow-up offer), even once the item closed', () => {
+    const view = openInput();
+    run(() => inputHost(view).props.onHold(true));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', 'Input request delivered.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+    // The owner is done with the offer: the card lets go, and the view closes.
+    run(() => inputHost(view).props.onHold(false, 'Sent to %terminal:dev.'));
+    expect(live().covered).toBe(false);
+  });
+
+  test('a send that failed lets go, so a request that ended meanwhile still closes', () => {
+    const view = openInput();
+    run(() => inputHost(view).props.onHold(true));
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', 'Input request cancelled: interrupted.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    run(() => inputHost(view).props.onHold(false));
+    expect(live().covered).toBe(false);
+    expect(sentLine(view)[0]?.props['data-tone']).toBe('info');
+  });
+
+  test('an approve-on-phone card closes its view when the daemon closes it', () => {
+    const REF = { id: `pa_${'0'.repeat(23)}1` };
+    const phone = item('A8', { kind: 'info', ask: undefined, phoneApproval: REF } as Partial<AgendaItem>);
+    const view = mount({ snapshot: board([phone]), focus: { target: 'A8' as AgendaId, seq: 1 } });
+    expect(live().covered).toBe(true);
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [
+            {
+              ...phone,
+              resolvedAt: '2026-07-31T12:00:05.000Z',
+              resolvedBy: 'daemon',
+              resolvedBySession: null,
+              resolvedByName: null,
+              resolutionNote: 'Approved on your phone.',
+              disposition: 'done',
+            },
+          ])}
+          focus={{ target: 'A8' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(false);
+  });
+
+  test('a closed input card opened from the history stays open to be read', () => {
+    const view = mount({
+      snapshot: board([item('A2')], {}, [closedRecord('A7', 'Input request delivered.')]),
+      focus: { target: 'A7' as AgendaId, seq: 1 },
+    });
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [closedRecord('A7', 'Input request delivered.')])}
+          focus={{ target: 'A7' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+  });
+
+  const resolveA7 = (view: ReturnType<typeof render>, seq: number, note = 'Input request delivered.') =>
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([item('A2')], {}, [closedRecord('A7', note)])}
+          focus={{ target: 'A7' as AgendaId, seq }}
+        />,
+      ),
+    );
+
+  test('a closed input card the view already closed on opens again from the history and stays to be read', () => {
+    const view = openInput();
+    resolveA7(view, 1);
+    expect(live().covered).toBe(false);
+    // The owner picks !A7 from the history, or a chat reference to it.
+    resolveA7(view, 2);
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+  });
+
+  test('an input card left before it ended stays to be read when it is opened from the history later', () => {
+    const view = openInput();
+    run(() => view.root.findByType(AgendaItemView).props.onClose());
+    expect(live().covered).toBe(false);
+    resolveA7(view, 2);
+    expect(live().covered).toBe(true);
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');
+  });
+
+  test('a hold left by a view that went away is not carried into the next opening of the request', () => {
+    const view = openInput();
+    const gone = inputHost(view).props.onHold;
+    run(() => gone(true));
+    run(() => view.root.findByType(AgendaItemView).props.onClose());
+    // The same request, opened again while it is still waiting.
+    run(() =>
+      view.update(
+        <Host snapshot={board([inputItem('A7'), item('A2')])} focus={{ target: 'A7' as AgendaId, seq: 2 }} />,
+      ),
+    );
+    expect(live().covered).toBe(true);
+    // The card that went away finishes late: it cannot hold, release or close the new opening.
+    run(() => gone(true));
+    run(() => gone(false, 'Sent to %terminal:dev.'));
+    expect(live().covered).toBe(true);
+    // The request ends: nothing holds the new opening, so it closes by itself.
+    resolveA7(view, 2);
+    expect(live().covered).toBe(false);
+    expect(sentLine(view)[0]?.props['data-tone']).toBe('info');
+  });
+
+  test('any other item the ferret closes while it is open stays on screen as before', () => {
+    const view = mount({ snapshot: board([item('A3')]), focus: { target: 'A3' as AgendaId, seq: 1 } });
+    run(() =>
+      view.update(
+        <Host
+          snapshot={board([], {}, [{ ...resolvedItem('A3'), resolvedBy: 'agent', resolutionNote: 'withdrawn' }])}
+          focus={{ target: 'A3' as AgendaId, seq: 1 }}
+        />,
+      ),
+    );
+    expect(live().covered).toBe(true);
   });
 });

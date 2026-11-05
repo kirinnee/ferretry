@@ -132,6 +132,20 @@ describe('shell redirections are not arguments', () => {
     });
   });
 
+  test('--kind and its value are options, not the message, spelled apart or joined', () => {
+    for (const script of [
+      'fy send tanna --kind blocker "please decide"',
+      'fy send tanna --kind=blocker "please decide"',
+      'fy send tanna "please decide" --kind fyi',
+      'fy send tanna --expect-reply --kind blocker please decide',
+    ])
+      expect(readSentMessage(bash(script), 'fy')).toMatchObject({ to: 'tanna', body: 'please decide' });
+    expect(readSentMessage(bash('fy reply tanna --kind blocker "yes, go"'), 'fy')).toMatchObject({
+      to: 'tanna',
+      body: 'yes, go',
+    });
+  });
+
   test('a redirected single read is still not the hand-off read', () => {
     expect(isHandoffRead(bash(`cat ${TURN} 2>&1`), TURN)).toBe(false);
   });
@@ -192,6 +206,23 @@ describe('readSentMessage', () => {
     expect(readSentMessage(bash('fy send a b', { text: 'revived the session with the message' }), 'fy')?.state).toBe(
       'delivered',
     );
+    // Held on purpose (&B157): an FYI until the receiver's turn ends, an action for a minute to batch — whatever line
+    // of the output says so.
+    const held = "held as an FYI (not typed yet): it is delivered when the agent's turn ends; do not resend";
+    expect(readSentMessage(bash('fy send a b', { text: `${held}\n  /tmp/s/a` }), 'fy')).toMatchObject({
+      state: 'held',
+      hold: { kind: 'fyi' },
+    });
+    expect(
+      readSentMessage(
+        bash('fy send a b', { text: 'held until 10:38:00 to combine with other messages (action); not typed yet' }),
+        'fy',
+      ),
+    ).toMatchObject({ state: 'held', hold: { kind: 'batch', until: '10:38' } });
+    // Held in words this reader does not know: held, and no guess at why.
+    const unknown = readSentMessage(bash('fy send a b', { text: 'held for review' }), 'fy');
+    expect(unknown?.state).toBe('held');
+    expect(unknown?.hold).toBeUndefined();
     expect(
       readSentMessage(bash('fy send a b', { text: 'error: session not found: a', isError: true }), 'fy'),
     ).toMatchObject({

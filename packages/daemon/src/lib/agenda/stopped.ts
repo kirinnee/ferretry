@@ -1,11 +1,11 @@
-import { type AgendaItem, agendaTurn, type SessionAgendaSummary } from '@ferretry/protocol';
+import { type AgendaItem, needsYouQueue, type SessionAgendaSummary } from '@ferretry/protocol';
 
 /**
- * The items a ferret is STOPPED ON: the agenda items whose turn is the owner's. A notice has no turn and a
- * ferret is never stopped on one, so it is not counted; neither is an item waiting on the ferret.
+ * The items a ferret is STOPPED ON: its board's Needs-you queue (`needsYouQueue`, docs/agenda.md § The Needs-you
+ * queue), the one list every count and push reads — each item once, blockers first. A notice, a resting item and a
+ * snoozed one wait on nobody, so none is counted.
  */
-export const ownerTurnItems = (items: readonly AgendaItem[]): readonly AgendaItem[] =>
-  items.filter(item => item.notice !== true && agendaTurn(item) === 'owner');
+export const ownerTurnItems = (items: readonly AgendaItem[]): readonly AgendaItem[] => needsYouQueue(items);
 
 /**
  * Where a session stands in its turn, as far as stopping goes: the instant its CURRENT idle period began

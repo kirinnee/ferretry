@@ -1,3 +1,4 @@
+export * from './file-outbox-tail.ts';
 export * from './file-send-channel.ts';
 export * from './file-send-ledger.ts';
 export * from './file-send-reproof-marker.ts';

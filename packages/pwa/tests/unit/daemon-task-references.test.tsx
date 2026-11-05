@@ -8,7 +8,7 @@ import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import type { DaemonConnection } from '../../src/lib/daemon-connection.ts';
 import { StoreProvider } from '../../src/lib/store.tsx';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
-import { fakeEnvironment, fakePort, flush, laptop } from './board-support.ts';
+import { card, fakeEnvironment, fakePort, flush, laneSetFor, laptop, PROJECT } from './board-support.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -29,6 +29,13 @@ const storeFor = (ids: readonly string[] | null) => {
 };
 
 const links = (container: HTMLElement) => [...container.querySelectorAll('a')].map(anchor => anchor.textContent);
+
+const FENCE = '`'.repeat(3);
+const CARD_BLOCK = [`${FENCE}fy-render`, 'type: card', 'alt: The card', '---', '&F12', FENCE].join('\n');
+
+function EmbedProse() {
+  return <Markdown enableFyRender {...useReferenceSurface()} text={CARD_BLOCK} />;
+}
 
 function Prose() {
   return <Markdown {...useReferenceSurface()} text={TEXT} />;
@@ -181,5 +188,49 @@ describe('useMachineTaskIds', () => {
     expect(view.container.querySelector('p')?.getAttribute('data-ids')).toBe('unknown');
     await view.render(<Ids store={store} />);
     expect(view.container.querySelector('p')?.getAttribute('data-ids')).toBe('unknown');
+  });
+});
+
+describe('DaemonTaskReferences card blocks', () => {
+  test('draws a card block live from the machine it is paired with, and opens it like a reference', async () => {
+    const cards = new Map([['F12', card('F12', { title: 'Inline card' })]]);
+    const port = fakePort({
+      ids: async () => ['F12'],
+      task: async (_daemon, id) => {
+        const task = cards.get(id);
+        return task === undefined ? null : { task, laneSet: laneSetFor() };
+      },
+    });
+    const store = new DaemonBoardStore(port, fakeEnvironment());
+    const opened: string[] = [];
+    view = await mount(
+      <DaemonTaskReferences connection={laptop} onNavigate={to => opened.push(to)} store={store}>
+        <EmbedProse />
+      </DaemonTaskReferences>,
+    );
+    await interact(() => flush());
+    expect(view.container.textContent).toContain('Inline card');
+    expect(view.container.textContent).toContain('Implement');
+    cards.set('F12', card('F12', { title: 'Inline card', laneId: 'review' }));
+    await interact(async () => {
+      store.noteEvent(laptop.daemonId, { type: 'board.changed', data: { projectId: PROJECT, taskIds: ['F12'] } });
+      await flush();
+    });
+    expect(view.container.textContent).toContain('Review/CI');
+    await interact(() =>
+      must(view?.container.querySelector<HTMLElement>('[data-fy-card-embed-card] a'), 'the card link').click(),
+    );
+    expect(opened).toEqual(['/d/daemon%2Flaptop/board/F12']);
+  });
+
+  test('leaves the block an ordinary code fence where no board can be read', async () => {
+    const { store } = storeFor(['F12']);
+    view = await mount(
+      <DaemonTaskReferences connection={undefined} onNavigate={() => undefined} store={store}>
+        <EmbedProse />
+      </DaemonTaskReferences>,
+    );
+    expect(view.container.querySelector('[data-fy-card-embed]')).toBeNull();
+    expect(view.container.querySelector('pre')?.textContent).toContain('type: card');
   });
 });

@@ -1,11 +1,7 @@
-import {
-  BoardActivityFilterSchema,
-  BoardPrStateFilterSchema,
-  BoardStateFilterSchema,
-  TaskKindSchema,
-} from '@ferretry/protocol';
+import { BoardPrStateFilterSchema, BoardStateFilterSchema, TaskKindSchema } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type { BoardController, BoardViewFlags } from '../../lib/board/board-controllers';
+import { BOARD_ACTIVITY_CHOICES } from '../../lib/board/board-request';
 
 const choices = (values: readonly string[]): string => values.join(' | ');
 
@@ -16,15 +12,17 @@ const choices = (values: readonly string[]): string => values.join(' | ');
 export function registerBoardCommands(program: Command, controller: BoardController): Command {
   return program
     .command('board')
-    .description('the project board: every card in its lane, closed ones hidden')
+    .description('the project board: the public cards in their lanes, closed and private ones hidden')
     .option('--project <name|all>', "a project's name or id, or `all`; default: the board of the calling session")
     .option('--ferret <name>', 'only cards this ferret (callsign or session id) owns or is assigned')
     .option('--mine', 'only cards the calling session owns or is assigned')
     .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
     .option('--pr <state>', `only cards whose PR is ${choices(BoardPrStateFilterSchema.options)}`)
-    .option('--activity <activity>', `only ${choices(BoardActivityFilterSchema.options)}`)
+    .option('--activity <activity>', `only ${choices(BOARD_ACTIVITY_CHOICES)}`)
     .option('--state <state>', `${choices(BoardStateFilterSchema.options)} (default open)`)
     .option('--closed', 'show the closed cards, which are hidden by default')
+    .option('--private', "show the private cards (the ferrets' own bookkeeping) instead of the public ones")
+    .option('--all', 'show public and private cards')
     .option('--query <text>', 'only cards whose id, title, summary or ask contain this text')
     .option('--session <id>', 'act as this session instead of the ambient FY_SESSION_ID')
     .option('--json', 'print the daemon response as JSON')

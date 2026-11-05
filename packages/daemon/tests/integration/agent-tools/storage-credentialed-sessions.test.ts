@@ -50,6 +50,57 @@ function directory(
 }
 
 describe('StorageCredentialedSessions', () => {
+  it('should project one session with the same rules as a snapshot, reading only its two documents', async () => {
+    // Arrange — a narrow read must not enumerate the fleet or touch another member's documents.
+    const reads: string[] = [];
+    const source = new StorageCredentialedSessions({
+      sessionIds: () => {
+        throw new Error('single-session lookup enumerated the fleet');
+      },
+      readConfig: async id => {
+        reads.push(`config:${id}`);
+        return configDocument(id, { teammate: 'loge' });
+      },
+      readState: async id => {
+        reads.push(`state:${id}`);
+        return { id, status: 'running', turn: 1, lastActivityAt: AT };
+      },
+    });
+
+    // Act
+    const actual = await source.session('root');
+
+    // Assert
+    should(actual).deepEqual({
+      id: 'root',
+      name: 'Wire Subsystems',
+      teammate: 'loge',
+      active: true,
+      sessionCapabilityHash: HASH,
+    });
+    should(reads).deepEqual(['config:root', 'state:root']);
+  });
+
+  it('should re-read a narrow projection after termination, rotation, malformed documents and removal', async () => {
+    // Arrange — source documents can change independently of a remembered digest.
+    const documents: Record<string, { config: unknown; state: unknown }> = {
+      root: { config: configDocument('root'), state: { id: 'root', status: 'running', turn: 1 } },
+    };
+    const source = directory(documents);
+
+    // Act + Assert
+    should(await source.session('root')).have.property('active', true);
+    documents.root = { config: configDocument('root'), state: { id: 'root', status: 'stopped', turn: 1 } };
+    should(await source.session('root')).have.property('active', false);
+    documents.root = { config: configDocument('root', { sessionCapabilityHash: 'b'.repeat(64) }), state: {} };
+    should(await source.session('root')).have.property('sessionCapabilityHash', 'b'.repeat(64));
+    should(await source.session('root')).have.property('active', false);
+    documents.root = { config: configDocument('root', { sessionCapabilityHash: 'malformed' }), state: {} };
+    should(await source.session('root')).be.undefined();
+    delete documents.root;
+    should(await source.session('root')).be.undefined();
+  });
+
   it('should project the fields the identity resolver is keyed on', async () => {
     // Arrange
     const source = directory({

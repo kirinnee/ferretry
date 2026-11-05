@@ -12,6 +12,7 @@ import type {
   StoreAnswer,
 } from '../../../src/lib/catalog-links/ports.ts';
 import { CatalogLinkService, type CatalogLinkDeps } from '../../../src/lib/catalog-links/service.ts';
+import type { SharedCatalogDeps } from '../../../src/lib/shared-catalogs/service.ts';
 import { crypto, rig, SKILL_PATH, type Rig } from '../shared-catalogs/support.ts';
 
 export { SKILL_PATH };
@@ -105,8 +106,11 @@ export interface LinkRig {
   readonly jitter: { value: number };
 }
 
-export async function linkRig(overrides: Partial<CatalogLinkDeps> = {}): Promise<LinkRig> {
-  const items = await rig();
+export async function linkRig(
+  overrides: Partial<CatalogLinkDeps> = {},
+  itemDeps: Partial<SharedCatalogDeps> = {},
+): Promise<LinkRig> {
+  const items = await rig(itemDeps);
   const documents = new MemoryLinkDocuments();
   const vault = new MemoryVault();
   const locator = new FakeLocator();

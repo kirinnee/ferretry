@@ -34,8 +34,8 @@ export const AGENDA_SHAPE_LEADS: Readonly<Record<AgendaShape, string>> = {
   approval: 'Approve or deny.',
   review: 'Review it, then approve or request changes.',
   reply: 'Type your answer below.',
-  answers: 'Reply with your answers below, numbered.',
-  form: 'Fill in the fields, add anything else in the reply box, then tap Send.',
+  answers: 'Reply with your answers below, numbered. Skip any you like.',
+  form: 'Fill in any of the fields, add anything else in the reply box, then tap Send.',
   todo: 'Do these steps, then tap Mark as done.',
   info: 'Nothing to decide. Tap Got it once you have read it.',
   input: 'Type the value below.',
@@ -141,7 +141,7 @@ export const agendaShapeHelp = (fy: string): string =>
  * prompt that turns Agenda mode on.
  */
 export const AGENDA_SHAPE_LINE =
-  'Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny.';
+  'Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`); todo=`--step`s; info=Got it; permission=Approve/Deny.';
 
 /** What a new raise says about its shape: the fields `agendaShapeProblems` reads. */
 export interface AgendaShapeRaise {

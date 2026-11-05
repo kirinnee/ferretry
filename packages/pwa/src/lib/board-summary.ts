@@ -3,7 +3,7 @@
  * recently merged and released. Newest first, no "who" and no PR numbers (the card detail has them).
  *
  * The lane design is about ACTION first and information second: a card in a lane where the owner has to
- * do something (try it, say Done or Not good) leads the page, then what is in progress, then two compact
+ * do something (try it) leads the page, then what is in progress, then two compact
  * information sections. Only the information sections follow the time window; "To test" and "Working now"
  * are true now, however old the card is.
  *

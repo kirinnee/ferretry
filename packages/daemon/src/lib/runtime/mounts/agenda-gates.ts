@@ -1,10 +1,11 @@
 /**
- * The agenda's half of a card's gate (docs/board.md § Gates ask the owner): the owner's answer to a gate item moves
- * the card FIRST, through the board as the owner, and only a move that went through closes the item.
+ * The agenda's half of a card ask (docs/agenda.md § Card asks): the owner's answer to a card ask moves the card
+ * FIRST, through the board as the owner, and only a move that went through records the answer; the agenda then rests.
  *
  * Who may answer: the owner — at the machine (the admin token, recorded `admin-token` on the card), or a paired
  * device the `fleet` grant lets use the board, exactly the caller who could have moved the card on the Board. A
- * ferret, a lead over its sub-ferret and the daemon are refused, here and again in the state machine.
+ * ferret, a lead over its sub-ferret and the daemon are refused here; the state machine records a card ask's answer
+ * only from the daemon itself, once this check passed and the card moved.
  */
 import type { AgendaId, AgendaResponse, BoardReopenAttachments } from '@ferretry/protocol';
 import { grantRefusalCode } from '../../api/capability.ts';
@@ -86,6 +87,8 @@ export async function answerGate(
     readonly note?: string | undefined;
     readonly actor: AgendaActor;
     readonly gate?: true | undefined;
+    readonly cardAsk?: string | undefined;
+    readonly askVersion?: number | undefined;
     readonly attachments?: BoardReopenAttachments | undefined;
   },
 ): Promise<AgendaMutation | undefined> {

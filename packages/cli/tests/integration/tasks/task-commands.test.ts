@@ -15,6 +15,7 @@ import { registerBoardCommands } from '../../../src/adapters/board/board-command
 import { registerTaskCommands } from '../../../src/adapters/tasks/task-commands';
 import { BoardController } from '../../../src/lib/board/board-controllers';
 import type { IBoardGateway, SessionDirectoryEntry } from '../../../src/lib/board/ports';
+import { TASK_CREATE_RULE } from '../../../src/lib/board/umbrella';
 import type { ITextFileReader } from '../../../src/lib/tasks/ports';
 import { boardResponse, FERRETRY_ID, listing, taskResponse } from '../board/fixtures';
 
@@ -81,8 +82,10 @@ class CapturedOutput {
 }
 
 class StubFiles implements ITextFileReader {
+  constructor(private readonly text = 'the brief from disk') {}
+
   readText(): Promise<string> {
-    return Promise.resolve('the brief from disk');
+    return Promise.resolve(this.text);
   }
 }
 
@@ -93,10 +96,10 @@ interface Harness {
 }
 
 /** Builds the command groups exactly as the composition root does, over test doubles. */
-function harness(environmentSessionId: string | undefined = 'session-7'): Harness {
+function harness(environmentSessionId: string | undefined = 'session-7', files = new StubFiles()): Harness {
   const gateway = new FakeBoardGateway();
   const output = new CapturedOutput();
-  const board = new BoardController({ gateway, output, files: new StubFiles(), binary: 'fy', environmentSessionId });
+  const board = new BoardController({ gateway, output, files, binary: 'fy', environmentSessionId });
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
   registerTaskCommands(program, { board });
@@ -261,6 +264,35 @@ describe('fy task move --help', () => {
   });
 });
 
+describe('fy task create --help', () => {
+  it('should teach one card per outcome after the options: never asks, related cards first, no umbrella', async () => {
+    // Arrange
+    const board = new BoardController({
+      gateway: new FakeBoardGateway(),
+      output: new CapturedOutput(),
+      files: new StubFiles(),
+      binary: 'fy',
+      environmentSessionId: 'session-7',
+    });
+    const written: string[] = [];
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: text => written.push(text), writeErr: () => {} });
+    registerTaskCommands(program, { board });
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'task', 'create', '--help']).catch(() => undefined);
+
+    // Assert
+    const flat = (text: string): string => text.replace(/\s+/g, ' ');
+    const help = flat(written.join(''));
+    const rule = flat(TASK_CREATE_RULE);
+    should(help).containEql('--broad <why>');
+    should(help).containEql('prefer adding to a related card');
+    should(help).containEql(rule);
+    should(help.indexOf(rule)).be.above(help.indexOf('--broad <why>'));
+  });
+});
+
 describe('every remaining task verb', () => {
   const verbs: readonly (readonly [string, readonly string[], string])[] = [
     ['focus', ['focus', 'F412'], 'focus'],
@@ -279,6 +311,7 @@ describe('every remaining task verb', () => {
     ['edit', ['edit', 'F412', '--summary', 'a line', '--term', 'x=y'], 'edit'],
     ['refile', ['refile', 'F412', '--project', 'Ferretry'], 'refile'],
     ['feedback', ['feedback', 'F412', 'nice'], 'note'],
+    ['claim', ['claim', 'F412'], 'claim'],
   ];
 
   for (const [name, argv, action] of verbs) {
@@ -357,5 +390,151 @@ describe('fy board', () => {
 
     // Assert
     should(() => JSON.parse(output.lines.join('\n'))).not.throw();
+  });
+});
+
+describe('fy task create --private / --public', () => {
+  it.each([
+    ['--private', 'private'],
+    ['--public', 'public'],
+  ] as const)('should send %s as the card visibility', async (flag, visibility) => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run(...creating, flag);
+
+    // Assert
+    should(gateway.created?.request).have.property('visibility', visibility);
+  });
+
+  it('should leave visibility to the daemon when neither flag is given', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run(...creating);
+
+    // Assert
+    should(gateway.created?.request).not.have.property('visibility');
+  });
+
+  it('should refuse both flags before any request', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    const attempt = run(...creating, '--private', '--public');
+
+    // Assert
+    await should(attempt).rejected();
+    should(gateway.created).be.undefined();
+  });
+});
+
+describe('fy task edit --visibility', () => {
+  it('should send visibility alone as one edit', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('task', 'edit', 'F412', '--visibility', 'private');
+
+    // Assert
+    should(gateway.acted?.request).eql({ action: 'edit', visibility: 'private' });
+  });
+
+  it('should send visibility beside card text as the same single edit', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('task', 'edit', 'F412', '--title', 'Changed', '--visibility', 'public');
+
+    // Assert
+    should(gateway.acted?.request).eql({ action: 'edit', title: 'Changed', visibility: 'public' });
+  });
+
+  it('should refuse a visibility that is neither public nor private before any request', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    const attempt = run('task', 'edit', 'F412', '--title', 'Changed', '--visibility', 'secret');
+
+    // Assert
+    await should(attempt).rejected();
+    should(gateway.acted).be.undefined();
+  });
+});
+
+describe('fy board --private / --all', () => {
+  it('should query the public cards only by default', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('board');
+
+    // Assert
+    should(gateway.queried).have.property('visibility', 'public');
+  });
+
+  it('should query the private cards with --private', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('board', '--private');
+
+    // Assert
+    should(gateway.queried).have.property('visibility', 'private');
+  });
+
+  it('should leave visibility out with --all so every card comes back', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    await run('board', '--all');
+
+    // Assert
+    should(gateway.queried).not.have.property('visibility');
+  });
+
+  it('should refuse --private with --all', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act
+    const attempt = run('board', '--private', '--all');
+
+    // Assert
+    await should(attempt).rejected();
+    should(gateway.queried).be.undefined();
+  });
+});
+
+describe('fy task show --yaml and fy task patch', () => {
+  it('should print the editable document with the card revision', async () => {
+    // Arrange
+    const { run, output } = harness();
+
+    // Act
+    await run('task', 'show', 'F412', '--yaml');
+
+    // Assert
+    should(output.lines.join('\n')).match(/\nrevision: 1\ntitle: /u);
+  });
+
+  it('should send the document read from --file as ONE edit carrying its revision', async () => {
+    // Arrange
+    const { run, gateway } = harness('session-7', new StubFiles('revision: 1\nsummary: One patch, one edit'));
+
+    // Act
+    await run('task', 'patch', 'F412', '--file', 'f412.yaml');
+
+    // Assert
+    should(gateway.acted?.request).eql({ action: 'edit', revision: 1, summary: 'One patch, one edit' });
   });
 });

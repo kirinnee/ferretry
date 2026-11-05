@@ -1,17 +1,16 @@
 /**
- * THE OWNER'S ANSWERS ON A CARD, AS ONE FLOW: Done, Close, Not good, Reopen, a ⋯ pick and a drop. The Board page
- * and the ferret's own Tasks tab both use it, so a card behaves the same wherever the owner answers it.
+ * THE OWNER'S ANSWERS, AS ONE FLOW: Done, Not good and Send back. Only the agenda's cards to try use it: the Board
+ * and its cards are read-only (no ⋯ pick, no drop, no Done, Not good or Reopen button), the owner answers in the agenda.
  *
  * - A move forward is sent at once. A move BACK opens the send-back composer (the words, and pictures where the
  *   machine takes them) and is sent only with its words.
  * - While a card's move is in flight the pressed control spins (`answerFor`), every answer on that card waits,
- *   and a second press or a drop is not a second move.
+ *   and a second press is not a second move.
  * - A refusal is said on the card it belongs to, and kept in the composer when one is open.
  */
 
 import type { BoardReopenAttachments } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { BoardActions } from '../../lib/board-actions.ts';
 import { ANSWER_AT_REST, type BoardAnswer, type BoardAnswerState } from '../../lib/board-done.ts';
 import { planMove } from '../../lib/board-move.ts';
@@ -25,23 +24,18 @@ export interface BoardAnswersInput {
   readonly ports: SendBackPorts | undefined;
   /** The pairing of the machine a card is on. */
   readonly connectionOf: (daemonId: DaemonId) => DaemonConnection | undefined;
-  /** A phone: the composer slides up from the bottom. */
-  readonly phone: boolean;
   /** Says (or clears) why a move could not even be planned: the project has no lanes, or not that one. */
   readonly onNotice: (message: string | null) => void;
-  /** Draw the composer over the whole page (a chat's side pane would clip it), rather than in place. */
-  readonly portal?: boolean;
-  /** The host draws the composer itself, under the card (`composerFor`), as wide as the card: no sheet, no popup. */
-  readonly inline?: boolean;
 }
 
 export interface BoardAnswers {
   /** One answer on one card; `answer` names the control that asked, which words the composer and spins. */
   readonly requestMove: (card: BoardCardOf, group: BoardGroupOf, laneId: string, answer?: BoardAnswer) => void;
   readonly answerFor: (card: BoardCardOf) => BoardAnswerState;
-  /** The send-back composer while a move back waits for its words; `null` otherwise, and always `null` when `inline`. */
-  readonly composer: ReactNode;
-  /** The composer under this card while its move back waits for words (`inline` only); `null` for any other card. */
+  /**
+   * The composer under this card while its move back waits for words, as wide as the card (no sheet, no popup);
+   * `null` for any other card.
+   */
   readonly composerFor: (card: BoardCardOf) => ReactNode;
 }
 
@@ -65,13 +59,6 @@ const sendBackWords = (pending: PendingMove) => {
         placeholder: 'What should change?',
         submitLabel: 'Send back',
       };
-    case 'reopen':
-      return {
-        heading: `Reopen ${title}: back to ${pending.toName}`,
-        placeholder: 'Why is it going back?',
-        submitLabel: 'Reopen',
-        busyLabel: 'Reopening…',
-      };
     default:
       return {
         heading: `Move ${title} back to ${pending.toName}`,
@@ -89,15 +76,7 @@ const without = <Value,>(map: ReadonlyMap<string, Value>, key: string): Readonly
   return next;
 };
 
-export function useBoardAnswers({
-  actions,
-  ports,
-  connectionOf,
-  phone,
-  onNotice,
-  portal = false,
-  inline = false,
-}: BoardAnswersInput): BoardAnswers {
+export function useBoardAnswers({ actions, ports, connectionOf, onNotice }: BoardAnswersInput): BoardAnswers {
   const [pending, setPending] = useState<PendingMove | null>(null);
   // Per card: the answer in flight, and the last refusal. Several cards can be settling at once.
   const [settling, setSettling] = useState<ReadonlyMap<string, BoardAnswer>>(() => new Map());
@@ -194,19 +173,8 @@ export function useBoardAnswers({
         {...sendBackWords(pending)}
       />
     );
-  const drawn =
-    box === null || inline ? null : (
-      <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
-        {box}
-      </div>
-    );
   const composerFor = (card: BoardCardOf): ReactNode =>
-    inline && pending !== null && pending.card.key === card.key ? box : null;
+    pending !== null && pending.card.key === card.key ? box : null;
 
-  return {
-    requestMove,
-    answerFor,
-    composer: drawn === null || !portal ? drawn : createPortal(drawn, document.body),
-    composerFor,
-  };
+  return { requestMove, answerFor, composerFor };
 }

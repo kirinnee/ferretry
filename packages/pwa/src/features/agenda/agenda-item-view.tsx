@@ -5,15 +5,25 @@
  *
  * ONE COLUMN, the composer's own width at every breakpoint, top to bottom:
  *
- *   head     ONE row: the title (one line; it scrolls when too long), where the item stands, ‹ n of N ›, the snooze
- *            clock, ⓘ and ✕. The item's ask is behind ⓘ, in a panel under the row
- *   card     everything to read and answer (`agenda-item-card.tsx`): premise and context, the question, the options,
- *            whatever sections the ferret added, the version picker, and the ONE answer row
- *   history  the conversation about the item, newest at the bottom, just above the composer
+ *   head     ONE row: the title (ONE line; a marquee when too long, cut at a word with the whole title a tap away where
+ *            motion is reduced), how urgent it is (Blocking now, Needed by 17:00), ‹ n of N ›, ⋯ and ✕. Everything quiet
+ *            is behind ⋯ (`agenda-item-menu.tsx`, a bottom sheet on a phone, a popover wider): the version picker,
+ *            Changes, Snooze, Merge with…, Not needed and a host's quiet tools (the Inbox's Skip); a gate item or a
+ *            notice drawn with its card rows keeps its summary there too
+ *   card     the item in the spec's nine parts (`agenda-item-card.tsx`; the order is `agenda-item-sections.ts`'s): its
+ *            description, state and stage chips, premise and context, the folded detailed context, the terms and
+ *            references table, where we are now, what it needs from the owner (the ask and every card ask, each with
+ *            its own buttons), the body (the full picture), then the log: the conversation and the folded activity
+ *
+ * OPENED AT ITS ASK (`startAt: 'ask'`): a Needs-you push and a link that names the item open it scrolled to "What I need
+ * from you", with that part focused, so the owner lands on what to do; the keys still answer from there. Each tap
+ * brings its own `startTap`, so a second push for the item already open at its ask scrolls there again.
  *
  * THE HEAD STICKS to the top of the scroller, and a one-row answer (choice, approval, to-do, notice, review) is drawn in
- * a DOCK that sticks to its bottom, so the title, the pager and the buttons are in reach however long the card runs. A
- * card answered in words (reply, mixed, form) has no dock: the composer is its answer. The scroller keeps room for both
+ * a DOCK that sticks to its bottom — the view's foot, whatever the card's height — so the title, the pager and the
+ * buttons are in reach however long the card runs. A card answered in words (reply, mixed, form) has no dock: the
+ * composer is its answer. An item with a card ask has no dock either: both button sets are inline, each under its own
+ * heading. The scroller keeps room for both
  * (`scroll-padding`), so a focused field never lands behind one.
  *
  * The body is the ONE scroller (`overscroll-behavior: contain`). ✕ and Esc go back to the chat; ‹ › page through the
@@ -22,24 +32,29 @@
  */
 
 import type { AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { GitCompareArrows, Merge } from 'lucide-react';
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
+import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import type { LineageTitles } from '../../lib/agenda-merge.ts';
+import { versionCount } from '../../lib/agenda-revisions.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
 import { AgendaItemCard } from './agenda-item-card.tsx';
-import { AgendaItemHistory } from './agenda-item-history.tsx';
+import { AgendaItemMenu, MenuGroup, SnoozeChoices, VersionPicker } from './agenda-item-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { CardHead } from './card-head.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
+import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 
 export interface AgendaItemViewProps {
   readonly item: AgendaItem;
@@ -58,7 +73,7 @@ export interface AgendaItemViewProps {
   /** An answer; the host adds the composer's text as its note and closes the view once it is sent. */
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
-  /** Snooze the item until this instant; absent: the clock button is not drawn. */
+  /** Snooze the item until this instant; absent: the ⋯ menu offers no Snooze. */
   readonly onSnooze?: (until: string) => void;
   readonly renderProse: (text: string) => ReactNode;
   /**
@@ -88,11 +103,29 @@ export interface AgendaItemViewProps {
   readonly cardsForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
-  /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
-  readonly wrapTitle?: boolean;
-  /** Quiet buttons kept under ⓘ (the Inbox's Skip and Not needed), so the card body keeps the room. */
+  /** Quiet buttons kept behind ⋯ (the Inbox's Skip and Not needed), so the card body keeps the room. */
   readonly tools?: ReactNode;
+  /**
+   * Open scrolled to the item's ask ("What I need from you"), focused: a Needs-you push or a link naming the item.
+   * Absent: the view opens at its top.
+   */
+  readonly startAt?: 'ask';
+  /** Which tap asked for `startAt`: a new one scrolls to the ask again, though the item is already open. */
+  readonly startTap?: number;
+  /** A card's How to test, read from the board the app holds: a card ask on this item shows it. */
+  readonly howToTestFor?: (cardId: string) => string | null | undefined;
+  /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
+  readonly itemKey?: string;
+  /** The versions the machine keeps for the item (`useItemLifecycle`): the ⋯ menu's "Changes". Absent: none. */
+  readonly versions?: AgendaVersionsView;
+  /** "Merge with…" (`useItemLifecycle`), a row of the ⋯ menu. Absent: not offered. */
+  readonly merge?: AgendaMergeView;
+  /** The titles of the agendas the item was merged into or split from (`useItemLifecycle`). */
+  readonly lineageTitles?: LineageTitles;
 }
+
+/** The urgent tones the head row says; where else the item stands is the card's state chip. */
+const URGENT_TONES: ReadonlySet<string> = new Set(['blocking', 'will-block', 'needed-by']);
 
 /** Keys that are a field's or a button's own. */
 const ownsKeys = (target: EventTarget): boolean =>
@@ -153,23 +186,106 @@ export function AgendaItemView({
   formKey,
   daemonId,
   tools,
-  wrapTitle = false,
+  startAt,
+  startTap,
+  howToTestFor,
+  itemKey,
+  versions,
+  merge,
+  lineageTitles,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
   const top = useRef<HTMLElement | null>(null);
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
-  const infoId = useId();
-  const [infoFor, setInfoFor] = useState<string | null>(null);
-  const infoOpen = infoFor === item.id;
+  const diffId = useId();
+  // The ⋯ menu and what it opens belong to ONE item: paging to another starts them all closed, at its latest version.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [diffFor, setDiffFor] = useState<string | null>(null);
+  const [mergeFor, setMergeFor] = useState<string | null>(null);
+  const [picked, setPicked] = useState<{ readonly id: string; readonly version: number } | null>(null);
+  const menuOpen = menuFor === item.id;
+  const setMenuOpen = useCallback((open: boolean) => setMenuFor(open ? item.id : null), [item.id]);
+  const count = versionCount(item);
+  const shown = picked?.id === item.id ? Math.min(picked.version, count) : count;
+  const latest = shown >= count;
+  const showVersion = (version: number): void => setPicked(version >= count ? null : { id: item.id, version });
   useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
-  const hasInfo = head.description !== null || tools !== undefined;
+  const urgent = status !== null && URGENT_TONES.has(status.tone) ? status : null;
+  // The card draws the description under the title, whole. A gate item, whose card repeats nothing, and a notice drawn
+  // with its card rows, which say its lines, keep it behind ⓘ instead.
+  const infoDescription = item.gate === undefined && cardsForm === undefined ? null : head.description;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
+  // Not needed: the host's own tools say it where it has them (the Inbox); otherwise the menu does, on an item that
+  // can be put aside at all — not a gate, a notice, an input card, or one whose own answers already dismiss.
+  const model = cardModel(item);
+  const canDismiss =
+    tools === undefined && answerable && latest && item.gate === undefined && !model.notice && model.dismissInMenu;
+  const menuRows = (
+    <ItemMenuRows
+      busy={busy}
+      count={count}
+      description={infoDescription}
+      diff={
+        versions === undefined
+          ? null
+          : {
+              id: diffId,
+              open: diffFor === item.id,
+              onToggle: () => {
+                setDiffFor(diffFor === item.id ? null : item.id);
+                setMenuOpen(false);
+              },
+            }
+      }
+      dismiss={
+        canDismiss
+          ? () => {
+              setMenuOpen(false);
+              if (!busy) onAct(DISMISS_ACTION);
+            }
+          : null
+      }
+      item={item}
+      merge={
+        merge === undefined || !latest
+          ? null
+          : () => {
+              setMergeFor(item.id);
+              setMenuOpen(false);
+            }
+      }
+      now={now}
+      onShowVersion={version => {
+        showVersion(version);
+        setMenuOpen(false);
+      }}
+      renderProse={renderProse}
+      shown={shown}
+      snooze={
+        onSnooze === undefined
+          ? null
+          : (until: string) => {
+              setMenuOpen(false);
+              onSnooze(until);
+            }
+      }
+      tools={tools ?? null}
+      versionsKept={versions !== undefined}
+    />
+  );
+  const hasMenu =
+    infoDescription !== null ||
+    tools !== undefined ||
+    canDismiss ||
+    count > 1 ||
+    onSnooze !== undefined ||
+    (merge !== undefined && latest);
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
   const requestChanges = (answer: AgendaCardAnswer): void => {
     const composer = quoteScope === null ? null : composerQuoteTarget(quoteScope);
@@ -184,10 +300,20 @@ export function AgendaItemView({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
-    root.current?.focus({ preventScroll: true });
-  }, [item.id]);
+    const ask = startAt === 'ask' ? body.current?.querySelector<HTMLElement>('[data-agenda-part="needs"]') : null;
+    if (ask === null || ask === undefined) {
+      root.current?.focus({ preventScroll: true });
+      return;
+    }
+    // At its ask: the part scrolls to the top of the scroller (its padding keeps it clear of the sticky head) and takes
+    // focus, so a screen reader starts there and the arrow keys still answer.
+    ask.scrollIntoView?.({ block: 'start' });
+    ask.focus({ preventScroll: true });
+  }, [item.id, startAt, startTap]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    // The ⋯ menu's sheet is drawn over the page (a portal), yet its keys still bubble here: they are the sheet's.
+    if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
     if (ownsKeys(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -227,32 +353,23 @@ export function AgendaItemView({
               close={{ label: closeLabel, onClick: onClose }}
               pager={{ index: position.index, total: position.total, onPrevious, onNext }}
               status={
-                status === null ? null : (
-                  <span className="fy-item-view__status" title={status.label}>
-                    <AgendaStatusPill status={status} />
+                urgent === null ? null : (
+                  <span className="fy-item-view__status" title={urgent.label}>
+                    <AgendaStatusPill status={urgent} />
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} twoLines={wrapTitle || item.gate !== undefined} />}
-              {...(hasInfo
-                ? { info: { controls: infoId, open: infoOpen, onToggle: () => setInfoFor(infoOpen ? null : item.id) } }
+              title={<MarqueeTitle title={head.title} />}
+              {...(hasMenu
+                ? {
+                    menu: (
+                      <AgendaItemMenu onOpenChange={setMenuOpen} open={menuOpen}>
+                        {menuRows}
+                      </AgendaItemMenu>
+                    ),
+                  }
                 : {})}
-              {...(onSnooze === undefined ? {} : { snooze: { onSnooze, disabled: busy, now } })}
             />
-            {hasInfo ? (
-              <div className="fy-item-view__info" data-agenda-info-panel="" hidden={!infoOpen} id={infoId}>
-                {infoOpen ? (
-                  <>
-                    {head.description === null ? null : (
-                      <div className="fy-item-view__desc" data-agenda-ask="">
-                        {renderProse(head.description)}
-                      </div>
-                    )}
-                    {tools}
-                  </>
-                ) : null}
-              </div>
-            ) : null}
           </header>
           <AgendaItemCard
             busy={busy}
@@ -263,9 +380,19 @@ export function AgendaItemView({
             onAct={onAct}
             renderProse={renderProse}
             swipeable={swipeable}
-            dismissAside={tools !== undefined}
-            typeShown={tools !== undefined}
             answerDock={dock}
+            shown={shown}
+            onShowVersion={showVersion}
+            diffId={diffId}
+            diffOpen={diffFor === item.id}
+            mergeOpen={mergeFor === item.id}
+            onMergeClose={() => setMergeFor(null)}
+            history={history}
+            {...(itemKey === undefined ? {} : { itemKey })}
+            {...(versions === undefined ? {} : { versions })}
+            {...(merge === undefined ? {} : { merge })}
+            {...(lineageTitles === undefined ? {} : { lineageTitles })}
+            {...(howToTestFor === undefined ? {} : { howToTestFor })}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}
@@ -277,11 +404,110 @@ export function AgendaItemView({
             {...(formKey === undefined ? {} : { formKey })}
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />
-          <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
           <div className="fy-item-view__dock" data-agenda-dock="" ref={setDock} />
         </div>
       </div>
       {quote.menu}
     </section>
+  );
+}
+
+interface ItemMenuRowsProps {
+  readonly item: AgendaItem;
+  readonly now: number;
+  readonly busy: boolean;
+  readonly renderProse: (text: string) => ReactNode;
+  /** A gate item's or a card notice's summary, which its card does not repeat. */
+  readonly description: string | null;
+  readonly count: number;
+  readonly shown: number;
+  /** The machine keeps versions, so the picker counts edits beside Changes. */
+  readonly versionsKept: boolean;
+  readonly onShowVersion: (version: number) => void;
+  readonly diff: { readonly id: string; readonly open: boolean; readonly onToggle: () => void } | null;
+  readonly snooze: ((until: string) => void) | null;
+  readonly merge: (() => void) | null;
+  readonly dismiss: (() => void) | null;
+  readonly tools: ReactNode;
+}
+
+/** What the ⋯ menu holds, each group only when the item has it: about, version, snooze, merge, put aside. */
+function ItemMenuRows({
+  item,
+  now,
+  busy,
+  renderProse,
+  description,
+  count,
+  shown,
+  versionsKept,
+  onShowVersion,
+  diff,
+  snooze,
+  merge,
+  dismiss,
+  tools,
+}: ItemMenuRowsProps) {
+  return (
+    <>
+      {description === null ? null : (
+        <MenuGroup hook="about" title="About this item">
+          <div className="fy-item-view__desc" data-agenda-ask="">
+            {renderProse(description)}
+          </div>
+        </MenuGroup>
+      )}
+      {count > 1 || diff !== null ? (
+        <MenuGroup hook="version" title="Version">
+          <div className="fy-item-menu__row" data-agenda-version-slot="">
+            {count > 1 ? (
+              <VersionPicker asEdits={versionsKept} item={item} now={now} onShow={onShowVersion} shown={shown} />
+            ) : null}
+            {diff === null ? null : (
+              <button
+                aria-controls={diff.id}
+                aria-expanded={diff.open}
+                className="fy-item-menu__action"
+                data-agenda-diff-toggle=""
+                onClick={diff.onToggle}
+                type="button"
+              >
+                <GitCompareArrows aria-hidden="true" size={16} />
+                {diff.open ? 'Hide changes' : 'Changes'}
+              </button>
+            )}
+          </div>
+        </MenuGroup>
+      ) : null}
+      {snooze === null ? null : (
+        <MenuGroup hook="snooze" title="Snooze until">
+          <SnoozeChoices disabled={busy} now={now} onSnooze={snooze} />
+        </MenuGroup>
+      )}
+      {merge === null && dismiss === null && tools === null ? null : (
+        <MenuGroup hook="aside" title="Actions">
+          <div className="fy-item-menu__row">
+            {merge === null ? null : (
+              <button className="fy-item-menu__action" data-agenda-merge-open="" onClick={merge} type="button">
+                <Merge aria-hidden="true" size={16} />
+                Merge with…
+              </button>
+            )}
+            {dismiss === null ? null : (
+              <button
+                className="fy-item-menu__action"
+                data-agenda-dismiss=""
+                disabled={busy}
+                onClick={dismiss}
+                type="button"
+              >
+                Not needed
+              </button>
+            )}
+            {tools}
+          </div>
+        </MenuGroup>
+      )}
+    </>
   );
 }

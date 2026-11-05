@@ -24,6 +24,8 @@ export const RENDER_GUIDE_TYPES = [
   'audio',
   'pdf',
   'lottie',
+  'card',
+  'board',
 ] as const;
 
 /** The types `fy render guide` accepts. */
@@ -31,7 +33,7 @@ type RenderGuideType = (typeof RENDER_GUIDE_TYPES)[number];
 
 /**
  * Which `###` section answers a type. `image`, `video`, `audio` and `pdf` share `media`: they name
- * bytes the same way, and the doc keeps one section for the four.
+ * bytes the same way, and the doc keeps one section for the four; `card` and `board` share `card`, which names cards.
  */
 const SECTION_FOR_TYPE: Record<RenderGuideType, string> = {
   mermaid: 'mermaid',
@@ -44,6 +46,8 @@ const SECTION_FOR_TYPE: Record<RenderGuideType, string> = {
   audio: 'media',
   pdf: 'media',
   lottie: 'lottie',
+  card: 'card',
+  board: 'card',
 };
 
 /** The section that answers `type`, or `undefined` when `fy render guide` refuses it. */

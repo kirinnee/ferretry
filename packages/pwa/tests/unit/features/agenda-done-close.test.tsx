@@ -7,7 +7,6 @@ import { useDoneClose } from '../../../src/hooks/use-done-close.ts';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import type { DoneCloseResult, DoneCloseSource } from '../../../src/lib/agenda-done-close.ts';
 import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
-import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
@@ -248,7 +247,6 @@ const hostFlow = (
         model={cardModel(item)}
         onAct={() => undefined}
         onSkip={() => undefined}
-        options={itemOptions(item)}
         swipeable
         {...(flow === undefined ? {} : { doneClose: flow })}
       />
@@ -359,7 +357,6 @@ describe('where Done · closes sits among the answers', () => {
           model={cardModel(item)}
           onAct={() => undefined}
           onSkip={() => undefined}
-          options={itemOptions(item)}
           swipeable
           {...(flow === undefined ? {} : { doneClose: flow })}
           {...extra}
@@ -369,7 +366,7 @@ describe('where Done · closes sits among the answers', () => {
     view = await mount(<Slot />);
   };
 
-  test('takes the → slot beside two lettered answers, or beside one answer', async () => {
+  test('takes the → slot beside two long answers, or beside one answer', async () => {
     await place(
       agendaItem('A1', { ask: choices('Use the seeded test account', 'Make a new one') } as Partial<AgendaItem>),
     );

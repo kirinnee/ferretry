@@ -53,8 +53,11 @@ export const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
   neededBy: 'Needed by',
   links: 'Links',
   steps: 'Steps',
-  body: 'More detail',
+  body: 'The full picture',
   questionAnswer: 'Answer to your question',
+  whereWeAre: 'Where we are now',
+  tabs: 'Tabs',
+  detail: 'From the start',
 };
 
 /** The most recent edit, or `null` when the item was never edited. */

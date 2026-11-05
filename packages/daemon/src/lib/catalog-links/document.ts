@@ -38,10 +38,15 @@ const PendingUploadSchema = z.strictObject({
   notAfter: InstantSchema,
   expiresAt: InstantSchema.optional(),
   installCap: InstallCap.optional(),
+  /** When the upload's document was signed: the link's `issuedAt` once it is committed. */
+  issuedAt: InstantSchema.optional(),
+  /** The store had lapsed the link and this upload puts it back. */
+  revived: z.boolean().optional(),
 });
 export type PendingUpload = z.infer<typeof PendingUploadSchema>;
 
-export const LINK_END_REASONS = ['owner', 'expired', 'used', 'item-gone'] as const;
+/** `identity-changed`: this machine's identity changed, so the store no longer takes this link's owner (docs/catalogs.md § Links). */
+export const LINK_END_REASONS = ['owner', 'expired', 'used', 'item-gone', 'identity-changed'] as const;
 
 export const StoredLinkSchema = z.strictObject({
   linkId: CatalogLinkIdSchema,
@@ -73,6 +78,10 @@ export const StoredLinkSchema = z.strictObject({
   /** The vault entry holding the key: the link id, present for a public link and never for a one-time link. */
   keyRef: CatalogLinkIdSchema.optional(),
   pendingUpload: PendingUploadSchema.optional(),
+  /** The version this link served before its latest move. */
+  movedFrom: z.number().int().min(1).optional(),
+  /** When the store had lapsed this link and it was put back. */
+  revivedAt: InstantSchema.optional(),
   endedAt: InstantSchema.optional(),
   endReason: z.enum(LINK_END_REASONS).optional(),
 });

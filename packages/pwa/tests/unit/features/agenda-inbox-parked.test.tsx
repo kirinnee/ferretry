@@ -11,8 +11,8 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
-import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { interact, mount, must } from '../../support/dom.ts';
+import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { typeInto } from '../../support/learning-dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
@@ -292,21 +292,18 @@ describe('AgendaInboxPage counts what it lists', () => {
 });
 
 describe('AgendaInboxPage snooze from the open item', () => {
-  it('snoozes the open item from its clock menu: it leaves and the toast says until when', async () => {
+  it('snoozes the open item from its ⋯ menu: it leaves and the toast says until when', async () => {
     const fake = fakeInbox();
     const { view } = await mountPage({}, [], fake, open.key);
     await interact(() =>
       must(
-        view.container.querySelector<HTMLButtonElement>('[data-agenda-view="A1"] [data-agenda-info-toggle]'),
-        'ⓘ',
+        view.container.querySelector<HTMLButtonElement>('[data-agenda-view="A1"] [data-agenda-menu-toggle]'),
+        '⋯',
       ).click(),
     );
-    const clock = must(
-      view.container.querySelector<HTMLButtonElement>('[data-agenda-view="A1"] [data-agenda-snooze]'),
-      'the clock',
+    await interact(() =>
+      must(view.container.querySelector<HTMLElement>('[data-agenda-menu-snooze="hour"]'), '1 hour').click(),
     );
-    await interact(() => clock.click());
-    await interact(() => must(view.container.querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
     expect(view.container.querySelector('[data-agenda-view="A1"]')).toBeNull();
     expect(must(view.container.querySelector('[data-agenda-undo]'), 'toast').textContent).toContain(
       'Snoozed !A1 until',

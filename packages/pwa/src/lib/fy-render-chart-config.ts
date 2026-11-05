@@ -129,7 +129,8 @@ const valueScale = (spec: ChartSpec, axis: ChartAxis, theme: ResolvedTheme) => (
   min: axis.min ?? undefined,
   stacked: spec.stacked,
   ticks: {
-    callback: (value: number | string) => formatChartValue(Number(value), axis, { compact: true }),
+    callback: (value: number | string, _index?: number, ticks?: readonly { readonly value: number }[]) =>
+      formatChartValue(Number(value), axis, { compact: true, ticks: ticks?.map(tick => tick.value) }),
     color: or(theme.colors.muted),
     font: tickFont(theme),
     maxTicksLimit: 6,
@@ -224,7 +225,8 @@ export function chartConfiguration(
       pointLabels: { color: or(c['fg-soft']), font: tickFont(theme) },
       ticks: {
         backdropColor: 'transparent',
-        callback: (tick: number | string) => formatChartValue(Number(tick), spec.y, { compact: true }),
+        callback: (tick: number | string, _index?: number, ticks?: readonly { readonly value: number }[]) =>
+          formatChartValue(Number(tick), spec.y, { compact: true, ticks: ticks?.map(at => at.value) }),
         color: or(c.muted),
         font: tickFont(theme),
         maxTicksLimit: 5,

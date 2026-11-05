@@ -35,6 +35,7 @@ const FIELD_WEIGHT: Readonly<Record<WorkField, number>> = {
   context: 3,
   brief: 2,
   howToTest: 2,
+  status: 2,
   body: 2,
   note: 1.5,
   history: 1.5,

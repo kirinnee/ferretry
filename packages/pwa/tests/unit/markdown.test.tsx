@@ -10,6 +10,7 @@ import {
   Markdown,
   referenceHasTrustedOrigin,
 } from '../../src/components/markdown.tsx';
+import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
   type ResolvedReference,
@@ -18,6 +19,7 @@ import {
   referenceIdentity,
 } from '../../src/lib/references.ts';
 import { render, runAsync } from '../support/react.ts';
+import { fakeEnvironment, fakePort, laptop } from './board-support.ts';
 
 /**
  * Rendered, not grepped: every assertion here goes through the real
@@ -182,6 +184,32 @@ const fence = (info: string, ...body: readonly string[]): string => [`${FENCE}${
 const SQUARE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
 const squareFence = (info = 'fy-render'): string =>
   fence(info, 'type: svg', 'alt: A ten by ten square', '---', SQUARE_SVG);
+
+describe('Markdown card and board blocks', () => {
+  const cardFence = fence('fy-render', 'type: card', 'alt: The card', '---', '&F12');
+  const badCardFence = fence('fy-render', 'type: card', 'alt: The card', '---', 'nope');
+  // A read that never answers: the block stays at its placeholder, so no card is drawn after the test ends.
+  const silent = fakePort({ task: () => new Promise(() => undefined) });
+  const host = { store: new DaemonBoardStore(silent, fakeEnvironment()), connection: laptop };
+
+  test('should draw a card block only where the surface lent it a board to read', () => {
+    // Act
+    const lent = render(<Markdown enableFyRender cardEmbed={host} text={cardFence} />);
+    const bare = render(<Markdown enableFyRender text={cardFence} />);
+
+    // Assert — without a board the block is the ordinary escaped fence, as any block this build cannot draw is.
+    should(lent.root.findAllByProps({ 'data-fy-card-embed': 'card' })).have.length(1);
+    should(lent.root.findAllByType('pre')).be.empty();
+    should(bare.root.findAllByProps({ 'data-fy-card-embed': 'card' })).be.empty();
+    should(textOf(bare.root.findByType('code'))).containEql('type: card');
+  });
+
+  test('should leave a card block with a bad payload as an ordinary fence even where it could draw', () => {
+    const tree = render(<Markdown enableFyRender cardEmbed={host} text={badCardFence} />);
+    should(tree.root.findAllByProps({ 'data-fy-card-embed': 'card' })).be.empty();
+    should(textOf(tree.root.findByType('code'))).containEql('nope');
+  });
+});
 
 describe('Markdown fy-render fences', () => {
   test('should render an illustration only where the surface opted in', () => {

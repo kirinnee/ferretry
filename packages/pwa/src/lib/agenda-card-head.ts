@@ -6,7 +6,8 @@
  * - The description is the ask (the item's summary, `subject`) when the title is not already it. An old item whose
  *   title IS its ask falls back to its `why`, when that says something else.
  * - The question is the one question the item asks (`questions[0]`), stated plainly above the options. Without one,
- *   the ask is already said — in the title or the description — so nothing is said twice.
+ *   the ask is already said in the title or the description, so the head says nothing more. ("What I need from you"
+ *   still leads with the ask on purpose: it is where a push lands, so it reads whole on its own.)
  */
 
 import type { AgendaItem } from '@ferretry/protocol';

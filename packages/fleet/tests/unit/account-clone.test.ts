@@ -295,6 +295,40 @@ describe('parseCloneBundle versions', () => {
   });
 });
 
+describe('planClone with compactAt', () => {
+  it('should copy the compactAt of a profile and of a runtime', () => {
+    // Arrange
+    const source = parseAccountModel({
+      ...sourceModel(),
+      profiles: {
+        default: { layers: ['instructions/main', 'modelSets/heavy'], compactAt: 250_000 },
+        agent: { layers: ['profile/default', 'skills/mine'] },
+      },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', compactAt: 'auto' },
+        'codex-agent': { credential: 'codex-work', profile: 'agent', agent: true },
+        'codex-extra': { credential: 'codex-work', profile: 'default' },
+      },
+    });
+    const bundle = buildCloneBundle({
+      model: source,
+      machine: 'studio-mac',
+      exportedAt: EXPORTED_AT,
+      emails: {},
+      files: [],
+      notCopied: [],
+    });
+
+    // Act
+    const plan = planClone(emptyTarget(), parseCloneBundle(bundle), options());
+
+    // Assert
+    should(plan.model.profiles.default?.compactAt).equal(250_000);
+    should(plan.model.profiles.agent?.compactAt).be.undefined();
+    should(plan.model.runtimes['claude-default']?.compactAt).equal('auto');
+  });
+});
+
 describe('planClone alongside', () => {
   it('should copy onto an empty machine under the same names, each login an empty slot that keeps its label', () => {
     // Arrange

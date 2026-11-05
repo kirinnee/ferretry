@@ -17,6 +17,7 @@ import { LoadSafeWorker } from './load-safe-worker.ts';
 
 /** The bundled worker programs, by name: each is `packages/daemon/bin/<name>.worker.ts`. */
 export type BundledWorkerName =
+  | 'agenda-versions'
   | 'analytics-fold'
   | 'analytics-index'
   | 'housekeeping'

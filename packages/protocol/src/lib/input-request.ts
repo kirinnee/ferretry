@@ -48,6 +48,21 @@ export const INPUT_QUARANTINE_WORDS = durationWords(INPUT_QUARANTINE_SECONDS);
  * neutral). The daemon's flag on a field and the app's and CLI's words are these; a client that tells one only once
  * compares the risk to them, never searches the text.
  */
+/**
+ * Where the agent's own sentence starts in an input card's agenda context: the daemon's lines come first, and the
+ * agent's prompt last, after this. The card shows the prompt under the daemon's facts, so a client drawing the card
+ * leaves it out of the context ({@link inputContextLines}); a restarted daemon reads the prompt back from it.
+ */
+export const INPUT_PROMPT_MARKER = 'The agent says: ';
+
+/** An input card's agenda context without the agent's prompt: the daemon's own lines only, or `null` when none. */
+export const inputContextLines = (context: string | null | undefined): string | null => {
+  if (context == null) return null;
+  const at = context.indexOf(INPUT_PROMPT_MARKER);
+  const lines = (at < 0 ? context : context.slice(0, at)).trim();
+  return lines === '' ? null : lines;
+};
+
 export const INPUT_PLAIN_VALUE_NOTICE = 'Not secret: the ferret can see this value.';
 export const INPUT_CODE_VISIBLE_NOTICE = 'One-time code: the ferret can see it.';
 /**

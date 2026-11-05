@@ -60,6 +60,11 @@ const deliver = (calls: readonly Call[]): Call =>
   );
 
 describe('the card', () => {
+  it('shows the ferret’s own words under the daemon’s facts when they differ from the prompt line', async () => {
+    const { q } = await show(request({ prompt: 'The deploy needs root for the restart' }));
+    expect(q('[data-input-agent-says]')?.textContent).toBe('Hadi says: “The deploy needs root for the restart”');
+  });
+
   it('draws the daemon facts large and the agent words small, with the title, target and countdown', async () => {
     const { q } = await show(request());
 
@@ -69,7 +74,8 @@ describe('the card', () => {
     expect(q('[data-input-program]')?.textContent).toBe('sudo');
     expect(q('[data-input-echo]')?.textContent).toContain('typing hidden');
     expect(q('[data-input-prompt-line]')?.textContent).toBe('[sudo] password for kirin:');
-    expect(q('[data-input-agent-says]')?.textContent).toContain('Hadi says');
+    // The ferret's words are the very prompt line the daemon saw, so they are not said twice (#B147).
+    expect(q('[data-input-agent-says]')).toBeNull();
     expect(q('[data-input-risk]')?.getAttribute('data-input-risk')).toBe('green');
   });
 

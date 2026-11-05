@@ -1,9 +1,10 @@
 import { describe, it } from 'bun:test';
-import { DAEMON_FEATURES } from '@ferretry/protocol';
+import { agendaItemRevision, DAEMON_FEATURES } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
 import { registerAgendaCommands } from '../../../src/lib/agenda/commands';
 import { AgendaController } from '../../../src/lib/agenda/controller';
+import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
 import { DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import {
   agentItem,
@@ -436,13 +437,12 @@ describe('agenda command surface', () => {
     // Act
     await should(program.parseAsync(['node', 'fy', 'agenda', '--help'])).be.rejected();
 
-    // Assert — items never time out on their own, but must not outlive their reason. Answering or
-    // dismissing on the board already resolves it; a blocker cleared some other way still needs the
-    // raising agent to close it itself, immediately — there is no wording left that could be read as
-    // "an addressed item may stay open".
-    should(help).containEql('Answering or dismissing on the agenda already');
-    should(help).containEql('the raising agent must run `done` or `dismiss` itself, immediately');
-    should(help).containEql('whose reason is gone but is still open is a bug');
+    // Assert — items never time out on their own, but must not outlive their reason. The owner's answer RESTS an
+    // item on its ferret (docs/agenda.md § States), so only the ferret closes it, the moment it is settled.
+    const flat = help.replace(/\s+/gu, ' ');
+    should(flat).containEql("The owner's answer or reply RESTS an item, waiting on you");
+    should(flat).containEql('run `done` or `dismiss` yourself the moment it is settled');
+    should(flat).containEql('whose reason is gone but is still open is a bug');
     should(help).not.containEql('never auto-clear');
   });
 
@@ -657,7 +657,7 @@ describe('agenda surface command', () => {
     should(edited.gateway.applied[0]?.request).match({ action: 'edit', id: 'A1', now: true });
   });
 
-  it('should send --back only when the ferret needs something new from the owner who already replied', async () => {
+  it('should refuse the retired --back with the verbs that replaced it, and send nothing', async () => {
     // Arrange + Act
     const plain = run(['agenda', 'edit', '!A1', '--summary', 'Reworded'], snapshot([]));
     await plain.parsed;
@@ -665,14 +665,18 @@ describe('agenda surface command', () => {
       ['agenda', 'edit', '!A1', '--back', '--summary', 'Which region?', '--premise', 'p', '--context', 'c'],
       snapshot([]),
     );
-    await back.parsed;
+    const refused = await back.parsed.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     // Assert
     should(plain.gateway.applied[0]?.request).not.have.property('back');
-    should(back.gateway.applied[0]?.request).match({ action: 'edit', id: 'A1', back: true });
+    should(String(refused)).match(/--back is retired.*agenda answer A1/u);
+    should(back.gateway.applied).be.empty();
   });
 
-  it('should explain --back in the edit help, and say a plain edit leaves a replied item off the owner’s list', async () => {
+  it('should say in the edit help that --back is retired and how an item resting on a reply comes back', async () => {
     // Arrange
     const gateway = new RecordingAgendaGateway(snapshot([]));
     const program = new Command().name('fy').exitOverride();
@@ -685,9 +689,9 @@ describe('agenda surface command', () => {
 
     // Assert
     const flat = help.replace(/\s+/gu, ' ');
-    should(flat).containEql('--back');
-    should(flat).containEql('something NEW from the owner');
-    should(flat).containEql('stays off their list unless you pass --back');
+    should(flat).containEql('--back retired');
+    should(flat).containEql('stays resting unless you answer on it (agenda answer)');
+    should(flat).containEql('--kind');
   });
 
   it('should no longer take --surface on add: a new ask is the owner’s turn', async () => {
@@ -788,6 +792,37 @@ describe('attention needs-info command', () => {
     should(bare.gateway.applied[0]?.request).match({ subject: 'Approve it', kind: 'reply', task: { id: 'F18' } });
     should(sigil.gateway.applied[0]?.request).match({ subject: 'Approve it', task: { id: 'F18' } });
     should(bare.out.diagnostics).be.empty();
+  });
+
+  it('should keep the legacy `add --title … --new "Choose region"` working: the swallowed words are the ask', async () => {
+    // Arrange + Act — the old boolean --new came last, with the ask after it; Commander hands the ask to --new.
+    const legacy = run(
+      ['agenda', 'add', '--title', 'Deploy', '--premise', 'x', '--context', 'y', '--new', 'Choose region'],
+      afterAdd,
+      [],
+      true,
+    );
+    await legacy.parsed;
+
+    // Assert
+    should(legacy.gateway.applied).have.length(1);
+    should(legacy.gateway.applied[0]?.request).match({ action: 'add', subject: 'Choose region', title: 'Deploy' });
+    should(legacy.out.diagnostics.join('\n')).containEql('--new now takes the reason');
+    should(legacy.out.diagnostics.join('\n')).containEql('was read as your ask');
+  });
+
+  it('should take --new as the reason when the ask is given as words, before or after it', async () => {
+    // Arrange + Act
+    const after = run(['agenda', 'add', 'Choose region', '--title', 'Deploy', '--new', 'its own decision'], afterAdd);
+    await after.parsed;
+    const before = run(['agenda', 'add', '--new', 'its own decision', 'Choose region', '--title', 'Deploy'], afterAdd);
+    await before.parsed;
+
+    // Assert
+    for (const each of [after, before]) {
+      should(each.gateway.applied[0]?.request).match({ subject: 'Choose region' });
+      should(each.out.diagnostics.join('\n')).not.containEql('was read as your ask');
+    }
   });
 
   it('should raise the item without its card on an older daemon, and say so', async () => {
@@ -1076,5 +1111,247 @@ describe('agenda clear', () => {
     // Assert
     should(gateway.clears).deepEqual([true, false]);
     should(out.messages).deepEqual(['cleared 2 open agenda items on 1 agent ferret']);
+  });
+
+  describe('--offer-close beside an open agenda carrying the same card', () => {
+    const offered = [DAEMON_FEATURES.agendaTask, DAEMON_FEATURES.agendaOfferClose];
+    const runAgainst = (item: ReturnType<typeof agentItem>, argv: string[]) => {
+      const gateway = new RecordingAgendaGateway(snapshot([item]), afterAdd);
+      gateway.offered = offered;
+      const program = new Command().name('fy').exitOverride();
+      program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+      registerAgendaCommands(program, new AgendaController(gateway, new CapturingOutput(), SESSION), async () => {});
+      return { gateway, parsed: program.parseAsync(['node', 'fy', ...withBrief(argv)]) };
+    };
+    const add = ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12'];
+    const base = { howToResolve: DEFAULT_HOW_TO_RESOLVE, ask: { kind: 'open-question' as const }, task: { id: 'F12' } };
+    const carrying = agentItem('A1', 'Try the build', base as never);
+
+    it('should not offer an edit that would drop the Done button, and point to --new', async () => {
+      // Arrange + Act
+      const { parsed, gateway } = runAgainst(carrying, [...add, '--offer-close']);
+      const failure = await parsed.then(
+        () => '',
+        (error: unknown) => (error as Error).message,
+      );
+
+      // Assert
+      should(failure).containEql('the Done button (--offer-close)');
+      should(failure).containEql('--new "<why none fits; closest is !A1>"');
+      should(failure).not.containEql('fy agenda edit A1');
+      should(gateway.applied).be.empty();
+    });
+
+    it('should still offer the edit when the agenda already offers the Done button, or it is not asked for', async () => {
+      // Arrange
+      const offering = agentItem('A1', 'Try the build', { ...base, offerClose: true } as never);
+
+      // Act + Assert
+      await should(runAgainst(offering, [...add, '--offer-close']).parsed).be.rejectedWith(/fy agenda edit A1/u);
+      await should(runAgainst(carrying, add).parsed).be.rejectedWith(/fy agenda edit A1/u);
+    });
+
+    it('should open the add with --new, sending the Done button', async () => {
+      // Arrange + Act
+      const { parsed, gateway } = runAgainst(carrying, [...add, '--offer-close', '--new', 'its own sign-off']);
+      await parsed;
+
+      // Assert
+      should(gateway.applied[0]?.request).match({ task: { id: 'F12' }, offerClose: true });
+    });
+  });
+});
+
+describe('agenda as a channel (agenda.channel.1)', () => {
+  const CHANNEL = [DAEMON_FEATURES.agendaChannel];
+  const ASKS = [DAEMON_FEATURES.agendaChannel, DAEMON_FEATURES.agendaAsks];
+  const failure = async (parsed: Promise<unknown>): Promise<string> =>
+    await parsed.then(
+      () => 'no error',
+      (error: unknown) => String(error),
+    );
+
+  it('should send the ferret’s answer as the question answer, which every daemon takes', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['agenda', 'answer', '!A1', 'EU keeps the data', 'in Frankfurt'], board);
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({
+      action: 'edit',
+      id: 'A1',
+      questionAnswer: 'EU keeps the data in Frankfurt',
+    });
+  });
+
+  it('should take an item on with rest --why, and refuse it without a why or on an older daemon', async () => {
+    // Arrange + Act
+    const rested = run(['agenda', 'rest', 'A1', '--why', 'rebasing the branch'], board, CHANNEL);
+    await rested.parsed;
+    const silent = run(['agenda', 'rest', 'A1'], board, CHANNEL);
+    const older = run(['agenda', 'rest', 'A1', '--why', 'rebasing'], board);
+
+    // Assert
+    should(rested.gateway.applied[0]?.request).deepEqual({ action: 'rest', id: 'A1', why: 'rebasing the branch' });
+    should(await failure(silent.parsed)).match(/say what you are doing/u);
+    should(await failure(older.parsed)).match(/older than taking an item on/u);
+    should(older.gateway.applied).be.empty();
+  });
+
+  it('should send --stage, --where, --detail and --clear-question-answer on edit', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      [
+        'agenda',
+        'edit',
+        'A1',
+        '--stage',
+        'plan',
+        '--where',
+        'The plan is written',
+        '--where',
+        'Two risks are left',
+        '--detail',
+        'From zero: …',
+        '--clear-question-answer',
+      ],
+      board,
+      ASKS,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({
+      action: 'edit',
+      id: 'A1',
+      stage: 'plan',
+      whereWeAre: '- The plan is written\n- Two risks are left',
+      detail: 'From zero: …',
+      clear: ['questionAnswer'],
+    });
+  });
+
+  it('should replace the ask with --kind, composed as add composes one', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      ['agenda', 'edit', 'A1', '--kind', 'choice', '--option', 'Rebase', '--option', 'Merge'],
+      board,
+      ASKS,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({
+      action: 'edit',
+      id: 'A1',
+      kind: 'choice',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Rebase' }, { label: 'Merge' }] },
+    });
+  });
+
+  it('should refuse a stage that is no stage, and the new edit fields on an older daemon', async () => {
+    // Arrange + Act
+    const unknown = run(['agenda', 'edit', 'A1', '--stage', 'review'], board, CHANNEL);
+    const done = run(['agenda', 'edit', 'A1', '--stage', 'done'], board, CHANNEL);
+    const older = run(['agenda', 'edit', 'A1', '--stage', 'plan'], board);
+
+    // Assert
+    should(await failure(unknown.parsed)).match(/--stage is one of explainer, question, plan, tracker, test/u);
+    should(await failure(done.parsed)).match(/done is `agenda done`/u);
+    should(await failure(older.parsed)).match(/older than --stage/u);
+  });
+
+  it('should send --stage, --where and --detail on add', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      [
+        'agenda',
+        'add',
+        'Read the plan',
+        '--title',
+        'The plan',
+        '-k',
+        'info',
+        '--stage',
+        'explainer',
+        '--where',
+        'Drafted',
+      ],
+      afterAdd,
+      CHANNEL,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({ action: 'add', stage: 'explainer', whereWeAre: 'Drafted' });
+  });
+});
+
+describe('editable asks (agenda.asks.1)', () => {
+  it('should refuse --kind and --clear-question-answer on a daemon that has the channel but not editable asks', async () => {
+    // Arrange + Act
+    const kind = run(['agenda', 'edit', 'A1', '--kind', 'yesno'], board, [DAEMON_FEATURES.agendaChannel]);
+    const clear = run(['agenda', 'edit', 'A1', '--clear-question-answer'], board, [DAEMON_FEATURES.agendaChannel]);
+    const refusal = async (parsed: Promise<unknown>): Promise<string> =>
+      await parsed.then(
+        () => 'no error',
+        (error: unknown) => String(error),
+      );
+
+    // Assert
+    should(await refusal(kind.parsed)).match(/older than --kind and --clear-question-answer/u);
+    should(await refusal(clear.parsed)).match(/older than --kind and --clear-question-answer/u);
+    should(kind.gateway.applied).be.empty();
+  });
+});
+
+it('dispatches log, merge and split arguments through the public command registration', async () => {
+  const cases = [
+    ['agenda', 'log', 'A1', '--reply', 'OK', '--message', 'owner-1'],
+    ['agenda', 'merge', 'A1', 'A2'],
+    [
+      'agenda',
+      'split',
+      'A1',
+      'Which cache?',
+      '--title',
+      'Cache',
+      '--premise',
+      'A cache is needed.',
+      '--context',
+      'It has a separate rollout.',
+    ],
+  ];
+  for (const argv of cases) {
+    const { parsed, gateway } = run(argv, afterAdd, [DAEMON_FEATURES.agendaConversation]);
+    await parsed;
+    should(gateway.applied[0]?.request.action).equal(argv[1]);
+  }
+});
+
+describe('agenda patch command registration', () => {
+  it('should hand the item reference and --file to the controller, which sends one edit', async () => {
+    // Arrange
+    const held = humanItem('A1', 'approve the deploy');
+    const gateway = new RecordingAgendaGateway(snapshot([held]), snapshot([held]));
+    gateway.offered = [DAEMON_FEATURES.agendaPatch];
+    const input = {
+      read: async (path: string) =>
+        path === 'a1.yaml' ? `revision: ${agendaItemRevision(held)}\nurgency: before Friday` : '',
+    };
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerAgendaCommands(program, new AgendaController(gateway, new CapturingOutput(), SESSION, input));
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'agenda', 'patch', '!A1', '--file', 'a1.yaml']);
+
+    // Assert
+    should(gateway.applied).deepEqual([
+      {
+        sessionId: SESSION,
+        request: { action: 'edit', id: 'A1', revision: agendaItemRevision(held), urgency: 'before Friday' },
+      },
+    ]);
   });
 });

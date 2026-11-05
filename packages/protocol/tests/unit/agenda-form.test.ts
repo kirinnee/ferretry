@@ -9,13 +9,7 @@ import {
   type AgendaFormField,
 } from '../../src/lib/agenda.ts';
 import { agendaCardAnswers, agendaShape } from '../../src/lib/agenda-card.ts';
-import {
-  formAnswerProblems,
-  formFieldName,
-  formFieldRequired,
-  formMissing,
-  formWords,
-} from '../../src/lib/agenda-form.ts';
+import { formAnswerProblems, formFieldName, formWords } from '../../src/lib/agenda-form.ts';
 import { AGENDA_SHAPE_LINE, agendaShapeProblems } from '../../src/lib/agenda-shape.ts';
 
 const region: AgendaFormField = {
@@ -100,6 +94,7 @@ describe('a form card on the agenda', () => {
     };
 
     should(AgendaResponseSchema.safeParse(answer).success).be.true();
+    // Words alone go as an `other` answer (&F922), so a form answer names a field and older apps still read it.
     should(AgendaResponseSchema.safeParse({ kind: 'form', answers: [] }).success).be.false();
   });
 
@@ -155,7 +150,7 @@ describe('a filled-in form', () => {
       '1. Which region: EU\n2. Alerts: Failures, Slow builds\n3. OK to restart: Yes\n4. Anything else: Ship after 6pm',
     );
     should(formWords(FIELDS, answers.slice(0, 1), ' · ')).equal(
-      '1. Which region: EU · 2. Alerts: (no answer) · 3. OK to restart: (no answer) · 4. Anything else: (no answer)',
+      '1. Which region: EU · 2. Alerts: (skipped) · 3. OK to restart: (skipped) · 4. Anything else: (skipped)',
     );
   });
 
@@ -164,15 +159,9 @@ describe('a filled-in form', () => {
     should(formFieldName(region)).equal('Which region');
   });
 
-  it('should require every field but the text one, unless it says otherwise', () => {
-    should(formFieldRequired(region)).be.true();
-    should(formFieldRequired(notes)).be.false();
-    should(formFieldRequired({ ...restart, required: false })).be.false();
-  });
-
-  it('should list the required fields left empty', () => {
-    should(formMissing(FIELDS, answers.slice(0, 1)).map(field => field.id)).deepEqual(['2', '3']);
-    should(formMissing(FIELDS, answers)).deepEqual([]);
+  it('should find no problem in a form answered in part, or not at all: every field is optional (&F922)', () => {
+    should(formAnswerProblems(FIELDS, answers.slice(0, 1))).deepEqual([]);
+    should(formAnswerProblems(FIELDS, [])).deepEqual([]);
   });
 
   it('should accept answers that fit and name each problem when they do not', () => {

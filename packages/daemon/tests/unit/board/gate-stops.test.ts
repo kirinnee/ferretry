@@ -19,7 +19,7 @@ import {
 import { card, FakeFocus, FakeLanes, lanes, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, world } from './support.ts';
 
 /**
- * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Gates ask the owner): their answer to its item, or their own
+ * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Cards show progress): their answer to its item, or their own
  * move — and, on an internal card, its owner ferret's or a lead's. A ferret's move, a daemon trigger, PR facts,
  * `fy signal done` and a refile may bring a card INTO a gate; none takes it out of one or past one.
  */
@@ -43,7 +43,7 @@ const verifyWithoutOwnerGate = (): LaneSet => {
   };
 };
 
-const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon'>, BoardCaller>> = {
+const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'>, BoardCaller>> = {
   'owner-human': { kind: 'owner' },
   owner: { kind: 'ferret', sessionId: 'child' },
   ancestor: { kind: 'ferret', sessionId: 'lead' },
@@ -129,7 +129,10 @@ describe('a ferret’s move never jumps a gate', () => {
 
   for (const jump of JUMPS) {
     for (const audience of ['external', 'internal'] as const) {
-      for (const [standing, caller] of Object.entries(CALLERS) as [Exclude<BoardStanding, 'daemon'>, BoardCaller][]) {
+      for (const [standing, caller] of Object.entries(CALLERS) as [
+        Exclude<BoardStanding, 'daemon' | 'assignee-lead'>,
+        BoardCaller,
+      ][]) {
         const expected = standing !== 'reader' && mayPassGate(standing, audience);
         it(`${expected ? 'lets' : 'refuses'} ${standing} on an ${audience} card ${jump.name}`, async () => {
           // Arrange
@@ -572,7 +575,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
         askedBy: 'person',
       }),
     ]);
-    await world.service.handOver('F1', 'lead', 'child');
+    await world.service.handOver('F1', 'lead', 'child', { owner: 'lead', assignee: null });
     await world.service.act(
       'F1',
       BoardTaskActionRequestSchema.parse({ action: 'refile', projectId: OTHER_PROJECT }),

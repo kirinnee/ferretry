@@ -11,6 +11,9 @@
  *     (`peerEnvelopePreamble` in the protocol). It is shown as a message FROM that agent, not from you.
  *     The daemon always delivers it by bracketed paste — it is multi-line — so on Claude it is ALSO
  *     wrapped in a paste block, which is why the banner used to go unrecognised.
+ *   * SEVERAL AGENTS AT ONCE. The daemon combines the ferret messages a receiver has waiting into ONE turn
+ *     (`combinedDelivery`), each part with its own banner. It is read as N peer messages in order, never as
+ *     one "You" bubble.
  *   * FERRETRY ITSELF, telling an agent a message it sent did not arrive (`ferretryNotice`). Shown as
  *     a compact system notice.
  *   * THE PERSON, BY WAY OF A FILE. A long, multi-line or attached message is written to a turn document
@@ -31,6 +34,7 @@
 import {
   type HandoffPointer,
   type PeerEnvelope,
+  parseCombinedDelivery,
   parseFerretryNotice,
   parseHandoffPointer,
   parsePeerEnvelope,
@@ -50,6 +54,7 @@ export const unwrapPastedContent = (text: string): string =>
 export type UserMessage =
   | { readonly kind: 'human'; readonly text: string }
   | { readonly kind: 'peer'; readonly from: PeerEnvelope; readonly body: string }
+  | { readonly kind: 'combined'; readonly parts: readonly { readonly from: PeerEnvelope; readonly body: string }[] }
   | { readonly kind: 'notice'; readonly text: string }
   | { readonly kind: 'handoff'; readonly pointer: HandoffPointer; readonly text: string };
 
@@ -59,6 +64,9 @@ export const readUserMessage = (raw: string): UserMessage => {
   if (notice !== null) return { kind: 'notice', text: notice };
   const pointer = parseHandoffPointer(text);
   if (pointer !== null) return { kind: 'handoff', pointer, text };
+  const combined = parseCombinedDelivery(text.trimStart());
+  if (combined !== null)
+    return { kind: 'combined', parts: combined.parts.map(({ envelope, body }) => ({ from: envelope, body })) };
   const peer = parsePeerEnvelope(text.trimStart());
   if (peer !== null) return { kind: 'peer', from: peer.envelope, body: peer.body };
   return { kind: 'human', text };

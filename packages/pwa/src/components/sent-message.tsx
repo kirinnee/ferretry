@@ -12,10 +12,11 @@
  */
 
 import { useState } from 'react';
+import { displayCallsign } from '../lib/callsign.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { SentMessage, SentState } from '../lib/peer-delivery.ts';
-import type { TranscriptEntry } from '../lib/session-screens.ts';
 import type { SendReceiptKind } from '../lib/send-receipt.ts';
+import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerName } from './agent-message-rows.tsx';
 import { Markdown } from './markdown.tsx';
 import { ReceiptMark } from './receipt-mark.tsx';
@@ -23,13 +24,29 @@ import { useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
-/** How each state reads, and the receipt mark it wears. */
-const STATES: Readonly<Record<SentState, { readonly word: string; readonly mark: SendReceiptKind }>> = {
+/**
+ * How each state reads: one short word on the card's one-line foot (&F949), the whole meaning on hover and to a screen
+ * reader, and the receipt mark it wears.
+ */
+const STATES: Readonly<
+  Record<SentState, { readonly word: string; readonly detail?: string; readonly mark: SendReceiptKind }>
+> = {
   sending: { word: 'Sending…', mark: 'sending' },
-  queued: { word: 'Queued — it reads this when its current turn ends', mark: 'queued' },
+  queued: { word: 'Queued', detail: 'it reads this when its current turn ends', mark: 'queued' },
+  held: { word: 'Held', mark: 'queued' },
   delivered: { word: 'Delivered', mark: 'delivered' },
   replied: { word: 'Replied', mark: 'answered' },
   failed: { word: 'Not delivered', mark: 'failed' },
+};
+
+/**
+ * Why a held send waits: an FYI for the receiver's turn to end, an action for the batch's time (&B157). The foot's
+ * visible word stays "Held" so the line stays one line on a phone (&F949); this is the tooltip and the screen reader's.
+ */
+const heldDetail = (sent: SentMessage): string | undefined => {
+  if (sent.hold?.kind === 'fyi') return `delivered when ${displayCallsign(sent.to)}'s turn ends`;
+  if (sent.hold?.kind === 'batch') return `delivered at ${sent.hold.until}, batched with its other messages`;
+  return undefined;
 };
 
 /** What a send's body says when this reader could not see the words. */
@@ -53,7 +70,12 @@ export function SentMessageRow({
 }) {
   const surface = useReferenceSurface();
   const [showCommand, setShowCommand] = useState(false);
-  const state = STATES[sent.state];
+  // A held send says when it goes, in the CLI's terms: true when it was sent, and all the sender knows (&B157 — GAP:
+  // the card does not follow it to Delivered; that is the receiver's send ledger, read from the sender's chat).
+  const known = STATES[sent.state];
+  const heldWhy = sent.state === 'held' ? heldDetail(sent) : undefined;
+  const state = heldWhy === undefined ? known : { ...known, detail: heldWhy };
+  const reason = sent.state === 'failed' && sent.reason !== undefined && sent.reason !== '' ? sent.reason : undefined;
   return (
     <article
       className="fy-message fy-message-sent"
@@ -61,7 +83,7 @@ export function SentMessageRow({
       data-transcript-kind="sent"
       {...rhythm}
     >
-      <header>
+      <header className="fy-sent-head">
         <span className="fy-sent-label">Sent to</span>
         <PeerName peer={{ name: sent.to }} surface={surface} />
         {sent.ask ? <span className="fy-peer-kind">waiting for a reply</span> : null}
@@ -71,26 +93,44 @@ export function SentMessageRow({
       ) : (
         <Markdown className="fy-sent-body" text={sent.body} {...surface} />
       )}
-      <p className="fy-sent-state" data-sent-state={sent.state} role={sent.state === 'failed' ? 'alert' : undefined}>
-        <ReceiptMark className="fy-sent-mark" kind={state.mark} />
-        <span>
-          {state.word}
-          {sent.reason === undefined || sent.reason === '' ? null : (
-            <span className="fy-sent-reason"> — {sent.reason}</span>
-          )}
-        </span>
-      </p>
+      {/* ONE LINE (&F949): where it got to · Show command, the time at the right. A failure's reason, in the CLI's own
+          words, is the one thing that takes a line of its own. */}
       <div className="fy-sent-foot">
-        <button
-          aria-expanded={showCommand}
-          className="fy-sent-command-toggle"
-          onClick={() => setShowCommand(current => !current)}
-          type="button"
+        <span
+          className="fy-sent-state"
+          data-sent-state={sent.state}
+          role={sent.state === 'failed' ? 'alert' : undefined}
+          title={state.detail === undefined ? state.word : `${state.word} — ${state.detail}`}
         >
-          {showCommand ? 'Hide command' : 'Show command'}
-        </button>
+          <ReceiptMark className="fy-sent-mark" kind={state.mark} />
+          <span className="fy-sent-word">
+            {state.word}
+            {state.detail === undefined ? null : <span className="sr-only"> — {state.detail}</span>}
+            {/* The alert says why, too: the visible reason below is drawn for the eye only. */}
+            {reason === undefined ? null : <span className="sr-only">: {reason}</span>}
+          </span>
+        </span>
+        {/* The separator belongs to the item AFTER it, so a foot that must wrap never strands it at a line's end. */}
+        <span className="fy-sent-command">
+          <span aria-hidden="true" className="fy-sent-dot">
+            ·
+          </span>
+          <button
+            aria-expanded={showCommand}
+            className="fy-sent-command-toggle"
+            onClick={() => setShowCommand(current => !current)}
+            type="button"
+          >
+            {showCommand ? 'Hide command' : 'Show command'}
+          </button>
+        </span>
         <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
       </div>
+      {reason === undefined ? null : (
+        <p aria-hidden="true" className="fy-sent-reason" data-sent-reason="">
+          {reason}
+        </p>
+      )}
       {showCommand && entry.tools !== undefined ? <ToolGroup calls={entry.tools} isLast={isLast} live={live} /> : null}
     </article>
   );

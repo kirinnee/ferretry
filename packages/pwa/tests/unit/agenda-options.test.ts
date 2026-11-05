@@ -5,7 +5,6 @@ import {
   isOneWord,
   itemOptions,
   letteredOptions,
-  letterOf,
   needsOptionsSection,
   optionLetter,
   rowLettered,
@@ -18,8 +17,6 @@ const options = [{ label: 'Keep both', description: 'One line.' }, { label: 'Rep
 describe('the letters of an item’s options', () => {
   test('are A, B, C… in ask order', () => {
     expect([0, 1, 2, 11].map(optionLetter)).toEqual(['A', 'B', 'C', 'L']);
-    expect(letterOf(options, 'replace the old one')).toBe('B');
-    expect(letterOf(options, 'Nothing')).toBeUndefined();
   });
 
   test('carry the item’s detail, falling back to the option’s own description, and mark the recommended one', () => {
@@ -37,10 +34,13 @@ describe('the letters of an item’s options', () => {
   });
 
   test('are read from a choice ask or a lone question, and from nothing else', () => {
-    expect(itemOptions(agendaItem('A1', { ask: choices('Yes', 'No') })).map(option => option.label)).toEqual([
-      'Yes',
-      'No',
+    expect(itemOptions(agendaItem('A1', { ask: choices('Ship', 'Hold') })).map(option => option.label)).toEqual([
+      'Ship',
+      'Hold',
     ]);
+    // Yes and No are listed as their buttons sit: No, then Yes, whichever order the ferret wrote.
+    for (const listed of [choices('Yes', 'No'), choices('No', 'Yes')])
+      expect(itemOptions(agendaItem('A1', { ask: listed })).map(option => option.label)).toEqual(['No', 'Yes']);
     const lone = agendaItem('A2', {
       ask: { kind: 'open-question' },
       questions: [{ question: 'Which?', options: [{ label: 'One' }] }],
@@ -50,7 +50,7 @@ describe('the letters of an item’s options', () => {
   });
 });
 
-describe('a button’s short text', () => {
+describe('the Options section’s name for an option', () => {
   test('is the label when it is one or two words, else the letter, else the whole label', () => {
     expect(shortLabel('Skip', 'C')).toBe('Skip');
     expect(shortLabel('Looks good', 'A')).toBe('Looks good');
@@ -67,7 +67,7 @@ describe('a button’s short text', () => {
   });
 });
 
-describe('a row of quick replies', () => {
+describe('a row of options in the Options section', () => {
   test('reads one way: one long lettered label letters the whole row', () => {
     const row = [
       { label: 'Use SQLite', letter: 'A' },

@@ -460,7 +460,10 @@ call.
 
 1. **An agent reaches only its own session.** `POST /v1/agent/tools` names no session anywhere: the
    daemon hashes the credential presented as `Authorization: Bearer fys_…` or on `x-fy-session-capability`
-   and finds the one LIVE session whose stored hash matches (constant-time). The call schema is strict, so
+   and finds the one LIVE session whose stored hash matches (constant-time). A digest it has seen before
+   locates that session without a fleet scan, but the session is re-read and re-proved on every request, and
+   a digest more than one session holds, or any request after a session configuration was written, scans
+   the fleet — so the answer is always the first live match a full scan would give. The call schema is strict, so
    a body `sessionId` is refused; `x-ferretry-session-id` may only agree with the credential, and one
    naming another session is `401 session_mismatch`, audited. Surfaces are looked up in that session's
    listing only.
@@ -861,7 +864,9 @@ Old closed work is left out unless `all` is true; when it was, a last line says 
 to search before it files (the board and agenda sections end their opening with the same rule), and
 `fy task create` / `fy agenda add` run the daemon's related check themselves
 (`POST /v1/search/related`): a strong match refuses the create unless `--new` (or `--related <id>`) says what to
-do instead. A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
+do instead. `fy agenda add` also lists the caller's own open agendas first and opens a new one only with
+`--new "<why none fits>"` ([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)); `fy task create` also
+lists weaker related cards and refuses an umbrella card ([board.md § One card, one outcome](board.md#one-card-one-outcome)). A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
 
 MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
 the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the

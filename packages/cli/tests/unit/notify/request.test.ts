@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { MAX_AGENDA_BODY_LENGTH } from '@ferretry/protocol';
 import should from 'should';
 import { composeNoticeRequest } from '../../../src/lib/notify/request';
 
@@ -45,6 +46,9 @@ describe('notice request', () => {
   it('should refuse a summary or body that is too long, in numbers', () => {
     // Act + Assert
     should(() => composeNoticeRequest(['x'.repeat(241)], {})).throw(/241 characters.*240/u);
-    should(() => composeNoticeRequest(['ok'], { body: 'y'.repeat(8_001) })).throw(/8001 characters.*8000/u);
+    const over = MAX_AGENDA_BODY_LENGTH + 1;
+    should(() => composeNoticeRequest(['ok'], { body: 'y'.repeat(over) })).throw(
+      new RegExp(`${over} characters.*${MAX_AGENDA_BODY_LENGTH}`, 'u'),
+    );
   });
 });

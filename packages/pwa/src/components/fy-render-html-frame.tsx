@@ -49,16 +49,16 @@ import type { FyRenderSandboxFailure, FyRenderSandboxFailureKind } from './fy-re
 const FY_RENDER_HTML_SHELL_URL = '/fy-render-html.html';
 
 /**
- * WHAT THE PAGE IS PAINTED WITH BY DEFAULT, so a frameless page reads as part of
- * the message: the column's background, text colour and font, and the reader's
- * mode. Three computed CSS values the reader can already see — nothing else of
- * the app. Any author stylesheet overrides them like a user-agent default.
+ * WHAT THE PAGE IS PAINTED WITH, so a frameless page reads as part of the
+ * message: the reader's mode, and the app's theme tokens as computed on the
+ * column — `FY_RENDER_HTML_TOKENS` in `lib/fy-render-html-kit.ts` names every
+ * one, and the shell admits each by that module's rule. Values the reader can
+ * already see on screen, nothing else of the app. No background: the page is
+ * transparent and sits on the column's own surface.
  */
 export interface FyRenderHtmlPaint {
-  readonly background: string;
-  readonly color: string;
-  readonly font: string;
   readonly scheme: 'dark' | 'light';
+  readonly tokens: Readonly<Record<string, string>>;
 }
 
 export interface FyRenderHtmlFrameProps {
@@ -70,8 +70,10 @@ export interface FyRenderHtmlFrameProps {
   readonly ready: boolean;
   /** The frame's accessible name — the block's own description. */
   readonly title: string;
-  /** In fullscreen the stylesheet owns the height and the reported one is ignored. */
+  /** In fullscreen the stylesheet owns the height and the reported one is ignored; the page may scroll there only. */
   readonly fullscreen: boolean;
+  /** The height this page last had, so a frame coming back takes its place before the page reports. */
+  readonly initialHeight?: number | null;
   /** The page is in: its scripts have run once and it reported its size. */
   readonly onRendered: () => void;
   /** The clamped inline height, each time the page reports one — so a parked frame keeps its place. */
@@ -89,6 +91,7 @@ export function FyRenderHtmlFrame({
   ready,
   title,
   fullscreen,
+  initialHeight = null,
   onRendered,
   onHeight,
   onFailed,
@@ -97,12 +100,12 @@ export function FyRenderHtmlFrame({
 }: FyRenderHtmlFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   /** Inline height the page asked for, already clamped. Null until it says. */
-  const [height, setHeight] = useState<number | null>(null);
+  const [height, setHeight] = useState<number | null>(initialHeight);
   const done = useRef(false);
   /** Callbacks by ref, so a transcript repaint never rebuilds the bridge and reruns the page. */
-  const latest = useRef({ onEscape, onFailed, onHeight, onRendered, paint });
+  const latest = useRef({ fullscreen, onEscape, onFailed, onHeight, onRendered, paint });
   useEffect(() => {
-    latest.current = { onEscape, onFailed, onHeight, onRendered, paint };
+    latest.current = { fullscreen, onEscape, onFailed, onHeight, onRendered, paint };
   });
   const portRef = useRef<MessagePort | null>(null);
 
@@ -110,6 +113,10 @@ export function FyRenderHtmlFrame({
   useEffect(() => {
     portRef.current?.postMessage({ kind: 'paint', paint });
   }, [paint]);
+  // Inline the page never scrolls; fullscreen is the one state it may. Also a message, never a remount.
+  useEffect(() => {
+    portRef.current?.postMessage({ kind: 'layout', layout: { fullscreen } });
+  }, [fullscreen]);
 
   const fail = (kind: FyRenderSandboxFailureKind, detail: string | null = null): void => {
     if (done.current) return;
@@ -192,6 +199,7 @@ export function FyRenderHtmlFrame({
       frame.contentWindow?.postMessage({ kind: 'init' }, '*', [channel.port2]);
       port.postMessage({
         kind: 'render-html',
+        layout: { fullscreen: latest.current.fullscreen },
         paint: latest.current.paint,
         source: block.payload,
         theme: latest.current.paint.scheme,
@@ -242,7 +250,15 @@ export function FyRenderHtmlFrame({
       referrerPolicy="no-referrer"
       /** NO `allow-same-origin`, and nothing else either. See the header. */
       sandbox="allow-scripts"
-      style={fullscreen || height === null ? undefined : { height: `${height}px` }}
+      /**
+       * THE FRAME'S SCHEME IS THE PAGE'S. A frame whose element and document disagree on
+       * `color-scheme` gets an opaque backdrop from the browser; agreeing keeps the
+       * transparent page on the column's own surface.
+       */
+      style={{
+        colorScheme: paint.scheme,
+        ...(fullscreen || height === null ? {} : { height: `${height}px` }),
+      }}
       /**
        * AN EXPLICIT TAB STOP, unlike the library frame's `-1`: the page IS the
        * interaction. Explicit rather than native so `useDialogFocus`'s

@@ -3,6 +3,7 @@ import {
   PUSH_URGENT_TTL_SECONDS,
   type PushDeliveryResult,
   PushDeliveryResultSchema,
+  type PushPayload,
   type PushDeviceView,
   type RegisterPushDeviceRequest,
 } from '@ferretry/protocol';
@@ -188,9 +189,11 @@ export class PushService {
    * discovery can be made: nothing else in this daemon ever learns that a browser is unreachable.
    * `delivered` means a push endpoint accepted the request; it does not claim a person observed it.
    */
-  async notify(dispatch: PushDispatch, to?: readonly string[]): Promise<PushDeliveryResult> {
+  async notify(dispatch: PushDispatch<PushPayload>, to?: readonly string[]): Promise<PushDeliveryResult> {
     const enrolled = await this.enrolments();
-    const addressed = to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id));
+    const addressed = (to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id))).filter(
+      record => record.deviceId !== dispatch.exceptDevice,
+    );
     const payload = JSON.stringify(dispatch.payload);
     // A high push is about something that expires (a one-time code): it asks to be delivered now, and not at all later.
     // A push about something that ends sooner (an approve-on-phone card) is held no longer than it lives.

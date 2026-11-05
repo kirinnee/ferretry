@@ -29,6 +29,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'mints a one-time public key for a secret copy; the import that spends it is audited under its id',
   'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
   'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
+  'POST /v1/push/seen':
+    'takes an opened agenda item’s alerts down on the owner’s other devices; changes nobody’s access, and the clear is recorded in the notification ledger',
   'POST /v1/system/open-url':
     'audited as link.opened by the service, which sees the address; the route decorator cannot read the body',
   'POST /v1/diagnostics/profile': 'opens a read-only window onto the daemon’s own counters; changes nothing',
@@ -83,6 +85,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'the owner skipping the settle window for answers already recorded; the send ledger is that history',
   'POST /v1/sessions/:sessionId/agenda':
     'an agent raising an agenda item (the agenda spelling of the agenda route above); the agenda list is that history',
+  'PUT /v1/sessions/:sessionId/agenda/:id/seen':
+    'a device marking the item version it opened; a per-device read marker, not a change to the item or to anyone\u2019s access',
   'POST /v1/sessions/:sessionId/agenda/replies':
     'the owner skipping the settle window for answers already recorded (the agenda spelling of the agenda route above); the send ledger is that history',
   'POST /v1/agenda/clear-agents':

@@ -50,6 +50,7 @@ const theme: ResolvedTheme = {
   colors: Object.fromEntries(THEME_TOKENS.map(token => [token, '#123456'])) as Record<ThemeToken, string>,
   font: 'system-ui',
   mode: 'dark',
+  backdrop: '#0b0b0d',
   radius: 2,
 };
 

@@ -301,6 +301,7 @@ export const JEV_ACTS_BY_KIND: Readonly<Record<WardenAnomalyKind, readonly Triag
   orphaned_card: [],
   report_overdue: [],
   input_stuck: [],
+  inbox_stuck: [],
 };
 
 /** The acts Jev is offered for one flag. A flag about several ferrets is no one ferret's to act on. */
@@ -317,7 +318,7 @@ export function jevActsFor(
  * Jev, shown the turn, can neither confirm nor refute it, and is offered no act on it. On 2026-10-29 it
  * answered `unsure` to every one of 39 such flags, which was right, and paid for each.
  */
-const JEV_BLIND_KINDS: ReadonlySet<WardenAnomalyKind> = new Set(['dead_monitor', 'owner_request']);
+const JEV_BLIND_KINDS: ReadonlySet<WardenAnomalyKind> = new Set(['dead_monitor', 'owner_request', 'inbox_stuck']);
 
 /** Whether Jev is worth asking about this flag at all: a flag it cannot judge is handed on unasked. */
 export function jevJudges(anomaly: Pick<WardenAnomaly, 'kind'>): boolean {

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
 import { AgendaSnoozeMenu } from '../../../src/features/agenda/agenda-snooze-menu.tsx';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
@@ -70,6 +72,8 @@ const deckPage = (
     onSkip?: (card: InboxCard) => void;
     compass?: boolean;
     snoozes?: string[];
+    /** Something drawn with each card besides the card itself. */
+    extra?: ReactNode;
   } = {},
 ) => (
   <InboxHarness
@@ -92,7 +96,12 @@ const deckPage = (
                   inbox.deferred.schedule(card, snoozeAction(until));
                 },
               })}
-          renderCard={(card, act) => <AgendaCard item={card.item} onAct={act} swipeHints />}
+          renderCard={(card, act) => (
+            <>
+              <AgendaCard item={card.item} onAct={act} swipeHints />
+              {props.extra}
+            </>
+          )}
         />
         <AgendaUndoToast clock={fake.clock.now} inbox={inbox} />
       </>
@@ -260,6 +269,28 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await advance(fake, 1);
     expect(fake.commits.map(commit => [commit.card.item.id, commit.action.label])).toEqual([['A3', 'Wait']]);
     await mounted.unmount();
+  });
+
+  it('swipes and keys Yes and No as ← No · → Yes, whichever order the item listed them in', async () => {
+    for (const [id, listed] of [
+      ['A7', choices('Yes', 'No')],
+      ['A8', choices('No', 'Yes')],
+    ] as const) {
+      const yesNo = inboxCard(
+        agendaItem(id, { subject: 'Restart the box tonight?', kind: 'yesno', ask: listed } as never),
+      );
+      expect(swipeKeyHint(swipeTargets(yesNo.item))).toBe('Arrow left: No. Arrow right: Yes.');
+      const left = fakeInbox();
+      const swiped = await mount(deckPage(left, [yesNo]));
+      await swipe(swiped, -200, 0);
+      expect(pending(left)).toEqual(['No']);
+      await swiped.unmount();
+      const right = fakeInbox();
+      const keyed = await mount(deckPage(right, [yesNo]));
+      await interact(() => pressKey(frame(keyed, id), 'ArrowRight'));
+      expect(pending(right)).toEqual(['Yes']);
+      await keyed.unmount();
+    }
   });
 
   it('swipes left to the left answer, and undo brings the card back', async () => {
@@ -669,6 +700,22 @@ describe('a swipe from anywhere on the card', () => {
     await touch(body, 'pointermove', 300, 304);
     await touch(body, 'pointerup', 300, 304);
     expect(pending(fake)).toEqual(['Skip']);
+    await mounted.unmount();
+  });
+
+  it('ignores a drag on something the card drew into a portal (the ⋯ sheet): React carries it here, the card is not under it', async () => {
+    const fake = fakeInbox();
+    const sheet = createPortal(<p data-test-sheet="">Item options</p>, document.body);
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay], { extra: sheet }));
+    const words = must(document.body.querySelector('[data-test-sheet]'), 'the sheet');
+    expect(deckTop(mounted).contains(words)).toBe(false);
+    await touch(words, 'pointerdown', 100, 300);
+    await touch(words, 'pointermove', 190, 304);
+    await touch(words, 'pointermove', 300, 304);
+    await touch(words, 'pointerup', 300, 304);
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+    expect(pending(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
     await mounted.unmount();
   });
 

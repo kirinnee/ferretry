@@ -9,8 +9,11 @@ import {
   BoardStateFilterSchema,
   type BoardTaskActionRequest,
   BoardTaskActionRequestSchema,
+  type BoardStatus,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
+  type BoardTaskVisibility,
+  BoardTaskVisibilitySchema,
   type BoardTerm,
   BoardTermsSchema,
   DependencyUntilSchema,
@@ -100,6 +103,10 @@ export interface BoardCreateOptions {
   readonly file?: readonly string[];
   readonly project?: string;
   readonly lane?: string;
+  /** `--private`: a card for the ferrets' own bookkeeping, off the default board. */
+  readonly private?: boolean;
+  /** `--public`: a card the owner sees on the default board. */
+  readonly public?: boolean;
 }
 
 /** What the controller resolved before the pure part runs: the brief and test texts, the board and the assignee id. */
@@ -171,6 +178,9 @@ export function buildBoardCreateRequest(
   const thread = present(options.thread);
   const branch = present(options.branch);
   const lane = present(options.lane);
+  if (options.private === true && options.public === true) refuse('pass --private or --public, not both');
+  const visibility: BoardTaskVisibility | undefined =
+    options.private === true ? 'private' : options.public === true ? 'public' : undefined;
 
   const candidate = {
     kind,
@@ -193,6 +203,7 @@ export function buildBoardCreateRequest(
     files: trimmedAll(options.file),
     ...(branch === undefined ? {} : { branch }),
     docs: trimmedAll(options.doc),
+    ...(visibility === undefined ? {} : { visibility }),
   };
   parseOrRefuse(BoardTaskCreateRequestSchema, candidate, 'cannot create this task');
   return candidate;
@@ -307,6 +318,9 @@ export function buildLinkAction(options: BoardLinkOptions): BoardTaskActionReque
 export const buildAssignAction = (assignee: string | null): BoardTaskActionRequest =>
   action({ action: 'assign', assignee }, 'cannot assign');
 
+/** `claim` names no one: the daemon takes the caller's own session from its credential. */
+export const buildClaimAction = (): BoardTaskActionRequest => action({ action: 'claim' }, 'cannot claim');
+
 export function buildReparentAction(
   parent: string | undefined,
   none: boolean | undefined,
@@ -349,7 +363,21 @@ export const buildFileAction = (
     'cannot claim the file',
   );
 
+/** `--visibility public|private`, checked; absent when not given. */
+export function visibilityOf(value: string | undefined): BoardTaskVisibility | undefined {
+  const given = present(value);
+  return given === undefined ? undefined : requireChoice(given, BoardTaskVisibilitySchema.options, '--visibility');
+}
+
 export interface BoardEditOptions {
+  /** `--status-now`: replaces the Now part of the status, the others kept. */
+  readonly statusNow?: string;
+  /** `--status-done`: replaces the Done so far part. */
+  readonly statusDone?: string;
+  /** `--status-next`: replaces the Next part. */
+  readonly statusNext?: string;
+  /** `--status-file`: YAML or JSON `{ now, doneSoFar, next }`; `-` reads standard input. */
+  readonly statusFile?: string;
   readonly title?: string;
   readonly summary?: string;
   readonly premise?: string | readonly string[];
@@ -359,16 +387,21 @@ export interface BoardEditOptions {
   readonly briefFile?: string;
   readonly howToTest?: string;
   readonly howToTestFile?: string;
+  /** `public` or `private`: who sees the card on the default board. */
+  readonly visibility?: string;
 }
 
-/** The texts `--brief-file` and `--how-to-test-file` stand for, already read, because reading a file is IO. */
+/**
+ * The texts `--brief-file` and `--how-to-test-file` stand for, already read, because reading a file is IO, and the
+ * status parts the `--status-*` flags and `--status-file` name (the daemon merges them into the card's current status).
+ */
 export interface BoardEditTexts {
+  readonly status?: Partial<BoardStatus> | undefined;
   readonly brief?: string | undefined;
   readonly howToTest?: string | undefined;
 }
 
-/** Terms replace the whole glossary. */
-export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts = {}): BoardTaskActionRequest {
+const editFields = (options: BoardEditOptions, texts: BoardEditTexts) => {
   const terms = (options.term ?? []).length > 0 ? parseTerms(options.term ?? []) : undefined;
   const premise = points(options.premise);
   const context = points(options.context);
@@ -380,17 +413,25 @@ export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts
     ...(terms === undefined ? {} : { terms }),
     ...(texts.brief === undefined ? {} : { brief: texts.brief }),
     ...(texts.howToTest === undefined ? {} : { howToTest: texts.howToTest }),
+    ...(texts.status === undefined ? {} : { status: texts.status }),
   };
-  if (Object.keys(fields).length === 0) {
+  return fields;
+};
+
+/** Terms replace the whole glossary. `--visibility` rides in the same action, so text and visibility are one change. */
+export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts = {}): BoardTaskActionRequest {
+  const fields = editFields(options, texts);
+  const visibility = visibilityOf(options.visibility);
+  if (Object.keys(fields).length === 0 && visibility === undefined) {
     refuse(
-      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test or --how-to-test-file',
+      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test, --how-to-test-file, --status-now, --status-done, --status-next, --status-file or --visibility',
     );
   }
   if ('title' in fields && fields.title !== undefined) {
     const problem = taskTitleIssue(fields.title);
     if (problem !== null) refuse(problem);
   }
-  return action({ action: 'edit', ...fields }, 'cannot edit');
+  return action({ action: 'edit', ...fields, ...(visibility === undefined ? {} : { visibility }) }, 'cannot edit');
 }
 
 export const buildRefileAction = (
@@ -419,6 +460,10 @@ export interface BoardViewOptions {
   readonly closed?: boolean;
   readonly query?: string;
   readonly mine?: boolean;
+  /** Show the private cards alone. */
+  readonly private?: boolean;
+  /** Show public and private cards. */
+  readonly all?: boolean;
 }
 
 /** The project the board scopes to once names are resolved: an id, or every project (`undefined`). */
@@ -426,6 +471,24 @@ export interface BoardViewResolved {
   readonly projectId: string | undefined;
   readonly ferretId: string | undefined;
 }
+
+/**
+ * The board shows public cards. `--private` shows the rest and `--all` shows both. A board scoped to one ferret
+ * (`--mine`, `--ferret`) is that ferret's own work, so it shows both unless `--private` says otherwise.
+ */
+function boardVisibilityOf(options: BoardViewOptions, resolved: BoardViewResolved): 'public' | 'private' | undefined {
+  if (options.private === true) return 'private';
+  if (options.all === true || resolved.ferretId !== undefined) return undefined;
+  return 'public';
+}
+
+/**
+ * The `--activity` choices: the board's filters but the deprecated ones (`waiting`, `to_test`, `waiting_on_you`), which
+ * match no card since a card's asks ride its agenda (docs/agenda.md § Card asks).
+ */
+export const BOARD_ACTIVITY_CHOICES: readonly BoardActivityFilter[] = BoardActivityFilterSchema.options.filter(
+  option => option !== 'waiting' && option !== 'to_test' && option !== 'waiting_on_you',
+);
 
 export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewResolved): BoardQueryInput {
   const kind = present(options.kind);
@@ -441,6 +504,8 @@ export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewRe
         ? undefined
         : requireChoice(stateFlag, BoardStateFilterSchema.options, '--state');
   const query = present(options.query);
+  if (options.private === true && options.all === true) refuse('pass --private or --all, not both');
+  const visibility = boardVisibilityOf(options, resolved);
   const candidate = {
     ...(resolved.projectId === undefined ? {} : { project: resolved.projectId }),
     ...(resolved.ferretId === undefined ? {} : { ferret: resolved.ferretId }),
@@ -450,9 +515,10 @@ export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewRe
       : { prState: requireChoice<BoardPrStateFilter>(prState, BoardPrStateFilterSchema.options, '--pr') }),
     ...(activity === undefined
       ? {}
-      : { activity: requireChoice<BoardActivityFilter>(activity, BoardActivityFilterSchema.options, '--activity') }),
+      : { activity: requireChoice<BoardActivityFilter>(activity, BOARD_ACTIVITY_CHOICES, '--activity') }),
     ...(state === undefined ? {} : { state }),
     ...(query === undefined ? {} : { query }),
+    ...(visibility === undefined ? {} : { visibility }),
   };
   parseOrRefuse(BoardQuerySchema, candidate, 'the board query is not usable');
   return candidate;

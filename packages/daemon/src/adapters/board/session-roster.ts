@@ -1,13 +1,19 @@
 import { InstantSchema, SessionStatusSchema, SessionTurnStateSchema, TaskRefSchema } from '@ferretry/protocol';
-import type { SessionLiveness, SessionLivenessSource, SessionRoster } from '../../lib/board/index.ts';
+import type {
+  SessionLiveness,
+  SessionLivenessGuard,
+  SessionLivenessSource,
+  SessionRoster,
+} from '../../lib/board/index.ts';
 import { jsonObject } from '../../lib/json.ts';
 import type { IndexedSession } from '../../lib/storage-types.ts';
 import { withLivenessLedger } from '../../lib/warden/liveness.ts';
 import type { WardenLivenessLedger, WardenSessionState } from '../../lib/warden/types.ts';
-import type { DaemonStorage } from '../storage/session-storage.ts';
+import type { DaemonStorage, DocumentFreshness } from '../storage/session-storage.ts';
+import { parseSessionId } from '../../lib/session-id.ts';
 import { DEFAULT_READ_CONCURRENCY, mapWithConcurrency } from '../warden/concurrent.ts';
 
-type SessionDocuments = Pick<DaemonStorage, 'listSessions' | 'readConfig' | 'readState'>;
+type SessionDocuments = Pick<DaemonStorage, 'listSessions' | 'readConfig' | 'readState' | 'holdSessions'>;
 type SessionDocument = Awaited<ReturnType<SessionDocuments['readState']>>;
 
 /** What the Warden's liveness monitor saw of one session this daemon life; `undefined` when nothing. */
@@ -45,7 +51,7 @@ interface DocumentLiveness {
  * A session whose documents cannot be read is held but left out of `sessions`: the board calls it
  * neither alive nor dead.
  */
-export class StorageSessionRoster implements SessionLivenessSource {
+export class StorageSessionRoster implements SessionLivenessSource, SessionLivenessGuard {
   /** Keyed by the state document's value, which a changed file replaces. */
   private readonly parsed = new WeakMap<object, DocumentLiveness>();
 
@@ -66,10 +72,30 @@ export class StorageSessionRoster implements SessionLivenessSource {
     return { held: new Set(indexed.map(session => session.id)), sessions };
   }
 
-  private async read(session: IndexedSession): Promise<SessionLiveness | undefined> {
+  /**
+   * Holds these sessions' documents still and reads them again from the files, so what `work` is handed is what is
+   * on disk at that moment and stays so until it settles. A session the index does not hold is gone. Only the named
+   * sessions are read, never the fleet: the hold is for a commit, and the commit must not wait on a whole-fleet read.
+   */
+  async settled<T>(ids: readonly string[], work: (fresh: SessionRoster) => Promise<T>): Promise<T> {
+    return await this.storage.holdSessions(ids.map(parseSessionId), async () => {
+      const held = this.storage.listSessions().filter(session => ids.includes(session.id));
+      const read = await Promise.all(
+        held.map(async session => await this.read(session, 'proved').catch(() => undefined)),
+      );
+      const sessions = new Map<string, SessionLiveness>();
+      for (const session of read) if (session !== undefined) sessions.set(session.id, session);
+      return await work({ held: new Set(held.map(session => session.id)), sessions });
+    });
+  }
+
+  private async read(
+    session: IndexedSession,
+    freshness: DocumentFreshness = 'heard',
+  ): Promise<SessionLiveness | undefined> {
     const [config, state] = await Promise.all([
-      this.storage.readConfig(session.id, 'heard'),
-      this.storage.readState(session.id, 'heard'),
+      this.storage.readConfig(session.id, freshness),
+      this.storage.readState(session.id, freshness),
     ]);
     const documents = this.documents(session.id, config, state);
     if (documents === undefined) return undefined;

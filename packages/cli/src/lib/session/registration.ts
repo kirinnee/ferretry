@@ -1,6 +1,8 @@
 import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import { type Command, Option } from 'commander';
+import { requireCardRef } from '../board/board-request.ts';
 import type { AnswerQuestionController } from './answer-controller.ts';
+import { SessionCommandError } from './errors.ts';
 import type { InterruptSessionController, ResumeSessionController } from './lifecycle-controllers.ts';
 import type { SuggestNamesController } from './name-controller.ts';
 import type { SessionPresenter } from './presenter.ts';
@@ -10,6 +12,7 @@ import type { SendMessageController } from './send-controller.ts';
 import type { SignalSessionController } from './signal-controller.ts';
 import type { StartSessionController } from './start-controller.ts';
 import type { SessionStatusController } from './status-controller.ts';
+import type { SessionSubtreeController } from './subtree-controller.ts';
 
 /** The agent runtime a first run makes for Claude Code, named the way the import names it. */
 const FIRST_RUN_EXAMPLE = importedRuntimeName('claude', IMPORT_NAMES.defaultProfile);
@@ -20,6 +23,7 @@ export interface SessionCommandDeps {
   readonly start: StartSessionController;
   readonly list: ListSessionsController;
   readonly status: SessionStatusController;
+  readonly subtree: SessionSubtreeController;
   readonly send: SendMessageController;
   readonly answer: AnswerQuestionController;
   readonly names: SuggestNamesController;
@@ -88,6 +92,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .option('--teammate-fallback', 'with --teammate: auto-assign a free callsign instead of failing on a collision')
     .option('--label <label>', 'ownership label; filter later with `ps --label`')
     .option('--parent <id>', 'parent session; an auto session started inside a pane inherits that pane by default')
+    .option('--card <id>', 'an existing card it takes over (assigned to it; no second card is made); needs a prompt')
     .option('--prompt-file <file>', 'read the prompt from a file instead of the command line')
     .option('--model <model>', 'override the model (alias or full id)')
     .option(
@@ -129,6 +134,9 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
           ...(flag(options, 'teammateFallback') === undefined ? {} : { teammateFallback: true }),
           ...(text(options, 'label') === undefined ? {} : { label: text(options, 'label') }),
           ...(text(options, 'parent') === undefined ? {} : { parent: text(options, 'parent') }),
+          ...(text(options, 'card') === undefined
+            ? {}
+            : { card: requireCardRef(text(options, 'card') ?? '', 'card id').id }),
           ...(text(options, 'model') === undefined ? {} : { model: text(options, 'model') }),
           // Only state a remote-control decision when one was actually typed; otherwise the daemon
           // applies its mode-dependent default.
@@ -172,15 +180,24 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
 
   program
     .command('status')
-    .description('show one session in detail')
-    .argument('<id>', 'session id or callsign')
-    .option('--json', 'print the session as JSON')
+    .description('show one session in detail, or with --subtree a table of its sub-ferrets')
+    .argument('[id]', 'session id or callsign (with --subtree: defaults to the calling session)')
+    .option(
+      '--subtree',
+      'one table of every live descendant (and those ended in the last 2h): model, state, card, PR and its last line',
+    )
+    .option('--json', 'print the session, or with --subtree its rows, as JSON')
     .action(
-      guard(async (id: string, options: CommanderOptions) => {
-        await deps.status.execute(id, { ...(flag(options, 'json') === undefined ? {} : { json: true }) });
+      guard(async (id: string | undefined, options: CommanderOptions) => {
+        const json = flag(options, 'json') === undefined ? {} : { json: true };
+        if (flag(options, 'subtree') !== undefined) return await deps.subtree.execute(id, json);
+        if (id === undefined) throw new SessionCommandError('missing the session id: status <id>, or status --subtree');
+        await deps.status.execute(id, json);
       }),
     );
 
+  const KIND_HELP =
+    "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends";
   const sendAction = guard(async (id: string, parts: string[], options: CommanderOptions) => {
     await deps.send.execute(id, {
       ...(joined(parts) === undefined ? {} : { message: joined(parts) }),
@@ -190,6 +207,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
       ...(flag(options, 'ask') === undefined ? {} : { ask: true }),
       ...(flag(options, 'expectReply') === undefined ? {} : { expectReply: true }),
       ...(text(options, 'until') === undefined ? {} : { until: text(options, 'until') }),
+      ...(text(options, 'kind') === undefined ? {} : { kind: text(options, 'kind') }),
       ...(flag(options, 'wait') === undefined ? {} : { wait: true }),
       ...(flag(options, 'json') === undefined ? {} : { json: true }),
     });
@@ -207,6 +225,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .option('--expect-reply', 'label this as needing a reply, without parking this session')
     .option('--until <when>', 'with --ask: give up waiting after this long (45m, 2h, or an ISO timestamp)')
     .option('--wait', 'wait until the message is proven delivered, timed out, or unconfirmed')
+    .option('--kind <kind>', KIND_HELP)
     .option('--json', 'print the session as JSON')
     .action(sendAction);
 
@@ -215,6 +234,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .description('the peer-reply spelling of send: answers a peer that is parked on this session')
     .argument('<id>', 'session id or callsign')
     .argument('<message...>', 'the reply text')
+    .option('--kind <kind>', KIND_HELP)
     .option('--json', 'print the session as JSON')
     .action(sendAction);
 

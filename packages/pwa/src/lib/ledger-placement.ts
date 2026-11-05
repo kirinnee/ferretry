@@ -1,6 +1,6 @@
 import { type HandoffPointer, parseFerretryNotice, parseMessageAttachments } from '@ferretry/protocol';
-import { markReplies } from './peer-delivery.ts';
 import { ferretryFeatureOf } from './ferretry-sender.ts';
+import { markReplies } from './peer-delivery.ts';
 import { peerFrom } from './peer-message.ts';
 import { EMPTY_SEND_VIEW, type SendViewState } from './send-dismissals.ts';
 import { foldLedgerSendRecords, type LedgerSendRecord, RECORD_CLOCK_SLACK_MS } from './send-ledger.ts';
@@ -234,11 +234,20 @@ const wearSends = (entries: readonly TranscriptEntry[], records: readonly Ledger
     worn.set(pair.index, pair.record);
     placed.add(pair.record.sendId);
   }
-  const inside = joinedSends(
-    entries,
-    candidates.filter(record => !placed.has(record.sendId)),
-    worn,
+  const inside = new Set(
+    joinedSends(
+      entries,
+      candidates.filter(record => !placed.has(record.sendId)),
+      worn,
+    ),
   );
+  // A message delivered inside a combined turn whose send a row wears but found no row of its own (the
+  // turn travelled as a file, so its row is one hand-off) is in the conversation: that row draws it.
+  const wornSends = new Set([...worn.values()].map(record => record.sendId));
+  for (const record of candidates) {
+    const into = record.queue?.deliveredAs;
+    if (!placed.has(record.sendId) && into !== undefined && wornSends.has(into)) inside.add(record.sendId);
+  }
   return { worn, inside };
 };
 

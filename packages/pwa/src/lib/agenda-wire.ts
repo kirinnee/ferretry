@@ -45,6 +45,12 @@ export class AgendaWireDirectory {
   readonly #gateItems = new Map<DaemonId, boolean>();
   /** Whether each read machine answers `GET /v1/agenda/open` (`agenda.open.1`); absent until its health answered. */
   readonly #open = new Map<DaemonId, boolean>();
+  /** Whether each read machine checks an answer's `askVersion` (`agenda.asks.1`); absent until its health answered. */
+  readonly #asks = new Map<DaemonId, boolean>();
+  /** Whether each read machine takes the card ask an answer names (`agenda.card-asks.1`); absent until its health answered. */
+  readonly #cardAsks = new Map<DaemonId, boolean>();
+  /** Whether each read machine stores the conversation and keeps versions (`agenda.conversation.1`); absent until its health answered. */
+  readonly #conversation = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -98,9 +104,40 @@ export class AgendaWireDirectory {
     return this.#open.get(daemonId);
   }
 
+  /**
+   * Whether the machine checks an answer's `askVersion` (`agenda.asks.1`): `undefined` until its health answered, and
+   * `false` for a machine that would refuse the field as malformed.
+   */
+  asksOf(daemonId: DaemonId): boolean | undefined {
+    return this.#asks.get(daemonId);
+  }
+
+  /**
+   * Whether the machine takes the card ask an answer names (`agenda.card-asks.1`): `undefined` until its health
+   * answered, and `false` for a machine that would refuse the field as malformed.
+   */
+  cardAsksOf(daemonId: DaemonId): boolean | undefined {
+    return this.#cardAsks.get(daemonId);
+  }
+
+  /**
+   * Whether the machine stores the conversation, keeps every version and takes `merge` (`agenda.conversation.1`): the
+   * item view draws the stored thread, the diff control and the merge button only where it does. `undefined` until its
+   * health answered, which offers none of them.
+   */
+  conversationOf(daemonId: DaemonId): boolean | undefined {
+    return this.#conversation.get(daemonId);
+  }
+
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
-    this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
+    const cardAsks = machineOffers(read, DAEMON_FEATURES.agendaCardAsks);
+    const cardAsksChanged = this.#cardAsks.get(daemonId) !== cardAsks;
+    this.#cardAsks.set(daemonId, cardAsks);
+    this.#asks.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaAsks));
+    const snoozes = machineOffers(read, DAEMON_FEATURES.agendaSnooze);
+    const snoozeChanged = this.#snooze.get(daemonId) !== snoozes;
+    this.#snooze.set(daemonId, snoozes);
     const offers = machineOffers(read, DAEMON_FEATURES.agendaOfferClose);
     const changed = this.#offerClose.get(daemonId) !== offers;
     this.#offerClose.set(daemonId, offers);
@@ -113,19 +150,45 @@ export class AgendaWireDirectory {
     const opens = machineOffers(read, DAEMON_FEATURES.agendaOpen);
     const openChanged = this.#open.get(daemonId) !== opens;
     this.#open.set(daemonId, opens);
+    const stores = machineOffers(read, DAEMON_FEATURES.agendaConversation);
+    const storesChanged = this.#conversation.get(daemonId) !== stores;
+    this.#conversation.set(daemonId, stores);
     const wire = agendaWireOf(read);
     const spelled = this.#wires.get(daemonId) !== wire;
     this.#wires.set(daemonId, wire);
-    if (changed || spelled || searchChanged || gatesChanged || openChanged) this.#notify();
+    if (
+      changed ||
+      spelled ||
+      searchChanged ||
+      gatesChanged ||
+      openChanged ||
+      cardAsksChanged ||
+      snoozeChanged ||
+      storesChanged
+    )
+      this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
-    this.#snooze.delete(daemonId);
+    const hadSnooze = this.#snooze.delete(daemonId);
+    const hadCardAsks = this.#cardAsks.delete(daemonId);
+    this.#asks.delete(daemonId);
     const had = this.#offerClose.delete(daemonId);
     const hadSearch = this.#workSearch.delete(daemonId);
     const hadGates = this.#gateItems.delete(daemonId);
     const hadOpen = this.#open.delete(daemonId);
-    if (this.#wires.delete(daemonId) || had || hadSearch || hadGates || hadOpen) this.#notify();
+    const hadStores = this.#conversation.delete(daemonId);
+    if (
+      this.#wires.delete(daemonId) ||
+      had ||
+      hadSearch ||
+      hadGates ||
+      hadOpen ||
+      hadSnooze ||
+      hadCardAsks ||
+      hadStores
+    )
+      this.#notify();
   }
 
   #notify(): void {

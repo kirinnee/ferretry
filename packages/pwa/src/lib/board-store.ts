@@ -160,8 +160,8 @@ interface View {
   refs: number;
   state: BoardViewState;
   timer: unknown;
-  /** A watcher wants the whole board re-read every beat. A view nobody asked that of stays live by events alone. */
-  beat: boolean;
+  /** Watchers that want the whole board re-read every beat. A view with none stays live by events alone. */
+  beats: number;
   /** The stamp of whatever last set (or removed) each card, per machine. */
   readonly stamps: Map<DaemonId, Map<BoardTaskId, number>>;
   /** The stamp of the newest whole-board read applied, per machine. */
@@ -175,6 +175,8 @@ interface TaskWatch {
   state: BoardTaskState;
   stamp: number;
   timer: unknown;
+  /** Holders that want the card re-read on the 30-second beat; an inline block reads only on its events. */
+  beats: number;
 }
 
 /** The key of the view for a query over these machines: what `watch` joins and `view` reads. */
@@ -241,14 +243,15 @@ export class DaemonBoardStore {
         refs: 0,
         state: { key, query, slices: new Map() },
         timer: undefined,
-        beat: false,
+        beats: 0,
         stamps: new Map(),
         fullStamp: new Map(),
       };
       this.#views.set(key, view);
     }
     view.refs += 1;
-    view.beat ||= options.beat ?? true;
+    const beats = options.beat ?? true;
+    if (beats) view.beats += 1;
     const joined = view;
     for (const machine of machines) {
       this.#connections.set(machine.daemonId, machine);
@@ -263,7 +266,14 @@ export class DaemonBoardStore {
         if (released) return;
         released = true;
         joined.refs -= 1;
-        if (joined.refs > 0) return;
+        if (beats) joined.beats -= 1;
+        if (joined.refs > 0) {
+          if (joined.beats === 0 && joined.timer !== undefined) {
+            this.#env.clearTimeout(joined.timer);
+            joined.timer = undefined;
+          }
+          return;
+        }
         if (joined.timer !== undefined) this.#env.clearTimeout(joined.timer);
         joined.timer = undefined;
         if (this.#views.get(key) === joined) this.#views.delete(key);
@@ -399,7 +409,7 @@ export class DaemonBoardStore {
   /** The next whole-board read of a view, one beat after the last; a hidden page waits a beat. */
   #arm(view: View): void {
     if (view.timer !== undefined) this.#env.clearTimeout(view.timer);
-    if (!view.beat) return;
+    if (view.beats === 0) return;
     view.timer = this.#env.setTimeout(() => {
       view.timer = undefined;
       if (this.#views.get(view.key) !== view) return;
@@ -480,24 +490,40 @@ export class DaemonBoardStore {
     return this.#tasks.get(taskKey(daemonId, id))?.state ?? IDLE_BOARD_TASK;
   }
 
-  /** Joins the page for one card, reads it, and re-reads it on its `board.changed` and every beat. */
-  watchTask(machine: DaemonConnection, id: BoardTaskId): () => void {
+  /**
+   * Joins the page for one card, reads it, and re-reads it on its `board.changed` and, unless a holder
+   * passes `beat: false`, every beat. A card shown inline in a message is live on events alone: nothing
+   * about a message earns a timer, and the page that holds the card in full still gets its beat.
+   */
+  watchTask(machine: DaemonConnection, id: BoardTaskId, options: { readonly beat?: boolean } = {}): () => void {
+    const beat = options.beat !== false;
     this.#connections.set(machine.daemonId, machine);
     const key = taskKey(machine.daemonId, id);
     let watch = this.#tasks.get(key);
     if (watch === undefined) {
-      watch = { daemonId: machine.daemonId, id, refs: 0, state: IDLE_BOARD_TASK, stamp: 0, timer: undefined };
+      watch = { daemonId: machine.daemonId, id, refs: 0, state: IDLE_BOARD_TASK, stamp: 0, timer: undefined, beats: 0 };
       this.#tasks.set(key, watch);
     }
     watch.refs += 1;
     const joined = watch;
+    if (beat) {
+      joined.beats += 1;
+      if (joined.state.status !== 'idle' && joined.timer === undefined) this.#armTask(joined);
+    }
     if (joined.state.status === 'idle') void this.#readTask(joined);
     let released = false;
     return () => {
       if (released) return;
       released = true;
       joined.refs -= 1;
-      if (joined.refs > 0) return;
+      if (beat) joined.beats -= 1;
+      if (joined.refs > 0) {
+        if (joined.beats === 0 && joined.timer !== undefined) {
+          this.#env.clearTimeout(joined.timer);
+          joined.timer = undefined;
+        }
+        return;
+      }
       if (joined.timer !== undefined) this.#env.clearTimeout(joined.timer);
       joined.timer = undefined;
       if (this.#tasks.get(key) === joined) this.#tasks.delete(key);
@@ -546,6 +572,7 @@ export class DaemonBoardStore {
   }
 
   #armTask(watch: TaskWatch): void {
+    if (watch.beats === 0) return;
     if (watch.timer !== undefined) this.#env.clearTimeout(watch.timer);
     watch.timer = this.#env.setTimeout(() => {
       watch.timer = undefined;
