@@ -24,6 +24,8 @@
  *   done-held          Done: what changed per group, and a held setting with Confirm
  *   update-newer-key   an Update that reports "A newer X exists on <source>" with the command to run by hand
  *   update-both-key    the same for a key changed on both machines, said so, with the secret copy panel open
+ *   settings-only-update  the fleet, logins and keys are the same and only the Warden's settings differ: the Settings
+ *                      files stay on screen, the Warden is ticked, and the one setting both machines changed is chosen
  *
  * It renders the REAL `CloneMachine` against two invented machines; the review is the invented one in
  * `tests/unit/features/fleet/setup/clone-review-support.ts`. No credential, token or real name exists in it.
@@ -128,6 +130,24 @@ const REVIEWS = {
     same: { count: 9, probable: 0 },
   }),
   'done-held': review({ items: [ITEMS.newMcp, ITEMS.theirsHooks], same: { count: 8, probable: 0 } }),
+  // Only a settings file differs: each document sent is answered with what it would change, the fleet-only review with none.
+  'settings-only-update': request => {
+    const sent = typeof request?.body === 'string' ? JSON.parse(request.body).settings : undefined;
+    return review({
+      settings: (sent ?? []).map(document => ({
+        path: document.path,
+        keys:
+          document.path === 'warden.yaml'
+            ? [
+                { key: 'intervalMinutes', outcome: 'both', mine: '5', theirs: '10' },
+                { key: 'caps.jevUsdPerDay', outcome: 'theirs', choice: 'take', mine: '1', theirs: '5', loosens: true },
+              ]
+            : [],
+      })),
+      same: { count: 12, probable: 0 },
+      fingerprint: sent === undefined ? 'fp-plain' : 'fp-' + sent.map(document => document.path).join('+'),
+    });
+  },
 };
 
 const MORE_BUNDLE = bundle({
@@ -180,7 +200,8 @@ const answerFor = machine => (path, init) => {
   } else {
     if (path === '/v1/fleet/machine') return machineView({ runtimeCount: 2 });
     if (path === '/v1/fleet/profiles') return STACKS;
-    if (path === '/v1/fleet/clone/review') return REVIEWS[state];
+    if (path === '/v1/fleet/clone/review')
+      return typeof REVIEWS[state] === 'function' ? REVIEWS[state](init) : REVIEWS[state];
     if (path === '/v1/fleet/export') return HERE_BUNDLE;
     if (path === '/v1/fleet/credentials') return HERE_LOGINS;
     if (path === '/v1/fleet/proposals' && method === 'POST') {
@@ -449,6 +470,12 @@ const walk = async (page: Page, state: string, scheme: string, vp: string): Prom
       await toChanges(page);
       await page.locator('[data-clone-newer-key="DEMO_API_KEY"]').waitFor({ state: 'visible' });
       break;
+    case 'settings-only-update':
+      await toChanges(page);
+      await click(page, '[data-setup-choice="warden"]');
+      await page.locator('[data-clone-key="warden.yaml:intervalMinutes"]').waitFor({ state: 'visible' });
+      await click(page, '[data-clone-key="warden.yaml:intervalMinutes"] [data-setup-choice="keep"]');
+      break;
     case 'done-held':
       await toChanges(page);
       await click(page, '[data-setup-choice="warden"]');
@@ -479,6 +506,7 @@ const STATES = [
   'stale-review',
   'update-newer-key',
   'update-both-key',
+  'settings-only-update',
   'done-held',
 ] as const;
 

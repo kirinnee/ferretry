@@ -263,6 +263,9 @@ export function CloneMachine(props: CloneMachineProps) {
   // before (every item, login and key); for a copy of the settings, key by key what differs (design §5). One review,
   // so one fingerprint is what the apply names. `null` for a first copy that sends no settings.
   const [review, setReview] = useState<FleetCloneReview | null>(null);
+  // Whether any settings file the source shared differs from this machine, from the review asked with all of them:
+  // an Update whose fleet part is empty still offers them, so a settings-only difference is not "nothing to copy".
+  const [settingsDiffer, setSettingsDiffer] = useState(false);
   // What the person picked for each item an Update lists, and which login each sign-in goes to.
   const [picks, setPicks] = useState<ReviewPicks>({});
   const [loginPicks, setLoginPicks] = useState<LoginPicks>({});
@@ -528,6 +531,7 @@ export function CloneMachine(props: CloneMachineProps) {
         keyStamps,
       );
       let found: FleetCloneReview | null = answer.kind === 'reviewed' ? answer.review : null;
+      const differing = found?.settings.some(file => file.keys.length > 0) ?? false;
       if (found?.mode === 'update') {
         // An Update starts with no settings ticked, and the apply names exactly the review it was made from.
         answer = await reviewSettings(exported.value, read, chosenFor('update', read), sourceMachine, true, keyStamps);
@@ -550,6 +554,7 @@ export function CloneMachine(props: CloneMachineProps) {
         if (logins.kind === 'done') nextLogins = logins.value.credentials;
       }
       setReview(found);
+      setSettingsDiffer(differing);
       setPicks({});
       setLoginPicks({});
       setMineFiles(nextMine);
@@ -895,7 +900,8 @@ export function CloneMachine(props: CloneMachineProps) {
         {reading ? 'Reviewing…' : 'Review again'}
       </Button>
     ) : null;
-    if (nothingDiffers(sheet)) {
+    const fleetEmpty = nothingDiffers(sheet);
+    if (fleetEmpty && !settingsDiffer) {
       const matched = sheet.same.probable;
       return (
         <div className="flex min-w-0 flex-col gap-3" data-clone-step="preview" data-clone-review-state="nothing">
@@ -957,6 +963,10 @@ export function CloneMachine(props: CloneMachineProps) {
       keys: keyNames.length,
     };
     const count = updateWrites(sheet, picks, loginPicks, others);
+    // Nothing on the fleet side differs and no settings file is ticked: the button only links an older copy to its
+    // source (when names matched), and waits otherwise. Ticking a settings file turns it into the Update that writes it.
+    const idle = fleetEmpty && count === 0;
+    const linking = idle && sheet.same.probable > 0;
     // The sign-ins still to do: one this machine already has, signed in, is not asked for again.
     const stillNeeded = needsAfterCopy(
       needs,
@@ -1039,11 +1049,11 @@ export function CloneMachine(props: CloneMachineProps) {
               authority={changes.authority}
               busy={changes.busy || copying}
               refusal={stale ? null : changes.refusal}
-              submitLabel={updateLabel(count)}
+              submitLabel={linking ? `Finish and link ${countWords(sheet.same.probable, 'item')}` : updateLabel(count)}
               submitClassName={TOUCH_BUTTON}
-              busyLabel="Updating…"
-              disabled={unchosen.length > 0 || blockedBy !== null}
-              onSubmit={() => copy()}
+              busyLabel={linking ? 'Linking…' : 'Updating…'}
+              disabled={unchosen.length > 0 || blockedBy !== null || (idle && !linking)}
+              onSubmit={() => copy(linking)}
             >
               {reviewAgainButton}
             </ChangeApplyPanel>

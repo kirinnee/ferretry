@@ -1683,4 +1683,136 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
       await screen.view.unmount();
     }
   });
+
+  describe('when only a settings file differs (reviewer M1)', () => {
+    /** The fleet, the logins and the keys are all the same as the earlier copy: only the documents sent can differ. */
+    const settingsOnly =
+      (rows: Partial<Record<CloneSettingsDoc, Rows>> = { 'warden.yaml': WARDEN_ROWS }, probable = 0) =>
+      (call: Call): unknown => {
+        const sent = (call.body as { settings?: { path: CloneSettingsDoc }[] }).settings;
+        return review({
+          same: { count: 12, probable },
+          settings: (sent ?? []).map(document => ({ path: document.path, keys: rows[document.path] ?? [] })),
+          fingerprint: sent === undefined ? 'fp-plain' : `fp-${sent.map(document => document.path).join('+')}`,
+        });
+      };
+    const only = (rows?: Partial<Record<CloneSettingsDoc, Rows>>, probable = 0) =>
+      setup({ '/v1/fleet/clone/review': settingsOnly(rows, probable) });
+
+    it('keeps the settings files on screen and says nothing to copy only until one is ticked', async () => {
+      const { createClient, calls } = only();
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        // Not the "already here" note: a settings file differs, and the Update is where it is chosen.
+        expect(screen.q('[data-setup-note="nothing-to-copy"]')).toBeNull();
+        expect(screen.q('[data-clone-review-state="changes"]')).not.toBeNull();
+        expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(false);
+        expect(tickItem(screen, 'controls')).not.toBeNull();
+        expect(screen.q('[data-clone-key]')).toBeNull();
+        // Nothing is ticked, so nothing is written and nothing is linked: the button waits.
+        expect(screen.submit()?.textContent).toBe('Nothing to copy');
+        expect(screen.submit()?.disabled).toBe(true);
+        expect(changeBodies(calls.target)).toEqual([]);
+
+        await click(tickItem(screen, 'warden'), 'tick warden');
+        expect(screen.q('[data-clone-key="warden.yaml:caps.jevUsdPerDay"] [data-clone-key-loosens]')).not.toBeNull();
+        // A key both machines changed is the person's to choose.
+        expect(keyRadios(screen, 'warden.yaml:intervalMinutes').map(radio => radio.checked)).toEqual([false, false]);
+        expect(screen.submit()?.disabled).toBe(true);
+        expect(screen.text('[data-setup-note="settings-undecided"]')).toContain('warden.yaml: intervalMinutes');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('applies the ticked settings in one update that names the review it was shown, and writes no file whole', async () => {
+      const { createClient, calls } = only();
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        await click(tickItem(screen, 'warden'), 'tick warden');
+        await click(keyRadios(screen, 'warden.yaml:intervalMinutes')[0] ?? null, 'keep mine');
+        expect(screen.submit()?.textContent).toBe('Update 2 things');
+        // The file, and the key the Warden needs that this machine lacks.
+        expect(screen.submit()?.disabled).toBe(false);
+
+        await click(screen.submit(), 'Update');
+
+        expect(screen.step()).toBe('done');
+        const bodies = changeBodies(calls.target);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]?.change).toMatchObject({
+          kind: 'clone.import',
+          mode: 'update',
+          reviewed: 'fp-warden.yaml',
+          decisions: {},
+          settings: [{ path: 'warden.yaml' }],
+          settingsDecisions: { 'warden.yaml': { intervalMinutes: 'keep', 'caps.jevUsdPerDay': 'take' } },
+        });
+        expect(configWrites(calls.target)).toEqual([]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('offers the default runtime and the controls too, each reviewed key by key', async () => {
+      const { createClient, calls } = only({ controls: [DEFAULT_ROW] });
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        await click(tickItem(screen, 'controls'), 'tick controls');
+        expect(screen.q('[data-clone-key="controls:defaultRuntime"]')).not.toBeNull();
+        expect(screen.submit()?.textContent).toBe('Update 1 thing');
+        await click(screen.submit(), 'Update');
+        expect(changeBodies(calls.target)[0]?.change).toMatchObject({
+          mode: 'update',
+          settingsDecisions: { controls: { defaultRuntime: 'take' } },
+        });
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('still links an earlier copy by name without writing a setting, until the person ticks one', async () => {
+      const { createClient, calls } = only(undefined, 3);
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        expect(screen.q('[data-setup-note="nothing-to-copy"]')).toBeNull();
+        expect(screen.submit()?.textContent).toBe('Finish and link 3 items');
+        expect(screen.submit()?.disabled).toBe(false);
+        await click(tickItem(screen, 'warden'), 'tick warden');
+        await click(tickItem(screen, 'warden'), 'untick warden');
+        expect(screen.submit()?.textContent).toBe('Finish and link 3 items');
+
+        await click(screen.submit(), 'Finish and link');
+
+        const bodies = changeBodies(calls.target);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]?.change).toMatchObject({ kind: 'clone.import', mode: 'update', reviewed: 'fp-plain' });
+        expect(bodies[0]?.change).not.toHaveProperty('settings');
+        expect(bodies[0]?.change).not.toHaveProperty('settingsDecisions');
+        expect(configWrites(calls.target)).toEqual([]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('still says Nothing to copy when the source shares settings files and none of them differs', async () => {
+      const { createClient, calls } = only({});
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        expect(screen.text('[data-setup-note="nothing-to-copy"]')).toBe(
+          'Everything from work-linux is already here. Nothing to copy.',
+        );
+        expect(screen.q('[data-setup-choices="clone-items"]')).toBeNull();
+        expect(screen.q('[data-change-submit]')).toBeNull();
+        expect(changeBodies(calls.target)).toEqual([]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+  });
 });

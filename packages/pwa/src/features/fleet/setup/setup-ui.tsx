@@ -174,7 +174,7 @@ function ChoiceList<T extends string>({
             htmlFor={id}
             data-setup-choice={option.id}
             className={cn(
-              'kt-panel relative flex min-h-control min-w-0 cursor-pointer items-start gap-3 p-panel has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
+              'kt-panel relative flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
               option.disabled === true ? 'cursor-not-allowed opacity-60' : 'hover:border-accent',
             )}
           >
