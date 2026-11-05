@@ -339,24 +339,29 @@ describe('the analytics mount', () => {
       should(jsonBody(response)).have.property('code', 'invalid_query');
     });
 
-    it('should refuse a query over the group limit as a typed 400 that says to add a matcher', async () => {
-      // THE BUG: a plain Error past the limit fell through to the 500 "failed to handle this request",
-      // which tells the caller the daemon is broken when the question is merely too wide.
-      // Arrange
-      const sessions = Array.from({ length: 101 }, (_, n) => finishedSession({ id: `s${n}` }));
+    // The owner's own query (B149, reopened) is pinned beside the first one: `cost_usd` and `by (id)` take
+    // the same aggregate path, so a 500 for it can only come from a machine older than this build.
+    it.each(['sum(tokens) by (id)', 'sum(cost_usd) by (id)'])(
+      'should refuse %s over the group limit as a typed 400 that says to add a matcher',
+      async q => {
+        // THE BUG: a plain Error past the limit fell through to the 500 "failed to handle this request",
+        // which tells the caller the daemon is broken when the question is merely too wide.
+        // Arrange
+        const sessions = Array.from({ length: 101 }, (_, n) => finishedSession({ id: `s${n}` }));
 
-      // Act
-      const response = await dispatcher(sessions).dispatch(
-        request({ path: '/v1/analytics', headers: human, query: [['q', 'sum(tokens) by (id)']] }),
-      );
+        // Act
+        const response = await dispatcher(sessions).dispatch(
+          request({ path: '/v1/analytics', headers: human, query: [['q', q]] }),
+        );
 
-      // Assert
-      should(response.status).equal(400);
-      should(jsonBody(response)).have.properties({
-        code: 'too_many_groups',
-        error: 'analytics query produces more than 100 groups; add a matcher',
-      });
-    });
+        // Assert
+        should(response.status).equal(400);
+        should(jsonBody(response)).have.properties({
+          code: 'too_many_groups',
+          error: 'analytics query produces more than 100 groups; add a matcher',
+        });
+      },
+    );
 
     it('should refuse a parameter it does not implement rather than answer the whole fleet', async () => {
       // Silently ignoring `?since=` would answer a narrowed question with every session, which reads

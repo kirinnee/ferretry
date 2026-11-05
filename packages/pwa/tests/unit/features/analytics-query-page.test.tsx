@@ -332,7 +332,7 @@ describe('AnalyticsQueryPage', () => {
       await Promise.resolve();
     });
     await settle();
-    expect(text(renderer)).toContain('kirin-box did not answer: asleep Its sessions are not in this result.');
+    expect(text(renderer)).toContain('kirin-box did not answer: asleep. Its sessions are not in this result.');
   });
 
   it('reads through the paired carrier by default', async () => {
