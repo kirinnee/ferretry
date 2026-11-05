@@ -256,6 +256,21 @@ describe('adopting an orphaned card', () => {
       unchanged(ports);
     });
 
+    it('should refuse a caller whose configuration was not read: no proven lineage, so not a lead', async () => {
+      // Arrange
+      const { configRead: _unread, ...unproven } = liveSession('lead');
+      const sessions = new FakeSessions(rosterOf([unproven, liveSession('other')]));
+      const { ports, service } = setup([orphan()], { sessions });
+
+      // Act
+      const error = await refusal(service.act('F1', adopt, ferret('lead')));
+
+      // Assert
+      should(error.code).equal('forbidden');
+      should(error.message).containEql('who started lead cannot be read, so it is not shown to be a lead');
+      unchanged(ports);
+    });
+
     it('should judge the orphan on the roster read inside the hold: an owner that resumed in the gap is not orphaned', async () => {
       // Arrange
       const sessions = new FakeSessions(rosterOf(['lead', 'other'].map(id => liveSession(id))));

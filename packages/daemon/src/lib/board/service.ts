@@ -1153,9 +1153,17 @@ export class BoardService {
     }
     if (presenceOf(roster, caller.sessionId) !== 'alive')
       throw new BoardError('forbidden', `only a live ferret may adopt ${ref}`);
-    const lead = roster.sessions.get(caller.sessionId)?.lead;
-    if (lead !== undefined)
-      throw new BoardError('forbidden', `only a lead may adopt ${ref}: ${caller.sessionId} was started by ${lead}`);
+    const session = roster.sessions.get(caller.sessionId);
+    if (session?.lead !== undefined)
+      throw new BoardError(
+        'forbidden',
+        `only a lead may adopt ${ref}: ${caller.sessionId} was started by ${session.lead}`,
+      );
+    if (session?.configRead !== true)
+      throw new BoardError(
+        'forbidden',
+        `only a lead may adopt ${ref}: who started ${caller.sessionId} cannot be read, so it is not shown to be a lead`,
+      );
     if ((await this.ports.lanes.projectOf(caller.sessionId)) !== card.projectId) {
       throw new BoardError(
         'forbidden',

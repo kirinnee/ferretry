@@ -60,6 +60,11 @@ export interface SessionLiveness {
   readonly declaredWait: boolean;
   /** The session that started it (`config.parent`); absent for a root. */
   readonly lead?: string;
+  /**
+   * Its configuration document was read and is an object, so an absent `lead` really says it was started by nobody.
+   * Without it an absent `lead` only means nothing could be learned, which is never taken for a root.
+   */
+  readonly configRead?: true;
   /** It is the owner's own chat (`config.mode`): board notices reach it only when nobody else is left. */
   readonly interactive?: boolean;
   readonly lastTokenAdvanceAt?: string;
