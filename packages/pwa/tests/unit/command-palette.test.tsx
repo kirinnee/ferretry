@@ -225,9 +225,23 @@ describe('searching', () => {
 
     expect(optionIds()).toEqual([
       'fy-palette-option-destination-sessions',
+      'fy-palette-option-destination-queue',
       'fy-palette-option-destination-new-session',
     ]);
     expect(document.querySelector('[role="dialog"] p')).toBeNull();
+  });
+
+  it('finds the queues page by “Queue” and opens it', async () => {
+    // &B160: the destination existed but the palette's ordering dropped it, so
+    // "Queue" answered nothing. It must answer, and Enter must go to the page.
+    const harness = await open({ sessions: [] });
+    await type('Queue');
+
+    expect(optionIds()).toEqual(['fy-palette-option-destination-queue']);
+    await interact(() => pressKey(input(), 'Enter'));
+
+    expect(harness.navigated).toEqual(['/d/alpha/queue']);
+    expect(harness.closed()).toBe(1);
   });
 });
 

@@ -239,14 +239,16 @@ export class DaemonFleetStore {
     this.#schedule = options.schedule ?? realSchedule;
   }
 
-  subscribe(listener: () => void): () => void {
+  // Bound on the instance (not prototype methods) so a reader may hand either to
+  // `useSyncExternalStore` detached, the way `SendOutbox.subscribe`/`snapshot`
+  // already are: a detached prototype method loses `this` and throws on the
+  // private fields, which is how the Queue page crashed on open (&B160).
+  subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
-  }
+  };
 
-  getSnapshot(): FleetSnapshot {
-    return this.#snapshot;
-  }
+  getSnapshot = (): FleetSnapshot => this.#snapshot;
 
   /** One daemon's fleet. An unknown daemon reads as unread, never as empty. */
   fleet(daemonId: DaemonId): DaemonFleetSlice {

@@ -23,9 +23,11 @@ class Memory implements DaemonConnectionRepository {
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'device' });
 const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceId: 'device' });
-const view = (id: string, name: string, teammate?: string) => ({
-  config: { id, name, ...(teammate ? { teammate } : {}) },
-});
+const view = (id: string, name: string, teammate?: string) =>
+  ({
+    config: { id, name, ...(teammate ? { teammate } : {}) },
+    state: { id, status: 'running', turn: 1 },
+  }) as never;
 
 let mounted: ReactTestRenderer | undefined;
 afterEach(() => {
@@ -36,7 +38,11 @@ afterEach(() => {
 const text = (node: ReactTestInstance): string =>
   node.children.map(child => (typeof child === 'string' ? child : text(child))).join('');
 
-const open = async (queues: Readonly<Record<string, unknown>>, down: readonly string[] = []) => {
+const open = async (
+  queues: Readonly<Record<string, unknown>>,
+  down: readonly string[] = [],
+  fleetSource: 'stubbed' | 'real' = 'stubbed',
+) => {
   const calls: string[] = [];
   const real = await createAppStore({
     repository: new Memory(),
@@ -54,6 +60,13 @@ const open = async (queues: Readonly<Record<string, unknown>>, down: readonly st
   });
   real.connections.add(alpha);
   real.connections.add(beta);
+  if (fleetSource === 'real') {
+    // The fleet the app itself owns, seeded: the page must survive the real
+    // DaemonFleetStore, not only the hand-written stub below.
+    real.fleet.seed(alpha, [view('s1', 'one', 'Casen'), view('s2', 'two')], Date.now());
+    real.fleet.seed(beta, [view('s3', 'three', 'Mira')], Date.now());
+    return { store: real, real, calls };
+  }
   const fleet = {
     subscribe: () => () => undefined,
     getSnapshot: () => snapshot,
@@ -81,6 +94,32 @@ const queued = (id: string, text: string) => ({
 });
 
 describe('QueuePage', () => {
+  /**
+   * THE CRASH ITSELF (&B160): the Actions-menu Queue entry opened a page that
+   * failed to load. The container handed `store.fleet.subscribe` and
+   * `store.fleet.getSnapshot` to `useSyncExternalStore` detached; on the real
+   * `DaemonFleetStore` those were prototype methods over private fields, so the
+   * first render threw. The stubbed fleet below could never catch it — its
+   * methods are safe to detach — so this case runs the real store.
+   */
+  test('mounts against the real fleet store — the Actions-menu Queue route crashed there', async () => {
+    const { store, calls } = await open(
+      { '/v1/sessions/s1/queue': { messages: [queued('q1', 'from the machine')] } },
+      [],
+      'real',
+    );
+    mounted = render(
+      <RouterProvider>
+        <StoreProvider store={store}>
+          <QueuePage daemonId={alpha.daemonId} sessionId="s1" />
+        </StoreProvider>
+      </RouterProvider>,
+    );
+    await settleUntil(() => JSON.stringify(mounted?.toJSON()).includes('from the machine'), 'queue shown', runAsync);
+    expect(text(mounted.root.findByType('h1'))).toBe('Queue — Casen');
+    expect(calls).toContain('GET /v1/sessions/s1/queue');
+  });
+
   test('All queues shows only ferrets with something waiting, across machines, including this device’s outbox', async () => {
     const { store, real } = await open({
       '/v1/sessions/s1/queue': { messages: [queued('q1', 'from the machine')] },

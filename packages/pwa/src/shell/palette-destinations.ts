@@ -121,7 +121,18 @@ export const SHARING_TAB_DESTINATIONS = [
 const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   sessions: ['sessions', 'fleet', 'dashboard', 'home', 'teammates', 'list'],
   'new-session': ['new', 'start', 'spawn', 'launch', 'create', 'teammate', 'agent'],
-  queue: ['queue', 'queues', 'outbox', 'waiting', 'pending', 'unsent', 'offline', 'messages'],
+  queue: [
+    'queue',
+    'queues',
+    'queued',
+    'waiting',
+    'waiting messages',
+    'outbox',
+    'pending',
+    'unsent',
+    'offline',
+    'messages',
+  ],
   board: ['board', 'kanban', 'tasks', 'cards', 'lanes', 'backlog', 'stale', 'to test', 'tree'],
   projects: ['projects', 'project', 'workspace', 'folder', 'repository', 'repo'],
   // No `accounts` entry: Accounts is no longer a destination. Logins and runtimes are Settings ›
@@ -215,15 +226,19 @@ export const destinationExists = (href: string): boolean => {
 };
 
 /**
- * The dashboard first (it is where Back goes), then the bar's own order, then
- * the new-session action.
+ * The dashboard first (it is where Back goes), then every other shell
+ * destination in declared order, then the bar's own order, then the
+ * new-session action. Everything `SHELL_DESTINATIONS` declares beyond the two
+ * named slots travels by rest-spread, so adding a shell destination can never
+ * strand it behind a positional destructure — which is how "All queues" was
+ * defined, searchable, and still invisible to Find (&B160).
  */
 const ordered = (destinations: readonly AppBarDestinationLike[]): AppBarDestinationLike[] => {
-  const [sessions, newSession] = SHELL_DESTINATIONS;
+  const [sessions, newSession, ...otherShell] = SHELL_DESTINATIONS;
   const withTabs = destinations.flatMap(destination =>
     destination.id === 'sharing' ? [destination, ...SHARING_TAB_DESTINATIONS] : [destination],
   );
-  return [sessions, ...withTabs, newSession];
+  return [sessions, ...otherShell, ...withTabs, newSession];
 };
 
 /**
