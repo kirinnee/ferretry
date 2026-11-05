@@ -373,6 +373,13 @@ Today's rules this part keeps, unchanged:
 - **The agenda moves cards past gates.** Only the owner passes a gate: their answer to its card ask
   moves the card first, through the board, and only then is the answer recorded. A ferret's move, a
   trigger or `fy signal done` may bring a card **into** a gate, never out of one.
+- **Internal cards keep their exception.** A private card a ferret made for itself gets no card ask;
+  its owner ferret and that ferret's leads pass its gates (board.md › Authority). This part keeps that:
+  a spec loop on an internal card presents to the **lead**, not the owner — its spec is the loop's
+  artifact (`fy loop show`), no agenda item is raised, and the lead's own move out of Plan/Design is
+  the approval (recorded on the loop as "approved by <lead>"), which triggers 2.7 as the owner's answer
+  does. Everything owner-facing below — agenda tabs, the picture, the reader, OK to build — is for
+  cards the owner asked for (public cards).
 - **Cards never ask.** Every ask about a card rides its agenda; the daemon opens one card agenda on the
   card's ferret's agenda home when none carries it.
 - **Sub-ferrets report, leads move.** A sub-ferret may not write the agenda or create cards (pack-mode.md
@@ -431,15 +438,23 @@ One optional lane field, **`loop: spec | build`**, single-sourced in `@ferretry/
 - **A card entering a lane with a loop starts that loop** (the daemon, on the same committed write that
   moves the card; the driver is started by the lead in stage 1, by the daemon in stage 2). A build loop
   started this way waits in `building` until the card's PR is linked and out of draft (1.2).
-- **Not for a card that has plan children.** A parent whose OK to build created child cards (2.7) does
-  no PR work of its own, so entering In progress starts no build loop on it; its children each run one.
+- **Not for a card that has plan children.** A parent whose OK to build creates child cards (2.7) does
+  no PR work of its own. The answer's handling records `plan: { presented, rows }` on the card **in
+  the same write that moves it**, before the lane-entry event is handled, so entering In progress never
+  starts a build loop on a card whose approved plan has two or more rows — through partial creation and
+  any `plan-apply` retry alike. A plan of **one** row creates no child: the card itself is the build,
+  and its own loop starts as usual.
 - **Only PR work gets a build loop.** An `ops` Fix or a `writing` Draft may produce no PR, and a build
   loop's subject is a PR, so those lanes run none by default. Reviewing non-PR work (a deploy, a
   document) is a declared GAP of this plan: a later subject kind, not a build loop without a subject.
 - **A gate with a loop asks when the loop presents, not when the card arrives.** Today a card the owner
   asked for gets its **OK to build** ask the moment it sits in Plan/Design — before any spec exists.
   With `loop: spec` the card ask is put on the agenda by `fy loop present` and restated in place for each
-  new version (the ask's `askVersion`), so OK to build always names the version the owner read.
+  new version, so OK to build always names the version the owner read. The ask's existing
+  `askVersion` cannot say which: it counts replacements of the ask, while agenda snapshot versions also
+  rise on replies, comments and other edits. So the card ask gains an explicit, immutable
+  **`presented`** reference — the agenda snapshot number `present` wrote — and the answer's receipt
+  records it. An answer whose `presented` is not the latest present is refused as stale.
 - **The lane editor shows it** as a third control beside Gate / Automatic ("Runs: spec loop / build loop
   / nothing"). Changing it is a lane change, so a ferret's edit waits for the owner as every lane change
   does.
@@ -530,14 +545,18 @@ excerpt}` (a new `agenda.quote.1` field), so the ferret knows exactly what was m
   presents it as the next version, which needs a fresh OK to build.
 - **The parent is the owner's card** (public: it is what they asked for); the children are the
   ferrets' (private). The parent does no PR work and runs no build loop (2.3).
-- **The parent moves on when its children have shipped.** Today nothing does that: the parent's
-  `rollup` only counts its children, and sub-cards close themselves without touching it. Proposal: when
-  a child closes as shipped and **no child is still open**, the daemon applies to the parent the latest
-  fact its children reached — `pr.merged`, or `release.published` when every row asked for a release —
-  through the same `triggerMove` every fact uses. So the parent stops at its Released gate like any
-  card, its card ask (Done / Not good, with the parent's How to test) lands on its agenda, and the owner
-  tries the whole thing once. A child dropped or closed without shipping does not count as shipped; if
-  that leaves nothing shipped, the parent stays where it is and its lead is told.
+- **The parent moves on its children's real facts.** Today nothing moves it: the parent's `rollup`
+  only counts its children, and a sub-card closes itself at its merge without touching the parent.
+  Proposal: the parent takes a fact once **every child that is not dropped** has reached it — all
+  merged → `pr.merged`; all of their merges in a published release → `release.published` — applied
+  through the same `triggerMove` every fact uses. A row's `until` says only when a dependent may start;
+  it has nothing to do with the parent's milestone. Because a child closes at its merge, the GitHub
+  watcher **keeps watching a closed child's merge commit for its release** while its parent is open, and
+  reconciles the parent on each later release observation, not only on a child's close. On a
+  `pr-release-verify` board the parent therefore goes to Merged when the last child merges, then to its
+  **Released** gate when the release that contains every child's merge is published; its card ask (Done
+  / Not good, with the parent's How to test) lands on its agenda and the owner tries the whole thing
+  once. If every child was dropped, the parent stays where it is and its lead is told.
 - **Each child drops into Part 1.** A child entering In progress starts a `build` loop, which waits in
   `building` for the child's PR. A child waits on its `dependsOn` as any card does, and its builder is
   started only once every card it depends on has shipped (or released, as the row says).
@@ -551,7 +570,7 @@ excerpt}` (a new `agenda.quote.1` field), so the ferret knows exactly what was m
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Only the owner passes a gate                    | unchanged: OK to build is a card ask, answered only by the owner, card moved first                                         |
 | The loop's tab write is narrow                  | only `present`, only the card's own agenda, only the loop's tabs, only from the loop's driver or lead                      |
-| Child cards come from the approved version only | `plan-apply` reads the version the owner answered (`askVersion`), never the working draft                                  |
+| Child cards come from the approved version only | `plan-apply` reads the snapshot named by the answer receipt's `presented` reference, never the working draft               |
 | A comment cannot approve                        | a quoted comment is a conversation entry; approval is only the card ask's answer                                           |
 | The picture runs nothing outside its frame      | fy-render's own boundaries; no new surface                                                                                 |
 | A workflow change never skips a gate            | a ferret may only add a gate, before any PR or gate; removing one is the owner's                                           |
@@ -560,15 +579,15 @@ excerpt}` (a new `agenda.quote.1` field), so the ferret knows exactly what was m
 
 ### 2.9 Slices
 
-| #   | Slice                                                                                                                                     | Outcome                                                                          | Try it                                                                                                                                        | Needs    |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| 2.1 | **Lanes name their loop**: `loop` field, template defaults, lane editor control; a gate with a loop asks on present                       | a card entering Plan/Design or In progress starts its loop; no early OK to build | make a `design-first` card: no OK to build appears until the spec is presented                                                                | 1.4      |
-| 2.2 | **The spec in agenda tabs**: `fy loop present`, the daemon's narrow tab write, Still open, "N still open" on OK to build, the litmus lens | the spec arrives as v1 with Spec, Plan and Where we are now tabs                 | answer with a reply: v2 appears with a Changes diff; OK to build moves the card                                                               | 2.1      |
-| 2.3 | **The picture**: always on v1, **Make picture** after                                                                                     | a Picture tab on v1; one on request later                                        | v1 has a Picture tab; tap Make picture on v2 and one appears                                                                                  | 2.2      |
-| 2.4 | **The full-width reader**: `agenda:<id>` workspace tab, contents, version picker, Changes, phone sheet                                    | the spec reads like a document, chat still usable                                | Open in reader on desktop and on a phone; switch versions; answer from the reader                                                             | 2.2      |
-| 2.5 | **Comments on a section** (`agenda.quote.1`)                                                                                              | the ferret sees exactly which words you meant                                    | select a sentence, comment; the next version answers it                                                                                       | 2.4      |
-| 2.6 | **Triage**: the triage step in a card's first session, spikes, the add-a-gate workflow change                                             | a new card arrives with premise, context and the right workflow                  | ask for something vague: the card gets its workflow and only real questions reach you                                                         | 2.1      |
-| 2.7 | **OK to build creates child cards** (`plan-apply`), each starting its build loop; the parent moves on when its children ship              | approve once, and the PRs plan themselves; you try the whole thing once          | approve a plan with two PRs: two child cards appear with the dependency, the second waits; when both ship the parent asks you Done / Not good | 2.2, 3.2 |
+| #   | Slice                                                                                                                                                                           | Outcome                                                                          | Try it                                                                                                                                        | Needs    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 2.1 | **Lanes name their loop**: `loop` field, template defaults, lane editor control; a gate with a loop asks on present                                                             | a card entering Plan/Design or In progress starts its loop; no early OK to build | make a `design-first` card: no OK to build appears until the spec is presented                                                                | 1.4      |
+| 2.2 | **The spec in agenda tabs**: `fy loop present`, the daemon's narrow tab write, the card ask's `presented` reference, Still open, "N still open" on OK to build, the litmus lens | the spec arrives as v1 with Spec, Plan and Where we are now tabs                 | answer with a reply: v2 appears with a Changes diff; OK to build moves the card                                                               | 2.1      |
+| 2.3 | **The picture**: always on v1, **Make picture** after                                                                                                                           | a Picture tab on v1; one on request later                                        | v1 has a Picture tab; tap Make picture on v2 and one appears                                                                                  | 2.2      |
+| 2.4 | **The full-width reader**: `agenda:<id>` workspace tab, contents, version picker, Changes, phone sheet                                                                          | the spec reads like a document, chat still usable                                | Open in reader on desktop and on a phone; switch versions; answer from the reader                                                             | 2.2      |
+| 2.5 | **Comments on a section** (`agenda.quote.1`)                                                                                                                                    | the ferret sees exactly which words you meant                                    | select a sentence, comment; the next version answers it                                                                                       | 2.4      |
+| 2.6 | **Triage**: the triage step in a card's first session, spikes, the add-a-gate workflow change                                                                                   | a new card arrives with premise, context and the right workflow                  | ask for something vague: the card gets its workflow and only real questions reach you                                                         | 2.1      |
+| 2.7 | **OK to build creates child cards** (`plan-apply`), each starting its build loop; the parent moves on its children's merge and release facts                                    | approve once, and the PRs plan themselves; you try the whole thing once          | approve a plan with two PRs: two child cards appear with the dependency, the second waits; when both ship the parent asks you Done / Not good | 2.2, 3.2 |
 
 ### 2.10 Owner decisions — Part 2
 
@@ -652,7 +671,7 @@ A start becomes a **capacity request** with one of three answers:
 | Count                     | Limit                                                                                                        | Source of the number                                                                                                                                                                                                                      |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Per parent**            | `limits.interactiveChildren` / `limits.autoChildren`, as today                                               | the session registry                                                                                                                                                                                                                      |
-| **Machine: live ferrets** | **new** `limits.machineFerrets` (D3.2)                                                                       | every session not finished and not queued, owner-started ones included                                                                                                                                                                    |
+| **Machine: live ferrets** | **new** `limits.machineFerrets` (D3.2)                                                                       | every session not finished, not queued and not **waiting on its own children** (below), owner-started ones included                                                                                                                       |
 | **Memory**                | free memory minus a **reserve** for the daemon and the owner's own work must cover the new ferret's estimate | with I36 on: the fleet slice's `MemoryMax` minus what the slice uses; off: the host's available memory. The estimate per runtime is measured (the median of its running ferrets' memory), with a fixed starting guess until there is data |
 | **CPU**                   | the host is not saturated: CPU pressure over 10 s below a threshold                                          | Linux pressure-stall information (`/proc/pressure/cpu`); macOS the load average per core — best effort, and Settings says so                                                                                                              |
 | **Quota**                 | unchanged: a candidate out of quota or over budget is skipped and the next tried                             | the probe and [budgets.md](../budgets.md)                                                                                                                                                                                                 |
@@ -663,6 +682,13 @@ A start becomes a **capacity request** with one of three answers:
   machine is full: 3 waiting" and may start anyway), and the Warden's own investigations, which take a
   reserved slot so supervision never waits behind the fleet it supervises — the same exclusion the cgroup
   layer makes for supervision.
+- **No deadlock: a ferret waiting on its children gives its slot back.** A lead or driver blocked in
+  `fy wait` on a child, or idle with children running or queued, does not hold a live-ferret slot
+  (its memory is still counted, because it is still resident). Without this, `machineFerrets: 2` with
+  a lead and its driver would fill both slots and the driver's first reviewer would wait for ever. As a
+  last resort, when **every** live session is waiting on queued children, the oldest queued request is
+  admitted even past the memory and CPU counts — one at a time, with I36's caps as the backstop — and
+  Settings says so. Slice 3.3 tests exactly this scenario.
 - **Quota does not queue (D3.3).** When no candidate has quota the start is refused as today, saying the
   earliest reset; waiting hours for a reset is a decision for the lead, not a silent queue.
 
@@ -723,7 +749,7 @@ the queue timeout and the CPU threshold.
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | 3.1 | **Measured and shown**: the counts, the memory estimate per runtime, Settings › Capacity and `fy capacity` (read-only)                                                           | you can see how full the machine is; nothing behaves differently                | open Settings › Capacity; run `fy capacity` while ferrets work                                                                                  | —        |
 | 3.2 | **Starts wait in a queue**: `queued` status, `fy new` returns at once, `fy wait` through the queue, expiry, `--no-wait`, the persisted queue, pack-mode.md and the teaching line | `limit_reached` is gone; a lead's extra sub-ferrets wait                        | set `interactiveChildren` to 1 (a tightening, applies at once), ask a lead for two sub-ferrets: the second waits and starts when the first ends | 3.1      |
-| 3.3 | **Machine-wide admission**: `limits.machineFerrets`, memory with the reserve, CPU pressure, round-robin across parents, I36's numbers when on                                    | the machine stops over-filling                                                  | lower `machineFerrets` to 2 with three leads asking: starts take turns                                                                          | 3.2, I36 |
+| 3.3 | **Machine-wide admission**: `limits.machineFerrets`, memory with the reserve, CPU pressure, round-robin across parents, I36's numbers when on                                    | the machine stops over-filling                                                  | lower `machineFerrets` to 2 with three leads asking: starts take turns; a lead and its driver at the limit still get their reviewer started     | 3.2, I36 |
 | 3.4 | **Restarts and revives queue**: auto-resume, revive and resume pass the same capacity counts as a start                                                                          | a restart on a full machine waits for memory instead of only for its fixed pace | fill the machine, restart the daemon: the ferrets that do not fit show as queued, then start as memory frees                                    | 3.3      |
 | 3.5 | **A stuck queue reaches the agenda**: one item after 30 minutes, Start now / Cancel in Settings                                                                                  | you hear about it only when you must act                                        | fill the machine; after 30 minutes one item offers raise, stop idle or bigger machine                                                           | 3.3      |
 
