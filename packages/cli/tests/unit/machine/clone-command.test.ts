@@ -307,6 +307,80 @@ describe('machine clone: an update', () => {
   });
 });
 
+describe('machine clone: an environment login the update adds', () => {
+  const environment = update({
+    items: [item('runtime/agent', 'new', { kind: 'runtime' })],
+    logins: [
+      {
+        sourceId: 'api',
+        outcome: 'slot',
+        runnable: { entries: [{ label: 'NODE_OPTIONS', text: '--require /tmp/probe.cjs', document: false }] },
+      },
+    ],
+  });
+
+  it('should show what the login is configured with before anything is applied, with --dry-run', async () => {
+    // Arrange
+    const world = fakeWorld({ files: FILES, gateway: gatewayReviewing(environment) });
+
+    // Act
+    await run(world, 'setup.json', '--dry-run');
+
+    // Assert
+    should(world.out.text()).containEql('Runs: NODE_OPTIONS: --require /tmp/probe.cjs');
+    should(world.gateway.called('apply')).have.length(0);
+  });
+
+  it('should refuse off a terminal without --yes, after showing it, and apply nothing', async () => {
+    // Arrange
+    const world = fakeWorld({ files: FILES, interactive: false, gateway: gatewayReviewing(environment) });
+
+    // Act
+    await run(world, 'setup.json');
+
+    // Assert
+    should(world.out.text()).containEql('Runs: NODE_OPTIONS: --require /tmp/probe.cjs');
+    should(world.out.exitCode).equal(1);
+    should(world.gateway.called('apply')).have.length(0);
+  });
+
+  it('should ask at a terminal, and stop on a no', async () => {
+    // Arrange
+    const world = fakeWorld({ files: FILES, gateway: gatewayReviewing(environment), answers: ['n'] });
+
+    // Act
+    await run(world, 'setup.json');
+
+    // Assert
+    should(world.prompt.questions).eql(['Go ahead? [y/N]']);
+    should(world.gateway.called('apply')).have.length(0);
+  });
+
+  it('should apply with --yes, bound to the review that listed the login', async () => {
+    // Arrange
+    const world = fakeWorld({ files: FILES, interactive: false, gateway: gatewayReviewing(environment) });
+
+    // Act
+    await run(world, 'setup.json', '--yes');
+
+    // Assert
+    should(staged(world)[0]).match({ kind: 'clone.import', reviewed: 'fp-update' });
+    should(world.out.text()).containEql('Runs: NODE_OPTIONS: --require /tmp/probe.cjs');
+    should(world.gateway.called('apply')).have.length(1);
+  });
+
+  it('should not ask when the runtime that would use it is left out', async () => {
+    // Arrange
+    const world = fakeWorld({ files: FILES, interactive: false, gateway: gatewayReviewing(environment) });
+
+    // Act
+    await run(world, 'setup.json', '--skip', 'runtime/agent');
+
+    // Assert
+    should(world.gateway.called('apply')).have.length(1);
+  });
+});
+
 describe('machine clone: both sides changed (nothing is pre-selected)', () => {
   const both = update({
     items: [item('settings/shared', 'both', { kind: 'settings', fields: ['args'] }), item('hooks/guard', 'both')],

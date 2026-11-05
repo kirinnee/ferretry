@@ -174,12 +174,38 @@ export function loginProblems(review: FleetCloneReview, answers: Readonly<Record
 
 const writes = (choice: CloneChoice | undefined): boolean => choice === 'take' || choice === 'add';
 
-/** Whether applying would make this machine run something new, or remove something: the cases that ask first. */
-export function cloneNeedsYes(review: FleetCloneReview, decisions: CloneDecisions): boolean {
-  return review.items.some(item => {
-    const choice = choiceOf(item, decisions);
-    return choice === 'remove' || (writes(choice) && item.runnable !== undefined);
-  });
+type RunnableEntries = NonNullable<CloneReviewItem['runnable']>['entries'];
+
+/**
+ * What an environment login would be configured to run with, when this copy could add it as a new login
+ * here: not one already matched, nor one the person pointed at a login they have. A sign-in login has none.
+ * A login still waiting for its answer counts, because "a new login" is one of the answers.
+ */
+function addedLoginEntries(login: CloneReviewLogin, answers: Readonly<Record<string, string>>): RunnableEntries {
+  const answered = answers[login.sourceId];
+  if (login.outcome === 'matched' || (answered !== undefined && answered !== 'slot')) return [];
+  return login.runnable?.entries ?? [];
+}
+
+/**
+ * Whether applying would make this machine run something new, or remove something: the cases that ask first.
+ * A configured login is only added for a runtime that is written, and the review does not say which runtime
+ * uses which login, so any written runtime counts: asking too often is the safe side.
+ */
+export function cloneNeedsYes(
+  review: FleetCloneReview,
+  decisions: CloneDecisions,
+  logins: Readonly<Record<string, string>>,
+): boolean {
+  const writesRuntime = review.items.some(item => item.kind === 'runtime' && writes(choiceOf(item, decisions)));
+  const addsConfiguredLogin = review.logins.some(login => addedLoginEntries(login, logins).length > 0);
+  return (
+    (writesRuntime && addsConfiguredLogin) ||
+    review.items.some(item => {
+      const choice = choiceOf(item, decisions);
+      return choice === 'remove' || (writes(choice) && item.runnable !== undefined);
+    })
+  );
 }
 
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────
@@ -220,15 +246,17 @@ function whatChanged(item: CloneReviewItem): string {
   return '';
 }
 
-/** Everything a written item runs, one entry per line under it, exactly as the other machine exported it. */
-function runLines(item: CloneReviewItem): string[] {
-  const entries = item.runnable?.entries ?? [];
+/** Every entry on its own line under what writes it, exactly as the other machine exported it. */
+function entryLines(entries: RunnableEntries): string[] {
   return entries.flatMap(entry => {
     if (!entry.document) return [`      Runs: ${entry.label}: ${entry.text}`];
     const body = entry.text.replace(/\n$/u, '').split('\n');
     return [`      Runs: ${entry.label}, ${plural(body.length, 'line')}:`, ...body.map(line => `        ${line}`)];
   });
 }
+
+/** Everything a written item runs. */
+const runLines = (item: CloneReviewItem): string[] => entryLines(item.runnable?.entries ?? []);
 
 /** What the decision for an item says, when it is one the person made or one the item needs. */
 function decisionWords(item: CloneReviewItem, options: RenderOptions, source: string): string {
@@ -260,17 +288,21 @@ function itemLines(item: CloneReviewItem, width: number, options: RenderOptions,
 
 function loginLine(login: CloneReviewLogin, answers: Readonly<Record<string, string>>, binaryName: string): string[] {
   const answered = answers[login.sourceId];
+  // An environment login is not an empty slot: it is added already configured, and all of that is listed.
+  const added = entryLines(addedLoginEntries(login, answers));
+  const fresh =
+    login.runnable === undefined
+      ? `new empty slot, needs sign-in (${binaryName} credentials)`
+      : 'new login, configured to run the following';
   if (login.outcome === 'matched') {
     return [`  ${login.sourceId} → already here as ${login.target ?? 'a login here'}, no new sign-in`];
   }
-  if (login.outcome === 'slot') {
-    return [`  ${login.sourceId} → new empty slot, needs sign-in (${binaryName} credentials)`];
-  }
-  if (answered === 'slot') return [`  ${login.sourceId} → new empty slot, needs sign-in (${binaryName} credentials)`];
+  if (login.outcome === 'slot' || answered === 'slot') return [`  ${login.sourceId} → ${fresh}`, ...added];
   if (answered !== undefined) return [`  ${login.sourceId} → ${answered}, no new sign-in`];
   return [
     `  ${login.sourceId} → could be any of ${(login.candidates ?? []).join(', ')}`,
-    `      choose with --login ${login.sourceId}=<one of those>, or --login ${login.sourceId}=slot for a new empty one`,
+    `      choose with --login ${login.sourceId}=<one of those>, or --login ${login.sourceId}=slot for ${login.runnable === undefined ? 'a new empty one' : 'a new configured one, listed below'}`,
+    ...added,
   ];
 }
 

@@ -279,16 +279,61 @@ describe('--login answers', () => {
   });
 });
 
+/** A new runtime plus an environment login the copy would add, configured to run `--require /tmp/probe.cjs`. */
+const withEnvironmentLogin = (outcome: 'slot' | 'ask' | 'matched' = 'slot') =>
+  cloneReview({
+    mode: 'update',
+    items: [item('runtime/agent', 'new')],
+    logins: [
+      {
+        sourceId: 'api',
+        outcome,
+        ...(outcome === 'ask' ? { candidates: ['api-a', 'api-b'] } : {}),
+        ...(outcome === 'matched' ? { target: 'api-here' } : {}),
+        runnable: {
+          entries: [
+            { label: 'harness', text: 'claude', document: false },
+            { label: 'NODE_OPTIONS', text: '--require /tmp/probe.cjs', document: false },
+          ],
+        },
+      },
+    ],
+  });
+
 describe('cloneNeedsYes', () => {
+  it('should ask before an environment login is added for a runtime that is written, whatever the login is called', () => {
+    // Arrange
+    const review = withEnvironmentLogin();
+
+    // Act / Assert
+    should(cloneNeedsYes(review, {}, {})).be.true();
+    should(cloneNeedsYes(withEnvironmentLogin('ask'), {}, { api: 'slot' })).be.true();
+    should(cloneNeedsYes(withEnvironmentLogin('ask'), {}, {})).be.true();
+  });
+
+  it('should not ask for an environment login nothing writes, one already here, or one the person pointed at a login here', () => {
+    // Act / Assert
+    should(cloneNeedsYes(withEnvironmentLogin(), { 'runtime/agent': 'skip' }, {})).be.false();
+    should(cloneNeedsYes(withEnvironmentLogin('matched'), {}, {})).be.false();
+    should(cloneNeedsYes(withEnvironmentLogin('ask'), {}, { api: 'api-b' })).be.false();
+    should(
+      cloneNeedsYes(
+        cloneReview({ items: [item('runtime/agent', 'new')], logins: [{ sourceId: 'x', outcome: 'slot' }] }),
+        {},
+        {},
+      ),
+    ).be.false();
+  });
+
   it('should ask before anything is removed or any command is brought in, and not before a plain update', () => {
     // Arrange
     const review = everyOutcome();
     const runs = review.items.filter(one => one.ref === 'mcp/notes');
 
     // Act / Assert
-    should(cloneNeedsYes(review, {})).be.true();
-    should(cloneNeedsYes(review, { 'mcp/notes': 'skip', 'settings/shared': 'keep' })).be.false();
-    should(cloneNeedsYes(review, { 'mcp/notes': 'skip', 'runtime/old-codex': 'remove' })).be.true();
+    should(cloneNeedsYes(review, {}, {})).be.true();
+    should(cloneNeedsYes(review, { 'mcp/notes': 'skip', 'settings/shared': 'keep' }, {})).be.false();
+    should(cloneNeedsYes(review, { 'mcp/notes': 'skip', 'runtime/old-codex': 'remove' }, {})).be.true();
     should(runs).have.length(1);
   });
 });
@@ -398,6 +443,44 @@ describe('renderCloneDiff', () => {
     should(text).containEql('new.sh (new), old.sh (removed), same.sh changed; probably the same item');
     should(text).containEql('      Needs: mcp/notes');
     should(render(review, { 'hooks/guard': 'remove' })).not.containEql('Needs:');
+  });
+
+  it('should list everything an environment login is configured with, and not call it an empty slot', () => {
+    // Arrange
+    const review = withEnvironmentLogin();
+
+    // Act
+    const text = render(review);
+
+    // Assert
+    should(text).containEql('  api → new login, configured to run the following\n');
+    should(text).containEql('      Runs: harness: claude\n      Runs: NODE_OPTIONS: --require /tmp/probe.cjs');
+    should(text).not.containEql('empty slot');
+  });
+
+  it('should list an environment login when it is asked about, and when the person answers it is a new login', () => {
+    // Arrange
+    const review = withEnvironmentLogin('ask');
+
+    // Act
+    const asking = render(review);
+    const slot = render(review, {}, { api: 'slot' });
+
+    // Assert
+    should(asking).containEql('or --login api=slot for a new configured one, listed below');
+    should(asking).containEql('      Runs: NODE_OPTIONS: --require /tmp/probe.cjs');
+    should(slot).containEql('  api → new login, configured to run the following');
+    should(slot).containEql('      Runs: NODE_OPTIONS: --require /tmp/probe.cjs');
+  });
+
+  it('should list nothing for an environment login that is already here, or that the person points at a login here', () => {
+    // Act
+    const matched = render(withEnvironmentLogin('matched'));
+    const named = render(withEnvironmentLogin('ask'), {}, { api: 'api-b' });
+
+    // Assert
+    should(matched).containEql('  api → already here as api-here, no new sign-in').and.not.containEql('Runs:');
+    should(named).containEql('  api → api-b, no new sign-in').and.not.containEql('Runs:');
   });
 
   it('should ask which login when the daemon could not tell, and show the answer once given', () => {

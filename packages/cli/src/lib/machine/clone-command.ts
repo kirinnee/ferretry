@@ -244,7 +244,7 @@ async function updateFrom(
         ...(Object.keys(logins).length === 0 ? {} : { logins: { ...logins } }),
         reviewed: review.fingerprint,
       },
-      destructive: cloneNeedsYes(review, decisions),
+      destructive: cloneNeedsYes(review, decisions, logins),
       options: writeFlags({ ...options }),
     });
     const addsSlot = review.logins.some(login => login.outcome === 'slot' || logins[login.sourceId] === 'slot');
