@@ -187,7 +187,7 @@ describe('delivery order and the next message', () => {
     expect(rows.map(item => item.id)).toEqual(['typing', 'unconfirmed', 'mine', 'fyi', 'action', 'blocker', 'read']);
   });
 
-  test('a daemon notice goes after a due ferret message but ahead of one still held', () => {
+  test('a due ferret message carries the held ones with it, in acceptance order, ahead of a daemon notice', () => {
     const now = Date.parse('2026-10-30T10:00:00.000Z');
     const daemon = { sender: 'daemon' as const, by: { kind: 'ferretry' as const, feature: 'Board' } };
     const rows = orderedRows(
@@ -207,8 +207,29 @@ describe('delivery order and the next message', () => {
       ],
       now,
     );
-    expect(rows.map(item => item.id)).toEqual(['due', 'board', 'held']);
-    expect(nextRowId(rows, now)).toBe('due');
+    expect(rows.map(item => item.id)).toEqual(['held', 'due', 'board']);
+    expect(nextRowId(rows, now)).toBe('held');
+  });
+
+  test('with every ferret message still held, a daemon notice may pass them', () => {
+    const now = Date.parse('2026-10-30T10:00:00.000Z');
+    const rows = orderedRows(
+      [
+        row('held', 'queued', {
+          ...ferret,
+          label: 'fyi',
+          holdUntil: '2026-10-30T10:05:00.000Z',
+          enqueuedAt: '2026-10-30T08:00:00.000Z',
+        }),
+        row('board', 'queued', {
+          sender: 'daemon',
+          by: { kind: 'ferretry', feature: 'Board' },
+          enqueuedAt: '2026-10-30T09:30:00.000Z',
+        }),
+      ],
+      now,
+    );
+    expect(rows.map(item => item.id)).toEqual(['board', 'held']);
   });
 
   test('a ferret author with no name is still a ferret, never "You" and never first', () => {
@@ -250,5 +271,37 @@ describe('needsClamp', () => {
 
   test('blank edges do not count toward the length', () => {
     expect(needsClamp(`\n\n${'x'.repeat(CLAMP_CHARS)}\n\n`)).toBe(false);
+  });
+});
+
+describe('waitingGroups order', () => {
+  test('the longest-waiting message decides, even when delivery order lists a newer one first', () => {
+    const rowsOf = (sessionId: string, items: Partial<QueuedMessage>[]) =>
+      ferretRows(
+        'd',
+        sessionId,
+        sessionId,
+        items.map(item => message(item)),
+        [],
+        Date.parse('2026-10-30T12:00:00.000Z'),
+      );
+    const group = (key: string, rows: ReturnType<typeof rowsOf>) => ({
+      key,
+      daemonId: 'd',
+      machine: 'm',
+      sessionId: key,
+      ferret: key,
+      rows,
+    });
+    const old = group(
+      'old',
+      rowsOf('old', [
+        { id: 'a', sender: 'agent', holdUntil: '2026-10-30T13:00:00.000Z', enqueuedAt: '2026-10-30T09:00:00.000Z' },
+        { id: 'b', sender: 'human', enqueuedAt: '2026-10-30T11:00:00.000Z' },
+      ]),
+    );
+    const mid = group('mid', rowsOf('mid', [{ id: 'c', sender: 'human', enqueuedAt: '2026-10-30T10:00:00.000Z' }]));
+    expect(old.rows[0]?.id).toBe('b');
+    expect(waitingGroups([mid, old]).map(item => item.key)).toEqual(['old', 'mid']);
   });
 });

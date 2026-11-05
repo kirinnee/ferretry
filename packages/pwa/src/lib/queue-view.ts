@@ -106,27 +106,32 @@ export const isWaitingRow = (row: QueueRow): boolean =>
 /** Not yet typed into the ferret: the rows whose turn is still to come. */
 const isPendingRow = (row: QueueRow): boolean => row.state === 'saved' || row.state === 'queued';
 
+const isHeld = (row: QueueRow, now: number): boolean => row.holdUntil !== undefined && Date.parse(row.holdUntil) > now;
+
 /**
  * Where a row stands in the ferret's delivery, as the daemon plans it (`planDelivery`): one message is typed at a
- * time; the owner's own messages go first, each alone; a ferret's message that is due (no hold, or the hold ended)
- * comes next, in the order the queue accepted them, and a due one carries the rest of the ferret's messages with
- * it; the daemon's own notices (Board, Warden…) go next and may pass a ferret message still being held; held
- * ferret messages follow; what is finished comes last. The kind chip says how soon a ferret's message is due — it
- * does not reorder the list by itself.
+ * time; the owner's own messages go first, each alone. Then, if ANY pending ferret message is due (no hold, or its
+ * hold ended), the daemon flushes every pending ferret message together — held ones included — in the order the
+ * queue accepted them, and the daemon's own notices (Board, Warden…) go after that batch. If none is due, a notice
+ * may pass the held ferret messages. What is finished comes last. The kind chip says how soon a ferret's message is
+ * due; it does not reorder the list by itself.
  */
-const deliveryRank = (row: QueueRow, now: number): number => {
-  if (row.state === 'typing') return 0;
-  if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 6;
-  if (row.origin === 'owner') return 2;
-  if (row.origin === 'daemon') return 4;
-  return row.holdUntil !== undefined && Date.parse(row.holdUntil) > now ? 5 : 3;
+const rankerFor = (rows: readonly QueueRow[], now: number): ((row: QueueRow) => number) => {
+  const ferretDue = rows.some(row => isPendingRow(row) && row.origin === 'ferret' && !isHeld(row, now));
+  return row => {
+    if (row.state === 'typing') return 0;
+    if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 5;
+    if (row.origin === 'owner') return 2;
+    if (row.origin === 'ferret') return ferretDue ? 3 : 4;
+    return ferretDue ? 4 : 3;
+  };
 };
 
 /** The order the ferret will meet its messages in; oldest first within the same standing. */
-export const orderedRows = (rows: readonly QueueRow[], now: number = Date.now()): readonly QueueRow[] =>
-  [...rows].sort(
-    (a, b) => deliveryRank(a, now) - deliveryRank(b, now) || a.at.localeCompare(b.at) || a.id.localeCompare(b.id),
-  );
+export const orderedRows = (rows: readonly QueueRow[], now: number = Date.now()): readonly QueueRow[] => {
+  const rank = rankerFor(rows, now);
+  return [...rows].sort((a, b) => rank(a) - rank(b) || a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+};
 
 /** The id of the row that is delivered next: the first one still to come, if any. */
 export const nextRowId = (rows: readonly QueueRow[], now: number = Date.now()): string | undefined =>
@@ -184,12 +189,16 @@ export interface QueueGroup {
   readonly rows: readonly QueueRow[];
 }
 
+/** When the longest-waiting message of these rows was queued (rows may be listed in delivery order, not age). */
+const oldestAt = (rows: readonly QueueRow[]): string =>
+  rows.reduce((oldest, row) => (oldest === '' || row.at < oldest ? row.at : oldest), '');
+
 /** Only ferrets with something waiting, the longest-waiting first. */
 export const waitingGroups = (groups: readonly QueueGroup[]): readonly QueueGroup[] =>
   groups
     .map(group => ({ ...group, rows: group.rows.filter(isWaitingRow) }))
     .filter(group => group.rows.length > 0)
-    .sort((a, b) => (a.rows[0]?.at ?? '').localeCompare(b.rows[0]?.at ?? '') || a.key.localeCompare(b.key));
+    .sort((a, b) => oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key));
 
 /** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */
 export const waitingCountLine = (count: number): string =>
