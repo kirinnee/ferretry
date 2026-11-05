@@ -1632,15 +1632,20 @@ describe('the whole app copy leaves a signed-in login, its secrets, its factors 
     const vault = vaultAt('2026-09-01T09:00:00.000Z');
     const source = await machine('studio', { claude: true, emails: { 'claude-you': EMAIL } });
     await importHost(source);
-    if (extraRuntime)
+    if (extraRuntime) {
+      // A second runtime needs a profile of its own: the catalog refuses one more on the same login and profile.
+      const layers = (await declared(source)).profiles['claude-default']?.layers;
+      if (layers === undefined) throw new Error('expected the imported profile');
+      await apply(source, { kind: 'profile.put', name: 'claude-extra', layers: [...layers], create: true });
       await apply(source, {
         kind: 'runtime.put',
         name: 'claude-extra',
         credential: 'claude-you',
-        profile: 'claude-default',
+        profile: 'claude-extra',
         agent: true,
         create: true,
       });
+    }
     // The source holds the held key under ANOTHER value, and a key the target lacks.
     await vault.directory.put(HELD as never, 'source-value-for-the-held-key');
     await vault.directory.put(MISSING as never, 'source-value-for-the-missing-key');
