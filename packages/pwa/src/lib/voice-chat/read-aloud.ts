@@ -53,6 +53,8 @@ export interface ReadAloudController {
   read(key: string, markdown: string): void;
   /** Stop whatever is being read. */
   stop(): void;
+  /** What to say about the voice a reading would use right now, before anything is read: null for a device voice. */
+  previewVoiceNote(): string | null;
   /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
   dismiss(): void;
 }
@@ -76,9 +78,25 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
     for (const listener of [...listeners]) listener();
   };
 
+  /** The voice a reading would use: the one the person picked, else the best that stays on the device; null for none. */
+  const pickVoice = (): { readonly voice: SpeakerVoice | null; readonly language: string } => {
+    let language = 'en-US';
+    try {
+      language = deps.language?.() ?? language;
+    } catch {
+      // No language to ask: English.
+    }
+    try {
+      return { voice: chooseVoice(speaker.voices(), language, deps.pickedVoice?.()), language };
+    } catch {
+      return { voice: null, language };
+    }
+  };
+
   return {
     supported: speaker.supported,
     getState: () => state,
+    previewVoiceNote: () => voiceNote(pickVoice().voice),
     subscribe: listener => {
       listeners.add(listener);
       return () => {
@@ -95,18 +113,7 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         set({ ...IDLE, key });
         return;
       }
-      let language = 'en-US';
-      try {
-        language = deps.language?.() ?? language;
-      } catch {
-        // No language to ask: English.
-      }
-      let voice: SpeakerVoice | null = null;
-      try {
-        voice = chooseVoice(speaker.voices(), language, deps.pickedVoice?.());
-      } catch {
-        voice = null;
-      }
+      const { voice, language } = pickVoice();
       if (voice === null) {
         // No voice that stays on the device and none picked: say so, and never hand the text to the browser's default.
         speaker.stop();

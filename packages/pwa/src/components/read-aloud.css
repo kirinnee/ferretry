@@ -1,6 +1,8 @@
-/* READ ALOUD on an assistant message (read-aloud.tsx). Calm and quiet when idle: one small control that says
-   what it does in words. While reading, the sentence being said is marked three ways — a tinted background,
-   an underline and a heavier weight — so colour is never the only signal. Theme tokens only. */
+/* READ ALOUD on an assistant message (read-aloud.tsx). Calm and quiet when idle: one control that says what it
+   does in words, at least 44px tall (48px on a phone or any touch screen). While reading, the sentence being said
+   is marked four ways — a tinted background, a solid bar on its left, an underline and a heavier weight — so
+   colour is never the only signal. The captions box shows whole lines only. A voice that sends the text away
+   gets a warning (icon + full-size words) before and while reading. Theme tokens only. */
 .fy-read-aloud {
   display: flex;
   flex-direction: column;
@@ -26,8 +28,16 @@
   font-size: var(--text-md);
   font-weight: var(--weight-medium, 600);
   gap: var(--gap-sm);
+  padding: 0 16px;
+}
+/* `:root` outranks the global `:root button { min-height: var(--target-floor) }`, which would otherwise win. */
+:root .fy-read-aloud-button {
   min-height: max(var(--target-floor, 0px), 44px);
-  padding: 0 14px;
+}
+@media (max-width: 640px), (pointer: coarse) {
+  :root .fy-read-aloud-button {
+    min-height: max(var(--target-floor, 0px), 48px);
+  }
 }
 .fy-read-aloud-button:hover {
   background: var(--accent-soft);
@@ -41,30 +51,62 @@
   border-color: var(--accent-border);
 }
 .fy-read-aloud-state {
-  color: var(--muted);
+  color: var(--fg-soft);
   font-size: var(--text-md);
 }
 .fy-read-aloud-note {
-  color: var(--muted);
-  font-size: var(--text-sm);
+  align-items: flex-start;
+  background: var(--warn-bg);
+  border: var(--stroke-control) solid var(--warn-border);
+  border-radius: var(--radius-control);
+  color: var(--fg);
+  display: flex;
+  font-size: var(--text-lg);
+  gap: var(--gap-md);
+  line-height: 1.45;
+  margin: 0;
+  padding: var(--gap-md) var(--flow-3);
 }
+.fy-read-aloud-note svg {
+  color: var(--warn);
+  flex: none;
+  margin-top: 0.15em;
+}
+/* The captions: a box that grows with the reply up to six WHOLE lines, then scrolls a line at a time (the
+   script rests it on line boundaries). The padding is the box's, outside the scrolling part, so no line ever
+   touches a border or is cut at an edge. */
 .fy-read-captions {
+  --caption-line: calc(var(--text-lg) * 1.75);
   background: var(--surface-2);
   border: var(--stroke-control) solid var(--border-soft);
   border-radius: var(--radius-control);
+  padding: var(--flow-3);
+}
+.fy-read-captions-scroll {
   font-size: var(--text-lg);
-  line-height: 1.6;
-  margin: 0;
-  max-height: 12.5em;
+  line-height: var(--caption-line);
+  max-height: calc(var(--caption-line) * 6);
   overflow-y: auto;
-  padding: var(--gap-md) var(--flow-3);
+  overscroll-behavior: contain;
 }
+.fy-read-captions-text {
+  margin: 0;
+  white-space: normal;
+}
+/* `line-height: 0` takes the sentence out of the line's height: the box's strut alone sets it, so a bolder or
+   fallback font in the marked sentence can never make one line taller than the others (the box is whole lines). */
 .fy-read-caption {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
   border-radius: var(--radius-xs);
-  padding: 1px 2px;
+  line-height: 0;
+  padding: 0.15em 0 0.15em 0.4em;
 }
+/* No padding or border on the right and no trailing space inside, so a wrapped sentence's tint ends at its last
+   word. The bar is a shadow, not a border: it adds no width, and is repeated on every wrapped line. */
 .fy-read-caption[data-current] {
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent-strong) 30%, var(--surface-2));
+  box-shadow: inset 4px 0 0 var(--accent-strong);
   font-weight: 600;
   text-decoration: underline;
   text-decoration-thickness: 2px;

@@ -1,7 +1,9 @@
 /**
  * Screenshots of READ ALOUD on an assistant message (F137 slice 1): idle, reading with the sentence
- * highlighted, stopped, and the remote-voice note. Phone (390) and desktop (1280), light and dark. Review
- * evidence; nothing compares the PNGs.
+ * highlighted (a long reply whose captions scroll, and a short one that fits), stopped, the remote-voice
+ * warning before and while reading, and the keyboard focus ring on Read aloud and on Stop. Phone (390) and
+ * desktop (1280), light and dark. Review evidence; nothing compares the PNGs, but the script itself fails if a
+ * target is too small, the captions box is not whole lines, or a part of a page would be blank.
  *
  *   bun harness/read-aloud-screenshot.tsx             # writes <out>/<light|dark>/<scene>-<phone|desktop>[-partN].png
  *   FY_READ_ALOUD_SHOTS_DIR=/tmp/shots bun harness/read-aloud-screenshot.tsx
@@ -42,6 +44,8 @@ import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 
 const params = new URLSearchParams(location.search);
 const scene = params.get('scene') ?? 'idle';
+const remote = scene.startsWith('remote-voice');
+const quietScene = scene === 'idle' || scene === 'remote-voice-idle' || scene === 'focus-read';
 
 const LOCAL: SpeakerVoice = { id: 'local', name: 'Samantha', lang: 'en-US', local: true, isDefault: true };
 const REMOTE: SpeakerVoice = { id: 'remote', name: 'Google US English', lang: 'en-US', local: false, isDefault: false };
@@ -62,8 +66,10 @@ const quiet = (voices: readonly SpeakerVoice[], current: number): SpeakerPort =>
 };
 
 const controller = createReadAloud({
-  speaker: quiet(scene === 'remote-voice' ? [REMOTE] : [LOCAL], scene === 'reading-late' ? 3 : 1),
+  speaker: quiet(remote ? [REMOTE] : [LOCAL], scene === 'reading-late' ? 3 : 1),
   language: () => 'en-US',
+  // A voice that sends the text away is used only when the person picked it.
+  pickedVoice: () => (remote ? 'remote' : undefined),
 });
 
 const REPLY = [
@@ -79,15 +85,17 @@ const REPLY = [
   'Run the tests next.',
 ].join('\\n');
 
+const SHORT = 'Done. The login button now works on the first tap.';
+
 const AT = Date.UTC(2026, 9, 18, 3, 0, 0);
 const entries: TranscriptEntry[] = [
   { id: 'u1', kind: 'user', text: 'The login button needs two taps. Can you fix it?', at: AT - 120000 },
-  { id: 'a1', kind: 'assistant', text: REPLY, label: 'Janella', at: AT },
+  { id: 'a1', kind: 'assistant', text: scene === 'short' ? SHORT : REPLY, label: 'Janella', at: AT },
 ];
 
 function Driver() {
   useEffect(() => {
-    if (scene !== 'idle') controller.read('a1', REPLY);
+    if (!quietScene) controller.read('a1', scene === 'short' ? SHORT : REPLY);
     if (scene === 'stopped') controller.stop();
     document.body.dataset.ready = '1';
   }, []);
@@ -99,7 +107,7 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <ReadAloudProvider controller={controller}>
     <Driver />
-    <main style={{ margin: '0 auto', maxWidth: 760, padding: '12px 16px' }}>
+    <main style={{ margin: '0 auto', maxWidth: 760, padding: '12px 16px 28px' }}>
       <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible' }}>
         <div className="fy-transcript-content" data-read-aloud-scene="">
           {entries.map((entry, index) => (
@@ -156,7 +164,26 @@ const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844, mobile: true },
   { name: 'desktop', width: 1280, height: 800, mobile: false },
 ] as const;
-const SCENES = ['idle', 'reading', 'reading-late', 'stopped', 'remote-voice'] as const;
+const SCENES = [
+  'idle',
+  'reading',
+  'reading-late',
+  'short',
+  'stopped',
+  'remote-voice-idle',
+  'remote-voice',
+  'focus-read',
+  'focus-stop',
+] as const;
+/** Scenes where the captions are on screen. */
+const CAPTIONED = new Set<string>(['reading', 'reading-late', 'short', 'remote-voice', 'focus-stop']);
+
+/**
+ * Where a page may be cut so no line of text is sliced: the bottoms of block-level things, where the captions
+ * box, a paragraph, a code block and a button each count as ONE block (their insides are never cut).
+ */
+const CUT_ROOT = '[data-read-aloud-scene]';
+const WHOLE = 'p, pre, button, .fy-read-captions';
 
 try {
   for (const scheme of ['light', 'dark'] as const) {
@@ -182,27 +209,100 @@ try {
           await page.goto(`${server.url}?theme=studio-${scheme}&scene=${scene}`);
           await page.locator('body[data-ready="1"]').waitFor({ state: 'attached' });
           await page.locator('[data-read-aloud-scene] .fy-read-aloud-button').first().waitFor({ state: 'visible' });
-          const expectCaptions = scene !== 'idle' && scene !== 'stopped';
           const captions = await page.locator('[data-read-captions]').count();
-          if (expectCaptions !== (captions === 1))
+          if (CAPTIONED.has(scene) !== (captions === 1))
             fail(`${scheme} ${viewport.name} ${scene}: captions shown = ${captions}`);
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scheme} ${viewport.name} ${scene} scrolls sideways by ${overflow}px`);
-          await page.waitForTimeout(200);
-          const height = await page.evaluate(() => document.documentElement.scrollHeight);
-          const parts = Math.max(1, Math.ceil(height / viewport.height));
-          for (let part = 0; part < parts; part += 1) {
-            const suffix = parts === 1 ? '' : `-part${part + 1}`;
+          if (scene === 'focus-read' || scene === 'focus-stop') {
+            // The keyboard way in: Tab until the button has focus (so :focus-visible is what the ring shows).
+            for (let tabs = 0; tabs < 12; tabs += 1) {
+              await page.keyboard.press('Tab');
+              if (
+                await page.evaluate(() => document.activeElement?.classList.contains('fy-read-aloud-button') === true)
+              )
+                break;
+            }
+          }
+          await page.waitForTimeout(500);
+          const facts = await page.evaluate(() => {
+            const button = document.querySelector('.fy-read-aloud-button');
+            const box = document.querySelector('.fy-read-captions-scroll');
+            const note = document.querySelector('[data-voice-warning]');
+            const line = box === null ? 0 : Number.parseFloat(getComputedStyle(box).lineHeight);
+            return {
+              target: button?.getBoundingClientRect().height ?? 0,
+              line,
+              boxHeight: box?.clientHeight ?? 0,
+              scrollTop: box?.scrollTop ?? 0,
+              scrolls: box === null ? false : box.scrollHeight > box.clientHeight + 1,
+              noteFont: note === null ? 0 : Number.parseFloat(getComputedStyle(note).fontSize),
+              noteIcon: note !== null && note.querySelector('svg') !== null,
+              focused: document.activeElement?.classList.contains('fy-read-aloud-button') ?? false,
+              focusLabel: document.activeElement?.textContent?.trim() ?? '',
+            };
+          });
+          const label = `${scheme} ${viewport.name} ${scene}`;
+          const remote = scene.startsWith('remote-voice');
+          const floor = viewport.mobile ? 48 : 44;
+          if (facts.target < floor - 0.5) fail(`${label}: Read aloud/Stop is ${facts.target}px tall, wants ${floor}`);
+          if (facts.line > 0) {
+            const whole = (value: number): boolean =>
+              Math.abs(value / facts.line - Math.round(value / facts.line)) < 0.05;
+            if (!whole(facts.boxHeight))
+              fail(`${label}: captions box is ${facts.boxHeight}px, not whole lines of ${facts.line}px`);
+            if (!whole(facts.scrollTop)) fail(`${label}: captions rest ${facts.scrollTop}px down, mid-line`);
+            if (scene === 'short' && facts.scrolls) fail(`${label}: a short reply's captions scroll`);
+          }
+          if (remote && (facts.noteFont < 14 || !facts.noteIcon)) fail(`${label}: the warning is small or has no icon`);
+          if (!remote && facts.noteIcon) fail(`${label}: a device voice shows a warning`);
+          if ((scene === 'focus-read' || scene === 'focus-stop') && !facts.focused)
+            fail(`${label}: the button is not focused`);
+          if (scene === 'focus-stop' && facts.focusLabel !== 'Stop')
+            fail(`${label}: focus is on "${facts.focusLabel}"`);
+          if (scene === 'focus-read' && facts.focusLabel !== 'Read aloud')
+            fail(`${label}: focus is on "${facts.focusLabel}"`);
+          // Cut the page where no line is sliced, and end on the last real row plus a margin: no blank parts.
+          const layout = await page.evaluate(
+            ([root, whole]: readonly [string, string]) => {
+              const bottoms = [...document.querySelectorAll(`${root} *`)]
+                .filter(node => {
+                  const display = getComputedStyle(node).display;
+                  const owner = node.closest(whole);
+                  return (
+                    (owner === null || owner === node) &&
+                    display !== 'inline' &&
+                    display !== 'contents' &&
+                    display !== 'none'
+                  );
+                })
+                .map(node => node.getBoundingClientRect().bottom + window.scrollY)
+                .sort((x, y) => x - y);
+              const main = document.querySelector('main');
+              const mainBottom = main === null ? 0 : main.getBoundingClientRect().bottom + window.scrollY;
+              return { bottoms, height: document.documentElement.scrollHeight, mainBottom };
+            },
+            [CUT_ROOT, WHOLE] as const,
+          );
+          const total = Math.min(layout.height, Math.ceil(layout.mainBottom));
+          const spans: Array<readonly [number, number]> = [];
+          let start = 0;
+          while (total - start > viewport.height) {
+            const limit = start + viewport.height;
+            const cut = layout.bottoms.filter(y => y > start + viewport.height / 2 && y <= limit - 3).at(-1);
+            const end = cut === undefined ? limit : Math.ceil(cut) + 3;
+            spans.push([start, end]);
+            start = end;
+          }
+          spans.push([start, total]);
+          for (const [index, [from, to]] of spans.entries()) {
+            if (to - from < 120) fail(`${label}: part ${index + 1} is only ${to - from}px`);
+            const suffix = spans.length === 1 ? '' : `-part${index + 1}`;
             const target = join(outDir, scheme, `${scene}-${viewport.name}${suffix}.png`);
             await page.screenshot({
               path: target,
               fullPage: true,
-              clip: {
-                x: 0,
-                y: part * viewport.height,
-                width: viewport.width,
-                height: Math.min(viewport.height, height - part * viewport.height),
-              },
+              clip: { x: 0, y: from, width: viewport.width, height: to - from },
             });
             process.stdout.write(`📸 ${target}\n`);
           }
@@ -216,3 +316,5 @@ try {
   await browser.close();
   server.stop();
 }
+process.stdout.write(`✅ read-aloud screenshots written to ${outDir}\n`);
+process.exit(0);
