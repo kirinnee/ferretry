@@ -12,8 +12,9 @@ export function harnessReadySeconds(milliseconds: number): string {
 }
 
 /**
- * `harness ready in 4.2 s`, or `harness not ready after 30.0 s` when the start gave up waiting (that figure is
- * the bound, not a startup time), or nothing when this session's start was never measured.
+ * `harness ready in 4.2 s`, or `harness not ready after 31.4 s` when the start gave up waiting (that figure is
+ * the time from launch until the wait gave up, at least the 30 s bound, not a startup time), or nothing when this
+ * session's start was never measured.
  */
 export function harnessReadyWords(view: SessionView): string | undefined {
   const { harnessStartupMs: ready, harnessNotReadyAfterMs: waited } = view.state;

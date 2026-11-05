@@ -15,7 +15,11 @@ import {
   RuntimeSupervisedReaper,
 } from '../../../../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
 import { CODEX_OFFLINE_LAUNCH_ERROR, type CodexAppServerOutcome } from '../../../../src/lib/fleet/codex-runtime.ts';
-import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../../src/lib/session/lifecycle/index.ts';
+import {
+  diedParked,
+  type SessionLifecycleLauncher,
+  type SessionLifecycleRecord,
+} from '../../../../src/lib/session/lifecycle/index.ts';
 import type { TerminalReapTarget } from '../../../../src/lib/session/reap.ts';
 
 const WRAPPER = '/state/fleet/bin/codex-default';
@@ -128,6 +132,25 @@ describe('RuntimeSupervisedLauncher', () => {
       should(error.message.startsWith(CODEX_OFFLINE_LAUNCH_ERROR)).be.true();
       should(error.cause).equal(inner.failure);
     }
+  });
+
+  it('should keep what the wait saw of the first turn on the explanation that replaces its error', async () => {
+    // Arrange
+    const parked = new RecordingLauncher();
+    parked.failure = Object.assign(new Error('pane died'), { parked: true });
+    const unparked = new RecordingLauncher();
+    unparked.failure = new Error('pane died');
+
+    // Act
+    const seen = await caught(new RuntimeSupervisedLauncher(parked, supervisor([]), screen(OFFLINE)).settled(RECORD));
+    const unseen = await caught(
+      new RuntimeSupervisedLauncher(unparked, supervisor([]), screen(OFFLINE)).settled(RECORD),
+    );
+
+    // Assert
+    should(seen.message.startsWith(CODEX_OFFLINE_LAUNCH_ERROR)).be.true();
+    should(diedParked(seen)).be.true();
+    should(diedParked(unseen)).be.false();
   });
 
   it('should pass any other failure through unchanged, even when the screen cannot be read', async () => {

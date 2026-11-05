@@ -90,6 +90,20 @@ export class PaneDeliveryError extends Error {
 }
 
 /**
+ * The pane died while `waitStartupSettled` was watching it. `parked` is whether a frame showed the first turn
+ * parked behind the harness's startup before it died: only then is the turn known never to have run.
+ */
+export class PaneStartupExitedError extends PaneDeliveryError {
+  constructor(
+    message: string,
+    readonly parked: boolean,
+  ) {
+    super(message);
+    this.name = 'PaneStartupExitedError';
+  }
+}
+
+/**
  * The payload is in the composer and every bounded Enter left it there: typed, and not sent.
  *
  * Its own type because the remedy is different from every other failure: nothing needs retyping, and
@@ -188,17 +202,19 @@ export class TmuxPaneDelivery {
    * Codex 0.166 takes a submission before its startup ends and parks it under `Waiting for startup`
    * (`paneShowsStartupWait`), so delivery is already proven while the harness is not yet running. Any
    * other pane answers on the first frame. A pane that dies meanwhile fails the wait with the harness's
-   * own exit reason, so the start reports it instead of a session that dies later; a bound that passes
+   * own exit reason (a `PaneStartupExitedError` saying whether the park was seen first), so the start reports it instead of a session that dies later; a bound that passes
    * answers `timed-out` rather than failing, because a slow harness is not a failed one and the caller
    * must not mistake the bound for a measured startup time.
    */
   async waitStartupSettled(session: string): Promise<'settled' | 'timed-out'> {
     // A step below one millisecond would never advance `waited`, so the bound could not end the loop.
     const step = Math.max(1, this.settings.pollMs);
+    let parked = false;
     for (let waited = 0; ; waited += step) {
       const frame = startupSettleStep(await captureFrame(this.tmux, session));
       if (frame.kind === 'settled') return 'settled';
-      if (frame.kind === 'exited') throw new PaneDeliveryError(`${frame.reason}; tmux session ${session}`);
+      if (frame.kind === 'exited') throw new PaneStartupExitedError(`${frame.reason}; tmux session ${session}`, parked);
+      parked = true;
       if (waited >= this.settings.startupSettleMs) return 'timed-out';
       await this.sleep(step);
     }

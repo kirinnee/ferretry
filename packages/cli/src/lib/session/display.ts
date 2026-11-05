@@ -69,7 +69,10 @@ function headline(view: SessionView): string {
     .join('  ');
 }
 
-/** `ready in 4.2 s`, or `not ready after 30.0 s` when the start gave up waiting; empty when nothing was measured. */
+/**
+ * `ready in 4.2 s`, or `not ready after 31.4 s` when the start gave up waiting (the time from launch until it gave up,
+ * at least the 30 s bound); empty when nothing was measured.
+ */
 function startupVital(state: SessionState): string {
   if (state.harnessStartupMs !== undefined) return `ready in ${harnessReadySeconds(state.harnessStartupMs)}`;
   return state.harnessNotReadyAfterMs === undefined

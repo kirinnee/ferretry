@@ -27,8 +27,8 @@ describe('harnessReadyWords', () => {
   });
 
   it('should say a start that gave up waiting was not ready, never that it was ready in the bound', () => {
-    const words = harnessReadyWords(sessionView({}, { harnessNotReadyAfterMs: 30_000 }));
-    should(words).equal('harness not ready after 30.0 s');
+    const words = harnessReadyWords(sessionView({}, { harnessNotReadyAfterMs: 31_400 }));
+    should(words).equal('harness not ready after 31.4 s');
     should(words).not.containEql('ready in');
   });
 });

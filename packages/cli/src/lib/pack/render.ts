@@ -81,11 +81,12 @@ export function renderGuide(view: PackView, bin: string): string {
  * The "reply OK" check of one attempt: `probe OK 640 ms`, `probe OK, cached`, or `probe failed 3436 ms`
  * (`shared` when another start's probe of the same model was already running). A refused attempt that
  * carries a time is one whose probe failed; one without a time passed it and was refused by the start.
+ * `start_failed` is the exception: its probe passed (the harness then did not come up) and it carries the time.
  */
 const probeWords = (attempt: PackAttempt): string => {
   if (attempt.probe === undefined) return '';
   const cached = attempt.probe === 'cached';
-  if (attempt.outcome === 'refused' && attempt.probeMs !== undefined)
+  if (attempt.outcome === 'refused' && attempt.probeMs !== undefined && attempt.refusal?.code !== 'start_failed')
     return cached ? ' (probe failed, shared)' : ` (probe failed ${String(attempt.probeMs)} ms)`;
   if (cached) return ' (probe OK, cached)';
   return attempt.probeMs === undefined ? ' (probe OK)' : ` (probe OK ${String(attempt.probeMs)} ms)`;
@@ -95,8 +96,6 @@ const probeWords = (attempt: PackAttempt): string => {
 const attemptLine = (attempt: PackAttempt, ready = ''): string => {
   const model = attempt.model === undefined ? '' : ` ${attempt.model}`;
   const probe = probeWords(attempt);
-  if (attempt.refusal?.code === 'start_failed')
-    return `  failed ${attempt.runtime}${model}${probe} — ${attempt.refusal.message}`;
   return attempt.outcome === 'started'
     ? `  started ${attempt.runtime}${model}${probe}${ready}`
     : `  refused ${attempt.runtime}${model}${probe} — ${attempt.refusal?.code ?? 'refused'}: ${attempt.refusal?.message ?? ''}`;
@@ -140,9 +139,7 @@ export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): stri
   );
   if (outcome.outcome === 'refused')
     return [
-      outcome.refusal.code === 'start_failed'
-        ? `start failed: ${outcome.refusal.message}`
-        : `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
+      `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
       ...(outcome.refusal.remedy === undefined ? [] : [outcome.refusal.remedy]),
       ...(attempts.length === 0 ? [] : ['', 'Tried:', ...attempts]),
     ].join('\n');

@@ -180,6 +180,14 @@ export interface SessionLifecycleRepository {
   write(record: SessionLifecycleRecord, event: SessionLifecycleEvent): Promise<void>;
 }
 
+/**
+ * Whether a rejection of `settled` says the first turn was seen parked behind the harness's startup before the pane
+ * died. Only that proves the turn never ran; any other failure leaves it unknown.
+ */
+export function diedParked(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'parked' in error && error.parked === true;
+}
+
 /** Process boundary for one managed terminal session. */
 export interface SessionLifecycleLauncher {
   /** True when this session's terminal already exists — the only safe guard against a second pane. */
@@ -210,7 +218,8 @@ export interface SessionLifecycleLauncher {
    * Delivery is not startup: Codex 0.166 takes a submission while it is still starting and parks it until an
    * account check with chatgpt.com answers. Answers `settled` when the harness is up, `timed-out` when the bound
    * passes first — not a failure, but not a startup time either — and rejects with the harness's own reason when
-   * the pane dies first. Optional: a launcher that cannot tell never waits, and the start then measures delivery
+   * the pane dies first; that rejection carries `parked: true` (see {@link diedParked}) when a frame showed the
+   * first turn parked before the pane died. Optional: a launcher that cannot tell never waits, and the start then measures delivery
    * alone.
    */
   settled?(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'>;

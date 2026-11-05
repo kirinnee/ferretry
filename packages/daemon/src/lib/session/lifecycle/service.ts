@@ -25,6 +25,7 @@ import {
 import type { SessionLifecycleSettings } from './settings.ts';
 import {
   type CreateSessionLifecycleRequest,
+  diedParked,
   SESSION_BOARD_CAPABILITY_VARIABLE,
   type SessionCredentialIssuer,
   type SessionCredentialRotator,
@@ -101,8 +102,12 @@ export interface SessionLifecyclePorts {
   readonly launches?: Pick<LaunchGate, 'launching' | 'awaitSettled'>;
 }
 
-/** Appended to a settle failure: delivery was recorded, but the harness died before it ran the first turn. */
+/**
+ * Appended to a settle failure: delivery was recorded, but the harness died before it ran the first turn. Said as
+ * fact only when the wait saw the turn parked before the pane died; otherwise the turn may have run.
+ */
 const FIRST_TURN_NEVER_RAN = '; its first turn was never run, so start a new session rather than reviving this one';
+const FIRST_TURN_MAYBE_RAN = '; its first turn may not have run, so start a new session rather than reviving this one';
 
 function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -392,9 +397,11 @@ export class SessionLifecycleService {
     try {
       settlement = (await this.ports.launcher.settled?.(record)) ?? 'settled';
     } catch (error) {
-      // The first turn is already recorded delivered, but a parked Codex never ran it: reviving this
-      // session would resume a conversation that was never given its assignment.
-      throw await this.recordFailure(record, new Error(`${failureMessage(error)}${FIRST_TURN_NEVER_RAN}`));
+      // The first turn is already recorded delivered. A parked Codex never ran it, and reviving the session
+      // would resume a conversation that was never given its assignment; a pane that died before any park was
+      // seen may have run it, so that is not claimed.
+      const ran = diedParked(error) ? FIRST_TURN_NEVER_RAN : FIRST_TURN_MAYBE_RAN;
+      throw await this.recordFailure(record, new Error(`${failureMessage(error)}${ran}`));
     }
     const elapsed = elapsedMs(launchedAt, this.ports.clock.now());
     return elapsed === undefined ? record : withHarnessStartup(record, settlement, elapsed);

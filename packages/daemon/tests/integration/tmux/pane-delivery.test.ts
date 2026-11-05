@@ -6,6 +6,7 @@ import {
   ComposerOccupiedError,
   ComposerUnconfirmedError,
   PaneDeliveryError,
+  PaneStartupExitedError,
   PaneStrandedError,
   TmuxPaneDelivery,
 } from '../../../src/adapters/index.ts';
@@ -698,8 +699,9 @@ describe('tmux pane delivery — waiting out the harness’s own startup', () =>
       (caught: unknown) => caught,
     );
 
-    // Assert
+    // Assert — the park was seen before the pane died, which is what lets the start say the turn never ran.
     should(error).be.instanceOf(PaneDeliveryError);
+    should((error as PaneStartupExitedError).parked).be.true();
     should((error as Error).message).match(/exited \(1\)/u);
     should((error as Error).message).endWith(`; tmux session ${SESSION}`);
   });
@@ -711,8 +713,13 @@ describe('tmux pane delivery — waiting out the harness’s own startup', () =>
     server.exitCode = '137';
     const { subject, slept } = delivery(server);
 
-    // Act + Assert
-    await should(subject.waitStartupSettled(SESSION)).be.rejectedWith(PaneDeliveryError);
+    // Act + Assert — no park was ever seen, so nothing is known about whether the turn ran.
+    const error = await subject.waitStartupSettled(SESSION).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    should(error).be.instanceOf(PaneDeliveryError);
+    should((error as PaneStartupExitedError).parked).be.false();
     should(slept).deepEqual([]);
   });
 });

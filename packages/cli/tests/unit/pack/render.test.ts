@@ -227,7 +227,7 @@ describe('renderPackNewOutcome', () => {
     should(claude).containEql('harness ready in 20.0 s');
   });
 
-  it('should print a start whose session failed as a failed start with its reason, never as Started', () => {
+  it('should print a start whose session failed as a refusal with its reason, in the shapes every refusal has, never as Started', () => {
     // Arrange
     const reason = 'claude-main opus did not start: the interactive harness exited (1)';
     const outcome = refused({
@@ -237,6 +237,8 @@ describe('renderPackNewOutcome', () => {
           runtime: 'claude-main',
           model: 'opus',
           outcome: 'refused',
+          probe: 'ran',
+          probeMs: 640,
           refusal: { code: 'start_failed', message: reason },
         }),
       ],
@@ -246,11 +248,10 @@ describe('renderPackNewOutcome', () => {
     const text = renderPackNewOutcome(outcome, 'fy');
 
     // Assert
-    should(text.split('\n')[0]).equal(`start failed: ${reason}`);
+    should(text.split('\n')[0]).equal(`refused (start_failed): ${reason}`);
     should(text).containEql('Its session child-1 holds the evidence.');
-    should(text).containEql(`  failed claude-main opus — ${reason}`);
+    should(text).containEql(`  refused claude-main opus (probe OK 640 ms) — start_failed: ${reason}`);
     should(text).not.containEql('Started');
-    should(text).not.containEql('refused');
   });
 
   it('should time a probe that passed and one that failed, and name a failed probe another start shared', () => {

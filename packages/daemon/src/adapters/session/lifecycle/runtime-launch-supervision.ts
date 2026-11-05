@@ -16,7 +16,11 @@
  */
 import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type CodexAppServerOutcome, codexLaunchFailure } from '../../../lib/fleet/codex-runtime.ts';
-import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../lib/session/lifecycle/index.ts';
+import {
+  diedParked,
+  type SessionLifecycleLauncher,
+  type SessionLifecycleRecord,
+} from '../../../lib/session/lifecycle/index.ts';
 import type { ExactTerminalReaper } from '../../../lib/session/reap-service.ts';
 import type { TerminalReapTarget } from '../../../lib/session/reap.ts';
 
@@ -60,7 +64,9 @@ export class RuntimeSupervisedLauncher implements SessionLifecycleLauncher {
   async settled(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'> {
     if (this.inner.settled === undefined) return 'settled';
     return await this.inner.settled(record).catch(async (error: unknown) => {
-      throw await this.#explained(record, error);
+      const explained = await this.#explained(record, error);
+      // The explanation replaces the error, but what the wait saw of the first turn is still true.
+      throw explained === error || !diedParked(error) ? explained : Object.assign(explained as Error, { parked: true });
     });
   }
 

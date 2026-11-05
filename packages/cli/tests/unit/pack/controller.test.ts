@@ -292,7 +292,7 @@ describe('PackController.newChild', () => {
     should(PACK_REFUSED_EXIT_CODE).equal(2);
   });
 
-  it('should write a start whose session failed to stderr as a failed start with its reason, and exit non-zero', async () => {
+  it('should write a start whose session failed to stderr as a refusal carrying its reason, and exit non-zero', async () => {
     // Arrange
     const reason = 'claude-main did not start: the interactive harness exited (1)';
     const { controller, out } = build({
@@ -304,7 +304,7 @@ describe('PackController.newChild', () => {
 
     // Assert
     should(out.out).be.empty();
-    should(out.err).eql([`foo new: start failed: ${reason}`]);
+    should(out.err).eql([`foo new: refused (start_failed): ${reason}`]);
     should(out.exitCode).equal(PACK_REFUSED_EXIT_CODE);
   });
 

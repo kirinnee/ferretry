@@ -608,7 +608,7 @@ describe('PackService.newChild with a named runtime', () => {
     should(refusal?.message).containEql('the interactive harness exited (1)');
     should(refusal?.remedy).containEql('child-1');
     should(outcome.attempts).deepEqual([
-      { runtime: 'claude-main', model: 'opus', outcome: 'refused', refusal, probe: 'ran' },
+      { runtime: 'claude-main', model: 'opus', outcome: 'refused', refusal, probe: 'ran', probeMs: 25 },
     ]);
   });
 

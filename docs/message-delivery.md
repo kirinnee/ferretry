@@ -363,20 +363,23 @@ visible instead of guessed at:
   is the park line it polls every `pollMs` (250 ms) for up to `startupSettleMs` (30 s). Claude, and a Codex
   that was not parked, are settled on the first frame and wait for nothing. A bound that passes is **not**
   a failure, and it is **not** a startup time: the wait answers `timed-out`, `harnessStartupMs` is left
-  unset, and the time spent waiting is recorded as `harnessNotReadyAfterMs` instead. A pane that dies while
+  unset, and the time from launch until the wait gave up (at least the 30 s bound, since it also covers launch and
+  delivery) is recorded as `harnessNotReadyAfterMs` instead. A pane that dies while
   waiting **fails the start** with the harness's own reason (`harnessExitReason`), so `account/read failed
 during TUI bootstrap … timed out` is reported at start time rather than by a session that dies later; the
-  reason ends `; its first turn was never run, so start a new session rather than reviving this one`, because
-  delivery was already recorded but a parked Codex never ran the turn. A clock reading that is not an instant
+  reason ends `; its first turn was never run, so start a new session rather than reviving this one` when the
+  wait saw the turn parked before the pane died (delivery was already recorded, but a parked Codex never ran it),
+  and `; its first turn may not have run, so start a new session rather than reviving this one` when it did not. A clock reading that is not an instant
   records neither field. Only a launch the start made
   is measured; a retried start that finds its pane already live, and a revive, leave any earlier value.
-- **`fy new`** appends `, harness ready in 4.2 s` (or `, harness not ready after 30.0 s`) to the started
+- **`fy new`** appends `, harness ready in 4.2 s` (or `, harness not ready after 31.4 s`) to the started
   attempt's line, and for a Codex that took 3 s or more prints one more line: `Codex waits on an account
 check with chatgpt.com before it starts, so a slow start is usually the network (the first start on a new
 Codex home also indexes its history once)`. `fy status <id>` shows `ready in 4.2 s` (or `not ready after
-30.0 s`) with the session's other vitals. A start whose session comes back `failed` is **not** a started
+31.4 s`) with the session's other vitals. A start whose session comes back `failed` is **not** a started
   ferret: Pack answers it as a `start_failed` refusal carrying the session's reason, and `fy new` prints
-  `start failed: …` and exits 2 like any refusal.
+  `refused (start_failed): …` (and `refused <runtime> … — start_failed: …` among the attempts) and exits 2 like
+  any refusal.
 
 ## Measured Claude Code behaviour
 

@@ -439,7 +439,7 @@ export class PackService {
             message: `${runtime}${model === undefined ? '' : ` ${model}`} did not start: ${view.state.reason ?? 'no reason was recorded'}`,
             remedy: `Its session ${view.config.id} holds the evidence (\`${this.ports.bin} status ${view.config.id}\`); try the next candidate.`,
           };
-          attempts.push({ runtime, ...named, outcome: 'refused', refusal: failure, probe });
+          attempts.push({ runtime, ...named, outcome: 'refused', refusal: failure, probe, probeMs: probed.outcome.ms });
           return refused(failure, attempts);
         }
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });

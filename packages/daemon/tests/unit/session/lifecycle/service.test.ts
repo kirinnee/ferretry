@@ -1956,9 +1956,9 @@ describe('SessionLifecycleService harness startup time', () => {
     const { launcher, repository, subject } = startup(15_000);
     const reason =
       'the interactive harness exited (1): its last output was "account/read failed during TUI bootstrap: workspace routing discovery timed out"';
-    launcher.settleError = new Error(reason);
+    launcher.settleError = Object.assign(new Error(reason), { parked: true });
 
-    // Act + Assert — delivery was recorded, so the reason also says the turn never ran.
+    // Act + Assert — delivery was recorded and the park was seen, so the reason also says the turn never ran.
     const said = `${reason}; its first turn was never run, so start a new session rather than reviving this one`;
     await should(subject.createAndStart(input())).be.rejectedWith(said);
     should(repository.current().state).containDeep({ status: 'failed', reason: said });
@@ -1972,7 +1972,7 @@ describe('SessionLifecycleService harness startup time', () => {
     should(launcher.calls).containEql('snapshot');
   });
 
-  it('should fail a start whose pane was already dead on the first look, naming the first turn as never run', async () => {
+  it('should fail a start whose pane was already dead on the first look, without claiming the first turn never ran', async () => {
     // Arrange — the wait ended at once, with nothing of the settle bound spent.
     const { launcher, repository, subject } = startup(0);
     launcher.settleError = new Error('the interactive harness exited (127): its last output was "codex: not found"');
@@ -1985,7 +1985,7 @@ describe('SessionLifecycleService harness startup time', () => {
 
     // Assert
     should((failure as Error).message).equal(
-      'the interactive harness exited (127): its last output was "codex: not found"; its first turn was never run, so start a new session rather than reviving this one',
+      'the interactive harness exited (127): its last output was "codex: not found"; its first turn may not have run, so start a new session rather than reviving this one',
     );
     should(repository.current().state.status).equal('failed');
     should(repository.current().state.harnessStartupMs).be.undefined();
