@@ -99,7 +99,8 @@
   border-color: var(--ok-border, var(--accent));
 }
 .fy-queue-row[data-queue-kind='blocker'] {
-  border-inline-start: 3px solid var(--err);
+  border-color: var(--err-border, var(--err));
+  background: var(--err-bg, var(--surface-2));
 }
 .fy-queue-chips {
   display: flex;
@@ -167,8 +168,19 @@
 .fy-queue-body[data-queue-clamped] {
   max-height: 9.5rem;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
-  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+}
+/* The fold fades into the card's own surface, so it reads as "more below" in every theme. */
+.fy-queue-body[data-queue-clamped]::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 3rem;
+  background: linear-gradient(to bottom, transparent, var(--surface-2));
+  pointer-events: none;
+}
+.fy-queue-row[data-queue-kind='blocker'] .fy-queue-body[data-queue-clamped]::after {
+  background: linear-gradient(to bottom, transparent, var(--err-bg, var(--surface-2)));
 }
 .fy-queue-more {
   min-width: 0;

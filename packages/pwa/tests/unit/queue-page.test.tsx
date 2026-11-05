@@ -115,10 +115,14 @@ describe('QueuePageView', () => {
     expect(text(row('q22').findByProps({ 'data-queue-chip': 'kind' }))).toBe('fyi');
   });
 
-  test('marks the one message that is delivered next, per ferret, and lists it first', () => {
+  test('marks the one message that is delivered next per ferret, in delivery order, not screen order', () => {
+    const mira = { by: { kind: 'ferret', name: 'Mira' } };
     mounted = view({
       groups: [
-        group([queued('q1', 'queued', { label: 'fyi' }), queued('q22', 'queued', { label: 'blocker' })]),
+        group([
+          queued('q1', 'queued', { ...mira, label: 'fyi', enqueuedAt: '2026-10-30T10:00:09.000Z' }),
+          queued('q22', 'queued'),
+        ]),
         group([queued('q333', 'read'), queued('q4444', 'queued')], 'd1/s2'),
       ],
     });
@@ -153,6 +157,12 @@ describe('QueuePageView', () => {
     expect(buttons(row('q1'), 'Show less')[0]?.props['aria-expanded']).toBe(true);
     run(() => buttons(row('q1'), 'Show less')[0]?.props.onClick());
     expect(buttons(row('q1'), 'Show more')).toHaveLength(1);
+  });
+
+  test('a ferret with nothing queued shows the empty card, not an empty heading', () => {
+    mounted = view({ groups: [group([])] });
+    expect(mounted.root.findAll(n => n.props['data-queue-group'] !== undefined)).toHaveLength(0);
+    expect(mounted.root.findByProps({ 'data-queue-empty': '' })).toBeDefined();
   });
 
   test('says when nothing waits, and when it is still reading', () => {

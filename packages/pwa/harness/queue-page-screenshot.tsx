@@ -34,7 +34,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import { QueuePage, QueuePageView } from '../../src/components/queue-page.tsx';
+import { QueuePage } from '../../src/components/queue-page.tsx';
 import { createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { MemoryOutboxBackend } from '../../src/lib/send-outbox.ts';
@@ -128,9 +128,11 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   view === 'empty' ? (
     <RouterProvider>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <QueuePageView groups={[]} handlers={{ edit: async () => {}, cancel: async () => {} }} loading={false} onOpenFerret={() => {}} onShowAll={() => {}} showMachine={false} title="Queue — Casen" />
-      </div>
+      <StoreProvider store={store}>
+        <div style={{ display: 'flex', minHeight: '100vh' }}>
+          <QueuePage daemonId={laptop.daemonId} sessionId="s2" />
+        </div>
+      </StoreProvider>
     </RouterProvider>
   ) : view === 'find' ? (
     <CommandPalette open focusSignal={0} onClose={() => {}} daemon={laptop.daemonId} sessions={[]} onNavigate={() => {}} />

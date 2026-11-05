@@ -5,7 +5,8 @@
 // the outbox first (local), the daemon's PATCH/DELETE after.
 
 import type { QueuedMessage } from '@ferretry/protocol';
-import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
@@ -25,6 +26,7 @@ import { absoluteTime } from '../lib/session-screens.ts';
 import { QueueActionError, queueActions, readSessionQueue } from '../lib/send-queue.ts';
 import { useAppStore, useConnectionSnapshot } from '../lib/store.tsx';
 import { ChatProse } from './chat-prose.tsx';
+import { DaemonTaskReferences } from './daemon-task-references.tsx';
 
 const STATE_LABEL: Readonly<Record<QueueRow['state'], string>> = {
   saved: 'On this device',
@@ -238,6 +240,8 @@ export interface QueuePageViewProps {
   readonly onOpenFerret: (group: QueueGroup) => void;
   readonly onShowAll?: () => void;
   readonly loading: boolean;
+  /** Wraps one ferret's card — the host puts what its messages' references need (a machine's cards) around it. */
+  readonly wrapGroup?: (group: QueueGroup, content: ReactNode) => ReactNode;
   /** The clock the "Queued … ago" chips read; the page passes the present, a test passes a fixed instant. */
   readonly now?: number;
 }
@@ -250,8 +254,11 @@ export function QueuePageView({
   onOpenFerret,
   onShowAll,
   loading,
+  wrapGroup = (_group, content) => content,
   now = Date.now(),
 }: QueuePageViewProps) {
+  // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all.
+  const shown = groups.filter(group => group.rows.length > 0);
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
   return (
     <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
@@ -265,7 +272,7 @@ export function QueuePageView({
             </button>
           )}
         </header>
-        {groups.length === 0 && !loading ? (
+        {shown.length === 0 && !loading ? (
           <div className="fy-queue-empty kt-panel" data-queue-empty="">
             <p className="fy-queue-empty-title">Nothing is waiting</p>
             <p className="fy-queue-empty-hint">
@@ -278,30 +285,30 @@ export function QueuePageView({
             )}
           </div>
         ) : null}
-        {groups.map(group => {
+        {shown.map(group => {
           const next = nextRowId(group.rows);
           return (
-            <section
-              aria-label={group.ferret}
-              className="kt-panel fy-queue-group"
-              data-queue-group={group.key}
-              key={group.key}
-            >
-              <h2 className="fy-queue-group-head">
-                <button className="fy-queue-ferret" onClick={() => onOpenFerret(group)} type="button">
-                  {group.ferret}
-                </button>
-                {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
-                <span className="fy-queue-group-count" title="Messages waiting for this ferret">
-                  {group.rows.filter(isWaitingRow).length}
-                </span>
-              </h2>
-              <ul className="fy-queue-list">
-                {group.rows.map(row => (
-                  <QueueRowView handlers={handlers} key={row.id} next={row.id === next} now={now} row={row} />
-                ))}
-              </ul>
-            </section>
+            <Fragment key={group.key}>
+              {wrapGroup(
+                group,
+                <section aria-label={group.ferret} className="kt-panel fy-queue-group" data-queue-group={group.key}>
+                  <h2 className="fy-queue-group-head">
+                    <button className="fy-queue-ferret" onClick={() => onOpenFerret(group)} type="button">
+                      {group.ferret}
+                    </button>
+                    {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
+                    <span className="fy-queue-group-count" title="Messages waiting for this ferret">
+                      {group.rows.filter(isWaitingRow).length}
+                    </span>
+                  </h2>
+                  <ul className="fy-queue-list">
+                    {group.rows.map(row => (
+                      <QueueRowView handlers={handlers} key={row.id} next={row.id === next} now={now} row={row} />
+                    ))}
+                  </ul>
+                </section>,
+              )}
+            </Fragment>
           );
         })}
       </div>
@@ -426,6 +433,14 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
       onShowAll={sessionId === undefined ? undefined : () => navigate(daemonQueuePath(daemonId))}
       showMachine={connections.length > 1}
       title={title}
+      wrapGroup={(group, content) => (
+        <DaemonTaskReferences
+          connection={connections.find(item => item.daemonId === group.daemonId)}
+          onNavigate={navigate}
+        >
+          {content}
+        </DaemonTaskReferences>
+      )}
     />
   );
 }

@@ -10,7 +10,7 @@ import { type OutboxEntry, WAITING_REASON } from './send-outbox.ts';
 import { WAIT_REASON_COPY } from './send-queue.ts';
 
 /** How urgent the sender said it is (`fy send --kind`); a message with no label is an `action`. */
-export type QueueKind = NonNullable<QueuedMessage['label']>;
+type QueueKind = NonNullable<QueuedMessage['label']>;
 
 /** `saved` is the browser's own outbox; the rest are the daemon queue's states. */
 type QueueRowState = 'saved' | QueuedMessage['state'];
@@ -29,6 +29,8 @@ export interface QueueRow {
   readonly at: string;
   /** Its kind: the sender's label, or `action` when it set none. */
   readonly kind: QueueKind;
+  /** The owner's own message (typed here or by hand): the daemon delivers these first, alone. */
+  readonly own: boolean;
   /** Who sent it, when it is not the owner: a ferret's name or "Ferretry · Board". Never text in the body. */
   readonly sender?: string;
   /** Still changeable: on this device, or queued and not typed yet. */
@@ -38,7 +40,12 @@ export interface QueueRow {
 
 const senderOf = (message: QueuedMessage): string | undefined => {
   const by = message.by;
-  if (by === undefined || by.kind === 'owner') return undefined;
+  // A message queued before `by` existed still says who it is from in `sender`.
+  if (by === undefined) {
+    if (message.sender === 'agent') return message.fromName ?? message.from ?? 'A ferret';
+    return message.sender === 'daemon' ? 'Ferretry' : undefined;
+  }
+  if (by.kind === 'owner') return undefined;
   if (by.kind === 'ferret') return by.name ?? message.fromName;
   return by.feature === undefined ? 'Ferretry' : `Ferretry · ${by.feature}`;
 };
@@ -67,6 +74,7 @@ export const queueRowOf = (daemonId: string, sessionId: string, ferret: string, 
     why: message.state === 'queued' ? queuedWhy(message) : (message.failure ?? WHY[message.state]),
     at: message.enqueuedAt,
     kind: message.label ?? 'action',
+    own: sender === undefined,
     editable: message.state === 'queued',
     ...(sender === undefined ? {} : { sender }),
   };
@@ -82,6 +90,7 @@ export const outboxRowOf = (ferret: string, entry: OutboxEntry): QueueRow => ({
   why: entry.reason ?? WAITING_REASON,
   at: entry.createdAt,
   kind: 'action',
+  own: true,
   editable: true,
   ...(entry.refused === true ? { refused: true as const } : {}),
 });
@@ -94,13 +103,15 @@ export const isWaitingRow = (row: QueueRow): boolean =>
 const isPendingRow = (row: QueueRow): boolean => row.state === 'saved' || row.state === 'queued';
 
 /**
- * Where a row stands in the ferret's delivery: what is being typed now, then what is still to come (a
- * `blocker` goes at once, an `action` is combined, an `fyi` is held the longest), then what is finished.
+ * Where a row stands in the ferret's delivery, as the daemon plans it (`planDelivery`): one message is typed at a
+ * time; the owner's own messages then go first, each alone; a ferret's or Ferretry's messages follow in the order
+ * the queue accepted them (a due one carries the rest with it, in that order); what is finished comes last. The
+ * kind chip says how soon a ferret's message is due — it does not reorder the list.
  */
 const deliveryRank = (row: QueueRow): number => {
   if (row.state === 'typing') return 0;
-  if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 5;
-  return row.kind === 'blocker' ? 2 : row.kind === 'action' ? 3 : 4;
+  if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 4;
+  return row.own ? 2 : 3;
 };
 
 /** The order the ferret will meet its messages in; oldest first within the same standing. */

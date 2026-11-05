@@ -167,33 +167,40 @@ describe('kind, sender and age chips', () => {
 describe('delivery order and the next message', () => {
   const row = (id: string, state: QueuedMessage['state'], extra: Partial<QueuedMessage> = {}) =>
     queueRowOf('d', 's', 'f', message({ id, state, ...extra }));
+  const ferret = { by: { kind: 'ferret' as const, name: 'Mira' } };
 
-  test('typing first, then blockers, actions, fyi, and what is finished last — oldest first within each', () => {
+  test("typing first, then the owner's own, then ferrets in the order the queue accepted them, finished last", () => {
     const rows = orderedRows([
       row('read', 'read', { enqueuedAt: '2026-10-30T09:00:00.000Z' }),
-      row('fyi', 'queued', { label: 'fyi', enqueuedAt: '2026-10-30T09:01:00.000Z' }),
-      row('action2', 'queued', { enqueuedAt: '2026-10-30T09:03:00.000Z' }),
-      row('action1', 'queued', { enqueuedAt: '2026-10-30T09:02:00.000Z' }),
-      row('blocker', 'queued', { label: 'blocker', enqueuedAt: '2026-10-30T09:05:00.000Z' }),
+      row('fyi', 'queued', { ...ferret, label: 'fyi', enqueuedAt: '2026-10-30T09:01:00.000Z' }),
+      row('action', 'queued', { ...ferret, enqueuedAt: '2026-10-30T09:03:00.000Z' }),
+      row('blocker', 'queued', { ...ferret, label: 'blocker', enqueuedAt: '2026-10-30T09:05:00.000Z' }),
+      row('mine', 'queued', { enqueuedAt: '2026-10-30T09:09:00.000Z' }),
       row('unconfirmed', 'unconfirmed', { enqueuedAt: '2026-10-30T09:06:00.000Z' }),
       row('typing', 'typing', { enqueuedAt: '2026-10-30T09:07:00.000Z' }),
     ]);
-    expect(rows.map(item => item.id)).toEqual([
-      'typing',
-      'unconfirmed',
-      'blocker',
-      'action1',
-      'action2',
-      'fyi',
-      'read',
-    ]);
+    expect(rows.map(item => item.id)).toEqual(['typing', 'unconfirmed', 'mine', 'fyi', 'action', 'blocker', 'read']);
   });
 
   test('the next one is the first still to come — never one that is being typed or already read', () => {
-    expect(nextRowId([row('a', 'typing'), row('b', 'queued', { label: 'fyi' }), row('c', 'queued')])).toBe('c');
+    expect(nextRowId([row('a', 'typing'), row('b', 'queued', { ...ferret, label: 'fyi' }), row('c', 'queued')])).toBe(
+      'c',
+    );
     expect(nextRowId([row('a', 'read'), row('b', 'unconfirmed')])).toBeUndefined();
     expect(nextRowId([])).toBeUndefined();
     expect(nextRowId([outboxRowOf('f', entry())])).toBe('o1');
+  });
+
+  test('a message queued before `by` existed still names its sender', () => {
+    const named = queueRowOf('d', 's', 'f', message({ sender: 'agent', fromName: 'Mira' }));
+    expect(fromLabel(named)).toBe('Mira');
+    expect(named.own).toBe(false);
+    expect(fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'agent', from: 's9' })))).toBe('s9');
+    expect(fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'agent' })))).toBe('A ferret');
+    expect(fromLabel(queueRowOf('d', 's', 'f', message({ sender: 'daemon' })))).toBe('Ferretry');
+    const human = queueRowOf('d', 's', 'f', message({ sender: 'human' }));
+    expect(fromLabel(human)).toBe('You');
+    expect(human.own).toBe(true);
   });
 });
 
