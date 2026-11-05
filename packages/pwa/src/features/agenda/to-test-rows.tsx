@@ -12,8 +12,8 @@
  * - THE HEAD IS THE AGENDA CARD'S (`CardHead`): title · ‹ n/N › · ⓘ · clock · ✕. The quiet facts (who, what, release) and the
  *   Skip button live under ⓘ, reachable by keyboard and screen reader; Done and Not good stay on the card.
  * - THE BUTTONS ARE THE SAME ANSWERS for a mouse, a keyboard and a screen reader, in the order of the swipes.
- * - NOTHING CLOSES A CARD HERE THAT THE BOARD DOES NOT: both answers go through `useBoardAnswers`, the Board's own flow.
- *   Done moves the card forward at once; Not good opens the Board's reason box and reopens the card with the owner's
+ * - BOTH ANSWERS GO THROUGH `useBoardAnswers`: this is the only place the owner moves a card (the Board is read-only).
+ *   Done moves the card forward at once; Not good opens the send-back box and reopens the card with the owner's
  *   words as the ask.
  */
 
@@ -65,16 +65,14 @@ const NO_HOST: ToTestHost = {
 };
 
 /** The answers on the rows; the box a Not good opens is drawn by the row itself, under its card (`composerFor`). */
-export const useToTestAnswers = (host: ToTestHost | undefined, phone: boolean) => {
+export const useToTestAnswers = (host: ToTestHost | undefined) => {
   const [notice, setNotice] = useState<string | null>(null);
   const live = host ?? NO_HOST;
   const { requestMove, answerFor, composerFor } = useBoardAnswers({
     actions: live.actions,
     ports: live.ports,
     connectionOf: live.connectionOf,
-    phone,
     onNotice: setNotice,
-    inline: true,
   });
   return {
     notice,

@@ -557,17 +557,6 @@
 }
 
 /* ---- Reason box ----------------------------------------------------------------------------------- */
-.fy-board__scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--gap-md);
-  background: var(--scrim);
-  --fy-send-back-max: 34rem;
-}
 .fy-board-reason {
   display: flex;
   width: min(30rem, 100%);
@@ -583,27 +572,10 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
-.fy-board-reason__input {
-  min-height: 32px;
-  padding: 0 var(--gap-sm);
-  border: var(--stroke-control, 1px) solid var(--border-soft);
-  border-radius: var(--radius-input, var(--radius-control));
-  background: var(--bg);
-  color: var(--fg);
-  font-size: var(--text-sm);
-}
-.fy-board-reason__input[aria-invalid='true'] {
-  border-color: var(--err);
-}
 .fy-board-reason__error {
   margin: 0;
   color: var(--err);
   font-size: var(--text-xs);
-}
-.fy-board-reason__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--gap-sm);
 }
 
 /* ---- Send back: "Not good" with the chat's composer ------------------------------------------------------ */
@@ -894,35 +866,6 @@
   padding-top: var(--gap-md);
 }
 
-/* The "why is it going back" box slides up from the bottom edge, above the keyboard. */
-.fy-board__scrim[data-phone] {
-  align-items: flex-end;
-  padding: 0;
-}
-.fy-board__scrim[data-phone] .fy-board-reason {
-  width: 100%;
-  padding-bottom: calc(var(--gap-md) + var(--safe-bottom, 0px));
-  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-  animation: fy-board-slide-up 180ms ease-out;
-}
-.fy-board__scrim[data-phone] .fy-board-reason__input {
-  min-height: 44px;
-  font-size: 16px;
-}
-@keyframes fy-board-slide-up {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .fy-board__scrim[data-phone] .fy-board-reason {
-    animation: none;
-  }
-}
-
 .fy-board-side {
   display: flex;
   min-width: 0;
@@ -1001,14 +944,6 @@
 .fy-board-side__view[aria-pressed='true'] {
   background: var(--accent-soft);
   color: var(--accent);
-}
-.fy-board-side__notice {
-  margin: 0;
-  padding: var(--gap-xs) var(--gap-sm);
-  border-radius: var(--radius-control);
-  background: var(--warn-bg);
-  color: var(--warn);
-  font-size: var(--text-xs);
 }
 /* The Kanban: one narrow column per lane, scrolling sideways a column at a time; a long column scrolls on its own. */
 .fy-board-side__kanban {

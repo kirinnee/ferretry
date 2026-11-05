@@ -1064,7 +1064,7 @@ Cards stay fully readable: the lane, the Status, links, history, sub-cards, depe
 is a link that opens its item in the ferret's chat, with no answer buttons. What stays, because it reads or navigates
 and writes to no card: **Open chat**, **Copy link**, **Add to chat** (puts the card's `&F18` in that chat's draft), the
 view switches, the filters, **Show private**, the scope toggle, the theme switch, and the ticks on How to test steps
-(a reading aid kept in the browser). The daemon routes and the `fy` commands that make, move, link, edit, reparent,
+(a reading aid on that screen only, never saved). The daemon routes and the `fy` commands that make, move, link, edit, reparent,
 drop and comment on a card are unchanged: ferrets and the CLI still use them, and the owner's only way to move a card is
 to answer where it asks, in the agenda.
 

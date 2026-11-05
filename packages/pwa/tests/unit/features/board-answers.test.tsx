@@ -11,16 +11,16 @@ test('a send-back answer asks what should change and sends the owner’s words o
   const row = toTestCards(await boardModelOf([card('F22', { laneId: 'tested', title: 'Try the board' })]))[0];
   if (row === undefined) throw new Error('missing the card to send back');
   const actions = fakeActions();
+  const target = row.card;
   let answers: BoardAnswers | undefined;
   function Host() {
     answers = useBoardAnswers({
       actions,
       ports: undefined,
       connectionOf: () => laptop,
-      phone: false,
       onNotice: () => undefined,
     });
-    return answers.composer;
+    return answers.composerFor(target);
   }
   const view = render(<Host />);
   try {
