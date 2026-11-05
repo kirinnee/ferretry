@@ -530,6 +530,8 @@ export function AgendaSwipeDeck({
       !event.currentTarget.contains(event.target) ||
       (startsOnInteractive(event.target) && !own) ||
       startsInSelection(event.target) ||
+      // A hypermedia block opened fullscreen covers the screen: a drag on it is the reader's pan, never a card answer (B164).
+      (event.target instanceof Element && event.target.closest('.fy-render-fullscreen') !== null) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
     )
       return;
