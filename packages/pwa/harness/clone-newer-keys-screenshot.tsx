@@ -199,17 +199,24 @@ const STATES = [
   { state: 'missing', name: 'missing-key' },
 ] as const;
 
-/** The page from `from` down to the bottom of `to`, so one frame shows the whole story. */
+/** Room under the last element, so a footer button is never flush with (or cut by) the frame edge. */
+const BOTTOM_PADDING = 24;
+
+/** The page from `from` down to the bottom of `to` plus padding, so one frame shows the whole story. */
 const shot = async (page: Page, name: string, theme: string, vp: string, from: string, to: string): Promise<void> => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (overflow > 0) fail(`${name} ${theme} ${vp} scrolls sideways by ${overflow}px`);
   const box = await page.evaluate(
-    ([a, b]) => {
+    ([a, b, padding]) => {
       const top = (document.querySelector(a as string) as HTMLElement).getBoundingClientRect();
       const bottom = (document.querySelector(b as string) as HTMLElement).getBoundingClientRect();
-      return { y: top.top + window.scrollY - 8, height: bottom.bottom - top.top + 16, width: window.innerWidth };
+      return {
+        y: top.top + window.scrollY - 8,
+        height: bottom.bottom - top.top + 8 + (padding as number),
+        width: window.innerWidth,
+      };
     },
-    [from, to],
+    [from, to, BOTTOM_PADDING],
   );
   const file = `${name}-${vp}-${theme.replace('studio-', '')}.png`;
   await page.screenshot({
@@ -228,7 +235,7 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
     await page.locator('[data-step-next]').click();
     await page.locator('[data-setup-section="clone-logins"]').waitFor({ state: 'visible' });
     if (state !== 'missing') await page.locator('[data-clone-newer-key="DEMO_API_KEY"]').waitFor({ state: 'visible' });
-    await shot(page, name, theme, vp, '[data-setup-section="clone-logins"]', '[data-setup-section="not-copied"]');
+    await shot(page, name, theme, vp, '[data-setup-section="clone-logins"]', '[data-clone-step="preview"]');
   }
   for (const { state, name } of STATES.filter(each => each.state !== 'both')) {
     await page.goto(`${server.url}?theme=${theme}&state=${state}&view=panel`);
