@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   AnalyticsQueryChart,
-  isTimeGrouped,
   QUERY_CHART_MAX_BARS,
   queryChartMetric,
   queryChartPoints,
@@ -20,14 +19,14 @@ describe('query chart model', () => {
     expect(queryChartMetric(agg(aggregateResponse('q', [], {}, 'count')))).toBe('sessions');
   });
 
-  it('orders a time series by time and shortens a day', () => {
+  it('draws a day-grouped result as a trend, in time order, with the day shortened', () => {
     const response = agg(
       aggregateResponse('q', [group({ day: '2026-10-14' }), group({ day: '2026-10-13' })], { groupBy: ['day'] }),
     );
-    expect(isTimeGrouped(response)).toBe(true);
-    expect(queryChartPoints(response, 'turns').map(point => point.label)).toEqual(['10-13', '10-14']);
-    const weeks = agg(aggregateResponse('q', [group({ week: '2026-W42' })], { groupBy: ['week'] }));
-    expect(queryChartPoints(weeks, 'turns')[0]!.label).toBe('2026-W42');
+    const rendered = render(<AnalyticsQueryChart response={response} />);
+    const labels = rendered.root.findAll(node => node.props['data-chart-xlabel'] !== undefined);
+    expect([...new Set(labels.map(node => node.props['data-chart-xlabel']))]).toEqual(['2026-10-13', '2026-10-14']);
+    expect(JSON.stringify(rendered.toJSON())).toContain('10-13');
   });
 
   it('orders categories biggest first, caps them, and flags a lower bound and a known zero', () => {
@@ -134,5 +133,28 @@ describe('the names under a by-model chart', () => {
     );
     const labels = labelsOf(render(<AnalyticsQueryChart response={response} />));
     expect(labels.every(node => !String(node.props.className).includes('vertical-rl'))).toBe(true);
+  });
+});
+
+describe('a trend bucket nothing could price', () => {
+  it('says unknown in the screen-reader table and the readout, never $0.00', () => {
+    const response = agg(
+      aggregateResponse(
+        'q',
+        [
+          group({ day: '2026-10-12' }, { equivalentApiCostUsdMicros: measure(null, 0, 5) }),
+          group({ day: '2026-10-13' }, { equivalentApiCostUsdMicros: measure(3_000_000) }),
+        ],
+        { groupBy: ['day'], metric: 'cost_usd' },
+        'avg',
+      ),
+    );
+    const rendered = render(<AnalyticsQueryChart response={response} />);
+    const cells = rendered.root.findAllByType('td').map(node => node.children.join(''));
+    expect(cells).toEqual(['Unpriced', '$3.00']);
+    const titles = rendered.root
+      .findAll(node => node.props['data-chart-point'] !== undefined)
+      .map(node => node.props.title);
+    expect(titles).toEqual(['10-12 · Unpriced', '10-13 · $3.00']);
   });
 });

@@ -44,6 +44,8 @@ export interface MetricChartPoint {
   readonly label: string;
   /** One value per series, in the series' order, in display units. */
   readonly values: readonly number[];
+  /** One reading per series, for a value that reads as more than its number ("unknown", "≥ $5.00"). */
+  readonly texts?: readonly string[];
   /** The value is a lower bound: drawn with a hatched cap. */
   readonly flagged?: boolean;
   /** A known zero — nothing happened — drawn as a hairline. */
@@ -276,7 +278,7 @@ export function AnalyticsMetricChart({
             <tr key={point.key}>
               <th scope="row">{point.label}</th>
               {series.map((entry, index) => (
-                <td key={entry.key}>{format(point.values[index] ?? 0)}</td>
+                <td key={entry.key}>{point.texts?.[index] ?? format(point.values[index] ?? 0)}</td>
               ))}
             </tr>
           ))}
