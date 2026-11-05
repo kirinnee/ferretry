@@ -268,6 +268,7 @@ export function isHarnessPromptItem(item: AgendaItem | ResolvedAgendaItem): bool
     item.twoFactorSeed !== undefined ||
     item.taskPlan !== undefined ||
     item.signInRuleSuggestion !== undefined ||
+    item.recipeProposal !== undefined ||
     agendaCardKind(item) === 'task';
   return !marked && !isDaemonSourceRef(item.sourceRef);
 }

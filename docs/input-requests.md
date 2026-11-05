@@ -809,9 +809,14 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   and one that signs in nowhere too. A rule suggestion (`preapprove`) resolves the sign-in with the same decision,
   codes and words, so the two halves of one call never answer differently. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
   a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change on github.com" (the place only: agenda text is every ferret's to
-  read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
-  approves or declines in Settings › Accounts › the account › the place › Recipe, or with
-  `fy account site recipe approve|decline <sign-in> <proposal>`, through the owner-only
+  read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". **The card's agenda answer approves nothing.** The card
+  points at the proposal (`recipeProposal: { signIn, proposal }`, which only the daemon raises: an agent raise carrying
+  one is refused `forbidden`), so the app draws the proposal's own form on it, in the chat's agenda and the Inbox:
+  the account and the place, "The ferret says: …" and the WHOLE diff, all read from the owner-only `GET /v1/accounts`
+  (masked there, never from the card's text), with **Approve** and **Decline**. A proposal made against an older
+  recipe offers Decline only; one already answered or pushed out says so. The owner approves or declines there, in
+  Settings › Accounts › the account › the place › Recipe, or with
+  `fy account site recipe approve|decline <sign-in> <proposal>` — all three through the SAME owner-only
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
   proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner

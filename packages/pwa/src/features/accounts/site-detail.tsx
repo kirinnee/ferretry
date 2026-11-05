@@ -12,7 +12,6 @@ import {
   LOGIN_RECIPE_MAX_LENGTH,
   type LoginMethodKind,
   observedWords,
-  recipeDiff,
   type SignInSummary,
 } from '@ferretry/protocol';
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
@@ -30,6 +29,7 @@ import {
 import { methodOfDraft, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
 import { MethodFields } from './method-fields.tsx';
+import { RecipeDiff } from './recipe-diff.tsx';
 import { RuleEditWarning, SignInRulePanel } from './sign-in-rule-panel.tsx';
 import type { RulesBinding } from './use-sign-in-rules.ts';
 
@@ -58,8 +58,6 @@ export interface SiteDetailProps {
   /** Present only when this machine reports standing sign-in rules. */
   readonly rules?: RulesBinding | undefined;
 }
-
-const DIFF_TONE = { ' ': 'text-muted', '-': 'bg-err-bg text-err', '+': 'bg-ok-bg text-ok' } as const;
 
 export function SiteDetail(props: SiteDetailProps): ReactNode {
   const { signIn, account, tab, onTab } = props;
@@ -290,22 +288,7 @@ function RecipeTab({ signIn, ops, busy, error, rules }: SiteDetailProps): ReactN
                   The ferret says: {proposal.why}
                 </p>
                 <p className="m-0 text-meta text-faint">{proposal.proposedAt.slice(0, 10)}</p>
-                <pre
-                  className="mono m-0 min-w-0 whitespace-pre-wrap break-words rounded-control border border-border p-0 text-meta"
-                  data-accounts-diff=""
-                >
-                  {recipeDiff(proposal.base, proposal.recipe).map((line, index) => (
-                    <span
-                      // biome-ignore lint/suspicious/noArrayIndexKey: a diff line has no identity beyond its place
-                      key={index}
-                      className={`block px-2 ${DIFF_TONE[line.op]}`}
-                      data-diff-op={line.op}
-                    >
-                      {line.op === ' ' ? '  ' : `${line.op} `}
-                      {line.text}
-                    </span>
-                  ))}
-                </pre>
+                <RecipeDiff base={proposal.base} recipe={proposal.recipe} />
                 <div className="flex flex-wrap gap-2">
                   <button
                     className="kt-btn min-h-[44px]"

@@ -20,7 +20,14 @@ function world(options: { redactorFails?: boolean } = {}) {
   const directory = new LoginDirectory(new MemoryLoginIndex(), new MemorySecretDocuments(), new FakeSecretCipher(), {
     now: () => NOW,
   });
-  const cards: { sessionId: string; sourceRef: string; subject: string; context: string; howToResolve: string }[] = [];
+  const cards: {
+    sessionId: string;
+    sourceRef: string;
+    subject: string;
+    context: string;
+    howToResolve: string;
+    signIn: string;
+  }[] = [];
   const closed: { sessionId: string; id: string; note: string }[] = [];
   const audits: AuditEntry[] = [];
   let next = 0;
@@ -96,6 +103,8 @@ describe('a ferret proposes', () => {
     should(JSON.stringify(w.cards)).not.containEql('Vercel');
     should(w.cards[0]?.context).equal('- Click Log in\n+ Continue with Google\n\nThe ferret says: the button moved');
     should(w.cards[0]?.howToResolve).match(/fy account site recipe approve si_[0-9a-f]{16} rp_0000000000000000/u);
+    // The card is told the sign-in the proposal waits on, so its form can answer it there.
+    should(w.cards[0]?.howToResolve).containEql(`approve ${w.cards[0]?.signIn ?? '-'} rp_0000000000000000`);
     const [entry] = await w.directory.list();
     should(entry?.recipe).equal('Open vercel.com\nClick Log in');
     should(entry?.proposals?.[0]).containDeep({ base: 'Open vercel.com\nClick Log in', agendaItemId: 'A1' });
@@ -175,6 +184,7 @@ describe('a proposal’s card', () => {
     subject: 'Recipe change',
     context: '+ x',
     howToResolve: 'Approve it',
+    signIn: 'si_0000000000000001',
   };
 
   it('should raise a task the daemon owns, and resolve it by its id', async () => {
@@ -193,7 +203,12 @@ describe('a proposal’s card', () => {
     should(await adapter.raise('s1', card)).deepEqual({ ok: true, id: 'A3' });
     should(raised[0]).containDeep([
       's1',
-      { kind: 'task', sourceRef: 'rp_0000000000000001' },
+      {
+        kind: 'task',
+        sourceRef: 'rp_0000000000000001',
+        // The card points at the proposal, so the app draws Approve and Decline on it.
+        recipeProposal: { signIn: 'si_0000000000000001', proposal: 'rp_0000000000000001' },
+      },
       { kind: 'daemon', cause: 'login-recipe' },
     ]);
     await adapter.close('s1', 'A3', 'Declined.');
