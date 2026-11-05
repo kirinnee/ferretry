@@ -15,9 +15,9 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   DEFAULT_PAUSE_MS,
+  ENDPOINTER_MAX_QUIET_RMS,
   type EndpointerEvent,
   type EndpointerState,
-  ENDPOINTER_MAX_QUIET_RMS,
   endpointerFeed,
   endpointerHint,
   endpointerStart,
@@ -403,6 +403,89 @@ describe('the adaptive noise floor', () => {
     // Loud room for 15 s, then it goes quiet: the floor falls back and a soft voice is heard again.
     const frames = [...steady(0.012, 15_000), ...steady(0.0005, 12_000, 15_000), ...steady(0.03, 1_000, 27_000)];
     should(kinds(play(endpointerStart(), frames).events)).eql(['speech-start']);
+  });
+});
+
+describe('only measured audio counts as loud time', () => {
+  it('two loud frames 500 ms apart are 40 ms of loud time, not 520', () => {
+    const frames: LevelFrame[] = [{ atMs: 20, rms: LOUD }, { atMs: 520, rms: LOUD }, ...framesOf([quiet(2_000)], 540)];
+    const { events, state } = play(endpointerStart(), frames);
+    should(state.voicedMs).equal(0);
+    should(kinds(events)).eql([]);
+    should(state.phase).equal('listening');
+  });
+
+  it('a loud frame one frame after a 480 ms hole is credited one frame', () => {
+    const early = play(endpointerStart(), [{ atMs: 20, rms: LOUD }]).state;
+    const step = endpointerFeed(early, { atMs: 500, rms: LOUD });
+    should(step.state.voicedMs).equal(STEP);
+    should(step.state.runStartMs).equal(480);
+  });
+
+  it('a jittery frame is credited no more than one frame', () => {
+    const confirmed = play(endpointerStart(), framesOf([loud(500)])).state;
+    const step = endpointerFeed(confirmed, { atMs: 500 + 90, rms: LOUD });
+    should(step.state.voicedMs).equal(500 + STEP);
+  });
+
+  it('invalid frames through 380 ms then a loud frame at 400 ms are 40 ms of loud time', () => {
+    const junk: LevelFrame[] = Array.from({ length: 18 }, (_, index) => ({ atMs: 40 + index * 20, rms: Number.NaN }));
+    const { events, state } = play(endpointerStart(), [{ atMs: 20, rms: LOUD }, ...junk, { atMs: 400, rms: LOUD }]);
+    should(state.voicedMs).equal(STEP);
+    should(state.runStartMs).equal(380);
+    should(events).eql([]);
+  });
+
+  it('a hole longer than a breath cancels a started, unconfirmed run', () => {
+    const frames = [...framesOf([loud(220)]), { atMs: 220 + 300, rms: LOUD }];
+    const { events, state } = play(endpointerStart(), frames);
+    should(kinds(events)).eql(['speech-start', 'speech-cancel']);
+    should(state.voicedMs).equal(STEP);
+    should(state.phase).equal('listening');
+  });
+
+  it('a hole of exactly one hangover does not break a run, and a confirmed turn is never broken', () => {
+    const { state } = play(endpointerStart(), [...framesOf([loud(100)]), { atMs: 100 + HANGOVER_MS, rms: LOUD }]);
+    should(state.voicedMs).equal(100 + STEP);
+    const confirmed = play(endpointerStart(), [...framesOf([loud(500)]), { atMs: 500 + 400, rms: LOUD }]);
+    should(confirmed.state.voicedMs).equal(500 + STEP);
+    should(kinds(confirmed.events)).eql(['speech-start']);
+  });
+
+  it('a hole inside a quiet part of an unconfirmed run over the hangover forgets it', () => {
+    const { state } = play(endpointerStart(), [
+      { atMs: 20, rms: LOUD },
+      { atMs: 400, rms: QUIET },
+    ]);
+    should(state.runStartMs).equal(null);
+    should(state.voicedMs).equal(0);
+  });
+});
+
+describe('soft speech is never learned as the room', () => {
+  const steady = (level: number, ms: number, from = 0): LevelFrame[] => framesOf([[level, ms]], from);
+
+  it('5 s of a quiet room then 15 s of uninterrupted soft speech is one unbroken turn', () => {
+    const frames = [...steady(0.001, 5_000), ...steady(0.025, 15_000, 5_000)];
+    const { events, state } = play(endpointerStart(), frames);
+    should(kinds(events)).eql(['speech-start']);
+    should(state.phase).equal('speaking');
+    should(state.pauseSaid).be.false();
+  });
+
+  it('and it ends 1.5 s after the soft speech really stops', () => {
+    const frames = [...steady(0.001, 5_000), ...steady(0.025, 15_000, 5_000), ...steady(0.001, 2_000, 20_000)];
+    const { events } = play(endpointerStart(), frames);
+    should(kinds(events)).eql(['speech-start', 'pause', 'turn-end']);
+    should((events.at(-1) as { atMs: number; speechEndedAtMs: number }).atMs).equal(21_500);
+    should((events.at(-1) as { speechEndedAtMs: number }).speechEndedAtMs).equal(20_000);
+  });
+
+  it('quiet frames between words are still learned while speaking', () => {
+    const frames = [...steady(0.001, 2_000), ...steady(0.025, 1_000, 2_000), ...steady(0.003, 100, 3_000)];
+    const { state } = play(endpointerStart(), frames);
+    should(state.levels.at(-1)).equal(0.003);
+    should(state.levels.filter(level => level === 0.025).length).be.below(11);
   });
 });
 

@@ -37,6 +37,13 @@
  *     frame after it: a stall can delay the end of a turn, never cause one. A run that has not yet
  *     reached {@link MIN_SPEECH_MS} is cancelled by a stall, so sparse loud frames across gaps never
  *     add up to a turn.
+ *   - ONLY MEASURED AUDIO COUNTS AS LOUD TIME: a loud frame is credited at most {@link FRAME_MS},
+ *     however long after the previous frame it arrived — the gap's audio was never measured. An
+ *     unconfirmed run with a gap longer than the {@link HANGOVER_MS} in it (missing or unusable
+ *     frames) is not continuous, so it starts over rather than adding up.
+ *   - THE NOISE FLOOR ONLY LEARNS FROM WHAT IS NOT SPEECH: while speech is under way, a loud frame
+ *     is not added to the floor window, so a long stretch of soft speech can never raise the bar
+ *     until the speaker reads as quiet.
  */
 
 import { FRAME_MS, noiseFloor, quietThreshold } from '../stt/energy.ts';
@@ -189,22 +196,30 @@ export function endpointerFeed(incoming: EndpointerState, frame: LevelFrame): En
   const events: EndpointerEvent[] = [];
   // A stall cannot confirm speech: an unconfirmed run (under the minimum) is cancelled, so sparse
   // loud frames that straddle gaps never add up to a turn. A confirmed turn survives and just waits.
+  // The same goes for an unconfirmed run with a hole in it longer than a breath: frames went
+  // missing (or were unusable), so the run is not continuous.
+  const unconfirmed = incoming.runStartMs !== null && incoming.voicedMs < MIN_SPEECH_MS;
+  const broken = previous !== null && unconfirmed && frame.atMs - previous > HANGOVER_MS;
   let state = incoming;
-  if (stalled && previous !== null && incoming.runStartMs !== null && incoming.voicedMs < MIN_SPEECH_MS) {
+  if ((stalled || broken) && previous !== null && unconfirmed) {
     if (incoming.phase === 'speaking') events.push({ kind: 'speech-cancel', atMs: frame.atMs });
     state = forgetRun(incoming);
   }
   // The interval this frame speaks for. After a stall nothing is known about the gap, so one frame.
   const spanMs = stalled ? FRAME_MS : frame.atMs - (previous as number);
   const intervalStartMs = frame.atMs - spanMs;
+  // Loud time is only what was measured: one frame, whatever the gap before it.
+  const measuredMs = Math.min(spanMs, FRAME_MS);
 
-  const levels = [...state.levels.slice(1 - FLOOR_WINDOW_FRAMES), frame.rms];
-  const loud = frame.rms >= quietThreshold(noiseFloor(levels), state.maxQuietRms);
+  const heard = [...state.levels.slice(1 - FLOOR_WINDOW_FRAMES), frame.rms];
+  const loud = frame.rms >= quietThreshold(noiseFloor(heard), state.maxQuietRms);
+  // The floor is the room, not the person: loud frames of speech under way are not learned.
+  const levels = loud && state.phase === 'speaking' ? state.levels : heard;
   let next: EndpointerState = { ...state, lastAtMs: frame.atMs, levels };
 
   if (loud) {
-    const voicedMs = state.voicedMs + spanMs;
-    const runStartMs = state.runStartMs ?? intervalStartMs;
+    const voicedMs = state.voicedMs + measuredMs;
+    const runStartMs = state.runStartMs ?? frame.atMs - measuredMs;
     if (state.pauseSaid) events.push({ kind: 'resume', atMs: frame.atMs });
     next = {
       ...next,
