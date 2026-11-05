@@ -17,6 +17,13 @@ describe('catalog install rendering', () => {
     should(text).not.containEql('Replaces');
   });
 
+  it('should name a link as the source, since a link has no catalog', () => {
+    const { catalogId: _id, catalogName: _name, ...shared } = previewOf().provenance as Record<string, unknown>;
+    const provenance = { ...shared, link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'public', sequence: 1 } } as never;
+    should(renderPreview(previewOf({ provenance }))).containEql('version 2) from a shared link');
+    should(renderInstalls([{ ...installOf(), provenance }])).containEql('from a shared link by kirin-box');
+  });
+
   it('should list no installs plainly', () => {
     should(renderInstalls([])).equal('No catalog items are installed.');
     should(renderInstalls([installOf()])).not.containEql('secrets:');

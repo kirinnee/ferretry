@@ -91,7 +91,10 @@ const demandFor = (scope: CatalogInstallScope): CapabilityDemand =>
 /** Each refusal's HTTP status. A wrong request is 4xx, a thing in the way is 409, and a missing one is 404. */
 const REFUSAL_STATUS: Readonly<Record<CatalogInstallRefusal, number>> = {
   catalog_signature_invalid: 422,
+  catalog_link_mismatch: 422,
   catalog_item_mismatch: 422,
+  catalog_link_expired: 410,
+  catalog_link_sequence_older: 409,
   catalog_publisher_changed: 409,
   catalog_revision_older: 409,
   catalog_downgrade: 409,

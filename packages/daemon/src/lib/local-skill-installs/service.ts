@@ -29,7 +29,7 @@ import {
   type CatalogInstallScope,
   type CatalogInstallTarget,
   type CatalogInstallWarning,
-  type CatalogProvenance,
+  type CatalogManifestProvenance,
   type CatalogSourceProblem,
   catalogItemReview,
   catalogItemWarnings,
@@ -347,7 +347,7 @@ export class LocalSkillInstallService {
   async #provenance(
     name: string,
     files: readonly { readonly path: string; readonly content: string }[],
-  ): Promise<CatalogProvenance> {
+  ): Promise<CatalogManifestProvenance> {
     const item = await this.#bytes(`local-skill-item:${name}`);
     const digest = await this.#hash(canonical({ name, files: files.toSorted((a, b) => (a.path < b.path ? -1 : 1)) }));
     return {
@@ -683,7 +683,7 @@ function installOf(record: LocalSkillInstallRecord): LocalSkillInstall {
 function itemOf(
   name: string,
   files: readonly { readonly path: string; readonly content: string }[],
-  provenance: CatalogProvenance,
+  provenance: CatalogManifestProvenance,
 ): SharedCatalogItem {
   return {
     format: SHARED_CATALOG_ITEM_FORMAT,

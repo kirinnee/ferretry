@@ -157,6 +157,9 @@ the caller's word for what the publisher said:
 Steps 1 and 2 are `verifySignedCatalogManifest` and `verifyCatalogItem`. The app runs them too,
 before it shows anything, but the installer always runs them again.
 
+An item that arrives from a **link** is checked by the same installer in a different order, because a link has no
+catalog and no revision: see [Installing from a link](#installing-from-a-link-catalogs-3f-6).
+
 ## The review
 
 The installer answers a preview from one module, `shared-catalog-review.ts`, so what a person reads and
@@ -763,7 +766,7 @@ Installing is two steps and every route has exactly one capability. A project wr
   `catalog_revision_older`. The pin, the revision and the install are recorded **only when an apply
   succeeds**, never by a preview. Nothing updates itself: a newer version is a new preview and a new yes.
 - **Storage.** `<FY_HOME>/state/catalog-installs.json`, mode `0600`, written by temp file and rename,
-  with a `schemaVersion` and checked on read. It holds each install with the SHA-256 of every file it
+  with a `schemaVersion` (1, or 2 once a link has been installed from: see [The state file, version 2](#the-state-file-version-2)) and checked on read. It holds each install with the SHA-256 of every file it
   wrote, the publishers, the pin per catalog and the highest revision seen. A damaged file stops every
   install route with `500 catalog_installs_unreadable` instead of starting afresh.
 
@@ -1506,7 +1509,7 @@ The Add skills page has a second group under the subscriptions, **On this machin
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4 and 3f-5,
 > [The daemon](#the-daemon-3f-4)) exist, and the daemon reports `catalogs.links.1`. The Worker is bound behind the
 > hosted relay (3f-3, merged at `f59c89df`; its relay deploy succeeded and `LINK_STORE` is bound), and no built-in app or CLI flow
-> exists yet (3f-6 is the installer, 3f-8 the app), though an authorized owner API client can mint a link. Whether the store answers is a separate operator runtime control (the
+> exists yet (3f-8 is the app; the installer's link source, 3f-6, is [Installing from a link](#installing-from-a-link-catalogs-3f-6), and the daemon reports `catalog-installs.links.1` for it), though an authorized owner API client can mint a link. Whether the store answers is a separate operator runtime control (the
 > `available` and `serving` switches, [relay-protocol.md](relay-protocol.md#operator-routes-and-the-kill-switches)),
 > not a release. Where a
 > sentence says "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own
@@ -1717,6 +1720,76 @@ or CLI flow for links yet (3f-6 is the installer, 3f-8 the app). The Worker is d
 - **The link URL's app origin is the hosted app's (`HOSTED_APP_ORIGIN`) in the daemon.** `FY_APP_URL` is read only by
   the CLI, so a daemon run for a self-hosted app still mints links that point at the hosted one. The review of 3f-4 (F8)
   asked for it; it is left until the daemon has a configured app origin of its own, which also shares need.
+
+### Installing from a link (catalogs 3f-6)
+
+The installer takes a link's item on the same two routes as a file's (`POST /v1/catalog-installs/<scope>/preview`,
+then the apply). The preview request is one of two shapes, told apart by their source: `{signedManifest, item,
+target, …}` for a catalog, or `{signedLink, item, linkFingerprint, target, allowOlder?, replaceEdited?}` for a link.
+`linkFingerprint` is the `fp` of the URL the person was given. **The installer never contacts the publisher or the
+link store**: the app fetched the bundle and hands it over, and everything is checked again here.
+
+The checks run in this order, and the first to fail is the one reported:
+
+1. **The signature** holds under the link label, and the key hashes to the publisher the document names
+   (`catalog_signature_invalid`).
+2. **The signer is the `fp` the URL named** (`catalog_link_mismatch`). A genuine link by someone else is refused.
+3. **The item is the one signed**, by every field and by the digest and size of these bytes (`catalog_item_mismatch`).
+4. **Freshness.** The fetcher is strict about a link's `notAfter`; the installer is not, because a person may open a
+   saved copy later. It refuses (`catalog_link_expired`) only a copy more than **7 days** past `notAfter`.
+5. **The sequence pin.** This machine keeps the highest signed sequence it has installed from each link. A lower one is
+   `catalog_link_sequence_older`; the same or a higher one is accepted. The pin is per link (publisher and link id),
+   so two links by one publisher never share one.
+6. **No downgrade**, as for a file: a lower item version is `catalog_downgrade` unless the person chose it, and then
+   the review leads with the `older-version` warning.
+7. **The bundle rules and the target**, exactly as for a file. The review is the same review, with the same warnings.
+
+A catalog whose manifest names the placeholder catalog id that every link item carries is refused
+`catalog_item_invalid`, so a link item can never share a catalog's pin.
+
+- **A link never pins a catalog and never records a revision**, because it belongs to none. The first thing installed
+  from a publisher by link says it came from a link, which carries only this one item and never updates it.
+- **A link install replaces only an install of the same link at the same place.** The same item from a catalog, or from
+  another link, at that place is `catalog_install_conflict`: nothing crosses sources. Nothing auto-updates; a newer
+  signed copy of the same link is a new preview and a new yes.
+- **Where it came from** is a union on every install record: the catalog's `catalogId`/`catalogName`, or `link:
+{linkId, kind, sequence}`. The fleet component records the same union in `installedFrom`, and a listing says
+  "a shared link" where a catalog would give its name.
+- **An apply is the same apply**: a fresh `catalog-install` passkey, the same secret bindings, the same writes.
+  Nothing is written by a preview.
+- **The flag is `catalog-installs.links.1`.** A client offers an install from a link only where it is reported.
+
+#### The state file, version 2
+
+`<FY_HOME>/state/catalog-installs.json` stays `schemaVersion: 1` for every catalog install. The first **link** apply
+upgrades it to `2`, which adds `linkSequences` (`<publisher>/<linkId>` → highest sequence) and lets an install's
+provenance be a link's. The upgrade is lazy and happens only inside that first write: a machine that never installs
+from a link never has a version 2 file.
+
+- The exact old text is first saved, `0600`, as `<FY_HOME>/state/catalog-installs.v1.json` (once; a later write
+  never touches it).
+- **A version 2 file must agree with itself, or it is damaged.** Every link install needs a `linkSequences` pin at or
+  above its own recorded sequence; no two installs share an install id or a place (`key`); and each install's `key`
+  must be the place its own root, folder, server entry, kind and name say it wrote to (a respelling such as `/./`
+  cannot make one physical install look like two). That place comes from ONE function that the reader and removal
+  both use, so removal can only touch the place a record is filed under. A record must name exactly one destination
+  shape: a project install has a root and either a server entry or a folder (never both, never neither), a runtime
+  install has neither root nor folder, and a folder is relative, canonical and stays under its root (`../app/x` beside
+  `x` is refused, not filed as a second spelling). A file that breaks a rule is refused on read
+  (`500 catalog_installs_unreadable`, "contradicts itself", no word of the file in the message) and is never repaired or
+  reset: otherwise a pin wiped from a damaged file would let an older signed copy of a link in, and the apply would
+  write the pin back down; two records with one id would make replacing either one drop the other; and a cloned record
+  would remove or update the same files twice. Version 1 is not held to these (it has no pins, and an old file may
+  repeat an id); it is upgraded, never refused on read for lacking them.
+- **The writer never emits a document its own reader refuses.** The first link install over a version 1 file that
+  repeats an id or a place would produce one, so apply checks the state it would leave behind BEFORE it writes the
+  item, and refuses (`catalog_install_conflict`, "Nothing was installed and the list was not changed") with the version 1
+  file byte-identical and no backup made. The file store validates a version 2 state again at write time.
+- A daemon that only knows version 1 refuses a version 2 file as damaged (`500 catalog_installs_unreadable`) rather
+  than reading it as empty.
+- **Rolling back** to such a daemon is `mv catalog-installs.v1.json catalog-installs.json` with the daemon stopped. It
+  loses every install recorded since the upgrade (the files they wrote stay on disk, unmanaged) and the sequence pins,
+  so a rolled-back machine would accept an older copy of a link again.
 
 ### Declared gaps
 

@@ -4,6 +4,7 @@ import type {
   CatalogInstall,
   CatalogInstallPrefsRequest,
   CatalogInstallPreviewRequest,
+  CatalogManifestInstallPreviewRequest,
   CatalogInstallRequest,
   CatalogInstallScope,
   CatalogInstallTarget,
@@ -388,7 +389,7 @@ export async function request(
     replaceEdited?: true;
     signedVersions?: SignedCatalogItemVersions;
   } = {},
-): Promise<CatalogInstallPreviewRequest> {
+): Promise<CatalogManifestInstallPreviewRequest> {
   const published = await publish(identity, [item], options);
   return {
     signedManifest: published.signedManifest,

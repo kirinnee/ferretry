@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CATALOG_INSTALL_REFUSALS,
+  CatalogInstallPreviewRequestSchema,
+  CatalogLinkProvenanceSchema,
+  CatalogManifestProvenanceSchema,
+  CatalogProvenanceSchema,
+  isLinkProvenance,
+  provenanceSource,
   catalogInstallPath,
   CatalogInstallPrefsRequestSchema,
   catalogInstallsPath,
@@ -62,6 +68,58 @@ describe('catalog install wire', () => {
 
   it('keeps every refusal distinct', () => {
     expect(new Set(CATALOG_INSTALL_REFUSALS).size).toBe(CATALOG_INSTALL_REFUSALS.length);
+  });
+});
+
+const DAEMON = `fy_daemon_${'A'.repeat(43)}`;
+const SHARED = {
+  publisher: DAEMON,
+  publisherName: 'kirin-box',
+  itemId: `itm_${'s'.repeat(22)}`,
+  kind: 'skill',
+  name: 'pdf-tools',
+  version: 1,
+  digest: `sha256:${'a'.repeat(64)}`,
+};
+const FROM_CATALOG = { ...SHARED, catalogId: `cat_${'c'.repeat(22)}`, catalogName: 'Kirin catalog' };
+const FROM_LINK = { ...SHARED, link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'public', sequence: 2 } };
+
+describe('catalog install provenance', () => {
+  it('reads where an install came from as a catalog or as a link, and never as both', () => {
+    expect(CatalogProvenanceSchema.safeParse(FROM_CATALOG).success).toBe(true);
+    expect(CatalogProvenanceSchema.safeParse(FROM_LINK).success).toBe(true);
+    expect(CatalogProvenanceSchema.safeParse({ ...FROM_CATALOG, link: FROM_LINK.link }).success).toBe(false);
+    expect(CatalogManifestProvenanceSchema.safeParse(FROM_LINK).success).toBe(false);
+    expect(CatalogLinkProvenanceSchema.safeParse(FROM_CATALOG).success).toBe(false);
+  });
+
+  it('refuses a link whose sequence is not a signed 32-bit count, or whose kind is unknown', () => {
+    for (const link of [
+      { ...FROM_LINK.link, sequence: 0 },
+      { ...FROM_LINK.link, sequence: 0x1_0000_0000 },
+      { ...FROM_LINK.link, kind: 'forever' },
+      { ...FROM_LINK.link, linkId: 'lnk_short' },
+    ])
+      expect(CatalogLinkProvenanceSchema.safeParse({ ...FROM_LINK, link }).success).toBe(false);
+  });
+
+  it('tells a link’s provenance from a catalog’s, and names the source a person reads', () => {
+    const link = CatalogProvenanceSchema.parse(FROM_LINK);
+    const catalog = CatalogProvenanceSchema.parse(FROM_CATALOG);
+    expect(isLinkProvenance(link)).toBe(true);
+    expect(isLinkProvenance(catalog)).toBe(false);
+    expect(provenanceSource(link)).toBe('a shared link');
+    expect(provenanceSource(catalog)).toBe('Kirin catalog');
+  });
+
+  it('names the three refusals a link adds', () => {
+    for (const code of ['catalog_link_mismatch', 'catalog_link_expired', 'catalog_link_sequence_older'])
+      expect(CATALOG_INSTALL_REFUSALS as readonly string[]).toContain(code);
+  });
+
+  it('refuses a preview request that is neither a manifest’s nor a link’s', () => {
+    expect(CatalogInstallPreviewRequestSchema.safeParse({}).success).toBe(false);
+    expect(CatalogInstallPreviewRequestSchema.safeParse({ linkFingerprint: DAEMON }).success).toBe(false);
   });
 });
 

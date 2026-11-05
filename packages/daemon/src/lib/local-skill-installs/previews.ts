@@ -5,7 +5,7 @@
  */
 import type {
   CatalogInstallTarget,
-  CatalogProvenance,
+  CatalogManifestProvenance,
   LocalSkillOrigin,
   LocalSkillPreviewId,
 } from '@ferretry/protocol';
@@ -19,7 +19,7 @@ export interface HeldLocalSkill {
   readonly expiresAt: number;
   readonly name: string;
   readonly origin: LocalSkillOrigin;
-  readonly provenance: CatalogProvenance;
+  readonly provenance: CatalogManifestProvenance;
   readonly target: CatalogInstallTarget;
   readonly files: readonly { readonly path: string; readonly content: string }[];
 }
