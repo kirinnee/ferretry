@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetCloneBundle, FleetSetupScan, FleetToolInstallResult } from '@ferretry/protocol';
+import {
+  type FleetCloneBundle,
+  type FleetSetupScan,
+  type FleetToolInstallResult,
+  mcpOAuthSecretNames,
+} from '@ferretry/protocol';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
 import {
   FLEET_EXPORT_PATH,
+  FLEET_CLONE_REVIEW_PATH,
   FLEET_SETUP_SCAN_PATH,
   FLEET_TOOLS_INSTALL_PATH,
   installFleetTools,
   readFleetExport,
   readFleetSetupScan,
+  recordCloneKeys,
+  reviewFleetClone,
 } from '../../../../src/features/fleet/setup-api.ts';
 
 interface Call {
@@ -100,5 +108,53 @@ describe('the setup wire client', () => {
     // Assert
     await expect(installed).rejects.toThrow();
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('the clone keys wire client', () => {
+  const REVIEW = {
+    mode: 'update',
+    source: { name: 'studio', verified: 'browser' },
+    items: [],
+    settings: [],
+    logins: [],
+    keys: [{ name: 'GLM_API_KEY', outcome: 'newer' }],
+    same: { count: 0, probable: 0 },
+    fingerprint: 'f'.repeat(64),
+  };
+
+  it('asks for a review with the source’s names and instants, as JSON', async () => {
+    const { client, calls } = clientFor(REVIEW);
+    const sourceSecrets = [{ name: 'GLM_API_KEY', updatedAt: '2026-10-20T08:00:00.000Z' }];
+
+    const answer = await reviewFleetClone(client, { bundle: BUNDLE, source: { daemonId: 'studio' }, sourceSecrets });
+
+    expect(answer.keys.map(key => `${key.name}:${key.outcome}`)).toEqual(['GLM_API_KEY:newer']);
+    expect(calls[0]?.path).toBe(FLEET_CLONE_REVIEW_PATH);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(calls[0]?.init?.body as string).sourceSecrets).toEqual(sourceSecrets);
+  });
+
+  it('records the instants of the keys a sealed copy filed, and refuses a sign-in token’s name before sending', async () => {
+    const { client, calls } = clientFor({ recorded: 1 });
+    const keys = [{ name: 'GLM_API_KEY', sourceUpdatedAt: '2026-10-20T08:00:00.000Z' }];
+
+    const filedAt = '2026-10-21T08:00:00.000Z';
+
+    expect(await recordCloneKeys(client, { source: { daemonId: 'studio' }, filedAt, keys })).toEqual({ recorded: 1 });
+    expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({ source: { daemonId: 'studio' }, filedAt, keys });
+
+    const refused = recordCloneKeys(client, {
+      source: { daemonId: 'studio' },
+      filedAt,
+      keys: [
+        {
+          name: mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access,
+          sourceUpdatedAt: keys[0]?.sourceUpdatedAt ?? '',
+        },
+      ],
+    });
+    await expect(refused).rejects.toThrow();
+    expect(calls).toHaveLength(1);
   });
 });

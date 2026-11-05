@@ -16,8 +16,13 @@
  *
  * WHY WEBASSEMBLY AND NOT WEBGPU. The int8 encoder this feature pins cannot run on ONNX Runtime's
  * WebGPU provider (parakeet.js itself swaps to the 2.5 GB fp32 encoder when asked for WebGPU), so the
- * sessions are created on the `wasm` provider, single-threaded: the app sends no cross-origin
- * isolation headers, so `SharedArrayBuffer` — and with it multi-threading — is not available.
+ * sessions are created on the `wasm` provider.
+ *
+ * THREADS ARE THE PAGE'S CALL (`lib/stt/speed-plan.ts`). The page asks for a thread count with its
+ * `load` message; it asks for more than one only on a cross-origin isolated page, because
+ * `SharedArrayBuffer` exists only there. The deployed app sends no isolation headers today, so the
+ * page asks for one and this worker runs single-threaded; the core falls back to one thread by itself
+ * if the runtime will not start with more (`parakeet-worker-core.ts`).
  *
  * The page's policy must allow `'wasm-unsafe-eval'` for the runtime to compile (`public/_headers`).
  */
@@ -26,6 +31,7 @@ import * as ort from 'onnxruntime-web/wasm';
 import { JsPreprocessor } from 'parakeet.js/mel';
 import { ParakeetModel } from 'parakeet.js/parakeet';
 import { ParakeetModelStore } from '../lib/stt/parakeet-store.ts';
+import { allowSpeechThreads, type ThreadScopeLike } from '../lib/stt/pthread-workers.ts';
 import { ParakeetVocabulary } from '../lib/stt/parakeet-vocabulary.ts';
 import {
   type ParakeetLoadedModel,
@@ -40,6 +46,8 @@ interface WorkerScope {
 }
 
 const scope = globalThis as unknown as WorkerScope;
+// Lets ONNX Runtime's thread pool start its sub-workers under Trusted Types; a single-thread run never needs it.
+allowSpeechThreads(globalThis as unknown as ThreadScopeLike);
 
 /** parakeet.js declares no public constructor; this is the one it has (`src/parakeet.js`). */
 const ParakeetModelWithParts = ParakeetModel as unknown as new (parts: {
@@ -64,9 +72,9 @@ const core = new ParakeetWorkerCore({
   // The runtime URL is irrelevant here: reading names files by role, never fetches.
   read: async () => await new ParakeetModelStore({ caches: scope.caches, fetch: refuse, runtimeUrl: '' }).read(),
   runtime: {
-    load: async bytes => {
+    load: async (bytes, threads) => {
       ort.env.wasm.wasmBinary = bytes.runtime;
-      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.numThreads = threads;
       ort.env.wasm.proxy = false;
       const encoderSession = await ort.InferenceSession.create(bytes.encoder, sessionOptions);
       const joinerSession = await ort.InferenceSession.create(bytes.decoder, sessionOptions);

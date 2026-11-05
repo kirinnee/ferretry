@@ -36,11 +36,23 @@
  * request; nothing is launched to find anything out, and no provider is called.
  */
 import {
+  analyseCloneSettings,
   analyseCloneUpdate,
   applyCloneToBase,
+  applyControls,
+  type CloneSettingsAnalysis,
+  type CloneSettingsInput,
+  type CloneSettingsPlan,
+  controlsDocument,
+  EMPTY_CLONE_SETTINGS_PLAN,
+  parseAccountModel,
+  planCloneSettings,
+  reviewCloneSettings,
+  classifyCloneKeys,
+  CloneSourceIdSchema,
+  recordCloneKeys,
   assignOriginKeys,
   type AccountModel,
-  checkCloneReviewed,
   type CloneAnalysis,
   cloneBaseFor,
   type CloneUpdatePlan,
@@ -92,22 +104,32 @@ import {
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
+  CLONE_REVIEW_STALE,
+  type CloneSettingsDoc,
+  type CloneSettingsText,
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetCloneFile,
+  type FleetCloneKeysRecordRequest,
+  type FleetCloneKeysRecordResult,
   type FleetCloneReview,
   type FleetCloneReviewRequest,
   type FleetSetupRefusalCode,
   type FleetSetupScan,
+  secretReferencesIn,
   type FleetSetupTool,
   type FleetToolInstallRequest,
   type FleetToolInstallResult,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
+import { ApiError } from '../api/error.ts';
+import { ConfigFileConflictError, ConfigFileInvalidError, configFileWriteRefusal } from '../config-files/index.ts';
 import {
   type AccountChangeExecutor,
   type AccountDocumentReading,
   budgetHoldsOf,
+  type ExecutorCaller,
+  FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
@@ -125,6 +147,36 @@ interface UpdateAnalysis {
   readonly record: ReturnType<typeof parseCloneBase>;
   /** Whether the record already holds this source, verified the way it is now. */
   readonly known: boolean;
+  /** The settings documents the source sent, merged key by key against this machine's own. */
+  readonly settings?: {
+    readonly analysis: CloneSettingsAnalysis;
+    /** The version of each file the comparison read: what the write is made against. */
+    readonly etags: ReadonlyMap<CloneSettingsDoc, string>;
+  };
+}
+
+/** The singleton each settings file is, for judging what a write would loosen. */
+const SETTINGS_KIND = { 'warden.yaml': 'warden', 'learning.yaml': 'learning', 'voice.yaml': 'voice' } as const;
+
+/**
+ * This machine's configuration files as a copy reads and writes them: the door `PUT /v1/config/file` is.
+ * A write is validated, refused if the file moved since it was read, and HELD when it loosens and the caller
+ * may not confirm it in the same act.
+ */
+export interface CloneConfigFiles {
+  file(path: string): Promise<{ readonly exists: boolean; readonly text: string; readonly etag: string }>;
+  /** What is in effect now, for judging a loosening. */
+  effective(): Promise<Readonly<Record<'warden' | 'learning' | 'voice', unknown>>>;
+  validate(
+    path: string,
+    text: string,
+  ): Promise<readonly { readonly severity: 'error' | 'warning'; readonly message: string; readonly line?: number }[]>;
+  write(
+    path: string,
+    text: string,
+    ifMatch: string,
+    mayLoosen: boolean,
+  ): Promise<{ readonly outcome: 'applied' | 'pending' }>;
 }
 
 /** Every refusal the setup routes answer with, so a client branches on cause rather than on prose. */
@@ -189,6 +241,8 @@ export interface FleetSetupServiceDeps {
   /** The secret store's management side: names in, values in, never a value out. */
   readonly secrets: {
     names(): Promise<readonly string[]>;
+    /** Each secret's name and when it was made and last changed: what a repeat copy compares. Never a value. */
+    held(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<void>;
   };
   /** One folder, read as text: a host skill folder, or a folder of the asset tree. */
@@ -209,10 +263,23 @@ export interface FleetSetupServiceDeps {
     read(path: string): Promise<string | undefined>;
     write(path: string, text: string): Promise<void>;
   };
-  /** `setup/clone-base.json` outside a copy: only forgetting a source writes it alone (a copy writes it in its own batch). */
+  /**
+   * The configuration files a settings merge reads and writes. Absent on a machine wired without them: a copy
+   * that carries `warden.yaml`, `learning.yaml` or `voice.yaml` is then refused rather than half applied.
+   */
+  readonly configFiles?: CloneConfigFiles;
+  /**
+   * `setup/clone-base.json` outside a copy: forgetting a source and remembering the keys a copy filed write it on
+   * their own (a copy writes it in its own batch, which checks the revision it planned against).
+   */
   readonly cloneBase: {
     read(path: string): Promise<string | undefined>;
-    write(path: string, text: string): Promise<void>;
+    /**
+     * One read-modify-write of the record with no other writer of it between the read and the write — this
+     * daemon's fleet applies included: `change` gets the text on disk NOW (`undefined` when there is none) and
+     * answers the text to write, or `undefined` to write nothing. Answers whether it wrote.
+     */
+    update(path: string, change: (current: string | undefined) => string | undefined): Promise<boolean>;
   };
 }
 
@@ -280,6 +347,14 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
 
 // ── What a staged import or clone holds ──────────────────────────────────────────────────────────
 
+/** One settings file to write: the text, the version it was compared with, and the port's own way to write it. */
+interface ConfigWrite {
+  readonly path: string;
+  readonly text: string;
+  readonly etag: string;
+  readonly put: CloneConfigFiles['write'];
+}
+
 interface Composed {
   readonly model: AccountModel;
   readonly documents: readonly FleetDocumentWrite[];
@@ -289,6 +364,10 @@ interface Composed {
   readonly summary: string;
   /** What the person reviewed, so the apply runs that and nothing else. Holds no value. */
   readonly fingerprint: string;
+  /** Configuration files the copy writes through the owner's door, each against the version it was compared with. */
+  readonly configWrites?: readonly ConfigWrite[];
+  /** The copy turns what agents may control back on: the same passkey rule `machine.settings` has applies. */
+  readonly widens?: boolean;
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
@@ -500,8 +579,10 @@ export class FleetSetupService {
       execute: async change => await this.#execute(change, await this.#composeImport(change)),
     },
     clone: {
-      describe: async change => await this.#describe(change, await this.#composeClone(change)),
-      execute: async change => await this.#execute(change, await this.#composeClone(change)),
+      describe: async (change, caller) =>
+        await this.#describe(change, await this.#composeClone(change, caller, 'describe')),
+      execute: async (change, caller) =>
+        await this.#execute(change, await this.#composeClone(change, caller, 'apply'), caller),
     },
   };
 
@@ -510,7 +591,7 @@ export class FleetSetupService {
     return composed.lines.join(' ');
   }
 
-  async #execute(change: object, composed: Composed): Promise<string> {
+  async #execute(change: object, composed: Composed, caller?: ExecutorCaller): Promise<string> {
     if (this.#described.get(change) !== composed.fingerprint) {
       throw new FleetCatalogRefusal(
         'fleet_change_stale',
@@ -527,8 +608,39 @@ export class FleetSetupService {
         );
       }
     }
+    // Settings files go first, each through the owner's door and against the version it was compared with. The
+    // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
+    // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
+    // other held edit.
+    const mayLoosen = caller?.governance?.governed === false;
+    let held = 0;
+    for (const write of composed.configWrites ?? []) held += await this.#writeConfigFile(write, mayLoosen);
     await this.#applyModel(composed.model, composed.documents);
-    return composed.summary;
+    if (composed.widens === true) caller?.spend();
+    return held === 0
+      ? composed.summary
+      : `${composed.summary} ${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`;
+  }
+
+  /** One settings file through `PUT /v1/config/file`'s semantics. Answers 1 when the write was held. */
+  async #writeConfigFile(write: ConfigWrite, mayLoosen: boolean): Promise<number> {
+    try {
+      return (await write.put(write.path, write.text, write.etag, mayLoosen)).outcome === 'pending' ? 1 : 0;
+    } catch (error) {
+      if (error instanceof ConfigFileConflictError) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_stale',
+          `${write.path} changed on this machine after it was reviewed; review it again`,
+        );
+      }
+      if (error instanceof ConfigFileInvalidError) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_refused',
+          `${write.path} would not check on this machine, so it was not written: ${errorMessage(error)}`,
+        );
+      }
+      throw error;
+    }
   }
 
   // ── Import ─────────────────────────────────────────────────────────────────────────────────────
@@ -683,8 +795,20 @@ export class FleetSetupService {
 
   // ── Clone ──────────────────────────────────────────────────────────────────────────────────────
 
-  async #composeClone(change: CloneChange): Promise<Composed> {
-    if (change.mode === 'update') return await this.#composeUpdate(change);
+  async #composeClone(
+    change: CloneChange,
+    caller?: ExecutorCaller,
+    stage: 'describe' | 'apply' = 'apply',
+  ): Promise<Composed> {
+    if (change.mode === 'update') return await this.#composeUpdate(change, caller, stage);
+    // Settings are merged key by key against a record of the last copy, which only a repeat copy has. Carrying them
+    // on another mode would be ignored, and a person who sent them would think they had been merged.
+    if ((change.settings?.length ?? 0) > 0 || change.settingsDecisions !== undefined) {
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        'Settings are merged key by key only when a copy is repeated (update). Nothing was changed.',
+      );
+    }
     const catalog = this.deps.catalog;
     const host = catalog.machineName();
     // The person's names for the two machines, when the app sent them; the hostnames are only what each calls itself.
@@ -748,10 +872,21 @@ export class FleetSetupService {
   }
 
   /** `POST /v1/fleet/clone/review`: what a copy from this source would change here, and why. Writes nothing. */
-  async reviewClone(request: FleetCloneReviewRequest): Promise<FleetCloneReview> {
+  async reviewClone(request: FleetCloneReviewRequest, governance?: CallerGovernance): Promise<FleetCloneReview> {
     const reading = await this.#read();
     try {
-      return reviewCloneUpdate((await this.#analyseUpdate(request, reading)).analysis);
+      const found = await this.#analyseUpdate(request, reading);
+      const review = {
+        ...reviewCloneUpdate(found.analysis),
+        keys: [...(await this.#reviewKeys(request, found))],
+      };
+      if (found.settings === undefined) return review;
+      // A settings file this caller may not write is listed as refused, with the sentence the apply would give.
+      const settings = reviewCloneSettings(found.settings.analysis).map(entry => {
+        const why = this.#settingsRefusal(governance, entry.path, 'describe');
+        return why === undefined ? entry : { path: entry.path, refused: why, keys: [] };
+      });
+      return { ...review, settings, fingerprint: this.#reviewFingerprint(found) };
     } catch (error) {
       if (error instanceof CloneRefusal || error instanceof CloneSourceMismatch) {
         throw new FleetSetupRefusal('fleet_setup_refused', error.message);
@@ -760,12 +895,60 @@ export class FleetSetupService {
     }
   }
 
+  /**
+   * How each API key the copy concerns stands, from `updatedAt` alone (docs/secrets.md): the keys the bundle's
+   * logins name and the ones the last copy from this source recorded, against what the source listed. Nothing
+   * is answered without a list from the source, and no value is read to answer.
+   */
+  async #reviewKeys(request: FleetCloneReviewRequest, found: UpdateAnalysis): Promise<FleetCloneReview['keys']> {
+    if (request.sourceSecrets === undefined) return [];
+    const wanted = found.bundle.credentials.flatMap(credential =>
+      secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}])),
+    );
+    return classifyCloneKeys({
+      source: request.sourceSecrets,
+      target: await this.deps.secrets.held().catch(() => []),
+      wanted,
+      recorded: found.source === undefined ? undefined : cloneBaseFor(found.record, found.source)?.keys,
+    });
+  }
+
+  /**
+   * `POST /v1/fleet/clone/keys`: a sealed copy filed these keys here at `filedAt`; remember when the source last
+   * changed each and the instant this machine filed it. A key is recorded only if its own store entry was CREATED
+   * at `filedAt` — the one thing that proves it is the entry that copy made: a key the person deleted and made
+   * again since is a different key and is left unrecorded. The entry's later edits do not matter and must not:
+   * the baseline is the copy's instant, never the store's current `updatedAt`, so a key the person edited after
+   * the copy still reads as changed here. Only the `keys` of a source this machine already has a record of
+   * change; a source with no record and a name no copy can carry are skipped. The read-modify-write of the record
+   * is one step with no other writer between (`cloneBase.update`). Timestamps only: nothing here reads a secret.
+   */
+  async recordCloneKeys(request: FleetCloneKeysRecordRequest): Promise<FleetCloneKeysRecordResult> {
+    if (!CloneSourceIdSchema.safeParse(request.source.daemonId).success) return { recorded: 0 };
+    const filedAt = Date.parse(request.filedAt);
+    const made = new Map((await this.deps.secrets.held()).map(secret => [secret.name, secret.createdAt] as const));
+    const recorded = request.keys.flatMap(key => {
+      const createdAt = made.get(key.name);
+      return createdAt !== undefined && Date.parse(createdAt) === filedAt
+        ? [{ name: key.name, sourceUpdatedAt: key.sourceUpdatedAt, targetUpdatedAt: request.filedAt }]
+        : [];
+    });
+    const wrote = await this.deps.cloneBase.update(this.#cloneBasePath(), current => {
+      const before = parseCloneBase(current);
+      const after = recordCloneKeys(before, request.source.daemonId, recorded);
+      return after === before ? undefined : serializeCloneBase(after);
+    });
+    // Counted from the update that committed, never from a change that was handed a record and wrote nothing.
+    return { recorded: wrote ? recorded.length : 0 };
+  }
+
   /** The three-way comparison of a bundle against this machine, from what is on disk now. */
   async #analyseUpdate(
     request: {
       readonly bundle: unknown;
       readonly source?: { readonly daemonId: string };
       readonly names?: { readonly source: string; readonly target: string };
+      readonly settings?: readonly CloneSettingsText[];
     },
     reading: AccountDocumentReading,
   ): Promise<UpdateAnalysis> {
@@ -794,7 +977,73 @@ export class FleetSetupService {
       roots: { userHome: catalog.layout.userHome, assetsDirectory: catalog.layout.assetsDirectory },
       ...(request.source === undefined ? {} : { sourceDaemon: request.source.daemonId }),
     });
-    return { analysis, bundle, machine, source, record, known: base !== undefined };
+    const settings =
+      request.settings === undefined || request.settings.length === 0
+        ? undefined
+        : await this.#analyseSettings(request.settings, reading.model, base?.settings);
+    return {
+      analysis,
+      bundle,
+      machine,
+      source,
+      record,
+      known: base !== undefined,
+      ...(settings === undefined ? {} : { settings }),
+    };
+  }
+
+  /** What the review is bound to: the items' comparison, and the settings' when the source sent any. */
+  #reviewFingerprint(found: UpdateAnalysis): string {
+    return found.settings === undefined
+      ? found.analysis.fingerprint
+      : this.deps.digest(`${found.analysis.fingerprint}\n${found.settings.analysis.fingerprint}`);
+  }
+
+  /** Each settings document the source sent, against this machine's own file (or its controls). */
+  async #analyseSettings(
+    sent: readonly CloneSettingsText[],
+    model: AccountModel,
+    base: Parameters<typeof analyseCloneSettings>[1],
+  ): Promise<NonNullable<UpdateAnalysis['settings']>> {
+    const inputs: CloneSettingsInput[] = [];
+    const etags = new Map<CloneSettingsDoc, string>();
+    let effective: Awaited<ReturnType<CloneConfigFiles['effective']>> | undefined;
+    for (const document of sent) {
+      if (document.path === 'controls') {
+        inputs.push({
+          path: 'controls',
+          theirs: document.text,
+          mine: controlsDocument(model.machine),
+          mineExists: true,
+        });
+        continue;
+      }
+      const files = this.deps.configFiles;
+      if (files === undefined) {
+        throw new CloneRefusal(`This machine cannot merge ${document.path} yet. Leave it out and copy the rest.`);
+      }
+      const here = await files.file(document.path);
+      effective ??= await files.effective();
+      etags.set(document.path, here.etag);
+      inputs.push({
+        path: document.path,
+        theirs: document.text,
+        mine: here.exists ? here.text : '',
+        mineExists: here.exists,
+        effective: effective[SETTINGS_KIND[document.path]],
+      });
+    }
+    return { analysis: analyseCloneSettings(inputs, base), etags };
+  }
+
+  /** Why this caller may not write a settings file, in words; none when it may (or, staging, only needs a passkey). */
+  #settingsRefusal(
+    governance: CallerGovernance | undefined,
+    path: CloneSettingsDoc,
+    stage: 'describe' | 'apply',
+  ): string | undefined {
+    // The controls are the machine's own settings: `fleet.configure`, which the change already demanded.
+    return path === 'controls' ? undefined : configFileWriteRefusal(governance, path, stage);
   }
 
   /** The documents this machine's own items own, as the export would carry them: what an update compares against. */
@@ -816,27 +1065,100 @@ export class FleetSetupService {
   }
 
   /** `clone.import` with `mode: 'update'`: re-plan, refuse a review that has moved, write only what was chosen. */
-  async #composeUpdate(change: CloneChange): Promise<Composed> {
+  async #composeUpdate(
+    change: CloneChange,
+    caller: ExecutorCaller | undefined,
+    stage: 'describe' | 'apply',
+  ): Promise<Composed> {
     const reading = await this.#read();
     let plan: CloneUpdatePlan;
     let found: UpdateAnalysis;
+    let settingsPlan: CloneSettingsPlan = EMPTY_CLONE_SETTINGS_PLAN;
     try {
       found = await this.#analyseUpdate(change, reading);
-      checkCloneReviewed(found.analysis, change.reviewed);
+      if (change.reviewed === undefined || change.reviewed !== this.#reviewFingerprint(found)) {
+        throw new CloneRefusal(CLONE_REVIEW_STALE);
+      }
       plan = planCloneUpdate(found.analysis, {
         decisions: change.decisions ?? {},
         ...(change.logins === undefined ? {} : { logins: change.logins }),
         ...(change.skip === undefined ? {} : { skip: change.skip }),
       });
+      if (found.settings !== undefined) {
+        // Each carried file passes the check `PUT /v1/config/file` makes, so a device that may not write
+        // `warden.yaml` directly cannot write it by copying either.
+        for (const file of found.settings.analysis.files) {
+          const why = this.#settingsRefusal(caller?.governance, file.input.path, stage);
+          if (why !== undefined)
+            throw new CloneRefusal(
+              `${why}. Leave ${file.input.path} out, or copy from a device that may. Nothing was changed.`,
+            );
+        }
+        settingsPlan = planCloneSettings(found.settings.analysis, change.settingsDecisions);
+      } else if (change.settingsDecisions !== undefined && Object.keys(change.settingsDecisions).length > 0) {
+        throw new CloneRefusal('Settings were decided, but no settings were sent. Review them again.');
+      }
     } catch (error) {
       if (error instanceof CloneRefusal || error instanceof CloneSourceMismatch) {
         throw new FleetCatalogRefusal('fleet_change_refused', error.message);
       }
       throw error;
     }
+    // The controls taken are a smaller `machine.settings` change: only those fields, in the same batch.
+    let nextModel = plan.model;
+    const controls = settingsPlan.controls;
+    if (controls !== undefined) {
+      try {
+        nextModel = parseAccountModel({ ...plan.model, machine: applyControls(plan.model.machine, controls.taken) });
+      } catch (error) {
+        const first =
+          (error as { issues?: readonly { message: string }[] }).issues?.[0]?.message ?? errorMessage(error);
+        throw new FleetCatalogRefusal(
+          'fleet_change_refused',
+          `Taking those controls would leave ${found.machine} with a setup it cannot read: ${first}. Nothing was changed.`,
+        );
+      }
+      // Turning what agents may control back ON needs a passkey proved for it from a remote device, and never
+      // a ferret: the rule `machine.settings` applies (docs/grants.md). Describing writes nothing, so it only says so.
+      if (stage === 'apply' && controls.widensAgentControl) {
+        if (caller?.agent === true) {
+          throw new ApiError(
+            403,
+            'a ferret cannot widen what ferrets may drive on this machine; the owner does',
+            'owner_only',
+          );
+        }
+        if (caller?.governance === undefined) {
+          throw new FleetCatalogRefusal(
+            'fleet_change_refused',
+            'this daemon cannot say whether this caller may widen what agents may control, so nothing was changed',
+          );
+        }
+        if (caller.governance.governed && !caller.freshStepUp) throw new FleetCatalogFreshStepUpRequired();
+      }
+    }
+    const configWrites: ConfigWrite[] = [];
+    const settingsFiles = this.deps.configFiles;
+    for (const file of settingsPlan.files) {
+      const etag = found.settings?.etags.get(file.path);
+      // A file with an etag was read through the port, so the port is there; the controls have neither.
+      if (etag === undefined || settingsFiles === undefined) continue;
+      const issues = await settingsFiles.validate(file.path, file.text);
+      const broken = issues.filter(issue => issue.severity === 'error');
+      if (broken.length > 0) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_refused',
+          `${file.path} from ${change.names?.source ?? found.bundle.machine} would not check on ${found.machine}: ${broken
+            .slice(0, 3)
+            .map(issue => `${issue.line === undefined ? '' : `line ${String(issue.line)}: `}${issue.message}`)
+            .join('; ')}. Nothing was changed.`,
+        );
+      }
+      configWrites.push({ path: file.path, text: file.text, etag, put: settingsFiles.write.bind(settingsFiles) });
+    }
     const path = this.#cloneBasePath();
     const record =
-      found.source === undefined || plan.sourceKeys.size === 0
+      found.source === undefined || (plan.sourceKeys.size === 0 && Object.keys(settingsPlan.recorded).length === 0)
         ? undefined
         : {
             path,
@@ -847,27 +1169,33 @@ export class FleetSetupService {
                 replace: !found.known,
                 copied: plan.base,
                 sourceKeys: plan.sourceKeys,
-                model: plan.model,
+                model: nextModel,
                 settled: new Set(plan.settled),
+                settings: settingsPlan.recorded,
               }),
             ),
           };
     const removals = plan.removals.map(file => this.#removableAsset(file));
     const documents = await this.#documents(
       reading,
-      plan.model,
+      nextModel,
       plan.files,
       record === undefined ? [] : [record],
       removals,
     );
     const sourceName = change.names?.source ?? found.bundle.machine;
+    const settingsWords = this.#settingsLines(settingsPlan, found.machine, caller?.governance?.governed !== false);
     return {
-      model: plan.model,
+      model: nextModel,
       documents,
       secrets: [],
-      lines: describeCloneUpdate(plan, found.machine, sourceName),
-      summary: `Updated ${found.machine} from ${sourceName}: ${plural(plan.done.taken.length, 'item')} updated, ${plural(plan.done.added.length, 'item')} added, ${plural(plan.done.removed.length, 'item')} removed.`,
-      fingerprint: this.#fingerprint(documents, [], record === undefined ? [] : [record.path]),
+      lines: [...describeCloneUpdate(plan, found.machine, sourceName), ...settingsWords],
+      summary: `Updated ${found.machine} from ${sourceName}: ${plural(plan.done.taken.length, 'item')} updated, ${plural(plan.done.added.length, 'item')} added, ${plural(plan.done.removed.length, 'item')} removed${
+        settingsPlan.done.taken.length === 0 ? '' : `, ${plural(settingsPlan.done.taken.length, 'setting')} taken`
+      }.`,
+      fingerprint: this.#fingerprint(documents, [], record === undefined ? [] : [record.path], configWrites),
+      configWrites,
+      ...(controls?.widensAgentControl === true ? { widens: true } : {}),
     };
   }
 
@@ -911,20 +1239,20 @@ export class FleetSetupService {
    * nothing copied, no login, no secret. Answers whether there was anything to forget.
    */
   async forgetCloneSource(source: string): Promise<boolean> {
-    const path = this.#cloneBasePath();
-    const before = parseCloneBase(await this.deps.cloneBase.read(path));
-    // A person names a source the way they know it: the id, the bare id an export carries, or its name.
-    const found = findCloneSources(before, source);
-    if (found.length === 0) return false;
-    const [only] = found;
-    if (found.length > 1 || only === undefined) {
-      throw new FleetSetupRefusal(
-        'fleet_setup_refused',
-        `More than one source is called ${source}: ${found.join(', ')}. Name one by its id.`,
-      );
-    }
-    await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, only)));
-    return true;
+    return await this.deps.cloneBase.update(this.#cloneBasePath(), current => {
+      const before = parseCloneBase(current);
+      // A person names a source the way they know it: the id, the bare id an export carries, or its name.
+      const found = findCloneSources(before, source);
+      if (found.length === 0) return undefined;
+      const [only] = found;
+      if (found.length > 1 || only === undefined) {
+        throw new FleetSetupRefusal(
+          'fleet_setup_refused',
+          `More than one source is called ${source}: ${found.join(', ')}. Name one by its id.`,
+        );
+      }
+      return serializeCloneBase(forgetCloneSource(before, only));
+    });
   }
 
   // ── Writing ────────────────────────────────────────────────────────────────────────────────────
@@ -1011,6 +1339,7 @@ export class FleetSetupService {
     documents: readonly FleetDocumentWrite[],
     secrets: readonly string[],
     timed: readonly string[] = [],
+    writes: readonly Pick<ConfigWrite, 'path' | 'text' | 'etag'>[] = [],
   ): string {
     return this.deps.digest(
       JSON.stringify({
@@ -1021,8 +1350,32 @@ export class FleetSetupService {
           document.remove === true,
         ]),
         secrets,
+        writes: writes.map(write => [write.path, this.deps.digest(write.text), write.etag]),
       }),
     );
+  }
+
+  /** What the settings merge does, as the confirm card says it. Keys and counts only: no value is spelled out. */
+  #settingsLines(plan: CloneSettingsPlan, machine: string, heldHere: boolean): readonly string[] {
+    const { taken, kept } = plan.done;
+    if (taken.length === 0 && kept.length === 0) return [];
+    const lines = [
+      `Settings: ${plural(taken.length, 'key')} taken from the other machine${taken.length === 0 ? '' : ` (${taken.join(', ')})`}, ${plural(kept.length, 'key')} kept as ${machine} has ${kept.length === 1 ? 'it' : 'them'}.`,
+    ];
+    const loosening = plan.files.filter(file => file.loosens).map(file => file.path);
+    if (loosening.length > 0) {
+      lines.push(
+        `${loosening.join(' and ')} would loosen what ${machine} may spend or do; ${
+          heldHere ? 'it is written but held until you confirm it' : 'you are at the machine, so it takes effect now'
+        }.`,
+      );
+    }
+    if (plan.controls?.widensAgentControl === true) {
+      lines.push(
+        `It turns on something agents may control on ${machine}, which asks for a passkey from another device.`,
+      );
+    }
+    return lines;
   }
 
   /** The catalogs an apply reads (docs/model-catalog.md), or nothing on a machine wired without them. */

@@ -15,6 +15,6 @@
   // shims are typechecked. They are browser code that ends up inside the sandbox
   // frame, so an untyped one would be the least reviewed and most security-
   // sensitive code in the package.
-  "include": ["src", "tests", "harness", "scripts", "vite.config.ts"],
+  "include": ["src", "tests", "harness", "speed-bench", "scripts", "vite.config.ts"],
   "exclude": []
 }

@@ -26,3 +26,9 @@ export const fileName = (path: string): string =>
     .split(/[\\/]/u)
     .filter(part => part !== '')
     .pop() ?? path;
+
+/** A reason a daemon words without a stop, closed so it reads as the end of a sentence; one already closed is left. */
+export const closedSentence = (reason: string): string => {
+  const text = reason.trim();
+  return /[.!?…]$/u.test(text) ? text : `${text}.`;
+};

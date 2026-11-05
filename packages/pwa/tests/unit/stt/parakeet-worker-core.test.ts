@@ -283,3 +283,97 @@ describe('ParakeetWorkerCore', () => {
     ]);
   });
 });
+
+describe('ParakeetWorkerCore — threads', () => {
+  it('accepts a thread count only above one, clamped, and leaves the request as it was otherwise', () => {
+    should(parseWorkerRequest({ type: 'load', threads: 4 })).eql({ type: 'load', threads: 4 });
+    should(parseWorkerRequest({ type: 'load', threads: 99 })).eql({ type: 'load', threads: 8 });
+    for (const bad of [1, 0, -2, 2.5, '4', null, Number.NaN])
+      should(parseWorkerRequest({ type: 'load', threads: bad })).eql({ type: 'load' });
+    const data = samples();
+    should(parseWorkerRequest({ type: 'transcribe', id: 1, samples: data, threads: 3 })).eql({
+      type: 'transcribe',
+      id: 1,
+      samples: data,
+      threads: 3,
+    });
+  });
+
+  it('hands the requested threads to the runtime, one when none were asked for', async () => {
+    const asked: number[] = [];
+    const h = harness({
+      load: async () => {
+        return DEFAULT_MODEL;
+      },
+    });
+    // The harness runtime ignores threads; build a core of our own to see them.
+    const core = new ParakeetWorkerCore({
+      read: async () => BYTES,
+      runtime: {
+        load: async (_bytes, threads) => {
+          asked.push(threads);
+          return DEFAULT_MODEL;
+        },
+      },
+      post: () => undefined,
+    });
+    await core.handle({ type: 'load', threads: 4 });
+    should(asked).eql([4]);
+    const plain = new ParakeetWorkerCore({
+      read: async () => BYTES,
+      runtime: {
+        load: async (_bytes, threads) => {
+          asked.push(threads);
+          return DEFAULT_MODEL;
+        },
+      },
+      post: () => undefined,
+    });
+    await plain.handle({ type: 'load' });
+    should(asked).eql([4, 1]);
+    should(h.loads()).equal(0);
+  });
+
+  it('answers threads-failed, not load-failed, when a threaded load fails; install problems keep their code', async () => {
+    const h = harness({
+      load: async () => {
+        throw new Error('worker blocked by policy');
+      },
+    });
+    await h.core.handle({ type: 'load', threads: 4 });
+    await h.core.handle({ type: 'load' });
+    should(h.replies.map(reply => reply.type === 'failed' && reply.code)).eql(['threads-failed', 'load-failed']);
+    const missing = harness({
+      read: async () => {
+        throw Object.assign(new Error('gone'), { code: 'not-installed' });
+      },
+    });
+    await missing.core.handle({ type: 'load', threads: 4 });
+    should(missing.replies[0]).have.property('code', 'not-installed');
+  });
+
+  it('answers threads-failed when a threaded decode fails, and does not trust that model again', async () => {
+    let loads = 0;
+    const replies: ParakeetWorkerReply[] = [];
+    const core = new ParakeetWorkerCore({
+      read: async () => BYTES,
+      runtime: {
+        load: async () => {
+          loads += 1;
+          return {
+            ...DEFAULT_MODEL,
+            transcribe: async () => {
+              throw new Error('out of memory');
+            },
+          };
+        },
+      },
+      post: reply => replies.push(reply),
+    });
+    await core.handle({ type: 'transcribe', id: 1, samples: samples(), threads: 4 });
+    await core.handle({ type: 'transcribe', id: 2, samples: samples() });
+    should(replies.map(reply => reply.type === 'failed' && reply.code)).eql(['threads-failed', 'transcribe-failed']);
+    // The threaded model was dropped, so the second request built a fresh one.
+    should(loads).equal(2);
+  });
+});

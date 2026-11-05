@@ -7,12 +7,15 @@
  * refusal becomes, and that a write is handed the caller's governance rather than deciding it.
  */
 import { describe, it } from 'bun:test';
-import type {
-  FleetCloneBundle,
-  FleetCloneReview,
-  FleetSetupScan,
-  FleetToolInstallRequest,
-  FleetToolInstallResult,
+import {
+  type FleetCloneBundle,
+  type FleetCloneKeysRecordRequest,
+  type FleetCloneReview,
+  type FleetCloneReviewRequest,
+  type FleetSetupScan,
+  type FleetToolInstallRequest,
+  type FleetToolInstallResult,
+  mcpOAuthSecretNames,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
@@ -66,11 +69,12 @@ interface Calls {
   exports: number;
   reviews: number;
   forgets: string[];
+  reviewed: { request: FleetCloneReviewRequest; governance: CallerGovernance | undefined }[];
   installs: { request: FleetToolInstallRequest; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetSetupSubsystem; calls: Calls } {
-  const calls: Calls = { scans: 0, exports: 0, reviews: 0, forgets: [], installs: [] };
+  const calls: Calls = { scans: 0, exports: 0, reviews: 0, forgets: [], reviewed: [], installs: [] };
   return {
     calls,
     subsystem: {
@@ -86,14 +90,16 @@ function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetS
         calls.exports += 1;
         return BUNDLE;
       },
-      reviewClone: async () => {
+      reviewClone: async (body, governance) => {
         calls.reviews += 1;
+        calls.reviewed.push({ request: body, governance });
         return REVIEW;
       },
       forgetCloneSource: async source => {
         calls.forgets.push(source);
         return source === 'studio';
       },
+      recordCloneKeys: async () => ({ recorded: 0 }),
       executors: {} as FleetSetupSubsystem['executors'],
       ...overrides,
     },
@@ -184,6 +190,83 @@ describe('the fleet setup mount', () => {
     // Assert
     should(answer.status).equal(409);
     should(jsonBody(answer).code).equal('fleet_setup_refused');
+  });
+
+  it('should hand a clone review the caller governance and the settings documents, so each file can be checked for THEM', async () => {
+    const { subsystem, calls } = stub();
+    const settings = [
+      { path: 'warden.yaml', text: 'enabled: true\n' },
+      { path: 'controls', text: '{"agentPermissions":"auto"}' },
+    ];
+
+    const answered = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE, settings })),
+    );
+
+    should(answered.status).equal(200);
+    should(calls.reviewed[0]?.request.settings).deepEqual(settings as never);
+    should(calls.reviewed[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should refuse a review whose settings name a document a copy does not merge', async () => {
+    const { subsystem, calls } = stub();
+    for (const settings of [
+      [{ path: 'machine.yaml', text: 'agentPermissions: skip\n' }],
+      [{ path: '../../etc/passwd', text: '' }],
+      [{ path: 'warden.yaml', text: 'x', extra: 1 }],
+    ]) {
+      const bad = await dispatcher(subsystem).dispatch(
+        post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE, settings })),
+      );
+      should(bad.status).equal(400);
+    }
+    should(calls.reviews).equal(0);
+  });
+
+  it('should record the keys a sealed copy filed through the shared schema, and refuse a sign-in token by name', async () => {
+    // Arrange
+    const seen: FleetCloneKeysRecordRequest[] = [];
+    const { subsystem } = stub({
+      recordCloneKeys: async request => {
+        seen.push(request);
+        return { recorded: request.keys.length };
+      },
+    });
+    const body = {
+      source: { daemonId: 'daemon-source' },
+      filedAt: '2026-10-12T08:00:00.000Z',
+      keys: [{ name: 'GLM_API_KEY', sourceUpdatedAt: '2026-10-10T08:00:00.000Z' }],
+    };
+    const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+
+    // Act
+    const answered = await dispatcher(subsystem).dispatch(post('/v1/fleet/clone/keys', JSON.stringify(body)));
+    const refused = await dispatcher(subsystem).dispatch(
+      post(
+        '/v1/fleet/clone/keys',
+        JSON.stringify({ ...body, keys: [{ name: signIn, sourceUpdatedAt: body.keys[0]?.sourceUpdatedAt }] }),
+      ),
+    );
+    const extra = await dispatcher(subsystem).dispatch(
+      post(
+        '/v1/fleet/clone/keys',
+        JSON.stringify({ ...body, keys: [{ ...body.keys[0], value: 'sk-live-0123456789' }] }),
+      ),
+    );
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(answered)).deepEqual({ recorded: 1 });
+    should(seen).have.length(1);
+    should(refused.status).equal(400);
+    should(extra.status).equal(400);
+    // The instant the copy filed them is what the record is anchored on: a report without it is refused.
+    const { filedAt: _omitted, ...withoutInstant } = body;
+    const unanchored = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/keys', JSON.stringify(withoutInstant)),
+    );
+    should(unanchored.status).equal(400);
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {

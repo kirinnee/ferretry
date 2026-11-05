@@ -213,7 +213,7 @@ import {
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
-import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
+import { cloneConfigFilesOver, fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import {
   CredentialEmailReader,
   ensurePrivateDirectory,
@@ -12377,6 +12377,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ...(process.env.CODEX_HOME === undefined ? {} : { codexHome: process.env.CODEX_HOME }),
           credentials: harnessCredentials,
           daemonId: () => attachmentDaemonId,
+          configFiles: cloneConfigFilesOver(configFiles),
           tools: new ToolInstallService({
             platform: process.platform,
             executables,

@@ -133,6 +133,8 @@ import {
   type SpeechGlobalLike,
 } from './stt/on-device-voices.ts';
 import { browserParakeetVoice, type ParakeetVoice } from './stt/parakeet-voice.ts';
+import { speedPlannerFor } from './stt/speed-planner.ts';
+import type { SpeedGlobalLike } from './stt/speed-signals.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
@@ -871,11 +873,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     options.transcriptionLog ?? new TranscriptionLog(new IndexedDbTranscriptionLogRecords(globalThis.indexedDB));
   void transcriptionLog.hydrate();
   const speechGlobal = globalThis as unknown as SpeechGlobalLike;
-  const voice = options.voice ?? browserParakeetVoice(speechGlobal, options.speechAssets ?? null);
+  const speedPlanner = speedPlannerFor(globalThis as unknown as SpeedGlobalLike);
+  const voice = options.voice ?? browserParakeetVoice(speechGlobal, options.speechAssets ?? null, speedPlanner);
   const voices =
     options.voices ??
     (options.voice === undefined
-      ? browserOnDeviceVoices(speechGlobal, options.speechAssets ?? null, voice)
+      ? browserOnDeviceVoices(speechGlobal, options.speechAssets ?? null, voice, speedPlanner)
       : new OnDeviceVoices([voice]));
   // Reads what is already installed; it never downloads.
   void voices.refresh();

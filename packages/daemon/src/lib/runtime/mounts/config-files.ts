@@ -63,7 +63,12 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, headerValue, queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { ConfigFileConflictError, ConfigFileInvalidError, type ConfigFilesService } from '../../config-files/index.ts';
+import {
+  ConfigFileConflictError,
+  ConfigFileInvalidError,
+  type ConfigFilesService,
+  configFileDemand,
+} from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import { presentedSessionCapability, TWO_SESSION_CREDENTIALS } from './agent-tools.ts';
 
@@ -114,7 +119,7 @@ function refusedFor(
   axis: 'use' | 'configure',
   narrowing = false,
 ): ApiResponse | undefined {
-  const capability = configFileCapability(addressOf(path));
+  const { capability } = configFileDemand(path, axis, narrowing);
   const governance = context.governance;
   if (governance === undefined) {
     // A wiring mistake, never the caller's: the route that reached here has no grant standing to read
@@ -130,7 +135,8 @@ function refusedFor(
       403,
     );
   }
-  const decision = governance.decide({ capability, axis, ...(narrowing ? { narrowing: true as const } : {}) });
+  // The one demand a copy from another machine asks too (`configFileWriteRefusal`): same file, same question.
+  const decision = governance.decide(configFileDemand(path, axis, narrowing));
   if (decision.allowed) return undefined;
   if (decision.refusal === 'step-up-required') {
     return stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, capability);

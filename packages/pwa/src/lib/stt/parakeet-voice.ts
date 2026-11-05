@@ -21,6 +21,7 @@ import { OnDeviceVoice } from './on-device-voice.ts';
 import { ParakeetEngine, type ParakeetWorkerLike } from './parakeet-engine.ts';
 import { ParakeetRecognitionSession, type ParakeetSessionOptions } from './parakeet-session.ts';
 import { type ParakeetCacheStorage, ParakeetModelStore, type ParakeetStorageManager } from './parakeet-store.ts';
+import { flatSpeedPlanner, type SpeedPlanner } from './speed-planner.ts';
 
 /** Where the build put the speech worker and the ONNX Runtime binary (bound in `src/main.tsx`). */
 export interface ParakeetAssets {
@@ -80,8 +81,15 @@ export function readParakeetSupport(global: ParakeetGlobalLike, assets: Parakeet
   return readOnDeviceSupport(global, assets !== null, 'Parakeet');
 }
 
-/** The production service, bound to this page. */
-export function browserParakeetVoice(global: ParakeetGlobalLike, assets: ParakeetAssets | null): ParakeetVoice {
+/**
+ * The production service, bound to this page. `planner` decides how many threads the runtime is asked
+ * for (`speed-plan.ts`); without one it is a single thread.
+ */
+export function browserParakeetVoice(
+  global: ParakeetGlobalLike,
+  assets: ParakeetAssets | null,
+  planner: SpeedPlanner = flatSpeedPlanner(),
+): ParakeetVoice {
   const support = readParakeetSupport(global, assets);
   if (!support.available || assets === null)
     return new ParakeetVoice({ support, store: null, engine: null, host: null });
@@ -95,6 +103,11 @@ export function browserParakeetVoice(global: ParakeetGlobalLike, assets: Parakee
   // The worker script is the app's own, built beside it; Trusted Types accepts exactly that URL.
   const engine = new ParakeetEngine(
     () => new Worker(trustedWorkerUrl(assets.workerUrl), { type: 'module', name: 'fy-parakeet' }),
+    undefined,
+    {
+      threads: () => planner.threadsFor(PARAKEET_CATALOG_MODEL.id),
+      onThreadsFailed: () => planner.threadsFailed(PARAKEET_CATALOG_MODEL.id),
+    },
   );
   const host = browserSessionHost(global);
   return new ParakeetVoice({ support, store, engine, host });

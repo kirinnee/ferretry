@@ -20,7 +20,7 @@ import {
   renderConfigFile,
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
-import { FleetCloneBundleSchema } from '@ferretry/protocol';
+import { configSchemaModeline, FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
@@ -29,7 +29,7 @@ import { fleetSetupRoutes } from '../../../src/lib/runtime/mounts/fleet-setup.ts
 import { CREDENTIALS, GRANTED, human, NARROWED } from '../../unit/runtime/mounts/support.ts';
 import { request } from '../../unit/api/support.ts';
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
-import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
+import { cloneConfigFilesOver, fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
@@ -114,6 +114,7 @@ async function machine(
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({
       catalog: catalogDeps,
+      configFiles: cloneConfigFilesOver(home.service),
       daemonId: () => 'daemon-source',
       credentials: {
         material: async () => ({ outcome: 'missing' }),
@@ -121,7 +122,12 @@ async function machine(
       } as never,
       tools: { plans: () => [], install: async () => [] },
       secrets: {
-        list: async () => [...secrets.keys()].map(secret => ({ name: secret })),
+        list: async () =>
+          [...secrets.keys()].map(secret => ({
+            name: secret,
+            createdAt: '2026-11-01T00:00:00.000Z',
+            updatedAt: '2026-11-01T00:00:00.000Z',
+          })),
         put: async (secret, value) => {
           secrets.set(secret, value);
         },
@@ -1302,5 +1308,245 @@ describe('a repeat copy (update) over real files', () => {
     // Assert
     should(review.items).deepEqual([]);
     should(Object.keys((await declared(target)).profiles)).deepEqual(Object.keys(renamed.profiles));
+  });
+
+  // ── Settings merged key by key (smart re-copy, PR 7) ──
+
+  describe('the settings of a repeat copy', () => {
+    const WARDEN_MINE =
+      '# Mine: Jev stays off.\nenabled: true # keep on\nlayers:\n  jev: false # off on purpose\n  llm: false\nintervalMinutes: 5\n';
+    const WARDEN_THEIRS = WARDEN_MINE.replace('jev: false # off on purpose', 'jev: true').replace(
+      'intervalMinutes: 5',
+      'intervalMinutes: 10',
+    );
+    const allowed = (governed: boolean, refusals: Record<string, 'not-granted' | 'step-up-required'> = {}) =>
+      ({
+        governed,
+        decide: (demand: { capability: string }) => {
+          const refusal = refusals[demand.capability] ?? 'granted';
+          return { allowed: refusal === 'granted', refusal };
+        },
+      }) as never;
+
+    const writeOwn = async (on: Machine, file: string, text: string): Promise<void> => {
+      const written = await on.home.service.write(file, text, undefined, true, 'owner');
+      should(written.outcome).equal('applied');
+    };
+    const disk = async (on: Machine, file: string): Promise<string> =>
+      await readFile(path.join(on.home.paths.config, file), 'utf8');
+
+    /** Review, then stage and apply an update that carries these settings, for this caller. */
+    async function settingsUpdate(
+      target: Machine,
+      source: Machine,
+      settings: { path: string; text: string }[],
+      settingsDecisions: Record<string, Record<string, 'take' | 'keep'>> | undefined,
+      governance: unknown,
+    ) {
+      const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+      const review = await target.setup.reviewClone({ bundle, settings: settings as never }, governance as never);
+      const staged = await target.catalog.propose(
+        {
+          kind: 'clone.import',
+          mode: 'update',
+          bundle,
+          reviewed: review.fingerprint,
+          decisions: {},
+          settings,
+          ...(settingsDecisions === undefined ? {} : { settingsDecisions }),
+        } as never,
+        { governance, freshStepUp: false, agent: false, spend: () => undefined } as never,
+      );
+      return { review, outcome: await target.catalog.apply(staged.id, governance as never) };
+    }
+
+    async function pair() {
+      const source = await machine('studio', { claude: true });
+      await importHost(source);
+      const target = await machine('work-linux', { claude: false });
+      const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+      const staged = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle } as never);
+      await target.catalog.apply(staged.id, { governed: false } as never);
+      await writeOwn(target, 'warden.yaml', WARDEN_MINE);
+      return { source, target };
+    }
+
+    it('should hold a merge that loosens for a remote device, keep the tighter version in effect, and put it into effect once confirmed', async () => {
+      const { source, target } = await pair();
+      const { review, outcome } = await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: WARDEN_THEIRS }],
+        { 'warden.yaml': { 'layers.jev': 'take', intervalMinutes: 'take' } },
+        allowed(true),
+      );
+
+      should(review.settings[0]?.keys.find(key => key.key === 'layers.jev')?.loosens).equal(true);
+      should((outcome as { summary: string }).summary).containEql('held until you confirm');
+      // Written, and exactly this machine's file with the two values changed: its comments and key order
+      // survive. Every file Ferretry writes starts with its schema modeline, so the merge adds that one line.
+      should(await disk(target, 'warden.yaml')).equal(
+        `${configSchemaModeline({ kind: 'warden' })}\n\n${WARDEN_MINE.replace(
+          'jev: false # off on purpose',
+          'jev: true # off on purpose',
+        ).replace('intervalMinutes: 5', 'intervalMinutes: 10')}`,
+      );
+      // …but the tighter version is still in effect, and the loosening waits.
+      const snapshot = await target.home.service.load();
+      should(snapshot.evaluation.effective.warden.layers.jev).equal(false);
+      const [held] = snapshot.evaluation.pending;
+      should(held?.path).equal('warden.yaml');
+      should(await target.home.service.confirm('warden.yaml', held?.etag as string)).equal(true);
+      should((await target.home.service.load()).evaluation.effective.warden.layers.jev).equal(true);
+    });
+
+    it('should put the same merge into effect at once at the machine', async () => {
+      const { source, target } = await pair();
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: WARDEN_THEIRS }],
+        { 'warden.yaml': { 'layers.jev': 'take', intervalMinutes: 'take' } },
+        allowed(false),
+      );
+      const snapshot = await target.home.service.load();
+      should(snapshot.evaluation.effective.warden.layers.jev).equal(true);
+      should(snapshot.evaluation.pending).deepEqual([]);
+    });
+
+    it('should keep what is kept: a key the person keeps changes nothing and the file stays byte-identical', async () => {
+      const { source, target } = await pair();
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: WARDEN_THEIRS }],
+        { 'warden.yaml': { 'layers.jev': 'keep', intervalMinutes: 'keep' } },
+        allowed(true),
+      );
+      should(await disk(target, 'warden.yaml')).equal(WARDEN_MINE);
+    });
+
+    it('should refuse a file the caller may not write, writing no settings file at all', async () => {
+      const { source, target } = await pair();
+      await writeOwn(target, 'learning.yaml', 'enabled: true\n');
+      const governance = allowed(true, { warden: 'not-granted' });
+      const settings = [
+        { path: 'warden.yaml', text: WARDEN_THEIRS },
+        { path: 'learning.yaml', text: 'enabled: false\n' },
+      ];
+      const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+      const review = await target.setup.reviewClone({ bundle, settings: settings as never }, governance);
+      should(review.settings.find(entry => entry.path === 'warden.yaml')?.refused).containEql('warden.yaml');
+
+      await target.catalog
+        .propose(
+          {
+            kind: 'clone.import',
+            mode: 'update',
+            bundle,
+            reviewed: review.fingerprint,
+            decisions: {},
+            settings,
+            settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' }, 'learning.yaml': { enabled: 'take' } },
+          } as never,
+          { governance, freshStepUp: false, agent: false, spend: () => undefined } as never,
+        )
+        .then(
+          () => should.fail(undefined, undefined, 'expected the file to be refused'),
+          (error: Error) => should(error.message).containEql('may not change warden.yaml'),
+        );
+      should(await disk(target, 'warden.yaml')).equal(WARDEN_MINE);
+      should(await disk(target, 'learning.yaml')).equal('enabled: true\n');
+    });
+
+    it('should refuse an apply that leaves a key both sides changed undecided, writing nothing', async () => {
+      const { source, target } = await pair();
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: WARDEN_MINE }],
+        { 'warden.yaml': {} },
+        allowed(false),
+      );
+      await writeOwn(target, 'warden.yaml', WARDEN_MINE.replace('intervalMinutes: 5', 'intervalMinutes: 15'));
+      const before = await disk(target, 'warden.yaml');
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: WARDEN_THEIRS.replace('jev: true', 'jev: false') }],
+        undefined,
+        allowed(false),
+      ).then(
+        () => should.fail(undefined, undefined, 'expected the undecided key to be refused'),
+        (error: Error) => should(error.message).containEql('warden.yaml: intervalMinutes'),
+      );
+      should(await disk(target, 'warden.yaml')).equal(before);
+    });
+
+    it('should refuse a carried file that would not check on this machine, naming the problem and writing nothing', async () => {
+      const { source, target } = await pair();
+      const before = await disk(target, 'warden.yaml');
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'warden.yaml', text: `${WARDEN_THEIRS}investigation:\n  note: nothing\n` }],
+        { 'warden.yaml': { 'layers.jev': 'take', intervalMinutes: 'take', 'investigation.note': 'take' } },
+        allowed(false),
+      ).then(
+        () => should.fail(undefined, undefined, 'expected the unchecked file to be refused'),
+        (error: Error) => {
+          should(error.message).containEql('warden.yaml');
+          should(error.message).containEql('would not check');
+          should(error.message).containEql('Unrecognized key');
+        },
+      );
+      should(await disk(target, 'warden.yaml')).equal(before);
+    });
+
+    it('should take only the controls chosen, and nothing else of machine.yaml', async () => {
+      const { source, target } = await pair();
+      const before = (await target.home.service.load()).evaluation.effective.model.machine;
+      await settingsUpdate(
+        target,
+        source,
+        [{ path: 'controls', text: JSON.stringify({ agentControl: { files: false, browsers: false } }) }],
+        { controls: { 'agentControl.files': 'take', 'agentControl.browsers': 'keep' } },
+        allowed(false),
+      );
+      const after = (await target.home.service.load()).evaluation.effective.model.machine;
+      should(after.agentControl.files).equal(false);
+      should(after.agentControl.browsers).equal(before.agentControl.browsers);
+      should({ ...after, agentControl: { ...after.agentControl, files: before.agentControl.files } }).deepEqual(before);
+    });
+
+    it('should leave a signed-in login and its secrets byte-identical across a settings merge, taking and keeping (§14.4)', async () => {
+      for (const choice of ['take', 'keep'] as const) {
+        const { source, target } = await pair();
+        const store = path.join(target.fleet, 'credentials', 'claude-you');
+        await mkdir(store, { recursive: true });
+        await writeFile(path.join(store, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
+        target.secrets.set('GITHUB_TOKEN', FAKE_SECRET);
+        await writeOwn(target, 'voice.yaml', 'postProcessing:\n  provider: off\n');
+        const before = await signedInState(target);
+
+        await settingsUpdate(
+          target,
+          source,
+          [
+            { path: 'warden.yaml', text: `${WARDEN_THEIRS}guard:\n  model: \${secret:GITHUB_TOKEN}\n` },
+            { path: 'voice.yaml', text: 'postProcessing:\n  provider: groq\n' },
+            { path: 'controls', text: JSON.stringify({ agentControl: { files: false } }) },
+          ],
+          {
+            'warden.yaml': { 'layers.jev': choice, intervalMinutes: choice, 'guard.model': choice },
+            'voice.yaml': { 'postProcessing.provider': choice },
+            controls: { 'agentControl.files': choice },
+          },
+          allowed(false),
+        );
+
+        should(await signedInState(target)).deepEqual(before);
+      }
+    });
   });
 });

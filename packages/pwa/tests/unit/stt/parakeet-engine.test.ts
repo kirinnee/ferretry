@@ -338,3 +338,239 @@ describe('ParakeetEngine model load time', () => {
     should(engine.consumeLoadMs()).be.undefined();
   });
 });
+
+describe('ParakeetEngine — threads', () => {
+  const threaded = (threads: number): { engine: ParakeetEngine; workers: FakeWorker[]; failed: () => number } => {
+    const workers: FakeWorker[] = [];
+    let failed = 0;
+    const engine = new ParakeetEngine(
+      () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      undefined,
+      { threads: () => threads, onThreadsFailed: () => (failed += 1) },
+    );
+    return { engine, workers, failed: () => failed };
+  };
+
+  it('asks for no threads by default: the messages are exactly what they were', () => {
+    const { engine, workers } = setup();
+    engine.preload();
+    void engine.transcribe(new Float32Array(4));
+    should(workers[0]?.posts.map(post => post.message)).eql([
+      { type: 'load' },
+      { type: 'transcribe', id: 1, samples: new Float32Array(4) },
+    ]);
+  });
+
+  it('puts the requested threads on load and on transcribe', () => {
+    const { engine, workers } = threaded(4);
+    engine.preload();
+    void engine.transcribe(new Float32Array(4));
+    should(workers[0]?.posts.map(post => post.message.type === 'load' && post.message.threads)).eql([4, false]);
+    const transcribe = workers[0]?.posts[1]?.message;
+    should(transcribe?.type === 'transcribe' && transcribe.threads).equal(4);
+  });
+
+  it('treats a nonsense thread count as one', () => {
+    for (const bad of [0, -3, 1, 2.5, Number.NaN]) {
+      const { engine, workers } = threaded(bad);
+      engine.preload();
+      should(workers[0]?.posts[0]?.message).eql({ type: 'load' });
+    }
+  });
+
+  it('on threads-failed: tells the page once, replaces the worker, and repeats the waiting audio on one thread', async () => {
+    const { engine, workers, failed } = threaded(4);
+    engine.preload();
+    const outcome = settle(engine.transcribe(new Float32Array([0.1, 0.2, 0.3])));
+    const first = workers[0] as FakeWorker;
+    first.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'no sub-workers' });
+    should(failed()).equal(1);
+    should(first.terminated).equal(1);
+    should(workers.length).equal(2);
+    const second = workers[1] as FakeWorker;
+    should(second.posts[0]?.message).eql({ type: 'load' });
+    const repeat = second.posts[1]?.message;
+    should(repeat?.type).equal('transcribe');
+    should(repeat?.type === 'transcribe' && [...repeat.samples]).eql([
+      Math.fround(0.1),
+      Math.fround(0.2),
+      Math.fround(0.3),
+    ]);
+    should(repeat?.type === 'transcribe' && repeat.threads).equal(undefined);
+    second.emit({ type: 'result', id: idOf(second, 1), text: 'hi' });
+    await tick();
+    should(outcome.value).equal('hi');
+  });
+
+  it('asks for one thread from then on, and does not tell the page twice', () => {
+    const { engine, workers, failed } = threaded(4);
+    engine.preload();
+    workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+    workers[1]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+    should(failed()).equal(1);
+    void engine.transcribe(new Float32Array(4));
+    const next = workers[1]?.posts.at(-1)?.message;
+    should(next?.type === 'transcribe' && next.threads).equal(undefined);
+  });
+
+  it('keeps no copy of the audio for a single-thread request, and none after it is answered', async () => {
+    const { engine, workers } = threaded(4);
+    const outcome = settle(engine.transcribe(new Float32Array(4)));
+    workers[0]?.emit({ type: 'result', id: idOf(workers[0] as FakeWorker), text: 'ok' });
+    await tick();
+    should(outcome.value).equal('ok');
+    // A later failure has nothing stale to repeat.
+    workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+    should(workers[1]?.posts.length).equal(1);
+  });
+  describe('thread configuration is pinned per worker', () => {
+    const drifting = (initial: number) => {
+      const workers: FakeWorker[] = [];
+      const state = { threads: initial };
+      const engine = new ParakeetEngine(
+        () => {
+          const worker = new FakeWorker();
+          workers.push(worker);
+          return worker;
+        },
+        undefined,
+        { threads: () => state.threads },
+      );
+      return { engine, workers, state };
+    };
+
+    it('a worker preloaded on 4 keeps asking for 4 and keeps the audio, even when the planner now says 1', async () => {
+      const { engine, workers, state } = drifting(4);
+      engine.preload();
+      state.threads = 1; // another tab recorded a failure
+      const outcome = settle(engine.transcribe(new Float32Array([0.5, 0.25])));
+      const first = workers[0] as FakeWorker;
+      const sent = first.posts[1]?.message;
+      should(sent?.type === 'transcribe' && sent.threads).equal(4);
+      // The cached model ran threaded and failed: the request must be repeated on the replacement, not hang.
+      first.emit({ type: 'failed', id: idOf(first, 1), code: 'threads-failed', message: 'out of memory' });
+      const second = workers[1] as FakeWorker;
+      should(second.posts[0]?.message).eql({ type: 'load' });
+      const repeat = second.posts[1]?.message;
+      should(repeat?.type === 'transcribe' && [...repeat.samples]).eql([0.5, 0.25]);
+      second.emit({ type: 'result', id: idOf(second, 1), text: 'hi' });
+      await tick();
+      should(outcome.value).equal('hi');
+    });
+
+    it('a worker preloaded on 1 keeps asking for 1 when the planner now says 4, and keeps no copy', () => {
+      const { engine, workers, state } = drifting(1);
+      engine.preload();
+      state.threads = 4;
+      void engine.transcribe(new Float32Array(4));
+      const sent = workers[0]?.posts[1]?.message;
+      should(sent?.type === 'transcribe' && sent.threads).equal(undefined);
+    });
+
+    it('a fresh worker after unload takes the planner current answer', () => {
+      const { engine, workers, state } = drifting(1);
+      engine.preload();
+      engine.unload();
+      state.threads = 4;
+      engine.preload();
+      should(workers[1]?.posts[0]?.message).eql({ type: 'load', threads: 4 });
+    });
+
+    it('a fresh worker after a crash takes the planner current answer', () => {
+      const { engine, workers, state } = drifting(1);
+      engine.preload();
+      workers[0]?.crash();
+      state.threads = 4;
+      engine.preload();
+      should(workers[1]?.posts[0]?.message).eql({ type: 'load', threads: 4 });
+    });
+
+    it('a one-thread worker that reports threads-failed settles every waiting request instead of hanging', async () => {
+      const { engine, workers } = drifting(1);
+      const one = settle(engine.transcribe(new Float32Array(4)));
+      const two = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(one.error).be.instanceOf(ParakeetEngineError);
+      should(two.error).be.instanceOf(ParakeetEngineError);
+    });
+
+    it('a request waiting on the replacement when it also reports threads-failed is settled, not left hanging', async () => {
+      const { engine, workers } = drifting(4);
+      const outcome = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      workers[1]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(outcome.error).be.instanceOf(ParakeetEngineError);
+    });
+  });
+
+  describe('the one-thread replacement itself fails to start', () => {
+    /** Engine whose second worker (the replacement) is made by `makeSecond`. */
+    const failing = (makeSecond: () => FakeWorker) => {
+      const workers: FakeWorker[] = [];
+      let spawned = 0;
+      const engine = new ParakeetEngine(
+        () => {
+          spawned += 1;
+          const worker = spawned === 2 ? makeSecond() : new FakeWorker();
+          workers.push(worker);
+          return worker;
+        },
+        undefined,
+        { threads: () => 4 },
+      );
+      return { engine, workers };
+    };
+
+    it('a replacement that cannot be created settles every waiting request and leaves the engine reusable', async () => {
+      let spawned = 0;
+      const workers: FakeWorker[] = [];
+      const engine = new ParakeetEngine(
+        () => {
+          spawned += 1;
+          if (spawned === 2) throw new Error('QuotaExceededError');
+          const worker = new FakeWorker();
+          workers.push(worker);
+          return worker;
+        },
+        undefined,
+        { threads: () => 4 },
+      );
+      const one = settle(engine.transcribe(new Float32Array(4)));
+      const two = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(workers[0]?.terminated).equal(1);
+      should(one.error).be.instanceOf(ParakeetEngineError);
+      should(two.error).be.instanceOf(ParakeetEngineError);
+      // Nothing is stuck: a later request starts a fresh worker.
+      void engine.transcribe(new Float32Array(4));
+      should(workers).have.length(2);
+    });
+
+    it('a replacement that cannot be given the audio is terminated and every waiting request is settled', async () => {
+      class Refusing extends FakeWorker {
+        override postMessage(message: never, transfer?: Transferable[]): void {
+          if ((message as { type: string }).type === 'transcribe') throw new Error('DataCloneError');
+          super.postMessage(message, transfer);
+        }
+      }
+      const { engine, workers } = failing(() => new Refusing());
+      const one = settle(engine.transcribe(new Float32Array(4)));
+      const two = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(workers[1]?.terminated).equal(1);
+      should(one.error).be.instanceOf(ParakeetEngineError);
+      should(two.error).be.instanceOf(ParakeetEngineError);
+      // The dead replacement is forgotten: a later request starts another worker.
+      void engine.transcribe(new Float32Array(4));
+      should(workers).have.length(3);
+    });
+  });
+});

@@ -21,7 +21,10 @@
  * sources the one copied longest ago goes. A Replace rewrites the source's record from this copy alone.
  */
 import {
+  CLONE_SETTINGS_KEYS_LIMIT,
   type CloneDigestKind,
+  type CloneSettingsDoc,
+  CloneSettingsDocSchema,
   CloneableSecretNameSchema,
   cloneFileOwned,
   cloneItemDigest,
@@ -55,9 +58,6 @@ const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u, 'a sha256 digest');
  * (under {@link SELF_REPORTED_PREFIX}). `__proto__` is no id: a record keyed by it reads back as nothing.
  */
 export const CloneSourceIdSchema = NonEmptyStringSchema.max(200).refine(id => id !== '__proto__', 'not an id');
-
-/** What a settings document's per-key digests are filed under (filled by the per-key merge). */
-export const CloneSettingsDocSchema = z.enum(['warden.yaml', 'learning.yaml', 'voice.yaml', 'controls']);
 
 const CloneBaseKindSchema = z.enum([...COMPONENT_KINDS, 'profile', 'runtime', 'login']);
 export type CloneBaseKind = z.infer<typeof CloneBaseKindSchema>;
@@ -101,8 +101,18 @@ export const CloneBaseSourceSchema = z.strictObject({
   items: z
     .record(OriginKeySchema, CloneBaseItemSchema)
     .refine(items => Object.keys(items).length <= CLONE_BASE_ITEMS_LIMIT, 'too many items for one source'),
-  /** Per-key digests of each settings document at the last copy. Filled by the per-key merge. */
-  settings: z.partialRecord(CloneSettingsDocSchema, z.record(z.string().min(1), Sha256HexSchema)).optional(),
+  /**
+   * Per-key digests of each settings document at the last copy (design §5): a dotted key path to the sha256 of
+   * its value in the SOURCE's document. Digests only: a value, even a `${secret:NAME}` reference, is never kept.
+   */
+  settings: z
+    .partialRecord(
+      CloneSettingsDocSchema,
+      z
+        .record(z.string().min(1), Sha256HexSchema)
+        .refine(keys => Object.keys(keys).length <= CLONE_SETTINGS_KEYS_LIMIT, 'too many settings keys'),
+    )
+    .optional(),
   /** `updatedAt` of each API key at the last copy, both sides. Timestamps only: never a value, never a digest of one. */
   keys: z
     .record(
@@ -400,6 +410,11 @@ export interface CloneBaseUpdate {
   readonly model: AccountModel;
   /** Items the source dropped that the person chose to keep: not offered for removal again. */
   readonly settled?: ReadonlySet<OriginKey>;
+  /**
+   * The source's settings documents as they stand after this copy (B := theirs): each document named here
+   * replaces the record's digests for it; one not named is left as it was.
+   */
+  readonly settings?: Readonly<Partial<Record<CloneSettingsDoc, Readonly<Record<string, string>>>>>;
 }
 
 /** What an item says of where it was copied from. */
@@ -474,6 +489,10 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
     if (item !== undefined && !update.sourceKeys.has(key)) kept[key] = { ...item, settled: true };
   }
 
+  // The source's settings, as it holds them now: the documents this copy decided replace the record's, the rest stay.
+  const settings = { ...before?.settings, ...update.settings };
+  const hasSettings = Object.values(settings).some(keys => Object.keys(keys).length > 0);
+
   // A Replace can leave another source with nothing here to link to; that source goes too.
   const sources = plain<CloneBaseSource>();
   for (const [id, source] of Object.entries(previous.sources)) {
@@ -483,10 +502,14 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
       verified: source.verified,
       ...(source.machine === undefined ? {} : { machine: source.machine }),
     });
-    if (Object.entries(source.items).some(([key, item]) => its.has(key) || viaLogin(item))) sources[id] = source;
+    if (
+      Object.entries(source.items).some(([key, item]) => its.has(key) || viaLogin(item)) ||
+      Object.values(source.settings ?? {}).some(keys => Object.keys(keys).length > 0)
+    )
+      sources[id] = source;
   }
   if (
-    Object.entries(kept).some(([key, item]) => linked(key, item)) &&
+    (Object.entries(kept).some(([key, item]) => linked(key, item)) || hasSettings) &&
     Object.keys(kept).length <= CLONE_BASE_ITEMS_LIMIT
   ) {
     sources[update.source.id] = {
@@ -495,7 +518,7 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
       ...(update.source.machine === undefined ? {} : { machine: update.source.machine }),
       lastCopiedAt: update.at,
       items: { ...kept },
-      ...(before?.settings === undefined ? {} : { settings: before.settings }),
+      ...(hasSettings ? { settings } : {}),
       ...(before?.keys === undefined ? {} : { keys: before.keys }),
     };
   }

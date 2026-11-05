@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ferretry speech speed benchmark</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        margin: 1rem auto;
+        max-width: 46rem;
+        padding: 0 1rem;
+        color: #1b1b1b;
+        background: #fff;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          color: #eee;
+          background: #161616;
+        }
+        pre {
+          background: #222;
+        }
+      }
+      button {
+        font: inherit;
+        min-height: 48px;
+        padding: 0 1.25rem;
+        margin: 0.25rem 0.5rem 0.25rem 0;
+      }
+      pre {
+        background: #f3f3f3;
+        padding: 0.75rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      label {
+        display: block;
+        margin: 0.4rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Speech speed benchmark</h1>
+    <p>
+      Times the on-device speech engines on THIS device with one fixed synthetic-voice clip (5 s). It prints timings
+      only — no audio is recorded and no words are shown. Models that are not installed are downloaded when you press
+      the button (up to ~0.9 GB).
+    </p>
+    <p id="state" role="status" aria-live="polite">Ready.</p>
+    <label><input type="checkbox" id="install" checked /> Download models that are not installed yet</label>
+    <label
+      ><input type="checkbox" id="threads" checked /> Also try multi-thread WebAssembly (needs an isolated page)</label
+    >
+    <p>
+      <button id="run" type="button">Run the benchmark</button>
+      <button id="copy" type="button" disabled>Copy the JSON</button>
+    </p>
+    <pre id="log" aria-label="Progress"></pre>
+    <pre id="result" aria-label="Result"></pre>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

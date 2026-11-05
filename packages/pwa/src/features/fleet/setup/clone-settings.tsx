@@ -11,6 +11,9 @@
 import { Check, KeyRound, Lock } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Badge, Button } from '../../../shell/primitives.tsx';
+import { LoosensBadge } from './clone-loosens-badge.tsx';
+import { browserClipboardWriter, type ClipboardWriter } from '../../onboarding/copy-button.tsx';
+import { ReplaceKeyCommand } from '../../secrets/replace-key-command.tsx';
 import { CLONE_KEEP_DEFAULT, CLONE_NO_DEFAULT, type CloneDefaultView } from './clone-model.ts';
 import {
   CLONE_ITEMS,
@@ -19,6 +22,7 @@ import {
   type CloneLogin,
   type CloneNeed,
   type CloneOutcomeItem,
+  type NewerKey,
   needsSentence,
   outcomeSentence,
 } from './clone-settings-model.ts';
@@ -84,6 +88,38 @@ export function CloneItemsChoices({
   );
 }
 
+/**
+ * One API key the source changed since the last copy: "A newer X exists on <source>". A REPORT, nothing to tick:
+ * Clone never writes a key this machine already holds, so it says how to replace it by hand instead, and says so
+ * plainly when this machine changed the key too.
+ */
+function NewerKeyRow({
+  keyName,
+  both,
+  machineName,
+  sourceName,
+  write,
+}: {
+  readonly keyName: string;
+  readonly both: boolean;
+  readonly machineName: string;
+  readonly sourceName: string;
+  readonly write: ClipboardWriter;
+}) {
+  return (
+    <div className="kt-panel relative flex min-h-control min-w-0 flex-col gap-1 p-panel" data-clone-newer-key={keyName}>
+      <span className="text-row font-semibold text-fg">
+        A newer <span className="font-mono">{keyName}</span> exists on {sourceName}
+      </span>
+      <span className="text-cell text-muted">
+        {both ? `You changed it on ${machineName} too. ` : ''}
+        Clone does not replace a key {machineName} already has. To use the newer one, run this on {machineName}:
+      </span>
+      <ReplaceKeyCommand name={keyName} write={write} />
+    </div>
+  );
+}
+
 /** The row's verdict in words, above its reason: the status mark alone is only spoken. */
 function LoginDetail({ word, tone, text }: { readonly word: string; readonly tone: string; readonly text: string }) {
   return (
@@ -106,6 +142,8 @@ export function CloneLoginsSection({
   keys,
   copyKeys,
   onCopyKeys,
+  newer = [],
+  write = browserClipboardWriter(),
 }: {
   readonly logins: readonly CloneLogin[];
   readonly machineName: string;
@@ -114,9 +152,13 @@ export function CloneLoginsSection({
   readonly keys: readonly string[];
   readonly copyKeys: boolean;
   readonly onCopyKeys: (on: boolean) => void;
+  /** Keys the source changed since the last copy, each reported on its own; Clone never copies one over the one here. */
+  readonly newer?: readonly NewerKey[];
+  /** Writes the `fy secret set` command to the clipboard; the browser's own unless a host or a test brings one. */
+  readonly write?: ClipboardWriter;
 }) {
   const boxId = useId();
-  if (logins.length === 0 && keys.length === 0) return null;
+  if (logins.length === 0 && keys.length === 0 && newer.length === 0) return null;
   const sending = copyKeys && keys.length > 0;
   return (
     <SetupSection title="Logins and keys" name="clone-logins">
@@ -165,6 +207,16 @@ export function CloneLoginsSection({
           />
         ),
       )}
+      {newer.map(key => (
+        <NewerKeyRow
+          key={key.name}
+          keyName={key.name}
+          both={key.outcome === 'both'}
+          machineName={machineName}
+          sourceName={sourceName}
+          write={write}
+        />
+      ))}
       {keys.length === 0 ? null : (
         <label
           htmlFor={boxId}
@@ -336,9 +388,12 @@ export function CloneNeedsList({
 /** How each chosen item ended, with Confirm on the ones that wait for the owner. */
 export function CloneOutcomes({
   outcomes,
+  machineName,
   onConfirm,
 }: {
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
+  /** This machine, as the person names it: the held badge says whose spending or authority it loosens. */
+  readonly machineName: string;
   /** Confirm one held file: the passkey is asked by the carrier when the daemon wants it. */
   readonly onConfirm: (path: string, etag: string) => Promise<string | null>;
 }) {
@@ -352,35 +407,47 @@ export function CloneOutcomes({
           <SetupNote
             key={item.id}
             name={`clone-outcome-${item.id}`}
-            tone={outcome.kind === 'refused' ? 'err' : outcome.kind === 'pending' && !done ? 'warn' : 'ok'}
+            tone={
+              outcome.kind === 'refused'
+                ? 'err'
+                : (outcome.kind === 'pending' && !done) || outcome.kind === 'unchecked'
+                  ? 'warn'
+                  : 'ok'
+            }
           >
             <span data-clone-outcome={item.id} data-outcome={done ? 'copied' : outcome.kind}>
               {done ? outcomeSentence(item, { kind: 'copied' }) : outcomeSentence(item, outcome)}
             </span>
             {outcome.kind === 'pending' && !done ? (
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="primary"
-                  data-clone-confirm={outcome.path}
-                  onClick={() =>
-                    void onConfirm(outcome.path, outcome.etag).then(failure => {
-                      if (failure === null) setConfirmed(current => new Set(current).add(outcome.path));
-                      else setProblems(current => ({ ...current, [outcome.path]: failure }));
-                    })
-                  }
-                >
-                  Confirm
-                </Button>
-                {problems[outcome.path] === undefined ? (
-                  <span className="text-meta text-muted">Or run fy config confirm on the machine.</span>
-                ) : (
-                  <span role="alert" className="text-meta text-err">
-                    {problems[outcome.path]}
-                  </span>
-                )}
-              </div>
+              <>
+                <span className="mt-1">
+                  <LoosensBadge machineName={machineName} data-clone-outcome-loosens="" />
+                </span>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="primary"
+                    className="min-h-[44px] min-w-[96px]"
+                    data-clone-confirm={outcome.path}
+                    onClick={() =>
+                      void onConfirm(outcome.path, outcome.etag).then(failure => {
+                        if (failure === null) setConfirmed(current => new Set(current).add(outcome.path));
+                        else setProblems(current => ({ ...current, [outcome.path]: failure }));
+                      })
+                    }
+                  >
+                    Confirm
+                  </Button>
+                  {problems[outcome.path] === undefined ? (
+                    <span className="text-meta text-muted">Or run fy config confirm on the machine.</span>
+                  ) : (
+                    <span role="alert" className="text-meta text-err">
+                      {problems[outcome.path]}
+                    </span>
+                  )}
+                </div>
+              </>
             ) : null}
           </SetupNote>
         );

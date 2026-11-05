@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ConfigFileView, FleetMachineView, SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import type { FleetClient, FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
 import {
@@ -92,6 +93,10 @@ const daemon = (routes: Routes, calls: Call[] = []): FleetClient => ({
     const call: Call = { path, method, body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined };
     calls.push(call);
     const key = `${method} ${path}` in routes ? `${method} ${path}` : path;
+    // A machine with no review route: the one thing that lets a clone copy its settings whole.
+    if (!(key in routes) && path === '/v1/fleet/clone/review') {
+      throw new FyHttpError(`no route ${method} ${path}`, 404, 'unknown_route');
+    }
     if (!(key in routes)) throw new Error(`no route ${method} ${path}`);
     const answer = routes[key];
     const value = typeof answer === 'function' ? (answer as (call: Call) => unknown)(call) : answer;

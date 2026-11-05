@@ -24,6 +24,7 @@
 
 import type { SessionTimings } from './dictation-timeline.ts';
 import type { CaptureMonitor } from './level-monitor.ts';
+import type { TentativeTake } from './tentative-take.ts';
 
 type BrowserRecognitionImplementation = 'standard' | 'webkit';
 type BrowserRecognitionAvailability = 'available' | 'insecure-context' | 'ios-home-screen' | 'unsupported';
@@ -320,6 +321,13 @@ export interface BrowserRecognitionSessionLike {
   cancel(): void;
   /** What this session measured about its own last `finish`. Optional: a session that measures nothing omits it. */
   timings?(): SessionTimings | undefined;
+  /**
+   * EARLY FINISH (`tentative-take.ts`): start working out the words so far while the pause that ends the
+   * take is still being confirmed. Optional: only the whole-take on-device engines offer it, and it
+   * answers `null` when it cannot (not recording, or nothing to gain). The caller then `discard()`s it
+   * if speech resumes, or calls `finish()`, which reuses the work when only quiet followed.
+   */
+  beginFinish?(): TentativeTake | null;
 }
 
 type SessionState = 'active' | 'finishing' | 'finished' | 'failed' | 'cancelled';
