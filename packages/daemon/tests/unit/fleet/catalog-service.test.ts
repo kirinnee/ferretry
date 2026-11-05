@@ -875,6 +875,109 @@ describe('installing from a catalog', () => {
   });
 });
 
+describe('an installer’s check of the component a change acts on', () => {
+  const MCP_INSTALL: FleetCatalogInstallChange = {
+    kind: 'catalog.install',
+    name: 'notes',
+    component: { kind: 'mcp', command: 'notes-server-2' },
+    files: [],
+    profile: 'default',
+    installedFrom: {
+      publisher: `fy_daemon_${'A'.repeat(43)}`,
+      publisherName: 'kirin-box',
+      catalogId: `cat_${'c'.repeat(22)}`,
+      catalogName: 'catalog',
+      itemId: `itm_${'s'.repeat(22)}`,
+      kind: 'mcp',
+      name: 'notes',
+      version: 1,
+      digest: `sha256:${'a'.repeat(64)}`,
+    },
+    replace: false,
+  };
+  const REMOVE_NOTES = {
+    kind: 'component.remove',
+    componentKind: 'mcp',
+    name: 'notes',
+    removeFromProfiles: true,
+  } as const;
+
+  it('should hand an install the component of the very reading it stages from, and refuse when it throws', async () => {
+    const { service, applied } = world();
+    const seen: unknown[] = [];
+
+    const fresh = { ...MCP_INSTALL, name: 'fresh-mcp' };
+    await service.installCatalogItem(fresh, governance, stored => {
+      seen.push(stored);
+    });
+    const refused = new Error('moved');
+    const error = await service
+      .installCatalogItem(fresh, governance, () => {
+        throw refused;
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+
+    should(seen).deepEqual([undefined]);
+    should(error).equal(refused);
+    should(applied).have.length(1);
+  });
+
+  it('should hand a skills install the skills component, or nothing for a new name', async () => {
+    const { service } = world();
+    const seen: unknown[] = [];
+
+    await service.installCatalogItem(
+      { ...MCP_INSTALL, name: 'fresh', component: { kind: 'skills', items: ['fresh'] } },
+      governance,
+      stored => {
+        seen.push(stored);
+      },
+    );
+
+    should(seen).deepEqual([undefined]);
+  });
+
+  it('should hand a removal the component of the reading it stages from, and stage nothing when it throws', async () => {
+    const { service } = world();
+    const seen: unknown[] = [];
+
+    await service.propose(REMOVE_NOTES, stored => {
+      seen.push(stored);
+    });
+    const refused = new Error('moved');
+    const error = await service
+      .propose(REMOVE_NOTES, async () => {
+        throw refused;
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+
+    should(seen).deepEqual([await service.storedComponent('mcp', 'notes')]);
+    should(error).equal(refused);
+  });
+
+  it('should not run the check for a change that is no removal of an mcp or skills component', async () => {
+    const { service } = world();
+    let calls = 0;
+    const count = (): void => {
+      calls += 1;
+    };
+
+    await service.propose({ kind: 'credential.signout', id: 'codex-slot' }, count);
+    await service.propose(
+      { kind: 'component.remove', componentKind: 'instructions', name: 'main', removeFromProfiles: true },
+      count,
+    );
+
+    should(calls).equal(0);
+  });
+});
+
 describe('signing a login out', () => {
   it("should stage it with the credentials surface's own sentence and run U13's executor on apply", async () => {
     // Arrange

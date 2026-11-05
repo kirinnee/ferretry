@@ -118,23 +118,38 @@ class MemoryPrefs implements CatalogInstallPrefsStore {
   }
 }
 
-class FakeMcpFiles implements McpProjectFiles {
+export class FakeMcpFiles implements McpProjectFiles {
   text: string | null = null;
   version = 0;
   failRead: Error | undefined;
   racing = false;
+  failReplace: Error | undefined;
   reads = 0;
   /** Runs at the start of each read, with how many there have been: a file that moves between two reads. */
   onRead: ((reads: number) => void) | undefined;
+  /** Runs right AFTER a read has been answered: an edit that lands between that read and the write. */
+  afterRead: ((reads: number) => void) | undefined;
+  /** The etag each replace was given, so a test can see what the installer carried from its read. */
+  readonly replaced: { readonly expected: string | null }[] = [];
   async read(): Promise<McpProjectFileReading> {
     this.reads += 1;
     this.onRead?.(this.reads);
     if (this.failRead !== undefined) throw this.failRead;
-    return { text: this.text, etag: this.text === null ? null : `e${this.version}` };
+    const reading = { text: this.text, etag: this.text === null ? null : `e${this.version}` };
+    this.afterRead?.(this.reads);
+    return reading;
+  }
+
+  /** Someone else saves the file: its text and its version both move. */
+  editElsewhere(text: string): void {
+    this.text = text;
+    this.version += 1;
   }
 
   async replace(_path: string, text: string, expected: string | null): Promise<string> {
+    this.replaced.push({ expected });
     const current = this.text === null ? null : `e${this.version}`;
+    if (this.failReplace !== undefined) throw this.failReplace;
     if (this.racing || expected !== current) throw new McpProjectFileChanged();
     this.text = text;
     this.version += 1;
@@ -241,8 +256,16 @@ export class FakeFleet {
     ['skills', []],
   ]);
   failApply: Error | undefined;
+  /** Runs after each `storedComponent` read: a configuration edit that lands once the installer has looked. */
+  afterStoredComponent: (() => void) | undefined;
+  /** The stored component each staging read handed the installer's `verify`, newest last. */
+  readonly verified: unknown[] = [];
 
   constructor(private readonly assets: FakeFolders) {}
+
+  private current(kind: 'mcp' | 'skills', name: string): unknown {
+    return asStored(this.components.get(kind)?.find(component => component.name === name));
+  }
 
   readonly api: CatalogInstallServiceDeps['fleet'] = {
     runtimes: async () =>
@@ -259,13 +282,24 @@ export class FakeFleet {
         format: 'version-2',
         profiles: [{ name: 'work' }, { name: 'play' }],
       }) as unknown as FleetLayeredProfileCatalog,
-    storedComponent: async (kind, name) =>
-      asStored(this.components.get(kind)?.find(component => component.name === name)),
-    propose: async change => {
+    storedComponent: async (kind, name) => {
+      const stored = this.current(kind, name);
+      this.afterStoredComponent?.();
+      return stored;
+    },
+    propose: async (change, verify) => {
+      if (change.kind === 'component.remove') {
+        const stored = this.current(change.componentKind as 'mcp' | 'skills', change.name);
+        this.verified.push(stored);
+        await verify?.(stored);
+      }
       this.proposed.push(change);
       return { id: `change-${this.proposed.length}` } as FleetAccountChangeView;
     },
-    installCatalogItem: async change => {
+    installCatalogItem: async (change, _governance, verify) => {
+      const before = this.current(change.component.kind === 'mcp' ? 'mcp' : 'skills', change.name);
+      this.verified.push(before);
+      await verify?.(before);
       this.proposed.push(change);
       this.applied.push(`change-${this.proposed.length}`);
       if (this.failApply !== undefined) throw this.failApply;

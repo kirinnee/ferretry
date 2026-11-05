@@ -20,6 +20,7 @@ const ASSIGNED_NAME = /^-{0,2}[A-Za-z_][A-Za-z0-9_.-]{0,127}$/u;
 const MIN_VALUE_LENGTH = 16;
 const ADDRESS_STOPS = new Set(['/', '?', '#', '"', "'", '<', '>', '`']);
 const SCHEMES = new Set(['bearer', 'basic', 'token', 'digest']);
+const LONGEST_SCHEME = Math.max(...[...SCHEMES].map(scheme => scheme.length));
 const LINE_END = /\r\n|[\r\n]/u;
 const WORD = /\S+/gu;
 const VALUE_START = new Set(['"', "'", '`']);
@@ -29,8 +30,13 @@ const NAME_END = new Set(['"', "'", '`']);
 const TOKEN_SPLIT = /[=:"'`,;(){}[\]<>@/&?.]/u;
 const PEM_HEADER = /-----BEGIN (?:[A-Z0-9]{1,16} ){0,4}PRIVATE KEY(?: BLOCK)?-----/iu;
 
+/** `%NAME%`, whole: a percent sign that starts a URL escape (`%64…`) or a password is not a reference to anything. */
+const WHOLE_PERCENT_REFERENCE = /^%[A-Za-z_][A-Za-z0-9_]{0,127}%$/u;
+/** The longest reference {@link WHOLE_PERCENT_REFERENCE} accepts, so a caller can look at no more than that. */
+const REFERENCE_LENGTH = 130;
+
 /** A value that points at a secret rather than holding one: `$VAR`, `${VAR}`, `<your key>`, `%VAR%`, `[…]`. */
-const isReference = (value: string): boolean => /^[$<{[%]/u.test(value);
+const isReference = (value: string): boolean => /^[$<{[]/u.test(value) || WHOLE_PERCENT_REFERENCE.test(value);
 
 const isSpace = (character: string): boolean => character.trim() === '';
 
@@ -183,14 +189,34 @@ function earliest(offsets: readonly number[]): number {
   return found.length === 0 ? -1 : Math.min(...found);
 }
 
+/** A word and where it starts in the text. */
+interface Word {
+  readonly text: string;
+  readonly at: number;
+}
+
+const FLAG_VALUE = /^--?[A-Za-z][A-Za-z0-9-]*=(?=.)/u;
+
+/** `--header={"k":"v"}` is two words to read, the flag and what it is given, so the value is read as a word of its own. */
+function splitAtFlagValue(match: RegExpMatchArray): Word[] {
+  const text = match[0];
+  const at = match.index ?? 0;
+  const flag = FLAG_VALUE.exec(text);
+  if (flag === null) return [{ text, at }];
+  return [
+    { text: flag[0], at },
+    { text: text.slice(flag[0].length), at: at + flag[0].length },
+  ];
+}
+
 /** Where in `text` the first credential starts, or -1. */
 function credentialOffset(text: string, lineStarts: ReadonlySet<number> = new Set()): number {
-  const found = [...text.matchAll(WORD)];
-  const words = found.map(match => match[0]);
+  const found = [...text.matchAll(WORD)].flatMap(splitAtFlagValue);
+  const words = found.map(match => match.text);
   const curlAt = words.findIndex(word => bare(word).toLowerCase().endsWith('curl'));
   let hit = -1;
   for (let index = 0; index < words.length && hit === -1; index += 1) {
-    hit = wordCredential(words, index, curlAt, found[index]?.index ?? 0, lineStarts);
+    hit = wordCredential(words, index, curlAt, found[index]?.at ?? 0, lineStarts);
   }
   return earliest([hit, addressWithPassword(text), text.search(PEM_HEADER)]);
 }
@@ -240,4 +266,212 @@ export function firstCredentialLine(text: string): number | undefined {
   const starts = startsOf(lines);
   const glued = credentialOffset(lines.join(''), new Set(starts));
   return glued === -1 ? undefined : lineHolding(starts, glued);
+}
+
+const HEADER_NAME = 'authorization';
+
+const AUTHORIZATION = /authorization/giu;
+
+/** Where each word (a run with no space) ends, from every offset: `ends[i]` is the first space at or after `i`. */
+function wordEnds(text: string): Int32Array {
+  const ends = new Int32Array(text.length + 1);
+  ends[text.length] = text.length;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    ends[index] = isSpace(text.charAt(index)) ? index : (ends[index + 1] ?? text.length);
+  }
+  return ends;
+}
+
+/** Where a word ending at `end` stops once its trailing value-end marks are trimmed: `kept[end]`, never before the word's start. */
+function trimmedEnds(text: string): Int32Array {
+  const kept = new Int32Array(text.length + 1);
+  for (let index = 1; index <= text.length; index += 1) {
+    kept[index] = VALUE_END.has(text.charAt(index - 1)) ? (kept[index - 1] ?? 0) : index;
+  }
+  return kept;
+}
+
+/**
+ * Whether `part` gives an HTTP authorization header (or `--authorization=`) a value that is not a reference. The
+ * scheme word (`Bearer`, `Basic`…) is skipped, and what follows it is judged like any value. One pass over the
+ * text with offsets and no slicing of the tail, so a part made of nothing but `authorization:` stays linear.
+ */
+function givesAuthorization(part: string): boolean {
+  const folded = foldedForScan(part);
+  const ends = wordEnds(folded);
+  const kept = trimmedEnds(folded);
+  const size = folded.length;
+  const skipSpaces = (from: number): number => {
+    let at = from;
+    while (at < size && isSpace(folded.charAt(at))) at += 1;
+    return at;
+  };
+  const skipQuotes = (from: number): number => {
+    let at = from;
+    while (at < size && (VALUE_START.has(folded.charAt(at)) || folded.charAt(at) === '\\')) at += 1;
+    return at;
+  };
+  for (const found of folded.matchAll(AUTHORIZATION)) {
+    // A quoted name (`{"Authorization":"Basic …"}`, or the same escaped inside a string) closes its quote before the `:`.
+    const separator = skipSpaces(skipQuotes(found.index + HEADER_NAME.length));
+    if (folded.charAt(separator) !== ':' && folded.charAt(separator) !== '=') continue;
+    let at = skipSpaces(separator + 1);
+    let afterScheme = false;
+    while (at < size) {
+      const wordEnd = ends[at] ?? size;
+      let from = at;
+      while (from < wordEnd && (VALUE_START.has(folded.charAt(from)) || folded.charAt(from) === '\\')) from += 1;
+      const to = Math.max(kept[wordEnd] ?? 0, from);
+      at = skipSpaces(wordEnd);
+      if (to === from) continue;
+      if (!afterScheme && to - from <= LONGEST_SCHEME && SCHEMES.has(folded.slice(from, to).toLowerCase())) {
+        afterScheme = true;
+        continue;
+      }
+      if (!isReference(folded.slice(from, Math.min(to, from + REFERENCE_LENGTH + 1)))) return true;
+      break;
+    }
+  }
+  return false;
+}
+
+/** `--user=name:pass` or `-uname:pass`: the flag and its login in one piece, which `curlUser` (two words) does not see. */
+function attachedCurlUser(piece: string): boolean {
+  const folded = foldedForScan(piece);
+  const login = folded.startsWith('--user=') ? folded.slice(7) : /^-u[^-]/u.test(folded) ? folded.slice(2) : '';
+  const password = login.slice(login.indexOf(':') + 1);
+  return login.includes(':') && password !== '' && !isReference(bare(password));
+}
+
+/** The most layers of encoding read through (a string inside a string, `\\"` inside `\"`): enough for a doubly escaped argument, bounded for a hostile one. */
+const MAX_VIEW_LAYERS = 4;
+/** The longest argument decoded: the contract holds far less, and a longer one is read as written, never parsed. */
+const MAX_DECODED_CHARS = 8192;
+const UNICODE_ESCAPE = /\\u([0-9A-Fa-f]{4})/gu;
+const QUOTE_ESCAPE = /\\(["'\\])/gu;
+
+/** The most name/value lines read out of one JSON text, and the deepest nesting followed: a hostile document is cut off, never walked to its end. */
+const MAX_JSON_LINES = 256;
+const MAX_JSON_DEPTH = 8;
+
+const tryParse = (candidate: string): unknown => {
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Every property of a parsed JSON value as a line of its own, `name: value`, names as decoded (a `\\u004b` is a K).
+ * A compact object is one whitespace word, which the scanners read only to its first name, so each property is
+ * set apart here, nested ones too, and a string value that is itself JSON is read the same way. Bounded in lines
+ * and depth, and total.
+ */
+function jsonLines(value: unknown, name: string, depth: number, lines: string[]): void {
+  if (lines.length >= MAX_JSON_LINES) return;
+  if (Array.isArray(value)) {
+    if (depth < MAX_JSON_DEPTH) for (const item of value) jsonLines(item, name, depth + 1, lines);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    if (depth < MAX_JSON_DEPTH)
+      for (const [key, inner] of Object.entries(value)) jsonLines(inner, key, depth + 1, lines);
+    return;
+  }
+  if (typeof value !== 'string') {
+    lines.push(`${name}: ${String(value)}`);
+    return;
+  }
+  lines.push(`${name}: ${value}`);
+  const trimmedValue = value.trim();
+  if (
+    depth < MAX_JSON_DEPTH &&
+    (trimmedValue.startsWith('{') || trimmedValue.startsWith('[') || trimmedValue.startsWith('"'))
+  )
+    jsonLines(tryParse(trimmedValue), name, depth + 1, lines);
+}
+
+/** The JSON a text IS, or that sits inside it (`--headers={…}`), as one `name: value` line per property; undefined when there is none. Never throws. */
+function plainJson(text: string): string | undefined {
+  const lines = (value: unknown): string => {
+    const found: string[] = [];
+    jsonLines(value, '', 0, found);
+    return found.join('\n');
+  };
+  const whole = tryParse(text);
+  if (typeof whole === 'string') return whole;
+  if (whole !== null && typeof whole === 'object') return lines(whole);
+  const open = text.search(/[{[]/u);
+  const close = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+  if (open === -1 || close <= open) return undefined;
+  const inner = tryParse(text.slice(open, close + 1));
+  if (inner === null || typeof inner !== 'object') return undefined;
+  return `${text.slice(0, open)}\n${lines(inner)}\n${text.slice(close + 1)}`;
+}
+
+/** One layer of encoding off `text`: JSON read as JSON, else `\uXXXX` made real and an escaped quote or backslash made plain, else percent-decoded. */
+function oneLayerOff(text: string): string {
+  const json = plainJson(text);
+  if (json !== undefined) return json;
+  const unescaped = text
+    .replace(UNICODE_ESCAPE, (_all, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(QUOTE_ESCAPE, '$1');
+  if (unescaped !== text) return unescaped;
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Every form of an argument a program could read it as: as written, then with one layer of encoding off, up to
+ * {@link MAX_VIEW_LAYERS} times (JSON decoded so `\uXXXX` names are real characters, escaped quotes made plain). The
+ * scanners run on each, so a credential that only shows once the quoting is gone is still found. Bounded (a long
+ * argument is read as written) and total (never throws).
+ */
+export function readableViews(piece: string): readonly string[] {
+  const views = [piece];
+  let current = piece;
+  for (let layer = 0; layer < MAX_VIEW_LAYERS && current.length <= MAX_DECODED_CHARS; layer += 1) {
+    const next = oneLayerOff(current);
+    if (next === current) break;
+    views.push(next);
+    current = next;
+  }
+  return views;
+}
+
+/**
+ * The 1-based place, among the pieces of a command line read as written, of the first one that holds a password or
+ * key: any of the shapes above read across pieces (`curl`, `--user`, `name:pass` in three arguments), or an
+ * `Authorization` header given any value. The pieces are read one to a line, so the place is never a guess.
+ */
+function firstCredentialIn(pieces: readonly string[]): number | undefined {
+  const single = pieces.map(piece => foldedForScan(piece).replace(/\r\n|[\r\n]/gu, ' '));
+  const curlAt = single.findIndex(piece => bare(piece).toLowerCase().endsWith('curl'));
+  const header = single.findIndex(
+    (piece, index) => givesAuthorization(piece) || (curlAt !== -1 && curlAt < index && attachedCurlUser(piece)),
+  );
+  const line = firstCredentialLine(single.join('\n'));
+  if (header === -1) return line;
+  return line === undefined ? header + 1 : Math.min(line, header + 1);
+}
+
+/**
+ * The 1-based place, among the pieces of a command line, of the first one that holds a password or key, or undefined.
+ * Every piece is read as written AND with its quoting taken off ({@link readableViews}), layer by layer, so a name
+ * or a value hidden behind escaped quotes, a JSON string or `\uXXXX` escapes is found like a plain one; the
+ * `${secret:NAME}` references stay exempt in every view.
+ */
+export function firstArgumentCredential(pieces: readonly string[]): number | undefined {
+  const views = pieces.map(readableViews);
+  const layers = Math.max(1, ...views.map(forms => forms.length));
+  const places: number[] = [];
+  for (let layer = 0; layer < layers; layer += 1) {
+    const place = firstCredentialIn(views.map(forms => forms[layer] ?? forms.at(-1) ?? ''));
+    if (place !== undefined) places.push(place);
+  }
+  return places.length === 0 ? undefined : Math.min(...places);
 }

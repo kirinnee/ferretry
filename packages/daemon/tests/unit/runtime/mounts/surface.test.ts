@@ -595,6 +595,20 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  localMcpInstalls: {
+    list: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    preview: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    apply: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    remove: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionMcp: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -1028,6 +1042,7 @@ describe('the mounted daemon surface', () => {
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       9 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, a remove per scope, and stay or skip per scope (docs/catalogs.md)
       7 + // copying a skill from this machine into a project or runtime: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
+      7 + // copying an MCP server from this machine into a project or runtime: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       19 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, the preview and publish of an update, making a version current and retiring one (docs/catalogs.md)
       10 + // the people a catalog is shared with: mint, list and end a share, approve a new passkey for an invite; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
       9 + // the download links this machine makes: the store's status, a preview, list, mint, one link, move, change, Copy and turn off (docs/catalogs.md § Links)
@@ -1341,6 +1356,13 @@ describe('the mounted daemon surface', () => {
       'GET /v1/skill-installs/local',
       'DELETE /v1/skill-installs/local/project/:installId',
       'DELETE /v1/skill-installs/local/runtime/:installId',
+      'POST /v1/mcp-installs/local/project/preview',
+      'POST /v1/mcp-installs/local/runtime/preview',
+      'POST /v1/mcp-installs/local/project',
+      'POST /v1/mcp-installs/local/runtime',
+      'GET /v1/mcp-installs/local',
+      'DELETE /v1/mcp-installs/local/project/:installId',
+      'DELETE /v1/mcp-installs/local/runtime/:installId',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
       'GET /v1/sessions/:sessionId/sends',

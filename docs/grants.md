@@ -921,6 +921,17 @@ not given back: copying a skill is the same decision (instructions that will run
 to loosen or forget. Removing needs only the capability. The source is never trusted from the request: it
 must be a skill the machine's inventory lists, found again by its `SKILL.md` path.
 
+## Copying an MCP server from this machine
+
+The same split as a local skill copy, with its own seven routes
+([catalogs.md](catalogs.md#copying-an-mcp-server-from-this-machine)): **both previews are `filesystem.use`**
+(a preview reads another account's configuration), a project apply or remove is `filesystem.configure`, a
+runtime apply or remove is `fleet.configure`, and the list answers project copies only to a caller whose
+`filesystem.use` is allowed. Every route is `caller: 'person'`, so a ferret is refused on all of them. A
+governed apply demands a fresh step-up for the existing act `catalog-install`; removing needs only the
+capability. The server is never trusted from the request: it must be one the machine's MCP inventory lists. No
+secret value crosses the wire: a preview names placeholders, and an apply names the caller's own secrets.
+
 ## Adding an MCP server for one ferret
 
 Actions › Add MCP server… writes in one of two places, and each is governed by the capability that

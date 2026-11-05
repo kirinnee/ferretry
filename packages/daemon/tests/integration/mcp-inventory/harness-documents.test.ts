@@ -3,11 +3,15 @@
  * and a file that does not parse is said by path without quoting a byte of it — it may hold a key.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { FileClaudeLocalScope, FileMcpHarnessDocuments } from '../../../src/adapters/mcp-inventory/index.ts';
+import {
+  ConfinedMcpHarnessDocuments,
+  FileClaudeLocalScope,
+  FileMcpHarnessDocuments,
+} from '../../../src/adapters/mcp-inventory/index.ts';
 import { McpDocumentUnreadable } from '../../../src/lib/mcp-inventory/index.ts';
 
 const roots: string[] = [];
@@ -163,5 +167,118 @@ describe('FileClaudeLocalScope', () => {
     // Assert
     should(error).be.instanceOf(Error);
     should(await readdir(root)).deepEqual(['nested']);
+  });
+});
+
+describe('ConfinedMcpHarnessDocuments', () => {
+  const SERVER = '{"mcpServers":{"x":{"command":"y"}}}';
+  const refused = async (documents: ConfinedMcpHarnessDocuments, file: string): Promise<McpDocumentUnreadable> => {
+    const error = await documents.read(file, 'json').then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    should(error).be.instanceOf(McpDocumentUnreadable);
+    return error as McpDocumentUnreadable;
+  };
+
+  async function world(): Promise<{ project: string; outside: string; documents: ConfinedMcpHarnessDocuments }> {
+    const root = await directory();
+    const project = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    await mkdir(project);
+    await mkdir(outside);
+    await writeFile(path.join(outside, 'secret.json'), '{"mcpServers":{"leak":{"command":"stolen"}}}');
+    return { project, outside, documents: new ConfinedMcpHarnessDocuments(async () => [project]) };
+  }
+
+  it('should read a plain file inside its folder, and a missing one as not there', async () => {
+    const { project, documents } = await world();
+    await mkdir(path.join(project, '.codex'));
+    await writeFile(path.join(project, '.mcp.json'), SERVER);
+    await writeFile(path.join(project, '.codex', 'config.toml'), '[mcp_servers.x]\nurl = "https://x.example/mcp"\n');
+
+    should(await documents.read(path.join(project, '.mcp.json'), 'json')).deepEqual({
+      mcpServers: { x: { command: 'y' } },
+    });
+    should(await documents.read(path.join(project, '.codex', 'config.toml'), 'toml')).deepEqual({
+      mcp_servers: { x: { url: 'https://x.example/mcp' } },
+    });
+    should(await documents.read(path.join(project, 'nothing.json'), 'json')).be.null();
+    should(await documents.read(path.join(project, 'no-dir', 'nothing.json'), 'json')).be.null();
+  });
+
+  it('should refuse a file that is itself a link to something outside', async () => {
+    const { project, outside, documents } = await world();
+    await symlink(path.join(outside, 'secret.json'), path.join(project, '.mcp.json'));
+
+    const error = await refused(documents, path.join(project, '.mcp.json'));
+
+    should(error.message).not.containEql('stolen');
+    should(error.message).containEql('link');
+  });
+
+  it('should refuse a folder that is a link to somewhere outside (a parent swapped for a link)', async () => {
+    const { project, outside, documents } = await world();
+    await symlink(outside, path.join(project, '.codex'));
+    await writeFile(path.join(outside, 'config.toml'), '[mcp_servers.leak]\ncommand = "stolen"\n');
+
+    const error = await refused(documents, path.join(project, '.codex', 'config.toml'));
+
+    should(error.message).not.containEql('stolen');
+  });
+
+  it('should refuse a file that shares another hard link', async () => {
+    const { project, outside, documents } = await world();
+    await link(path.join(outside, 'secret.json'), path.join(project, '.mcp.json'));
+
+    const error = await refused(documents, path.join(project, '.mcp.json'));
+
+    should(error.message).containEql('hard link');
+    should(error.message).not.containEql('stolen');
+  });
+
+  // Root reads anything, so this says nothing when the suite runs as root.
+  it.skipIf(process.getuid?.() === 0)('should say a folder the daemon cannot enter cannot be read', async () => {
+    const { project, documents } = await world();
+    await mkdir(path.join(project, 'locked'));
+    await chmod(path.join(project, 'locked'), 0o000);
+
+    try {
+      const error = await refused(documents, path.join(project, 'locked', 'sub', '.mcp.json'));
+
+      should(error.message).containEql('cannot be read by the daemon');
+    } finally {
+      await chmod(path.join(project, 'locked'), 0o700);
+    }
+  });
+
+  it('should refuse when the folder itself is gone', async () => {
+    const { project, documents } = await world();
+    await rm(project, { recursive: true });
+
+    await refused(documents, path.join(project, '.mcp.json'));
+  });
+
+  it('should read a path under no boundary as the inventory does, links included', async () => {
+    const { project, outside } = await world();
+    const documents = new ConfinedMcpHarnessDocuments(async () => [project]);
+    await symlink(path.join(outside, 'secret.json'), path.join(outside, 'alias.json'));
+
+    should(await documents.read(path.join(outside, 'alias.json'), 'json')).deepEqual({
+      mcpServers: { leak: { command: 'stolen' } },
+    });
+  });
+
+  it('should hold the longest boundary that covers a path, and not a sibling that shares its prefix', async () => {
+    const { project, outside } = await world();
+    await writeFile(path.join(outside, 'secret.json'), SERVER);
+    const documents = new ConfinedMcpHarnessDocuments(async () => [`${project}/`, path.join(project, 'inner')]);
+    await mkdir(path.join(project, 'inner'));
+    await writeFile(path.join(project, 'inner', 'a.json'), SERVER);
+
+    should(await documents.read(path.join(project, 'inner', 'a.json'), 'json')).deepEqual({
+      mcpServers: { x: { command: 'y' } },
+    });
+    should(await documents.read(`${project}-sibling.json`, 'json')).be.null();
   });
 });

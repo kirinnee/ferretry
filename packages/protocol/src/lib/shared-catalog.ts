@@ -70,6 +70,9 @@ export const CATALOG_MAX_ITEMS = 200;
 export const CATALOG_MAX_WITHDRAWN = 1_000;
 export const CATALOG_MCP_MAX_ARGS = 64;
 export const CATALOG_MCP_MAX_ENV = 64;
+/** The longest command and the longest argument or value a command server holds. */
+export const CATALOG_MCP_MAX_COMMAND_CHARS = 1_024;
+export const CATALOG_MCP_MAX_TEXT_CHARS = 4_096;
 /** An artifact snapshot's bound (owner decision Q6): the item carries the reference, never the bytes. */
 export const CATALOG_ARTIFACT_MAX_BYTES = 10 * 1024 * 1024;
 /**
@@ -380,13 +383,13 @@ const plainLine = (max: number, rawKey: (text: string) => boolean = holdsRawKey)
 /** An argument or a value: tabs and line breaks are fine (the review quotes them), nothing hidden is. */
 const plainText = z
   .string()
-  .max(4_096)
+  .max(CATALOG_MCP_MAX_TEXT_CHARS)
   .refine(text => !HIDDEN_IN_TEXT.test(text), NO_HIDDEN);
 
 /** A program the installer's runtimes start, with its arguments and environment. */
 const CatalogMcpCommandSchema = z.strictObject({
   transport: z.literal('command'),
-  command: plainLine(1_024),
+  command: plainLine(CATALOG_MCP_MAX_COMMAND_CHARS),
   args: z.array(plainText.refine(text => !substitutes(text), NO_SUBSTITUTION)).max(CATALOG_MCP_MAX_ARGS),
   /** Each value is a literal with no `${` in it, or exactly `${secret:NAME}` — a placeholder the installer fills. */
   env: z

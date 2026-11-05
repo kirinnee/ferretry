@@ -28,6 +28,21 @@ import {
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
 import {
+  LocalMcpInstalledSchema,
+  LocalMcpInstallIdSchema,
+  LocalMcpInstallListSchema,
+  type LocalMcpInstalled,
+  type LocalMcpInstallList,
+  type LocalMcpInstallRequest,
+  LocalMcpInstallRequestSchema,
+  type LocalMcpPreview,
+  LocalMcpPreviewRequestSchema,
+  type LocalMcpPreviewRequest,
+  LocalMcpPreviewSchema,
+  type LocalMcpRemoved,
+  LocalMcpRemovedSchema,
+} from '../lib/local-mcp-install.ts';
+import {
   LocalSkillInstalledSchema,
   LocalSkillInstallIdSchema,
   LocalSkillInstallListSchema,
@@ -784,6 +799,31 @@ export class FyApiClient implements IFyApiClient {
     return scope === 'project'
       ? this.request(`/v1/skill-installs/local/project/${id}`, LocalSkillRemovedSchema, { method: 'DELETE' })
       : this.request(`/v1/skill-installs/local/runtime/${id}`, LocalSkillRemovedSchema, { method: 'DELETE' });
+  }
+
+  previewLocalMcpInstall(scope: CatalogInstallScope, request: LocalMcpPreviewRequest): Promise<LocalMcpPreview> {
+    const init = jsonRequest('POST', LocalMcpPreviewRequestSchema, request);
+    return scope === 'project'
+      ? this.request('/v1/mcp-installs/local/project/preview', LocalMcpPreviewSchema, init)
+      : this.request('/v1/mcp-installs/local/runtime/preview', LocalMcpPreviewSchema, init);
+  }
+
+  applyLocalMcpInstall(scope: CatalogInstallScope, request: LocalMcpInstallRequest): Promise<LocalMcpInstalled> {
+    const init = jsonRequest('POST', LocalMcpInstallRequestSchema, request);
+    return scope === 'project'
+      ? this.request('/v1/mcp-installs/local/project', LocalMcpInstalledSchema, init)
+      : this.request('/v1/mcp-installs/local/runtime', LocalMcpInstalledSchema, init);
+  }
+
+  localMcpInstalls(): Promise<LocalMcpInstallList> {
+    return this.request('/v1/mcp-installs/local', LocalMcpInstallListSchema);
+  }
+
+  removeLocalMcpInstall(scope: CatalogInstallScope, installId: string): Promise<LocalMcpRemoved> {
+    const id = encodeURIComponent(LocalMcpInstallIdSchema.parse(installId));
+    return scope === 'project'
+      ? this.request(`/v1/mcp-installs/local/project/${id}`, LocalMcpRemovedSchema, { method: 'DELETE' })
+      : this.request(`/v1/mcp-installs/local/runtime/${id}`, LocalMcpRemovedSchema, { method: 'DELETE' });
   }
 
   daemonUpdate(): Promise<DaemonUpdateView> {

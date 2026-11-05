@@ -1,8 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { firstCredentialLine } from '../../../src/lib/local-skill-installs/credentials.ts';
+import {
+  firstArgumentCredential,
+  firstCredentialLine,
+  readableViews,
+} from '../../../src/lib/local-skill-installs/credentials.ts';
 
 const LONG = 'abcdef0123456789abcdef';
+
+/** A whole secret reference, written so it is not a template placeholder. */
+const REF = ['$', '{secret:TOKEN}'].join('');
 
 describe('the credential test that refuses a copy', () => {
   it('should refuse an address with a password in it, and name its line', () => {
@@ -178,6 +185,115 @@ describe('the credential test that refuses a copy', () => {
   it('should take the earliest of a name, an address, a key block and a token on one line', () => {
     should(firstCredentialLine(`-----BEGIN PRIVATE KEY----- API_KEY=${LONG}`)).equal(1);
     should(firstCredentialLine(`a\nAPI_KEY=${LONG}\n-----BEGIN PRIVATE KEY-----`)).equal(2);
+  });
+});
+
+describe('the credential test on a command line', () => {
+  it('should treat only a whole %NAME% as a reference, not a password that begins with a percent sign', () => {
+    should(firstCredentialLine(`https://me:%64${LONG}@example.com/`)).equal(1);
+    should(firstCredentialLine(`curl -u me:%64${LONG} https://example.com`)).equal(1);
+    should(firstCredentialLine('https://me:%PASSWORD%@example.com/')).be.undefined();
+    should(firstCredentialLine('curl -u me:%PASSWORD% https://example.com')).be.undefined();
+    should(firstCredentialLine(`API_KEY=%${LONG}`)).equal(1);
+    should(firstCredentialLine('API_KEY=%PASSWORD_FROM_THE_ENVIRONMENT%')).be.undefined();
+  });
+
+  it('should read the value after an authorization scheme as a reference or a credential', () => {
+    should(firstArgumentCredential(['--header', 'Authorization: Bearer $TOKEN'])).be.undefined();
+    should(firstArgumentCredential(['--header', 'Authorization: Bearer dummy1'])).equal(2);
+    should(firstArgumentCredential(['x', `api_key=${LONG}`, 'Authorization: Bearer dummy1'])).equal(2);
+    should(firstArgumentCredential(['Authorization: Bearer dummy1', `api_key=${LONG}`])).equal(1);
+    should(firstArgumentCredential(['Authorization: Bearer dummy1'])).equal(1);
+  });
+
+  it('should read a quoted authorization header name, short values included', () => {
+    should(firstArgumentCredential(['--headers', '{"Authorization":"Basic Zm9vOmJhcg=="}'])).equal(2);
+    should(firstArgumentCredential(['--headers', '{"Authorization" : "Bearer short"}'])).equal(2);
+    should(firstArgumentCredential(['--headers', "{'Authorization':'Basic Zm9vOmJhcg=='}"])).equal(2);
+    should(firstArgumentCredential(['--headers', '{\\"Authorization\\":\\"Basic Zm9vOmJhcg==\\"}'])).equal(2);
+    should(firstArgumentCredential(['--headers', `{"Authorization":"Bearer ${REF}"}`])).be.undefined();
+    should(firstArgumentCredential(['--headers', `{\\"Authorization\\":\\"${REF}\\"}`])).be.undefined();
+    should(firstArgumentCredential(['--headers', '{"Authorization"}'])).be.undefined();
+  });
+
+  it('should read a credential hidden behind escaped quotes, JSON or Unicode escapes', () => {
+    for (const piece of [
+      `{\\"X-Api-Key\\":\\"${LONG}\\"}`,
+      `{\\\\"X-Api-Key\\\\":\\\\"${LONG}\\\\"}`,
+      `{"X-Api-\\u004bey":"${LONG}"}`,
+      `{"x-API-KEY":"${LONG}"}`,
+      '{"Proxy-Authorization":"Basic Zm9vOmJhcg=="}',
+      '{"Author\\u0069zation":"Basic Zm9vOmJhcg=="}',
+      JSON.stringify(`{"X-Api-Key":"${LONG}"}`),
+      `--headers={"X-Api-Key":"${LONG}"}`,
+      `--header=%58-Api-Key:${LONG}`,
+    ])
+      should(firstArgumentCredential(['--headers', piece])).equal(2);
+    for (const piece of [`{\\"X-Api-Key\\":\\"${REF}\\"}`, '{"a":1}', '{"open":', '%ZZ', '\\u00zz'])
+      should(firstArgumentCredential(['--headers', piece])).be.undefined();
+  });
+
+  it('should list every form of an argument it reads, and stop at the bounds', () => {
+    should(readableViews('plain')).deepEqual(['plain']);
+    should(readableViews('{\\"a\\":\\"b\\"}')).deepEqual(['{\\"a\\":\\"b\\"}', '{"a":"b"}', 'a: b']);
+    should(readableViews('"x\\u0041"')).deepEqual(['"x\\u0041"', 'xA']);
+    should(readableViews('{"a": [1, 2]} tail')).deepEqual(['{"a": [1, 2]} tail', '\na: 1\na: 2\n tail']);
+    should(readableViews('a%20b')).deepEqual(['a%20b', 'a b']);
+    const nested = '{\\\\\\\\\\\\\\\\"a\\\\\\\\\\\\\\\\":1}';
+    should(readableViews(nested).length).be.belowOrEqual(5);
+    const big = `{"k":"${'x'.repeat(9_000)}\\u0041"}`;
+    should(readableViews(big).length).be.belowOrEqual(2);
+  });
+
+  it('should set every property of a JSON argument apart, names decoded, nested ones and nested strings too', () => {
+    should(readableViews('{"A":"1","B":{"C":"2"},"D":["3","4"],"E":null,"F":true}')[1]).equal(
+      'A: 1\nC: 2\nD: 3\nD: 4\nE: null\nF: true',
+    );
+    should(readableViews('{"X-Api-\\u004bey":"v"}')[1]).equal('X-Api-Key: v');
+    should(readableViews('{"in":"{\\"X\\":\\"y\\"}"}')[1]).equal('in: {"X":"y"}\nX: y');
+    should(readableViews('--headers={"A":"1"}')[1]).equal('--headers=\nA: 1\n');
+    should(readableViews('["x"]')[1]).equal(': x');
+  });
+
+  it('should cut a hostile JSON document off at a fixed number of lines and levels, whatever its size', () => {
+    const wide = `{${Array.from({ length: 600 }, (_, index) => `"k${index}":"v"`).join(',')}}`;
+    should(wide.length).be.belowOrEqual(8_192);
+    should(readableViews(wide)[1]?.split('\n').length).equal(256);
+    const deep = `${'{"a":'.repeat(40)}"x"${'}'.repeat(40)}`;
+    should(readableViews(deep)[1]).equal('');
+    const inString = `{"in":"${'{\\"in\\":'.repeat(4)}1${'}'.repeat(4)}"}`;
+    should(readableViews(inString).length).be.belowOrEqual(5);
+  });
+
+  it('should read every property of a compact JSON argument, not only the first', () => {
+    for (const piece of [
+      `{"Accept":"application/json","X-Api-\\u004bey":"${LONG}"}`,
+      `{"Accept":"application/json","Nested":{"X-Api-\\u004bey":"${LONG}"}}`,
+      `{"Accept":"application/json","List":[{"X-Api-Key":"${LONG}"}]}`,
+      '{"a":"b","Author\\u0069zation":"Basic Zm9vOmJhcg=="}',
+      `{"Accept":"application/json","h":"{\\"X-Api-Key\\":\\"${LONG}\\"}"}`,
+      `--headers={"Accept":"application/json","X-Api-Key":"${LONG}"}`,
+      `{"Accept":"application/json"} {"X-Api-Key":"${LONG}"}`,
+    ])
+      should(firstArgumentCredential(['--headers', piece])).equal(2);
+    for (const piece of [
+      `{"Accept":"application/json","X-Api-Key":"${REF}"}`,
+      '{"Accept":"application/json","Retry":3,"Debug":false,"Mode":null}',
+      '{"a":{"b":{"c":"d"}},"list":["x","y"]}',
+    ])
+      should(firstArgumentCredential(['--headers', piece])).be.undefined();
+  });
+
+  it('should finish on an argument made of nothing but authorization headers, and still find a credential after them', () => {
+    const size = 32_768;
+    for (const piece of [
+      `${'authorization:$ '.repeat(size)}${'"'.repeat(size)}`,
+      'authorization:'.repeat(size),
+      'authorization: "'.repeat(size),
+      `authorization:${' "'.repeat(size)}`,
+      `authorization: Bearer ${'Bearer '.repeat(size)}`,
+    ])
+      should(firstArgumentCredential([piece, `api_key=${LONG}`])).be.a.Number();
   });
 });
 
