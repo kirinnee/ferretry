@@ -1,4 +1,4 @@
-import type { AnalyticsResponse } from '@ferretry/protocol';
+import { ANALYTICS_TOO_MANY_GROUPS_CODE, AnalyticsGroupLimitError, type AnalyticsResponse } from '@ferretry/protocol';
 import type { AnalyticsIndexRead } from '../../analytics/ingestion.ts';
 import { AnalyticsQueryError, parseAnalyticsQuery, scopeAnalyticsQuery } from '../../analytics/query.ts';
 import { queryAnalyticsRecords } from '../../analytics/results.ts';
@@ -106,6 +106,7 @@ function analyticsQuery(request: ApiRequest): string | undefined {
  * will keep rewriting a query that was right all along.
  */
 function reraise(error: unknown): never {
+  if (error instanceof AnalyticsGroupLimitError) throw new ApiError(400, error.message, ANALYTICS_TOO_MANY_GROUPS_CODE);
   if (error instanceof AnalyticsQueryError) throw new ApiError(400, error.message, 'invalid_query');
   throw error;
 }

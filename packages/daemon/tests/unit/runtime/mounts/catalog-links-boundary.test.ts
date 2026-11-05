@@ -293,6 +293,32 @@ describe('minting a link at the boundary', () => {
     should(world.links.calls).deepEqual(['mint']);
   });
 
+  it.each([
+    ['a mint', (world: Awaited<ReturnType<typeof machine>>) => world.mint()],
+    ['a move', (world: Awaited<ReturnType<typeof machine>>) => world.move()],
+  ] as const)('should leave the next governed act unproved after %s, with a zero-minute window', async (_name, act) => {
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+    await world.prove();
+
+    const served = await act(world);
+    const store = await world.ask('GET', '/v1/catalog-links/store');
+
+    should(served.status).be.oneOf(200, 201);
+    should([store.status, codeOf(store)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+  });
+
+  it('should leave the held step-up to retry with when the fresh proof is refused', async () => {
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+
+    const refused = await world.mint();
+
+    should([refused.status, codeOf(refused)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    await world.prove();
+    should((await world.mint()).status).equal(201);
+  });
+
   it('should refuse a proof made for another act', async () => {
     const world = await machine({});
     await world.unlock();

@@ -442,6 +442,24 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
+  it('never starts a swipe from a hypermedia block opened fullscreen inside the card (B164)', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    // The real block is an in-place host wearing this class while fullscreen; the deck must leave its pan alone.
+    const host = document.createElement('div');
+    host.className = 'kt-overlay fy-render-fullscreen';
+    const picture = document.createElement('div');
+    host.append(picture);
+    deckTop(mounted).append(host);
+    const before = topId(mounted);
+    await dragBy(mounted, 200, 0, picture);
+    expect(stamp(mounted)).toBeNull();
+    await release(picture, 200, 0);
+    expect(pending(fake)).toEqual([]);
+    expect(topId(mounted)).toBe(before);
+    await mounted.unmount();
+  });
+
   it('flies a committed card off with motion, and simply removes it with reduced motion', async () => {
     const moving = await mount(deckPage(fakeInbox(), [threeWay, twoWay], { reducedMotion: false }));
     await swipe(moving, 200, 0);

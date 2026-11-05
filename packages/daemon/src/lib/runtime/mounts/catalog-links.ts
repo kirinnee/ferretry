@@ -77,8 +77,14 @@ function ownerOnly(context: RouteContext, act: string): void {
  * caller (the machine's own `fy`) needs none.
  */
 function claimPasskey(context: RouteContext, what = 'making a download link'): ApiResponse | undefined {
-  if (context.governance?.governed !== true || context.claimFreshStepUp?.(STEP_UP_ACTS.shareLink) === true)
+  if (context.governance?.governed !== true) return undefined;
+  if (context.claimFreshStepUp?.(STEP_UP_ACTS.shareLink) === true) {
+    // The boundary did not spend the general step-up (these routes are `narrowing`), and the claim above only took the
+    // fresh proof; under a zero-minute window the held step-up would admit the NEXT governed act unproved. Spent
+    // only after a successful claim, so a refused claim leaves the person's step-up to retry with.
+    context.spendStepUp?.();
     return undefined;
+  }
   return jsonResponse(
     {
       error: `${what} needs a passkey confirmation for it, from this device`,

@@ -132,6 +132,8 @@
         "harness/agenda-page.tsx",
         "harness/native-hypermedia-screenshot.ts",
         "harness/native-hypermedia-page.tsx",
+        "harness/fy-render-expand-screenshot.ts",
+        "harness/fy-render-expand-page.tsx",
         "harness/live-card-page.tsx",
         "harness/agenda-layout-page.tsx",
         "harness/inbox-page.tsx",

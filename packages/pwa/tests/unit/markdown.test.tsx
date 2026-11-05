@@ -9,9 +9,11 @@ import {
   locationFenceBody,
   Markdown,
   referenceHasTrustedOrigin,
+  tolerateAuthoringNoise,
 } from '../../src/components/markdown.tsx';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { parseFyRender } from '../../src/lib/fy-render.ts';
 import {
   type ResolvedReference,
   type ResolvedSurfaceReference,
@@ -208,6 +210,72 @@ describe('Markdown card and board blocks', () => {
     const tree = render(<Markdown enableFyRender cardEmbed={host} text={badCardFence} />);
     should(tree.root.findAllByProps({ 'data-fy-card-embed': 'card' })).be.empty();
     should(textOf(tree.root.findByType('code'))).containEql('nope');
+  });
+});
+
+describe('Markdown fy-render fences authored with noise (B162)', () => {
+  // The body the renderer would hand the grammar for a fence authored as `text`, parsed.
+  const drawn = (text: string): number => {
+    const inner = text.replace(/^```fy-render\r?\n/u, '').replace(/\r?\n```$/u, '');
+    const node = {
+      children: [
+        {
+          type: 'element',
+          tagName: 'code',
+          properties: { 'data-fy-render-fence': 'true' },
+          children: [{ type: 'text', value: `${inner}\n` }],
+        },
+      ],
+    };
+    const body = fyRenderFenceBody(node);
+    return body !== null && parseFyRender(body).ok ? 1 : 0;
+  };
+
+  test('should draw a block whose lines end in CRLF', () => {
+    should(drawn(squareFence().replace(/\n/gu, '\r\n'))).equal(1);
+  });
+
+  test('should draw a block with trailing spaces on the boundary or a header', () => {
+    should(drawn(squareFence().replace('---', '---  '))).equal(1);
+    should(drawn(squareFence().replace('type: svg', 'type: svg \t'))).equal(1);
+  });
+
+  test('should draw a block with blank lines before the first header', () => {
+    should(drawn(squareFence().replace('type: svg', '\n\ntype: svg'))).equal(1);
+  });
+
+  test('should still refuse what the contract refuses', () => {
+    should(drawn(squareFence().replace('---', '----'))).equal(0);
+    should(drawn(squareFence().replace('type: svg', 'Type: svg'))).equal(0);
+  });
+
+  describe('payload after the boundary is verbatim', () => {
+    const payloadOf = (body: string): string => {
+      const parsed = parseFyRender(tolerateAuthoringNoise(body));
+      if (!parsed.ok) throw new Error(`expected a parse, got: ${parsed.reason}`);
+      return parsed.block.payload;
+    };
+
+    test('should keep CRLF and trailing spaces in an html payload', () => {
+      const payload = '<div>  \r\n  <p>hi</p>   \r\n</div>\r\n\r\n  ';
+      should(payloadOf(`type: html\r\nalt: x  \r\n---  \r\n${payload}`)).equal(payload);
+    });
+
+    test('should keep CRLF and trailing spaces in an svg payload', () => {
+      const payload =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4">  \r\n<rect width="4" height="4"/> \r\n</svg>  ';
+      should(payloadOf(`\r\n\r\ntype: svg \t\r\nalt: sq\r\n---\r\n${payload}`)).equal(payload);
+    });
+
+    test('should keep an LF payload and a payload that itself contains ---', () => {
+      const payload = '<p>a</p>  \n---  \n<p>b</p>\r\n';
+      should(payloadOf(`type: html\nalt: x\n---\n${payload}`)).equal(payload);
+    });
+
+    test('should keep a bare CR inside the payload', () => {
+      const payload = '<p>a\rb</p>';
+      should(payloadOf(`type: html\r\nalt: x\r\n---\r\n${payload}`)).equal(payload);
+    });
   });
 });
 
