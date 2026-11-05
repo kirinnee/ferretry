@@ -10,7 +10,7 @@
 import { isBackwardMove, type LaneSet } from '@ferretry/protocol';
 
 export type MovePlan =
-  /** Dropped where it already is. */
+  /** Already in that lane. */
   | { readonly kind: 'stay' }
   /** Send it now; `closing` is the one-tap "Done". */
   | { readonly kind: 'send'; readonly to: string; readonly closing: boolean }

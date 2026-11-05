@@ -59,7 +59,7 @@
   color: var(--fg);
 }
 
-/* The scrolling document: header, sections, history. The comment box below it never scrolls away. */
+/* The scrolling document: header, sections, history. */
 .fy-board-detail__content {
   display: flex;
   min-height: 0;

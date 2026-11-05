@@ -274,10 +274,8 @@ function DetailBody({
           </div>
         ) : null}
         <div className="fy-board-detail__meta">
-          <span className="fy-board-detail__lane">
-            <span className="fy-board-detail__pill" data-pill="lane" data-static="">
-              {laneNameOf(laneSet, task.laneId)}
-            </span>
+          <span className="fy-board-detail__pill" data-pill="lane" data-static="">
+            {laneNameOf(laneSet, task.laneId)}
           </span>
           {firstPr === null ? null : (
             <a className="fy-board-detail__metalink" data-meta="pr" href={firstPr.url} rel="noreferrer" target="_blank">

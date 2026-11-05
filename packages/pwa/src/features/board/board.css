@@ -740,8 +740,7 @@
   /* A sideways drag is the lane switch; the page still scrolls up and down. */
   touch-action: pan-y;
 }
-/* Dense rows: the title and the meta line set the height, not the menu button. The ⋮ is drawn small and its
-   44px hit area is an overlay, so a finger still lands on it but the row does not grow to hold it. */
+/* Dense rows: the title and the meta line set the height. */
 .fy-board[data-phone] .fy-board-card {
   align-items: center;
   padding: 6px var(--gap-xs) 6px var(--gap-sm);

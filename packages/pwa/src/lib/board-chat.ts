@@ -264,7 +264,7 @@ interface ChatKanbanLane {
   readonly key: string;
   /** The project board (`BoardGroup.key`) the lane belongs to. */
   readonly groupKey: string;
-  /** The lane's id; `null` for the `Unplaced` column, which is not a place a card can be moved to. */
+  /** The lane's id; `null` for the `Unplaced` column. */
   readonly laneId: string | null;
   readonly name: string;
   readonly category: LaneCategory | null;
