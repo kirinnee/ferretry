@@ -29,15 +29,21 @@ import type { DeviceSpeedupKeys } from '../lib/stt/speedup-keys.ts';
 import { isOnDeviceEngine, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
+import { type AudioContextConstructor, navigatorHaptics, webAudioEarcons } from '../lib/voice-chat/earcons.ts';
 import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '../lib/voice-chat/live-assembly.ts';
 import { INITIAL_LIVE_STATE } from '../lib/voice-chat/live-machine.ts';
+import { createLiveReader, type LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
+import { DEFAULT_LIVE_VOICE_SETTINGS } from '../lib/voice-chat/live-settings.ts';
 import { LiveTurnLog } from '../lib/voice-chat/live-turn-log.ts';
 import { type LiveView, liveView } from '../lib/voice-chat/live-view.ts';
 import { webMicLock } from '../lib/voice-chat/mic-lock.ts';
+import { needsTapToListen } from '../lib/voice-chat/platform.ts';
 import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import { documentVisibility } from '../lib/voice-chat/visibility.ts';
 import { screenWakeLock } from '../lib/voice-chat/wake-lock.ts';
+import { useDeviceVoiceSettingsStore } from './use-live-voice-settings.ts';
+import { useReadAloudController } from './use-read-aloud.ts';
 
 export interface UseLiveVoiceOptions {
   /** Live can be offered here: the composer may send, there is a session to watch, dictation is on. */
@@ -55,6 +61,11 @@ export interface UseLiveVoiceOptions {
   readonly readConversation?: () => readonly string[];
   /** The hooks `readContext` rule of dictation: `(needsEvidence) → messages`. Supplied by the host bundle. */
   readonly readContext: (needsEvidence: boolean) => readonly string[];
+  /**
+   * The conversation on screen, for reading the reply aloud. Absent: Live shows the reply and listens again
+   * (nothing is read). The voice, speed, length and the tones come from this device's voice settings.
+   */
+  readonly reading?: LiveReadingSource;
   readonly graceMs?: unknown;
   readonly pauseMs?: unknown;
   // Seams for tests and the visual harness.
@@ -83,6 +94,9 @@ export interface LiveVoiceHandle {
   resume(): void;
   end(): void;
   skip(): void;
+  repeat(): void;
+  /** A message was sent by hand (not by Live): a reading in progress belongs to an older turn. */
+  outsideSend(): void;
 }
 
 const NO_LEVELS: readonly number[] = [];
@@ -96,6 +110,8 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   const contextVoices = useOnDeviceVoices();
   const contextKeys = useSpeedupKeys();
   const routedFetch = useDaemonFetch();
+  const reader = useReadAloudController();
+  const voiceSettings = useDeviceVoiceSettingsStore();
   const ambientRecognition = useMemo(() => browserRecognitionProvider(), []);
   const ambientMeter = useMemo(() => browserMicMeter(globalThis as unknown as MicMeterGlobalLike), []);
   const [, repaint] = useReducer((tick: number) => tick + 1, 0);
@@ -125,6 +141,10 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   });
   ambient.current = { recognition: ambientRecognition, meter: ambientMeter, keys: contextKeys, fetch: routedFetch };
 
+  // The page's one voice and this device's choices, read when Live starts and again at each reading.
+  const spoken = useRef({ reader, voiceSettings });
+  spoken.current = { reader, voiceSettings };
+
   const buildPorts = useCallback((): LiveRunnerPorts => {
     const current = latest.current;
     const clock = browserClock(globalThis as unknown as ClockGlobalLike);
@@ -150,7 +170,20 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     const assembled = assembleFromPage(read, {
       composer: current.composer,
       reply: current.reply,
-      speaker: null,
+      reader:
+        current.reading === undefined
+          ? null
+          : createLiveReader({
+              controller: spoken.current.reader,
+              source: current.reading,
+              settings: () => spoken.current.voiceSettings?.get() ?? DEFAULT_LIVE_VOICE_SETTINGS,
+              clock,
+            }),
+      earcons: webAudioEarcons(
+        (globalThis as { AudioContext?: AudioContextConstructor; webkitAudioContext?: AudioContextConstructor })
+          .AudioContext ?? (globalThis as { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext,
+      ),
+      haptics: navigatorHaptics(nav as { vibrate?: (pattern: readonly number[]) => boolean }),
       clock,
       visibility,
       micLock: webMicLock(nav.locks),
@@ -174,6 +207,9 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
       canSend: latest.current.enabled,
       graceMs: latest.current.graceMs,
       pauseMs: latest.current.pauseMs,
+      tapToListen: needsTapToListen(typeof navigator === 'undefined' ? undefined : navigator),
+      // Tones and buzzes follow this device's switch at the moment each one would sound.
+      cues: () => (spoken.current.voiceSettings ?? { get: () => DEFAULT_LIVE_VOICE_SETTINGS }).get().earcons,
       onTurn: numbers => turns.current.add(numbers),
     });
     runnerRef.current = runner;
@@ -235,5 +271,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     resume: () => runnerRef.current?.resume(),
     end: () => runnerRef.current?.end(),
     skip: () => runnerRef.current?.skip(),
+    repeat: () => runnerRef.current?.repeat(),
+    outsideSend: () => runnerRef.current?.outsideSend(),
   };
 }

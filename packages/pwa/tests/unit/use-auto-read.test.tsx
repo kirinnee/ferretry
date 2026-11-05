@@ -105,6 +105,37 @@ const press = async (id: string | undefined = 's1'): Promise<void> => {
   await interact(() => handle?.sent(id));
 };
 
+describe('useAutoRead — while Live is on', () => {
+  test('stands down: a turn that ends is not read, and a reading already going is silenced', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working({ suspended: true })));
+    await mounted.render(tree(r, ended([user, reply('Live reads this one.')], { suspended: true })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.unmount();
+
+    // Reading under way when Live starts: it is stopped, and the next turn is Live's to read.
+    const again = rig(true);
+    mounted = await mount(tree(again, working()));
+    await mounted.render(tree(again, ended([user, reply('Auto-read reads this.')])));
+    await settle();
+    expect(again.controller.getState().status).toBe('reading');
+    await mounted.render(tree(again, ended([user, reply('Auto-read reads this.')], { suspended: true })));
+    await settle();
+    expect(again.controller.getState().status).toBe('stopped');
+  });
+
+  test('comes back when Live ends: the settings were never touched', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, working({ suspended: true })));
+    await mounted.render(tree(r, working()));
+    await mounted.render(tree(r, ended([user, reply('Read after Live ended.')])));
+    await settle();
+    expect(said(r)).toBe('Read after Live ended.');
+    expect(r.store.get().autoRead).toBe(true);
+  });
+});
+
 describe('useAutoRead', () => {
   test('OFF by default: a turn ends and nothing is said', async () => {
     const r = rig(false);

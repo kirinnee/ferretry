@@ -33,6 +33,7 @@ export interface LiveVoiceBarProps {
   onResume(): void;
   onEnd(): void;
   onSkip(): void;
+  onRepeat(): void;
 }
 
 export const MAX_BARS = 32;
@@ -72,9 +73,10 @@ export function liveAnnouncement(view: LiveView): { readonly key: string; readon
       case 'working':
         return { key: 'working', text: 'Ferret is working' };
       case 'reading':
-        return { key: 'reading', text: 'Reading reply' };
+        // The state in words, never the reply itself: the voice is already saying it.
+        return { key: `reading:${view.stateWord}`, text: view.stateWord };
       case 'hold':
-        return { key: 'hold', text: 'On hold' };
+        return { key: `hold:${view.stateWord}`, text: view.stateWord };
       case 'paused':
         return { key: 'paused', text: 'Paused' };
     }
@@ -153,7 +155,7 @@ function Ring({ progress }: { progress: number }) {
 }
 
 export function LiveVoiceBar(props: LiveVoiceBarProps) {
-  const { view, layout, levels, onHold, onSendNow, onResume, onEnd, onSkip } = props;
+  const { view, layout, levels, onHold, onSendNow, onResume, onEnd, onSkip, onRepeat } = props;
   const pageReduced = usePrefersReducedMotion();
   const reduced = props.reducedMotion ?? pageReduced;
 
@@ -165,6 +167,7 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
       'send-now': onSendNow,
       resume: onResume,
       skip: onSkip,
+      repeat: onRepeat,
       end: onEnd,
     };
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -178,7 +181,7 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [keyed, view, onHold, onSendNow, onResume, onSkip, onEnd]);
+  }, [keyed, view, onHold, onSendNow, onResume, onSkip, onRepeat, onEnd]);
 
   // The live region: filled AFTER mount (a region that arrives full is not read), and only when the
   // announcement's key changes.
@@ -238,6 +241,12 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
         {label} <Key>{key}</Key>
       </button>
     );
+    // While a reply is being read Esc stops the reading, so End is a button only.
+    const plainAction = (label: string, onPress: () => void): ReactNode => (
+      <button type="button" className="fy-live-btn" onClick={onPress} data-live-action={label}>
+        {label}
+      </button>
+    );
     return (
       <section
         className="fy-live fy-live--desktop"
@@ -256,9 +265,10 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
           <span className="fy-live-actions">
             {view.canHold ? action('Hold', 'H', 'H', onHold) : null}
             {view.canSendNow ? action('Send now', '↵', 'Enter', onSendNow) : null}
-            {view.canResume ? action('Resume', 'Space', ' ', onResume) : null}
-            {view.big.action === 'skip' ? action('Stop reading', 'Space', ' ', onSkip) : null}
-            {view.canEnd ? action('End', 'Esc', 'Escape', onEnd) : null}
+            {view.canResume ? action(view.big.label === 'Listen' ? 'Listen' : 'Resume', 'Space', ' ', onResume) : null}
+            {view.canSkip ? action('Stop reading', 'Space', 'Space Escape S', onSkip) : null}
+            {view.canRepeat ? action('Repeat', 'R', 'R', onRepeat) : null}
+            {view.canEnd ? (view.canSkip ? plainAction('End', onEnd) : action('End', 'Esc', 'Escape', onEnd)) : null}
           </span>
         </div>
         {progress}
@@ -309,6 +319,11 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
         {view.canSendNow ? (
           <button type="button" className="fy-live-btn" onClick={onSendNow}>
             Send now
+          </button>
+        ) : null}
+        {view.canRepeat ? (
+          <button type="button" className="fy-live-btn" onClick={onRepeat} aria-keyshortcuts="R">
+            Repeat
           </button>
         ) : null}
         {view.canEnd ? (

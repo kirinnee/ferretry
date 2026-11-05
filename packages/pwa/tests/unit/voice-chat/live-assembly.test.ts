@@ -155,7 +155,7 @@ describe('assembleLivePorts', () => {
       meter: null,
       composer,
       reply: { current: () => null, subscribe: () => () => undefined },
-      speaker: null,
+      reader: null,
       clock: { now: () => 42, after: () => () => undefined },
       visibility: { visible: () => true, watch: () => () => undefined },
       micLock: { acquire: async () => true, release: () => undefined },
@@ -173,9 +173,9 @@ describe('assembleLivePorts', () => {
     should(await assemble(bridge(false)).send.send()).deepEqual({ kind: 'failed', reason: 'not-sent' });
   });
 
-  it('has no speaker yet, and a take that refuses without an engine', async () => {
+  it('has no reader unless the page gives one, and a take that refuses without an engine', async () => {
     const ports = assemble(bridge(true));
-    should(ports.speaker).equal(null);
+    should(ports.reader).equal(null);
     const events: string[] = [];
     ports.take.start({
       onLive: () => undefined,
@@ -204,7 +204,7 @@ describe('assembleLivePorts', () => {
       meter: null,
       composer: bridge(true),
       reply: { current: () => null, subscribe: () => () => undefined },
-      speaker: null,
+      reader: null,
       clock: { now: () => 0, after: () => () => undefined },
       visibility: { visible: () => true, watch: () => () => undefined },
       micLock: { acquire: async () => true, release: () => undefined },
@@ -238,7 +238,7 @@ describe('assembleFromPage', () => {
       submit: async () => true,
     },
     reply: { current: () => null, subscribe: () => () => undefined },
-    speaker: null,
+    reader: null,
     clock: { now: () => 0, after: () => () => undefined },
     visibility: { visible: () => true, watch: () => () => undefined },
     micLock: { acquire: async () => true, release: () => undefined },

@@ -24,6 +24,9 @@ export const LIVE_BLOCK_COPY: Readonly<Record<LiveBlock, string>> = Object.freez
     'On an iPhone Home Screen app, Live needs a voice that runs on this device. Choose one in Settings › Voice.',
 });
 
+export const READ_FAILED_COPY = "Couldn't speak this reply. It is on screen.";
+export const READ_UNAVAILABLE_COPY = 'This device has no built-in voice for reading, so the reply stays on screen.';
+
 const VOICE_SERVICE_COPY = "Can't reach the voice service.";
 export const LIVE_TAKE_FAILED_COPY = `${VOICE_SERVICE_COPY} Your words were kept.`;
 
@@ -34,6 +37,8 @@ export function noticeCopy(notice: LiveNotice): string {
       return LIVE_BLOCK_COPY[notice.block];
     case 'take-failed':
       return LIVE_TAKE_FAILED_COPY;
+    case 'read-failed':
+      return notice.why === 'unavailable' ? READ_UNAVAILABLE_COPY : READ_FAILED_COPY;
     case 'ended':
       return notice.why === 'idle' ? 'Live ended after ten minutes of quiet.' : 'Ferret stopped. Live ended.';
   }
@@ -60,6 +65,10 @@ export interface LiveView {
   readonly canHold: boolean;
   readonly canSendNow: boolean;
   readonly canResume: boolean;
+  /** A reply is being read: Stop (Space, Esc, S) ends it and Live listens again. */
+  readonly canSkip: boolean;
+  /** A reply is being read: Repeat (R) reads it again from the start. */
+  readonly canRepeat: boolean;
   /** "End" is offered whenever Live is on. */
   readonly canEnd: boolean;
   readonly micOpen: boolean;
@@ -76,6 +85,7 @@ const HOLD_COPY = {
   typing: 'Paused while you type. Resume when you are ready.',
   'send-failed': "Couldn't send. Your words are in the message box.",
   'needs-input': 'Your ferret is asking you something.',
+  listen: 'The reply has been read. Tap Listen to talk.',
 } as const;
 
 /** The line under a hold or a pause; a take that failed while the stop waited for its words says so first. */
@@ -93,6 +103,8 @@ const OFF_VIEW: LiveView = {
   canHold: false,
   canSendNow: false,
   canResume: false,
+  canSkip: false,
+  canRepeat: false,
   canEnd: false,
   micOpen: false,
   liveWords: '',
@@ -183,10 +195,32 @@ export function liveView(
         big: { label: `Working ${mmss(seconds)}`, action: 'none' },
       };
     }
-    case 'reading':
-      return { ...base, stateWord: 'Reading reply', tone: 'active', big: { label: 'Stop reading', action: 'skip' } };
+    case 'reading': {
+      const question = state.readKind === 'question';
+      return {
+        ...base,
+        // The words of the reply are never here: they are on screen, and the live region must not say them twice.
+        stateWord: question ? 'Reading question' : 'Reading reply',
+        detail: question ? 'Your ferret is asking you something.' : null,
+        tone: 'active',
+        big: { label: 'Stop reading', action: 'skip' },
+        canSkip: true,
+        canRepeat: true,
+      };
+    }
     case 'hold': {
       const reason = state.holdReason ?? 'user';
+      // The reply was read and the microphone waits for a tap: it is the person's turn, not a hold they asked for.
+      if (reason === 'listen')
+        return {
+          ...base,
+          stateWord: 'Your turn',
+          detail: heldDetail(state, HOLD_COPY.listen),
+          tone: 'calm',
+          big: { label: 'Listen', action: 'resume' },
+          canResume: true,
+          canSendNow: composerHasWords || state.words.trim() !== '',
+        };
       return {
         ...base,
         stateWord: 'On hold',
@@ -210,13 +244,21 @@ export function liveView(
 }
 
 /** The key a press maps to, or null. Only the bar's own keys; the caller checks the focus is not in a text field. */
-export type LiveKeyAction = 'hold' | 'send-now' | 'resume' | 'skip' | 'end';
+export type LiveKeyAction = 'hold' | 'send-now' | 'resume' | 'skip' | 'repeat' | 'end';
 
 export function liveKeyAction(key: string, view: LiveView): LiveKeyAction | null {
   if (!view.visible || view.phase === 'off') return null;
   switch (key) {
     case 'Escape':
+      // While a reply is being read Esc stops the reading (back to listening); otherwise it ends Live.
+      if (view.canSkip) return 'skip';
       return view.canEnd ? 'end' : null;
+    case 's':
+    case 'S':
+      return view.canSkip ? 'skip' : null;
+    case 'r':
+    case 'R':
+      return view.canRepeat ? 'repeat' : null;
     case 'Enter':
       return view.canSendNow ? 'send-now' : null;
     case 'h':

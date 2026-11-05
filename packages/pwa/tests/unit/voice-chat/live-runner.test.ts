@@ -108,10 +108,34 @@ interface Rig {
   meterOpen: { mode: 'ok' | 'null' | 'reject' | 'pending' };
   openMeter(): void;
   meterReleased: number;
-  speaker: { spoke: number; stopped: number; done: () => void };
+  speaker: Speaker;
 }
 
-const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown; reply?: ReplyFeedPort } = {}): Rig => {
+/** The fake reader's record: what was read, how it can be ended, and the taps it was told about. */
+interface Speaker {
+  spoke: number;
+  stopped: number;
+  marked: number;
+  unlocked: number;
+  /** What was last read. */
+  what: string | null;
+  /** End the reading in progress as it finishing. */
+  done: () => void;
+  /** End the reading in progress some other way. */
+  end: (end: 'finished' | 'stopped' | 'failed' | 'unavailable') => void;
+}
+
+const rig = (
+  options: {
+    speaker?: boolean;
+    canSend?: boolean;
+    graceMs?: unknown;
+    reply?: ReplyFeedPort;
+    tapToListen?: boolean;
+    /** The tones and buzzes the runner made, in order; the switch asked at each cue. */
+    cues?: { played: string[]; on: boolean };
+  } = {},
+): Rig => {
   const clock = new FakeClock();
   const takes: FakeTake[] = [];
   const listeners: TakeListener[] = [];
@@ -132,7 +156,15 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown;
   const meterOpen: Rig['meterOpen'] = { mode: 'ok' };
   let pendingMeter: (() => void) | null = null;
   let meterReleased = 0;
-  const speaker: { spoke: number; stopped: number; done: () => void } = { spoke: 0, stopped: 0, done: () => undefined };
+  const speaker: Speaker = {
+    spoke: 0,
+    stopped: 0,
+    marked: 0,
+    unlocked: 0,
+    what: null,
+    done: () => undefined,
+    end: () => undefined,
+  };
   let frameAt = 0;
 
   const meter: LevelMeterHandle = {
@@ -194,17 +226,35 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown;
         };
       },
     },
-    speaker: options.speaker
+    reader: options.speaker
       ? {
-          speak: onDone => {
+          supported: true,
+          unlock: () => {
+            speaker.unlocked += 1;
+          },
+          mark: () => {
+            speaker.marked += 1;
+          },
+          read: (what, onEnd) => {
             speaker.spoke += 1;
-            speaker.done = onDone;
+            speaker.what = what;
+            speaker.end = onEnd;
+            speaker.done = () => onEnd('finished');
           },
           stop: () => {
             speaker.stopped += 1;
           },
         }
       : null,
+    ...(options.cues === undefined
+      ? {}
+      : {
+          earcons: {
+            play: kind => void options.cues?.played.push(`tone:${kind}`),
+            unlock: () => void options.cues?.played.push('tone:unlock'),
+          },
+          haptics: { pulse: kind => void options.cues?.played.push(`buzz:${kind}`) },
+        }),
     wakeLock: {
       acquire: () => Promise.resolve(wake.granted),
       release: () => void log.push('wake.release'),
@@ -232,6 +282,8 @@ const rig = (options: { speaker?: boolean; canSend?: boolean; graceMs?: unknown;
   const runner = new LiveRunner(ports, {
     canSend: options.canSend ?? true,
     graceMs: options.graceMs,
+    ...(options.tapToListen === undefined ? {} : { tapToListen: options.tapToListen }),
+    ...(options.cues === undefined ? {} : { cues: () => options.cues?.on ?? true }),
     onTurn: turn => void turns.push(turn),
   });
   const rigResult: Rig = {
@@ -1067,5 +1119,169 @@ describe('LiveRunner — dispose', () => {
     r.signal({ kind: 'done' });
     r.runner.dispose();
     should(r.speaker.stopped).be.above(0);
+  });
+});
+
+describe('LiveRunner — reading the reply (slice 5)', () => {
+  const working = async (r: Rig): Promise<void> => {
+    await speakTurn(r);
+    await r.settle();
+    r.clock.advance(1_500);
+    await r.settle();
+  };
+  /** A rig that has sent a turn and is working, with a reader. */
+  const worked = async (options: Parameters<typeof rig>[0] = {}): Promise<Rig> => {
+    const r = await listening({ speaker: true, ...options });
+    await working(r);
+    return r;
+  };
+
+  it('unlocks speech and sound inside the tap that starts Live, and again inside every Resume', async () => {
+    const r = rig({ speaker: true, cues: { played: [], on: true } });
+    should(r.speaker.unlocked).equal(0);
+    r.runner.start();
+    should(r.speaker.unlocked).equal(1);
+    await r.settle();
+    r.runner.hold();
+    r.runner.resume();
+    should(r.speaker.unlocked).equal(2);
+  });
+
+  it('remembers what the page held as the message goes, and reads the reply once the ferret is done', async () => {
+    const r = await worked();
+    should(r.speaker.marked).equal(1);
+    r.signal({ kind: 'done' });
+    should(r.runner.state.phase).equal('reading');
+    should(r.speaker.what).equal('reply');
+    should(r.speaker.spoke).equal(1);
+    // Half-duplex: the microphone was shut when the message went, and is not reopened to read.
+    should(r.takes.filter(take => !take.cancelled).length).equal(0);
+    r.speaker.done();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.takes.filter(take => !take.cancelled).length).equal(1);
+  });
+
+  it('a question is read, and Live then waits at the prompt with the microphone shut', async () => {
+    const r = await worked();
+    r.signal({ kind: 'needs-input' });
+    should(r.runner.state.phase).equal('reading');
+    should(r.speaker.what).equal('question');
+    r.speaker.done();
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('needs-input');
+    should(r.takes.filter(take => !take.cancelled).length).equal(0);
+  });
+
+  it('a tap (skip) stops the speech at once and Live listens; the stopped speech answering late changes nothing', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    const endReading = r.speaker.end;
+    r.runner.skip();
+    should(r.speaker.stopped).be.above(0);
+    endReading('stopped');
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('Repeat reads again; the first reading ending late does not end the second', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    const first = r.speaker.end;
+    r.runner.repeat();
+    should(r.speaker.spoke).equal(2);
+    first('stopped');
+    await r.settle();
+    should(r.runner.state.phase).equal('reading');
+    r.speaker.done();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+  });
+
+  it('a message sent by hand while reading stops the reading and follows the new turn', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    r.runner.outsideSend();
+    should(r.speaker.stopped).be.above(0);
+    should(r.runner.state.phase).equal('working');
+    should(r.speaker.marked).equal(2);
+    r.signal({ kind: 'done' });
+    should(r.runner.state.phase).equal('reading');
+    should(r.speaker.spoke).equal(2);
+  });
+
+  it('the tab hiding while reading stops the speech and pauses Live', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    r.setVisible(false);
+    should(r.runner.state.phase).equal('paused');
+    should(r.speaker.stopped).be.above(0);
+  });
+
+  it('speech that breaks keeps Live going, text only, with the notice', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    r.speaker.end('failed');
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.runner.state.notice).deepEqual({ kind: 'read-failed', why: 'failed' });
+  });
+
+  it('no reader at all (no voice on this device): the reply is not read and Live listens again', async () => {
+    const r = await listening();
+    await working(r);
+    r.signal({ kind: 'done' });
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.runner.state.canRead).be.false();
+  });
+
+  it('on an iPhone Live waits for Listen after a reply, and the tap opens the microphone', async () => {
+    const r = await worked({ tapToListen: true });
+    r.signal({ kind: 'done' });
+    r.speaker.done();
+    await r.settle();
+    should(r.runner.state.phase).equal('hold');
+    should(r.runner.state.holdReason).equal('listen');
+    should(r.takes.filter(take => !take.cancelled).length).equal(0);
+    r.runner.resume();
+    await r.settle();
+    should(r.runner.state.phase).equal('listening');
+    should(r.takes.filter(take => !take.cancelled).length).equal(1);
+  });
+
+  it('ending Live while reading stops the speech', async () => {
+    const r = await worked();
+    r.signal({ kind: 'done' });
+    r.runner.end();
+    should(r.speaker.stopped).be.above(0);
+    should(r.runner.state.phase).equal('off');
+  });
+
+  it('makes the tones in order, with a buzz for sent and reply ready — and none when they are off', async () => {
+    const cues = { played: [] as string[], on: true };
+    const r = await worked({ cues });
+    r.signal({ kind: 'done' });
+    r.speaker.done();
+    await r.settle();
+    r.runner.end();
+    const sounds = cues.played.filter(entry => entry !== 'tone:unlock');
+    should(sounds).deepEqual([
+      'tone:listening',
+      'tone:sent',
+      'buzz:sent',
+      'tone:reply-ready',
+      'buzz:reply-ready',
+      'tone:listening',
+      'tone:stopped',
+    ]);
+    const quiet = { played: [] as string[], on: false };
+    const q = await worked({ cues: quiet });
+    q.signal({ kind: 'done' });
+    q.speaker.done();
+    await q.settle();
+    q.runner.end();
+    should(quiet.played.filter(entry => entry !== 'tone:unlock')).deepEqual([]);
   });
 });

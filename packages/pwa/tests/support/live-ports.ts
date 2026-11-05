@@ -7,6 +7,8 @@
 import type { LiveRunnerPorts } from '../../src/lib/voice-chat/live-runner.ts';
 import type {
   LevelMeterHandle,
+  ReadEnd,
+  ReadWhat,
   ReplySignal,
   SendOutcome,
   TakeHandle,
@@ -33,9 +35,21 @@ export interface FakeLive {
   /** How long `endTurn` takes to answer, in fake milliseconds: the engine's remaining decode time. */
   readonly decodeMs: { current: number };
   sendResult: { current: SendOutcome };
+  /** The fake reader's record (present when `reader` was asked for). */
+  readonly reader: {
+    readonly reads: ReadWhat[];
+    readonly stops: { count: number };
+    readonly marks: { count: number };
+    /** End the reading in progress. */
+    end(end: ReadEnd): void;
+  };
 }
 
-export const fakeLive = (): FakeLive => {
+export const fakeLive = (options: { reader?: boolean } = {}): FakeLive => {
+  const reads: ReadWhat[] = [];
+  const stops = { count: 0 };
+  const marks = { count: 0 };
+  let endReading: (end: ReadEnd) => void = () => undefined;
   let now = 0;
   const pending: { at: number; run: () => void; live: boolean }[] = [];
   const takes: FakeLive['takes'] = [];
@@ -116,7 +130,22 @@ export const fakeLive = (): FakeLive => {
         },
       }),
     },
-    speaker: null,
+    reader: options.reader
+      ? {
+          supported: true,
+          unlock: () => undefined,
+          mark: () => {
+            marks.count += 1;
+          },
+          read: (what, onEnd) => {
+            reads.push(what);
+            endReading = onEnd;
+          },
+          stop: () => {
+            stops.count += 1;
+          },
+        }
+      : null,
     wakeLock: { acquire: async () => true, release: () => undefined },
     visibility: {
       visible: () => visible,
@@ -161,5 +190,6 @@ export const fakeLive = (): FakeLive => {
     outcome,
     decodeMs,
     sendResult,
+    reader: { reads, stops, marks, end: end => endReading(end) },
   };
 };

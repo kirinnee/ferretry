@@ -747,6 +747,9 @@ refused storage keeps the choice in memory and says so. Nothing in it is a secre
 | Speed             | 0.8× – 2.0×                                          | 1.1×                     |
 | Longest reading   | 30 seconds · 1 · 2 · 5 minutes · No limit            | 1 minute                 |
 | What to read      | Last message of the turn · Every message             | Last message of the turn |
+| Live sounds       | On / Off (Live's tones, and the Android buzz)        | **On**                   |
+
+**While Live voice is on, Auto-read stands down:** Live reads its own turns ([Reading the reply](#reading-the-reply)), so a reply is never read twice. The "Auto-read replies" setting is not changed; it works again when Live ends.
 
 The voice list groups voices **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as Chrome's
 "Google …" ones), and a remote voice is labelled in words with who it sends text to ("(sends text to Google)") and warns in words when chosen. **Preview voice** speaks one sentence
@@ -909,16 +912,17 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 
 ### What it does
 
-| State             | What you see                                                                                                                          | Mic     |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Starting          | "Starting…" until the mic is open **and** the Live-tab lock is ours ("Allow the microphone if your browser asks." on the first start) | opening |
-| Listening         | level bars (one labelled "Mic level" meter with reduced motion), "Listening"                                                          | open    |
-| Hearing           | the words appearing in the composer                                                                                                   | open    |
-| Sending in 1.5 s  | a ring counting down, **Hold**, **Send now**                                                                                          | open    |
-| Working           | "Working 0:12", **End**                                                                                                               | **off** |
-| Reading (slice 5) | reserved: the reply being read aloud                                                                                                  | **off** |
-| On hold           | "On hold — paused while you type", **Resume**                                                                                         | off     |
-| Paused            | the tab is hidden                                                                                                                     | off     |
+| State              | What you see                                                                                                                          | Mic     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Starting           | "Starting…" until the mic is open **and** the Live-tab lock is ours ("Allow the microphone if your browser asks." on the first start) | opening |
+| Listening          | level bars (one labelled "Mic level" meter with reduced motion), "Listening"                                                          | open    |
+| Hearing            | the words appearing in the composer                                                                                                   | open    |
+| Sending in 1.5 s   | a ring counting down, **Hold**, **Send now**                                                                                          | open    |
+| Working            | "Working 0:12", **End**                                                                                                               | **off** |
+| Reading            | "Reading reply" (or "Reading question"): the sentence being said is highlighted in the chat; **Stop reading**, **Repeat**, **End**    | **off** |
+| Your turn (iPhone) | "The reply has been read. Tap Listen to talk." and one big **Listen** button                                                          | off     |
+| On hold            | "On hold — paused while you type", **Resume**                                                                                         | off     |
+| Paused             | the tab is hidden                                                                                                                     | off     |
 
 - **The words are in the composer, visibly, during the countdown.** What is sent is exactly what the composer
   shows at that moment. Edit them, add to them or delete them: typing pauses the countdown and holds, and
@@ -934,11 +938,12 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   Parakeet) open a new session and carry the earlier words; the whole-take engines (Parakeet, Whisper) keep the
   mic open and only discard the early decode (`discard()`, see [Starting to transcribe during the send
   countdown](#starting-to-transcribe-during-the-send-countdown)).
-- **Interrupting is a tap or a key, never your voice.** The mic is **off** while the ferret works, so nothing it
-  or the room says can send or stop anything. **Skip**/**End** do it by hand.
-- **Keys** (only when focus is not in a text field): **Enter** = Send now, **H** = Hold, **Space** = Resume
-  (or Skip while the ferret works), **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat
-  page).
+- **Interrupting is a tap or a key, never your voice.** The mic is **off** while the ferret works and while its
+  reply is read, so nothing it or the room says can send or stop anything.
+- **Keys** (only when focus is not in a text field, and never with Ctrl, Cmd or Alt held): **Enter** = Send now,
+  **H** = Hold, **Space** = Resume. **While a reply is being read:** **Space**, **Esc** and **S** stop the
+  reading and Live listens again (Esc does _not_ end Live then — use **End**), **R** reads it again. Otherwise
+  **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat page).
 - **A stop is sticky (the surprise-send rule).** Nothing sends unless the visible countdown elapsed in an
   un-parked state. **Hold**, typing and a hidden tab pressed while the words are still being worked out stop
   capture and the level frames at once (the transcription already under way is allowed to finish, so nothing
@@ -970,6 +975,92 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
   The mic button is held back while Live is on, and Live while the mic is recording.
 
+### Reading the reply
+
+When the ferret's turn ends after a message **Live sent**, Live reads the reply aloud and then listens again.
+The words and the voice are the Read aloud / Auto-read ones ([What is read, and what is
+described](#what-is-read-and-what-is-described), [Which voice](#which-voice)); Live only decides **when**.
+
+- **Only the last message of the turn is read** (the "Last message of the turn" choice; "Every message" is
+  honoured if you chose it). Code, tables, diagrams and pictures are **described** ("Code block, 14 lines of
+  TypeScript. It's on screen."), never read out. A turn that wrote no text says "Done. No message." — it never
+  falls back to the previous turn's reply, because the page's rows are remembered as the message goes
+  (`ReaderPort.mark`).
+- **It stops at about a minute** (the "Longest reading" setting, 1 minute by default) and says "There's more on
+  screen." The cut is made by the speakable text, not by the loop: to the loop a capped reading is one that
+  ended. **R** reads the reply again from the start — there is no "read the rest" yet.
+- **The text settles first.** The daemon says the turn is over a moment before the last record always shows, so
+  the reply is picked once the conversation has held still for 500 ms (at most 3 s) — `live-reader.ts`.
+- **The microphone is off the whole time** (half-duplex): it was shut when the message went and is reopened only
+  when the speech ends. Nothing the voice says can be heard, transcribed or sent. The state is **Reading reply**;
+  the sentence being said is highlighted in the chat and scrolled into view (the same captions as Read aloud).
+- **The live region says the state, never the reply** ("Reading reply"): a screen reader would otherwise speak
+  over the voice. If you use VoiceOver or TalkBack, consider switching Read aloud off — Live then shows the
+  reply and listens again.
+- **Only a tap or a key interrupts it** (see Keys above): the big **Stop reading** button, **Space**, **Esc**, **S**.
+  There is no interrupt by voice.
+- **A question is read, then Live stops at the prompt.** When the ferret needs you (`needs-input`) Live reads the
+  question and its options, then lands **On hold** with the normal prompt on screen. It does **not** listen for an
+  answer and has **no way to accept an approval by voice** — permission, sudo, secret and payment prompts are
+  only ever read. A skipped, broken or hidden-tab reading lands at the same prompt, never on Listening. The
+  machine tests assert that no event can produce a send from a question or its prompt.
+- **A message you send by hand while a reply is being read** (typing in the box and pressing send) stops the
+  reading — it belongs to an older turn — and Live follows the new one.
+- **If it cannot speak, Live keeps going as text.** A speech error says "Couldn't speak this reply. It is on
+  screen."; a device with no built-in voice (remote voices are never chosen automatically) says "This device has
+  no built-in voice for reading, so the reply stays on screen." Either way the reply is on screen and Live
+  listens again.
+- **Live reads its own turns, and nothing else does while it is on.** The page's "Auto-read replies" stands
+  down while Live is on (`useAutoRead({ suspended })`, the setting itself is untouched), so a reply is never
+  read twice; it comes back by itself when Live ends. Both go through the page's **one** read-aloud controller,
+  so two voices can never talk at once.
+- **Every reading has an id.** A reading that ends late — the stopped one answering after **R**, a speech that was
+  replaced — is ignored, so it can never end the reading that replaced it.
+
+### Sounds and buzzes
+
+Four short tones from Web Audio oscillators (no files, `lib/voice-chat/earcons.ts`): a **rising pair** when Live
+starts listening (the first time and after each reply), one **short blip** when your message is sent, a
+**two-note chime** when the reply is ready (including a question), a **falling pair** when Live stops. They are
+told apart by shape, not only pitch, are quiet (peak gain 0.12) and last under 0.4 s; the "listening" tone sounds
+as the mic opens, and the endpointer ignores anything shorter than a real utterance, so it is never taken for a
+turn. A refusal to start, hearing you, a countdown, a hold and a take that came to nothing make no sound. On an
+Android phone `navigator.vibrate` buzzes briefly for **sent** and **reply ready** (guarded: iOS web has no
+vibration, and a refusing device is silent). **Settings › Voice › Live sounds** switches the tones **and** the
+buzzes off (`fy-live-voice-v1`, `earcons`, on by default). The audio context is created and resumed inside the tap
+that starts Live (browsers refuse sound before a gesture).
+
+### Proving it on an iPhone
+
+The iPhone behaviour is **built but unproven** — nobody has run it on a real iPhone. What the code does:
+
+- **Speech is unlocked inside the Live tap** (`ReaderPort.unlock` → a silent utterance), and again inside every
+  Resume/Listen tap, because iOS only lets speech start from a gesture.
+- **Half-duplex:** the mic is closed before any speech (it is closed while the ferret works anyway), because an
+  open mic can route iOS audio to the earpiece.
+- **After each reply Live shows one big "Listen"** (state "Your turn") instead of reopening the mic by itself,
+  where the browser looks like an iPhone/iPad (`lib/voice-chat/platform.ts`, a cautious user-agent guess). Anywhere
+  else, a mic that Live reopened by itself and was **refused** falls back to the same **Listen** — so a wrong guess
+  costs one tap, not a stuck loop.
+
+What must be tried on a real iPhone before this is called done (Safari tab, and the Home Screen app):
+
+1. Press Live. The mic prompt appears, you can speak, the turn sends, and the **reply is spoken aloud** from the
+   loudspeaker (not the earpiece) at a normal volume.
+2. After the reply, **Listen** appears (or the mic reopened by itself — note which). Tapping it opens the mic and
+   the next turn works. Repeat for five turns in a row.
+3. **Stop reading** stops the speech at once; the next tap on **Listen** works.
+4. Lock the screen mid-reading and unlock: Live is **Paused** with "Resume?" and nothing speaks by itself.
+5. Take a phone call or switch app mid-reading: speech does not resume on its own.
+6. A reply with code and a table is **described**, not read out.
+7. With the silent switch on, note whether speech is heard (Safari plays speech through the media channel;
+   record what actually happens).
+8. Home Screen app + Browser voice: Live refuses and says to pick an on-device voice (existing behaviour).
+9. Whether the "listening" tone is heard by the mic and taken as speech (it should not be).
+
+Record the iOS version, the model and the result of each in this section; until then every claim above about
+iOS is a design intent.
+
 ### Clean-up in Live: Fix only
 
 Live runs the Fix clean-up (`lib/voice-chat/live-cleanup.ts`) with a 3 s budget, and **any failure sends the
@@ -989,8 +1080,8 @@ on-device engine). The words live in `lib/voice-chat/live-view.ts` (`LIVE_BLOCK_
 `lib/voice-chat/live-machine.ts` is a pure reducer `(state, event) → { state, effects }`, tested table-driven
 including every race (speech returning during the countdown, a late transcript for an old attempt, a failed
 send, typing while words are still being worked out, hiding the tab mid-send). `live-runner.ts` owns the I/O
-through ports (`lib/voice-chat/ports.ts`: level frames, take, send, reply feed, wake lock, visibility, clock,
-mic lock) and drops every stale async answer by generation. `reply-feed.ts` counts a reply as finished only
+through ports (`lib/voice-chat/ports.ts`: level frames, take, send, reply feed, reader, earcons, haptics, wake
+lock, visibility, clock, mic lock; `live-reader.ts` is the reader over the page's read-aloud controller) and drops every stale async answer by generation. `reply-feed.ts` counts a reply as finished only
 once `working` was seen or `turnStateAt` changed — never by comparing clocks.
 
 ### Latency: last word to sent
@@ -1019,19 +1110,20 @@ real microphones, noise suppression, phones, Safari, any GPU.
 
 ### Still open
 
-- **Reading the reply aloud is not wired.** The **Reading** state, the `speak` / `stopSpeaking` effects and a
-  `SpeakerPort` exist and are tested with a fake port; nothing is connected to them yet (slice 5).
+- **"Read the rest"** of a reply cut at the cap is not built: **R** reads it again from the start.
+- **No spoken summary, no voice to answer a question.** The reply is read as it is; a question is read and
+  answered by tapping.
 - **No `⌥L` chord yet;** the palette entry and the button are the ways in.
 - **No separate "connection lost" state.** A lost connection shows as the send failing (**On hold**, "Couldn't
   send. Your words are in the message box."), or as Live ending when the composer can no longer send.
 - **A daemon without `turnState`** never reports a reply, so Live stays in **Working** until you press **Skip**
   or **End**.
-- **The iOS mic reopen is unproven:** whether Safari lets Live reopen the mic after the ferret works, without a
-  fresh tap, has not been tried on a device. The first turn is from the tap; later turns are unproven there.
+- **iOS is unproven:** the Listen fallback, the speech unlock and the loudspeaker routing have not been tried on
+  a device — see [Proving it on an iPhone](#proving-it-on-an-iphone). The first turn is from the tap; the rest is design intent.
 
 ## Not built yet
 
-- **Live voice reading the reply aloud:** the listen-and-send loop is built (see [Live voice](#live-voice-the-one-place-voice-sends)); reading the ferret's reply aloud is not wired yet.
+- **Live voice settings screen and the `⌥L` chord** (slice 6): the loop, the reading and the sounds are built (see [Live voice](#live-voice-the-one-place-voice-sends)); the Live-specific settings (pause length, countdown, keep-screen-on) are not on a screen yet.
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
   downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
   channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per

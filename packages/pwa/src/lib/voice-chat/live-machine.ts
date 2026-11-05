@@ -33,11 +33,25 @@
  *   - AN EMPTY OR NOISE TAKE goes quietly back to listening.
  *   - THE MICROPHONE IS OPEN ONLY WHILE `listening`, `hearing` or `sending` (until the send starts).
  *
- * `reading` and the `speak` / `stopSpeaking` effects exist and are tested; until slice 5 wires a speaker
- * the runner starts with `canRead: false` and a finished reply goes straight back to listening.
+ * READING (docs/voice.md › Live voice › Reading the reply):
+ *
+ *   - A turn that ends (`working` → `done`) is READ when the device can speak (`canRead`): phase `reading`, the
+ *     microphone still CLOSED (half-duplex: it was shut when the message went), then listening again when the
+ *     speech ends. A turn that stops on a QUESTION is read too (`readKind: 'question'`) and then lands On hold
+ *     for the prompt on screen — Live never listens for an answer to it and has no way to accept one by voice.
+ *   - Every reading has an id. An end that is not the current reading's (a stopped one answering late, after a
+ *     Repeat) is ignored, so a late echo can never end the reading that replaced it.
+ *   - ONLY A TAP OR A KEY STOPS A READING (`skip`): the microphone is not open to hear anything else.
+ *   - A speech that breaks (`failed`) or has no voice that stays on the device (`unavailable`) is text only:
+ *     the reply is on screen, a notice says so, and Live listens again.
+ *   - `tapToListen` (an iPhone, where a page may not open the microphone without a tap) lands On hold with
+ *     reason `listen` after each reply instead of reopening the microphone by itself; and when an automatic
+ *     reopen is refused anywhere, the same Listen hold is the fallback.
+ *   - A message sent BY HAND while a reply is being read (`outside-send`) stops the reading — it belongs to an
+ *     older turn — and Live follows the new one.
  */
 
-import type { LiveBlock } from './ports.ts';
+import type { LiveBlock, ReadEnd, ReadWhat } from './ports.ts';
 
 /** The countdown between the end of a turn and the send, in ms. 0 sends as soon as the words are shown. */
 export const DEFAULT_GRACE_MS = 1_500;
@@ -63,7 +77,7 @@ export type LivePhase =
   | 'reading'
   | 'hold'
   | 'paused';
-type HoldReason = 'user' | 'typing' | 'send-failed' | 'needs-input';
+type HoldReason = 'user' | 'typing' | 'send-failed' | 'needs-input' | 'listen';
 type PauseReason = 'hidden';
 /** Why a turn ended: the endpointer's rule, or the person's "Send now". */
 type EndReason = 'pause' | 'engine-hint' | 'max-turn' | 'user';
@@ -72,7 +86,9 @@ type EndReason = 'pause' | 'engine-hint' | 'max-turn' | 'user';
 export type LiveNotice =
   | { readonly kind: 'blocked'; readonly block: LiveBlock }
   | { readonly kind: 'ended'; readonly why: 'idle' | 'ferret-stopped' }
-  | { readonly kind: 'take-failed'; readonly block: LiveBlock };
+  | { readonly kind: 'take-failed'; readonly block: LiveBlock }
+  /** The reply could not be read aloud: it is on screen. */
+  | { readonly kind: 'read-failed'; readonly why: 'failed' | 'unavailable' };
 
 /** Where a phase waits to go once the words being worked out arrive. */
 type Park =
@@ -83,6 +99,14 @@ export interface LiveState {
   readonly phase: LivePhase;
   readonly graceMs: number;
   readonly canRead: boolean;
+  /** This device cannot reopen the microphone without a tap (an iPhone): after a reply, Live waits for "Listen". */
+  readonly tapToListen: boolean;
+  /** What is being read, in `reading`. */
+  readonly readKind: ReadWhat | null;
+  /** Which reading is current; an end for another is ignored. */
+  readonly readId: number;
+  /** The microphone is being reopened by Live itself (not by a tap): a refusal falls back to "Listen". */
+  readonly autoReopen: boolean;
   /** The tab is hidden now (kept in every phase: a reply that lands while away pauses instead of listening). */
   readonly hidden: boolean;
   /** While `starting`: the microphone and the level meter are open. */
@@ -161,7 +185,7 @@ export type LiveEffect =
   | { readonly type: 'send' }
   | { readonly type: 'watchReply' }
   | { readonly type: 'stopWatchReply' }
-  | { readonly type: 'speak' }
+  | { readonly type: 'speak'; readonly what: ReadWhat; readonly id: number }
   | { readonly type: 'stopSpeaking' }
   | { readonly type: 'recordTurn'; readonly numbers: TurnNumbers };
 
@@ -173,6 +197,7 @@ export type LiveEvent =
       readonly visible: boolean;
       readonly graceMs?: unknown;
       readonly canRead?: boolean;
+      readonly tapToListen?: boolean;
     }
   | { readonly type: 'locks'; readonly granted: boolean }
   | { readonly type: 'listening' }
@@ -200,8 +225,13 @@ export type LiveEvent =
   | { readonly type: 'sent'; readonly atMs: number }
   | { readonly type: 'send-failed' }
   | { readonly type: 'reply'; readonly signal: 'working' | 'done' | 'needs-input' | 'ended' }
-  | { readonly type: 'speak-done' }
-  | { readonly type: 'skip' };
+  /** A reading ended: `id` is the reading that ended and `end` how. */
+  | { readonly type: 'speak-done'; readonly id: number; readonly end: ReadEnd }
+  /** The person stopped the reading (tap, Space, Esc, S). */
+  | { readonly type: 'skip' }
+  | { readonly type: 'repeat' }
+  /** A message was sent by hand (not by Live): a reading in progress belongs to an older turn. */
+  | { readonly type: 'outside-send'; readonly atMs: number };
 
 export interface LiveStep {
   readonly state: LiveState;
@@ -212,6 +242,10 @@ export const INITIAL_LIVE_STATE: LiveState = Object.freeze({
   phase: 'off',
   graceMs: DEFAULT_GRACE_MS,
   canRead: false,
+  tapToListen: false,
+  readKind: null,
+  readId: 0,
+  autoReopen: false,
   hidden: false,
   micReady: false,
   lockReady: false,
@@ -253,6 +287,7 @@ const FRESH_TURN = {
   sendInFlight: false,
   resumed: false,
   park: null,
+  autoReopen: false,
 } as const;
 
 const CLOSE_ALL: readonly LiveEffect[] = [
@@ -291,6 +326,7 @@ const toOff = (state: LiveState, notice: LiveNotice | null): LiveStep =>
       ...INITIAL_LIVE_STATE,
       graceMs: state.graceMs,
       canRead: state.canRead,
+      tapToListen: state.tapToListen,
       hidden: state.hidden,
       turn: state.turn,
       notice,
@@ -420,10 +456,47 @@ const reopen = (state: LiveState): LiveStep =>
     [{ type: 'openMic' }],
   );
 
+/**
+ * A turn is over (read, or not readable): listen again. Live reopens the microphone itself — and on a device that
+ * cannot do that without a tap (`tapToListen`) waits On hold for "Listen" instead.
+ */
+function listenAgain(state: LiveState, notice: LiveNotice | null): LiveStep {
+  const base = { ...state, ...FRESH_TURN, readKind: null, micReady: false, notice };
+  if (state.tapToListen)
+    return step({ ...base, phase: 'hold', holdReason: 'listen', pauseReason: null }, [{ type: 'closeMic' }]);
+  return step({ ...base, phase: 'starting', lockReady: true, autoReopen: true, holdReason: null }, [
+    { type: 'openMic' },
+  ]);
+}
+
+/** Speak what the turn left: a new reading with a new id. */
+function beginReading(state: LiveState, what: ReadWhat, before: readonly LiveEffect[]): LiveStep {
+  const id = state.readId + 1;
+  return step({ ...state, ...FRESH_TURN, phase: 'reading', readKind: what, readId: id }, [
+    ...before,
+    { type: 'speak', what, id },
+  ]);
+}
+
+/** The reading is over (ended, failed or stopped): a question lands on its prompt, a reply back on listening. */
+function finishReading(state: LiveState, end: ReadEnd, before: readonly LiveEffect[]): LiveStep {
+  if (state.readKind === 'question')
+    return step(
+      { ...state, ...FRESH_TURN, phase: 'hold', holdReason: 'needs-input', readKind: null, notice: null },
+      before,
+    );
+  const notice: LiveNotice | null =
+    end === 'failed' || end === 'unavailable' ? { kind: 'read-failed', why: end } : null;
+  const listening = listenAgain(state, notice);
+  return step(listening.state, [...before, ...listening.effects]);
+}
+
 /** `starting` becomes `listening` only when the microphone is open AND the lock is ours. */
 function startedOrWaiting(state: LiveState): LiveStep {
   if (!(state.micReady && state.lockReady)) return step(state);
-  return state.hidden ? stepToPaused(state) : step(toListening(state, { notice: null }), [idleTimer]);
+  // A reply that could not be read says so on the first line of listening; anything else is cleared.
+  const notice = state.notice?.kind === 'read-failed' ? state.notice : null;
+  return state.hidden ? stepToPaused(state) : step(toListening(state, { notice }), [idleTimer]);
 }
 
 export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
@@ -442,7 +515,14 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
     )
       return phase === 'starting' ? stepToPaused(seen) : park(seen, { phase: 'paused', reason: 'hidden' });
     if (phase === 'reading')
-      return step({ ...seen, phase: 'paused', pauseReason: 'hidden' }, [{ type: 'stopSpeaking' }]);
+      // A question stays a question: it lands on its prompt. A reply waits for the person to come back.
+      return state.readKind === 'question'
+        ? step({ ...seen, ...FRESH_TURN, phase: 'hold', holdReason: 'needs-input', readKind: null }, [
+            { type: 'stopSpeaking' },
+          ])
+        : step({ ...seen, ...FRESH_TURN, phase: 'paused', pauseReason: 'hidden', readKind: null }, [
+            { type: 'stopSpeaking' },
+          ]);
     return step(seen);
   }
   // A refusal of the one-Live-tab lock ends Live in EVERY active phase: two tabs must never both capture and send.
@@ -460,6 +540,7 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
         ...INITIAL_LIVE_STATE,
         graceMs: resolveGraceMs(event.graceMs),
         canRead: event.canRead === true,
+        tapToListen: event.tapToListen === true,
         hidden: !event.visible,
         turn: state.turn,
       };
@@ -470,6 +551,11 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
     }
 
     case 'starting': {
+      // The microphone Live reopened by itself was refused (an iPhone wants a tap): wait for "Listen".
+      if (event.type === 'blocked' && state.autoReopen)
+        return step({ ...state, ...FRESH_TURN, phase: 'hold', holdReason: 'listen', micReady: false, readKind: null }, [
+          { type: 'closeMic' },
+        ]);
       if (event.type === 'blocked') return toOff(state, { kind: 'blocked', block: event.block });
       if (event.type === 'locks') return startedOrWaiting({ ...state, lockReady: true });
       if (event.type === 'listening') return startedOrWaiting({ ...state, micReady: true });
@@ -485,24 +571,36 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
 
     case 'working': {
       if (event.type !== 'reply') return step(state);
-      if (event.signal === 'needs-input')
-        return step({ ...state, phase: 'hold', holdReason: 'needs-input', ...FRESH_TURN }, [
-          { type: 'stopWatchReply' },
-        ]);
-      if (event.signal !== 'done') return step(state);
       const stop: LiveEffect = { type: 'stopWatchReply' };
+      // The ferret needs the person: read the question (and options) if this device can, then stop at the prompt.
+      if (event.signal === 'needs-input')
+        return state.canRead && !state.hidden
+          ? beginReading(state, 'question', [stop])
+          : step({ ...state, phase: 'hold', holdReason: 'needs-input', ...FRESH_TURN }, [stop]);
+      if (event.signal !== 'done') return step(state);
       if (state.hidden) return step({ ...state, phase: 'paused', pauseReason: 'hidden' }, [stop]);
-      if (state.canRead) return step({ ...state, phase: 'reading' }, [stop, { type: 'speak' }]);
-      return step({ ...state, phase: 'starting', micReady: false, lockReady: true }, [stop, { type: 'openMic' }]);
+      if (state.canRead) return beginReading(state, 'reply', [stop]);
+      const again = listenAgain(state, null);
+      return step(again.state, [stop, ...again.effects]);
     }
 
     case 'reading': {
-      if (event.type === 'speak-done' || event.type === 'skip')
-        return step({ ...state, phase: 'starting', micReady: false, lockReady: true }, [
-          { type: 'stopSpeaking' },
-          { type: 'openMic' },
-        ]);
-      return step(state);
+      switch (event.type) {
+        case 'speak-done':
+          return event.id === state.readId ? finishReading(state, event.end, []) : step(state);
+        case 'skip':
+          return finishReading(state, 'stopped', [{ type: 'stopSpeaking' }]);
+        case 'repeat':
+          return beginReading(state, state.readKind ?? 'reply', [{ type: 'stopSpeaking' }]);
+        case 'outside-send':
+          // A message sent by hand: this reading belongs to an older turn. Follow the new one.
+          return step(
+            { ...state, ...FRESH_TURN, phase: 'working', readKind: null, sentAtMs: event.atMs, turn: state.turn + 1 },
+            [{ type: 'stopSpeaking' }, { type: 'watchReply' }],
+          );
+        default:
+          return step(state);
+      }
     }
 
     case 'hold': {

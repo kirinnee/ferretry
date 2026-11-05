@@ -50,6 +50,7 @@ import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import { useSendOutbox } from '../lib/store.tsx';
 import type { LiveComposerBridge } from '../lib/voice-chat/live-assembly.ts';
+import type { LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
 import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
@@ -205,6 +206,10 @@ export interface ComposerProps {
    * Live button: the page that holds the session offers it.
    */
   readonly liveReply?: ReplySource;
+  /** The conversation on screen, for reading the ferret's reply aloud in Live. Absent: Live shows replies and does not read. */
+  readonly liveReading?: LiveReadingSource;
+  /** Told when Live turns on or off, so the page's own auto-read stands down while Live reads its turns. */
+  readonly onLiveActiveChange?: (active: boolean) => void;
   /** Test/visual seam: the ports, clock and engines Live voice runs over. Production uses the page's own. */
   readonly liveVoiceSeams?: LiveVoiceControlProps['seams'];
   /** One already-read daemon fleet slice, shared with transcript references. */
@@ -480,6 +485,8 @@ export function Composer({
   dictationRecognition,
   dictationConversation,
   liveReply,
+  liveReading,
+  onLiveActiveChange,
   liveVoiceSeams,
   autocompleteSessions,
   autocompleteAgenda,
@@ -962,6 +969,10 @@ export function Composer({
     onSent?.(sent);
   };
 
+  /** Live's own send is in progress: it is not "a message sent by hand". */
+  const liveOwnSend = useRef(false);
+  /** Tells Live a message went by hand; set once the Live control exists. */
+  const liveOutsideSend = useRef<(() => void) | null>(null);
   const submit = async (interrupt = false): Promise<boolean> => {
     if (!canSubmit || submitLock.current) return false;
     // The word a phone keyboard is still composing is part of the message: the composition ends here,
@@ -971,6 +982,8 @@ export function Composer({
       return false;
     }
     submitLock.current = true;
+    // A message sent by hand while Live is reading a reply: that reading is about an older turn.
+    if (!liveOwnSend.current) liveOutsideSend.current?.();
     onSending?.();
     // What this press sends, remembered against everything typed before it lands.
     const mark = shared.markSend();
@@ -1494,9 +1507,21 @@ export function Composer({
     if (liveSendRequest === 0) return;
     const resolve = liveSendResolve.current;
     liveSendResolve.current = null;
-    void submit().then(sent => resolve?.(sent));
+    liveOwnSend.current = true;
+    void submit()
+      .then(sent => resolve?.(sent))
+      .finally(() => {
+        liveOwnSend.current = false;
+      });
   }, [liveSendRequest]);
   const [liveActive, setLiveActive] = useState(false);
+  const handleLiveActive = useCallback(
+    (active: boolean) => {
+      setLiveActive(active);
+      onLiveActiveChange?.(active);
+    },
+    [onLiveActiveChange],
+  );
   const [dictating, setDictating] = useState(false);
   const liveControl = useLiveVoiceControl({
     settings: dictationSettings,
@@ -1509,9 +1534,12 @@ export function Composer({
     ...(dictationConversation === undefined ? {} : { readConversation: dictationConversation }),
     compact,
     busyElsewhere: dictating,
-    onActiveChange: setLiveActive,
+    onActiveChange: handleLiveActive,
+    ...(liveReading === undefined ? {} : { reading: liveReading }),
     ...(liveVoiceSeams === undefined ? {} : { seams: liveVoiceSeams }),
   });
+
+  liveOutsideSend.current = liveControl.live.outsideSend;
 
   const dictation = dictationSettings ? (
     <DictationControl

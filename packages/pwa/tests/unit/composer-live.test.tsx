@@ -56,8 +56,10 @@ interface Sent {
   fail: boolean;
 }
 
-const rig = async (options: { live?: boolean; disabled?: boolean; compact?: boolean } = {}) => {
-  const fake = fakeLive();
+const rig = async (
+  options: { live?: boolean; disabled?: boolean; compact?: boolean; reader?: boolean; onLiveActive?: boolean[] } = {},
+) => {
+  const fake = fakeLive({ reader: options.reader === true });
   // Everything but the send is a fake: the words go through the composer's own send.
   const { send: _send, ...ports } = fake.ports;
   const sent: Sent = { messages: [], fail: false };
@@ -79,6 +81,9 @@ const rig = async (options: { live?: boolean; disabled?: boolean; compact?: bool
       {...(options.live === false ? {} : { liveReply: replySource() })}
       {...(options.disabled === true ? { disabled: true } : {})}
       {...(options.compact === true ? { compact: true } : {})}
+      {...(options.onLiveActive === undefined
+        ? {}
+        : { onLiveActiveChange: (on: boolean) => options.onLiveActive?.push(on) })}
       liveVoiceSeams={{ ports }}
     />,
   );
@@ -263,6 +268,126 @@ describe('Composer Live voice', () => {
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(fake.takes[0]?.cancelled).toBe(true);
     unitClock.advance(0);
+    await composer.unmount();
+  });
+});
+
+describe('Composer Live voice — reading the reply (slice 5)', () => {
+  beforeEach(() => {
+    writeMdComposePref('off');
+    unitClock.hold();
+  });
+  afterEach(() => writeMdComposePref('on'));
+
+  /** Start Live, speak a turn, let it send, and leave it working. */
+  const working = async (options: Parameters<typeof rig>[0] = {}) => {
+    const r = await rig({ reader: true, ...options });
+    await interact(() => must(liveButton(r.composer.container), 'the Live button').click());
+    await flush();
+    await speakTurn(r.fake);
+    await interact(async () => {
+      r.fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(r.sent.messages).toEqual(['Fix the bug.']);
+    return r;
+  };
+  const done = async (fake: FakeLive): Promise<void> => {
+    await interact(async () => {
+      fake.signal({ kind: 'done' });
+      await Promise.resolve();
+    });
+    await flush();
+  };
+
+  it('tells the page when Live is on and off, so its own auto-read can stand down', async () => {
+    const seen: boolean[] = [];
+    const { composer } = await rig({ reader: true, onLiveActive: seen });
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    expect(seen.at(-1)).toBe(true);
+    // The Live button toggles: pressing it again ends Live.
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    expect(seen.at(-1)).toBe(false);
+    await composer.unmount();
+  });
+
+  it('reads the reply: the bar says Reading reply with Stop, Repeat and End — and the live region never says the reply', async () => {
+    const { composer, fake } = await working();
+    expect(fake.reader.marks.count).toBe(1);
+    await done(fake);
+    expect(fake.reader.reads).toEqual(['reply']);
+    const bar = composer.container.querySelector('[data-live-phase="reading"]');
+    expect(bar).not.toBeNull();
+    const labels = [...(bar?.querySelectorAll('button') ?? [])].map(button => button.textContent?.trim());
+    expect(labels.some(label => label?.startsWith('Stop reading'))).toBe(true);
+    expect(labels.some(label => label?.startsWith('Repeat'))).toBe(true);
+    expect(labels).toContain('End');
+    expect(bar?.querySelector('[data-live-region]')?.textContent).toBe('Reading reply');
+    // Done speaking: Live listens again.
+    await interact(async () => {
+      fake.reader.end('finished');
+      await Promise.resolve();
+    });
+    await flush();
+    expect(composer.container.querySelector('[data-live-phase="listening"]')).not.toBeNull();
+    await composer.unmount();
+  });
+
+  it('Space and Esc stop the reading and listen again; S too; R reads it again', async () => {
+    const { composer, fake } = await working();
+    await done(fake);
+    await interact(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true })));
+    await flush();
+    expect(fake.reader.reads).toEqual(['reply', 'reply']);
+    await interact(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await flush();
+    expect(fake.reader.stops.count).toBeGreaterThan(0);
+    // Esc stopped the READING; Live is still on and listening.
+    expect(composer.container.querySelector('[data-live-phase="listening"]')).not.toBeNull();
+    await composer.unmount();
+  });
+
+  it('a question is read and Live stops at the prompt: the words said cannot approve anything', async () => {
+    const { composer, fake, sent } = await working();
+    await interact(async () => {
+      fake.signal({ kind: 'needs-input' });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(fake.reader.reads).toEqual(['question']);
+    await interact(async () => {
+      fake.reader.end('finished');
+      await Promise.resolve();
+    });
+    await flush();
+    expect(composer.container.querySelector('[data-live-phase="hold"]')).not.toBeNull();
+    await interact(async () => {
+      fake.hear(0.1, 600);
+      fake.hear(0.001, 1_520);
+      fake.advance(5_000);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
+    await composer.unmount();
+  });
+
+  it('a message sent by hand while a reply is read stops the reading', async () => {
+    const { composer, fake, sent } = await working();
+    await done(fake);
+    expect(composer.container.querySelector('[data-live-phase="reading"]')).not.toBeNull();
+    const textarea = textareaOf(composer.container);
+    await typeInto(textarea, 'one more thing', 'textarea');
+    await interact(() =>
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    );
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.', 'one more thing']);
+    expect(fake.reader.stops.count).toBeGreaterThan(0);
+    expect(composer.container.querySelector('[data-live-phase="reading"]')).toBeNull();
     await composer.unmount();
   });
 });

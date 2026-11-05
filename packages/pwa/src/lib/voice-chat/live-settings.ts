@@ -66,6 +66,8 @@ export interface LiveVoiceSettings {
   /** The longest one reading runs, in seconds, or null for no limit. */
   readonly maxSeconds: number | null;
   readonly whatToRead: WhatToReadId;
+  /** Live's short tones (and, on Android, a short buzz) at listening, sent, reply ready and stopped. ON by default. */
+  readonly earcons: boolean;
 }
 
 export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
@@ -75,6 +77,7 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
   rate: DEFAULT_SPEECH_RATE,
   maxSeconds: DEFAULT_READING_SECONDS,
   whatToRead: 'last',
+  earcons: true,
 });
 
 const fieldsSchema = z.object({
@@ -94,6 +97,7 @@ const fieldsSchema = z.object({
     .nullable()
     .catch(DEFAULT_LIVE_VOICE_SETTINGS.maxSeconds),
   whatToRead: z.enum(['last', 'every']).catch(DEFAULT_LIVE_VOICE_SETTINGS.whatToRead),
+  earcons: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.earcons),
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

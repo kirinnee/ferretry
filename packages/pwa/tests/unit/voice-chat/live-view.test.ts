@@ -12,6 +12,8 @@ import {
 } from '../../../src/lib/voice-chat/live-machine.ts';
 import {
   LIVE_BLOCK_COPY,
+  READ_FAILED_COPY,
+  READ_UNAVAILABLE_COPY,
   LIVE_TAKE_FAILED_COPY,
   liveKeyAction,
   liveView,
@@ -289,5 +291,76 @@ describe('liveView — the last turn', () => {
     );
     should(hidden.stateWord).equal('Paused');
     should(hidden.detail).equal("Can't reach the voice service. Live paused while away. Resume?");
+  });
+});
+
+describe('liveView — reading (slice 5)', () => {
+  const sent = (extra: Partial<LiveState> = {}): LiveState => ({
+    ...run([...WORDS, { type: 'countdown-done', atMs: 6_500 }, { type: 'sent', atMs: 6_600 }]),
+    canRead: true,
+    ...extra,
+  });
+  const reading = run([{ type: 'reply', signal: 'done' }], sent());
+  const asking = run([{ type: 'reply', signal: 'needs-input' }], sent());
+
+  it('says "Reading reply" with Stop, Repeat and End — and not one word of the reply', () => {
+    const view = liveView(reading, 0);
+    should(view.stateWord).equal('Reading reply');
+    should(view.big).deepEqual({ label: 'Stop reading', action: 'skip' });
+    should(view.canSkip && view.canRepeat && view.canEnd).be.true();
+    should(view.canHold || view.canSendNow || view.canResume).be.false();
+    should(view.micOpen).be.false();
+    should(JSON.stringify(view)).not.containEql('Fix it');
+  });
+
+  it('says "Reading question" when it is the ferret\'s question, and says who is asking', () => {
+    const view = liveView(asking, 0);
+    should(view.stateWord).equal('Reading question');
+    should(view.detail).equal('Your ferret is asking you something.');
+    should(view.canSkip).be.true();
+  });
+
+  it('Space, Esc and S stop the reading (Esc does NOT end Live while reading), R repeats, Enter and H do nothing', () => {
+    const view = liveView(reading, 0);
+    for (const key of [' ', 'Spacebar', 'Escape', 's', 'S']) should(liveKeyAction(key, view)).equal('skip');
+    for (const key of ['r', 'R']) should(liveKeyAction(key, view)).equal('repeat');
+    for (const key of ['Enter', 'h', 'H', 'x']) should(liveKeyAction(key, view)).equal(null);
+  });
+
+  it('S and R mean nothing outside a reading, and Esc ends Live again', () => {
+    const listening = liveView(run(LISTENING), 0);
+    should(liveKeyAction('s', listening)).equal(null);
+    should(liveKeyAction('r', listening)).equal(null);
+    should(liveKeyAction('Escape', listening)).equal('end');
+  });
+
+  it("after a read reply on an iPhone the bar says it is the person's turn and offers one big Listen", () => {
+    const phone = run([{ type: 'reply', signal: 'done' }], sent({ tapToListen: true }));
+    const afterRead = run([{ type: 'speak-done', id: 1, end: 'finished' }], phone);
+    const view = liveView(afterRead, 0);
+    should(view.stateWord).equal('Your turn');
+    should(view.detail).equal('The reply has been read. Tap Listen to talk.');
+    should(view.big).deepEqual({ label: 'Listen', action: 'resume' });
+    should(view.canResume).be.true();
+    should(view.canHold).be.false();
+    should(view.micOpen).be.false();
+    should(view.tone).equal('calm');
+    should(liveKeyAction(' ', view)).equal('resume');
+    should(liveView(afterRead, 0, true).canSendNow).be.true();
+  });
+
+  it('says when a reply could not be spoken, in plain words, on the first line of listening', () => {
+    const listening = (why: 'failed' | 'unavailable'): ReturnType<typeof liveView> =>
+      liveView(
+        run(
+          [{ type: 'speak-done', id: 1, end: why }, { type: 'locks', granted: true }, { type: 'listening' }],
+          reading,
+        ),
+        0,
+      );
+    should(listening('failed').detail).equal(READ_FAILED_COPY);
+    should(listening('unavailable').detail).equal(READ_UNAVAILABLE_COPY);
+    should(listening('failed').tone).equal('warn');
+    should(noticeCopy({ kind: 'read-failed', why: 'failed' })).equal("Couldn't speak this reply. It is on screen.");
   });
 });

@@ -21,6 +21,7 @@ import type { DeviceClass } from '../lib/stt/engine-defaults.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import type { LiveComposerBridge } from '../lib/voice-chat/live-assembly.ts';
 import { onLiveToggle } from '../lib/voice-chat/live-command.ts';
+import type { LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
 import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import { DEFAULT_STT_SETTINGS } from '../lib/stt/stt-settings.ts';
 import { LiveVoiceBar } from './live-voice-bar.tsx';
@@ -37,6 +38,8 @@ export interface LiveVoiceControlProps {
   /** The session's turn state; without one there is nothing to wait for. */
   readonly reply: ReplySource | undefined;
   readonly readConversation?: () => readonly string[];
+  /** The conversation on screen, for reading the ferret's reply (and its questions) aloud. Absent: nothing is read. */
+  readonly reading?: LiveReadingSource;
   /** Phone chrome: the big-button bar. Otherwise the desktop strip. */
   readonly compact: boolean;
   /** The mic is recording: Live waits. */
@@ -73,6 +76,7 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
     skip: !offered,
   });
   const readConversation = props.readConversation;
+  const reading = props.reading;
   const live = useLiveVoice({
     enabled: offered,
     daemon: props.daemon,
@@ -82,6 +86,7 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
     draft: props.draft,
     reply: props.reply ?? NO_REPLY,
     ...(readConversation === undefined ? {} : { readConversation }),
+    ...(reading === undefined ? {} : { reading }),
     readContext: needsEvidence => {
       const held = extractHeldMessages(readConversation?.() ?? []);
       return !needsEvidence || hasUsableContext(held) ? held : [];
@@ -125,6 +130,7 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
       onResume={live.resume}
       onEnd={live.end}
       onSkip={live.skip}
+      onRepeat={live.repeat}
     />
   ) : null;
 

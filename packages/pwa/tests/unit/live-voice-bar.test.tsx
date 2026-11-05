@@ -47,12 +47,13 @@ interface Calls {
   resume: number;
   end: number;
   skip: number;
+  repeat: number;
 }
 const harness = (
   shown: LiveView,
   overrides: Partial<LiveVoiceBarProps> = {},
 ): { readonly calls: Calls; readonly element: React.ReactElement } => {
-  const calls: Calls = { hold: 0, sendNow: 0, resume: 0, end: 0, skip: 0 };
+  const calls: Calls = { hold: 0, sendNow: 0, resume: 0, end: 0, skip: 0, repeat: 0 };
   return {
     calls,
     element: (
@@ -66,6 +67,7 @@ const harness = (
         onResume={() => calls.resume++}
         onEnd={() => calls.end++}
         onSkip={() => calls.skip++}
+        onRepeat={() => calls.repeat++}
         {...overrides}
       />
     ),
@@ -218,7 +220,7 @@ describe('<LiveVoiceBar> — the phone', () => {
     await interact(() => must(named(mounted.container, 'Send now'), 'Send now').click());
     await interact(() => must(named(mounted.container, 'End'), 'End').click());
     await interact(() => must(named(mounted.container, 'LIVE'), 'pill').click());
-    expect(sending.calls).toEqual({ hold: 1, sendNow: 1, resume: 0, end: 2, skip: 0 });
+    expect(sending.calls).toEqual({ hold: 1, sendNow: 1, resume: 0, end: 2, skip: 0, repeat: 0 });
     await mounted.unmount();
 
     const held = harness(view([...WORDS, { type: 'hold' }]));
@@ -247,7 +249,7 @@ describe('<LiveVoiceBar> — the phone', () => {
       const big = must(mounted.container.querySelector<HTMLButtonElement>('[data-live-big="none"]'), 'big');
       expect(big.disabled).toBe(true);
       await interact(() => big.click());
-      expect(calls).toEqual({ hold: 0, sendNow: 0, resume: 0, end: 0, skip: 0 });
+      expect(calls).toEqual({ hold: 0, sendNow: 0, resume: 0, end: 0, skip: 0, repeat: 0 });
       await mounted.unmount();
     }
   });
@@ -394,7 +396,7 @@ describe('<LiveVoiceBar> — the desktop strip', () => {
     const working = run(SENT);
     const reading = liveView(run([{ type: 'reply', signal: 'done' }], { ...working, canRead: true }), 0);
     const speaking = await mount(harness(reading, { layout: 'desktop' }).element);
-    expect(names(speaking.container)).toEqual(['Stop reading Space', 'End Esc']);
+    expect(names(speaking.container)).toEqual(['Stop reading Space', 'Repeat R', 'End']);
     await speaking.unmount();
   });
 
@@ -404,7 +406,7 @@ describe('<LiveVoiceBar> — the desktop strip', () => {
     await interact(() => must(named(mounted.container, 'Hold H'), 'Hold').click());
     await interact(() => must(named(mounted.container, 'Send now ↵'), 'Send now').click());
     await interact(() => must(named(mounted.container, 'End Esc'), 'End').click());
-    expect(hearing.calls).toEqual({ hold: 1, sendNow: 1, resume: 0, end: 1, skip: 0 });
+    expect(hearing.calls).toEqual({ hold: 1, sendNow: 1, resume: 0, end: 1, skip: 0, repeat: 0 });
     await mounted.unmount();
     const held = harness(view([...WORDS, { type: 'hold' }]), { layout: 'desktop' });
     const resumed = await mount(held.element);
@@ -499,7 +501,7 @@ describe('<LiveVoiceBar> — keys', () => {
     await interact(() => pressKey(document.body, 'H'));
     await interact(() => pressKey(document.body, 'Enter'));
     await interact(() => pressKey(document.body, 'Escape'));
-    expect(hearing.calls).toEqual({ hold: 2, sendNow: 1, resume: 0, end: 1, skip: 0 });
+    expect(hearing.calls).toEqual({ hold: 2, sendNow: 1, resume: 0, end: 1, skip: 0, repeat: 0 });
     await mounted.unmount();
 
     const held = harness(view([...WORDS, { type: 'hold' }]));
@@ -528,7 +530,7 @@ describe('<LiveVoiceBar> — keys', () => {
     const notOffered = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
     await interact(() => document.body.dispatchEvent(notOffered));
     expect(notOffered.defaultPrevented).toBe(false);
-    expect(hearing.calls).toEqual({ hold: 1, sendNow: 0, resume: 0, end: 0, skip: 0 });
+    expect(hearing.calls).toEqual({ hold: 1, sendNow: 0, resume: 0, end: 0, skip: 0, repeat: 0 });
     await mounted.unmount();
   });
 
@@ -552,7 +554,7 @@ describe('<LiveVoiceBar> — keys', () => {
       await interact(() => pressKey(field, 'Escape'));
       await interact(() => pressKey(field, 'Enter'));
     }
-    expect(hearing.calls).toEqual({ hold: 0, sendNow: 0, resume: 0, end: 0, skip: 0 });
+    expect(hearing.calls).toEqual({ hold: 0, sendNow: 0, resume: 0, end: 0, skip: 0, repeat: 0 });
     await mounted.unmount();
   });
 
@@ -628,6 +630,7 @@ describe('<LiveVoiceBar> — keys', () => {
         onResume={() => calls.push('resume')}
         onEnd={() => calls.push('end')}
         onSkip={() => calls.push('skip')}
+        onRepeat={() => calls.push('repeat')}
       />
     );
     const mounted = await mount(bar(view(LISTENING)));

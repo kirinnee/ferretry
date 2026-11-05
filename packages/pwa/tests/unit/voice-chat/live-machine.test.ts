@@ -644,11 +644,13 @@ describe('liveReduce — after the send', () => {
     const reading = run([{ type: 'reply', signal: 'done' }], base);
     should(reading.state.phase).equal('reading');
     should(types(reading.effects)).deepEqual(['stopWatchReply', 'speak']);
-    for (const event of [{ type: 'speak-done' }, { type: 'skip' }] as LiveEvent[]) {
-      const done = run([event], reading.state);
-      should(done.state.phase).equal('starting');
-      should(types(done.effects)).deepEqual(['stopSpeaking', 'openMic']);
-    }
+    should(reading.effects).deepEqual([{ type: 'stopWatchReply' }, { type: 'speak', what: 'reply', id: 1 }]);
+    const finished = run([{ type: 'speak-done', id: 1, end: 'finished' }], reading.state);
+    should(finished.state.phase).equal('starting');
+    should(types(finished.effects)).deepEqual(['openMic']);
+    const skipped = run([{ type: 'skip' }], reading.state);
+    should(skipped.state.phase).equal('starting');
+    should(types(skipped.effects)).deepEqual(['stopSpeaking', 'openMic']);
     should(run([{ type: 'typing' }], reading.state).state).equal(reading.state);
   });
 
@@ -840,7 +842,16 @@ describe('liveReduce — Listening needs the microphone AND the lock', () => {
     should(run([mic], held).state.phase).equal('listening');
     const again = run([{ type: 'reply', signal: 'done' }], WORKING).state;
     should(run([mic], again).state.phase).equal('listening');
-    const reading = run([{ type: 'reply', signal: 'done' }, { type: 'speak-done' }], { ...WORKING, canRead: true });
+    const reading = run(
+      [
+        { type: 'reply', signal: 'done' },
+        { type: 'speak-done', id: 1, end: 'finished' },
+      ],
+      {
+        ...WORKING,
+        canRead: true,
+      },
+    );
     should(run([mic], reading.state).state.phase).equal('listening');
   });
 });
@@ -876,8 +887,11 @@ describe('liveReduce — totality', () => {
     { type: 'reply', signal: 'done' },
     { type: 'reply', signal: 'needs-input' },
     { type: 'reply', signal: 'ended' },
-    { type: 'speak-done' },
+    { type: 'speak-done', id: 1, end: 'finished' },
+    { type: 'speak-done', id: 9, end: 'failed' },
     { type: 'skip' },
+    { type: 'repeat' },
+    { type: 'outside-send', atMs: 10 },
   ];
   const PHASES: Record<LivePhase, LiveState> = {
     off: INITIAL_LIVE_STATE,

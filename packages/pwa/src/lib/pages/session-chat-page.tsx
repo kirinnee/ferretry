@@ -96,6 +96,7 @@ import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspa
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { type SendAcceptance, useAutoRead } from '../../hooks/use-auto-read.ts';
+import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
@@ -963,7 +964,16 @@ export function SessionChatPage({
         : needsInputOf({ question, permissionRequest, harnessDialog, turnPrompt: session.state.turnPrompt }),
     [harnessDialog, permissionRequest, question, session.state.status, session.state.turnPrompt],
   );
+  // Live voice reads the reply of its own turns: while it is on, the auto-read above stands down (never both).
+  const [liveOn, setLiveOn] = useState(false);
+  const liveSources = useRef({ entries, spokenPrompt });
+  liveSources.current = { entries, spokenPrompt };
+  const liveReading = useMemo<LiveReadingSource>(
+    () => ({ rows: () => liveSources.current.entries, question: () => liveSources.current.spokenPrompt }),
+    [],
+  );
   const autoRead = useAutoRead({
+    suspended: liveOn,
     scope: `${connection.daemonId}/${session.config.id}`,
     entries,
     // Only a daemon that dates its turns is watched: with no `turnState` there is no turn to be sure of.
@@ -1784,6 +1794,8 @@ export function SessionChatPage({
               {...(dictationSettings === undefined ? {} : { dictationSettings })}
               dictationConversation={readDictationConversation}
               liveReply={liveReply}
+              liveReading={liveReading}
+              onLiveActiveChange={setLiveOn}
               enterKeyPreference={composerEnterKey}
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}

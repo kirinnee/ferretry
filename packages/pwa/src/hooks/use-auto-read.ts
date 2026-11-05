@@ -39,7 +39,7 @@
  * Nothing here logs, stores or sends the words it hands the controller.
  */
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import {
   armOnSend,
   dropSend,
@@ -82,6 +82,11 @@ export interface AutoReadInput {
   readonly sends: readonly SendAcceptance[];
   /** The clock, for tests. */
   readonly now?: () => number;
+  /**
+   * Live voice is on and reads its own turns, so this must not: with it set, nothing is watched and nothing
+   * is read, exactly as if "Auto-read replies" were off. (The setting itself is not touched.)
+   */
+  readonly suspended?: boolean;
 }
 
 export interface AutoReadHandle {
@@ -109,10 +114,12 @@ const parseInstant = (value: string | undefined): number | null => {
 };
 
 export function useAutoRead(input: AutoReadInput): AutoReadHandle {
-  const { scope, entries, turn, turnStateAt, sends, now = Date.now } = input;
+  const { scope, entries, turn, turnStateAt, sends, now = Date.now, suspended = false } = input;
   const controller = useReadAloudController();
   const store = useDeviceVoiceSettingsStore();
-  const { settings } = useLiveVoiceSettings(store);
+  const { settings: stored } = useLiveVoiceSettings(store);
+  // Live reads its own turns: while it is on, "auto-read" stands down so a reply is never read twice.
+  const settings = useMemo(() => (suspended ? { ...stored, autoRead: false } : stored), [stored, suspended]);
   const visible = useDocumentVisible();
 
   // Everything the evaluation reads, in one ref, so a timer always sees the latest without re-arming.

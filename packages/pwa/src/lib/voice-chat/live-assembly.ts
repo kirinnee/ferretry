@@ -27,11 +27,13 @@ import type { LiveRunnerPorts } from './live-runner.ts';
 import { blockOf, type LiveSession, type LiveSessionCallbacks, liveTakePort } from './live-take.ts';
 import type {
   ClockPort,
+  EarconPort,
+  HapticsPort,
   LiveBlock,
   MicLockPort,
   ReplyFeedPort,
   SendPort,
-  SpeakerPort,
+  ReaderPort,
   VisibilityPort,
   WakeLockPort,
 } from './ports.ts';
@@ -84,7 +86,9 @@ export interface LiveAssemblyDeps {
   readonly meter: MicMeterPort | null;
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
-  readonly speaker: SpeakerPort | null;
+  readonly reader: ReaderPort | null;
+  readonly earcons?: EarconPort | null;
+  readonly haptics?: HapticsPort | null;
   readonly clock: ClockPort;
   readonly visibility: VisibilityPort;
   readonly micLock: MicLockPort;
@@ -111,7 +115,9 @@ export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
     levels: meterLevelFrames(deps.meter, deps.clock),
     send,
     reply,
-    speaker: deps.speaker,
+    reader: deps.reader,
+    earcons: deps.earcons ?? null,
+    haptics: deps.haptics ?? null,
     wakeLock: deps.wakeLock,
     visibility: deps.visibility,
     micLock: deps.micLock,
@@ -136,7 +142,9 @@ export interface LivePageInputs {
 export interface LiveEnvironment {
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
-  readonly speaker: SpeakerPort | null;
+  readonly reader: ReaderPort | null;
+  readonly earcons?: EarconPort | null;
+  readonly haptics?: HapticsPort | null;
   readonly clock: ClockPort;
   readonly visibility: VisibilityPort;
   readonly micLock: MicLockPort;

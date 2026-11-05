@@ -27,6 +27,7 @@
  * countdown is cancelled — the microphone stays open for exactly that.
  */
 
+import { cueFor } from './earcons.ts';
 import {
   INITIAL_LIVE_STATE,
   type LiveEffect,
@@ -37,13 +38,16 @@ import {
 } from './live-machine.ts';
 import type {
   ClockPort,
+  EarconPort,
+  HapticsPort,
   LevelFramesPort,
   LevelMeterHandle,
   MicLockPort,
+  ReaderPort,
+  ReadWhat,
   ReplyFeedPort,
   ReplyWatch,
   SendPort,
-  SpeakerPort,
   TakeHandle,
   TakePort,
   VisibilityPort,
@@ -56,8 +60,12 @@ export interface LiveRunnerPorts {
   readonly levels: LevelFramesPort;
   readonly send: SendPort;
   readonly reply: ReplyFeedPort;
-  /** Null until slice 5 wires reading aloud. */
-  readonly speaker: SpeakerPort | null;
+  /** Reads a finished turn aloud. Null where nothing can be read: a finished reply then goes straight to listening. */
+  readonly reader: ReaderPort | null;
+  /** Short tones for listening / sent / reply ready / stopped. Absent: silent. */
+  readonly earcons?: EarconPort | null;
+  /** A short buzz for sent / reply ready. Absent: none. */
+  readonly haptics?: HapticsPort | null;
   readonly wakeLock: WakeLockPort;
   readonly visibility: VisibilityPort;
   readonly micLock: MicLockPort;
@@ -71,6 +79,10 @@ export interface LiveRunnerOptions {
   readonly graceMs?: unknown;
   /** The pause that ends a turn: a preset name or ms. Resolved by the endpointer. */
   readonly pauseMs?: unknown;
+  /** This device cannot reopen the microphone without a tap (an iPhone): Live waits for "Listen" after each reply. */
+  readonly tapToListen?: boolean;
+  /** Whether the tones and buzzes are on, asked at each cue so a setting changed mid-Live applies at once. */
+  readonly cues?: () => boolean;
   /** One call per sent turn with its numbers. Never words. */
   readonly onTurn?: (numbers: TurnNumbers) => void;
 }
@@ -138,14 +150,22 @@ export class LiveRunner {
   /** Call synchronously from the person's tap: the microphone prompt belongs to the gesture. */
   start(): void {
     this.#unwatchVisibility ??= this.#ports.visibility.watch(visible => this.dispatch({ type: 'visibility', visible }));
+    this.#unlock();
     this.dispatch({
       type: 'start',
       atMs: this.#ports.clock.now(),
       canSend: this.#options.canSend,
       visible: this.#ports.visibility.visible(),
       graceMs: this.#options.graceMs,
-      canRead: this.#ports.speaker !== null,
+      canRead: this.#ports.reader?.supported === true,
+      tapToListen: this.#options.tapToListen === true,
     });
+  }
+
+  /** Inside a tap: allow speech and sound for the rest of the session (iOS and autoplay policies want a gesture). */
+  #unlock(): void {
+    this.#ports.reader?.unlock();
+    this.#ports.earcons?.unlock();
   }
 
   hold(): void {
@@ -157,6 +177,8 @@ export class LiveRunner {
   }
 
   resume(): void {
+    // A resume is a tap too: the "Listen" after a reply is where an iPhone lets the microphone open again.
+    this.#unlock();
     this.dispatch({ type: 'resume' });
   }
 
@@ -164,8 +186,19 @@ export class LiveRunner {
     this.dispatch({ type: 'end' });
   }
 
+  /** Stop reading the reply (tap, Space, Esc, S): Live listens again. */
   skip(): void {
     this.dispatch({ type: 'skip' });
+  }
+
+  /** Read the reply again from the start. */
+  repeat(): void {
+    this.dispatch({ type: 'repeat' });
+  }
+
+  /** The person sent a message by hand (not through Live): a reading in progress is stale. */
+  outsideSend(): void {
+    this.dispatch({ type: 'outside-send', atMs: this.#ports.clock.now() });
   }
 
   /** The person edited the composer: auto-send pauses. */
@@ -183,7 +216,7 @@ export class LiveRunner {
     this.#clearCountdown();
     this.#clearTimers();
     this.#stopReply();
-    this.#ports.speaker?.stop();
+    this.#ports.reader?.stop();
     this.#releaseLocks();
     this.#listeners.clear();
   }
@@ -195,9 +228,11 @@ export class LiveRunner {
     this.#processing = true;
     try {
       for (let next = this.#queue.shift(); next !== undefined; next = this.#queue.shift()) {
-        const step = liveReduce(this.#state, next);
+        const before = this.#state;
+        const step = liveReduce(before, next);
         this.#state = step.state;
         for (const effect of step.effects) this.#perform(effect);
+        this.#cue(before, step.state);
         for (const listener of this.#listeners) listener();
       }
     } finally {
@@ -256,10 +291,10 @@ export class LiveRunner {
         this.#stopReply();
         break;
       case 'speak':
-        this.#speak();
+        this.#speak(effect.what, effect.id);
         break;
       case 'stopSpeaking':
-        this.#ports.speaker?.stop();
+        this.#ports.reader?.stop();
         break;
       case 'recordTurn':
         this.#options.onTurn?.(effect.numbers);
@@ -459,9 +494,9 @@ export class LiveRunner {
 
   #send(): void {
     // The feed is armed (baseline taken, listening) BEFORE the message goes: a fast turn can finish while the
-    // send is still being acknowledged.
+    // send is still being acknowledged. The reader's baseline is taken at the same moment.
     this.#armedReply?.cancel();
-    const armed = this.#ports.reply.arm();
+    const armed = this.#arm();
     this.#armedReply = armed;
     void this.#ports.send.send().then(outcome => {
       if (outcome.kind === 'sent') this.dispatch({ type: 'sent', atMs: this.#ports.clock.now() });
@@ -473,8 +508,14 @@ export class LiveRunner {
     });
   }
 
+  /** Arm the feed and remember what the page holds, as the message goes. */
+  #arm(): ReplyWatch {
+    this.#ports.reader?.mark();
+    return this.#ports.reply.arm();
+  }
+
   #watchReply(): void {
-    const armed = this.#armedReply ?? this.#ports.reply.arm();
+    const armed = this.#armedReply ?? this.#arm();
     this.#armedReply = null;
     this.#replyCancel?.();
     this.#replyCancel = armed.attach(signal => this.dispatch({ type: 'reply', signal: signal.kind }));
@@ -487,9 +528,25 @@ export class LiveRunner {
     this.#armedReply = null;
   }
 
-  #speak(): void {
-    const speaker = this.#ports.speaker;
-    if (speaker === null) this.dispatch({ type: 'speak-done' });
-    else speaker.speak(() => this.dispatch({ type: 'speak-done' }));
+  // — reading and cues ——————————————————————————————————————————————————————
+
+  #speak(what: ReadWhat, id: number): void {
+    const reader = this.#ports.reader;
+    if (reader === null) {
+      this.dispatch({ type: 'speak-done', id, end: 'unavailable' });
+      return;
+    }
+    // `onEnd` may come at once (a fake, a refusal) or much later: either way it is queued behind the event in hand.
+    reader.read(what, end => this.dispatch({ type: 'speak-done', id, end }));
+  }
+
+  /** The tone and the buzz this event earned (`earcons.ts`), if the person has them on. */
+  #cue(before: LiveState, after: LiveState): void {
+    if (before.phase === after.phase) return;
+    const cue = cueFor(before, after);
+    if (cue.earcon === null && cue.haptic === null) return;
+    if (this.#options.cues?.() === false) return;
+    if (cue.earcon !== null) this.#ports.earcons?.play(cue.earcon);
+    if (cue.haptic !== null) this.#ports.haptics?.pulse(cue.haptic);
   }
 }
