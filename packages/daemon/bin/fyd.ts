@@ -548,6 +548,7 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
+import { FileRenderRepository } from '../src/adapters/renders/index.ts';
 import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -1157,6 +1158,7 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
+  RenderService,
   RestartBusy,
   RestartService,
   type RestartSubject,
@@ -13276,6 +13278,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
+        // Saved pictures: svg and html a ferret keeps as daemon files (docs/renders.md). Its saves run one at a time
+        // on a queue of their own: the collision check and the quotas read the whole store.
+        renders: new RenderService(new FileRenderRepository(paths, stateFiles), clock, new KeyedSerialExecutor()),
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
         sharedDrafts: sharedDraftService,

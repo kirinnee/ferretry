@@ -99,6 +99,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     "the owner dismissing, snoozing or resolving a machine notice; the item's own history records it, and it widens nobody's access",
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
+  'POST /v1/renders':
+    'saves a picture a ferret made into the daemon’s state home, validated and size-capped; it changes nobody’s access, and a ferret or the owner at the machine is the only caller',
   'POST /v1/sessions/:sessionId/pin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/unpin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/shared-draft':

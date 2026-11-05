@@ -189,17 +189,19 @@ does nothing.
 
 What this class already has on `main`:
 
-| Fact                                    | Owner                                                         | What notices a second definition            |
-| --------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- |
-| the state home's layout decision        | `protocol/src/lib/state-home-layout.ts`                       | `cli-contracts.sh state-home-layout-claim`  |
-| the default state home path             | derived from the product name                                 | `cli-contracts.sh state-home-default`       |
-| the log directory inside the state home | shared between the CLI and the daemon                         | `cli-contracts.sh state-home-log-directory` |
-| a pane process's start identity         | `protocol/src/{lib,adapters}/process-incarnation.ts`          | one module, imported by both                |
-| the fy-render caps                      | `protocol/src/lib/fy-render-caps.ts`                          | re-exported, never redefined                |
-| the fy-render svg and html rules        | `protocol/src/lib/fy-render.ts`                               | one module, read by the PWA's fence reader  |
-| the default daemon address              | `protocol/src/lib/address.ts`                                 | `cli-contracts.sh daemon-default-address`   |
-| the product and binary names            | `package.json` × 2 ([Architecture](../architecture/index.md)) | `cli-contracts.sh name-single-source`       |
-| a daemon's data, per daemon, in the PWA | `daemonSessionKey()` and `DaemonConnection`                   | `daemon-scope.sh`                           |
+| Fact                                                        | Owner                                                         | What notices a second definition                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
+| the state home's layout decision                            | `protocol/src/lib/state-home-layout.ts`                       | `cli-contracts.sh state-home-layout-claim`        |
+| the default state home path                                 | derived from the product name                                 | `cli-contracts.sh state-home-default`             |
+| the log directory inside the state home                     | shared between the CLI and the daemon                         | `cli-contracts.sh state-home-log-directory`       |
+| a pane process's start identity                             | `protocol/src/{lib,adapters}/process-incarnation.ts`          | one module, imported by both                      |
+| the fy-render caps                                          | `protocol/src/lib/fy-render-caps.ts`                          | re-exported, never redefined                      |
+| the fy-render svg and html rules                            | `protocol/src/lib/fy-render.ts`                               | one module, read by the PWA's fence reader        |
+| a saved picture's id grammar, quotas, token and wire shapes | `protocol/src/lib/renders.ts` ([Renders](../../renders.md))   | one module, read by the daemon's store and routes |
+| whether a picture may be saved                              | `protocol/src/lib/render-save.ts`, built from `fy-render.ts`  | one module; the daemon calls it before any write  |
+| the default daemon address                                  | `protocol/src/lib/address.ts`                                 | `cli-contracts.sh daemon-default-address`         |
+| the product and binary names                                | `package.json` × 2 ([Architecture](../architecture/index.md)) | `cli-contracts.sh name-single-source`             |
+| a daemon's data, per daemon, in the PWA                     | `daemonSessionKey()` and `DaemonConnection`                   | `daemon-scope.sh`                                 |
 
 Read that table as a shape, not as a list to memorise: every row is one fact, one named owner, and one
 mechanism that fails a commit. **A row with an owner and no mechanism is an intention**, and a
