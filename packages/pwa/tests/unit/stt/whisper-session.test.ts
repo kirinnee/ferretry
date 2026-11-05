@@ -523,4 +523,23 @@ describe('WhisperRecognitionSession — closing the microphone while the early f
     await tick();
     should(w.failures).deepEqual([]);
   });
+
+  it('stops watching the page once the capture is closed, and a hide already on its way cancels nothing', async () => {
+    const w = await recordingWorld();
+    const pending = deferred<WhisperHeard>();
+    w.state.transcribe = (samples, signal) => {
+      w.transcribed.push({ samples, signal });
+      return pending.promise;
+    };
+    const take = w.session.beginFinish();
+    should(w.unwatched()).equal(0);
+    w.session.closeCapture();
+    should(w.unwatched()).equal(1);
+    w.hide();
+    await tick();
+    should(w.events).not.containEql('abort');
+    pending.resolve({ text: 'saved words', backend: 'wasm' });
+    should(await take?.text).equal('saved words');
+    should(w.recording.cancels).equal(0);
+  });
 });

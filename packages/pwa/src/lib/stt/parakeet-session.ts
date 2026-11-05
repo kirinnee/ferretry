@@ -127,6 +127,9 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     this.#captureClosed = true;
     this.#clearLimit();
     this.#options.onMonitor?.(null);
+    // Live owns the stopped snapshot now: a tab that is hidden from here on must not cancel the words it is
+    // still working out. (Dictation never closes capture alone, so its own hide-cancels behaviour is unchanged.)
+    this.#cleanup();
     void this.#tentative.snapshotTaken().then(async () => {
       try {
         await (await this.#whenRecording()).stop();
@@ -139,6 +142,8 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
   /** Call synchronously from the reader's gesture: the permission prompt is attributed to it. */
   start(): void {
     this.#unwatchHidden = this.#ports.watchHidden(() => {
+      // A listener already queued when capture closed (a page's hide fans out to every watcher) stands down too.
+      if (this.#captureClosed) return;
       if (this.#state !== 'opening' && this.#state !== 'recording') return;
       this.cancel();
       this.#options.onAbort();

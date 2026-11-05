@@ -34,6 +34,14 @@
  *   - LISTENING NEEDS BOTH THE MICROPHONE AND THE LOCK: `starting` becomes `listening` only once the mic is
  *     open (`listening` event) AND the one-Live-tab lock is granted (`locks`); a refusal of the lock ends Live
  *     in any phase.
+ *   - A SEND CAN BE TAKEN BACK UNTIL THE COMPOSER STARTS IT. `sendInFlight` begins when the machine approves the send;
+ *     the composer's own send starts a moment later (a render later). In between the runner holds a revocable ticket
+ *     and a stop (Hold, typing, a hidden tab) first dispatches `send-withdrawn` — the send goes back to "words ready,
+ *     nothing sent" — and then the stop itself, so it lands exactly where a stop in the countdown does.
+ *   - THE PERSON'S OWN SEND RETIRES THE ATTEMPT. The composer's ordinary Send (arrow, Enter) while Live is anywhere but
+ *     working/reading is `person-send`: the countdown, the timers and the take (and its pending decode) are gone, the
+ *     microphone is shut, and the turn is the same "send in flight → working" path Live's own send takes. The person
+ *     sent what they saw; Live never sends it again.
  *   - A FAILED SEND is On hold with the words kept; nothing is retried by itself.
  *   - AN EMPTY OR NOISE TAKE goes quietly back to listening.
  *   - THE MICROPHONE IS OPEN ONLY WHILE `listening`, `hearing` or `sending` (until the send starts).
@@ -205,6 +213,10 @@ export type LiveEvent =
   | { readonly type: 'timer'; readonly kind: LiveTimerKind; readonly atMs: number }
   | { readonly type: 'hold' }
   | { readonly type: 'send-now'; readonly atMs: number }
+  /** The person pressed the composer's own Send. */
+  | { readonly type: 'person-send'; readonly atMs: number }
+  /** The send Live approved was taken back before the composer started it. */
+  | { readonly type: 'send-withdrawn' }
   | { readonly type: 'resume' }
   | { readonly type: 'end' }
   | { readonly type: 'typing' }
@@ -513,6 +525,7 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
       return step({ ...seen, phase: 'paused', pauseReason: 'hidden' }, [{ type: 'stopSpeaking' }]);
     return step(seen);
   }
+  if (event.type === 'person-send') return personSent(state, event.atMs);
   // A refusal of the one-Live-tab lock ends Live in EVERY active phase: two tabs must never both capture and send.
   if (event.type === 'locks' && !event.granted)
     return phase === 'off' ? step(state) : toOff(state, { kind: 'blocked', block: 'other-tab' });
@@ -605,6 +618,37 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
   }
 }
 
+/**
+ * The person sent the box with the composer's own Send. Whatever Live was doing about this turn is over: nothing counts
+ * down, nothing is worked out, the microphone is shut, and the send is "in flight" — the answer (`sent` / `send-failed`)
+ * comes from that press, not from Live. While Live works or reads aloud the press is a separate message and changes nothing.
+ */
+function personSent(state: LiveState, atMs: number): LiveStep {
+  const { phase } = state;
+  if (phase === 'off' || phase === 'working' || phase === 'reading') return step(state);
+  if (phase === 'sending' && state.sendInFlight) return step(state);
+  return step(
+    {
+      ...state,
+      phase: 'sending',
+      countdown: null,
+      countdownElapsed: true,
+      sendInFlight: true,
+      sendWhenReady: false,
+      sendNow: true,
+      wordsReady: true,
+      wordsReadyAtMs: atMs,
+      endReason: 'user',
+      endedAtMs: atMs,
+      speechEndedAtMs: atMs,
+      park: null,
+      holdReason: null,
+      pauseReason: null,
+    },
+    [{ type: 'cancelCountdown' }, { type: 'cancelTimers' }, { type: 'closeMic' }],
+  );
+}
+
 /** A hidden tab before the microphone ever opened: nothing to close but the take that was being opened. */
 function stepToPaused(state: LiveState): LiveStep {
   return step({ ...state, ...FRESH_TURN, words: '', phase: 'paused', pauseReason: 'hidden' }, [
@@ -648,6 +692,17 @@ function reduceOpen(state: LiveState, event: LiveEvent): LiveStep {
 function reduceSending(state: LiveState, event: LiveEvent): LiveStep {
   if (state.sendInFlight) {
     if (event.type === 'sent') return sentTurn(state, event.atMs);
+    // Taken back before the composer started it: the words stand on screen, ready, and nothing has gone. The stop
+    // that caused it follows at once; until it does the turn is parked, so no timer or press can send it.
+    if (event.type === 'send-withdrawn')
+      return step({
+        ...state,
+        sendInFlight: false,
+        sendNow: false,
+        countdown: null,
+        countdownElapsed: true,
+        park: { phase: 'hold', reason: 'user' },
+      });
     if (event.type === 'send-failed')
       return step({
         ...state,

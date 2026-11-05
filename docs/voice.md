@@ -753,6 +753,12 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   (`TakeHandle.stopRecording` → the session's `closeCapture`): the early finish reads its snapshot first, then
   the recorder stops and the tracks are released, while the model is still decoding. A slow or stuck decode can
   no longer keep the person's microphone open; the words still arrive from the snapshot.
+- **A stop also closes the engine's own hide listener.** A hidden tab cancels a plain dictation, as it always did. A Live
+  take whose capture was closed by a stop (`closeCapture`, Parakeet and Whisper) hands its stopped snapshot to Live,
+  so its hide listener is removed and a hide already queued for it does nothing: the page fans a hide out to the
+  runner first (it parks and starts the early finish) and the session second, and the second can no longer cancel the
+  first's decode. Tested with the real `watchHidden` and both listeners in registration order
+  (`tests/unit/voice-chat/live-capture.test.ts`).
 - **A stop in the middle of a sentence keeps the sentence.** **Hold**, typing or a hidden tab pressed while you
   are still speaking (before the pause that ends the turn) finish the turn into the same sticky stop: its words
   are worked out with no countdown and no send, and they are put in the message box before Live lands on
@@ -764,6 +770,27 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **Text you typed never rides along with a voice send.** If the message box holds any text Live did not put
   there (typed before Live started, or since) when a countdown would start, the turn is not counted down: its
   words are added after your text and Live goes **On hold**. Only **Send now** (your own press) sends them.
+- **One revocable send path (nothing is sent that was not on screen exactly as sent, never twice, never after a stop).**
+  Live sends through exactly one door: a `SendTicket` (`ports.ts`) carrying the words on screen when the machine
+  approved the send. The composer sends them a render later (`liveBridge.submit`) and, **in that render, immediately
+  before sending**, checks that the box still reads exactly the approved words and calls `ticket.commit()`, which is
+  false once the ticket is revoked or the page is hidden. Until it commits the send is only _queued_: **Hold**, typing,
+  a hidden tab, **End**, a refused lock and the page leaving each revoke the ticket (Hold, typing and a hidden tab first
+  tell the machine `send-withdrawn`, so they land exactly as in the countdown, words kept), and the composer then sends
+  nothing. A send the composer has committed is on the wire and stands. Only the _current_ ticket's answer is heard, so
+  a taken-back send that answers late cannot fail the next one.
+- **Typing is heard at the keystroke.** The composer tells Live about every write to its draft the moment it is made
+  (`LiveComposerBridge.observe`), so typing pauses auto-send and takes back a queued send before React renders — not in an
+  effect after it. A write that is exactly the words Live just put there is not typing.
+- **Your own Send retires the attempt.** Pressing the composer's own Send (arrow, Enter, ⌘↵) while Live is anywhere but
+  Working/Reading sends what you see and tells Live (`LiveRunner.personSent`): the countdown, the timers, the take and its
+  pending decode and the microphone are all gone, and your press becomes the send in flight — **Working** and the reply
+  watch when it went, **On hold** with the words kept when it failed. A slow decode that finishes afterwards can no
+  longer re-insert the words and send them a second time; the microphone stays off through the first real turn.
+- **A new take never writes over a finished one.** When the microphone opens (the tap, **Resume**, after a hidden tab, after
+  the reply) the box is _sealed_ (`SendPort.seal`): the words Live left in it — a held sentence — become the front of the
+  next take's words, which follow them, and are never replaced. Text you typed is still yours (it keeps a turn from counting
+  down); words you edit become yours too.
 - **Both the microphone and the lock before Listening.** The microphone and the one-tab Web Lock are asked for
   in parallel and Live listens only when both have answered; a refusal of the lock ends Live in any phase, so
   two tabs can never both capture and send. A lock granted after Live ended (End, the page leaving, a hidden
@@ -775,8 +802,8 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 - **The reply is watched from before the send** (`ReplyFeedPort.arm()`, attached on the acknowledgement), so a
   turn the ferret finishes while the send is still being acknowledged is not lost.
 - **A failed send is never retried automatically.** The loop goes to **On hold** with your words kept in the
-  composer and the reason said; **Resume** sends again by your hand. While a message is on the wire, Hold,
-  typing and hiding the tab do nothing to it.
+  composer and the reason said; **Resume** sends again by your hand. Once the composer has started the send (it is on
+  the wire), Hold, typing and hiding the tab do nothing to it; before that they take it back.
 - **Idle for 10 minutes ends Live** (`IDLE_END_MS`). It never turns itself back on.
 - **One Live tab:** it takes a Web Lock; a second tab says "Live is on in another tab". It asks for a Screen
   Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. Hiding, showing

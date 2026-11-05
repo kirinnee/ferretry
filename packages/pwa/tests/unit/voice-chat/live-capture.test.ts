@@ -10,9 +10,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AudioCaptureGlobalLike, browserAudioCapture } from '../../../src/lib/stt/audio-capture.ts';
+import { browserSessionHost } from '../../../src/lib/stt/on-device-host.ts';
 import { ParakeetRecognitionSession } from '../../../src/lib/stt/parakeet-session.ts';
 import { LiveRunner } from '../../../src/lib/voice-chat/live-runner.ts';
 import { liveTakePort } from '../../../src/lib/voice-chat/live-take.ts';
+import { documentVisibility } from '../../../src/lib/voice-chat/visibility.ts';
 import { type FakeLive, fakeLive } from '../../support/live-ports.ts';
 
 /** The capture decodes blobs (`Blob.arrayBuffer`), which is not a microtask: let real timers run too. */
@@ -88,9 +90,47 @@ const media = () => {
   return { global, tracks, recorders };
 };
 
-/** A runner over fake ports, except the take: the real adapter over a real Parakeet session over real capture. */
-const realRig = (fake: FakeLive) => {
+/**
+ * A page's document: `visibilitychange` listeners called in registration order. `snapshot` fans the event out to a copy
+ * of the listener list, so a listener removed by an earlier one still runs (an event already queued to every watcher).
+ */
+class FakeDocument {
+  visibilityState = 'visible';
+  readonly #listeners: (() => void)[] = [];
+  constructor(private readonly snapshot: boolean) {}
+  addEventListener(_type: 'visibilitychange', listener: () => void): void {
+    this.#listeners.push(listener);
+  }
+  removeEventListener(_type: 'visibilitychange', listener: () => void): void {
+    const at = this.#listeners.indexOf(listener);
+    if (at >= 0) this.#listeners.splice(at, 1);
+  }
+  get watchers(): number {
+    return this.#listeners.length;
+  }
+  hide(): void {
+    this.visibilityState = 'hidden';
+    const called = this.snapshot ? [...this.#listeners] : this.#listeners;
+    for (let at = 0; at < called.length; at += 1) called[at]?.();
+  }
+}
+
+/**
+ * A runner over fake ports, except the take: the real adapter over a real Parakeet session over real capture.
+ * With `page`, the session watches the REAL `watchHidden` (`on-device-host.ts`) and the runner the REAL
+ * `documentVisibility`, both over that document: a hide reaches the runner first and the session second.
+ */
+const realRig = (fake: FakeLive, page?: FakeDocument) => {
   const world = media();
+  const host =
+    page === undefined
+      ? null
+      : browserSessionHost({
+          ...world.global,
+          document: page,
+          setTimeout: () => 0,
+          clearTimeout: () => undefined,
+        });
   const decode = deferred<string>();
   const decodes: AbortSignal[] = [];
   const take = liveTakePort({
@@ -105,7 +145,7 @@ const realRig = (fake: FakeLive) => {
               return await decode.promise;
             },
           },
-          watchHidden: () => () => undefined,
+          watchHidden: host === null ? () => () => undefined : onHidden => host.watchHidden(onHidden),
           setTimeout: () => 0,
           clearTimeout: () => undefined,
           now: () => fake.ports.clock.now(),
@@ -114,7 +154,9 @@ const realRig = (fake: FakeLive) => {
       ),
     clean: async text => ({ text, kept: 'raw' }),
   });
-  const runner = new LiveRunner({ ...fake.ports, take }, { canSend: true });
+  const ports =
+    page === undefined ? { ...fake.ports, take } : { ...fake.ports, take, visibility: documentVisibility(page) };
+  const runner = new LiveRunner(ports, { canSend: true });
   return { ...world, decode, decodes, runner };
 };
 
@@ -223,4 +265,76 @@ describe('a stop in the middle of a spoken sentence', () => {
       rig.runner.dispose();
     });
   }
+});
+
+describe("the tab is hidden while the words are still being worked out (the engine's own hide listener)", () => {
+  for (const snapshot of [false, true]) {
+    for (const when of ['hearing', 'sending'] as const) {
+      it(`hiding during ${when} keeps the utterance and lands Paused — ${snapshot ? "even when the engine's listener was already queued" : "the engine's listener is gone once Live owns the snapshot"}`, async () => {
+        const fake = fakeLive();
+        const page = new FakeDocument(snapshot);
+        const rig = realRig(fake, page);
+        rig.runner.start();
+        await settle();
+        should(rig.runner.state.phase).equal('listening');
+        // The runner's watcher and the session's: two listeners, in registration order.
+        should(page.watchers).equal(2);
+        fake.hear(0.1, 600);
+        if (when === 'sending') fake.hear(0.001, 1_520);
+        await settle();
+        should(rig.runner.state.phase).equal(when);
+
+        page.hide();
+        await settle();
+        should(rig.runner.state.phase).equal('sending');
+        should(rig.runner.state.park).not.equal(null);
+        // The engine did not cancel the decode Live started, and the microphone is shut.
+        should(rig.decodes.length).equal(1);
+        should(rig.decodes[0]?.aborted).be.false();
+        should(rig.tracks.live).equal(0);
+        // The engine's hide listener no longer watches the page (Live owns the stopped snapshot).
+        should(page.watchers).equal(1);
+
+        rig.decode.resolve('the whole sentence');
+        await settle();
+        should(rig.runner.state.phase).equal('paused');
+        should(fake.shown.at(-1)).equal('the whole sentence');
+        should(fake.sends.length).equal(0);
+        rig.runner.dispose();
+      });
+    }
+  }
+
+  it('dictation keeps its own rule: a session that did not close its capture is cancelled by a hidden tab', async () => {
+    const world = media();
+    const page = new FakeDocument(false);
+    const host = browserSessionHost({
+      ...world.global,
+      document: page,
+      setTimeout: () => 0,
+      clearTimeout: () => undefined,
+    });
+    const events: string[] = [];
+    const session = new ParakeetRecognitionSession(
+      {
+        capture: browserAudioCapture(world.global),
+        engine: { preload: () => undefined, transcribe: async () => 'unused' },
+        watchHidden: onHidden => host.watchHidden(onHidden),
+        setTimeout: () => 0,
+        clearTimeout: () => undefined,
+        now: () => 0,
+      },
+      {
+        onStart: () => events.push('start'),
+        onTranscript: () => undefined,
+        onFailure: () => undefined,
+        onAbort: () => events.push('abort'),
+        onLimit: () => undefined,
+      },
+    );
+    session.start();
+    await settle();
+    page.hide();
+    should(events).deepEqual(['start', 'abort']);
+  });
 });

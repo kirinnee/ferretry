@@ -49,7 +49,8 @@ import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import { useSendOutbox } from '../lib/store.tsx';
-import type { LiveComposerBridge } from '../lib/voice-chat/live-assembly.ts';
+import type { LiveComposerBridge, LiveComposerObserver } from '../lib/voice-chat/live-assembly.ts';
+import type { SendTicket } from '../lib/voice-chat/ports.ts';
 import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
@@ -85,6 +86,17 @@ import { type ReferenceSurface, useReferenceSurface } from './reference-surface.
 import type { PendingAttachment } from './session-chat-model.ts';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 import { Spinner } from './spinner.tsx';
+
+/**
+ * What Live last put in the box: the text a person typed (`typed`), everything in front of the current take's
+ * words (`base`: the typed text plus the words of earlier, finished takes), and the box as Live left it (`shown`).
+ * A box that no longer reads `shown` was edited by a person.
+ */
+interface LiveWords {
+  readonly typed: string;
+  readonly base: string;
+  readonly shown: string;
+}
 
 interface SendFailure {
   readonly text: string;
@@ -538,7 +550,19 @@ export function Composer({
   scopeKeyNow.current = scopeKey;
   const [draftState, setDraftState] = useState(() => ({ key: scopeKey, text: draftStore.load(scope) }));
   const draft = draftState.key === scopeKey ? draftState.text : draftStore.load(scope);
-  const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
+  /**
+   * Live voice hears every write to the draft the moment it is made (`liveBridge.observe`): a keystroke pauses
+   * auto-send and takes back a send Live queued but this composer has not started, before the next render — not in an
+   * effect after it. Live's own writes carry the text it just put there, which it recognises as its own.
+   */
+  const liveObserver = useRef<LiveComposerObserver | null>(null);
+  const setDraft = useCallback(
+    (text: string) => {
+      liveObserver.current?.edited(text);
+      setDraftState({ key: daemonSessionKey(scope), text });
+    },
+    [scope],
+  );
   const [sending, setSending] = useState(false);
   /** A press that ended a composition, waiting for the render that holds the word it read (`submit`). */
   const [resubmit, setResubmit] = useState<{ readonly interrupt: boolean } | null>(null);
@@ -945,16 +969,16 @@ export function Composer({
     sharedItems.sent();
     locating.current += 1;
     setLocation(null);
-    setDraft(left);
     // The box is empty again: what Live last showed is gone with it, so the emptying is not mistaken for typing.
     if (left === '') liveWords.current = null;
+    setDraft(left);
     // The next message starts as text, not as commands.
     setVim(initialVimState);
     if (left === '') draftStore.clear(sentScope);
     onSent?.(sent);
   };
 
-  const submit = async (interrupt = false): Promise<boolean> => {
+  const sendDraft = async (interrupt = false): Promise<boolean> => {
     if (!canSubmit || submitLock.current) return false;
     // The word a phone keyboard is still composing is part of the message: the composition ends here,
     // and when that changed the text this press goes once the composer holds it (the effect below).
@@ -1053,6 +1077,18 @@ export function Composer({
       submitLock.current = false;
       setSending(false);
     }
+  };
+
+  /**
+   * EVERY press of Send — the arrow, Enter, ⌘↵, the form — except Live's own. A press that really went (the lock is
+   * taken before the send's first await) is told to Live in the same tick, with its outcome, so a Live attempt about
+   * the same words (a countdown, a take still being decoded) is retired instead of sending them a second time.
+   */
+  const submit = (interrupt = false): Promise<boolean> => {
+    const wasSending = submitLock.current;
+    const outcome = sendDraft(interrupt);
+    if (!wasSending && submitLock.current) liveObserver.current?.sending(outcome);
+    return outcome;
   };
 
   // The press again, now that the draft (and the shared draft's copy of it) holds the composed word.
@@ -1447,49 +1483,71 @@ export function Composer({
   // words of the turn in front of whatever was typed before them; a draft that is not what `show` last put there was
   // edited by a person, which pauses Live (`use-live-voice.ts`). `submit` waits for the render that holds the
   // words, then runs the ordinary send and says whether it went.
-  const liveWords = useRef<{ readonly base: string; readonly shown: string } | null>(null);
+  const liveWords = useRef<LiveWords | null>(null);
   const [liveSendRequest, setLiveSendRequest] = useState(0);
-  const liveSendResolve = useRef<((sent: boolean) => void) | null>(null);
+  const liveSend = useRef<{ readonly ticket: SendTicket; readonly resolve: (sent: boolean) => void } | null>(null);
   const liveBridge = useMemo<LiveComposerBridge>(() => {
     const place = (base: string, words: string): string =>
       words === '' ? base : base.trim() === '' ? words : `${base}${/\s$/u.test(base) ? '' : ' '}${words}`;
-    const put = (base: string, next: string): void => {
-      liveWords.current = { base, shown: next };
-      draftRef.current = next;
-      applyDictation({ text: next, caret: next.length });
+    const put = (next: LiveWords): void => {
+      liveWords.current = next;
+      draftRef.current = next.shown;
+      applyDictation({ text: next.shown, caret: next.shown.length });
+    };
+    /** The words Live last put in the box, while the box still holds exactly them (nobody has edited since). */
+    const attached = (): LiveWords | null => {
+      const held = liveWords.current;
+      return held !== null && held.shown === draftRef.current ? held : null;
     };
     return {
       show: words => {
-        const held = liveWords.current;
-        const current = draftRef.current;
-        const base = held !== null && held.shown === current ? held.base : current;
-        put(base, place(base, words));
+        const held = attached();
+        const base = held?.base ?? draftRef.current;
+        const shown = place(base, words);
+        put({ typed: held?.typed ?? draftRef.current, base, shown });
       },
       clear: () => {
-        const held = liveWords.current;
-        if (held !== null && held.shown === draftRef.current) put(held.base, held.base);
+        const held = attached();
+        if (held !== null) put({ typed: held.typed, base: held.base, shown: held.base });
+      },
+      // A take's words are final once the take is over (Hold, a pause): they become the front of the next take's
+      // box, and what a person typed stays what a person typed.
+      seal: () => {
+        const held = attached();
+        if (held !== null) liveWords.current = { typed: held.typed, base: held.shown, shown: held.shown };
+      },
+      observe: observer => {
+        liveObserver.current = observer;
+        return () => {
+          if (liveObserver.current === observer) liveObserver.current = null;
+        };
       },
       draft: () => draftRef.current,
-      typed: () => {
-        const held = liveWords.current;
-        const current = draftRef.current;
-        return held !== null && held.shown === current ? held.base : current;
-      },
+      typed: () => attached()?.typed ?? draftRef.current,
       lastShown: () => liveWords.current?.shown ?? null,
-      submit: () =>
+      // Deferred to the render that holds the approved words, then re-checked there (see the effect below).
+      submit: ticket =>
         new Promise<boolean>(resolve => {
-          liveSendResolve.current?.(false);
-          liveSendResolve.current = resolve;
+          liveSend.current?.resolve(false);
+          liveSend.current = { ticket, resolve };
           setLiveSendRequest(count => count + 1);
         }),
     };
   }, [applyDictation]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `submit` is this render's, which is the point
+  // The ONE door Live sends through. It runs in the render that holds the words, and sends only if, right now, the
+  // approval still stands (not revoked by Hold, typing, a hidden tab or End) AND this render holds exactly the words
+  // that were on screen when it was given. A box edited since, a stop, a disabled composer: nothing is sent.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `sendDraft` is this render's, which is the point
   useEffect(() => {
-    if (liveSendRequest === 0) return;
-    const resolve = liveSendResolve.current;
-    liveSendResolve.current = null;
-    void submit().then(sent => resolve?.(sent));
+    const pending = liveSend.current;
+    if (pending === null) return;
+    liveSend.current = null;
+    const { ticket, resolve } = pending;
+    if (draft !== ticket.text || !ticket.commit()) {
+      resolve(false);
+      return;
+    }
+    void sendDraft().then(resolve);
   }, [liveSendRequest]);
   const [liveActive, setLiveActive] = useState(false);
   const [dictating, setDictating] = useState(false);
