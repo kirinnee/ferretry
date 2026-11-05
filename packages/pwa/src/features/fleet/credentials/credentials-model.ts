@@ -186,18 +186,10 @@ export const sameEmailLogin = (
         other => other.id !== credential.id && other.harness === credential.harness && other.email === credential.email,
       );
 
-/** Whether the two labels of the E26 step can be saved: both given, and different. */
+/** Whether the two labels of the E26 step can be saved: both given, and different (trimmed, any case — as the daemon compares). */
 export const labelsError = (older: string, newer: string): string | null => {
   if (older.trim() === '' || newer.trim() === '') return 'Give each login a label.';
-  return older.trim() === newer.trim() ? 'Use two different labels.' : null;
-};
-
-/** A new login's id: the harness name, numbered past every id this machine already has. */
-export const nextCredentialId = (list: FleetCredentialList | null, harness: HarnessKind): string => {
-  const taken = new Set((list?.credentials ?? []).map(credential => credential.id));
-  let index = 2;
-  while (taken.has(`${harness}-${String(index)}`)) index += 1;
-  return taken.has(harness) ? `${harness}-${String(index)}` : harness;
+  return older.trim().toLowerCase() === newer.trim().toLowerCase() ? 'Use two different labels.' : null;
 };
 
 // ── Budgets (docs/budgets.md) ─────────────────────────────────────────────────────────────────────

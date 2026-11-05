@@ -1,5 +1,5 @@
 import { detectProvider } from '@ferretry/fleet';
-import type { FleetProviderPresetView } from '@ferretry/protocol';
+import { type FleetProviderPresetView, loginIdFor, runtimeNameFor } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import { requireMayApply } from '../fleet/account-authority.ts';
 import { runChange } from '../fleet/account-change.ts';
@@ -26,32 +26,6 @@ import {
 import { registerBudgetCommand } from './budget.ts';
 import { renderCredentialList, renderCredentialRow, renderPresetList } from './render.ts';
 
-const CREDENTIAL_ID_LIMIT = 64;
-
-/** A credential id from a label: lowercase letters, digits and dashes. */
-const slug = (value: string): string =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '');
-
-/**
- * The id a new login gets when nobody names one: `<harness>-<label>`, or `<harness>-login`, with `-2`,
- * `-3`… added until it is free.
- */
-export function suggestCredentialId(
-  harness: AccountHarness,
-  label: string | undefined,
-  taken: ReadonlySet<string>,
-): string {
-  const base = `${harness}-${slug(label ?? '') || 'login'}`.slice(0, CREDENTIAL_ID_LIMIT - 3);
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) {
-    const candidate = `${base}-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
 /** Mounts `credentials` and `credential …` (docs/design/account-model.md §6.2). */
 export function registerCredentialCommands(program: Command, deps: AccountCommandDeps): void {
   const bin = deps.binaryName;
@@ -77,7 +51,7 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
       .command('add')
       .description('add a login: sign claude or codex in, or build one from a provider preset')
       .argument('[tool-or-provider]', 'claude, codex, or a provider — e.g. glm, deepseek, bedrock')
-      .option('--label <label>', 'a name to tell this login apart from another with the same email')
+      .option('--label <label>', 'a name for this login, e.g. work (its id is made from it)')
       .option('--id <id>', 'the id to give it (default: made from the tool and the label)')
       .option('--no-sign-in', 'add the login without signing in now')
       .option('--preset <id>', `an environment login from a provider preset (see \`${bin} login presets\`)`)
@@ -263,7 +237,7 @@ async function addToolLogin(
   const bin = deps.binaryName;
   const harness = parseHarness(tool);
   const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
-  const id = options.id ?? suggestCredentialId(harness, options.label ?? options.preset, taken);
+  const id = options.id ?? loginIdFor(harness, options.label ?? options.preset, taken);
   const flags = writeFlags(options);
   const environment = await environmentLogin(deps, harness, options);
   const outcome = await runChange(deps, {
@@ -284,9 +258,30 @@ async function addToolLogin(
   }
   if (options.signIn === false) {
     deps.out.report(`Sign it in when you are ready: ${bin} credential signin ${id}`);
+    await reportRuntimeHint(deps, harness, id);
     return;
   }
   await runSignIn(deps, id);
+  await reportRuntimeHint(deps, harness, id);
+}
+
+/** A word for a pasted shell line: bare when it is plain, else single-quoted with `'` escaped (POSIX). */
+const shellWord = (value: string): string =>
+  /^[A-Za-z0-9._-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+
+/**
+ * The runtime the Add a login page would have made for this login, as a copy-paste line. The CLI does not
+ * make it silently — a CLI write stays explicit — and leaves the line out when no runtime of this CLI
+ * exists to borrow a profile from.
+ */
+async function reportRuntimeHint(deps: AccountCommandDeps, harness: AccountHarness, id: string): Promise<void> {
+  const { runtimes } = await deps.gateway.runtimes();
+  const profile = runtimes.find(runtime => runtime.harness === harness)?.profile;
+  if (profile === undefined) return;
+  const name = runtimeNameFor(harness, id, new Set(runtimes.map(runtime => runtime.name)));
+  deps.out.report(
+    `To run ${HARNESS_LABEL[harness]} on it: ${deps.binaryName} runtime add ${shellWord(name)} --credential ${shellWord(id)} --profile ${shellWord(profile)}`,
+  );
 }
 
 /**
@@ -431,7 +426,7 @@ async function addProviderLogin(
   await resolveProviderSecrets(deps, preset, harnesses, shellEnv);
 
   const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
-  const id = options.id ?? suggestCredentialId(harness, options.label ?? preset.id, taken);
+  const id = options.id ?? loginIdFor(harness, options.label ?? preset.id, taken);
   const flags = writeFlags(options);
   const cloudCredential = options.cloudCredential ?? preset.cloudCredential?.suggested;
 

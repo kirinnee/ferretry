@@ -4,11 +4,18 @@
  * First the provider, as tiles: **Claude Code** or **Codex** with a subscription sign-in, then every
  * API-key provider this machine offers (Popular, Cloud, Self-hosted…) and **Paste variables…**. One tap
  * folds the tiles to the one chosen and shows, right under it, only what that provider needs — a sign-in,
- * or its key — and ONE button that adds the login and, when no runtime runs that CLI yet, the runtime on
- * it. What it is doing and anything that went wrong say so in place.
+ * or its key — and ONE button that adds the login and the runtime on it (ticked by default whenever a
+ * profile fits). What it is doing and anything that went wrong say so in place.
+ *
+ * A sign-in asks for a **Name** first: required when the machine already has a login of that CLI, optional
+ * for the first. The login id and the runtime name both come from it through one function in
+ * `@ferretry/protocol` (`loginIdFor`, `runtimeNameFor`), so the harness prefix is added once. A short
+ * "What happens next" list says what Sign in does, including that the provider signs in whichever account
+ * the browser is already signed in to.
  *
  * A sign-in starts in the same click that made the login, and its link (and Codex's code) appears under
- * the button. A signed-in email that already has a login of that harness asks for two labels here (E26).
+ * the button. A signed-in email that already has a login of that harness asks whether the browser signed in
+ * as the wrong account; keeping both asks only for the label that is still missing (E26).
  * An environment login is offered its Test once saved: the daemon tests the login it has, never a draft.
  *
  * Every write is a reviewed change through the shared apply path, so the grant and passkey rules are the
@@ -16,14 +23,20 @@
  * could send.
  */
 
-import type { FleetMachineView } from '@ferretry/protocol';
+import {
+  type FleetMachineView,
+  loginIdFor,
+  loginNameProblem,
+  NAMED_HARNESS_WORDS,
+  SIGN_IN_OTHER_ACCOUNT_TIP,
+} from '@ferretry/protocol';
 import { Check, ChevronLeft } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
-import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
+import { type CredentialLoginFlow, restartCredentialSignIn, startCredentialSignIn } from '../harness-login-api.ts';
 import type { MachineData } from '../runtimes/machine-data.ts';
 import { type FirstRuntime, firstRuntimeFor } from '../runtimes/runtimes-model.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
@@ -32,17 +45,17 @@ import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-pan
 import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
   credentialEmail,
+  HARNESS_SHORT,
   HARNESSES,
   type HarnessKind,
   labelsError,
-  nextCredentialId,
   plural,
   sameEmailLogin,
 } from './credentials-model.ts';
 import { useProviderCatalog } from './environment-login.tsx';
 import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
 import { type LocalModelsControl, useLocalModels } from './use-local-models.ts';
-import { offeredHarnesses, presetScope } from './environment-model.ts';
+import { freeLoginId, offeredHarnesses, presetScope } from './environment-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';
 import { LoginTest } from './login-test.tsx';
 import { OneClickLogin } from './one-click-login.tsx';
@@ -59,6 +72,8 @@ type Choice =
 /** What the one button made. */
 interface Made {
   readonly credentialId: string;
+  /** The Name the person gave it, or `''`. */
+  readonly label: string;
   /** The runtime made on it, its refusal, or `null` when none was asked for. */
   readonly runtime:
     | { readonly kind: 'made'; readonly name: string }
@@ -126,12 +141,24 @@ export function AddLogin({
       catalog.loaded.kind === 'ready' && catalog.loaded.presets.some(candidate => candidate.id === OLLAMA_PRESET_ID),
   });
   const [choice, setChoice] = useState<Choice | null>(null);
-  /** Whether to make the runtime too; `null` while the default (make it when none runs that CLI) holds. */
+  /** Whether to make the runtime too; `null` while the default (make it whenever a profile fits) holds. */
   const [withRuntime, setWithRuntime] = useState<boolean | null>(null);
+  /** The Name of a sign-in login, as typed. */
+  const [typed, setName] = useState('');
+  /** Sign in was pressed once without a required Name, so the missing Name is said. */
+  const [tried, setTried] = useState(false);
+  /** The sign-in restarted because the browser signed in as the wrong account, so the tip is said loudly. */
+  const [retryTip, setRetryTip] = useState(false);
   const [made, setMade] = useState<Made | null>(null);
   const [started, setStarted] = useState<Started | null>(null);
   const [signedIn, setSignedIn] = useState(false);
-  const [labels, setLabels] = useState<{ older: string; newer: string } | null>(null);
+  const [labels, setLabels] = useState<{ older: string; newer: string; askOlder: boolean; askNewer: boolean } | null>(
+    null,
+  );
+  /** The sign-in is being restarted for another account. */
+  const [restarting, setRestarting] = useState(false);
+  /** How many times the sign-in has been restarted, so its panel starts fresh each time. */
+  const [run, setRun] = useState(0);
   /** What the button is doing right now, said on it. */
   const [working, setWorking] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -151,26 +178,44 @@ export function AddLogin({
   /** The CLIs the chosen login drives, Claude Code first. */
   const drives: readonly HarnessKind[] =
     choice?.kind === 'signin' ? [choice.harness] : preset === undefined ? [] : offeredHarnesses(preset);
+  const logins = data?.credentials.credentials ?? [];
+  const takenIds = new Set(logins.map(login => login.id));
+  const signinHarness = choice?.kind === 'signin' ? choice.harness : null;
+  /** The id a sign-in login would get from the Name typed so far. */
+  const loginId =
+    signinHarness !== null
+      ? loginIdFor(signinHarness, typed, takenIds)
+      : preset === undefined
+        ? ''
+        : freeLoginId(data?.credentials ?? null, preset.id);
   const plan: FirstRuntime | null =
-    data === null ? null : firstRuntimeFor(drives, data.runtimes.runtimes, data.profiles.profiles);
-  const makeRuntime = plan !== null && (withRuntime ?? plan.needed);
+    data === null ? null : firstRuntimeFor(drives, data.runtimes.runtimes, data.profiles.profiles, loginId);
+  const makeRuntime = plan !== null && (withRuntime ?? true);
+  const nameProblem = signinHarness === null ? null : loginNameProblem(typed, signinHarness, logins);
+  /** A problem with a Name that was typed disables the button; a missing one is said when Sign in is pressed. */
+  const nameBlocks = nameProblem !== null && typed.trim() !== '';
 
   const choose = (next: Choice | null): void => {
     changes.clear();
     setWithRuntime(null);
+    setName('');
+    setTried(false);
     setChoice(next);
   };
 
   /** The runtime on the login just made, when one was asked for. A refusal is said, and the login stays. */
   const addRuntime = async (credentialId: string): Promise<Made['runtime']> => {
-    if (!makeRuntime || plan === null) return null;
-    setWorking(`Creating ${plan.name}…`);
+    if (!makeRuntime || data === null) return null;
+    // Named after the login that was actually made: a preset login's id can be edited before it is saved.
+    const runtime = firstRuntimeFor(drives, data.runtimes.runtimes, data.profiles.profiles, credentialId);
+    if (runtime === null) return null;
+    setWorking(`Making ${runtime.name}…`);
     const result = await changes.apply({
       kind: 'runtime.put',
-      name: plan.name,
+      name: runtime.name,
       credential: credentialId,
-      profile: plan.profile,
-      ...(drives.length > 1 ? { harness: plan.harness } : {}),
+      profile: runtime.profile,
+      ...(drives.length > 1 ? { harness: runtime.harness } : {}),
       agent: false,
       create: true,
     });
@@ -178,19 +223,29 @@ export function AddLogin({
     changes.clear();
     return result.kind === 'refused'
       ? { kind: 'refused', sentence: result.sentence }
-      : { kind: 'made', name: plan.name };
+      : { kind: 'made', name: runtime.name };
   };
 
   /** A sign-in: make the empty login, its runtime, then start the harness's sign-in for it. */
   const signIn = async (harness: HarnessKind): Promise<void> => {
-    const id = nextCredentialId(data?.credentials ?? null, harness);
+    if (nameProblem !== null) {
+      setTried(true);
+      return;
+    }
+    const id = loginId;
+    const label = typed.trim();
     setWorking('Adding the login…');
     try {
-      const added = await changes.apply({ kind: 'credential.add', id, harness });
+      const added = await changes.apply({
+        kind: 'credential.add',
+        id,
+        harness,
+        ...(label === '' ? {} : { label }),
+      });
       if (added.kind === 'refused') return;
       const runtime = await addRuntime(id);
       await reload();
-      setMade({ credentialId: id, runtime });
+      setMade({ credentialId: id, label, runtime });
       setWorking('Starting sign-in…');
       try {
         const client = await createClient(connection);
@@ -206,11 +261,11 @@ export function AddLogin({
 
   /** An environment login is saved: its runtime next, then the Test. */
   const saved = async (credentialId: string): Promise<void> => {
-    setMade({ credentialId, runtime: null });
+    setMade({ credentialId, label: '', runtime: null });
     try {
       const runtime = await addRuntime(credentialId);
       if (runtime !== null) {
-        setMade({ credentialId, runtime });
+        setMade({ credentialId, label: '', runtime });
         await reload();
       }
     } finally {
@@ -218,14 +273,55 @@ export function AddLogin({
     }
   };
 
+  /** Saves only the label that is still missing: the older login's, the new one's, or both. */
   const saveLabels = async (): Promise<void> => {
     if (credential === undefined || twin === undefined || labels === null) return;
-    const first = await changes.apply({ kind: 'credential.label', id: twin.id, label: labels.older.trim() });
-    if (first.kind === 'refused') return;
-    const second = await changes.apply({ kind: 'credential.label', id: credential.id, label: labels.newer.trim() });
-    if (second.kind === 'refused') return;
+    if (labels.askOlder) {
+      const first = await changes.apply({ kind: 'credential.label', id: twin.id, label: labels.older.trim() });
+      if (first.kind === 'refused') return;
+    }
+    if (labels.askNewer) {
+      const second = await changes.apply({ kind: 'credential.label', id: credential.id, label: labels.newer.trim() });
+      if (second.kind === 'refused') return;
+    }
     await reload();
     onAdded(credential.id);
+  };
+
+  /** Keep both logins: ask only for the label that is still missing, and finish at once when none is. */
+  const keepBoth = (): void => {
+    if (credential === undefined || twin === undefined) return;
+    const older = twin.label?.trim() ?? '';
+    // The Name typed earlier is the new login's label; the daemon saved it with the login.
+    const newer = credential.label?.trim() || made?.label || '';
+    if (older !== '' && newer !== '' && labelsError(older, newer) === null) onAdded(credential.id);
+    else setLabels({ older, newer, askOlder: older === '', askNewer: newer === '' });
+  };
+
+  /** The browser signed in as the wrong account: sign this login out and start its sign-in again. */
+  const signInAgain = async (): Promise<void> => {
+    if (credential === undefined) return;
+    setRestarting(true);
+    try {
+      const out = await changes.apply({ kind: 'credential.signout', id: credential.id });
+      if (out.kind === 'refused') return;
+      changes.clear();
+      setSignedIn(false);
+      setRetryTip(true);
+      // The panel is remounted only once the new flow is in hand: it keeps the flow it started with, so a
+      // remount before the restart answers would show (and finish) the old, completed one.
+      try {
+        const client = await createClient(connection);
+        const flow = await restartCredentialSignIn(client, { credentialId: credential.id }, undefined);
+        setStarted({ flow, refusal: null });
+      } catch (error) {
+        setStarted({ flow: null, refusal: changeRefusalSentence(error) });
+      }
+      setRun(count => count + 1);
+      await reload();
+    } finally {
+      setRestarting(false);
+    }
   };
 
   const done = made !== null && (choice?.kind !== 'signin' || signedIn);
@@ -242,7 +338,7 @@ export function AddLogin({
           <p className="mb-0 mt-1 text-cell leading-base text-muted">
             {made === null
               ? 'No new login is added.'
-              : 'The login you added is kept, and can be signed in from its own page.'}
+              : `The login ${loginWords(made)} is kept as Needs sign-in. Sign it in later from its own page, or remove it there.`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button type="button" variant="danger" data-add-login-stop="" onClick={onLeave}>
@@ -317,11 +413,11 @@ export function AddLogin({
         />
         <span className="flex min-w-0 flex-col">
           <span className="text-ui text-fg">
-            Also create the runtime <span className="break-all font-mono">{plan.name}</span>
+            Also make the runtime <span className="break-all font-mono">{plan.name}</span>
           </span>
           <span className="text-meta leading-base text-muted">
-            {HARNESS_NAMES[plan.harness]} · {plan.profile} profile
-            {plan.needed ? '' : ` · ${HARNESS_NAMES[plan.harness]} already has a runtime here`}
+            Runs {HARNESS_NAMES[plan.harness]} on this login, with the{' '}
+            <span className="break-words font-mono">{plan.profile}</span> profile.
           </span>
         </span>
       </label>
@@ -339,7 +435,7 @@ export function AddLogin({
       >
         <Check size={14} aria-hidden="true" />
         <span>
-          Created the runtime <span className="break-all font-mono">{made.runtime.name}</span>
+          Made the runtime <span className="break-all font-mono">{made.runtime.name}</span>
         </span>
       </p>
     ) : (
@@ -429,45 +525,50 @@ export function AddLogin({
     if (credential !== undefined && signedIn) {
       if (twin !== undefined && labels !== null) {
         const problem = labelsError(labels.older, labels.newer);
+        const { askOlder, askNewer } = labels;
         return (
           <div className="flex min-w-0 flex-col gap-3" data-add-login-label="">
             <p className="m-0 text-ui leading-base text-fg">
               You already have a {name} login for{' '}
-              <span className="break-all font-mono">{credentialEmail(credential)}</span>. Label both so you can tell
-              them apart.
+              <span className="break-all font-mono">{credentialEmail(credential)}</span>.{' '}
+              {askOlder && askNewer ? 'Label both so you can tell them apart.' : 'Label the one that has no label.'}
             </p>
-            <div className="flex min-w-0 flex-col gap-1">
-              <label htmlFor="add-login-label-old" className="text-ui font-semibold text-fg">
-                Label for the login you already had
-              </label>
-              <input
-                id="add-login-label-old"
-                className="kt-input"
-                autoComplete="off"
-                value={labels.older}
-                placeholder="e.g. personal"
-                onChange={event => setLabels({ ...labels, older: event.target.value })}
-              />
-              <span className="text-meta text-muted">Used by {plural(twin.usedBy.length, 'runtime')}.</span>
-            </div>
-            <div className="flex min-w-0 flex-col gap-1">
-              <label htmlFor="add-login-label-new" className="text-ui font-semibold text-fg">
-                Label for the new login
-              </label>
-              <input
-                id="add-login-label-new"
-                className="kt-input"
-                autoComplete="off"
-                value={labels.newer}
-                placeholder="e.g. work"
-                onChange={event => setLabels({ ...labels, newer: event.target.value })}
-              />
-              {problem === null ? null : (
-                <span className="text-meta text-err" data-add-login-label-error="">
-                  {problem}
-                </span>
-              )}
-            </div>
+            {askOlder ? (
+              <div className="flex min-w-0 flex-col gap-1">
+                <label htmlFor="add-login-label-old" className="text-ui font-semibold text-fg">
+                  Label for the login you already had
+                </label>
+                <input
+                  id="add-login-label-old"
+                  className="kt-input"
+                  autoComplete="off"
+                  value={labels.older}
+                  placeholder="e.g. personal"
+                  onChange={event => setLabels({ ...labels, older: event.target.value })}
+                />
+                <span className="text-meta text-muted">Used by {plural(twin.usedBy.length, 'runtime')}.</span>
+              </div>
+            ) : null}
+            {askNewer ? (
+              <div className="flex min-w-0 flex-col gap-1">
+                <label htmlFor="add-login-label-new" className="text-ui font-semibold text-fg">
+                  Label for the new login
+                </label>
+                <input
+                  id="add-login-label-new"
+                  className="kt-input"
+                  autoComplete="off"
+                  value={labels.newer}
+                  placeholder="e.g. work"
+                  onChange={event => setLabels({ ...labels, newer: event.target.value })}
+                />
+              </div>
+            ) : null}
+            {problem === null ? null : (
+              <span className="text-meta text-err" data-add-login-label-error="">
+                {problem}
+              </span>
+            )}
             <ChangeApplyPanel
               machineName={machineName}
               authority={changes.authority}
@@ -489,59 +590,135 @@ export function AddLogin({
             </span>
           </p>
           {runtimeOutcome()}
-          <div>
-            <Button
-              type="button"
-              variant="primary"
-              data-add-login-finish=""
-              onClick={() => {
-                if (twin === undefined) onAdded(credential.id);
-                else setLabels({ older: twin.label ?? 'personal', newer: twin.label === 'work' ? 'side' : 'work' });
-              }}
+          {twin === undefined ? (
+            <div>
+              <Button type="button" variant="primary" data-add-login-finish="" onClick={() => onAdded(credential.id)}>
+                Done
+              </Button>
+            </div>
+          ) : (
+            <div
+              role="alert"
+              data-add-login-same-account=""
+              className="flex min-w-0 flex-col gap-3 rounded-control border border-warn-border bg-warn-bg p-3"
             >
-              {twin === undefined ? 'Done' : 'Next: label them'}
-            </Button>
-          </div>
+              <p className="m-0 text-ui leading-base text-warn">
+                <strong className="font-semibold">
+                  This is the same {HARNESS_SHORT[choice.harness]} account as your login{' '}
+                  <span className="break-words">{twin.label ?? twin.id}</span> ({credentialEmail(credential)}).
+                </strong>{' '}
+                Did your browser sign in as the wrong account?
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="primary"
+                  data-add-login-different-account=""
+                  disabled={restarting}
+                  onClick={() => void signInAgain()}
+                >
+                  {restarting ? 'Signing out…' : 'Sign in with a different account'}
+                </Button>
+                <Button type="button" data-add-login-keep-both="" disabled={restarting} onClick={keepBoth}>
+                  Keep both
+                </Button>
+              </div>
+              {changes.refusal === null ? null : (
+                <p role="alert" className="m-0 text-cell leading-base text-err">
+                  {changes.refusal}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       );
     }
-    if (credential !== undefined && started !== null)
+    if (credential !== undefined && started !== null && made !== null)
       return (
         <div className="flex min-w-0 flex-col gap-3" data-add-login-signing-in="">
+          <p role="status" className="m-0 inline-flex items-center gap-2 text-cell text-ok" data-add-login-added="">
+            <Check size={14} aria-hidden="true" />
+            <span className="min-w-0 break-words">
+              Added <span className="break-all font-mono">{loginWords(made)}</span>
+            </span>
+          </p>
           {runtimeOutcome()}
+          {retryTip ? (
+            <p className="m-0 text-cell font-semibold leading-base text-fg" data-add-login-other-account-tip="">
+              {SIGN_IN_OTHER_ACCOUNT_TIP[choice.harness]}
+            </p>
+          ) : null}
           {started.refusal === null ? null : (
             <p role="alert" className="m-0 text-cell leading-base text-err" data-add-login-start-refused="">
               {started.refusal}
             </p>
           )}
-          <CredentialSignIn
-            credential={credential}
-            machineName={machineName}
-            connection={connection}
-            createClient={createClient}
-            changes={changes}
-            {...(started.flow === null ? {} : { initialFlow: started.flow })}
-            {...(pollMs === undefined ? {} : { pollMs })}
-            onSignedIn={() => {
-              setSignedIn(true);
-              void reload();
-            }}
-          />
+          {restarting ? (
+            <p role="status" className="m-0 text-cell text-muted" data-add-login-restarting="">
+              Starting the sign-in again…
+            </p>
+          ) : (
+            <CredentialSignIn
+              key={run}
+              credential={credential}
+              machineName={machineName}
+              connection={connection}
+              createClient={createClient}
+              changes={changes}
+              {...(started.flow === null ? {} : { initialFlow: started.flow })}
+              {...(pollMs === undefined ? {} : { pollMs })}
+              onSignedIn={() => {
+                setSignedIn(true);
+                void reload();
+              }}
+            />
+          )}
         </div>
       );
+    const trimmed = typed.trim();
+    const hint = nameHint({
+      harness: choice.harness,
+      others: logins.filter(login => login.harness === choice.harness),
+      id: loginId,
+      named: trimmed !== '',
+    });
+    const error = nameProblem !== null && (trimmed !== '' || tried) ? nameProblem : null;
+    const inputId = 'add-login-name';
     return (
       <>
-        <p className="m-0 text-cell leading-base text-muted">
-          You sign in on {name}’s own page; the login is kept on {machineName}, and nothing here sees your password.
-        </p>
+        <div className="flex min-w-0 max-w-[42rem] flex-col gap-1" data-add-login-name="">
+          <label htmlFor={inputId} className="text-ui font-semibold text-fg">
+            Name
+          </label>
+          <input
+            id={inputId}
+            className="kt-input w-full sm:max-w-[20rem]"
+            autoComplete="off"
+            value={typed}
+            placeholder="e.g. work, personal"
+            aria-invalid={error === null ? undefined : true}
+            aria-describedby={`${inputId}-hint`}
+            onChange={event => setName(event.target.value)}
+          />
+          <span
+            id={`${inputId}-hint`}
+            className={`text-meta leading-base ${error === null ? 'text-muted' : 'text-err'}`}
+            data-add-login-name-hint={error === null ? '' : undefined}
+            data-add-login-name-error={error === null ? undefined : ''}
+          >
+            {error ?? hint}
+          </span>
+        </div>
         {runtimeChoice()}
+        <WhatHappensNext harness={choice.harness} machineName={machineName} name={trimmed} />
         <ChangeApplyPanel
           machineName={machineName}
           authority={changes.authority}
           busy={changes.busy || working !== null}
           busyLabel={working ?? 'Adding the login…'}
           refusal={changes.refusal}
-          submitLabel={makeRuntime ? `Sign in and create ${plan?.name}` : `Sign in to ${name}`}
+          submitLabel={makeRuntime && plan !== null ? `Sign in and make ${plan.name}` : `Sign in to ${name}`}
+          disabled={nameBlocks}
           onSubmit={() => void signIn(choice.harness)}
         />
       </>
@@ -681,5 +858,79 @@ function Chosen({
         </Button>
       )}
     </div>
+  );
+}
+
+/** A login as the page names it: `work (claude-work)`, or just its id when it has no Name. */
+const loginWords = (made: Made): string =>
+  made.label === '' ? made.credentialId : `${made.label} (${made.credentialId})`;
+
+/** What the Name box says under it: why it is asked for, and the id it will be saved as. */
+function nameHint({
+  harness,
+  others,
+  id,
+  named,
+}: {
+  readonly harness: HarnessKind;
+  readonly others: readonly { readonly label?: string | undefined; readonly email?: string | undefined }[];
+  readonly id: string;
+  readonly named: boolean;
+}): string {
+  const tool = NAMED_HARNESS_WORDS[harness];
+  const saved = `Saved as ${id}.`;
+  if (others.length === 0) return named ? saved : `Optional. ${saved}`;
+  const [only] = others;
+  if (others.length > 1 || only === undefined)
+    return `So you can tell it from your other ${String(others.length)} ${tool} logins. ${saved}`;
+  const label = only.label?.trim() ?? '';
+  const email = only.email ?? '';
+  const who = email !== '' && label !== '' ? `${email} (${label})` : email !== '' ? email : label;
+  return `So you can tell it from your other ${tool} login${who === '' ? '' : `, ${who}`}. ${saved}`;
+}
+
+/** What Sign in does, step by step, because the provider signs in whichever account the browser is already in. */
+function WhatHappensNext({
+  harness,
+  machineName,
+  name,
+}: {
+  readonly harness: HarnessKind;
+  readonly machineName: string;
+  readonly name: string;
+}) {
+  const tool = NAMED_HARNESS_WORDS[harness];
+  const account = harness === 'claude' ? 'Claude' : 'ChatGPT';
+  const want = name === '' ? 'you want here' : `you want for "${name}"`;
+  return (
+    <section className="flex min-w-0 max-w-[42rem] flex-col gap-2" data-add-login-next="">
+      <h4 className="m-0 text-ui font-semibold text-fg">What happens next</h4>
+      <ol className="m-0 flex list-none flex-col gap-2 p-0 text-cell leading-base text-fg">
+        <li className="flex min-w-0 gap-2">
+          <span className="w-4 shrink-0 text-muted">1</span>
+          <span className="min-w-0">
+            {machineName} starts {tool}’s sign-in and shows you a link here.
+          </span>
+        </li>
+        <li className="flex min-w-0 gap-2">
+          <span className="w-4 shrink-0 text-muted">2</span>
+          <span className="min-w-0">
+            Open the link and sign in with the {account} account {want}.
+            <span className="mt-1 block text-meta text-muted">{SIGN_IN_OTHER_ACCOUNT_TIP[harness]}</span>
+          </span>
+        </li>
+        <li className="flex min-w-0 gap-2">
+          <span className="w-4 shrink-0 text-muted">3</span>
+          <span className="min-w-0">
+            {harness === 'claude'
+              ? 'Claude shows a code. Paste it back here.'
+              : 'Enter the code this page shows on the Codex page. This page finishes by itself.'}
+          </span>
+        </li>
+      </ol>
+      <p className="m-0 text-meta leading-base text-muted">
+        Your password stays on {tool}’s page. The login is kept on {machineName}.
+      </p>
+    </section>
   );
 }

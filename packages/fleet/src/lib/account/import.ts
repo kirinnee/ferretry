@@ -32,7 +32,7 @@
  * Pure: documents in, a plan out. Reading the host is the adapter's; writing the plan is the setup
  * executor's. A content digest is a caller-supplied function, because hashing is not this layer's.
  */
-import { MIN_SECRET_VALUE_LENGTH, secretReference, secretReferencesIn } from '@ferretry/protocol';
+import { harnessPrefixed, MIN_SECRET_VALUE_LENGTH, secretReference, secretReferencesIn } from '@ferretry/protocol';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
@@ -280,7 +280,7 @@ export const IMPORT_NAMES = {
   sharedSkills: 'skills',
 } as const;
 
-const harnessNamed = (harness: HarnessKind, what: string): string => `${harness}-${what}`;
+const harnessNamed = (harness: HarnessKind, what: string): string => harnessPrefixed(harness, what);
 
 /**
  * The runtime an import makes for one harness on one profile — `claude-default` on a machine whose
@@ -1238,7 +1238,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const profileName = profileOf[harness];
     if (profileName === undefined) continue;
     const suggested = freeName(
-      profileName.startsWith(`${harness}-`) ? profileName : importedRuntimeName(harness, profileName),
+      importedRuntimeName(harness, profileName),
       candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined,
     );
     const twin = Object.entries(existing?.runtimes ?? {}).find(

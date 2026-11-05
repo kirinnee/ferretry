@@ -1,4 +1,4 @@
-import type { HarnessLoginCodexMethod, HarnessLoginFlow } from '@ferretry/protocol';
+import { type HarnessLoginCodexMethod, type HarnessLoginFlow, SIGN_IN_OTHER_ACCOUNT_TIP } from '@ferretry/protocol';
 import { requireMayApply } from './account-authority.ts';
 import { type AccountCommandDeps, AccountCommandError } from './account-ports.ts';
 
@@ -107,6 +107,7 @@ async function attemptSignIn(
     if (flow.harness === 'claude' && flow.state === 'awaiting-code') {
       if (shownUrl !== flow.verificationUrl) {
         deps.out.report(`Open this page and sign in:\n  ${flow.verificationUrl}`);
+        deps.out.report(SIGN_IN_OTHER_ACCOUNT_TIP.claude);
         shownUrl = flow.verificationUrl;
       }
       if (!codeSent || flow.lastCode === 'rejected') {
@@ -121,6 +122,7 @@ async function attemptSignIn(
     }
     if (flow.harness === 'codex' && flow.state === 'awaiting-approval' && !shownApproval) {
       deps.out.report(`Open this page and enter the code ${flow.userCode}:\n  ${flow.verificationUrl}`);
+      deps.out.report(SIGN_IN_OTHER_ACCOUNT_TIP.codex);
       deps.out.report('Waiting for you to approve it there…');
       shownApproval = true;
     }

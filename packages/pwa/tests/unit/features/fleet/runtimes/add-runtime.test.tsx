@@ -181,7 +181,7 @@ describe('Add runtime: the page', () => {
     const view = await mountHost({ online: false });
     await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
-    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(nameInput(view.container).value).toBe('claude-hooks');
     expect(submit(view.container).disabled).toBe(true);
     await view.unmount();
   });
@@ -266,7 +266,7 @@ describe('Add runtime: Login', () => {
 });
 
 describe('Add runtime: Add a new login', () => {
-  const NEW_CLAUDE = credential({ id: 'claude', email: undefined, ...withStatus('needs_sign_in') });
+  const NEW_CLAUDE = credential({ id: 'claude-login', email: undefined, ...withStatus('needs_sign_in') });
   const withNew = (...extra: ReturnType<typeof credential>[]): MachineData => ({
     ...DATA,
     credentials: credentialsOf(...CREDENTIALS.credentials, ...extra),
@@ -326,15 +326,15 @@ describe('Add runtime: Add a new login', () => {
     await click(view.container, '[data-add-row="login"]');
     await click(view.container, '[data-add-runtime-login="claude"]');
     await waitFor(view.container, '[data-credential-sign-in="awaiting-code"]');
-    expect(proposed(calls)).toEqual([{ change: { kind: 'credential.add', id: 'claude', harness: 'claude' } }]);
+    expect(proposed(calls)).toEqual([{ change: { kind: 'credential.add', id: 'claude-login', harness: 'claude' } }]);
     expect(reloads).toEqual(['reload']);
-    expect(calls.find(call => call.path === '/v1/fleet/login')?.body).toEqual({ credentialId: 'claude' });
+    expect(calls.find(call => call.path === '/v1/fleet/login')?.body).toEqual({ credentialId: 'claude-login' });
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
 
     await click(view.container, '[data-add-runtime-sign-in-later]');
     expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();
     expect(
-      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new')
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude-login"] input'), 'new')
         .checked,
     ).toBe(true);
     expect(view.container.querySelector('[data-add-runtime-part="profile"]')).not.toBeNull();
@@ -359,7 +359,7 @@ describe('Add runtime: Add a new login', () => {
     await waitFor(view.container, '[data-add-row="login"]');
     expect(reloads.length).toBeGreaterThanOrEqual(2);
     expect(
-      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new')
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude-login"] input'), 'new')
         .checked,
     ).toBe(true);
     await view.unmount();
@@ -384,7 +384,7 @@ describe('Add runtime: Add a new login', () => {
     ).not.toBeNull();
     await click(view.container, '[data-add-runtime-sign-in-later]');
     expect(
-      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new')
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude-login"] input'), 'new')
         .checked,
     ).toBe(true);
     await view.unmount();
@@ -406,7 +406,7 @@ describe('Add runtime: Add a new login', () => {
     expect(text(view.container, '[data-add-runtime-new-login] [role="alert"]')).toBe(
       'This change conflicts with the setup on this machine.',
     );
-    expect(view.container.querySelector('[data-add-runtime-credential="claude"]')).toBeNull();
+    expect(view.container.querySelector('[data-add-runtime-credential="claude-login"]')).toBeNull();
     expect(view.container.querySelector('[data-change-refusal]')).toBeNull();
     await view.unmount();
   });
@@ -470,7 +470,7 @@ describe('Add runtime: Profile', () => {
     expect(view.container.querySelector('#add-runtime-name')).toBeNull();
     expect(submit(view.container).disabled).toBe(true);
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
-    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(nameInput(view.container).value).toBe('claude-hooks');
     expect(submit(view.container).disabled).toBe(false);
     await view.unmount();
   });
@@ -583,7 +583,7 @@ describe('Add runtime: Name and Create', () => {
 
   it('shows the suggested name and the agent choice', async () => {
     const view = await ready();
-    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(nameInput(view.container).value).toBe('claude-hooks');
     expect(view.container.querySelector('[data-runtime-name-problem]')).toBeNull();
     expect(text(view.container, '[data-add-runtime-part="name"]')).toContain(
       'Letters, digits and dashes. You type this to launch it.',
@@ -640,7 +640,7 @@ describe('Add runtime: Name and Create', () => {
     const after = withRuntime(
       DATA,
       runtime({
-        name: 'claude-claude-hooks',
+        name: 'claude-hooks',
         profile: 'Claude hooks',
         credential: { id: 'claude-personal', store: 'host', status: 'ready' },
       }),
@@ -653,7 +653,7 @@ describe('Add runtime: Name and Create', () => {
       {
         change: {
           kind: 'runtime.put',
-          name: 'claude-claude-hooks',
+          name: 'claude-hooks',
           credential: 'claude-personal',
           profile: 'Claude hooks',
           agent: true,
@@ -662,17 +662,17 @@ describe('Add runtime: Name and Create', () => {
       },
     ]);
     expect(reloads).toEqual(['reload']);
-    expect(view.container.querySelector('[data-add-runtime-made="claude-claude-hooks"]')).not.toBeNull();
-    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-claude-hooks is ready to launch');
+    expect(view.container.querySelector('[data-add-runtime-made="claude-hooks"]')).not.toBeNull();
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-hooks is ready to launch');
     expect(text(view.container, '[data-add-runtime-done]')).toContain('Claude Code · Claude hooks profile');
     expect(text(view.container, '[data-add-runtime-done]')).not.toContain('Sign in before you launch');
     expect(view.container.querySelector('#add-runtime-name')).toBeNull();
     expect(text(view.container, '[data-add-runtime-finish="list"]')).toBe('Back to Runtimes');
-    expect(text(view.container, '[data-add-runtime-finish="open"]')).toBe('Open claude-claude-hooks');
+    expect(text(view.container, '[data-add-runtime-finish="open"]')).toBe('Open claude-hooks');
     await click(view.container, '[data-add-runtime-finish="list"]');
     await click(view.container, '[data-add-runtime-finish="open"]');
     await click(view.container, '[data-page-back]');
-    expect(finishes).toEqual([null, 'claude-claude-hooks', null]);
+    expect(finishes).toEqual([null, 'claude-hooks', null]);
     await view.unmount();
   });
 
@@ -708,7 +708,7 @@ describe('Add runtime: Name and Create', () => {
     const after = withRuntime(
       SIGN_IN_NEEDED,
       runtime({
-        name: 'claude-claude-hooks',
+        name: 'claude-hooks',
         profile: 'Claude hooks',
         credential: { id: 'claude-work', store: 'ferretry', status: 'needs_sign_in' },
       }),
@@ -742,7 +742,7 @@ describe('Add runtime: Name and Create', () => {
     await waitFor(view.container, '[data-change-refusal]');
     expect(text(view.container, '[data-change-refusal]')).toBe('This change conflicts with the setup on this machine.');
     expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
-    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(nameInput(view.container).value).toBe('claude-hooks');
     expect(reloads).toEqual([]);
     refuse = false;
     await click(view.container, '[data-change-submit]');
@@ -802,7 +802,7 @@ describe('Add runtime: a login that drives both CLIs', () => {
     expect(codexWork().disabled).toBe(false);
     await click(view.container, '[data-add-runtime-profile="Codex work"] input');
     expect(runsAt(view.container)).toBe('codex');
-    expect(nameInput(view.container).value).toBe('codex-codex-work');
+    expect(nameInput(view.container).value).toBe('codex-work');
     await click(view.container, '[data-add-runtime-runs-option="claude"] input');
     expect(view.container.querySelector('#add-runtime-name')).toBeNull();
     expect(codexWork().disabled).toBe(true);
@@ -818,7 +818,7 @@ describe('Add runtime: a login that drives both CLIs', () => {
     const after = withRuntime(
       DUAL_DATA,
       runtime({
-        name: 'codex-codex-work',
+        name: 'codex-work',
         harness: 'codex',
         profile: 'Codex work',
         credential: { id: 'deepseek', store: 'environment', status: 'ready' },
@@ -833,7 +833,7 @@ describe('Add runtime: a login that drives both CLIs', () => {
       {
         change: {
           kind: 'runtime.put',
-          name: 'codex-codex-work',
+          name: 'codex-work',
           credential: 'deepseek',
           profile: 'Codex work',
           harness: 'codex',

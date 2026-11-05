@@ -192,7 +192,7 @@ describe('Add runtime from the tab', () => {
     await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
     expect(must(view.container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name').value).toBe(
-      'claude-claude-hooks',
+      'claude-hooks',
     );
     await click(view.container, '[data-change-submit]');
     await settle();
@@ -210,7 +210,7 @@ describe('Add runtime from the tab', () => {
   });
 
   it('creates a runtime, re-reads, and Open lands on the runtime’s own page', async () => {
-    const made = runtime({ name: 'claude-claude-hooks', profile: 'Claude hooks' });
+    const made = runtime({ name: 'claude-hooks', profile: 'Claude hooks' });
     let created = false;
     const calls: Call[] = [];
     const view = await open({
@@ -226,10 +226,10 @@ describe('Add runtime from the tab', () => {
       },
     });
     await journey(view);
-    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-claude-hooks is ready to launch');
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-hooks is ready to launch');
     await click(view.container, '[data-add-runtime-finish="open"]');
-    expect(view.container.querySelector('[data-runtime-page="claude-claude-hooks"]')).not.toBeNull();
-    expect(window.location.hash).toBe('#machines/studio-mac/runtimes/claude-claude-hooks');
+    expect(view.container.querySelector('[data-runtime-page="claude-hooks"]')).not.toBeNull();
+    expect(window.location.hash).toBe('#machines/studio-mac/runtimes/claude-hooks');
     await view.unmount();
   });
 

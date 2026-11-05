@@ -65,6 +65,12 @@ describe('names', () => {
     expect(slug('!!!')).toBe('');
   });
 
+  it('never doubles the harness prefix of a profile that already carries it', () => {
+    expect(suggestedRuntimeName('claude', 'claude-default', [])).toBe('claude-default');
+    expect(suggestedRuntimeName('claude', 'claude-default', named('claude-default'))).toBe('claude-default-2');
+    expect(suggestedRuntimeName('claude', 'claude-default', [])).not.toContain('claude-claude');
+  });
+
   it('prefills harness plus profile, made unique', () => {
     expect(suggestedRuntimeName('claude', 'Default', [])).toBe('claude-default');
     expect(suggestedRuntimeName('claude', 'Default', named('claude-default'))).toBe('claude-default-2');
@@ -399,27 +405,32 @@ describe('runtimeProfileLine', () => {
 describe('firstRuntimeFor', () => {
   const codexScoped = profile({ name: 'Codex work', scope: { kind: 'scoped', scope: 'codex' } });
 
-  it('uses the profile a runtime of that CLI already runs, under a free name, and is not needed', () => {
-    expect(firstRuntimeFor(['claude'], RUNTIMES.runtimes, PROFILES.profiles)).toEqual({
+  it('uses the profile a runtime of that CLI already runs, named after the login', () => {
+    expect(firstRuntimeFor(['claude'], RUNTIMES.runtimes, PROFILES.profiles, 'claude-side')).toEqual({
       harness: 'claude',
       profile: 'Default',
-      name: 'claude-default-2',
-      needed: false,
+      name: 'claude-side',
     });
   });
 
-  it('takes the first profile that fits when no runtime runs that CLI, and is needed', () => {
-    expect(firstRuntimeFor(['codex'], [], [codexScoped])).toEqual({
+  it('numbers the name past a runtime that has it, and never doubles the prefix', () => {
+    expect(firstRuntimeFor(['claude'], named('claude-work'), PROFILES.profiles, 'claude-work')?.name).toBe(
+      'claude-work-2',
+    );
+    expect(firstRuntimeFor(['claude'], [], PROFILES.profiles, 'work')?.name).toBe('claude-work');
+  });
+
+  it('takes the first profile that fits when no runtime runs that CLI', () => {
+    expect(firstRuntimeFor(['codex'], [], [codexScoped], 'codex-login')).toEqual({
       harness: 'codex',
       profile: 'Codex work',
-      name: 'codex-codex-work',
-      needed: true,
+      name: 'codex-login',
     });
   });
 
   it('moves on to the next CLI a login drives when no profile runs the first, else there is none', () => {
-    expect(firstRuntimeFor(['claude', 'codex'], [], [codexScoped])?.harness).toBe('codex');
-    expect(firstRuntimeFor(['claude'], [], [codexScoped])).toBeNull();
-    expect(firstRuntimeFor([], RUNTIMES.runtimes, PROFILES.profiles)).toBeNull();
+    expect(firstRuntimeFor(['claude', 'codex'], [], [codexScoped], 'x')?.harness).toBe('codex');
+    expect(firstRuntimeFor(['claude'], [], [codexScoped], 'x')).toBeNull();
+    expect(firstRuntimeFor([], RUNTIMES.runtimes, PROFILES.profiles, 'x')).toBeNull();
   });
 });

@@ -36,6 +36,7 @@ import { type FormEvent, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import { OpenSignInLink } from './open-sign-in-link.tsx';
 import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from './harness-login-model.ts';
 
@@ -190,11 +191,12 @@ export function CodexLoginPanel({
         {flow?.state === 'awaiting-approval' ? (
           <div className="space-y-4">
             <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
-              <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
-              <div className="mt-2 flex min-w-0 items-start gap-2">
-                <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
+              <p className="m-0 text-meta font-semibold text-accent">1 · Open this link</p>
+              <div className="mt-2 flex min-w-0 flex-wrap items-start gap-2">
+                <code className="min-w-0 basis-full break-all sm:basis-0 sm:flex-1 rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
                   {flow.verificationUrl}
                 </code>
+                <OpenSignInLink href={flow.verificationUrl} label="Open the Codex sign-in page" />
                 <CopyButton text={flow.verificationUrl} label="Copy the Codex sign-in link" write={copy} />
               </div>
             </div>
@@ -245,10 +247,11 @@ export function CodexLoginPanel({
             ) : null}
             <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
               <p className="m-0 text-meta font-semibold text-accent">1 · Open this link and sign in</p>
-              <div className="mt-2 flex min-w-0 items-start gap-2">
-                <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
+              <div className="mt-2 flex min-w-0 flex-wrap items-start gap-2">
+                <code className="min-w-0 basis-full break-all sm:basis-0 sm:flex-1 rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
                   {flow.verificationUrl}
                 </code>
+                <OpenSignInLink href={flow.verificationUrl} label="Open the Codex sign-in page" />
                 <CopyButton text={flow.verificationUrl} label="Copy the Codex sign-in link" write={copy} />
               </div>
             </div>

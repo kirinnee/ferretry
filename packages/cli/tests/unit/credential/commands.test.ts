@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { FleetPresetVariable, FleetProviderPresetView } from '@ferretry/protocol';
 import should from 'should';
-import { registerCredentialCommands, suggestCredentialId } from '../../../src/lib/credential/commands.ts';
+import { registerCredentialCommands } from '../../../src/lib/credential/commands.ts';
 import { renderCredentialList } from '../../../src/lib/credential/render.ts';
-import { authorityOf, credential, fakeWorld, flow, machine, runCommand } from '../fleet/account-fakes.ts';
+import { authorityOf, credential, fakeWorld, flow, machine, runCommand, runtime } from '../fleet/account-fakes.ts';
 
 const needsSignIn = credential({
   id: 'codex-work',
@@ -137,13 +137,6 @@ const DEEPSEEK_CODEX_GAP_CLICK: FleetProviderPresetView = {
   ],
 };
 
-describe('suggestCredentialId', () => {
-  it('should make an id from the tool and label, and add a number until it is free', () => {
-    should(suggestCredentialId('claude', 'Work Mac!', new Set())).equal('claude-work-mac');
-    should(suggestCredentialId('codex', undefined, new Set(['codex-login', 'codex-login-2']))).equal('codex-login-3');
-  });
-});
-
 describe('renderCredentialList', () => {
   it('should show each login, where it lives and the sign-in command for one that needs it', () => {
     // Arrange
@@ -229,6 +222,71 @@ describe('registerCredentialCommands', () => {
     });
     should(world.gateway.called('startSignIn')[0]?.args[0]).equal('claude-work-2');
     should(world.out.text('success')).match(/Signed in\. claude-work-2/);
+  });
+
+  it('should print the runtime the page would have made, named after the login and using an existing profile', async () => {
+    const world = fakeWorld({
+      gateway: {
+        runtimes: () => ({
+          format: 'version-2',
+          runtimes: [runtime({ name: 'claude-default', profile: 'claude-default' })],
+        }),
+      },
+    });
+
+    await runCommand(registerCredentialCommands, world, [
+      'credential',
+      'add',
+      'claude',
+      '--label',
+      'work',
+      '--no-sign-in',
+    ]);
+
+    should(world.out.text('report')).match(
+      /fz runtime add claude-work --credential claude-work --profile claude-default/,
+    );
+  });
+
+  for (const [profile, quoted] of [
+    ['My Profile', "'My Profile'"],
+    ["My Profile's", "'My Profile'\\''s'"],
+  ] as const) {
+    it(`should single-quote the profile ${profile} in the printed runtime line`, async () => {
+      const world = fakeWorld({
+        gateway: {
+          runtimes: () => ({ format: 'version-2', runtimes: [runtime({ name: 'claude-default', profile })] }),
+        },
+      });
+
+      await runCommand(registerCredentialCommands, world, [
+        'credential',
+        'add',
+        'claude',
+        '--label',
+        'work',
+        '--no-sign-in',
+      ]);
+
+      should(world.out.text('report')).containEql(
+        `runtime add claude-work --credential claude-work --profile ${quoted}`,
+      );
+    });
+  }
+
+  it('should print no runtime line when no runtime of that tool exists', async () => {
+    const world = fakeWorld({ gateway: { runtimes: () => ({ format: 'version-2', runtimes: [] }) } });
+
+    await runCommand(registerCredentialCommands, world, [
+      'credential',
+      'add',
+      'claude',
+      '--label',
+      'work',
+      '--no-sign-in',
+    ]);
+
+    should(world.out.text('report')).not.match(/runtime add/);
   });
 
   it('should add without signing in when asked, and not sign in after a dry run', async () => {

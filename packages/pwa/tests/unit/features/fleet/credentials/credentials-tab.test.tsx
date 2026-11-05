@@ -686,7 +686,7 @@ describe('CredentialsTab · signing a login in from its page', () => {
 
 describe('CredentialsTab · Add a login from the tab', () => {
   it('makes and signs in a login, then lands on its own page', async () => {
-    const fresh = credential({ id: 'claude', email: 'new@example.com' });
+    const fresh = credential({ id: 'claude-side', label: 'side', email: 'new@example.com' });
     let made = false;
     const { view, calls } = await open({
       [LIST]: () => listOf(made ? [...CREDENTIALS.credentials, fresh] : CREDENTIALS.credentials),
@@ -702,20 +702,31 @@ describe('CredentialsTab · Add a login from the tab', () => {
     await click(c.querySelector('[data-add-login]'), 'Add a login');
     expect(text(c, '#add-login-title')).toBe('Add a login');
     await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
-    // Claude Code already has runtimes here, so this one click makes only the login and starts its sign-in.
-    await click(c.querySelector('[data-add-login-fields] [data-change-submit]'), 'Sign in to Claude Code');
+    // A second Claude Code login needs a Name; the one click then makes the login, its runtime and the sign-in.
+    await type(must(c.querySelector<HTMLInputElement>('#add-login-name'), 'the Name'), 'side');
+    await click(c.querySelector('[data-add-login-fields] [data-change-submit]'), 'Sign in');
     await wait(50);
-    expect(changeBodies(calls)).toEqual([{ kind: 'credential.add', id: 'claude', harness: 'claude' }]);
+    expect(changeBodies(calls)[0]).toEqual({
+      kind: 'credential.add',
+      id: 'claude-side',
+      harness: 'claude',
+      label: 'side',
+    });
+    expect(changeBodies(calls)[1]).toMatchObject({
+      kind: 'runtime.put',
+      name: 'claude-side',
+      credential: 'claude-side',
+    });
     await type(must(c.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'), 'a-code');
     await click(button(c, 'Finish sign-in'), 'Finish sign-in');
     await wait(50);
     expect(text(c, '[data-add-login-done] > p')).toBe('Signed in to Claude Code as new@example.com');
     await click(c.querySelector('[data-add-login-finish]'), 'Done');
 
-    expect(window.location.hash).toBe(`${HASH}/claude`);
+    expect(window.location.hash).toBe(`${HASH}/claude-side`);
     expect(c.querySelector('[data-add-login-screen]')).toBeNull();
-    expect(c.querySelector('[data-credential-page]')?.getAttribute('data-credential-page')).toBe('claude');
-    expect(text(c, '[data-credential-page] p.font-mono')).toBe('new@example.com');
+    expect(c.querySelector('[data-credential-page]')?.getAttribute('data-credential-page')).toBe('claude-side');
+    expect(text(c, '[data-credential-page] p.font-mono')).toBe('new@example.com (side)');
     await view.unmount();
   });
 });

@@ -1,3 +1,4 @@
+import { SIGN_IN_OTHER_ACCOUNT_TIP } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { runSignIn, SIGN_IN_POLL_MS } from '../../../src/lib/fleet/sign-in.ts';
@@ -40,7 +41,9 @@ describe('runSignIn', () => {
     should(signedIn).be.true();
     should(world.gateway.called('submitSignInCode')[0]?.args).eql(['flow-1', 'the-code']);
     should(world.prompt.questions).eql(['Paste the code the page shows:']);
-    should(world.out.text('report')).equal(`Open this page and sign in:\n  ${URL}`);
+    should(world.out.text('report')).equal(
+      `Open this page and sign in:\n  ${URL}\n${SIGN_IN_OTHER_ACCOUNT_TIP.claude}`,
+    );
     should(world.out.text('success')).equal('Signed in. claude-you is ready to use.');
     should(world.slept.every(ms => ms === SIGN_IN_POLL_MS)).be.true();
   });

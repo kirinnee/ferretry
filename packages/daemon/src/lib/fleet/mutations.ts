@@ -54,6 +54,7 @@ import type {
   FleetRunningSession,
   FleetSettingsEntriesInput,
 } from '@ferretry/protocol';
+import { loginLabelTaken, loginLabelTakenSentence } from '@ferretry/protocol';
 import {
   componentUsage,
   counted,
@@ -351,15 +352,15 @@ function componentBody(
   }
 }
 
-/** A label two logins of one harness may not share (C9, E26). */
+/** A label two logins of one harness may not share, whatever the case or spacing (C9, E26). */
 function assertLabelFree(model: AccountModel, id: string, harness: HarnessKind, label: string | undefined): void {
   if (label === undefined) return;
-  const clash = Object.entries(model.credentials).find(
-    ([other, credential]) => other !== id && credential.harness === harness && credential.label === label,
-  );
-  if (clash !== undefined) {
-    refuse(`another ${HARNESS_DISPLAY_NAMES[harness]} login is already labelled ${label}; pick a different label`);
-  }
+  const logins = Object.entries(model.credentials).map(([other, credential]) => ({
+    id: other,
+    harness: credential.harness,
+    label: credential.label,
+  }));
+  if (loginLabelTaken(label, harness, logins, id)) refuse(loginLabelTakenSentence(label, harness));
 }
 
 type Draft = {

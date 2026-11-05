@@ -155,6 +155,16 @@ describe('ClaudeLoginPanel', () => {
     expect(cancels).toBe(1);
   });
 
+  it('offers the link as an Open sign-in page link that opens a new tab without a back reference', () => {
+    const view = mount({ flow: claudeFlow('awaiting-code') });
+
+    const link = view.root.findByProps({ 'data-open-sign-in': '' });
+
+    expect(link.props.href).toBe(CLAUDE_URL);
+    expect(link.props.target).toBe('_blank');
+    expect(link.props.rel).toContain('noopener');
+  });
+
   it('copies the link through the injected writer, never the real clipboard', async () => {
     const copied: string[] = [];
     const view = mount({

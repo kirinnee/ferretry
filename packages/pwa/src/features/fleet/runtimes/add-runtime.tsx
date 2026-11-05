@@ -9,7 +9,7 @@
  * the same login and profile already being a runtime (E15), and a clashing or invalid name (E16).
  */
 
-import type { FleetMachineView } from '@ferretry/protocol';
+import { type FleetMachineView, loginIdFor } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
@@ -24,7 +24,6 @@ import {
   HARNESSES,
   type HarnessKind,
   harnessesName,
-  nextCredentialId,
   plural,
 } from '../credentials/credentials-model.ts';
 import { EnvironmentLogin } from '../credentials/environment-login.tsx';
@@ -523,7 +522,7 @@ function NewLogin({
   /** Make the empty login, then start its sign-in. */
   const signIn = async (harness: HarnessKind): Promise<void> => {
     setRefusal(null);
-    const id = nextCredentialId(data.credentials, harness);
+    const id = loginIdFor(harness, undefined, new Set(data.credentials.credentials.map(item => item.id)));
     const added = await changes.apply({ kind: 'credential.add', id, harness });
     if (added.kind === 'refused') return;
     await reload();
