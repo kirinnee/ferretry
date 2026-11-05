@@ -59,7 +59,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
-import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
+import { lapPage, reportWalkTiming, timed, timePage } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -264,7 +264,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 101, desktop: 98 };
+const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 98, desktop: 95 };
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`), per
@@ -278,9 +278,9 @@ const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobil
  * Resolved view, Edit as YAML and a new profile — plus the phone's Add picker: one more in all. The provider
  * tiles added four: the grid and a provider's key form, at each viewport. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
- * edits this, and the pull request says which frames the gate covers.
+ * edits this, and the pull request says which frames the gate covers. Shortening machine setup to five pages (PR 1420) removed three frames in each viewport, so 65 became 62.
  */
-const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 65, desktop: 65 };
+const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 62, desktop: 62 };
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -3628,16 +3628,15 @@ try {
             await accountShot('not-set-up', 'machine not set up');
             await newMachine.locator('[data-machine-finish-setup-open]').click();
             // New machine setup: ONE rail, no stepper inside any step. The whole journey, every step a frame
-            // measured for the rail and the pinned footer: Start from, Claude Code (its runtime renamed and
-            // imported in place), Codex (imported to sign in later), Speed-ups, Voice (skipped), the Warden,
-            // Learning, Agent controls, and Done naming both runtimes and the skipped step's "Set up later".
+            // measured for the rail and the pinned footer: Start from (two cards, no footer primary), Claude
+            // Code (its runtime renamed and imported in place), Codex (imported to sign in later), Speed-ups
+            // (skipped), Defaults (kept), and Done naming both runtimes and the skipped step's "Set up later".
             const setupScreen = page.locator('#harness-machine-setup [data-machine-onboarding]');
             const setupStep = async (step: string): Promise<void> =>
               setupScreen.locator(`[data-onboarding-step-body="${step}"]`).waitFor({ state: 'visible' });
-            const setupNext = async (): Promise<void> => setupScreen.locator('[data-onboarding-next]').click();
             await setupStep('start');
             await setupShot('start', 'Start from');
-            await setupNext();
+            await setupScreen.locator('[data-start-card="fresh"]').click();
             const setupPrimary = setupScreen.locator('[data-onboarding-foot] [data-onboarding-primary]');
             await setupScreen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
             await setupShot('claude', 'Claude Code, Import in the footer');
@@ -3651,18 +3650,11 @@ try {
             await setupShot('codex', 'Codex, carrying the Claude Code import, not signed in');
             await setupPrimary.click();
             await setupStep('speedups');
-            for (const [step, label] of [
-              ['speedups', 'Speed-ups'],
-              ['voice', 'Voice'],
-              ['warden', 'Warden'],
-              ['learning', 'Learning'],
-              ['controls', 'Agent controls'],
-            ] as const) {
-              await setupStep(step);
-              await setupShot(step, label);
-              if (step === 'voice' || step === 'speedups') await setupScreen.locator('[data-onboarding-skip]').click();
-              else await setupNext();
-            }
+            await setupShot('speedups', 'Speed-ups');
+            await setupScreen.locator('[data-onboarding-skip]').click();
+            await setupStep('defaults');
+            await setupShot('defaults', 'Defaults');
+            await setupPrimary.click();
             await setupStep('done');
             await setupScreen
               .locator('[data-onboarding-summary-row="codex"]')
@@ -3671,7 +3663,7 @@ try {
             const claudeRow = await setupScreen.locator('[data-onboarding-summary-row="claude"]').innerText();
             if (!claudeRow.includes('claude-main'))
               fail(`Done does not name the runtime Claude Code made: ${claudeRow}`);
-            await setupShot('done', 'Done naming both runtimes, Voice skipped');
+            await setupShot('done', 'Done naming both runtimes, Speed-ups skipped');
             // Leaving lands back on the machine in Settings, banner and all.
             await page
               .locator('[data-onboarding-restart]')

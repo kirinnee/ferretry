@@ -98,8 +98,8 @@ import {
   controlsChange,
   keysToCopy,
   needsAfterCopy,
-  signInLink,
   type SourceSettingsFile,
+  signInLink,
   sourceItemSummary,
 } from './clone-settings-model.ts';
 import { machineItemHash } from './settings-route.ts';
@@ -118,6 +118,8 @@ export interface CloneMachineProps extends MachineTabProps {
   readonly onCopied?: (source: string) => void;
   /** `embedded` inside New machine setup's Start from step: no stepper of its own on screen. */
   readonly presentation?: 'inline' | 'embedded';
+  /** Pre-pick this source: a caller that already asked "copy which one?" does not ask again. */
+  readonly initialSource?: DaemonId;
 }
 
 interface CloneResult {
@@ -163,11 +165,12 @@ export function CloneMachine(props: CloneMachineProps) {
     doneLabel = 'Go to Runtimes',
     onCopied,
     presentation = 'inline',
+    initialSource,
   } = props;
   const target = useSetupAccess({ connection, createClient });
   const { changes } = target;
   const [reach, setReach] = useState<ReadonlyMap<DaemonId, MachineReach>>(new Map());
-  const [picked, setPicked] = useState<DaemonId | null>(null);
+  const [picked, setPicked] = useState<DaemonId | null>(initialSource ?? null);
   const pickedRecord = sources.find(source => source.daemonId === picked);
   const source = useSetupAccess({ connection: pickedRecord ?? connection, createClient });
   const [bundle, setBundle] = useState<FleetCloneBundle | null>(null);

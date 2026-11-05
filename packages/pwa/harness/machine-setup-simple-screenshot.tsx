@@ -1,8 +1,9 @@
 /**
- * New machine setup, one action per page: every step at 390 and 1440, light and dark, from the real
- * `MachineOnboarding` in the shell harness (`?machine-setup=<daemon>`) with no real daemon. Walks it the way
- * a person does — Back · Skip · ONE primary — and fails if a page shows a second primary, scrolls sideways at
- * 390px, or the footer's primary does not move the page on.
+ * New machine setup, five pages (six with another machine to copy): every step at 390 and 1440, light and
+ * dark, from the real `MachineOnboarding` in the shell harness (`?machine-setup=<daemon>`) with no real
+ * daemon. Walks it the way a person does — Back · Skip · ONE primary — and fails if a page shows a second
+ * primary, scrolls sideways at 390px, or the footer's primary does not move the page on. Start from… is
+ * walked with another machine paired (the two cards) and without one (the rail opens on Claude Code).
  *
  *   bun harness/machine-setup-simple-screenshot.tsx [outDir]
  *
@@ -17,7 +18,7 @@ import { chromium } from 'playwright-core';
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const buildDir = join(harnessDir, 'out');
-const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000/shots/simpler-onboarding-pr1-one-action/after');
+const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000/shots/simpler-onboarding-pr2-fewer-steps/after');
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -84,17 +85,18 @@ try {
         const page = await context.newPage();
         page.on('pageerror', error => process.stderr.write(`⚠ page error: ${error.message}\n`));
         const screen = page.locator(SCREEN);
-        const open = async (machine: string, step?: string): Promise<void> => {
+        const open = async (machine: string, step?: string, alone = false): Promise<void> => {
           const url = new URL(server.url);
           url.searchParams.set('machine-setup', machine);
           if (step !== undefined) url.searchParams.set('setup-step', step);
+          if (alone) url.searchParams.set('setup-sources', 'none');
           await page.goto(url.toString());
           await screen.waitFor({ state: 'visible' });
         };
         const stepBody = async (id: string): Promise<void> =>
           screen.locator(`[data-onboarding-step-body="${id}"]`).waitFor({ state: 'visible' });
         const primary = screen.locator(
-          '[data-onboarding-foot] [data-onboarding-primary], [data-onboarding-foot] [data-onboarding-next], [data-onboarding-foot] [data-onboarding-finish]',
+          '[data-onboarding-foot] [data-onboarding-primary], [data-onboarding-foot] [data-onboarding-finish]',
         );
         const shot = async (name: string): Promise<void> => {
           await page.waitForTimeout(500);
@@ -121,11 +123,20 @@ try {
           process.stdout.write(`📸 ${join(outDir, `${base}.png`)}\n`);
         };
 
-        // Start, then Claude Code: the step's own Import in the footer, the name as text, conversations.
+        // Start from… (another machine is paired): two cards are the actions, there is no footer primary.
         await open('checking-daemon');
         await stepBody('start');
+        if ((await primary.count()) > 0) fail('Start from… shows a footer primary; its two cards are the actions');
         await shot('start');
-        await primary.click();
+        await screen.locator('[data-start-card="clone"]').click();
+        await screen
+          .locator('[data-onboarding-step-body="start"] [data-machine-stepper]')
+          .waitFor({ state: 'visible' });
+        await shot('start-copy');
+        await screen.locator('[data-onboarding-back]').click();
+        await screen.locator('[data-start-card="fresh"]').click();
+        // Then Claude Code: the step's own Import in the footer, the name as text, conversations.
+        await screen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
         await screen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
         await page.waitForTimeout(400);
         await shot('claude');
@@ -173,46 +184,29 @@ try {
         await shot('speedups-typed');
         await primary.click();
         await screen
-          .locator('[data-onboarding-step-body="voice"], [data-speedups-problem]')
+          .locator('[data-onboarding-step-body="defaults"], [data-speedups-problem]')
           .first()
           .waitFor({ state: 'visible' });
         const stuck = await screen.locator('[data-speedups-problem]').allInnerTexts();
         if (stuck.length > 0) fail(`Save keys did not move on: ${stuck.join(' ')}`);
-        await stepBody('voice');
-        for (const id of ['voice', 'warden', 'learning', 'controls'] as const) {
-          await stepBody(id);
-          await shot(id);
-          if (id === 'controls') {
-            // A switch flipped: Save what agents may control is the primary; Continue goes quiet.
-            const flip = screen.locator('[data-agent-control] [role="switch"]').first();
-            await flip.click();
-            await screen
-              .locator('[data-change-submit]:not([data-onboarding-primary])')
-              .first()
-              .waitFor({ state: 'visible' });
-            await shot('controls-changed');
-            // And a different default runtime picked too: two reviewed changes pending, still ONE primary.
-            const pick = screen.locator('[data-default-runtime-select]');
-            await pick.waitFor({ state: 'visible' });
-            const options = await pick
-              .locator('option:not([disabled])')
-              .evaluateAll(list =>
-                list.map(option => (option as HTMLOptionElement).value).filter(value => value !== ''),
-              );
-            const chosen = options[0] ?? fail('Agent controls has no runtime to pick as the default');
-            await pick.selectOption(chosen);
-            await screen.locator('[data-default-runtime] [data-change-submit]').waitFor({ state: 'visible' });
-            const saves = await screen.locator('form [data-change-submit]:visible').allInnerTexts();
-            if (saves.length !== 2) fail(`both reviewed changes should keep a save button, saw: ${saves.join(' / ')}`);
-            await shot('controls-both-changed');
-            await screen.locator('[data-default-runtime-undo]').click();
-            await flip.click();
-          }
-          await screen.locator('[data-onboarding-next]').click();
-        }
+        // Defaults: already set, so the page opens ready to keep; one change is saved on Use these.
+        await stepBody('defaults');
+        await screen.locator('[data-default-row="voice"]').waitFor({ state: 'visible' });
+        await shot('defaults');
+        await screen.locator('input[aria-label="Learn from my corrections"]').uncheck();
+        await shot('defaults-changed');
+        await primary.click();
         await stepBody('done');
         await shot('done');
         if ((await screen.locator('[data-onboarding-restart]').count()) > 0) fail('Done still offers Start again');
+
+        // No other machine paired: Start from… is not on the rail, the setup opens on Claude Code.
+        await open('checking-daemon', undefined, true);
+        await stepBody('claude');
+        if ((await screen.locator('[data-onboarding-go="start"]').count()) > 0)
+          fail('Start from… is on the rail alone');
+        await screen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
+        await shot('no-start');
 
         // A machine without Codex: the one primary is the install.
         await open('harness-daemon', 'codex');

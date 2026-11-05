@@ -25,8 +25,8 @@ const edited = (value: unknown) => memory({ [MACHINE_SETUP_PROGRESS_KEY]: JSON.s
 
 describe('new machine setup progress', () => {
   const RAIL: MachineSetupProgress = {
-    at: 'warden',
-    states: { pair: 'done', start: 'done', voice: 'skipped' },
+    at: 'defaults',
+    states: { start: 'done', speedups: 'skipped' },
     start: 'clone',
   };
 
@@ -49,7 +49,7 @@ describe('new machine setup progress', () => {
     writeMachineSetupProgress(storage, work, { ...RAIL, at: 'claude' });
     writeMachineSetupProgress(storage, studio, RAIL);
     expect(readMachineSetupProgress(storage, work)?.at).toBe('claude');
-    expect(readMachineSetupProgress(storage, studio)?.at).toBe('warden');
+    expect(readMachineSetupProgress(storage, studio)?.at).toBe('defaults');
   });
 
   it('forgets one machine without touching another', () => {
@@ -66,7 +66,7 @@ describe('new machine setup progress', () => {
     const answered: MachineSetupProgress = {
       ...RAIL,
       at: 'codex',
-      states: { pair: 'done', claude: 'done', codex: 'skipped' },
+      states: { claude: 'done', codex: 'skipped' },
       answers: {
         claude: { name: 'claude-mine', addAnother: true, accepted: ['skills', 'mcp'] },
         codex: { name: 'codex-2' },
@@ -90,10 +90,10 @@ describe('new machine setup progress', () => {
   });
 
   it('reads a hand-edited value as nothing kept', () => {
-    expect(readMachineSetupProgress(edited({ at: 'warden', states: {} }), studio)).toBeNull();
-    expect(readMachineSetupProgress(edited({ at: 'warden', states: {}, start: 'borrowed' }), studio)).toBeNull();
+    expect(readMachineSetupProgress(edited({ at: 'defaults', states: {} }), studio)).toBeNull();
+    expect(readMachineSetupProgress(edited({ at: 'defaults', states: {}, start: 'borrowed' }), studio)).toBeNull();
     expect(
-      readMachineSetupProgress(edited({ at: 'warden', states: { voice: 'finished' }, start: 'fresh' }), studio),
+      readMachineSetupProgress(edited({ at: 'defaults', states: { speedups: 'finished' }, start: 'fresh' }), studio),
     ).toBeNull();
   });
 
@@ -105,15 +105,56 @@ describe('new machine setup progress', () => {
     expect(readMachineSetupProgress(answers({ claude: { accepted: [1] } }), studio)).toBeNull();
   });
 
-  it('rejects a step id it does not know, as the open step and as a marked one', () => {
+  it('rejects an open step it does not know, and drops a marked step it does not know', () => {
     expect(readMachineSetupProgress(edited({ at: 'billing', states: {}, start: 'fresh' }), studio)).toBeNull();
     expect(readMachineSetupProgress(edited({ at: 'logins', states: {}, start: 'fresh' }), studio)).toBeNull();
-    expect(
-      readMachineSetupProgress(edited({ at: 'warden', states: { billing: 'done' }, start: 'fresh' }), studio),
-    ).toBeNull();
-    expect(
-      readMachineSetupProgress(edited({ at: 'warden', states: { done: 'done' }, start: 'fresh' }), studio),
-    ).toBeNull();
+    const dropped = edited({ at: 'claude', states: { billing: 'done', done: 'done', claude: 'done' }, start: 'fresh' });
+    expect(readMachineSetupProgress(dropped, studio)).toEqual({
+      at: 'claude',
+      states: { claude: 'done' },
+      start: 'fresh',
+    });
+  });
+
+  describe('a place kept by the ten-step rail', () => {
+    const kept = (at: string, states: Record<string, string> = {}) =>
+      readMachineSetupProgress(edited({ at, states, start: 'fresh' }), studio);
+
+    it.each(['voice', 'learning', 'controls'])('resumes %s on Defaults', at => {
+      expect(kept(at)?.at).toBe('defaults');
+    });
+
+    it('resumes the Warden on Speed-ups', () => {
+      expect(kept('warden')?.at).toBe('speedups');
+    });
+
+    it('resumes Pair on the first step, which is Start from', () => {
+      expect(kept('pair')?.at).toBe('start');
+    });
+
+    it('keeps the steps that still exist, and drops the Pair and Warden states', () => {
+      expect(kept('claude', { pair: 'done', start: 'done', claude: 'skipped', warden: 'done' })?.states).toEqual({
+        start: 'done',
+        claude: 'skipped',
+      });
+    });
+
+    it('counts a set Voice, Learning or Controls as Defaults set, and never lets a skip undo it', () => {
+      expect(kept('done', { voice: 'skipped', learning: 'done', controls: 'skipped' })?.states).toEqual({
+        defaults: 'done',
+      });
+      expect(kept('done', { voice: 'skipped', controls: 'skipped' })?.states).toEqual({ defaults: 'skipped' });
+    });
+
+    it('keeps the answers and the start', () => {
+      const stored = edited({ at: 'voice', states: {}, start: 'clone', answers: { claude: { name: 'x' } } });
+      expect(readMachineSetupProgress(stored, studio)).toEqual({
+        at: 'defaults',
+        states: {},
+        start: 'clone',
+        answers: { claude: { name: 'x' } },
+      });
+    });
   });
 
   it('still works when storage refuses a write', () => {

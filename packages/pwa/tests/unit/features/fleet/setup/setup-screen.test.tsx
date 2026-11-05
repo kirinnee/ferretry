@@ -12,7 +12,7 @@ import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { CREDENTIALS, PROFILES } from '../account-support.ts';
 import { pairing } from '../shell/machine-support.ts';
-import { FRESH_MACHINE, machineView, runtimes, scan, scriptedClient } from './setup-support.ts';
+import { FRESH_MACHINE, machineView, runtimes, runtimeView, scan, scriptedClient } from './setup-support.ts';
 
 const studio = pairing('studio', 'studio mac');
 const work = pairing('work', 'work linux');
@@ -103,27 +103,46 @@ describe('MachineSetupScreen', () => {
     expect(screen.q('[data-machine-onboarding]')).toBeNull();
   });
 
-  it('opens the onboarding on its first real choice, with this machine’s name', async () => {
+  it('opens on Claude Code, with this machine’s name, when there is no other machine to copy', async () => {
     const screen = await open(freshClient());
     expect(screen.q('[data-machine-setup]')).not.toBeNull();
     expect(screen.q('[data-machine-onboarding="studio"]')).not.toBeNull();
-    expect(at(screen)).toBe('start');
-    expect(screen.q('#machine-onboarding-title')?.textContent).toBe('Start from…');
+    expect(at(screen)).toBe('claude');
+    expect(screen.q('#machine-onboarding-title')?.textContent).toBe('Claude Code');
     expect(screen.q('[data-machine-setup] p.kt-label')?.textContent).toContain('studio mac');
+    const rail = Array.from(
+      screen.view.container.querySelectorAll('[data-onboarding-rail="column"] [data-onboarding-go]'),
+    ).map(item => item.getAttribute('data-onboarding-go'));
+    expect(rail).toEqual(['claude', 'codex', 'speedups', 'defaults', 'done']);
   });
 
-  it('opens the onboarding for a machine that is already set up, with Claude Code one tap away', async () => {
+  it('opens on Start from… when another paired machine could be copied', async () => {
+    const screen = await open(freshClient(), memory(), [studio, work]);
+    expect(at(screen)).toBe('start');
+    expect(screen.q('#machine-onboarding-title')?.textContent).toBe('Start from…');
+    expect(screen.q('[data-start-card="fresh"]')).not.toBeNull();
+    expect(screen.q('[data-start-card="clone"]')).not.toBeNull();
+    expect(screen.q('[data-onboarding-primary]')).toBeNull();
+    const rail = Array.from(
+      screen.view.container.querySelectorAll('[data-onboarding-rail="column"] [data-onboarding-go]'),
+    ).map(item => item.getAttribute('data-onboarding-go'));
+    expect(rail).toEqual(['start', 'claude', 'codex', 'speedups', 'defaults', 'done']);
+    await screen.click('[data-start-card="fresh"]');
+    expect(at(screen)).toBe('claude');
+  });
+
+  it('opens the onboarding for a machine that is already set up, with the Defaults page one tap away', async () => {
     const screen = await open(setUpClient());
     expect(screen.q('[data-setup-message]')).toBeNull();
-    expect(at(screen)).toBe('start');
-    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="claude"]');
     expect(at(screen)).toBe('claude');
-    expect(screen.q('[data-onboarding-step-body="claude"]')).not.toBeNull();
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="defaults"]');
+    expect(at(screen)).toBe('defaults');
+    expect(screen.q('[data-onboarding-step-body="defaults"]')).not.toBeNull();
   });
 
   it('opens on the step it is told to, as Settings’ Import again does, over a kept place', async () => {
     const storage = memory();
-    writeMachineSetupProgress(storage, studio.daemonId, { ...ONBOARDING_START, at: 'warden' });
+    writeMachineSetupProgress(storage, studio.daemonId, { ...ONBOARDING_START, at: 'defaults' });
     const screen = await open(setUpClient(), storage, [studio], 'claude');
     expect(at(screen)).toBe('claude');
     expect(screen.q('#machine-onboarding-title')?.textContent).toBe('Claude Code');
@@ -139,11 +158,11 @@ describe('MachineSetupScreen', () => {
   it('keeps the rail’s place per daemon in storage, and resumes there', async () => {
     const storage = memory();
     const screen = await open(freshClient(), storage);
-    await screen.click('[data-onboarding-next]');
-    expect(at(screen)).toBe('claude');
+    await screen.click('[data-onboarding-skip]');
+    expect(at(screen)).toBe('codex');
     expect(readMachineSetupProgress(storage, studio.daemonId)).toEqual({
-      at: 'claude',
-      states: { pair: 'done', start: 'done' },
+      at: 'codex',
+      states: { claude: 'skipped' },
       start: 'fresh',
     });
     expect(Object.keys(JSON.parse(storage.values.get(MACHINE_SETUP_PROGRESS_KEY) ?? '{}'))).toEqual(['studio']);
@@ -151,16 +170,16 @@ describe('MachineSetupScreen', () => {
     mounted.length = 0;
 
     const again = await open(freshClient(), storage);
-    expect(at(again)).toBe('claude');
-    expect(again.q('[data-onboarding-count]')?.textContent).toBe('2 of 9 set');
+    expect(at(again)).toBe('codex');
+    expect(again.q('[data-onboarding-count]')?.textContent).toBe('0 of 4 set');
   });
 
   it('keeps another daemon’s place separate', async () => {
     const storage = memory();
-    writeMachineSetupProgress(storage, work.daemonId, { ...ONBOARDING_START, at: 'warden' });
+    writeMachineSetupProgress(storage, work.daemonId, { ...ONBOARDING_START, at: 'speedups' });
     const screen = await open(freshClient(), storage);
-    expect(at(screen)).toBe('start');
-    expect(readMachineSetupProgress(storage, work.daemonId)?.at).toBe('warden');
+    expect(at(screen)).toBe('claude');
+    expect(readMachineSetupProgress(storage, work.daemonId)?.at).toBe('speedups');
   });
 
   it('keeps the runtime name typed on a CLI step with the place, under the one version 2 key', async () => {
@@ -190,14 +209,14 @@ describe('MachineSetupScreen', () => {
       JSON.stringify({ studio: { at: 'logins', states: { pair: 'done' }, start: 'fresh' } }),
     );
     const screen = await open(freshClient(), storage);
-    expect(at(screen)).toBe('start');
+    expect(at(screen)).toBe('claude');
   });
 
   it('works without storage: it only cannot resume', async () => {
     const screen = await open(freshClient(), null);
-    expect(at(screen)).toBe('start');
-    await screen.click('[data-onboarding-next]');
     expect(at(screen)).toBe('claude');
+    await screen.click('[data-onboarding-skip]');
+    expect(at(screen)).toBe('codex');
   });
 
   it('Finish later goes back to the machine, and the place is kept', async () => {
@@ -208,10 +227,27 @@ describe('MachineSetupScreen', () => {
     expect(readMachineSetupProgress(storage, studio.daemonId)).toEqual(ONBOARDING_START);
   });
 
-  it('Finish setup goes to the machine’s sessions and forgets the place', async () => {
+  it('Add a runtime, when none was made, goes to Settings and forgets the place', async () => {
     const storage = memory();
     const screen = await open(freshClient(), storage);
     await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="done"]');
+    expect(screen.q('[data-onboarding-finish]')?.textContent).toBe('Add a runtime');
+    expect(screen.q('#machine-onboarding-title')?.textContent).toBe('studio mac is ready');
+    await screen.click('[data-onboarding-finish]');
+    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/runtimes']);
+    expect(readMachineSetupProgress(storage, studio.daemonId)).toBeNull();
+  });
+
+  it('Start a ferret, once a runtime exists, goes to the machine’s sessions and forgets the place', async () => {
+    const storage = memory();
+    const client = scriptedClient({
+      '/v1/fleet/machine': machineView(),
+      ...stepReads,
+      '/v1/fleet/runtimes': runtimes([runtimeView('claude-default')]),
+    });
+    const screen = await open(client, storage);
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="done"]');
+    expect(screen.q('[data-onboarding-finish]')?.textContent).toBe('Start a ferret');
     await screen.click('[data-onboarding-finish]');
     expect(screen.went).toEqual(['/d/studio']);
     expect(readMachineSetupProgress(storage, studio.daemonId)).toBeNull();
@@ -219,9 +255,11 @@ describe('MachineSetupScreen', () => {
 
   it('offers every OTHER paired machine to clone from, never this one', async () => {
     const screen = await open(freshClient(), memory(), [studio, work]);
-    await screen.click('[data-setup-choice="clone"] input');
-    expect(screen.q('[data-setup-choice="work"]')).not.toBeNull();
-    expect(screen.q('[data-setup-choice="studio"]')).toBeNull();
+    expect(screen.q('[data-start-card="clone"]')?.textContent).toContain('Copy work linux');
+    await screen.click('[data-start-card="clone"]');
+    expect(screen.q('[data-onboarding-step-body="start"] [data-presentation="embedded"]')).not.toBeNull();
+    expect(screen.q('[data-onboarding-step-body="start"]')?.textContent).toContain('work linux');
+    expect(screen.q('[data-onboarding-step-body="start"]')?.textContent).toContain('Copy fromwork linux');
   });
 
   it('says why it cannot set up a machine that would not share its setup, and Open in Settings goes to it', async () => {
@@ -237,16 +275,20 @@ describe('MachineSetupScreen', () => {
 
   it('still renders the onboarding when the machine is asleep, paused inside the steps that need it', async () => {
     let asked = 0;
-    const screen = await open(async () => {
-      asked += 1;
-      return scriptedClient({});
-    });
+    const screen = await open(
+      async () => {
+        asked += 1;
+        return scriptedClient({});
+      },
+      memory(),
+      [studio, work],
+    );
     expect(screen.q('[data-setup-message]')).toBeNull();
     expect(screen.q('[data-machine-onboarding]')).not.toBeNull();
     await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="claude"]');
     expect(screen.q('[data-setup-note="harness-paused"]')).not.toBeNull();
     await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="start"]');
-    await screen.click('[data-setup-choice="clone"] input');
+    await screen.click('[data-start-card="clone"]');
     expect(screen.q('[data-stepper-paused]')).not.toBeNull();
     const before = asked;
     await screen.click('[data-stepper-retry]');
@@ -270,8 +312,8 @@ describe('MachineSetupScreen', () => {
       if (held) await gate;
       return client;
     });
-    expect(at(screen)).toBe('start');
-    await screen.click('[data-onboarding-next]');
+    expect(at(screen)).toBe('claude');
+    await screen.click('[data-onboarding-skip]');
     held = true;
     imported = true;
     await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="speedups"]');

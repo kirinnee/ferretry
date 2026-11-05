@@ -1647,11 +1647,14 @@ const harnessSetupStorage = (): Pick<Storage, 'getItem' | 'setItem'> => {
  */
 function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string }) {
   useAppViewport();
-  const connections = settingsConnections('many');
+  const params = new URLSearchParams(window.location.search);
+  const everyone = settingsConnections('many');
   const record =
-    connections.find(connection => String(connection.daemonId) === daemonId) ?? HARNESS_SETTINGS_CONNECTIONS[0];
+    everyone.find(connection => String(connection.daemonId) === daemonId) ?? HARNESS_SETTINGS_CONNECTIONS[0];
+  // `&setup-sources=none`: the only machine paired, so Start from… has nothing to copy and is not on the rail.
+  const connections = params.get('setup-sources') === 'none' ? [record] : everyone;
   const storage = useMemo(harnessSetupStorage, []);
-  const step = new URLSearchParams(window.location.search).get('setup-step') ?? '';
+  const step = params.get('setup-step') ?? '';
   return (
     <section
       id="harness-machine-setup"
@@ -1662,7 +1665,6 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
         connection={record}
         connections={connections}
         createClient={HARNESS_MACHINE_CLIENT}
-        createPairingClient={HARNESS_PAIRING_CLIENT}
         voice={HARNESS_PARAKEET_ABSENT}
         storage={storage}
         {...(isMachineSetupStepId(step) ? { startAt: step } : {})}
