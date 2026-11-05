@@ -13,6 +13,8 @@
  *   both-unchosen      the same, nothing chosen for the both-changed items: Apply off, and said so
  *   both-chosen        both-changed items chosen, their changes opened
  *   nothing-to-copy    nothing differs: one note and Done
+ *   alongside-earlier  Add alongside after an earlier copy: the full preview, everything ticked
+ *   identical-switched an identical old copy reached after Add alongside was opened and left: still only the link
  *   identical-legacy   an identical old copy matched by name: the note, what finishing links, and its button
  *   two-conflicts      two both-changed items with this machine's value beside the source's, one chosen
  *   kept-with-settings only kept items, a settings file ticked: the button counts it, not "Nothing to copy"
@@ -106,6 +108,8 @@ const REVIEWS = {
   'both-chosen': review({ items: [ITEMS.bothSettings, ITEMS.bothHooks, ITEMS.newMcp], same: { count: 9, probable: 0 } }),
   'nothing-to-copy': review({ same: { count: 12, probable: 0 } }),
   'identical-legacy': NOTHING_REVIEW,
+  'alongside-earlier': FULL_REVIEW,
+  'identical-switched': NOTHING_REVIEW,
   'two-conflicts': review({ items: [ITEMS.bothSettings, ITEMS.bothProfile], same: { count: 8, probable: 0 } }),
   'kept-with-settings': review({ items: [ITEMS.mineInstructions, ITEMS.goneRuntime], same: { count: 8, probable: 0 } }),
   'logins-ask': MORE_LOGINS,
@@ -347,6 +351,23 @@ const walk = async (page: Page, state: string, scheme: string, vp: string): Prom
       await toChanges(page);
       await page.locator('[data-setup-note="link-by-name"]').waitFor({ state: 'visible' });
       break;
+    case 'alongside-earlier':
+      await toExisting(page);
+      await click(page, '[data-setup-choice="alongside"]');
+      await click(page, '[data-step-next]');
+      await page.locator('[data-clone-step="preview"]').waitFor({ state: 'visible' });
+      break;
+    case 'identical-switched':
+      await toExisting(page);
+      await click(page, '[data-setup-choice="alongside"]');
+      await click(page, '[data-step-next]');
+      await page.locator('[data-clone-step="preview"]').waitFor({ state: 'visible' });
+      await click(page, '[data-setup-choices="clone-items"] [data-setup-choice="fleet"]');
+      await click(page, '[data-stepper-back]');
+      await click(page, '[data-setup-choice="update"]');
+      await click(page, '[data-step-next]');
+      await page.locator('[data-setup-note="link-by-name"]').waitFor({ state: 'visible' });
+      break;
     case 'two-conflicts':
       await toChanges(page);
       await click(page, '[data-review-pick="settings/shared:keep"]');
@@ -391,6 +412,8 @@ const STATES = [
   'both-chosen',
   'nothing-to-copy',
   'identical-legacy',
+  'alongside-earlier',
+  'identical-switched',
   'two-conflicts',
   'kept-with-settings',
   'logins-ask',

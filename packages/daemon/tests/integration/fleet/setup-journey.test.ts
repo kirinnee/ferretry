@@ -20,20 +20,35 @@ import {
   renderConfigFile,
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
-import { configSchemaModeline, FleetCloneBundleSchema } from '@ferretry/protocol';
+import { CloneableSecretNameSchema, configSchemaModeline, FleetCloneBundleSchema } from '@ferretry/protocol';
+import type { DaemonIdentity } from '@ferretry/relay';
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
-import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
-import { fleetSetupRoutes } from '../../../src/lib/runtime/mounts/fleet-setup.ts';
-import { CREDENTIALS, GRANTED, human, NARROWED } from '../../unit/runtime/mounts/support.ts';
-import { request } from '../../unit/api/support.ts';
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
 import { cloneConfigFilesOver, fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { fleetSetupRoutes } from '../../../src/lib/runtime/mounts/fleet-setup.ts';
+import {
+  SecretDirectory,
+  SecretExportService,
+  SecretImportService,
+  SecretVault,
+} from '../../../src/lib/secrets/index.ts';
 import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
+import { request } from '../../unit/api/support.ts';
+import {
+  CREDENTIALS,
+  FakeSecretCipher,
+  GRANTED,
+  human,
+  MemorySecretDocuments,
+  NARROWED,
+} from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -73,7 +88,12 @@ interface Machine {
 
 async function machine(
   name: string,
-  options: { readonly claude: boolean; readonly emails?: Readonly<Record<string, string>> },
+  options: {
+    readonly claude: boolean;
+    readonly emails?: Readonly<Record<string, string>>;
+    /** A real secret directory (names, timestamps and all) in place of the plain map, when a test needs one. */
+    readonly vault?: SecretDirectory;
+  },
 ): Promise<Machine> {
   const root = await temporary();
   const home = await configHome(path.join(root, 'state'));
@@ -122,9 +142,13 @@ async function machine(
       } as never,
       tools: { plans: () => [], install: async () => [] },
       secrets: {
-        list: async () => [...secrets.keys()].map(secret => ({ name: secret })),
+        list: async () =>
+          options.vault === undefined
+            ? [...secrets.keys()].map(secret => ({ name: secret }))
+            : await options.vault.list(),
         put: async (secret, value) => {
-          secrets.set(secret, value);
+          if (options.vault === undefined) secrets.set(secret, value);
+          else await options.vault.put(secret as never, value);
         },
       },
     }),
@@ -366,30 +390,30 @@ describe('Clone and the default runtime for new agents over real files', () => {
   });
 });
 
-describe('the last-copied record over real files', () => {
-  /**
-   * Everything a signed-in login and its secrets are, as raw bytes: every sign-in file, every secret value,
-   * and every login declaration (one holds a `${secret:NAME}` reference). Nothing is parsed,
-   * so a re-rendered file counts as a change.
-   */
-  async function credentialBytes(on: Machine): Promise<Record<string, string>> {
-    const bytes: Record<string, string> = {};
-    const sign = path.join(on.fleet, 'credentials');
-    for (const file of await filesUnder(sign))
-      bytes[`credentials/${file}`] = (await readFile(path.join(sign, file))).toString('hex');
-    for (const [name, value] of on.secrets) bytes[`secret:${name}`] = value;
-    const config = on.home.paths.config;
-    for (const file of await filesUnder(config)) {
-      const raw = (await readFile(path.join(config, file))).toString('hex');
-      if (file.startsWith('logins/')) bytes[`config/${file}`] = raw;
-    }
-    return bytes;
+/**
+ * Everything a signed-in login and its secrets are, as raw bytes: every sign-in file, every secret value,
+ * and every login declaration (one holds a `${secret:NAME}` reference). Nothing is parsed,
+ * so a re-rendered file counts as a change.
+ */
+async function credentialBytes(on: Machine): Promise<Record<string, string>> {
+  const bytes: Record<string, string> = {};
+  const sign = path.join(on.fleet, 'credentials');
+  for (const file of await filesUnder(sign))
+    bytes[`credentials/${file}`] = (await readFile(path.join(sign, file))).toString('hex');
+  for (const [name, value] of on.secrets) bytes[`secret:${name}`] = value;
+  const config = on.home.paths.config;
+  for (const file of await filesUnder(config)) {
+    const raw = (await readFile(path.join(config, file))).toString('hex');
+    if (file.startsWith('logins/')) bytes[`config/${file}`] = raw;
   }
+  return bytes;
+}
 
-  /** The files that were there before must read back the same; a copy may ADD files, never change one. */
-  const unchanged = (before: Record<string, string>, after: Record<string, string>): Record<string, string> =>
-    Object.fromEntries(Object.keys(before).map(key => [key, after[key] as string]));
+/** The files that were there before must read back the same; a copy may ADD files, never change one. */
+const unchanged = (before: Record<string, string>, after: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.keys(before).map(key => [key, after[key] as string]));
 
+describe('the last-copied record over real files', () => {
   /**
    * A target signed in as `claude-you` (the id the source's own login has, so every copy meets a clash), with a
    * secret in the store and an environment login that holds a `${secret:GITHUB_TOKEN}` reference to it.
@@ -1543,5 +1567,351 @@ describe('a repeat copy (update) over real files', () => {
         should(await signedInState(target)).deepEqual(before);
       }
     });
+  });
+});
+
+// ── The whole app copy, over real files and a real secret directory (design §14.4) ───────────────────
+
+/**
+ * The app copies in one fixed order, each step through the route the browser uses: the reviewed fleet change, then
+ * the settings files it ticked, then the agent controls, then the keys the copied setup names, sealed for one
+ * passkey. Each step runs here through the same code the daemon runs: the real provisioner on real files, the real
+ * configuration service, and the real secret import and export over a real secret directory (a fake cipher and an
+ * in-memory document, so its timestamps and sealed entries are the daemon's own). A sign-in is a file a person
+ * signed in with; a factor is a file beside it; neither is ever read by the copy, so each is compared as bytes.
+ */
+describe('the whole app copy leaves a signed-in login, its secrets, its factors and the defaults byte-identical', () => {
+  const crypto_ = new WebCryptoRelayCrypto();
+  const HELD = 'HELD_KEY';
+  const OTHER_HELD = 'OTHER_HELD_KEY';
+  const MISSING = 'MISSING_KEY';
+  const FACTORS = JSON.stringify({ passkeys: ['credential-id-1'], totp: 'enrolled' });
+  const DEFAULTS = 'sites:\n  app.clickup.com: CLICKUP_A\n';
+  const LEARNING = 'enabled: false\n';
+  const EMAIL = 'kirin@example.test';
+
+  interface Vault {
+    readonly documents: MemorySecretDocuments;
+    readonly directory: SecretDirectory;
+  }
+
+  /** A secret directory whose clock moves a minute with every write, so a rewrite shows in `updatedAt`. */
+  const vaultAt = (start: string): Vault => {
+    let at = Date.parse(start);
+    const documents = new MemorySecretDocuments();
+    return {
+      documents,
+      directory: new SecretDirectory(documents, new FakeSecretCipher(), {
+        now: () => {
+          at += 60_000;
+          return new Date(at).toISOString();
+        },
+      }),
+    };
+  };
+
+  async function identity(): Promise<DaemonIdentity> {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+      'sign',
+      'verify',
+    ])) as unknown as CryptoKeyPair;
+    const der = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
+    return await crypto_.importDaemonIdentity(
+      ['-----BEGIN PRIVATE KEY-----', ...(base64.match(/.{1,64}/gu) ?? []), '-----END PRIVATE KEY-----', ''].join('\n'),
+    );
+  }
+
+  const apply = async (on: Machine, change: unknown) => {
+    const staged = await on.catalog.propose(change as never);
+    return await on.catalog.apply(staged.id, { governed: false } as never);
+  };
+
+  /** A source that is signed in as `kirin@example.test`, with a second runtime when asked, and its secrets. */
+  async function sourceMachine(extraRuntime: boolean): Promise<{ source: Machine; vault: Vault }> {
+    const vault = vaultAt('2026-09-01T09:00:00.000Z');
+    const source = await machine('studio', { claude: true, emails: { 'claude-you': EMAIL } });
+    await importHost(source);
+    if (extraRuntime)
+      await apply(source, {
+        kind: 'runtime.put',
+        name: 'claude-extra',
+        credential: 'claude-you',
+        profile: 'claude-default',
+        agent: true,
+        create: true,
+      });
+    // The source holds the held key under ANOTHER value, and a key the target lacks.
+    await vault.directory.put(HELD as never, 'source-value-for-the-held-key');
+    await vault.directory.put(MISSING as never, 'source-value-for-the-missing-key');
+    return { source, vault };
+  }
+
+  /**
+   * A target that is signed in as the same account (twice, when asked), holds secrets, an environment login that
+   * refers to one by `${secret:NAME}`, factors, a host sign-in and an account default.
+   */
+  async function signedInMachine(name: string, twoLogins: boolean): Promise<{ target: Machine; vault: Vault }> {
+    const vault = vaultAt('2026-10-01T09:00:00.000Z');
+    await vault.directory.put(HELD as never, 'target-value-for-the-held-key');
+    await vault.directory.put(OTHER_HELD as never, 'target-value-for-the-other-key');
+    const logins = ['claude-kirin', ...(twoLogins ? ['claude-kirin-2'] : [])];
+    const target = await machine(name, {
+      claude: false,
+      emails: { ...Object.fromEntries(logins.map(id => [id, EMAIL])), 'codex-kirin': 'codex@example.test' },
+      vault: vault.directory,
+    });
+    const steps = [
+      ...logins.map(id => ({ kind: 'credential.add', id, harness: 'claude' })),
+      { kind: 'credential.add', id: 'codex-kirin', harness: 'codex' },
+      {
+        kind: 'component.put',
+        name: 'house',
+        component: { kind: 'instructions' },
+        content: 'Be kind.\n',
+        create: true,
+      },
+      { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
+      { kind: 'runtime.put', name: 'mine', credential: 'claude-kirin', profile: 'plain', agent: true, create: true },
+      {
+        kind: 'credential.add',
+        id: 'keyed',
+        harness: 'claude',
+        store: 'environment',
+        env: { ANTHROPIC_API_KEY: `\${secret:${HELD}}` },
+      },
+    ];
+    for (const step of steps) await apply(target, step);
+    for (const [id, file, token] of [
+      ...logins.map(id => [id, '.credentials.json', FAKE_LOGIN] as const),
+      ['codex-kirin', 'auth.json', FAKE_CODEX_LOGIN] as const,
+    ]) {
+      const store = path.join(target.fleet, 'credentials', id);
+      await mkdir(store, { recursive: true });
+      await writeFile(path.join(store, file), token, { mode: 0o600 });
+      await writeFile(path.join(store, 'factors.json'), FACTORS, { mode: 0o600 });
+    }
+    const claude = path.join(target.userHome, '.claude');
+    await mkdir(claude, { recursive: true });
+    await writeFile(path.join(claude, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
+    await writeFile(path.join(target.home.paths.config, 'account-defaults.yaml'), DEFAULTS, { mode: 0o600 });
+    return { target, vault };
+  }
+
+  /** Every byte a sign-in, a factor, a secret entry (value, timestamps) and an account default is. */
+  async function heldBytes(on: Machine, vault: Vault): Promise<Record<string, string>> {
+    const bytes = await credentialBytes(on);
+    const hex = async (file: string): Promise<string> => (await readFile(file)).toString('hex');
+    bytes['host/.claude/.credentials.json'] = await hex(path.join(on.userHome, '.claude', '.credentials.json'));
+    bytes['config/account-defaults.yaml'] = await hex(path.join(on.home.paths.config, 'account-defaults.yaml'));
+    const document = await vault.documents.read();
+    for (const name of [HELD, OTHER_HELD]) bytes[`vault/${name}`] = JSON.stringify(document?.entries[name]);
+    return bytes;
+  }
+
+  const exportedBundle = async (source: Machine) => FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+
+  /** What a copy made before keys existed looks like: the same bundle as version 1. */
+  const legacyBundle = async (source: Machine) => {
+    const current = await exportedBundle(source);
+    if (current.version !== 2) throw new Error('expected a version 2 bundle');
+    const { daemon: _daemon, keys: _keys, ...rest } = current;
+    return { ...rest, version: 1 as const };
+  };
+
+  interface Choices {
+    /** What the person decided in the review, by item. */
+    readonly decisions?: Record<string, 'take' | 'keep' | 'remove'>;
+    /** Which existing login each sign-in uses. */
+    readonly logins?: Record<string, string>;
+    /** A link-only finish: the reviewed change and nothing else. */
+    readonly linkOnly?: boolean;
+  }
+
+  /**
+   * The app's copy, step by step. `mode` is the Existing-setup choice; an Update names the review it came from.
+   * Returns what the key import said, so a test can assert that nothing held was replaced.
+   */
+  async function appCopy(
+    target: Machine,
+    vault: Vault,
+    from: { source: Machine; vault: Vault },
+    mode: 'update' | 'alongside' | 'replace',
+    choices: Choices = {},
+  ) {
+    const bundle = await exportedBundle(from.source);
+    // 1. The fleet.
+    if (mode === 'update') {
+      const review = await target.setup.reviewClone({ bundle });
+      await apply(target, {
+        kind: 'clone.import',
+        mode,
+        bundle,
+        decisions: choices.decisions ?? {},
+        ...(choices.logins === undefined ? {} : { logins: choices.logins }),
+        reviewed: review.fingerprint,
+      });
+    } else {
+      await apply(target, { kind: 'clone.import', mode, bundle });
+    }
+    if (choices.linkOnly === true) return undefined;
+    // 2. A settings file, written whole against what is here now.
+    const file = await target.home.service.file('learning.yaml');
+    await target.home.service.write('learning.yaml', LEARNING, file.etag, false, 'owner');
+    // 3. The agent controls, with the default the fleet copy already decided read back.
+    await apply(target, {
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: (await declared(target)).machine.defaultRuntime ?? null,
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+    });
+    // 4. The keys the copied setup names that this machine does not hold, sealed for one passkey on the source.
+    const held = new Set((await vault.directory.list()).map(secret => secret.name));
+    const offered = (await from.vault.directory.list()).map(secret => secret.name);
+    const names = offered.filter(name => !held.has(name)).map(name => CloneableSecretNameSchema.parse(name));
+    const here = await identity();
+    const there = await identity();
+    const clock = { now: () => '2026-10-20T10:00:00.000Z' };
+    const importing = new SecretImportService({
+      crypto: crypto_,
+      identity: { load: async () => here },
+      directory: vault.directory,
+      clock,
+    });
+    const exporting = new SecretExportService({
+      crypto: crypto_,
+      identity: { load: async () => there },
+      vault: new SecretVault(from.vault.documents, new FakeSecretCipher()),
+      clock,
+    });
+    const offer = await importing.open();
+    const sealed = await exporting.seal(offer.importId, { offer, names });
+    return { names, result: await importing.complete(offer.importId, sealed.bundle) };
+  }
+
+  /** The held entries, to the byte, and the key the copy was allowed to add. */
+  const provedUntouched = async (
+    target: Machine,
+    vault: Vault,
+    before: Record<string, string>,
+    keys: Awaited<ReturnType<typeof appCopy>>,
+  ): Promise<void> => {
+    for (const key of [
+      'credentials/claude-kirin/.credentials.json',
+      'credentials/claude-kirin/factors.json',
+      'credentials/codex-kirin/auth.json',
+      'config/logins/claude-kirin.yaml',
+      'config/logins/keyed.yaml',
+      'config/account-defaults.yaml',
+      'host/.claude/.credentials.json',
+      `vault/${HELD}`,
+      `vault/${OTHER_HELD}`,
+    ])
+      should(Object.keys(before)).containEql(key);
+    should(Buffer.from(before['config/logins/keyed.yaml'] as string, 'hex').toString('utf8')).containEql(
+      `\${secret:${HELD}}`,
+    );
+    should(unchanged(before, await heldBytes(target, vault))).deepEqual(before);
+    if (keys === undefined) return;
+    // The key it lacked arrived; nothing it held was named, replaced or rewritten.
+    should(keys.names).deepEqual([MISSING]);
+    should(keys.result.imported).deepEqual([MISSING]);
+    should(keys.result.replaced).deepEqual([]);
+    should(Object.keys((await vault.documents.read())?.entries ?? {}).toSorted()).deepEqual(
+      [HELD, MISSING, OTHER_HELD].toSorted(),
+    );
+  };
+
+  for (const mode of ['alongside', 'replace'] as const) {
+    it(`should leave them alone through a ${mode} copy: fleet, then a settings file, controls and a sealed key`, async () => {
+      const from = await sourceMachine(false);
+      const { target, vault } = await signedInMachine(`work-${mode}`, false);
+      const before = await heldBytes(target, vault);
+
+      const keys = await appCopy(target, vault, from, mode);
+
+      await provedUntouched(target, vault, before, keys);
+      should(Object.keys((await declared(target)).runtimes)).containEql('claude-default');
+    });
+  }
+
+  it('should leave them alone through an Update that takes what the source changed', async () => {
+    const from = await sourceMachine(false);
+    const { target, vault } = await signedInMachine('work-update', false);
+    const before = await heldBytes(target, vault);
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await exportedBundle(from.source) });
+    const [name] = Object.keys((await declared(from.source)).components.instructions);
+    if (name === undefined) throw new Error('expected an instructions component');
+    await apply(from.source, {
+      kind: 'component.put',
+      name,
+      component: { kind: 'instructions' },
+      content: 'Edited on the source.\n',
+      create: false,
+    });
+
+    const keys = await appCopy(target, vault, from, 'update');
+
+    await provedUntouched(target, vault, before, keys);
+    const copied = await readFile(
+      path.join(target.fleet, 'assets', 'components', 'instructions', `${name}.md`),
+      'utf8',
+    );
+    should(copied).equal('Edited on the source.\n');
+  });
+
+  for (const decision of ['keep', 'remove'] as const) {
+    it(`should leave them alone when the person chooses to ${decision} an item the source dropped`, async () => {
+      const from = await sourceMachine(true);
+      const { target, vault } = await signedInMachine(`work-gone-${decision}`, false);
+      const before = await heldBytes(target, vault);
+      await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await exportedBundle(from.source) });
+      should(Object.keys((await declared(target)).runtimes)).containEql('claude-extra');
+      await apply(from.source, { kind: 'runtime.remove', name: 'claude-extra' });
+      const review = await target.setup.reviewClone({ bundle: await exportedBundle(from.source) });
+      should(review.items.find(row => row.ref === 'runtime/claude-extra')?.outcome).equal('gone');
+
+      const keys = await appCopy(target, vault, from, 'update', {
+        decisions: decision === 'remove' ? { 'runtime/claude-extra': 'remove' } : {},
+      });
+
+      await provedUntouched(target, vault, before, keys);
+      const runtimes = Object.keys((await declared(target)).runtimes);
+      should(runtimes.includes('claude-extra')).equal(decision === 'keep');
+    });
+  }
+
+  it('should leave them alone when the person names which existing login a sign-in uses', async () => {
+    const from = await sourceMachine(false);
+    const { target, vault } = await signedInMachine('work-picked', true);
+    const before = await heldBytes(target, vault);
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await legacyBundle(from.source) });
+    const review = await target.setup.reviewClone({ bundle: await exportedBundle(from.source) });
+    const ask = review.logins.find(login => login.sourceId === 'claude-you');
+    should(ask?.outcome).equal('ask');
+    should(ask?.candidates).deepEqual(['claude-kirin', 'claude-kirin-2']);
+
+    const keys = await appCopy(target, vault, from, 'update', { logins: { 'claude-you': 'claude-kirin-2' } });
+
+    await provedUntouched(target, vault, before, keys);
+  });
+
+  it('should leave them alone when an old copy is only linked, and write nothing but the link', async () => {
+    const from = await sourceMachine(false);
+    const { target, vault } = await signedInMachine('work-linked', false);
+    const before = await heldBytes(target, vault);
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await legacyBundle(from.source) });
+    const assets = async (): Promise<string[]> => await filesUnder(path.join(target.fleet, 'assets'));
+    const assetsBefore = await assets();
+    const review = await target.setup.reviewClone({ bundle: await exportedBundle(from.source) });
+    should(review.items).deepEqual([]);
+    should(review.same.probable).be.above(0);
+
+    const keys = await appCopy(target, vault, from, 'update', { linkOnly: true });
+
+    should(keys).be.undefined();
+    await provedUntouched(target, vault, before, undefined);
+    should(await assets()).deepEqual(assetsBefore);
+    should((await target.setup.reviewClone({ bundle: await exportedBundle(from.source) })).items).deepEqual([]);
   });
 });

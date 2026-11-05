@@ -4,7 +4,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import { type DaemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import type { DaemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   FIRST_REVIEW,
@@ -762,6 +762,223 @@ describe('CloneMachine · Update · The button counts every write the apply make
       await click(screen.submit(), 'Update');
       const written = calls.target.filter(call => call.path === '/v1/config/file' && call.body !== undefined);
       expect(written.map(call => (call.body as { path: string }).path)).toEqual(['warden.yaml']);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── One mode's choices never reach another ──────────────────────────────────────────────────────
+
+/** Source → Existing setup, then the copy mode, then on to its preview. */
+const throughMode = async (screen: Screen, mode: 'update' | 'alongside' | 'replace') => {
+  await screen.choose(mode);
+  await click(screen.q('[data-step-next]'), 'Next');
+  expect(screen.step()).toBe('preview');
+};
+const back = async (screen: Screen) => click(screen.q('[data-stepper-back]'), 'Back');
+const configWrites = (calls: readonly Call[]) =>
+  calls.filter(call => call.path === '/v1/config/file' && call.body !== undefined);
+const writesOf = (calls: readonly Call[]) => calls.filter(call => call.body !== undefined);
+
+describe('CloneMachine · Update · A mode submits only what its own screen shows', () => {
+  const identical = () => {
+    const { target, work } = settingsAnswers();
+    return daemons({ ...target, '/v1/fleet/clone/review': NOTHING_REVIEW }, work);
+  };
+
+  it('starts Add alongside with everything it can copy ticked, and an Update with the fleet alone', async () => {
+    const { createClient } = identical();
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await throughMode(screen, 'alongside');
+      expect((tickItem(screen, 'fleet') as HTMLInputElement).checked).toBe(true);
+      expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(true);
+      await back(screen);
+      await throughMode(screen, 'update');
+      expect(screen.text('[data-setup-note="nothing-to-copy"]')).toContain('Nothing to copy');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('finishes a link with no settings write after Add alongside ticked Warden (reviewer N1)', async () => {
+    const { createClient, calls } = identical();
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await throughMode(screen, 'alongside');
+      expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(true);
+      await back(screen);
+      await throughMode(screen, 'update');
+      // The screen promises it: this is all it says it writes.
+      expect(screen.text('[data-setup-note="link-by-name"]')).toContain('Nothing else is written.');
+      expect(screen.q('[data-setup-choices="clone-items"]')).toBeNull();
+
+      await click(screen.submit(), 'Finish and link');
+
+      expect(configWrites(calls.target)).toEqual([]);
+      expect(writesOf(calls.work)).toEqual([]);
+      expect(writesOf(calls.target).filter(call => call.path.startsWith('/v1/secrets'))).toEqual([]);
+      expect(changeBodies(calls.target)).toHaveLength(1);
+      expect(screen.step()).toBe('done');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('still links after Add alongside left the fleet out (reviewer N2)', async () => {
+    const { createClient, calls } = identical();
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await throughMode(screen, 'alongside');
+      await click(tickItem(screen, 'fleet'), 'untick the fleet');
+      expect((tickItem(screen, 'fleet') as HTMLInputElement).checked).toBe(false);
+      await back(screen);
+      await throughMode(screen, 'update');
+
+      await click(screen.submit(), 'Finish and link');
+
+      // One reviewed link, so the next edit on the source reads as theirs and not as a conflict.
+      const bodies = changeBodies(calls.target);
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]?.change).toMatchObject({ kind: 'clone.import', mode: 'update', reviewed: 'fingerprint-1' });
+      expect(configWrites(calls.target)).toEqual([]);
+      expect(screen.step()).toBe('done');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('applies the reviewed Update after Add alongside left the fleet out, and writes no file it does not show', async () => {
+    const { target, work } = settingsAnswers();
+    const { createClient, calls } = daemons({ ...target, '/v1/fleet/clone/review': FULL_REVIEW }, work);
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await throughMode(screen, 'alongside');
+      await click(tickItem(screen, 'fleet'), 'untick the fleet');
+      await back(screen);
+      await throughMode(screen, 'update');
+      // The Update screen offers settings files unticked, and the fleet is its own review: neither is inherited.
+      expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(false);
+      await click(screen.q('[data-review-pick="settings/shared:keep"]'), 'Keep mine');
+
+      await click(screen.submit(), 'Update');
+
+      const bodies = changeBodies(calls.target);
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]?.change).toMatchObject({ kind: 'clone.import', mode: 'update', reviewed: 'fingerprint-1' });
+      expect(configWrites(calls.target)).toEqual([]);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('keeps what Add alongside left out when the person moves to Start over, which shows the same screen', async () => {
+    const { createClient } = identical();
+    const screen = await render(createClient);
+    try {
+      await screen.choose('work');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await throughMode(screen, 'alongside');
+      await click(tickItem(screen, 'warden'), 'untick warden');
+      expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(false);
+      await back(screen);
+      await throughMode(screen, 'replace');
+      expect((tickItem(screen, 'warden') as HTMLInputElement).checked).toBe(false);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── The writes an Update makes, in the order it makes them ───────────────────────────────────────
+
+const IMPORT_ID = `fy_secret_import_${'a'.repeat(22)}`;
+const OFFER = {
+  v: 1,
+  importId: IMPORT_ID,
+  daemonId: `fy_daemon_${'T'.repeat(43)}`,
+  identityKey: 'aWQ',
+  publicKey: 'cHVi',
+  expiresAt: '2026-10-20T10:00:00.000Z',
+  signature: 'c2ln',
+};
+const SEALED = {
+  v: 1,
+  importId: IMPORT_ID,
+  sourceDaemonId: `fy_daemon_${'S'.repeat(43)}`,
+  targetDaemonId: OFFER.daemonId,
+  expiresAt: OFFER.expiresAt,
+  names: ['JEV_API_KEY'],
+  ephemeralKey: 'ZXBo',
+  nonce: 'bm9uY2U',
+  ciphertext: 'Y2lwaGVy',
+};
+const NAMES_TWO_KEYS = `enabled: true\nlabel: \${secret:JEV_API_KEY}\nother: \${secret:HELD_ONE}\n`;
+
+describe('CloneMachine · Update · The writes it makes, in order', () => {
+  it('writes the reviewed change, the ticked file, the controls and the one key this machine lacks, and nothing else', async () => {
+    const { target, work } = settingsAnswers();
+    const { createClient, calls } = daemons(
+      {
+        ...target,
+        '/v1/fleet/clone/review': FULL_REVIEW,
+        '/v1/secrets': secretNames(['HELD_ONE']),
+        '/v1/secrets/imports': OFFER,
+        [`/v1/secrets/imports/${IMPORT_ID}`]: {
+          importId: IMPORT_ID,
+          sourceDaemonId: SEALED.sourceDaemonId,
+          imported: ['JEV_API_KEY'],
+          replaced: [],
+        },
+      },
+      {
+        ...work,
+        '/v1/secrets': secretNames(['JEV_API_KEY', 'HELD_ONE']),
+        [fileRoute('warden.yaml')]: sourceFile('warden.yaml', NAMES_TWO_KEYS),
+        [`/v1/secrets/exports/${IMPORT_ID}`]: { bundle: SEALED, names: ['JEV_API_KEY'] },
+      },
+    );
+    const screen = await render(createClient);
+    try {
+      await toChanges(screen);
+      await click(screen.q('[data-review-pick="settings/shared:keep"]'), 'Keep mine');
+      await click(tickItem(screen, 'warden'), 'tick warden');
+      await click(tickItem(screen, 'controls'), 'tick controls');
+      // The key this machine already holds is not offered; the one it lacks is.
+      expect(screen.text('[data-clone-keys-names]')).toBe('JEV_API_KEY');
+
+      await click(screen.submit(), 'Update');
+
+      expect(screen.step()).toBe('done');
+      const describeWrite = (call: Call): string => {
+        const body = call.body as { change?: { kind?: string } } | undefined;
+        return call.path === '/v1/fleet/proposals' ? `propose ${body?.change?.kind ?? '?'}` : call.path;
+      };
+      // The review is a question, not a write: it carries a body but changes nothing.
+      const writes = writesOf(calls.target).filter(call => call.path !== '/v1/fleet/clone/review');
+      expect(writes.map(describeWrite)).toEqual([
+        'propose clone.import',
+        APPLY_PATH,
+        '/v1/config/file',
+        'propose machine.settings',
+        APPLY_PATH,
+        '/v1/secrets/imports',
+        `/v1/secrets/imports/${IMPORT_ID}`,
+      ]);
+      expect(configWrites(calls.target).map(call => (call.body as { path: string }).path)).toEqual(['warden.yaml']);
+      // The source is asked for the one missing key by name, and for nothing else.
+      expect(writesOf(calls.work).map(call => ({ path: call.path, body: call.body }))).toEqual([
+        { path: `/v1/secrets/exports/${IMPORT_ID}`, body: { offer: OFFER, names: ['JEV_API_KEY'] } },
+      ]);
     } finally {
       await screen.view.unmount();
     }

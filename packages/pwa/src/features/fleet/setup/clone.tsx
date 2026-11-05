@@ -89,9 +89,10 @@ import {
   applyHold,
   chooseItem,
   compareItem,
+  isStaleReview,
+  type LoginPicks,
   lastCopiedWords,
   linksOnly,
-  type LoginPicks,
   loginChoices,
   nothingDiffers,
   type OtherWrites,
@@ -101,7 +102,6 @@ import {
   reviewedLoginTargets,
   reviewOutcomes,
   sameNames,
-  isStaleReview,
   unchosenBoth,
   updateLabel,
   updateWrites,
@@ -145,8 +145,8 @@ import {
   controlsChange,
   keysToCopy,
   needsAfterCopy,
-  signInLink,
   type SourceSettingsFile,
+  signInLink,
   sourceItemSummary,
 } from './clone-settings-model.ts';
 import { machineItemHash } from './settings-route.ts';
@@ -423,6 +423,29 @@ export function CloneMachine(props: CloneMachineProps) {
     });
   };
 
+  /**
+   * What each mode starts with ticked. An Update copies the fleet only; a settings file stays unticked until the
+   * person asks, and is then compared key by key. Every other mode starts with all it can copy.
+   */
+  const chosenFor = (next: CloneChoiceMode, read: ReadonlyMap<string, SourceSettingsFile>): readonly CloneItemId[] =>
+    next === 'update' ? ['fleet'] : ALL_CLONE_ITEMS.filter(id => itemReadable(id, read, pickedReach));
+
+  /**
+   * Switching between Update and a full copy starts the new mode's own selection: what was ticked or left out under
+   * the other never carries over, so each mode submits exactly what its own screen shows. Add alongside and Start
+   * over share one screen, so a choice made on it stays. The settings it ticks are reviewed again, so the apply
+   * names a review of exactly those.
+   */
+  const chooseMode = (next: CloneChoiceMode): void => {
+    if ((next === 'update') !== (mode === 'update')) {
+      const ticked = chosenFor(next, files);
+      setChosen(ticked);
+      setKeyPicks(new Map());
+      reviewAgain(ticked);
+    }
+    setMode(next);
+  };
+
   /** Read the source's setup and the review of what a copy would change here. `advance` moves on from Source. */
   const readSource = (advance = true): void => {
     // Only reachable with a source picked: Next waits for one, and Review again comes after reading one.
@@ -496,9 +519,7 @@ export function CloneMachine(props: CloneMachineProps) {
       setDefaultPick(undefined);
       // An Update copies the fleet only. A settings file stays unticked until the person asks, and is then compared
       // key by key: a repeat copy never changes a setting made here without being asked.
-      const ticked: readonly CloneItemId[] = updatable
-        ? ['fleet']
-        : ALL_CLONE_ITEMS.filter(id => itemReadable(id, read, pickedReach));
+      const ticked = chosenFor(updatable ? 'update' : 'alongside', read);
       setChosen(ticked);
       setKeyPicks(new Map());
       // The settings it ticked are reviewed key by key too. An Update has none ticked, and the review it was just
@@ -536,8 +557,14 @@ export function CloneMachine(props: CloneMachineProps) {
     }
   };
 
-  const copy = (): void => {
+  /**
+   * Run the copy. `link` is the metadata-only finish of an Update that found nothing different: it proposes the
+   * reviewed clone (which records where the copy came from) and writes nothing else, whatever else is ticked.
+   */
+  const copy = (link = false): void => {
     if (bundle === null || preview === null || pickedRecord === undefined) return;
+    const todo: readonly CloneItemId[] = link ? ['fleet'] : chosen;
+    const copiesFleet = todo.includes('fleet');
     setCopying(true);
     void (async () => {
       let summary: string | null = null;
@@ -549,7 +576,7 @@ export function CloneMachine(props: CloneMachineProps) {
       const before = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
       // What the daemon reviewed key by key, to decide in the same apply as the items (an Update) or on its own first.
       const settingsApply =
-        review === null || perKeyItems.length === 0
+        link || review === null || perKeyItems.length === 0
           ? null
           : {
               settings: [...settingsToSend(chosen, files, sourceMachine)],
@@ -623,10 +650,10 @@ export function CloneMachine(props: CloneMachineProps) {
       }
       for (const settings of CLONE_SETTINGS_FILES) {
         const file = files.get(settings.file);
-        if (!chosen.includes(settings.id) || file === undefined || merged.has(settings.id)) continue;
+        if (!todo.includes(settings.id) || file === undefined || merged.has(settings.id)) continue;
         outcomes.push({ item: settings, outcome: await copyFile(settings.file, file.text) });
       }
-      if (chosen.includes('controls') && sourceMachine !== null && !merged.has('controls')) {
+      if (todo.includes('controls') && sourceMachine !== null && !merged.has('controls')) {
         // The fleet copy already decided this machine's default; read it back so the controls do not undo it.
         const decided = copiesFleet ? await target.read(client => readFleetMachine(client)) : null;
         const applied = await changes.apply(
@@ -639,7 +666,7 @@ export function CloneMachine(props: CloneMachineProps) {
       }
       // The keys the copied setup needs follow, sealed, for ONE passkey on the source. After the fleet, so a
       // refused copy has not already moved a key; before the credentials are read, so a login shows ready.
-      if (keyNames.length > 0) {
+      if (!link && keyNames.length > 0) {
         outcomes.push({ item: CLONE_KEYS_ITEM, outcome: await sealKeys(keyNames) });
         await readHeld();
       }
@@ -709,7 +736,7 @@ export function CloneMachine(props: CloneMachineProps) {
         busyLabel="Copying…"
         variant={variant}
         disabled={chosen.length === 0 || blockedBy !== null}
-        onSubmit={copy}
+        onSubmit={() => copy()}
       />
     </div>
   );
@@ -829,7 +856,7 @@ export function CloneMachine(props: CloneMachineProps) {
                 refusal={stale ? null : changes.refusal}
                 submitLabel={`Finish and link ${countWords(matched, 'item')}`}
                 busyLabel="Linking…"
-                onSubmit={copy}
+                onSubmit={() => copy(true)}
               >
                 {reviewAgainButton}
               </ChangeApplyPanel>
@@ -933,7 +960,7 @@ export function CloneMachine(props: CloneMachineProps) {
               submitLabel={updateLabel(count)}
               busyLabel="Updating…"
               disabled={unchosen.length > 0 || blockedBy !== null}
-              onSubmit={copy}
+              onSubmit={() => copy()}
             >
               {reviewAgainButton}
             </ChangeApplyPanel>
@@ -1202,7 +1229,7 @@ export function CloneMachine(props: CloneMachineProps) {
           legendHidden
           name="clone-mode"
           value={mode}
-          onChoose={setMode}
+          onChoose={chooseMode}
           options={[
             ...(updating
               ? [
