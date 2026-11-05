@@ -98,13 +98,30 @@ describe('where a done card goes', () => {
     should(doneLane(card({ laneId: 'implement' }), noReview)?.id).equal('merged');
   });
 
-  it('should stay put with a PR, outside an active lane, dropped, or when the only lane ahead is closed', () => {
+  it('should wait in the review lane while its PR is open, never past it', () => {
     // Arrange
     const withPr = card({ laneId: 'implement', links: { prs: [PR], branch: null, commits: [], docs: [] } });
+
+    // Act / Assert
+    should(doneLane(withPr, lanes())?.id).equal('review');
+    should(doneLane({ ...withPr, laneId: 'review' }, lanes())).be.null();
+  });
+
+  it('should leave a card whose PR merged to the PR watcher, and move one with no PR to review', () => {
+    // Arrange
+    const merged = { ...PR, state: 'merged' as const, mergedAt: NOW, mergeSha: 'a'.repeat(40) };
+    const shipped = card({ laneId: 'implement', links: { prs: [merged], branch: null, commits: [], docs: [] } });
+
+    // Act / Assert
+    should(doneLane(shipped, lanes())).be.null();
+    should(doneLane(card({ laneId: 'implement' }), lanes())?.id).equal('review');
+  });
+
+  it('should stay put outside an active lane, dropped, or when the only lane ahead is closed', () => {
+    // Arrange
     const dropped = card({ laneId: 'implement', dropped: { reason: 'superseded', at: NOW } });
 
     // Act / Assert
-    should(doneLane(withPr, lanes())).be.null();
     should(doneLane(card({ laneId: 'todo' }), lanes())).be.null();
     should(doneLane(card({ laneId: 'review' }), lanes())).be.null();
     should(doneLane(dropped, lanes())).be.null();

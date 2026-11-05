@@ -391,7 +391,7 @@ hand-made set.
 **`fy signal done` with no PR** moves a card still in an active lane to the lane its variant enters on `signal.done`,
 else the first review or verify lane ahead: a review lane where one comes first (today's behaviour on a board that
 has one), else the verify lane where the owner tries it. It never moves a card into a closed lane, because only the
-owner closes, never out of a gate, and stops at a gate on the way. A card with a PR is left where it is; its PR moves it.
+owner closes, never out of a gate, and stops at a gate on the way. A card with an OPEN PR goes to the review lane and waits there until the PR merges (never closed, never past it); one whose PR merged is left to its PR.
 
 **A session starting on a card fires `work.started`.** `SessionCards` does it, for a card it just made (`fy new`,
 `fy start`) and for one handed over by `fy new --card`, so a sub-ferret, who may not move cards, still lands in the
