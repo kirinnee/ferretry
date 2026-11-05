@@ -20,7 +20,7 @@ import {
   renderConfigFile,
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
-import { FleetCloneBundleSchema } from '@ferretry/protocol';
+import { configSchemaModeline, FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
@@ -1378,12 +1378,13 @@ describe('a repeat copy (update) over real files', () => {
 
       should(review.settings[0]?.keys.find(key => key.key === 'layers.jev')?.loosens).equal(true);
       should((outcome as { summary: string }).summary).containEql('held until you confirm');
-      // Written, and exactly this machine's file with the two values changed: its comments survive.
+      // Written, and exactly this machine's file with the two values changed: its comments and key order
+      // survive. Every file Ferretry writes starts with its schema modeline, so the merge adds that one line.
       should(await disk(target, 'warden.yaml')).equal(
-        WARDEN_MINE.replace('jev: false # off on purpose', 'jev: true # off on purpose').replace(
-          'intervalMinutes: 5',
-          'intervalMinutes: 10',
-        ),
+        `${configSchemaModeline({ kind: 'warden' })}\n\n${WARDEN_MINE.replace(
+          'jev: false # off on purpose',
+          'jev: true # off on purpose',
+        ).replace('intervalMinutes: 5', 'intervalMinutes: 10')}`,
       );
       // …but the tighter version is still in effect, and the loosening waits.
       const snapshot = await target.home.service.load();
@@ -1462,7 +1463,7 @@ describe('a repeat copy (update) over real files', () => {
         { 'warden.yaml': {} },
         allowed(false),
       );
-      await writeOwn(target, 'warden.yaml', WARDEN_MINE.replace('intervalMinutes: 5', 'intervalMinutes: 7'));
+      await writeOwn(target, 'warden.yaml', WARDEN_MINE.replace('intervalMinutes: 5', 'intervalMinutes: 15'));
       const before = await disk(target, 'warden.yaml');
       await settingsUpdate(
         target,
@@ -1507,12 +1508,12 @@ describe('a repeat copy (update) over real files', () => {
           target,
           source,
           [
-            { path: 'warden.yaml', text: `${WARDEN_THEIRS}investigation:\n  note: \${secret:GITHUB_TOKEN}\n` },
+            { path: 'warden.yaml', text: `${WARDEN_THEIRS}guard:\n  model: \${secret:GITHUB_TOKEN}\n` },
             { path: 'voice.yaml', text: 'postProcessing:\n  provider: groq\n' },
             { path: 'controls', text: JSON.stringify({ agentControl: { files: false } }) },
           ],
           {
-            'warden.yaml': { 'layers.jev': choice, intervalMinutes: choice, 'investigation.note': choice },
+            'warden.yaml': { 'layers.jev': choice, intervalMinutes: choice, 'guard.model': choice },
             'voice.yaml': { 'postProcessing.provider': choice },
             controls: { 'agentControl.files': choice },
           },
