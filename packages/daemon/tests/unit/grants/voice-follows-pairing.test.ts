@@ -197,6 +197,26 @@ describe('Voice for a device that held every other capability before Voice exist
     should(VOICE_RELEASED_AT < AFTER && VOICE_RELEASED_AT > BEFORE).be.true();
   });
 
+  it('fails closed on a record whose time cannot be told: the device it names is not widened', async () => {
+    const journal = journalOf(
+      { actor: 'admin-cli', changes: [`${PHONE}/terminal.use=on`], at: 'not-an-instant' },
+      { actor: 'admin-cli', changes: [`${TABLET}/terminal.use=on`], at: BEFORE },
+    );
+    const { deps, stored } = rig({
+      devices: { [PHONE]: preVoiceFull(), [TABLET]: preVoiceFull() },
+      journal,
+    });
+
+    should(await repairVoiceFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [TABLET],
+      unrecorded: [],
+      failed: [],
+    });
+    should(stored.get(PHONE)?.voice).deepEqual(OFF);
+    should(stored.get(TABLET)?.voice).deepEqual(ON);
+  });
+
   it('repairs a device at most once, because its own record marks it', async () => {
     const first = rig();
     await repairVoiceFromPairing(first.deps);

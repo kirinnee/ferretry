@@ -188,6 +188,27 @@ describe('Sharing for a device that held everything before Sharing existed', () 
     should(SHARING_RELEASED_AT < AFTER && SHARING_RELEASED_AT > BEFORE).be.true();
   });
 
+  it('fails closed on a record whose time cannot be told: the device it names is not widened', async () => {
+    const journal: WholeJournal = {
+      kind: 'read',
+      entries: [
+        { actor: 'admin-cli', changes: [`${PHONE}/terminal.use=on`], at: 'not-an-instant' },
+        { actor: 'admin-cli', changes: [`${TABLET}/terminal.use=on`], at: BEFORE },
+      ],
+      unreadable: 0,
+    };
+    const { deps, stored } = rig({ devices: { [PHONE]: oldFull(), [TABLET]: oldFull() }, journal });
+
+    should(await repairSharingFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [TABLET],
+      unrecorded: [],
+      failed: [],
+    });
+    should(stored.get(PHONE)?.sharing).deepEqual(OFF);
+    should(stored.get(TABLET)?.sharing).deepEqual(ON);
+  });
+
   it('repairs a device at most once, because its own record marks it', async () => {
     const first = rig();
     await repairSharingFromPairing(first.deps);

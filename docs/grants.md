@@ -382,12 +382,15 @@ device can only widen what it holds, so only the machine could turn Sharing on. 
 once, at boot** (owner decision 2026-10-31: sharing must start without a command at the machine;
 `sharing-follows-pairing.ts`). A device gets Sharing on both axes only when ALL of these hold:
 
-- its stored record has **every other capability fully on** and Sharing fully off — a device that held everything
-  before Sharing existed, what it would hold if it were paired today (the owner's phone);
+- its stored record has **the seven capabilities that existed before Sharing fully on** (`fleet`, `terminal`,
+  `browser`, `filesystem`, `warden`, `pairing`, `secrets`) and Sharing fully off — a device that held everything
+  before Sharing existed, what it would hold if it were paired today (the owner's phone). Capabilities added after
+  Sharing (`voice`) are not asked for: they are filled off on such a device;
 - the daemon-wide document is readable and has **Pairing fully on** (the operator's gate on handing out access);
 - **no grant-journal record ever names its Sharing** — a Sharing set by hand is never undone;
 - **no grant-journal record names the device at all since Sharing shipped** (v4.177.0): whoever changed it since
-  saw Sharing and decided.
+  saw Sharing and decided. A record whose time cannot be parsed counts as since: it fails closed and withholds the
+  device (the same rule holds for the Voice repair below).
 
 Each repair is recorded in the grant journal as `daemon:sharing-follows-pairing`, after its write, so it happens
 once and `fy daemon config history` says why; a write whose record failed is said at boot. The whole journal is
@@ -435,7 +438,8 @@ The questions above, answered for it ([design/voice-modes.md](design/voice-modes
   - **no grant-journal record names the device at all since Voice shipped** (`VOICE_RELEASED_AT`): whoever changed it
     since saw Voice and decided. The one exception is `daemon:sharing-follows-pairing`, the Sharing repair's record
     from the same boot — that is the daemon, not somebody deciding, and counting it would stop the Voice repair for the
-    very device that needs both.
+    very device that needs both. A record whose time cannot be parsed counts as since Voice shipped: it fails closed
+    and withholds the device.
 
   Each repair is recorded in the grant journal as `daemon:voice-follows-pairing`, after its write; the whole
   journal is read, and a journal over 8 MiB, or a line or a file that will not read, repairs nothing and says so at boot.

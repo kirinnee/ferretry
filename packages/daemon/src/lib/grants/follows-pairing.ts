@@ -27,7 +27,8 @@ import type { EnforcedGrants, GrantAuditEntry, GrantAuditPort, GrantClock } from
  * - every `heldBefore` capability is fully on in its stored record, and the new capability is fully off;
  * - the daemon-wide document has Pairing fully on (the operator's "who may hand out access" gate), and is readable;
  * - no grant-journal record EVER names `<device>/<capability>.*` — a grant somebody set by hand is never undone;
- * - no grant-journal record, other than an ignored actor's, names the device at all at or after `releasedAt`.
+ * - no grant-journal record, other than an ignored actor's, names the device at all at or after `releasedAt`; a
+ *   record whose time cannot be parsed counts as at or after it (it fails closed).
  *
  * Each repair is recorded in the grant journal under the spec's actor, after its write, so it happens at most once
  * and the history says why. A device whose write landed but whose record failed is reported as such.
@@ -107,7 +108,9 @@ const decided = (spec: FollowsPairingSpec, entries: readonly GrantAuditEntry[]):
   const since = Date.parse(spec.releasedAt);
   const ids = new Set<string>();
   for (const entry of entries) {
-    const recent = Date.parse(entry.at) >= since && !(spec.ignoredActors ?? []).includes(entry.actor);
+    const at = Date.parse(entry.at);
+    // A record whose time cannot be told fails CLOSED: it counts as recent, so the device is withheld.
+    const recent = (Number.isNaN(at) || at >= since) && !(spec.ignoredActors ?? []).includes(entry.actor);
     for (const change of entry.changes) {
       const named = deviceOf(change);
       if (named !== undefined && (recent || named.rest.startsWith(`${spec.capability}.`))) ids.add(named.id);
