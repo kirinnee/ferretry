@@ -82,6 +82,8 @@ export class WhisperEngine {
   readonly #replay = new Map<number, Float32Array>();
   /** Set once several threads failed: this engine asks for one from then on. */
   #oneThread = false;
+  /** The thread count the current worker was configured with; `null` while there is no worker. */
+  #pinned: number | null = null;
 
   constructor(
     model: string,
@@ -95,11 +97,21 @@ export class WhisperEngine {
     this.#speed = speed;
   }
 
-  /** The thread count to ask for now. */
+  /**
+   * The thread count of the CURRENT worker. The first message a worker gets fixes it, because a worker
+   * keeps the model it loaded: a later planner answer (another tab recorded a failure, say) changes
+   * what the NEXT worker is asked for, never what this one is already running. Every message to this
+   * worker repeats the pinned count, and replay is kept exactly while it is above one.
+   */
   #threads(): number {
-    if (this.#oneThread) return 1;
-    const asked = this.#speed.threads?.() ?? 1;
-    return Number.isSafeInteger(asked) && asked > 1 ? asked : 1;
+    if (this.#pinned !== null) return this.#pinned;
+    let threads = 1;
+    if (!this.#oneThread) {
+      const asked = this.#speed.threads?.() ?? 1;
+      threads = Number.isSafeInteger(asked) && asked > 1 ? asked : 1;
+    }
+    this.#pinned = threads;
+    return threads;
   }
 
   /** Start loading the model now, so the first utterance does not wait for it. */
@@ -162,6 +174,7 @@ export class WhisperEngine {
     this.#loadStartedAt = null;
     this.#loadMs = null;
     this.#replay.clear();
+    this.#pinned = null;
     worker?.terminate();
     this.#failAll(new WhisperEngineError('cancelled', 'The speech model was unloaded.'));
   }
@@ -178,6 +191,7 @@ export class WhisperEngine {
       // The worker script itself failed — refused by the page's policy, or a runtime that would not
       // start. Nothing it was asked will be answered, so every caller hears it now.
       this.#worker = null;
+      this.#pinned = null;
       this.#loadStartedAt = null;
       worker.terminate();
       this.#failAll(
@@ -214,15 +228,25 @@ export class WhisperEngine {
     pending?.reject(new WhisperEngineError(data.code, data.message));
   }
 
-  /** Threads did not work: tell the page, start a fresh worker on one thread, and repeat what is waiting. */
+  /**
+   * Threads did not work: tell the page, start a fresh worker on one thread, and repeat what is waiting.
+   * Every request to a threaded worker kept its audio (retention follows the worker's pinned thread
+   * count), so every waiting one is repeated. A one-thread worker that reports a thread failure cannot be
+   * retried, so everything waiting is SETTLED with a clear error rather than left waiting forever.
+   */
   #retryOnOneThread(reason: string): void {
-    if (this.#oneThread) return;
+    if (this.#oneThread || this.#pinned === 1) {
+      this.#failAll(new WhisperEngineError('worker-failed', 'The on-device speech engine failed on one thread.'));
+      return;
+    }
     this.#oneThread = true;
     this.#speed.onThreadsFailed?.(reason);
     const stale = this.#worker;
     this.#worker = null;
+    this.#pinned = null;
     stale?.terminate();
     const worker = this.#ensure();
+    this.#pinned = 1;
     worker.postMessage({ type: 'load', model: this.#model });
     const jobs = [...this.#replay];
     this.#replay.clear();

@@ -37,12 +37,22 @@ export interface TentativeTake {
 export const QUIET_TAIL_RMS = 0.01;
 /** A tail this short (20 ms, one frame) adds nothing a pause could not. */
 export const IGNORED_TAIL_SAMPLES = 320;
+/** Speech is looked for frame by frame, 20 ms at 16 kHz: a short word must not be averaged away by the silence around it. */
+const TAIL_FRAME_SAMPLES = 320;
 
 const rms = (samples: Float32Array): number => {
   if (samples.length === 0) return 0;
   let sum = 0;
   for (const sample of samples) sum += sample * sample;
   return Math.sqrt(sum / samples.length);
+};
+
+/** Whether ANY frame of `tail` holds speech. The whole-tail average would call a short burst plus a long pause "quiet". */
+const hasSpeech = (tail: Float32Array): boolean => {
+  for (let start = 0; start < tail.length; start += TAIL_FRAME_SAMPLES) {
+    if (rms(tail.subarray(start, start + TAIL_FRAME_SAMPLES)) >= QUIET_TAIL_RMS) return true;
+  }
+  return false;
 };
 
 export interface TentativePorts {
@@ -100,8 +110,9 @@ export class TentativeTranscriber {
   }
 
   /**
-   * The answer to reuse for a take that ended with `final` samples — or `null` when `final` has speech the
-   * attempt did not hear (decode it afresh), no attempt is live, or the attempt failed.
+   * The answer to reuse for a take that ended with `final` samples — or `null` when ANY frame after the
+   * attempt's snapshot has speech the attempt did not hear (decode it afresh), no attempt is live, the attempt
+   * failed, or it was discarded, replaced, cleared or aborted while its answer was awaited.
    */
   async reuse(final: Float32Array): Promise<string | null> {
     const attempt = this.#attempt;
@@ -115,7 +126,9 @@ export class TentativeTranscriber {
     const heard = attempt.progress.samples;
     if (final.length < heard) return null;
     const tail = final.subarray(heard);
-    return tail.length <= IGNORED_TAIL_SAMPLES || rms(tail) < QUIET_TAIL_RMS ? text : null;
+    // Discard, a replacing begin, clear and the session abort all abort the attempt: a superseded answer is never reused.
+    if (attempt.abort.signal.aborted) return null;
+    return tail.length <= IGNORED_TAIL_SAMPLES || !hasSpeech(tail) ? text : null;
   }
 
   /** Drop any attempt: the session ended. */

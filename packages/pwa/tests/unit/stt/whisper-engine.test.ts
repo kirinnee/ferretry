@@ -269,4 +269,80 @@ describe('WhisperEngine — threads', () => {
     await tick();
     should(outcome.value).eql({ text: 'hi', backend: 'wasm' });
   });
+  describe('thread configuration is pinned per worker', () => {
+    const drifting = (initial: number) => {
+      const workers: FakeWorker[] = [];
+      const state = { threads: initial };
+      const engine = new WhisperEngine(
+        MODEL,
+        () => {
+          const worker = new FakeWorker();
+          workers.push(worker);
+          return worker;
+        },
+        undefined,
+        { threads: () => state.threads },
+      );
+      return { engine, workers, state };
+    };
+
+    it('a worker preloaded on 4 keeps asking for 4 and keeps the audio, even when the planner now says 1', async () => {
+      const { engine, workers, state } = drifting(4);
+      engine.preload();
+      state.threads = 1;
+      const outcome = settle(engine.transcribe(new Float32Array([0.5, 0.25])));
+      const first = workers[0] as FakeWorker;
+      const sent = first.posts[1]?.message;
+      should(sent?.type === 'transcribe' && sent.threads).equal(4);
+      first.emit({ type: 'failed', id: idOf(first, 1), code: 'threads-failed', message: 'out of memory' });
+      const second = workers[1] as FakeWorker;
+      should(second.posts[0]?.message).eql({ type: 'load', model: MODEL });
+      const repeat = second.posts[1]?.message;
+      should(repeat?.type === 'transcribe' && [...repeat.samples]).eql([0.5, 0.25]);
+      second.emit({ type: 'result', id: idOf(second, 1), text: 'hi', backend: 'wasm' });
+      await tick();
+      should(outcome.value).eql({ text: 'hi', backend: 'wasm' });
+    });
+
+    it('a worker preloaded on 1 keeps asking for 1 when the planner now says 4, and keeps no copy', () => {
+      const { engine, workers, state } = drifting(1);
+      engine.preload();
+      state.threads = 4;
+      void engine.transcribe(new Float32Array(4));
+      const sent = workers[0]?.posts[1]?.message;
+      should(sent?.type === 'transcribe' && sent.threads).equal(undefined);
+    });
+
+    it('a fresh worker after unload or a crash takes the planner current answer', () => {
+      const { engine, workers, state } = drifting(1);
+      engine.preload();
+      engine.unload();
+      state.threads = 4;
+      engine.preload();
+      should(workers[1]?.posts[0]?.message).eql({ type: 'load', model: MODEL, threads: 4 });
+      workers[1]?.crash();
+      state.threads = 3;
+      engine.preload();
+      should(workers[2]?.posts[0]?.message).eql({ type: 'load', model: MODEL, threads: 3 });
+    });
+
+    it('a one-thread worker that reports threads-failed settles every waiting request instead of hanging', async () => {
+      const { engine, workers } = drifting(1);
+      const one = settle(engine.transcribe(new Float32Array(4)));
+      const two = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(one.error).be.instanceOf(WhisperEngineError);
+      should(two.error).be.instanceOf(WhisperEngineError);
+    });
+
+    it('a request waiting on the replacement when it also reports threads-failed is settled, not left hanging', async () => {
+      const { engine, workers } = drifting(4);
+      const outcome = settle(engine.transcribe(new Float32Array(4)));
+      workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      workers[1]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+      await tick();
+      should(outcome.error).be.instanceOf(WhisperEngineError);
+    });
+  });
 });

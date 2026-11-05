@@ -138,6 +138,30 @@ describe('SpeedMemoryStore', () => {
     should(store.recordFailure('parakeet', 'wasm-threads', NOW)).equal(false);
   });
 
+  it('remembers failures in this page after storage refuses a write, merged with what storage holds', () => {
+    const storage = new FakeStorage();
+    storage.items.set(
+      SPEED_MEMORY_KEY,
+      serialiseSpeedMemory({ failures: [{ model: 'whisper-base-en', path: 'webgpu', at: NOW - 1_000 }] }),
+    );
+    storage.denyWrites = true;
+    const store = new SpeedMemoryStore(storage);
+    should(store.recordFailure('parakeet', 'wasm-threads', NOW)).equal(false);
+    should(store.read().failures).deepEqual([
+      { model: 'parakeet', path: 'wasm-threads', at: NOW },
+      { model: 'whisper-base-en', path: 'webgpu', at: NOW - 1_000 },
+    ]);
+    // A second refused write keeps the first, and the next accepted write persists both.
+    should(store.recordFailure('parakeet', 'webgpu', NOW + 1)).equal(false);
+    should(store.read().failures.map(failure => failure.path)).deepEqual(['webgpu', 'wasm-threads', 'webgpu']);
+    storage.denyWrites = false;
+    should(store.recordFailure('whisper-tiny-en', 'wasm-threads', NOW + 2)).equal(true);
+    should(new SpeedMemoryStore(storage).read().failures.length).equal(4);
+    // Once persisted, reads follow storage again (another tab's change is seen).
+    storage.items.set(SPEED_MEMORY_KEY, serialiseSpeedMemory(NO_MEMORY));
+    should(store.read()).deepEqual({ failures: [] });
+  });
+
   it('reads nothing when storage refuses reads, and never throws', () => {
     const storage = new FakeStorage();
     storage.denyReads = true;
