@@ -5,8 +5,12 @@
 // a network or a clock.
 
 import type { QueuedMessage } from '@ferretry/protocol';
+import { relativeTime } from './session-screens.ts';
 import { type OutboxEntry, WAITING_REASON } from './send-outbox.ts';
 import { WAIT_REASON_COPY } from './send-queue.ts';
+
+/** How urgent the sender said it is (`fy send --kind`); a message with no label is an `action`. */
+export type QueueKind = NonNullable<QueuedMessage['label']>;
 
 /** `saved` is the browser's own outbox; the rest are the daemon queue's states. */
 type QueueRowState = 'saved' | QueuedMessage['state'];
@@ -23,6 +27,8 @@ export interface QueueRow {
   readonly why: string;
   /** When it was written down: the queue's `enqueuedAt`, or the outbox entry's `createdAt`. */
   readonly at: string;
+  /** Its kind: the sender's label, or `action` when it set none. */
+  readonly kind: QueueKind;
   /** Who sent it, when it is not the owner: a ferret's name or "Ferretry · Board". Never text in the body. */
   readonly sender?: string;
   /** Still changeable: on this device, or queued and not typed yet. */
@@ -60,6 +66,7 @@ export const queueRowOf = (daemonId: string, sessionId: string, ferret: string, 
     state: message.state,
     why: message.state === 'queued' ? queuedWhy(message) : (message.failure ?? WHY[message.state]),
     at: message.enqueuedAt,
+    kind: message.label ?? 'action',
     editable: message.state === 'queued',
     ...(sender === undefined ? {} : { sender }),
   };
@@ -74,6 +81,7 @@ export const outboxRowOf = (ferret: string, entry: OutboxEntry): QueueRow => ({
   state: 'saved',
   why: entry.reason ?? WAITING_REASON,
   at: entry.createdAt,
+  kind: 'action',
   editable: true,
   ...(entry.refused === true ? { refused: true as const } : {}),
 });
@@ -82,9 +90,44 @@ export const outboxRowOf = (ferret: string, entry: OutboxEntry): QueueRow => ({
 export const isWaitingRow = (row: QueueRow): boolean =>
   row.state === 'saved' || row.state === 'queued' || row.state === 'typing' || row.state === 'unconfirmed';
 
-/** Oldest first within a ferret: what the ferret will meet in that order. */
+/** Not yet typed into the ferret: the rows whose turn is still to come. */
+const isPendingRow = (row: QueueRow): boolean => row.state === 'saved' || row.state === 'queued';
+
+/**
+ * Where a row stands in the ferret's delivery: what is being typed now, then what is still to come (a
+ * `blocker` goes at once, an `action` is combined, an `fyi` is held the longest), then what is finished.
+ */
+const deliveryRank = (row: QueueRow): number => {
+  if (row.state === 'typing') return 0;
+  if (!isPendingRow(row)) return row.state === 'unconfirmed' ? 1 : 5;
+  return row.kind === 'blocker' ? 2 : row.kind === 'action' ? 3 : 4;
+};
+
+/** The order the ferret will meet its messages in; oldest first within the same standing. */
 export const orderedRows = (rows: readonly QueueRow[]): readonly QueueRow[] =>
-  [...rows].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  [...rows].sort((a, b) => deliveryRank(a) - deliveryRank(b) || a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+
+/** The id of the row that is delivered next: the first one still to come, if any. */
+export const nextRowId = (rows: readonly QueueRow[]): string | undefined => orderedRows(rows).find(isPendingRow)?.id;
+
+/** Who the message is from: the sender's name, or "You" for the owner's own. */
+export const fromLabel = (row: QueueRow): string => row.sender ?? 'You';
+
+/** "Queued 14m ago" — the time chip. Nothing is claimed when the instant cannot be read. */
+export const queuedAgo = (at: string, now: number): string => {
+  const ago = relativeTime(at, now);
+  return ago === '—' ? 'Queued' : ago === 'now' ? 'Queued just now' : `Queued ${ago}`;
+};
+
+/** A message past this many lines, characters or a code block, shows a clamp with "Show more". */
+export const CLAMP_LINES = 6;
+export const CLAMP_CHARS = 420;
+
+/** Whether a message body is long enough to fold behind "Show more". */
+export const needsClamp = (text: string): boolean => {
+  const body = text.trim();
+  return body.length > CLAMP_CHARS || body.split('\n').length > CLAMP_LINES;
+};
 
 /** A ferret's rows: its machine's queue and this device's outbox, each message once (the queue wins). */
 export const ferretRows = (

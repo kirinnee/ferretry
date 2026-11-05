@@ -5,20 +5,26 @@
 // the outbox first (local), the daemon's PATCH/DELETE after.
 
 import type { QueuedMessage } from '@ferretry/protocol';
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   ferretRows,
+  fromLabel,
   isWaitingRow,
+  needsClamp,
+  nextRowId,
+  queuedAgo,
   type QueueGroup,
   type QueueRow,
   waitingCountLine,
   waitingGroups,
 } from '../lib/queue-view.ts';
 import { useRouter } from '../lib/router.tsx';
+import { absoluteTime } from '../lib/session-screens.ts';
 import { QueueActionError, queueActions, readSessionQueue } from '../lib/send-queue.ts';
 import { useAppStore, useConnectionSnapshot } from '../lib/store.tsx';
+import { ChatProse } from './chat-prose.tsx';
 
 const STATE_LABEL: Readonly<Record<QueueRow['state'], string>> = {
   saved: 'On this device',
@@ -47,7 +53,77 @@ export interface QueueRowHandlers {
   readonly cancel: (row: QueueRow) => Promise<void>;
 }
 
-function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly handlers: QueueRowHandlers }) {
+const KIND_TONE: Readonly<Record<QueueRow['kind'], 'err' | 'accent' | undefined>> = {
+  blocker: 'err',
+  action: 'accent',
+  fyi: undefined,
+};
+
+function Chip({
+  children,
+  tone,
+  part,
+  title,
+}: {
+  readonly children: string;
+  readonly tone?: 'err' | 'accent' | 'ok' | 'warn' | undefined;
+  readonly part: string;
+  readonly title?: string;
+}) {
+  return (
+    <span
+      className="kt-badge fy-queue-chip"
+      data-queue-chip={part}
+      {...(tone === undefined ? {} : { 'data-tone': tone })}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A message's words, drawn as the chat draws them, folded behind "Show more" when they run long. */
+function QueueBody({ text }: { readonly text: string }) {
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
+  const clamped = needsClamp(text);
+  return (
+    <div className="fy-queue-message">
+      <div
+        className="fy-queue-body"
+        data-queue-body=""
+        data-queue-clamped={clamped && !open ? '' : undefined}
+        id={bodyId}
+      >
+        <ChatProse text={text} />
+      </div>
+      {clamped ? (
+        <button
+          aria-controls={bodyId}
+          aria-expanded={open}
+          className="fy-queue-more"
+          data-queue-more=""
+          onClick={() => setOpen(current => !current)}
+          type="button"
+        >
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function QueueRowView({
+  row,
+  handlers,
+  next,
+  now,
+}: {
+  readonly row: QueueRow;
+  readonly handlers: QueueRowHandlers;
+  readonly next: boolean;
+  readonly now: number;
+}) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(row.text);
   const [note, setNote] = useState<string | null>(null);
@@ -62,27 +138,45 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
     }
   };
   return (
-    <li className="flex flex-col gap-1 px-3 py-2" data-queue-row={row.id} data-queue-state={row.state}>
-      <div className="flex flex-wrap items-center gap-2 text-meta text-muted">
-        <span data-queue-ticks={STATE_TICKS[row.state]}>{STATE_LABEL[row.state]}</span>
-        {row.sender === undefined ? null : (
-          <span className="rounded-control border border-border px-1.5" data-queue-sender="">
-            {row.sender}
-          </span>
-        )}
-        <span>{row.why}</span>
+    <li
+      className="fy-queue-row"
+      data-queue-kind={row.kind}
+      data-queue-next={next ? '' : undefined}
+      data-queue-row={row.id}
+      data-queue-state={row.state}
+    >
+      <div className="fy-queue-chips">
+        {next ? (
+          <Chip part="next" tone="ok">
+            Next up
+          </Chip>
+        ) : null}
+        <Chip part="to">{`To ${row.ferret}`}</Chip>
+        <Chip part="from">{`From ${fromLabel(row)}`}</Chip>
+        <Chip part="kind" tone={KIND_TONE[row.kind]}>
+          {row.kind}
+        </Chip>
+        <time className="fy-queue-time" dateTime={row.at} title={absoluteTime(row.at)}>
+          {queuedAgo(row.at, now)}
+        </time>
       </div>
+      <p className="fy-queue-why" data-queue-ticks={STATE_TICKS[row.state]}>
+        <span className="fy-queue-state">{STATE_LABEL[row.state]}</span>
+        <span aria-hidden="true"> · </span>
+        {row.why}
+      </p>
       {editing ? (
-        <div className="flex flex-col gap-2">
+        <div className="fy-queue-edit">
           <textarea
             aria-label="Message text"
-            className="min-h-16 w-full rounded-control border border-border bg-surface-2 p-2"
+            className="fy-queue-textarea"
             onChange={event => setText(event.target.value)}
             value={text}
           />
-          <div className="flex gap-2">
+          <div className="fy-queue-actions">
             <button
-              className="kt-btn kt-btn--sm"
+              className="kt-btn"
+              data-variant="primary"
               disabled={text.trim().length === 0}
               onClick={() => void act(() => handlers.edit(row, text.trim())).then(done => done && setEditing(false))}
               type="button"
@@ -90,7 +184,7 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
               Save
             </button>
             <button
-              className="kt-btn kt-btn--sm"
+              className="kt-btn"
               onClick={() => {
                 setText(row.text);
                 setEditing(false);
@@ -102,18 +196,17 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
           </div>
         </div>
       ) : (
-        <p className="m-0 whitespace-pre-wrap break-words">{row.text}</p>
+        <QueueBody text={row.text} />
       )}
       {note === null ? null : (
-        <p className="m-0 text-meta text-err" role="status">
+        <p className="fy-queue-note" role="status">
           {note}
         </p>
       )}
       {row.editable && !editing ? (
-        <div className="flex gap-1">
+        <div className="fy-queue-actions">
           <button
-            className="kt-btn kt-btn--sm kt-btn--flush-start"
-            data-variant="ghost"
+            className="kt-btn"
             onClick={() => {
               setText(row.text);
               setEditing(true);
@@ -123,8 +216,8 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
             Edit
           </button>
           <button
-            className="kt-btn kt-btn--sm"
-            data-variant="ghost"
+            className="kt-btn"
+            data-variant="danger"
             onClick={() => void act(() => handlers.cancel(row))}
             type="button"
           >
@@ -145,6 +238,8 @@ export interface QueuePageViewProps {
   readonly onOpenFerret: (group: QueueGroup) => void;
   readonly onShowAll?: () => void;
   readonly loading: boolean;
+  /** The clock the "Queued … ago" chips read; the page passes the present, a test passes a fixed instant. */
+  readonly now?: number;
 }
 
 export function QueuePageView({
@@ -155,44 +250,61 @@ export function QueuePageView({
   onOpenFerret,
   onShowAll,
   loading,
+  now = Date.now(),
 }: QueuePageViewProps) {
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
   return (
-    <main
-      aria-label={title}
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 scroll-thin"
-      data-queue-page=""
-    >
-      <header className="flex shrink-0 flex-wrap items-baseline gap-3">
-        <h1 className="m-0 text-lg">{title}</h1>
-        <span className="text-meta text-muted">{loading ? 'Reading the queues…' : waitingCountLine(waiting)}</span>
-        {onShowAll === undefined ? null : (
-          <button className="text-meta underline" onClick={onShowAll} type="button">
-            All queues
-          </button>
-        )}
-      </header>
-      {groups.length === 0 && !loading ? <p className="m-0 shrink-0 text-muted">Nothing is waiting.</p> : null}
-      {groups.map(group => (
-        <section
-          aria-label={group.ferret}
-          className="kt-panel shrink-0 overflow-hidden"
-          data-queue-group={group.key}
-          key={group.key}
-        >
-          <h2 className="m-0 flex flex-wrap items-baseline gap-2 border-b border-border-soft px-3 py-2 text-base">
-            <button className="underline" onClick={() => onOpenFerret(group)} type="button">
-              {group.ferret}
+    <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
+      <div className="fy-queue-column">
+        <header className="fy-queue-head">
+          <h1 className="fy-queue-title">{title}</h1>
+          <span className="fy-queue-count">{loading ? 'Reading the queues…' : waitingCountLine(waiting)}</span>
+          {onShowAll === undefined ? null : (
+            <button className="kt-btn kt-btn--sm" onClick={onShowAll} type="button">
+              All queues
             </button>
-            {showMachine ? <span className="text-meta text-muted">{group.machine}</span> : null}
-          </h2>
-          <ul className="m-0 list-none divide-y divide-border-soft p-0">
-            {group.rows.map(row => (
-              <QueueRowView handlers={handlers} key={row.id} row={row} />
-            ))}
-          </ul>
-        </section>
-      ))}
+          )}
+        </header>
+        {groups.length === 0 && !loading ? (
+          <div className="fy-queue-empty kt-panel" data-queue-empty="">
+            <p className="fy-queue-empty-title">Nothing is waiting</p>
+            <p className="fy-queue-empty-hint">
+              Messages for a ferret show up here while they wait for its turn, then leave once it has read them.
+            </p>
+            {onShowAll === undefined ? null : (
+              <button className="kt-btn" onClick={onShowAll} type="button">
+                See all queues
+              </button>
+            )}
+          </div>
+        ) : null}
+        {groups.map(group => {
+          const next = nextRowId(group.rows);
+          return (
+            <section
+              aria-label={group.ferret}
+              className="kt-panel fy-queue-group"
+              data-queue-group={group.key}
+              key={group.key}
+            >
+              <h2 className="fy-queue-group-head">
+                <button className="fy-queue-ferret" onClick={() => onOpenFerret(group)} type="button">
+                  {group.ferret}
+                </button>
+                {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
+                <span className="fy-queue-group-count" title="Messages waiting for this ferret">
+                  {group.rows.filter(isWaitingRow).length}
+                </span>
+              </h2>
+              <ul className="fy-queue-list">
+                {group.rows.map(row => (
+                  <QueueRowView handlers={handlers} key={row.id} next={row.id === next} now={now} row={row} />
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
     </main>
   );
 }

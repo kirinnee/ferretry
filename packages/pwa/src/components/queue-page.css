@@ -1,0 +1,239 @@
+/* THE QUEUE PAGE (&B160). One readable column — the chat's own measure — of cards: each queued message is
+   a row of chips (who it is for, who sent it, its kind, when it was queued), the sentence for why it waits,
+   its words drawn by the chat's renderer (folded behind "Show more" when long) and real buttons. Colours,
+   radii and type all come from the theme tokens; nothing here names a colour. */
+.fy-queue-page {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--pad-panel, 16px);
+}
+.fy-queue-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: var(--chat-column, 760px);
+  min-width: 0;
+  margin-inline: auto;
+}
+.fy-queue-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.fy-queue-title {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.3;
+}
+.fy-queue-count {
+  flex: 1 1 auto;
+  color: var(--muted);
+  font-size: var(--text-sm, 0.875rem);
+}
+.fy-queue-group {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.fy-queue-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: var(--divider-width, 1px) solid var(--divider-color, var(--border-soft));
+  font-size: 1rem;
+}
+.fy-queue-ferret {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: start;
+  font-weight: var(--weight-strong, 600);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.fy-queue-ferret:hover,
+.fy-queue-ferret:focus-visible {
+  color: var(--accent);
+}
+.fy-queue-machine {
+  color: var(--muted);
+  font-size: var(--text-xs, 0.75rem);
+}
+.fy-queue-group-count {
+  margin-inline-start: auto;
+  min-width: 1.6em;
+  padding: 0 6px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-badge, 999px);
+  color: var(--muted);
+  font-size: var(--text-xs, 0.75rem);
+  text-align: center;
+}
+.fy-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 10px;
+  list-style: none;
+}
+.fy-queue-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: var(--stroke, 1px) solid var(--border-soft);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-2);
+}
+.fy-queue-row[data-queue-next] {
+  border-color: var(--ok-border, var(--accent));
+}
+.fy-queue-row[data-queue-kind='blocker'] {
+  border-inline-start: 3px solid var(--err);
+}
+.fy-queue-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+/* The ferret and the sender are names, not states: quiet outlines, so kind and "Next up" are what colour says. */
+.fy-queue-chip[data-queue-chip='to'],
+.fy-queue-chip[data-queue-chip='from'],
+.fy-queue-chip[data-queue-chip='kind']:not([data-tone]) {
+  max-width: 100%;
+  overflow: hidden;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  text-overflow: ellipsis;
+  text-transform: none;
+}
+.fy-queue-chip[data-queue-chip='kind']:not([data-tone]) {
+  color: var(--muted);
+  text-transform: var(--label-transform);
+}
+.fy-queue-time {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: var(--text-xs, 0.75rem);
+  white-space: nowrap;
+}
+.fy-queue-why {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs, 0.8rem);
+  overflow-wrap: anywhere;
+}
+.fy-queue-state {
+  font-weight: var(--weight-strong, 600);
+}
+.fy-queue-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+/* The words wrap at the column — a long URL or path breaks wherever it must instead of widening the page —
+   and a code block scrolls inside itself. */
+.fy-queue-body {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.fy-queue-body > :first-child {
+  margin-top: 0;
+}
+.fy-queue-body > :last-child {
+  margin-bottom: 0;
+}
+.fy-queue-body pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.fy-queue-body[data-queue-clamped] {
+  max-height: 9.5rem;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+}
+.fy-queue-more {
+  min-width: 0;
+  padding: 2px 0;
+  color: var(--accent);
+  font-size: var(--text-sm, 0.875rem);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fy-queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-queue-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-queue-textarea {
+  width: 100%;
+  min-height: 6rem;
+  padding: 8px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface);
+  color: var(--fg);
+}
+.fy-queue-note {
+  margin: 0;
+  color: var(--err);
+  font-size: var(--text-sm, 0.875rem);
+}
+.fy-queue-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 20px;
+  text-align: center;
+}
+.fy-queue-empty-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: var(--weight-strong, 600);
+}
+.fy-queue-empty-hint {
+  max-width: 28rem;
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+/* A thumb's 44px, on a touch screen (the global floor) and on any narrow window, mouse or not. */
+@media (max-width: 640px) {
+  .fy-queue-page {
+    padding: 12px;
+  }
+  .fy-queue-actions .kt-btn,
+  .fy-queue-head .kt-btn,
+  .fy-queue-empty .kt-btn {
+    min-height: 44px;
+  }
+  .fy-queue-actions .kt-btn {
+    flex: 1 1 8rem;
+  }
+  .fy-queue-more {
+    min-height: 44px;
+  }
+}

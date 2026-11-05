@@ -78,37 +78,90 @@ const text = (node: ReactTestInstance): string =>
 const buttons = (root: ReactTestInstance, label: string) => root.findAll(n => n.type === 'button' && text(n) === label);
 
 describe('QueuePageView', () => {
-  test('lists each message with its tick count, reason and a sender chip, and counts what waits', () => {
+  test('lists each message with its tick count, reason and chips, and counts what waits', () => {
     mounted = view();
     const root = mounted.root;
     expect(text(root.findByType('h1'))).toBe('All queues');
     expect(root.findAll(n => n.props['data-queue-row'] !== undefined)).toHaveLength(4);
     expect(root.findByProps({ 'data-queue-row': 'o1' }).findByProps({ 'data-queue-ticks': 1 })).toBeDefined();
     expect(root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-ticks': 4 })).toBeDefined();
-    expect(text(root.findByProps({ 'data-queue-sender': '' }))).toBe('Mira');
+    expect(text(root.findByProps({ 'data-queue-row': 'q333' }).findByProps({ 'data-queue-chip': 'from' }))).toBe(
+      'From Mira',
+    );
     expect(JSON.stringify(mounted.toJSON())).toContain('waiting for connection');
     expect(JSON.stringify(mounted.toJSON())).toContain('3 messages are waiting');
   });
 
-  test('keeps every card, the header and the empty note at natural height so the page scrolls instead of clipping rows', () => {
-    mounted = view({ groups: [group([queued('q1', 'queued')], 'd1/s1'), group([queued('q22', 'read')], 'd1/s2')] });
-    const sections = mounted.root.findAll(n => n.type === 'section' && n.props['data-queue-group'] !== undefined);
-    expect(sections).toHaveLength(2);
-    for (const section of sections) expect(String(section.props.className).split(' ')).toContain('shrink-0');
-    expect(String(mounted.root.findByType('header').props.className).split(' ')).toContain('shrink-0');
-    mounted.unmount();
-    mounted = view({ groups: [] });
-    const note = mounted.root.findAll(n => n.type === 'p' && text(n) === 'Nothing is waiting.');
-    expect(String(note[0]?.props.className).split(' ')).toContain('shrink-0');
+  test('each message names who it is for, who sent it, its kind and when it was queued', () => {
+    mounted = view({ now: Date.parse('2026-10-30T10:15:00.000Z') });
+    const chip = (id: string, part: string) =>
+      text(mounted!.root.findByProps({ 'data-queue-row': id }).findByProps({ 'data-queue-chip': part }));
+    expect(chip('o1', 'to')).toBe('To Casen');
+    expect(chip('o1', 'from')).toBe('From You');
+    expect(chip('o1', 'kind')).toBe('action');
+    expect(chip('q333', 'from')).toBe('From Mira');
+    const time = mounted.root.findByProps({ 'data-queue-row': 'o1' }).findByType('time');
+    expect(text(time)).toBe('Queued 15m ago');
+    expect(time.props.dateTime).toBe('2026-10-30T10:00:05.000Z');
+  });
+
+  test("a ferret's label shows as the kind chip, and a blocker marks its row", () => {
+    mounted = view({
+      groups: [group([queued('q1', 'queued', { label: 'blocker' }), queued('q22', 'queued', { label: 'fyi' })])],
+    });
+    const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
+    expect(text(row('q1').findByProps({ 'data-queue-chip': 'kind' }))).toBe('blocker');
+    expect(row('q1').props['data-queue-kind']).toBe('blocker');
+    expect(text(row('q22').findByProps({ 'data-queue-chip': 'kind' }))).toBe('fyi');
+  });
+
+  test('marks the one message that is delivered next, per ferret, and lists it first', () => {
+    mounted = view({
+      groups: [
+        group([queued('q1', 'queued', { label: 'fyi' }), queued('q22', 'queued', { label: 'blocker' })]),
+        group([queued('q333', 'read'), queued('q4444', 'queued')], 'd1/s2'),
+      ],
+    });
+    const rows = mounted.root.findAll(n => n.type === 'li' && n.props['data-queue-row'] !== undefined);
+    expect(rows.map(n => n.props['data-queue-row'])).toEqual(['q1', 'q22', 'q333', 'q4444']);
+    expect(mounted.root.findAll(n => n.props['data-queue-next'] === '').map(n => n.props['data-queue-row'])).toEqual([
+      'q22',
+      'q4444',
+    ]);
+    expect(text(mounted.root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-chip': 'next' }))).toBe(
+      'Next up',
+    );
+  });
+
+  test('draws a message the way the chat does, not as a raw run of text', () => {
+    mounted = view({ groups: [group([queued('q1', 'queued', { text: 'Fixed **it**, see `code`' })])] });
+    const body = text(mounted.root.findByProps({ 'data-queue-body': '' }));
+    expect(body).toContain('Fixed it, see code');
+    expect(body).not.toContain('**');
+    expect(body).not.toContain('`');
+  });
+
+  test('a long message is clamped behind Show more; a short one has no control', () => {
+    const long = 'a long line of words. '.repeat(30);
+    mounted = view({ groups: [group([queued('q1', 'queued', { text: long }), queued('q22', 'queued')])] });
+    const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
+    expect(row('q1').findByProps({ 'data-queue-body': '' }).props['data-queue-clamped']).toBe('');
+    expect(buttons(row('q1'), 'Show more')).toHaveLength(1);
+    expect(buttons(row('q22'), 'Show more')).toHaveLength(0);
+    run(() => buttons(row('q1'), 'Show more')[0]?.props.onClick());
+    expect(row('q1').findByProps({ 'data-queue-body': '' }).props['data-queue-clamped']).toBeUndefined();
+    expect(buttons(row('q1'), 'Show less')[0]?.props['aria-expanded']).toBe(true);
+    run(() => buttons(row('q1'), 'Show less')[0]?.props.onClick());
+    expect(buttons(row('q1'), 'Show more')).toHaveLength(1);
   });
 
   test('says when nothing waits, and when it is still reading', () => {
     mounted = view({ groups: [] });
-    expect(JSON.stringify(mounted.toJSON())).toContain('Nothing is waiting.');
+    expect(text(mounted.root.findByProps({ 'data-queue-empty': '' }))).toContain('Nothing is waiting');
     mounted.unmount();
     mounted = view({ groups: [], loading: true });
     expect(JSON.stringify(mounted.toJSON())).toContain('Reading the queues');
-    expect(JSON.stringify(mounted.toJSON())).not.toContain('Nothing is waiting.');
+    expect(JSON.stringify(mounted.toJSON())).not.toContain('Nothing is waiting');
   });
 
   test('names the machine only when several show, opens the ferret, and offers All queues when asked', () => {
@@ -144,7 +197,7 @@ describe('QueuePageView', () => {
     expect(buttons(row(), 'Save')[0]?.props.disabled).toBe(true);
     run(() => buttons(row(), 'Keep as is')[0]?.props.onClick());
     expect(row().findAllByType('textarea')).toHaveLength(0);
-    expect(text(row().findByType('p'))).toBe('thank you');
+    expect(text(row().findByProps({ 'data-queue-body': '' }))).toBe('thank you');
   });
 
   test('cancel goes through the handler; a refusal is said in plain words and the editor stays open', async () => {

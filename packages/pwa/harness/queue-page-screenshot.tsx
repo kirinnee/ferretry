@@ -34,7 +34,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import { QueuePage } from '../../src/components/queue-page.tsx';
+import { QueuePage, QueuePageView } from '../../src/components/queue-page.tsx';
 import { createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { MemoryOutboxBackend } from '../../src/lib/send-outbox.ts';
@@ -42,7 +42,7 @@ import { RouterProvider } from '../../src/lib/router.tsx';
 import { CommandPalette } from '../../src/shell/command-palette.tsx';
 
 const view = new URLSearchParams(location.search).get('view') ?? 'all';
-const at = (minute: number) => '2026-10-30T01:' + String(minute).padStart(2, '0') + ':00.000Z';
+const at = (minute: number) => new Date(Date.now() - (60 - minute) * 60000).toISOString();
 const message = (id: string, text: string, minute: number, extra: object = {}) => ({
   v: 1, id, sender: 'human', text, attachmentIds: [], state: 'queued', stateAt: at(minute), revision: 1,
   enqueuedAt: at(minute), ...extra,
@@ -60,6 +60,35 @@ const QUEUES: Record<string, object> = {
       }),
       message('q4', 'Typed, waiting for proof', 39, { state: 'unconfirmed' }),
       message('q5', 'Already read', 30, { state: 'read' }),
+      message('q7', 'Blocked: the deploy needs your approval before I can continue with the rollout. See https://github.com/kirinnee/ferretry/actions/runs/123456789012345678901234567890/job/98765432109876543210/attempts/3?pr=1481&check_suite_focus=true and @packages/pwa/src/components/queue-page.tsx:120-140 for the failing step.', 44, {
+        sender: 'agent', from: 'mira', fromName: 'Mira', by: { kind: 'ferret', name: 'Mira' },
+        label: 'blocker', waitReason: 'busy',
+      }),
+      message('q8', [
+        '## Review notes',
+        '',
+        'I went through the diff and found **three** things worth a look:',
+        '',
+        '1. The retry loop never backs off',
+        '2. \\u0060readSessionQueue\\u0060 swallows the error',
+        '3. Card &F7 is still open',
+        '',
+        '\\u0060\\u0060\\u0060ts',
+        'export const backoff = (attempt: number): number => Math.min(30_000, 2 ** attempt * 250);',
+        'const veryLongLineThatShouldScrollInsideTheCodeBlockAndNeverPushThePageSideways = await fetchEverything(abc, def, ghi);',
+        '\\u0060\\u0060\\u0060',
+        '',
+        'Then a long paragraph so the clamp has something to cut: ' + 'the queue holds each message until the ferret is idle and its input box is empty, and only then types it in. '.repeat(6),
+        '',
+        'Last line after the long paragraph.',
+      ].join('\\n'), 45, {
+        sender: 'agent', from: 'mira', fromName: 'Mira', by: { kind: 'ferret', name: 'Mira' },
+        label: 'action', waitReason: 'busy',
+      }),
+      message('q9', '/home/kirin/Workspace/personal/ferretry/packages/pwa/src/components/very/deeply/nested/directory/structure/with/a/really/long/path/name/queue-page-view-component-final-v2.tsx', 46, {
+        sender: 'agent', from: 'lead', fromName: 'Lead', by: { kind: 'ferret', name: 'Lead' },
+        label: 'fyi', holdUntil: at(50),
+      }),
     ],
   },
   '/v1/sessions/s2/queue': { messages: [] },
@@ -97,7 +126,13 @@ await store.outbox.submit({ daemonId: 'laptop', sessionId: 's1', message: 'thank
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  view === 'find' ? (
+  view === 'empty' ? (
+    <RouterProvider>
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
+        <QueuePageView groups={[]} handlers={{ edit: async () => {}, cancel: async () => {} }} loading={false} onOpenFerret={() => {}} onShowAll={() => {}} showMachine={false} title="Queue — Casen" />
+      </div>
+    </RouterProvider>
+  ) : view === 'find' ? (
     <CommandPalette open focusSignal={0} onClose={() => {}} daemon={laptop.daemonId} sessions={[]} onNavigate={() => {}} />
   ) : (
     <RouterProvider>
@@ -176,14 +211,17 @@ try {
         const page = await context.newPage();
         const errors: string[] = [];
         page.on('pageerror', error => errors.push(error.message));
-        for (const view of ['all', 'ferret', 'find'] as const) {
-          await page.goto(`${server.url}?theme=studio-${scheme}&view=${view}`);
+        for (const view of ['all', 'ferret', 'expanded', 'empty', 'find'] as const) {
+          await page.goto(`${server.url}?theme=studio-${scheme}&view=${view === 'expanded' ? 'ferret' : view}`);
           if (view === 'find') {
             await page.getByRole('combobox').first().fill('Queue');
             await page.getByText('All queues').first().waitFor({ state: 'visible' });
+          } else if (view === 'empty') {
+            await page.locator('[data-queue-empty]').waitFor({ state: 'visible' });
           } else {
             await page.locator('[data-queue-page]').waitFor({ state: 'visible' });
             await page.locator('[data-queue-row]').first().waitFor({ state: 'visible' });
+            if (view === 'expanded') await page.locator('[data-queue-more]').first().click();
           }
           await page.waitForTimeout(250);
           if (errors.length > 0) fail(`${view} ${device.name} ${scheme} threw: ${errors.join(' | ')}`);

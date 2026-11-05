@@ -1,10 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '@ferretry/protocol';
 import {
+  CLAMP_CHARS,
+  CLAMP_LINES,
   ferretRows,
+  fromLabel,
   isWaitingRow,
+  needsClamp,
+  nextRowId,
   orderedRows,
   outboxRowOf,
+  queuedAgo,
   queueRowOf,
   waitingCountLine,
   waitingGroups,
@@ -132,5 +138,75 @@ describe('waiting', () => {
       '1 message is waiting',
       '3 messages are waiting',
     ]);
+  });
+});
+
+describe('kind, sender and age chips', () => {
+  test("the kind is the sender's label, or action when it set none", () => {
+    expect(queueRowOf('d', 's', 'f', message()).kind).toBe('action');
+    expect(queueRowOf('d', 's', 'f', message({ label: 'blocker' })).kind).toBe('blocker');
+    expect(queueRowOf('d', 's', 'f', message({ label: 'fyi' })).kind).toBe('fyi');
+    expect(outboxRowOf('f', entry()).kind).toBe('action');
+  });
+
+  test('"You" is the sender when nobody else is named', () => {
+    expect(fromLabel(queueRowOf('d', 's', 'f', message()))).toBe('You');
+    expect(fromLabel(queueRowOf('d', 's', 'f', message({ by: { kind: 'ferret', name: 'Mira' } })))).toBe('Mira');
+  });
+
+  test('says how long ago it was queued, and never invents an age', () => {
+    const now = Date.parse('2026-10-30T10:30:00.000Z');
+    expect(queuedAgo('2026-10-30T10:00:00.000Z', now)).toBe('Queued 30m ago');
+    expect(queuedAgo('2026-10-30T07:30:00.000Z', now)).toBe('Queued 3h ago');
+    expect(queuedAgo('2026-10-28T10:30:00.000Z', now)).toBe('Queued 2d ago');
+    expect(queuedAgo('2026-10-30T10:29:50.000Z', now)).toBe('Queued just now');
+    expect(queuedAgo('not a time', now)).toBe('Queued');
+  });
+});
+
+describe('delivery order and the next message', () => {
+  const row = (id: string, state: QueuedMessage['state'], extra: Partial<QueuedMessage> = {}) =>
+    queueRowOf('d', 's', 'f', message({ id, state, ...extra }));
+
+  test('typing first, then blockers, actions, fyi, and what is finished last — oldest first within each', () => {
+    const rows = orderedRows([
+      row('read', 'read', { enqueuedAt: '2026-10-30T09:00:00.000Z' }),
+      row('fyi', 'queued', { label: 'fyi', enqueuedAt: '2026-10-30T09:01:00.000Z' }),
+      row('action2', 'queued', { enqueuedAt: '2026-10-30T09:03:00.000Z' }),
+      row('action1', 'queued', { enqueuedAt: '2026-10-30T09:02:00.000Z' }),
+      row('blocker', 'queued', { label: 'blocker', enqueuedAt: '2026-10-30T09:05:00.000Z' }),
+      row('unconfirmed', 'unconfirmed', { enqueuedAt: '2026-10-30T09:06:00.000Z' }),
+      row('typing', 'typing', { enqueuedAt: '2026-10-30T09:07:00.000Z' }),
+    ]);
+    expect(rows.map(item => item.id)).toEqual([
+      'typing',
+      'unconfirmed',
+      'blocker',
+      'action1',
+      'action2',
+      'fyi',
+      'read',
+    ]);
+  });
+
+  test('the next one is the first still to come — never one that is being typed or already read', () => {
+    expect(nextRowId([row('a', 'typing'), row('b', 'queued', { label: 'fyi' }), row('c', 'queued')])).toBe('c');
+    expect(nextRowId([row('a', 'read'), row('b', 'unconfirmed')])).toBeUndefined();
+    expect(nextRowId([])).toBeUndefined();
+    expect(nextRowId([outboxRowOf('f', entry())])).toBe('o1');
+  });
+});
+
+describe('needsClamp', () => {
+  test('a short message is shown whole; one past the line or character limit folds', () => {
+    expect(needsClamp('hello')).toBe(false);
+    expect(needsClamp(Array.from({ length: CLAMP_LINES }, () => 'x').join('\n'))).toBe(false);
+    expect(needsClamp(Array.from({ length: CLAMP_LINES + 1 }, () => 'x').join('\n'))).toBe(true);
+    expect(needsClamp('x'.repeat(CLAMP_CHARS))).toBe(false);
+    expect(needsClamp('x'.repeat(CLAMP_CHARS + 1))).toBe(true);
+  });
+
+  test('blank edges do not count toward the length', () => {
+    expect(needsClamp(`\n\n${'x'.repeat(CLAMP_CHARS)}\n\n`)).toBe(false);
   });
 });
