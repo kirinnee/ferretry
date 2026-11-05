@@ -4,7 +4,7 @@
  * list are `clone-settings-model.ts`.
  *
  * THE INLINE ADD WRITES ONE WAY. A pasted value goes to THIS machine's secret store through the
- * ordinary secret route and is never shown again — the row only flips to "set ✓". Nothing here can
+ * ordinary secret route and is never shown again — the row only flips to "set". Nothing here can
  * read a value back, because no route returns one.
  */
 
@@ -236,7 +236,7 @@ export function CloneKeysBox({
   );
 }
 
-/** One need: held ("set ✓"), a sign-in (done after the copy), or a field to add the secret now. */
+/** One need: held ("set", with a tick), a sign-in (done after the copy), or a field to add the secret now. */
 function NeedRow({
   need,
   signIn,
@@ -274,7 +274,7 @@ function NeedRow({
       </span>
       {need.held ? (
         <Badge tone="ok">
-          <Check size={12} aria-hidden="true" /> set ✓
+          <Check size={12} aria-hidden="true" /> set
         </Badge>
       ) : need.kind === 'sign-in' ? (
         (signIn ?? <span className="text-meta text-muted">Sign in after copying</span>)
