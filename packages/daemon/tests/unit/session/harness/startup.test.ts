@@ -142,7 +142,7 @@ describe('the plan for a start’s reasoning level', () => {
       for (const harness of ['codex', 'claude'] as const) {
         expect(planStartupEffort(harness, 'm', level, undefined)).toEqual({
           kind: 'refused',
-          cause: 'unservable',
+          cause: 'invalid',
           reason: `${level} is not a reasoning level`,
         });
       }

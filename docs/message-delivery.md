@@ -319,6 +319,12 @@ loopback proxy held every connection, then the pane was killed before startup co
   (`SendPending`, which the queue reads as `launching`) and is tried again once startup ends; the
   parked message's own tracking reads it as held by the harness (`paneHoldOf` answers `queue`), not as
   typed-and-unsent.
+- **The send side holds the same line at every entry.** A send, a re-attempt or a submit at a parked
+  pane is refused as pending (a re-attempt: busy) and nothing is typed or pressed; the queue reads it as
+  launching. A revive's held-send release waits **outside the session lock** for the park to clear (a
+  2 s poll, bounded at 10 min) and otherwise leaves the sends held and journals
+  `control.send_release_deferred`, as it also does for a record skipped because the pane parked again
+  under the lock. `clearComposer` answers stuck rather than wiping the harness's own text.
 - **A NEW session's start no longer types `/model` at all** (`fy new`, the app's New ferret). It used to
   set a Codex start's reasoning level by driving the picker the instant the composer appeared, which on
   0.166 meant typing into a Codex that could not run it yet; the picker driver's bounded wait then

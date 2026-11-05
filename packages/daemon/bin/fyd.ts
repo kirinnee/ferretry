@@ -2940,9 +2940,14 @@ function createSessionControlSubsystem(
       const effortPlan = planStartupEffort(account.kind, plan.model, request.effort, catalog);
       if (effortPlan.kind === 'refused') {
         await releaseCallsign();
-        // An unreadable catalog is a retry (503); a model or level the catalog does not list is not (409).
+        // An unreadable catalog is a retry (503); a model or level the catalog does not list is not (409); a
+        // level that is not a reasoning level at all is a malformed request (400), as compactAt is.
         throw new SessionControlError(
-          effortPlan.cause === 'catalog_unreadable' ? 'unavailable' : 'unservable_model',
+          effortPlan.cause === 'catalog_unreadable'
+            ? 'unavailable'
+            : effortPlan.cause === 'invalid'
+              ? 'invalid'
+              : 'unservable_model',
           effortPlan.reason,
         );
       }

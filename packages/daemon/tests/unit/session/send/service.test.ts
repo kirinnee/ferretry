@@ -1548,6 +1548,7 @@ describe('a Codex startup park while held sends are released (B170)', () => {
 
     should(built.terminal.typed).be.empty();
     should(held(built).held).be.true();
+    should(built.repository.journal_.at(-1)).match({ event: 'control.send_release_deferred', data: { held: 1 } });
   });
 
   it('withholds a re-attempt as busy at a parked pane, quoting no draft and typing nothing', async () => {
@@ -2168,6 +2169,28 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
         should(built.terminal.calls).not.containEql('submitComposer');
         should(built.ledger.records.has('send-1')).be.false();
       }
+    });
+
+    it('refuses the main path as pending at a parked pane holding the harness’s own text, typing nothing', async () => {
+      const built = parts(target(), [parked({ draft: 'resume' })]);
+
+      const refusal = await built.service.send(request()).catch((error: unknown) => error);
+
+      should(refusal).be.instanceof(SendPending);
+      should(built.terminal.typed).be.empty();
+      should(built.terminal.calls).not.containEql('stopActiveTurn');
+      should(built.ledger.records.size).equal(0);
+    });
+
+    it('refuses `now` as pending when the stop leaves the pane parked, typing nothing', async () => {
+      const built = parts(target({ status: 'thinking' }), [pane({ activeWork: true }), parked()]);
+
+      const refusal = await built.service.send(request({ now: true })).catch((error: unknown) => error);
+
+      should(refusal).be.instanceof(SendPending);
+      should(built.terminal.calls).containEql('stopActiveTurn');
+      should(built.terminal.typed).be.empty();
+      should(built.ledger.records.size).equal(0);
     });
 
     it('sends normally once startup has ended and the pane is an ordinary idle prompt', async () => {

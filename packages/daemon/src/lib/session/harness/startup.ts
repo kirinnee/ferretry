@@ -91,8 +91,9 @@ export type StartupEffortPlan =
       /**
        * `catalog_unreadable` — the login's catalog could not be read, so nothing was decided: a RETRY may
        * succeed. `unservable` — the catalog was read and does not list the model or the level: it will not.
+       * `invalid` — the level is not a reasoning level at all (`x_high`): a malformed request, not a model.
        */
-      readonly cause: 'catalog_unreadable' | 'unservable';
+      readonly cause: 'catalog_unreadable' | 'unservable' | 'invalid';
       readonly reason: string;
     }
   | {
@@ -124,7 +125,7 @@ export function planStartupEffort(
     const asked = effort?.trim() ?? '';
     return asked === ''
       ? { kind: 'planned' }
-      : { kind: 'refused', cause: 'unservable', reason: `${asked} is not a reasoning level` };
+      : { kind: 'refused', cause: 'invalid', reason: `${asked} is not a reasoning level` };
   }
   if (carried.kind === 'command')
     return { kind: 'planned', startupRuntime: { action: 'effort', effort: carried.effort } };

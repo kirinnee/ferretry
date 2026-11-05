@@ -474,6 +474,7 @@ export class SessionSendService {
       return 0;
     }
     let released = 0;
+    let leftParked = 0;
     for (const record of held) {
       const outcome = await this.ports.serial.run(id, async () => {
         const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === record.sendId);
@@ -481,7 +482,10 @@ export class SessionSendService {
         const target = await this.require(id);
         const pane = await this.ports.terminal.observe(id);
         // Parked again between the wait and the lock: leave it held, nothing typed.
-        if (pane.startupParked === true) return undefined;
+        if (pane.startupParked === true) {
+          leftParked += 1;
+          return undefined;
+        }
         const routing = routeSend(target, pane);
         if (routing === 'revive') return undefined;
         const request: SendMessageRequest = {
@@ -497,6 +501,12 @@ export class SessionSendService {
       });
       if (outcome !== undefined) released += 1;
     }
+    // Parked again under the lock: those sends stay held for the next revive, which is said as the pre-lock wait does.
+    if (leftParked > 0)
+      await this.ports.repository.journal(id, 'control.send_release_deferred', {
+        held: leftParked,
+        waitedMs: this.settings.startupParkWaitMs,
+      });
     if (released > 0) this.ports.tracking.track(id);
     return released;
   }
