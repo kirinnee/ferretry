@@ -21,6 +21,7 @@
  * Pure: no IO.
  */
 import { ORIGIN_KEY_PATTERN } from '@ferretry/protocol';
+import { parseCloudCredential } from '../account/environment.ts';
 
 /** A located finding: the path to the value inside the document, never the value. */
 export interface SecretFinding {
@@ -80,6 +81,18 @@ export function shannonEntropy(value: string): number {
  */
 const ORIGIN_KEY_FIELD = 'clonedFromKey';
 
+/**
+ * Two fields end in "credential" and hold a NAME, never a credential: a runtime's `credential` names the
+ * login it runs on (`claude-amazon-bedrock`), and a login's `cloudCredential` is a reference
+ * (`aws-profile:work`, `gcloud-adc`, `azure-cli`). Both read as random to the entropy test — a long,
+ * varied login id does — so each is exempt only in its own top-level field and only in its own grammar:
+ * a lower-case, dashed name, and a reference that parses. A key pasted there is still flagged by its shape.
+ */
+const REFERENCE_FIELDS: Readonly<Record<string, (value: string) => boolean>> = {
+  credential: value => /^[a-z0-9]+(?:-[a-z0-9]+)+$/u.test(value),
+  cloudCredential: value => parseCloudCredential(value) !== undefined,
+};
+
 export interface LooksLikeOptions {
   /** `key` is a field of the item itself, not of anything nested inside it (an `env` map, say). */
   readonly topLevel?: boolean;
@@ -94,6 +107,12 @@ export function looksLikeRawSecret(
   if (KNOWN_SHAPES.some(shape => shape.test(value))) return true;
   if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key)) return false;
   if (options.topLevel === true && key === ORIGIN_KEY_FIELD && ORIGIN_KEY_PATTERN.test(value)) return false;
+  if (
+    options.topLevel === true &&
+    Object.hasOwn(REFERENCE_FIELDS, key) &&
+    REFERENCE_FIELDS[key]?.(value.trim()) === true
+  )
+    return false;
   const trimmed = value.trim();
   if (REFERENCE.test(trimmed) || trimmed.length < MIN_SECRET_LENGTH || /\s/u.test(trimmed)) return false;
   // A path or a URL under a "…key" name (a key file, a JWKS endpoint) is where a secret is, not one.

@@ -176,6 +176,22 @@ describe('looksLikeRawSecret — a high-entropy value under a credential key', (
     should(looksLikeRawSecret('clonedFromKey', RANDOM_LOOKING, { topLevel: true })).be.true();
   });
 
+  it("should not flag a runtime's login name or a login's cloud credential reference, in their own fields only", () => {
+    // Arrange — both end in "credential" and read as random to the entropy test, but each is a NAME
+    const login = 'claude-amazon-bedrock-api-key';
+    const reference = 'aws-profile:default';
+
+    // Act + Assert
+    should(findRawSecrets({ credential: login, profile: 'claude-default' })).deepEqual([]);
+    should(findRawSecrets({ harness: 'claude', store: 'environment', cloudCredential: reference })).deepEqual([]);
+    should(findRawSecrets({ cloudCredential: 'gcloud-adc:/home/owner/adc.json' })).deepEqual([]);
+    // Nowhere else, and never a value outside the field's own grammar.
+    should(findRawSecrets({ env: { credential: login } })).have.length(1);
+    should(findRawSecrets({ credential: RANDOM_LOOKING })).have.length(1);
+    should(findRawSecrets({ cloudCredential: RANDOM_LOOKING })).have.length(1);
+    should(findRawSecrets({ credential: 'sk-ant-api03-abcdefghijklmnop' })).have.length(1);
+  });
+
   it("should flag a clonedFromKey that is not the item's own top-level field", () => {
     // Arrange
     const originKey = 'q7zk2px5mlw4tnr6sbd3fgh2jk';

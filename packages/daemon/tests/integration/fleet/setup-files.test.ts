@@ -222,6 +222,9 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
     deps: undefined as never,
   };
   handle.deps = fileFleetSetupDeps({
+    // No login shell is asked and no preset recognised: env providers have their own tests.
+    shellEnvironment: { read: async () => ({ state: 'unavailable', cause: 'failed' }) },
+    presets: async () => [],
     catalog,
     daemonId: () => 'daemon-source',
     credentials,
@@ -263,6 +266,9 @@ describe('the setup service collaborators over a temporary machine', () => {
     await writeFile(path.join(claudeHome, 'CLAUDE.md'), '# elsewhere\n');
     await writeFile(path.join(codexHome, 'AGENTS.md'), '# elsewhere too\n');
     const deps = fileFleetSetupDeps({
+      // No login shell is asked and no preset recognised: env providers have their own tests.
+      shellEnvironment: { read: async () => ({ state: 'unavailable', cause: 'failed' }) },
+      presets: async () => [],
       catalog,
       daemonId: () => 'daemon-source',
       claudeConfigDir: claudeHome,

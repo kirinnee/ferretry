@@ -5,11 +5,14 @@
  * Reads only: every write the setup service makes goes through the provisioner, inside its rollback
  * boundary.
  */
+
+import type { ProviderPreset } from '@ferretry/fleet';
 import { HostHarnessScanner, type StoredCredentialMaterialReader } from '@ferretry/fleet/adapters';
 import { randomBytes } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FleetSetupServiceDeps, FolderReading, SetupCatalogDeps } from '../../lib/fleet/setup-service.ts';
+import type { ShellEnvironmentPort } from '../../lib/fleet/shell-environment.ts';
 import type { ToolInstallService } from '../../lib/fleet/tool-install.ts';
 import { AtomicFileWriter } from '../atomic-file/atomic-file.ts';
 
@@ -105,6 +108,10 @@ export interface FileFleetSetupOptions {
     list(): Promise<readonly { readonly name: string }[]>;
     put(name: string, value: string): Promise<unknown>;
   };
+  /** The owner's login shell, asked for its environment (`./login-shell-environment.ts`). */
+  readonly shellEnvironment: ShellEnvironmentPort;
+  /** The provider presets this machine offers. */
+  readonly presets: () => Promise<readonly ProviderPreset[]>;
 }
 
 const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
@@ -132,6 +139,8 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
   return {
     catalog,
     scan: async () => await scanner.scan(),
+    shellEnvironment: options.shellEnvironment,
+    presets: options.presets,
     tools: options.tools,
     secrets: {
       names: async () => (await options.secrets.list()).map(secret => secret.name),

@@ -839,6 +839,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     acceptedUpdates: z.array(NonEmptyStringSchema).optional(),
     /** Add a runtime even where an identical one exists (E15 during Import again). */
     addDuplicates: z.boolean().optional(),
+    /**
+     * Harnesses whose env provider (the scan's `provider` findings) the person chose NOT to import as a
+     * login of its own. Its settings are then imported as they are, as before env detection.
+     */
+    skipProviders: z.array(HarnessKindSchema).max(2).optional(),
   }),
   z.strictObject({
     kind: z.literal('clone.import'),

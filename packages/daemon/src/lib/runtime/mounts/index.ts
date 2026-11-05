@@ -78,6 +78,7 @@ import {
   fleetEventSocketRoutes,
 } from './fleet-events.ts';
 import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts';
+import { type FleetRuntimeCheckSubsystem, fleetRuntimeCheckRoutes } from './fleet-runtime-check.ts';
 import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
@@ -253,6 +254,8 @@ export interface MountedSubsystems {
   /** The account model's first run and clone: the setup scan, tool install and the export bundle
    *  (docs/design/account-model.md §7). */
   readonly fleetSetup: FleetSetupSubsystem;
+  /** One real "reply OK" through a runtime on its own default model: the start probe, asked for on purpose. */
+  readonly fleetRuntimeCheck: FleetRuntimeCheckSubsystem;
   /** How much of this machine the managed fleet may take: the aggregate every agent shares, the
    *  ceiling on any one of them, and whether either is enforced. It is the read side of the same
    *  seam the session launch uses — one saved document, one conversion to host-manager properties —
@@ -622,6 +625,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...fleetCredentialRoutes(subsystems.fleetCredentials),
         ...fleetCatalogRoutes(subsystems.fleetCatalog),
         ...fleetSetupRoutes(subsystems.fleetSetup),
+        // `/v1/fleet/runtimes/:runtimeId/check` is the only route under a runtime id, and the catalogue's
+        // `/v1/fleet/runtimes` is an exact literal, so neither can shadow the other.
+        ...fleetRuntimeCheckRoutes(subsystems.fleetRuntimeCheck),
         // The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed
         // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
         // the fleet tables above.

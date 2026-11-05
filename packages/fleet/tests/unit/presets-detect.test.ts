@@ -116,6 +116,28 @@ describe('detectProvider', () => {
     should(actual.recognised).deepEqual(['ANTHROPIC_BASE_URL']);
   });
 
+  it("should read an EMPTY variable as no clue at all, so a gateway's blank key never reads as a key", () => {
+    // Arrange — the anthropic row detecting by its key variable, as the preset file does
+    const table: readonly DetectablePreset[] = [
+      {
+        id: 'anthropic-api-key',
+        detect: { hosts: ['api.anthropic.com'], variables: ['ANTHROPIC_API_KEY'], keyPrefixes: [] },
+      },
+      { id: 'openrouter', detect: { hosts: ['openrouter.ai'], variables: [], keyPrefixes: [] } },
+    ];
+
+    // Act
+    const blank = detectProvider(table, { ANTHROPIC_API_KEY: '', ANTHROPIC_BASE_URL: 'https://gateway.example.test' });
+    const gateway = detectProvider(table, { ANTHROPIC_API_KEY: '', ANTHROPIC_BASE_URL: 'https://openrouter.ai/api' });
+    const bare = detectProvider(table, { ANTHROPIC_API_KEY: 'some-key' });
+
+    // Assert
+    should(blank.preset).be.undefined();
+    should(gateway.preset).equal('openrouter');
+    should(gateway.alsoMatched).deepEqual([]);
+    should(bare.preset).equal('anthropic-api-key');
+  });
+
   it('should ignore a scheme that is neither http nor https', () => {
     // Act
     const actual = detectProvider(TABLE, { ANTHROPIC_BASE_URL: 'ftp://api.anthropic.com' });

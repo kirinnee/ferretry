@@ -130,10 +130,9 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
-import { SessionOwnerChat, typedWords } from '../src/adapters/agenda/session-owner-chat.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
+import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
 import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
@@ -143,6 +142,7 @@ import {
   SendAgendaMessenger,
 } from '../src/adapters/agenda/send-agenda-delivery.ts';
 import { SessionConfigAgendaModes } from '../src/adapters/agenda/session-agenda-modes.ts';
+import { SessionOwnerChat, typedWords } from '../src/adapters/agenda/session-owner-chat.ts';
 import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/agenda/session-turn-stops.ts';
 import { armAgendaNudge, StorageAgendaNudgeSessions } from '../src/adapters/agenda/storage-agenda-nudge.ts';
 import { StorageAgentSessions } from '../src/adapters/agenda/storage-agent-sessions.ts';
@@ -210,7 +210,13 @@ import {
   readDeclaredAccountModel,
   sessionStatusOf,
 } from '../src/adapters/fleet/account-model-files.ts';
+import {
+  bunShellSpawn,
+  LoginShellEnvironment,
+  loginShellBaseEnvironment,
+} from '../src/adapters/fleet/login-shell-environment.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
+import { ensureOwnedPrivateDirectory } from '../src/adapters/fleet/private-directory.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
@@ -693,6 +699,7 @@ import {
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
 import { DisableExpiryWatch } from '../src/lib/fleet/disable-expiry.ts';
+import { loginFacts, RuntimeCheckService } from '../src/lib/fleet/runtime-check.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
@@ -756,11 +763,11 @@ import {
   AgendaItemDraftDiscard,
   AgendaReplyBatcher,
   AgendaReplyDelivery,
+  AgendaRestNudger,
   AgendaResurfacer,
   AgendaRollup,
   AgendaService,
   AgendaTurnNudge,
-  AgendaRestNudger,
   AgendaWaker,
   type AgentCopyPagesPort,
   type AgentCopyPort,
@@ -7947,6 +7954,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // operator wrote — and the one the UI showed would not be the one a spawned child got.
   const daemonConfigStore =
     overrides.configFile === undefined ? stateHomeDaemonConfigStore : new ExplicitDaemonConfig(overrides.configFile);
+  // The owner's own shell, resolved once and read from the document at that moment (not captured): every
+  // terminal opens it, and the setup scan asks the same one for the environment its rc files set.
+  const ownerLoginShell = systemLoginShell(
+    async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell,
+  );
   // Read per call, not captured: an operator editing `config/daemon.json` sees the effect on the
   // next use rather than after a restart, and a document that has become unreadable answers no
   // recipes rather than the last good ones — a stale recipe is a reference resolved against a rule
@@ -9734,12 +9746,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     api: new BunApiServer(),
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
-    terminalRuntime: new TmuxTerminalRuntime(
-      tmux,
-      () => Date.now(),
-      // The owner's own shell, resolved once and read from the document at that moment (not captured).
-      systemLoginShell(async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell),
-    ),
+    terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now(), ownerLoginShell),
     agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(
       new BrowserProfileStore(paths.home),
@@ -12365,6 +12372,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             environment: process.env,
           }),
           secrets: secrets.directory,
+          // The setup scan's env providers: the owner's login shell, asked once per scan with a fixed
+          // command and killed at 5 s, and the presets whose `detect:` blocks recognise what it set.
+          shellEnvironment: new LoginShellEnvironment({
+            shell: ownerLoginShell,
+            spawn: bunShellSpawn,
+            env: loginShellBaseEnvironment(process.env, userHome),
+            cwd: userHome,
+          }),
+          presets: async () => await providerPresets.presets(),
         }),
       );
       // SETTLED: the feed caches this list for an interval, so a login being read right now is listed
@@ -12700,6 +12716,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         );
         return async (request: PackProbeRequest, ttlMs: number) => await cache.probe(request, ttlMs);
       })();
+      /**
+       * Checking a runtime (`POST /v1/fleet/runtimes/:runtimeId/check`): the start probe above, through the same
+       * cache, on the runtime's own default model. Its sentence names the login's plain facts, never output.
+       */
+      const fleetRuntimeCheck = new RuntimeCheckService({
+        runtime: async idOrName => {
+          const rows = (await fleetCatalog.runtimes()).runtimes;
+          const row = rows.find(each => each.id === idOrName) ?? rows.find(each => each.name === idOrName);
+          return row === undefined
+            ? undefined
+            : {
+                id: row.id,
+                name: row.name,
+                wrapper: row.wrapper,
+                harness: row.harness,
+                credential: row.credential.id,
+                ...(row.models?.default === undefined ? {} : { defaultModel: row.models.default }),
+                disabled: row.disabled !== undefined,
+                agent: row.agent,
+                ...(row.launch.available ? {} : { blocked: row.launch.reason }),
+              };
+        },
+        login: async target =>
+          loginFacts(
+            (await declaredAccountModel())?.credentials[target.credential],
+            target.harness,
+            await providerPresets.presets().catch(() => []),
+          ),
+        probe: packProbe,
+        passTtlMs: async () => (await configFiles.inEffect()).evaluation.effective.pack.probe.cacheSeconds * 1_000,
+        // Never `tmpdir()`: a CLI reads CLAUDE.md, .mcp.json and AGENTS.md from where it starts, with the login's env.
+        workingDirectory: async () =>
+          await ensureOwnedPrivateDirectory(join(paths.temporary, 'runtime-check'), { uid: process.getuid?.() }),
+      });
       const packCatalogs = async () =>
         modelCatalogsView(await modelCatalogService.catalogs(), {
           origin: modelCatalogOrigin,
@@ -13161,6 +13211,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // document shares, so this never disagrees with what the catalogue or a start just read.
         agentControl,
         fleetSetup,
+        fleetRuntimeCheck,
         /**
          * How much of this machine the managed fleet may take.
          *

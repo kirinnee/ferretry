@@ -342,6 +342,16 @@ screen, top to bottom:
    ready" (or **Sign in before you launch**) with the notes (E6–E9). "Importing copies your setup into
    Ferretry. Claude Code on _machine_ keeps working as before", and "Ferretry and your own `claude`
    share this login: signing out in one signs out both."
+   **Env providers (simpler onboarding PR 4, owner decision !A316).** The scan also reads the owner's
+   login shell (5 s at most) and each CLI's own settings for the provider it is switched onto —
+   Bedrock, Vertex, Foundry, a gateway, an API key — through the presets' `detect:` table, and lists it
+   in the harness's `findings` beside the sign-in (preset, source, clue and secret NAMES, plain facts;
+   never a value). `setup.import` brings in BOTH: `claude-default` on the sign-in, and an environment
+   login made from the preset with its own runtime (`claude-<preset>`, on the same profile; with no
+   sign-in it is `claude-default`). The provider's variables move from the shared settings onto that
+   login, so the sign-in runtime is not switched by the profile they share; `skipProviders` imports a
+   harness as before. Each runtime made is then checked once with `POST /v1/fleet/runtimes/:runtimeId/check`
+   ([provider-presets.md](../provider-presets.md#from-this-machines-own-setup)).
 7. **Use a provider key instead** (collapsed): the provider grid (§4.6) for this CLI. The login it adds
    gets its runtime right there — a name field and **Create** (`runtime.put`) on the profile this CLI's
    import made; without one, it says to import first.

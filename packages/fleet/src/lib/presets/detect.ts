@@ -7,7 +7,9 @@
  *
  * - a base URL on a host the provider documents (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, a Codex
  *   `model_providers.<id>.base_url`) — the provider is where the requests go;
- * - a variable only that provider's setup uses (`CLAUDE_CODE_USE_BEDROCK`, `ZAI_API_KEY`);
+ * - a variable only that provider's setup uses (`CLAUDE_CODE_USE_BEDROCK`, `ZAI_API_KEY`), SET to something:
+ *   an empty one says nothing — a gateway sets `ANTHROPIC_API_KEY` empty on purpose, so the key it sends
+ *   is its own, and that must never read as "an Anthropic API key";
  * - a key that starts the way the provider documents its keys (`sk-or-`).
  *
  * NO VALUE LEAVES THIS MODULE. What it reports is variable NAMES, the clue kind, and — for a host —
@@ -97,7 +99,7 @@ function cluesFor(preset: DetectablePreset, env: Readonly<Record<string, string>
     const host = URL_NAME.test(name) ? hostOf(value) : undefined;
     const declared = host === undefined ? undefined : preset.detect.hosts.find(entry => onHost(host, entry));
     if (declared !== undefined) clues.push({ kind: 'host', variable: name, host: declared });
-    if (preset.detect.variables.some(pattern => namesVariable(pattern, name)))
+    if (value.trim() !== '' && preset.detect.variables.some(pattern => namesVariable(pattern, name)))
       clues.push({ kind: 'variable', variable: name });
     if (KEY_NAME.test(name) && preset.detect.keyPrefixes.some(prefix => value.startsWith(prefix))) {
       clues.push({ kind: 'key-prefix', variable: name });

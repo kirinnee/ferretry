@@ -37,6 +37,26 @@ describe('sanitizeHarnessEnv', () => {
     should(actual).deepEqual({ ANTHROPIC_DEFAULT_SONNET: 'kept — not a model slot' });
   });
 
+  it('should remove a provider switch inherited from the shell the daemon started in, by shape', () => {
+    // Arrange — a sign-in runtime must never be turned onto Bedrock by the daemon's own surroundings
+    const environment = {
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      CLAUDE_CODE_USE_VERTEX: '1',
+      CLAUDE_CODE_USE_SOMETHING_NEW: '1',
+      CLAUDE_CODE_USER_AGENT: 'kept — not a switch',
+      AWS_PROFILE: 'kept — names a profile, switches nothing',
+    };
+
+    // Act
+    const actual = sanitizeHarnessEnv(environment);
+
+    // Assert
+    should(actual).deepEqual({
+      CLAUDE_CODE_USER_AGENT: 'kept — not a switch',
+      AWS_PROFILE: 'kept — names a profile, switches nothing',
+    });
+  });
+
   it('should keep a named variable a wrapper depends on', () => {
     // Act
     const actual = sanitizeHarnessEnv({ OPENAI_API_KEY: 'placeholder', ANTHROPIC_API_KEY: 'placeholder' }, [

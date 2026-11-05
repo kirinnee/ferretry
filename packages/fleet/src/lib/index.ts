@@ -18,6 +18,7 @@ export * from './account/ids.ts';
 export * from './account/import.ts';
 export * from './account/layering.ts';
 export * from './account/materialise.ts';
+export * from './account/provider-findings.ts';
 export * from './account/schema.ts';
 export * from './account/scope.ts';
 export * from './account/store-inspection.ts';

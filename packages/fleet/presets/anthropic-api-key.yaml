@@ -25,4 +25,7 @@ quota:
 pricing: anthropic
 detect:
   hosts: [api.anthropic.com]
+  # A bare key with no base URL is the commonest setup. A variable weighs less than a host, and an EMPTY
+  # one is no clue at all, so a gateway that sets ANTHROPIC_API_KEY empty on purpose still reads as itself.
+  variables: [ANTHROPIC_API_KEY]
   keyPrefixes: [sk-ant-api]

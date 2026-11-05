@@ -8,6 +8,9 @@
  *   update. Never a value.
  * - `POST /v1/fleet/machine/tools/install` — install named harness tools with the exact command the
  *   scan showed. From off the machine it needs the passkey step-up.
+ *   Each harness also lists its FINDINGS: the sign-in, and the env provider its `settings.json`,
+ *   `config.toml` or the owner's login shell sets it up for — each by preset, clue NAMES, plain facts
+ *   and secret NAMES (docs/provider-presets.md § Detect). No field of a finding can carry a secret value.
  * - `GET /v1/fleet/export` — the Clone bundle: components, model sets, profiles and runtimes, and each
  *   login the runtimes use as a DESCRIPTOR (harness, label, email). No credential and no history.
  *
@@ -92,6 +95,79 @@ export const FleetHostLoginSchema = z.strictObject({
 });
 export type FleetHostLogin = z.infer<typeof FleetHostLoginSchema>;
 
+/** An environment variable NAME — never a value: what a clue or a secret is reported as. */
+const VariableNameSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]*$/u, 'a variable name')
+  .max(128);
+
+/** A clue: a variable NAME, or a Codex `config.toml` key (`model_providers.openrouter.base_url`). */
+const ClueNameSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_-]+)*$/u, 'a variable or config.toml key name')
+  .max(256);
+
+/** Where a provider's deciding clues came from, as the Found row says it. */
+export const FleetSetupProviderSourceSchema = z.enum([
+  'settings.json',
+  'shell',
+  'settings.json+shell',
+  'config.toml',
+  'config.toml+shell',
+]);
+export type FleetSetupProviderSource = z.infer<typeof FleetSetupProviderSourceSchema>;
+
+/**
+ * A plain fact the Found row shows: a value the preset declares PLAIN that does not look like a secret
+ * (`AWS_REGION` = `us-east-1`), a URL only as its HOST, a profile only as its NAME.
+ */
+export const FleetSetupProviderFactSchema = z.strictObject({
+  name: ClueNameSchema,
+  value: NonEmptyStringSchema.max(200),
+});
+export type FleetSetupProviderFact = z.infer<typeof FleetSetupProviderFactSchema>;
+
+/** The person's own sign-in, as one of a harness's findings. */
+export const FleetSetupSignInFindingSchema = z.strictObject({
+  kind: z.literal('sign-in'),
+  state: z.enum(['signed-in', 'refresh-due']),
+  email: NonEmptyStringSchema.optional(),
+  /** The login it is, or becomes on import. */
+  login: NonEmptyStringSchema,
+  /** The runtime the import makes on it; absent when one already uses that login and profile. */
+  runtime: NonEmptyStringSchema.optional(),
+});
+export type FleetSetupSignInFinding = z.infer<typeof FleetSetupSignInFindingSchema>;
+
+/**
+ * An env provider a harness is set up for: what it is (the preset, its label), where it was found, and
+ * what pointed there — by NAME. Importing makes it an environment login of its own (plain values,
+ * `${secret:NAME}` references, a cloud credential REFERENCE) and a runtime on it.
+ */
+export const FleetSetupProviderFindingSchema = z.strictObject({
+  kind: z.literal('provider'),
+  preset: NonEmptyStringSchema.max(64),
+  label: NonEmptyStringSchema,
+  source: FleetSetupProviderSourceSchema,
+  clues: z.array(ClueNameSchema).readonly(),
+  facts: z.array(FleetSetupProviderFactSchema).readonly(),
+  /** The variables whose values go to the secret store on import, by NAME. */
+  secrets: z.array(VariableNameSchema).readonly(),
+  /** The environment login it becomes, or an existing one from the same preset Import again reuses. */
+  login: NonEmptyStringSchema.optional(),
+  /** The runtime the import makes on it; absent when one already uses that login and profile. */
+  runtime: NonEmptyStringSchema.optional(),
+  /** Why it is not imported, when it is not: a required variable is missing. */
+  problem: NonEmptyStringSchema.optional(),
+});
+export type FleetSetupProviderFinding = z.infer<typeof FleetSetupProviderFindingSchema>;
+
+export const FleetSetupFindingSchema = z.discriminatedUnion('kind', [
+  FleetSetupSignInFindingSchema,
+  FleetSetupProviderFindingSchema,
+]);
+export type FleetSetupFinding = z.infer<typeof FleetSetupFindingSchema>;
+
 /** What the first run found for one harness (§4.3 steps 2 and 3). */
 export const FleetHarnessScanSchema = z.strictObject({
   harness: HarnessKindSchema,
@@ -113,6 +189,11 @@ export const FleetHarnessScanSchema = z.strictObject({
   secretKeys: z.array(NonEmptyStringSchema).readonly(),
   missingCommands: z.array(NonEmptyStringSchema).readonly(),
   problems: z.array(NonEmptyStringSchema).readonly(),
+  /**
+   * The logins found for it, sign-in first: both a sign-in and an env provider import, each as its own
+   * login with its own runtime (owner decision !A316). Absent from a daemon that predates env detection.
+   */
+  findings: z.array(FleetSetupFindingSchema).readonly().optional(),
 });
 export type FleetHarnessScan = z.infer<typeof FleetHarnessScanSchema>;
 
@@ -121,6 +202,10 @@ export const FleetSetupRuntimeSchema = z.strictObject({
   harness: HarnessKindSchema,
   name: NonEmptyStringSchema,
   profile: NonEmptyStringSchema,
+  /** The login it runs on. */
+  login: NonEmptyStringSchema.optional(),
+  /** The env provider's preset, for a runtime on an env provider's login. */
+  provider: NonEmptyStringSchema.max(64).optional(),
 });
 
 /** A component whose source changed since the last import: offered, never applied unless chosen (O6). */
@@ -152,6 +237,11 @@ export const FleetSetupScanSchema = z.strictObject({
   notes: z.array(z.strictObject({ harness: HarnessKindSchema, text: NonEmptyStringSchema })).readonly(),
   /** Whether an import may be staged now, and why not when it may not. */
   importing: FleetCatalogActSchema,
+  /**
+   * Whether the owner's login shell was read for env providers (5 s at most): `read`, or why not — then
+   * the findings come from `settings.json` and `config.toml` only. Absent from a daemon that predates it.
+   */
+  shell: z.enum(['read', 'timed-out', 'failed']).optional(),
 });
 export type FleetSetupScan = z.infer<typeof FleetSetupScanSchema>;
 
