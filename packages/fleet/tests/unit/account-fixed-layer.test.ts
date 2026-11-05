@@ -824,13 +824,13 @@ describe('AGENDA_INSTRUCTION', () => {
     // explainers stay in them.
     // And READ → EDIT (the owner: "we need to read to know what needs to be updated"): every part, the ask's too.
     should(text).containEql(
-      "Asks/answers stack on the topic's ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there.",
+      "Ask/answer stack on the topic's ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there.",
     );
     should(text).not.containEql("rewrite all that's stale");
     // The owner on !A404: every unresolved ask stays floated in where-we-are and what-I-need; answered Q&A goes to a
     // History tab, oldest first, with the answer.
     should(text).containEql(
-      'EVERY open ask stays floated in premise (where we are) + ask (what I need); answered Q&A→`History` tab, oldest first, with answer.',
+      'Float EVERY open ask in premise (where we are) + ask (what I need); answered Q&A→`History`, oldest first, with answer.',
     );
     should(text).containEql('Tabs by kind, serial stays one; steps/explainers stay.');
     should(text).not.containEql('(main)');
@@ -840,7 +840,9 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).not.containEql('Type:');
     should(text).not.containEql('`--stage`');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
-    should(text).containEql('Chat: `log <id> --reply|--rest` logs their words verbatim; unsure→closest.');
+    should(text).containEql(
+      'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
+    );
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
@@ -886,7 +888,10 @@ describe('AGENDA_INSTRUCTION', () => {
     // "rewrite all that's stale (…)" list and the tabs sentence's parenthesis, which the whole-prompt cap (8,000, 7,998
     // measured) left no room to grow past. Review then restored the owner's two tab rules (split by content kind, one
     // tab per kind; steps and explainers stay in the tabs) as "Tabs by kind, serial stays one; steps/explainers stay.",
-    // paid for by "link it", "say so" and "then" (→): 1,383, the whole prompt 7,996.
+    // paid for by "link it", "say so" and "then" (→): 1,383, the whole prompt 7,996. Review then restored "link it" and
+    // "say so" in the chat line (the ferret links the agenda from its reply and says so when unsure which one;
+    // docs/agenda.md), paid for by "Float EVERY open ask in" for "EVERY open ask stays floated in", "`History`" for
+    // "`History` tab" and "Ask/answer" for "Asks/answers": 1,386, the whole prompt 7,999.
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_390);
   });
 

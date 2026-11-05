@@ -187,11 +187,11 @@ describe('the teaching says the tabs are the live document and the chat is its l
 
     // Assert
     should(prompt).containEql(
-      "asks/answers stack on the topic's one item: `show <id> --yaml` whole→`patch <id> --file f`",
+      "ask/answer stack on the topic's one item: `show <id> --yaml` whole→`patch <id> --file f`",
     );
     // The owner on !A404: every unresolved ask stays floated; answered Q&A moves to a History tab.
-    should(prompt).containEql('every open ask stays floated in premise (where we are) + ask (what i need)');
-    should(prompt).containEql('answered q&a→`history` tab, oldest first, with answer');
+    should(prompt).containEql('float every open ask in premise (where we are) + ask (what i need)');
+    should(prompt).containEql('answered q&a→`history`, oldest first, with answer');
     should(prompt).containEql('tabs by kind, serial stays one; steps/explainers stay.');
     should(prompt).containEql('chat points there');
     should(prompt).not.containEql('short status');
