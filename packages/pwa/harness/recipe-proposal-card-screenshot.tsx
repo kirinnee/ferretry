@@ -40,8 +40,16 @@ const signIn = (recipe) => ({ id: 'si_00000000000000a1', account: 'DEMO_GIT', pl
 const ready = { kind: 'ready', account, signIn: signIn(base), proposal };
 const stale = { kind: 'stale', account, signIn: signIn('Edited by the owner'), proposal };
 const noop = () => undefined;
+const rule = {
+  id: 'sr_' + 'a'.repeat(24), revision: 1, signIn: 'si_00000000000000a1', account: { id: 'DEMO_GIT', label: 'Example Git' },
+  username: 'demo-user', place: { kind: 'site', domains: ['git.example.com'], match: [] }, fields: ['username', 'password'], totp: false,
+  scope: { kind: 'any' }, createdAt: '2026-10-30T09:00:00.000Z', expiresAt: '2026-11-29T09:00:00.000Z', status: 'active',
+  usage: { count: 0 }, flags: [], approvedWith: { deviceId: 'fy_device_id_AAAAAAAAAAAAAAAAAAAAAA', device: 'Demo phone' },
+};
+const withRule = { askPasskey: undefined, client: { request: async (_path, schema) => schema.parse({ health: 'ok', rules: [rule], stages: [] }) } };
 const states = [
   ['Ready', { kind: 'open', view: ready }],
+  ['Standing rule on this sign-in', { kind: 'open', view: ready }, withRule],
   ['Recipe changed since', { kind: 'open', view: stale }],
   ['Refused by the machine', { kind: 'failed', view: ready, words: 'This device may not change accounts. Ask the owner to allow it in Settings › Devices.' }],
   ['Approved', { kind: 'done', ok: true, words: RECIPE_APPROVED_WORDS }],
@@ -51,10 +59,10 @@ const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <main data-fixture="" style={{ margin: '0 auto', maxWidth: 720, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-    {states.map(([label, phase]) => (
+    {states.map(([label, phase, rules]) => (
       <section key={label} className="rounded-control border border-border bg-surface p-3" data-shot-state={label}>
         <p className="m-0 mb-2 text-meta text-faint">Recipe change on git.example.com · {label}</p>
-        <RecipeProposalCard phase={phase} onApprove={noop} onDecline={noop} settings={{ href: '/d/demo/settings#accounts', onOpen: noop }} />
+        <RecipeProposalCard phase={phase} rules={rules} onApprove={noop} onDecline={noop} settings={{ href: '/d/demo/settings#accounts', onOpen: noop }} />
       </section>
     ))}
   </main>,
@@ -144,6 +152,7 @@ try {
         page.on('pageerror', error => fail(`the page threw: ${error.message}`));
         await page.goto(`${server.url}?theme=${theme}`);
         await page.locator('[data-recipe-card]').first().waitFor({ state: 'visible' });
+        await page.locator('[data-rule-edit-warning]').first().waitFor({ state: 'visible' });
         await shot(page, theme, vp);
         await page.close();
       } finally {

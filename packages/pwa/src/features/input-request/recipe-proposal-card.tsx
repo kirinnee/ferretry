@@ -16,6 +16,8 @@ import {
 } from '../../lib/recipe-proposal-card.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { RecipeDiff } from '../accounts/recipe-diff.tsx';
+import { RuleEditWarning } from '../accounts/sign-in-rule-panel.tsx';
+import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 
 export type RecipeCardPhase =
   | { readonly kind: 'checking' }
@@ -30,6 +32,8 @@ export interface RecipeProposalCardProps {
   readonly onApprove: () => void;
   readonly onDecline: () => void;
   readonly onRetry?: () => void;
+  /** Present only when the machine reports standing sign-in rules: an approval suspends those on this sign-in, and says so. */
+  readonly rules?: RulesBinding;
   /** Where Settings › Accounts is, for the quiet "Open in Settings" link; absent draws no link. */
   readonly settings?: { readonly href: string; readonly onOpen: (to: string) => void };
 }
@@ -42,6 +46,7 @@ export function RecipeProposalCard({
   onApprove,
   onDecline,
   onRetry,
+  rules,
   settings,
 }: RecipeProposalCardProps): ReactNode {
   const settingsLink =
@@ -127,6 +132,7 @@ export function RecipeProposalCard({
           {RECIPE_APPROVE_MEANS}
         </p>
       )}
+      {rules === undefined || view.kind !== 'ready' ? null : <RuleEditWarning rules={rules} signIn={view.signIn.id} />}
       {phase.kind === 'failed' ? (
         <p className="m-0 text-ui text-err" data-recipe-failed="" role="alert">
           {phase.words}

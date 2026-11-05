@@ -154,6 +154,7 @@ const thread = {
   phoneApproval: undefined,
   signInRuleSuggestion: undefined,
   signInRuleSuspended: undefined,
+  recipeProposal: undefined,
   raisedBy: 'agent' as const,
   source: 'agent-raised' as const,
   sourceRef: null,
@@ -183,6 +184,7 @@ describe('which agendas can carry a card ask', () => {
       'phoneApproval',
       'signInRuleSuggestion',
       'signInRuleSuspended',
+      'recipeProposal',
     ] as const)
       should(canCarryCardAsk({ ...thread, [field]: {} as never })).be.false();
   });

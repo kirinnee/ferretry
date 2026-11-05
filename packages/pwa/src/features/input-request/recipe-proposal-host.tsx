@@ -7,10 +7,12 @@
  * only answer drawn. A daemon that cannot be read draws the card's own words and says where else to answer.
  */
 
-import type { AgendaItem } from '@ferretry/protocol';
-import { useCallback, useEffect, useState } from 'react';
+import { type AgendaItem, DAEMON_FEATURES } from '@ferretry/protocol';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { machineOffers } from '../../lib/daemon-health.ts';
 import { type InputClient, readAccounts } from '../../lib/input-api.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import {
   RECIPE_APPROVED_WORDS,
   RECIPE_DECLINED_WORDS,
@@ -18,10 +20,11 @@ import {
   recipeDecideFailureWords,
   recipeProposalView,
 } from '../../lib/recipe-proposal-card.ts';
-import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import { useDaemonClient } from '../../lib/store.tsx';
+import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { decideProposal } from '../accounts/accounts-api.ts';
+import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 import { type RecipeCardPhase, RecipeProposalCard } from './recipe-proposal-card.tsx';
 
 export interface RecipeProposalHostProps {
@@ -29,50 +32,90 @@ export interface RecipeProposalHostProps {
   readonly item: Pick<AgendaItem, 'recipeProposal'>;
   /** Hands in a client in place of the app store's (the harness and tests). */
   readonly createClient?: (connection: DaemonConnection) => Promise<InputClient>;
+  /** Says the machine offers `sign-in-rules.1` without reading its health (the harness and tests). */
+  readonly offered?: boolean;
   readonly onDone?: () => void;
 }
 
 const codeOf = (cause: unknown): unknown =>
   typeof cause === 'object' && cause !== null && 'code' in cause ? cause.code : undefined;
 
-export function RecipeProposalHost({ connection, item, createClient: injected, onDone }: RecipeProposalHostProps) {
+const settled = (phase: RecipeCardPhase): boolean => phase.kind === 'saving' || phase.kind === 'done';
+
+export function RecipeProposalHost({
+  connection,
+  item,
+  createClient: injected,
+  offered: injectedOffered,
+  onDone,
+}: RecipeProposalHostProps) {
   const routed = useDaemonClient();
   const createClient = injected ?? routed;
-  const ref = item.recipeProposal;
+  const health = useDaemonHealth(injectedOffered === undefined ? connection : undefined);
+  const withRules = injectedOffered ?? machineOffers(health, DAEMON_FEATURES.signInRules);
+  // The semantic keys, not the ref object: an agenda snapshot parsed again carries an equal but new object.
+  const signIn = item.recipeProposal?.signIn;
+  const proposal = item.recipeProposal?.proposal;
   const router = useOptionalRouter();
   const [client, setClient] = useState<InputClient | null>(null);
   const [phase, setPhase] = useState<RecipeCardPhase>({ kind: 'checking' });
   const [reads, setReads] = useState(0);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  /** Counts the owner's decisions (and a change of proposal): a read begun before the latest one is out of date. */
+  const generation = useRef(0);
+  /** A decision is on its way: nothing else may start one, and no read may draw over it. */
+  const inFlight = useRef(false);
+  const seen = useRef<string | undefined>(undefined);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` only re-runs the read when the owner presses Try again
   useEffect(() => {
-    if (ref === undefined) return undefined;
+    if (signIn === undefined || proposal === undefined) return undefined;
+    const key = `${signIn}/${proposal}`;
+    if (seen.current !== key) {
+      // Another proposal: whatever was in flight for the last one is no longer this card's.
+      seen.current = key;
+      generation.current += 1;
+      inFlight.current = false;
+      setPhase({ kind: 'checking' });
+    } else setPhase(prev => (settled(prev) ? prev : { kind: 'checking' }));
+    const began = generation.current;
     let current = true;
-    setPhase({ kind: 'checking' });
+    const fresh = (): boolean => current && generation.current === began;
     void createClient(connection)
       .then(async next => {
-        if (!current) return;
+        if (!fresh()) return;
         setClient(next);
         const list = await readAccounts(next);
-        if (current) setPhase({ kind: 'open', view: recipeProposalView(list, ref) });
+        if (fresh())
+          setPhase(prev =>
+            settled(prev) ? prev : { kind: 'open', view: recipeProposalView(list, { signIn, proposal }) },
+          );
       })
       .catch(() => {
-        if (current) setPhase({ kind: 'unread' });
+        if (fresh()) setPhase(prev => (settled(prev) ? prev : { kind: 'unread' }));
       });
     return () => {
       current = false;
     };
-  }, [connection, createClient, ref, reads]);
+  }, [connection, createClient, signIn, proposal, reads]);
 
   const decide = useCallback(
     async (decision: 'approve' | 'decline'): Promise<void> => {
-      if (ref === undefined || client === null) return;
-      if (phase.kind !== 'open' && phase.kind !== 'failed') return;
-      const { view } = phase;
+      if (signIn === undefined || proposal === undefined || client === null) return;
+      if (inFlight.current) return;
+      const now = phaseRef.current;
+      if (now.kind !== 'open' && now.kind !== 'failed') return;
+      const { view } = now;
       if (view.kind === 'gone' || (decision === 'approve' && view.kind !== 'ready')) return;
+      inFlight.current = true;
+      generation.current += 1;
+      const mine = generation.current;
+      const mineStill = (): boolean => generation.current === mine;
       setPhase({ kind: 'saving', view, decision });
       try {
-        await decideProposal(client, ref.signIn, ref.proposal, decision);
+        await decideProposal(client, signIn, proposal, decision);
+        if (!mineStill()) return;
         setPhase({
           kind: 'done',
           ok: decision === 'approve',
@@ -80,26 +123,35 @@ export function RecipeProposalHost({ connection, item, createClient: injected, o
         });
         onDone?.();
       } catch (cause) {
+        if (!mineStill()) return;
         const code = codeOf(cause);
         if (code === 'unknown_proposal') {
           setPhase({ kind: 'done', ok: false, words: RECIPE_GONE_WORDS });
           return;
         }
+        inFlight.current = false;
         // A stale approval: the recipe moved under the owner, so Approve goes and only Decline stays.
         const next = code === 'stale_proposal' ? { ...view, kind: 'stale' as const } : view;
         setPhase({ kind: 'failed', view: next, words: recipeDecideFailureWords(cause) });
       }
     },
-    [client, onDone, phase, ref],
+    [client, onDone, proposal, signIn],
   );
 
-  if (ref === undefined) return null;
+  // Standing rules, read the way Settings reads them; a machine without the capability draws nothing.
+  const rules = useMemo<RulesBinding | undefined>(
+    () => (withRules && client !== null ? { client, askPasskey: undefined } : undefined),
+    [client, withRules],
+  );
+
+  if (signIn === undefined) return null;
   return (
     <RecipeProposalCard
       onApprove={() => void decide('approve')}
       onDecline={() => void decide('decline')}
       onRetry={() => setReads(count => count + 1)}
       phase={phase}
+      {...(rules === undefined ? {} : { rules })}
       {...(router === null
         ? {}
         : { settings: { href: `${daemonSettingsPath(connection.daemonId)}#accounts`, onOpen: router.navigate } })}

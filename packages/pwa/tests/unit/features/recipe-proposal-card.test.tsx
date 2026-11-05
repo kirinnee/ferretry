@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type AgendaRecipeProposalRef, AccountListSchema } from '@ferretry/protocol';
+import { AccountListSchema, type AgendaRecipeProposalRef, type SignInRuleView } from '@ferretry/protocol';
 import { RecipeProposalCard } from '../../../src/features/input-request/recipe-proposal-card.tsx';
 import { RecipeProposalHost } from '../../../src/features/input-request/recipe-proposal-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -12,9 +12,11 @@ import {
   recipeDecideFailureWords,
   recipeProposalView,
 } from '../../../src/lib/recipe-proposal-card.ts';
+import { suspendWarning } from '../../../src/lib/sign-in-rules.ts';
 import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
 import { type Call, fakeClient } from '../../support/input-fixtures.ts';
+import { pageRule, ruleList, suspendedRule } from '../../support/sign-in-rule-fixtures.ts';
 
 const mounted: Mounted[] = [];
 afterEach(async () => {
@@ -218,5 +220,182 @@ describe('the recipe card’s link to Settings', () => {
     );
     mounted.push(bare);
     expect(bare.container.querySelector('[data-recipe-settings]')).toBeNull();
+  });
+});
+
+describe('a decision in flight', () => {
+  /** A client whose decide answer waits until the test lets it go, and which counts every accounts read. */
+  const deferred = () => {
+    const calls: Call[] = [];
+    let release: (outcome: 'ok' | Error) => void = () => undefined;
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ path, method, body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined });
+        if (method === 'GET') return schema.parse(list());
+        const outcome = await new Promise<'ok' | Error>(resolve => {
+          release = resolve;
+        });
+        if (outcome !== 'ok') throw outcome;
+        const [signIn] = list().signIns;
+        return schema.parse({ ...signIn, proposals: undefined });
+      },
+    };
+    return {
+      client: client as never,
+      create: async () => client as never,
+      calls,
+      release: (outcome: 'ok' | Error = 'ok') => release(outcome),
+      reads: () => calls.filter(call => call.method === 'GET' && call.path === '/v1/accounts').length,
+      decides: () => calls.filter(call => call.method === 'POST').length,
+    };
+  };
+
+  /** `stable`: the app hands one client factory for good; otherwise each render brings a new one, as a harness may. */
+  const host = (machine: ReturnType<typeof deferred>, ref: AgendaRecipeProposalRef, stable = true) => (
+    <RecipeProposalHost
+      connection={connection}
+      createClient={stable ? machine.create : async () => machine.client}
+      item={{ recipeProposal: ref }}
+    />
+  );
+  const settleAll = async () => {
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+  };
+
+  it('should send one decision and keep the buttons off when the agenda is parsed again with an equal pointer', async () => {
+    const machine = deferred();
+    const view = await mount(host(machine, { ...REF }));
+    mounted.push(view);
+    await settleAll();
+    const q = (selector: string) => view.container.querySelector<HTMLButtonElement>(selector);
+    expect(machine.reads()).toBe(1);
+
+    await click(q('[data-recipe-approve]'));
+    await settleAll();
+    expect(machine.decides()).toBe(1);
+    expect(q('[data-recipe-approve]')?.disabled).toBe(true);
+    expect(q('[data-recipe-decline]')?.disabled).toBe(true);
+
+    // The same ids in a new object: a snapshot parsed again. It must not read, nor re-enable anything.
+    await view.render(host(machine, { ...REF }));
+    await settleAll();
+    expect(machine.reads()).toBe(1);
+    expect(q('[data-recipe-approve]')?.disabled).toBe(true);
+    expect(q('[data-recipe-decline]')?.disabled).toBe(true);
+    await click(q('[data-recipe-approve]'));
+    await click(q('[data-recipe-decline]'));
+    expect(machine.decides()).toBe(1);
+
+    machine.release();
+    await settleAll();
+    expect(machine.decides()).toBe(1);
+    expect(view.container.querySelector('[data-recipe-done]')?.textContent).toBe(RECIPE_APPROVED_WORDS);
+
+    // And once it is done, a later snapshot does not bring the buttons back.
+    await view.render(host(machine, { ...REF }));
+    await settleAll();
+    expect(view.container.querySelector('[data-recipe-done]')?.textContent).toBe(RECIPE_APPROVED_WORDS);
+    expect(q('[data-recipe-approve]')).toBeNull();
+  });
+
+  it('should never let a background read re-enable the buttons, even when every render brings a new client factory', async () => {
+    const machine = deferred();
+    const view = await mount(host(machine, { ...REF }, false));
+    mounted.push(view);
+    await settleAll();
+    const q = (selector: string) => view.container.querySelector<HTMLButtonElement>(selector);
+
+    await click(q('[data-recipe-approve]'));
+    await settleAll();
+    await view.render(host(machine, { ...REF }, false));
+    await settleAll();
+
+    expect(q('[data-recipe-approve]')?.disabled).toBe(true);
+    expect(q('[data-recipe-decline]')?.disabled).toBe(true);
+    await click(q('[data-recipe-approve]'));
+    expect(machine.decides()).toBe(1);
+    machine.release();
+    await settleAll();
+    expect(machine.decides()).toBe(1);
+    expect(view.container.querySelector('[data-recipe-done]')?.textContent).toBe(RECIPE_APPROVED_WORDS);
+  });
+
+  it('should let the owner try again after a refusal, and only then', async () => {
+    const machine = deferred();
+    const view = await mount(host(machine, { ...REF }));
+    mounted.push(view);
+    await settleAll();
+    const q = (selector: string) => view.container.querySelector<HTMLButtonElement>(selector);
+
+    await click(q('[data-recipe-decline]'));
+    await settleAll();
+    machine.release(new Error('not allowed from this device'));
+    await settleAll();
+    expect(view.container.querySelector('[data-recipe-failed]')?.textContent).toBe('not allowed from this device');
+
+    await click(q('[data-recipe-decline]'));
+    await settleAll();
+    expect(machine.decides()).toBe(2);
+    machine.release();
+    await settleAll();
+    expect(view.container.querySelector('[data-recipe-done]')?.textContent).toBe(RECIPE_DECLINED_WORDS);
+  });
+
+  it('should read again for another proposal', async () => {
+    const machine = deferred();
+    const view = await mount(host(machine, { ...REF }));
+    mounted.push(view);
+    await settleAll();
+
+    await view.render(host(machine, { ...REF, proposal: 'rp_00000000000000b2' }));
+    await settleAll();
+
+    expect(machine.reads()).toBe(2);
+    expect(view.container.querySelector('[data-recipe-state="gone"]')?.textContent).toBe(RECIPE_GONE_WORDS);
+  });
+});
+
+describe('the recipe card and standing rules', () => {
+  const drawWithRules = async (over: { readonly offered: boolean; readonly rules?: readonly SignInRuleView[] }) => {
+    const machine = fakeClient((call: Call) => {
+      if (call.path === '/v1/accounts') return list();
+      if (call.path === '/v1/sign-in-rules') return ruleList({ rules: [...(over.rules ?? [])] });
+      throw new Error(`unexpected ${call.path}`);
+    });
+    const view = await mount(
+      <RecipeProposalHost
+        connection={connection}
+        createClient={async () => machine.client}
+        item={{ recipeProposal: REF }}
+        offered={over.offered}
+      />,
+    );
+    mounted.push(view);
+    for (let tries = 0; tries < 5; tries += 1) await settle();
+    return { view, calls: machine.calls };
+  };
+
+  it('should warn that approving suspends an active rule on this sign-in', async () => {
+    const { view } = await drawWithRules({ offered: true, rules: [pageRule({ signIn: SIGN_IN })] });
+
+    expect(view.container.querySelector('[data-rule-edit-warning]')?.textContent).toBe(suspendWarning(1));
+  });
+
+  it('should say nothing for a rule on another sign-in, a suspended one, or no rules at all', async () => {
+    const other = await drawWithRules({ offered: true, rules: [pageRule({ signIn: 'si_00000000000000ff' })] });
+    expect(other.view.container.querySelector('[data-rule-edit-warning]')).toBeNull();
+    const suspended = await drawWithRules({ offered: true, rules: [{ ...suspendedRule(), signIn: SIGN_IN }] });
+    expect(suspended.view.container.querySelector('[data-rule-edit-warning]')).toBeNull();
+    const none = await drawWithRules({ offered: true });
+    expect(none.view.container.querySelector('[data-rule-edit-warning]')).toBeNull();
+  });
+
+  it('should not even ask for rules on a machine that does not report them', async () => {
+    const { view, calls } = await drawWithRules({ offered: false, rules: [pageRule({ signIn: SIGN_IN })] });
+
+    expect(view.container.querySelector('[data-rule-edit-warning]')).toBeNull();
+    expect(calls.some(call => call.path === '/v1/sign-in-rules')).toBe(false);
+    expect(view.container.querySelector('[data-recipe-approve]')).not.toBeNull();
   });
 });
