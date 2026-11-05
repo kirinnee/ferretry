@@ -8,15 +8,17 @@ import {
   type AgendaGate,
   type AgendaGateOption,
   type BoardTask,
-  clipAtWord,
-  formatTaskRef,
   cardAgendaReference,
   cardAskStage,
-  isSubCard,
+  clipAtWord,
+  formatTaskRef,
   type GateOption,
   type GateOutcomeError,
+  gateAskLine,
   gateOptions,
   gateOutcomeLane,
+  gateStyle,
+  isSubCard,
   type Lane,
   type LaneSet,
   laneOf,
@@ -25,6 +27,7 @@ import {
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
   type TaskWorkflow,
+  tryItText,
 } from '@ferretry/protocol';
 import { CARD_AGENDA_HOW_TO_RESOLVE, type RaiseAgendaRequest } from '../agenda/state-machine.ts';
 import type { CardAudience } from './authority.ts';
@@ -131,44 +134,32 @@ export const gateOf = (card: GateCard, lanes: GateLanes): AgendaGate | undefined
   };
 };
 
-/** The first line of a card text that says something, list markers and Markdown emphasis taken off. */
-const firstLine = (text: string): string | undefined =>
-  text
-    .split('\n')
-    .map(line =>
-      line
-        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/u, '')
-        .replaceAll(/[*_`#>]/gu, '')
-        .trim(),
-    )
-    .find(line => line !== '' && !line.endsWith(':'));
-
-const isTryIt = (gate: Pick<AgendaGate, 'options'>): boolean =>
-  gate.options.some(option => option.outcome === 'reopen-with-agenda');
-
-/** The ask the lane makes, in one line: "Try it: <the first step>" at a try-it gate, else "<option>? <summary>". */
-const gateSubject = (gate: AgendaGate, task: Pick<BoardTask, 'title' | 'summary' | 'howToTest'>): string => {
+/** The ask the lane makes, in one line, in the lane's own words (`gateAskLine`): what the card is, never its first step. */
+const gateSubject = (gate: AgendaGate, task: Pick<BoardTask, 'title' | 'summary'>): string => {
   const said = task.summary.trim() === '' ? task.title : task.summary.trim();
-  const line = isTryIt(gate)
-    ? `Try it: ${firstLine(task.howToTest ?? '') ?? said}`
-    : `${gate.options[0]?.label ?? gate.laneName}? ${said}`;
-  return clipAtWord(line.replaceAll(/\s+/gu, ' '), MAX_AGENDA_SUBJECT_LENGTH);
+  return clipAtWord(gateAskLine(gate, said).replaceAll(/\s+/gu, ' '), MAX_AGENDA_SUBJECT_LENGTH);
 };
 
-/** One line per PR of the card that is still open, or `null` when none is. */
-const openPullRequests = (task: Pick<BoardTask, 'links'>): string | null => {
-  const open = task.links.prs.filter(pr => pr.state === 'open');
-  return open.length === 0 ? null : open.map(pr => `A new PR is open for this card: ${pr.url}`).join('\n');
-};
-
-/** The card's How to test as written (Markdown keeps its lines), absent when it has none, and never a cut-off copy: too long for a body, it is a pointer to the card. */
-export const howToTestOf = (task: Pick<BoardTask, 'id' | 'howToTest'>): string | undefined => {
+/**
+ * EVERYTHING NEEDED TO TRY IT, written for someone cold (`tryItText`): the preview link first when the card has one, else
+ * where to try it for real; the card's How to test as written; the shipped version and the PR. Never a cut-off copy: too
+ * long for a body, the steps are a pointer to the card.
+ */
+export const howToTestOf = (
+  task: Pick<BoardTask, 'id' | 'howToTest' | 'links'>,
+  gate: Pick<AgendaGate, 'options'>,
+): string | undefined => {
+  // An approval has nothing to try: its ask carries the card's own words (the plan) as written, when it has them.
   const steps = task.howToTest?.trim() ?? '';
-  if (steps === '') return undefined;
-  return steps.length <= MAX_AGENDA_BODY_LENGTH
-    ? steps
-    : `How to test is ${steps.length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_AGENDA_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatTaskRef(task)}) for the full steps.`;
+  if (gateStyle(gate) === 'approval') {
+    if (steps === '') return undefined;
+    return steps.length <= MAX_AGENDA_BODY_LENGTH ? steps : pointerTo(task)(steps.length);
+  }
+  return tryItText(task, pointerTo(task), MAX_AGENDA_BODY_LENGTH);
 };
+
+const pointerTo = (task: Pick<BoardTask, 'id'>) => (length: number) =>
+  `How to test is ${length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_AGENDA_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatTaskRef(task)}) for the full steps.`;
 
 /**
  * The agenda the daemon opens for a card that no open agenda carries yet (docs/agenda.md § Card asks): named after
@@ -182,7 +173,7 @@ export const cardAgendaRaise = (
 ): RaiseAgendaRequest => {
   const where = gate.projectName === undefined ? gate.laneName : `${gate.laneName} on ${gate.projectName}`;
   const summary = task.summary.trim();
-  const howToTest = howToTestOf(task);
+  const howToTest = howToTestOf(task, gate);
   return {
     source: 'task',
     sourceRef: cardAgendaReference(task.id),
@@ -192,8 +183,6 @@ export const cardAgendaRaise = (
     subject: gateSubject(gate, task),
     why: `${formatTaskRef(task)} reached ${where}.`,
     howToResolve: CARD_AGENDA_HOW_TO_RESOLVE,
-    // A PR still open while the card waits: the card stays at the gate, so the owner is told to wait or say Not good.
-    context: openPullRequests(task),
     ...(summary === '' ? {} : { premise: clipAtWord(summary, MAX_AGENDA_REASON_LENGTH) }),
     task: { id: task.id },
     stage: cardAskStage(gate),

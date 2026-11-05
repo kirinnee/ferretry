@@ -76,7 +76,7 @@ export const gateWhySubject = (item: AgendaItem, action: InboxAction): string =>
  * recommendation are the thread's ask, not the card's. Carried over, a thread with several questions made the card
  * ask read as "several questions — answer in words", and its OK to build button was never drawn.
  */
-export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
+export const attachedGateView = (item: AgendaItem, only?: AgendaGate): GateItem | undefined => {
   const {
     gateAttached,
     waitingOn: _waitingOn,
@@ -88,13 +88,14 @@ export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
     recommendation: _recommendation,
     ...rest
   } = item;
-  if (gateAttached === undefined || item.gate !== undefined || item.notice === true) return undefined;
+  const gate = only ?? gateAttached;
+  if (gate === undefined || item.gate !== undefined || item.notice === true) return undefined;
   return {
     ...rest,
-    gate: gateAttached,
+    gate,
     kind: 'choice',
-    ask: { kind: 'multiple-choice', options: gateAskOptions(gateAttached) },
-    answers: gateAnswers(gateAttached),
+    ask: { kind: 'multiple-choice', options: gateAskOptions(gate) },
+    answers: gateAnswers(gate),
   };
 };
 

@@ -31,7 +31,9 @@ import {
   AGENDA_SHAPE_LEADS,
   type AgendaCardAnswer,
   type AgendaItem,
+  gateReference,
   inputContextLines,
+  ownCardAsk,
   plainLabel,
   singleAgendaQuestion,
 } from '@ferretry/protocol';
@@ -64,6 +66,7 @@ import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
+import { CardAskAnswer } from './agenda-card-ask-answer.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
 import { AgendaFold } from './agenda-fold.tsx';
@@ -509,7 +512,13 @@ export function AgendaItemCard({
       : undefined;
   // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
   // separate item. Only the latest version is answerable, so an earlier one draws none.
-  const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
+  const allAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
+  // A card's OWN agenda (the daemon opened it for the card) asks nothing else: its one ask is drawn INSIDE "What I need
+  // from you", not in a box of its own, and the typed words under the card are its other answer. Any other item keeps
+  // its own ask and draws each card ask it carries apart, with its heading.
+  const ownAsk = latest && settled === undefined ? ownCardAsk(item) : undefined;
+  const single = ownAsk === undefined ? undefined : allAsks.find(ask => ask.key === gateReference(ownAsk.gate));
+  const cardAsks = allAsks.filter(ask => ask !== single);
   // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
   const replyOffer = cardAsks.length === 0 ? null : replyApproval(item, history);
   const replies = (
@@ -577,7 +586,7 @@ export function AgendaItemCard({
             )}
           </span>
         </div>
-        {gated || description === null ? null : (
+        {gated || single !== undefined || description === null ? null : (
           <div className="fy-card__desc" data-agenda-description="">
             {renderProse(description)}
           </div>
@@ -658,6 +667,7 @@ export function AgendaItemCard({
                   ? { lead: FORM_ELSEWHERE }
                   : {})}
               {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
+              {...(single === undefined ? {} : { lead: '' })}
             >
               {askLine === '' ||
               cardsForm !== undefined ||
@@ -672,6 +682,9 @@ export function AgendaItemCard({
               {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
               {cardsForm}
               {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
+              {single === undefined ? null : (
+                <CardAskAnswer ask={single} busy={busy} onAct={onAct} renderProse={renderProse} />
+              )}
               {choosing && showList ? (
                 <OptionsList
                   busy={busy}

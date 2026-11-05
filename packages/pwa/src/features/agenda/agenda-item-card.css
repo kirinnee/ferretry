@@ -1854,3 +1854,19 @@
 .fy-card__answered-line {
   margin: 0;
 }
+
+/* THE ONE ASK OF A CARD'S OWN AGENDA: how to try it, one tap, then the words line — all inside "What I need from you". */
+.fy-card__try-it {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-card__try-taps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+.fy-card__try-taps .fy-qr__chip {
+  flex: 1 1 8rem;
+}

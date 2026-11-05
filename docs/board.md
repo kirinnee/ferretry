@@ -703,7 +703,7 @@ On the Mac, once it runs v4.157:
 
 1. Open the Inbox and tap the card's "Try it" ask.
 2. Follow How to test, and tick each step as you check it.
-3. You should see Done and Not good right under the steps.
+3. You should see Good right under the steps, and a box to type what is wrong.
 ```
 
 The kanban card face shows the summary as one truncated line under the title (not in the side pane, which keeps
@@ -1068,10 +1068,11 @@ view switches, the filters, **Show private**, the scope toggle, the theme switch
 drop and comment on a card are unchanged: ferrets and the CLI still use them, and the owner's only way to move a card is
 to answer where it asks, in the agenda.
 
-The owner's two answers about a card, on the agenda surfaces:
+The owner's two answers about a card, on the agenda surfaces (the card's own agenda draws them as **Good**, one tap, and
+the words typed under the card; see [One ask](agenda.md#one-ask-in-the-lanes-own-words)):
 
-- **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
-- **Not good** opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
+- **Done** (shown as **Good** on a try-it) moves the card to the project's Closed lane, and its ferret is told in one plain line.
+- **Not good** (on the card's own agenda: what is typed under the card, sent) opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
   same mic, Enter to send and Shift+Enter for a new line. What is typed is kept nowhere — never the ferret's chat draft,
   never queued as a message — and the box is as wide as the column it sits in (under the Inbox deck's card it takes the
   card's own inset; one rule in `board.css` and `agenda-inbox.css`, one component for the Board, a to-test row, the
@@ -1122,7 +1123,15 @@ has its ask on exactly ONE open agenda, found in this order:
 2. else an open agenda that carries its **parent card**;
 3. else a **new agenda** named after the card, raised by the daemon on behalf of the card's ferret on its **agenda home**
    (the assignee's, else the owner ferret's; [agenda.md](agenda.md#the-agenda-home)), `sourceRef` `card-agenda:<card>`,
-   stage `test` or `plan`. Its own ask is only a reply; the card ask's buttons move the card.
+   stage `test` or `plan`. It asks the owner NOTHING else: its one ask is the card ask, drawn inside "What I need from
+   you" with everything needed to try it, one tap (**Good**) and the words line ([agenda.md](agenda.md#one-ask-in-the-lanes-own-words)).
+
+**The agenda answer is the only thing that moves a gated card.** The Board never draws an answer (no Done, no Not good,
+no Try it), whatever lane a card sits in; the card only shows where the work is. What the agenda says is the lane's
+own, from its workflow's stage: a lane the owner tries things in is a **try-it** (Good moves the card as the lane's
+pass does, e.g. Released → Closed; anything typed sends it back as the lane's fail does, e.g. → Implement, with the
+owner's words as the reopen ask); a lane the owner approves is an **approval** (the lane's own option moves it on;
+typed words ask for changes first, and the card stays). A gate that is not a try-it never says "try it".
 
 Of several candidates, the one on the card's ferret's home wins, then one on the owner's turn, then the newest. A
 ferret's item that the daemon acts on (an input card, a held configuration change, a plan) never carries one. The

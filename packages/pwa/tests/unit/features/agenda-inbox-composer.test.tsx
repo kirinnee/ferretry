@@ -102,6 +102,49 @@ describe('the open Inbox item’s composer', () => {
     run(() => view.unmount());
   });
 
+  test('on a card’s own agenda Send answers the card with the typed words, never the chat, and says what to type', async () => {
+    const sent: string[] = [];
+    const answered: string[] = [];
+    const replied: string[] = [];
+    const api = {
+      send: async (_sessionId: string, request: { message: string }) => {
+        sent.push(request.message);
+        return {} as never;
+      },
+    };
+    const view = render(
+      <AgendaInboxComposer
+        answerTyped={words => answered.push(words.message)}
+        clientFor={async () => api}
+        compact
+        connection={daemon}
+        itemId={'A8' as AgendaId}
+        onReplied={reply => replied.push(reply.words)}
+        typedPlaceholder="What is wrong, or what needs changing?"
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    const composer = view.root.findByType(Composer);
+    expect(composer.props.placeholder).toBe('What is wrong, or what needs changing?');
+    // An empty box has nothing to say: it is never an answer.
+    expect(composer.props.allowEmptySend).toBe(false);
+    expect(composer.props.onSent).toBeUndefined();
+    const field = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
+    run(() =>
+      field().props.onChange({ currentTarget: { value: 'the badge is red', selectionStart: 16, selectionEnd: 16 } }),
+    );
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    expect(answered).toEqual(['the badge is red']);
+    expect(sent).toEqual([]);
+    expect(replied).toEqual([]);
+    run(() => view.unmount());
+  });
+
   test('a form’s “nothing to send” line goes once a pick changes', async () => {
     const api = { send: async () => ({}) as never };
     const view = render(

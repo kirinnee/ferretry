@@ -27,6 +27,7 @@ import {
   agendaStage,
   agendaState,
   gateReference,
+  openCardAsks,
 } from '@ferretry/protocol';
 import { revisionStamp } from './agenda-revisions.ts';
 import { agendaAuthor, parkedUntilWords } from './agenda-status.ts';
@@ -171,10 +172,22 @@ export const itemCardAsks = (
   item: AgendaItem,
   howToTestFor?: (cardId: string) => string | null | undefined,
 ): readonly ItemCardAsk[] => {
-  const view = attachedGateView(item);
-  if (view === undefined) return [];
-  const steps = howToTestFor?.(view.gate.cardId)?.trim() ?? '';
-  return [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: steps === '' ? null : steps }];
+  // The asks the item carries, each with the card's whole "how to try it" the daemon wrote (it keeps it in line with the
+  // card); a daemon that sends none reads the one mirrored ask, with the steps from the board.
+  const asks = openCardAsks(item);
+  if (asks.length === 0) {
+    const view = attachedGateView(item);
+    if (view === undefined) return [];
+    const steps = howToTestFor?.(view.gate.cardId)?.trim() ?? '';
+    return [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: steps === '' ? null : steps }];
+  }
+  return asks.flatMap(ask => {
+    const view = attachedGateView(item, ask.gate);
+    if (view === undefined) return [];
+    const written = ask.howToTest?.trim() ?? '';
+    const steps = written === '' ? (howToTestFor?.(ask.gate.cardId)?.trim() ?? '') : written;
+    return [{ key: gateReference(ask.gate), gate: ask.gate, view, howToTest: steps === '' ? null : steps }];
+  });
 };
 
 // ---------------------------------------------------------------------------------------------------

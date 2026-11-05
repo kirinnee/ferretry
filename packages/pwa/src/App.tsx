@@ -45,7 +45,6 @@ import type { TranscriptHistoryControl } from './components/transcript-history-r
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
-import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
@@ -101,6 +100,7 @@ import { queueContribution } from './features/queue-view/queue-action.ts';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
 import { ActionToast } from './features/session-actions/action-toast.tsx';
+import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
@@ -2349,7 +2349,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       onNavigate={navigate}
       phone={phone}
       // The open item's ferret's own composer: a reply goes to its chat, about the item.
-      renderComposer={(card, answerForm) => {
+      renderComposer={(card, answerForm, typed) => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) return null;
         const controls = store.controls.controls(card.daemonId);
@@ -2362,6 +2362,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             dictationSettings={dictation.settings}
             disabled={TERMINAL_STATUSES.has(card.view.state.status)}
             answerForm={answerForm}
+            {...(typed === undefined ? {} : { answerTyped: typed.send, typedPlaceholder: typed.placeholder })}
             formKey={card.key}
             enterKeyPreference={controls.composerEnterKey}
             itemId={card.item.id}

@@ -115,6 +115,8 @@
         "harness/inbox-rollup-page.tsx",
         "harness/inbox-card-asks-screenshot.ts",
         "harness/inbox-card-asks-page.tsx",
+        "harness/own-card-ask-screenshot.ts",
+        "harness/own-card-ask-page.tsx",
         "harness/inbox-gates-screenshot.ts",
         "harness/not-good-composer-screenshot.ts",
         "harness/not-good-ask-screenshot.ts",

@@ -8,6 +8,7 @@ import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
+import { openConversation } from '../../support/agenda-folds.ts';
 import {
   agendaItem,
   choices,
@@ -16,7 +17,6 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
-import { openConversation } from '../../support/agenda-folds.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
@@ -313,6 +313,75 @@ describe('the open Inbox item', () => {
     expect(fake.deferred.getSnapshot().pending).toHaveLength(1);
     expect(draft).toBe('');
     unregister();
+    await mounted.unmount();
+  });
+
+  it('answers a card’s own agenda with what is typed under it: Not good, with those words', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'Ready to try',
+      entry: 3,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F12',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const fake = fakeInbox();
+    let typed: { placeholder: string } | undefined;
+    let send: ((words: { message: string; attachmentIds?: string[] }) => void) | undefined;
+    const mounted = await mount(
+      page(fake, [own], {
+        initialOpen: own.key,
+        renderComposer: (_card, _answerForm, answer) => {
+          typed = answer;
+          send = answer?.send;
+          return <textarea />;
+        },
+      }),
+    );
+    expect(typed?.placeholder).toBe('What is wrong, or what needs changing?');
+    expect(() => send?.({ message: '  ' })).toThrow('Type what you want to say first.');
+    await interact(() => send?.({ message: 'The badge is red', attachmentIds: ['a1'] }));
+    expect(fake.deferred.getSnapshot().pending.map(entry => entry.action)).toEqual([
+      expect.objectContaining({
+        kind: 'respond',
+        label: 'Not good',
+        note: 'The badge is red',
+        gate: true,
+        cardAsk: 'gate:F12:tested:3',
+        attachments: { from: 'sess-5', ids: ['a1'] },
+      }),
+    ]);
+    await mounted.unmount();
+  });
+
+  it('gives an ordinary item no typed answer: what is typed there is a reply', async () => {
+    let typed: unknown = 'unset';
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        renderComposer: (_card, _answerForm, answer) => {
+          typed = answer;
+          return <textarea />;
+        },
+      }),
+    );
+    expect(typed).toBeUndefined();
     await mounted.unmount();
   });
 

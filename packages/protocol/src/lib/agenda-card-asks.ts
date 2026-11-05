@@ -52,6 +52,19 @@ export const asksOnlyCardAsks = (
   return Date.parse(item.waitingSince) <= Math.max(...open.map(ask => Date.parse(ask.at)));
 };
 
+/**
+ * The ONE ask of a card's own agenda — the agenda the daemon opened for the card, which asks the owner nothing else —
+ * so its answer is the item's own: Good in one tap, anything else typed. `undefined` for any other item, and for a card
+ * agenda that holds more or fewer than one open ask.
+ */
+export const ownCardAsk = (
+  item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'> & { readonly cardAsks?: readonly AgendaCardAsk[] | undefined },
+): AgendaCardAsk | undefined => {
+  if (item.raisedBy !== 'daemon' || parseCardAgendaReference(item.sourceRef) === undefined) return undefined;
+  const open = openCardAsks(item);
+  return open.length === 1 ? open[0] : undefined;
+};
+
 /** The card ask an app that predates card asks is shown (`gateAttached`): the first open one. */
 export const mirroredCardAsk = (item: {
   readonly cardAsks?: readonly AgendaCardAsk[] | undefined;

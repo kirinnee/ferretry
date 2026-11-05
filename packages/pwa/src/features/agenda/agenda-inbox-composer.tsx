@@ -21,10 +21,11 @@
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer, type ComposerProps, type ComposerSent } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';
+import { type TypedSend, withTypedSend } from '../../lib/agenda-gate-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -53,6 +54,12 @@ export interface AgendaInboxComposerProps {
   readonly answerForm?: (() => void) | undefined;
   /** The open form's picks key: a changed pick clears the "nothing to send" line under the box. */
   readonly formKey?: string | undefined;
+  /**
+   * The open item is a card's own agenda: what is typed here answers the card (Not good, with these words), so Send runs
+   * this instead of chatting, and `typedPlaceholder` says what to type. It never marks the item replied.
+   */
+  readonly answerTyped?: ((send: TypedSend) => void) | undefined;
+  readonly typedPlaceholder?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
   /** This device's dictation settings, the chat composer's own: present, the box carries the same mic. */
@@ -75,6 +82,8 @@ export function AgendaInboxComposer({
   disabled = false,
   answerForm,
   formKey,
+  answerTyped,
+  typedPlaceholder,
   autocompleteFetcher,
   enterKeyPreference = null,
   dictationSettings,
@@ -101,23 +110,36 @@ export function AgendaInboxComposer({
   const chat = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
   const form = useFormComposer(chat, answerForm, formKey);
   const forForm = form.allowEmptySend;
-  if (form.api === null) return null;
+  const typing = useRef(answerTyped);
+  typing.current = answerTyped;
+  const forTyped = answerTyped !== undefined;
+  const sender = useMemo(
+    () => (form.api === null || !forTyped ? form.api : withTypedSend(form.api, send => typing.current?.(send))),
+    [form.api, forTyped],
+  );
+  if (sender === null) return null;
   return (
     <Composer
       allowEmptySend={forForm}
       {...(form.clearErrorOn === undefined ? {} : { clearErrorOn: form.clearErrorOn })}
-      api={form.api}
+      api={sender}
       compact={compact}
       daemon={connection}
       disabled={disabled}
       draftSlot={itemId}
-      {...(forForm || onReplied === undefined ? {} : { onSent: onReplied })}
+      {...(forForm || forTyped || onReplied === undefined ? {} : { onSent: onReplied })}
       {...(restore === undefined ? {} : { restore })}
       {...(onRestored === undefined ? {} : { onRestored })}
       {...(dictationSettings === undefined ? {} : { dictationSettings })}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
-      placeholder={forForm ? `Anything else for ${ferretName(view)}?` : `Reply to ${ferretName(view)}…`}
+      placeholder={
+        forTyped && typedPlaceholder !== undefined
+          ? typedPlaceholder
+          : forForm
+            ? `Anything else for ${ferretName(view)}?`
+            : `Reply to ${ferretName(view)}…`
+      }
       quota={quota}
       sessionId={view.config.id}
       {...(autocompleteFetcher === undefined ? {} : { autocompleteFetcher })}

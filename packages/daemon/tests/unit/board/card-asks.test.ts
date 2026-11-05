@@ -1,19 +1,19 @@
 import { describe, it } from 'bun:test';
 import {
-  agendaState,
   type AgendaItem,
   type AgendaResponse,
+  agendaState,
   type BoardTask,
   type BoardTaskActionRequest,
-  type LaneSet,
   BoardTaskActionRequestSchema,
   gateReference,
+  type LaneSet,
   MAX_AGENDA_BODY_LENGTH,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
+import type { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
-import { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -25,11 +25,11 @@ import {
 import {
   type BoardCaller,
   BoardService,
+  cardAgendaRaise,
   type GateAnswer,
   GateItems,
   gateEntry,
   gateOf,
-  cardAgendaRaise,
   stageGateLanes,
 } from '../../../src/lib/board/index.ts';
 import { card, FakeDone, FakeReopen, lanes, MemoryBoardStore, NOW, world } from './support.ts';
@@ -80,6 +80,10 @@ const external = (overrides: Partial<BoardTask> = {}): BoardTask => {
     laneId,
   });
 };
+
+/** What a try-it carries for a card with these steps, no preview and no PR: where to try it, then the steps as written. */
+const TRY_IT =
+  'There is no preview for this one. Try it for real: the steps below say where.\n\n1. Open the Inbox\n2. Answer the card';
 
 const internal = (overrides: Partial<BoardTask> = {}): BoardTask =>
   external({ ask: { text: 'tidy the logs', source: 'session:child' }, ...overrides });
@@ -418,7 +422,7 @@ describe('a card at a gate asks on its agenda, never on its own', () => {
     should(item.cardAsks).have.length(1);
     should(item.cardAsks?.[0]).match({
       gate: { cardId: 'F1', laneId: 'tested', entry: 2, options: [{ label: 'Done' }, { label: 'Not good' }] },
-      howToTest: '1. Open the Inbox\n2. Answer the card',
+      howToTest: TRY_IT,
     });
     should(item.cardAsks?.[0]?.answer).be.undefined();
     should(item.gateAttached).eql(item.cardAsks?.[0]?.gate);
@@ -1336,7 +1340,7 @@ describe('open gate items from before card asks', () => {
       stage: 'test',
       waitingSince: legacy.waitingSince,
     });
-    should(items[0]?.cardAsks?.[0]).match({ gate: legacy.gate, howToTest: task.howToTest });
+    should(items[0]?.cardAsks?.[0]).match({ gate: legacy.gate, howToTest: TRY_IT });
     const answered = await world.answer(legacy.id, choose('Done'), { cardAsk: 'gate:F1:tested:2' });
     should(answered).match({ handled: true, mutation: { ok: true } });
     should(world.stored().laneId).equal('closed');
@@ -1399,7 +1403,7 @@ describe('the new agenda for a card', () => {
 
     // Assert
     should(steps).match(
-      /^How to test is 201,003 characters, too long to show here \(the most is 200,000\)\. Open the card \(/u,
+      /How to test is 201,003 characters, too long to show here \(the most is 200,000\)\. Open the card \(/u,
     );
     should(steps).not.match(/x{10}/u);
   });
@@ -1422,12 +1426,95 @@ describe('the new agenda for a card', () => {
       sourceRef: 'card-agenda:F1',
       kind: 'reply',
       ask: { kind: 'open-question' },
-      subject: 'Try it: Open the Inbox',
+      subject: 'Try it: Gates raise one agenda item',
       task: { id: 'F1' },
       stage: 'test',
-      cardAsks: [{ gate, at: NOW, howToTest: '1. Open the Inbox\n2. Answer the card' }],
+      cardAsks: [{ gate, at: NOW, howToTest: TRY_IT }],
     });
     should(request.gate).be.undefined();
+  });
+});
+
+describe('the new agenda for a card carries everything needed to try it', () => {
+  const PR = 'https://github.com/kirinnee/ferretry/pull/9';
+  const linked = (
+    state: 'open' | 'merged',
+    releasedIn: { version: string } | null,
+    docs: string[] = [],
+  ): Partial<BoardTask> => ({
+    laneId: 'tested',
+    history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'tested' }],
+    links: {
+      prs: [
+        {
+          url: PR,
+          number: 9,
+          repo: 'kirinnee/ferretry',
+          state,
+          draft: false,
+          checks: 'passing',
+          mergedAt: state === 'merged' ? NOW : null,
+          mergeSha: state === 'merged' ? 'a'.repeat(40) : null,
+          releasedIn:
+            releasedIn === null ? null : { version: releasedIn.version, tag: `v${releasedIn.version}`, at: NOW },
+          polledAt: NOW,
+        },
+      ],
+      branch: null,
+      commits: [],
+      docs,
+    },
+  });
+  const raised = (overrides: Partial<BoardTask>) => {
+    const task = external(overrides);
+    const gate = gateOf({ task, laneSet: lanes(), audience: 'external' }, stageGateLanes);
+    if (gate === undefined) throw new Error('expected a gate');
+    return cardAgendaRaise(gate, task, NOW);
+  };
+
+  it('links the preview first, then the steps, then the shipped version and the PR', () => {
+    const request = raised(linked('merged', { version: '1.2.3' }, ['https://abc123.ferretry.pages.dev/inbox']));
+    const steps = request.cardAsks?.[0]?.howToTest ?? '';
+    should(steps.startsWith('**Try it on the preview:** https://abc123.ferretry.pages.dev/inbox')).be.true();
+    should(steps).containEql('1. Open the Inbox');
+    should(steps).containEql(`Shipped in Ferretry v1.2.3 (${PR})`);
+    should(steps.indexOf('1. Open the Inbox')).be.below(steps.indexOf('Shipped in'));
+  });
+
+  it('says where to try it for real when the card has no preview, and that an open PR is not shipped', () => {
+    const steps = raised(linked('open', null)).cardAsks?.[0]?.howToTest ?? '';
+    should(steps).startWith('There is no preview for this one. Try it for real');
+    should(steps).containEql('Not merged yet, so not shipped');
+    // The agenda itself carries no second copy of the PR line: the one ask says it.
+    should(raised(linked('open', null)).context).be.undefined();
+  });
+
+  it('asks an approval in its own words, with the card’s text as written and no try-it frame', () => {
+    const request = raised({
+      laneId: 'plan',
+      history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'plan' }],
+    });
+    should(request.subject).equal('OK to build? Gates raise one agenda item');
+    should(request.cardAsks?.[0]?.howToTest).not.containEql('preview');
+  });
+
+  it('points an approval at the card when its text is too long for a body', () => {
+    const request = raised({
+      laneId: 'plan',
+      howToTest: `1. ${'x'.repeat(MAX_AGENDA_BODY_LENGTH + 10)}`,
+      history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'plan' }],
+    });
+    should(request.cardAsks?.[0]?.howToTest).match(/^How to test is /u);
+    should(request.cardAsks?.[0]?.howToTest).not.match(/x{10}/u);
+  });
+
+  it('carries no text for an approval whose card wrote none', () => {
+    const request = raised({
+      laneId: 'plan',
+      howToTest: '',
+      history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'plan' }],
+    });
+    should(request.cardAsks?.[0]?.howToTest).be.undefined();
   });
 });
 

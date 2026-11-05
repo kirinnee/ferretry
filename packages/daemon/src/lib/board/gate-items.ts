@@ -26,25 +26,25 @@ import { createHash } from 'node:crypto';
 import {
   type AgendaCardAsk,
   type AgendaGate,
+  type AgendaGateOption,
   type AgendaId,
   type AgendaItem,
   type AgendaResponse,
   type AgendaSnapshot,
-  type ResolvedAgendaItem,
   type BoardReopenAttachments,
   type BoardTask,
   type BoardTaskActionRequest,
   type BoardTaskId,
   canCarryCardAsk,
-  carriesCard,
   cardAskOf,
   cardAskReference,
+  carriesCard,
   clipAtWord,
   formatTaskRef,
   gateChoice,
   gateReference,
-  gatesAnsweredOn,
   gateReopenOption,
+  gatesAnsweredOn,
   isOpenCardAsk,
   MAX_BOARD_REASON_LENGTH,
   mirroredCardAsk,
@@ -52,7 +52,7 @@ import {
   parseCardAgendaReference,
   parseGateFollowupReference,
   parseGateReference,
-  type AgendaGateOption,
+  type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import { type CardAskOperation, LEGACY_REPLAY_MS } from '../agenda/card-asks.ts';
 import type { AgendaQueryResult } from '../agenda/service.ts';
@@ -670,7 +670,7 @@ export class GateItems implements CardWriteObserver {
     await this.closeEarlierRounds(task, gate, held.followups);
     const operation: CardAskOperation = {
       kind: 'attach',
-      ask: { gate, ...withSteps(howToTestOf(task)) },
+      ask: { gate, ...withSteps(howToTestOf(task, gate)) },
     };
     // Already asked: restated as the card stands now (a renamed lane, new steps), never asked a second time.
     if (keeper !== undefined) {

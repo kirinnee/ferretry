@@ -36,7 +36,16 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, type AgendaItem, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import {
+  type AgendaId,
+  type AgendaItem,
+  agendaAnswerText,
+  formatTaskRef,
+  gateTypedLabel,
+  gateTypedPlaceholder,
+  isMachineAgendaId,
+  ownCardAsk,
+} from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -73,6 +82,7 @@ import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
+import { type TypedSend, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
@@ -318,6 +328,32 @@ const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonI
  * Answers the open item: what is typed in the item's own composer rides as the answer's note (the chat's own rule,
  * `withComposerNote`), and the composer is emptied once it is spent.
  */
+/** What the composer under a card's own agenda does with typed words: answer the card, and say what to type. */
+export interface TypedAnswer {
+  readonly send: (send: TypedSend) => void;
+  readonly placeholder: string;
+}
+
+/**
+ * The typed answer of an open item, when it has one: a card's own agenda (the daemon opened it for the card) has exactly
+ * one ask, so the words typed under it are that ask's other answer — never a chat message about the item.
+ */
+const typedAnswerFor = (
+  host: Pick<CardHostProps, 'inbox' | 'onNavigate'>,
+  card: InboxCard,
+): TypedAnswer | undefined => {
+  const ask = ownCardAsk(card.item);
+  if (ask === undefined || gateTypedLabel(ask.gate) === undefined) return undefined;
+  return {
+    placeholder: gateTypedPlaceholder(ask.gate),
+    send: send => {
+      const answer = typedGateAnswer(ask, send, card.view.config.id);
+      if (answer.kind === 'refused') throw new Error(answer.message);
+      answerCard(host, card, answer.action);
+    },
+  };
+};
+
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
   const composer = composerQuoteTarget(scopeOf(card));
   const draft = composer?.draft() ?? '';
@@ -1127,7 +1163,12 @@ export interface AgendaInboxPageProps {
    * The open item's ferret's REAL composer, bound to that conversation: what is typed goes to its chat about the
    * item. The host draws it (it holds the clients); absent, the open item has no composer.
    */
-  readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
+  readonly renderComposer?: (
+    card: InboxCard,
+    answerForm: (() => void) | undefined,
+    /** A card's own agenda: what is typed answers the card (Not good, with the words); see `typedAnswerFor`. */
+    typed: TypedAnswer | undefined,
+  ) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
   /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
@@ -2098,6 +2139,7 @@ export function AgendaInboxPage({
                   {renderComposer(
                     deck[0],
                     deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    typedAnswerFor(host, deck[0]),
                   )}
                 </div>
               )}

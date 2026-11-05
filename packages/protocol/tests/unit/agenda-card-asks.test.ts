@@ -12,6 +12,7 @@ import {
   hasOpenCardAsk,
   mirroredCardAsk,
   openCardAsks,
+  ownCardAsk,
   parseCardAgendaReference,
 } from '../../src/lib/agenda-card-asks.ts';
 import { type AgendaQueueSource, needsYouQueue } from '../../src/lib/agenda-queue.ts';
@@ -210,5 +211,24 @@ describe('an agenda that asks only card asks', () => {
   it('should be true for a thread the ask was put on after its last question, false when the ferret asked since', () => {
     should(asksOnlyCardAsks({ ...base, cardAsks: [{ ...open('F1'), at: LATER }] })).be.true();
     should(asksOnlyCardAsks({ ...base, waitingSince: LATER, cardAsks: [open('F1')] })).be.false();
+  });
+});
+
+describe('ownCardAsk: the one ask of a card’s own agenda', () => {
+  const own = { raisedBy: 'daemon', sourceRef: 'card-agenda:F12', cardAsks: [open('F12')] } as const;
+
+  it('is the open ask of the agenda the daemon opened for the card', () => {
+    should(ownCardAsk(own)).eql(open('F12'));
+  });
+
+  it('is nothing for a ferret’s own thread, however many asks it carries', () => {
+    should(ownCardAsk({ ...own, raisedBy: 'agent', sourceRef: 'task:F12' })).be.undefined();
+    should(ownCardAsk({ ...own, raisedBy: 'agent' })).be.undefined();
+  });
+
+  it('is nothing when the card agenda has no open ask or more than one', () => {
+    should(ownCardAsk({ ...own, cardAsks: [{ ...open('F12'), answer: undefined }, open('F13')] })).be.undefined();
+    should(ownCardAsk({ ...own, cardAsks: [] })).be.undefined();
+    should(ownCardAsk({ raisedBy: 'daemon', sourceRef: 'card-agenda:F12' })).be.undefined();
   });
 });

@@ -10,7 +10,7 @@ agenda passes the three-part test; otherwise it adds to the closest. It never op
 own work: no "please test X", "please verify Y" or "try it after the release". Testing a card goes through the card's own agenda — the board
 runs itself and a card never asks (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda
 tracks all those and are the one request user to test so it can move it"_): a finished card reaches its Released or
-Ready to try lane, the daemon puts its card ask on the card's agenda, and the owner's **Done** or **Not good** there
+Ready to try lane, the daemon puts its card ask on the card's agenda, and the owner's **Good** (Done) or typed **Not good** there
 moves the card ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
 [notifications.md](notifications.md#agenda-mode)).
 
@@ -1450,8 +1450,8 @@ and a part the item does not carry is not drawn:
   (two ticks) until then. A chat reply the daemon stored on the item is stored once the queue accepts it, still
   queued, so its `fromChat` mark is no proof of reading. A stored entry records no delivery, so the item never claims
   more than that.
-- **Card asks live inside the item.** A card ready to test or approve is answered in part 6, with its own buttons,
-  never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
+- **Card asks live inside the item.** A card ready to test or approve is answered in part 6, never as an item of its
+  own — on a card's own agenda as its ONE ask ([One ask](#one-ask-in-the-lanes-own-words)), on any other item with its own buttons. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
   one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until card asks
   share the view: then it sits inline right under the item's own ask, headed **Your answer for this item**, and
@@ -1741,6 +1741,40 @@ A swipe down is therefore never destructive without Undo. The choices are a pure
 gesture: behind every open card's ⋯ are plain buttons — **Skip** and **Not needed** — and **Snooze** (1 h / 4 h /
 tomorrow / custom); the arrow keys are unchanged. Snooze is offered only where the machine advertises it
 (`agenda.snooze.1`), in the compass and in the menu alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
+
+### One ask, in the lane's own words
+
+**A card's own agenda (`card-agenda:<card>`, the one the daemon opens) asks the owner exactly one thing, in one place**
+(the owner, on !A404: _"if it's good, we just select good, if not we type what's wrong or what needs changing. to try
+it, it should write all information needed to try it. if it has preview env, we can try it there (even better)!
+different work flow have different style, and the agenda MOVES the card and acts as any gates for the card
+movements"_). Inside "What I need from you" it draws, in order:
+
+1. **The ask**, in the lane's words (`gateAskLine`): "Try it: <what the card is>" at a try-it; "OK to build? <what>" at an
+   approval — never a card's first step, and never "Type your answer below" beside buttons.
+2. **Everything needed to try it**, written by the daemon from the card for someone who knows nothing of it
+   (`tryItText`, carried as the ask's `howToTest` and restated whenever the card changes): the preview link first —
+   **Try it on the preview** — when the card links one, else "There is no preview for this one. Try it for real: the steps
+   below say where."; then the card's own How to test (where / do / see) as written; then where the work stands: **shipped
+   in Ferretry vX.Y.Z** with the PR and how to get that version, merged but not released, or the PR still open ("not
+   merged yet, so not shipped"). A preview is a card link that is a Cloudflare Pages preview of a project
+   (`https://<branch-or-hash>.<project>.pages.dev`, never the production host), recorded with `fy task link <card> --doc
+<url>`; nothing invents one. **No per-PR preview deploy exists yet** (`pwa-pages.yaml` deploys production from `main`
+   only), so today a card says where to try it for real; adding a preview deploy is a CI decision, and once a card
+   links one it is shown first with no further change. An approval has nothing to try: its text is the card's own, as written.
+3. **One tap**: the lane's pass, in the lane's words — **Good** at a try-it (the lane's default "Done" reads Good; a label
+   the lane wrote itself is kept), the lane's own option at an approval. It moves the card as the lane's pass does.
+4. **Words**: everything else is typed in the box under the card (the open item's composer, whose placeholder says what
+   to type) and sent. At a try-it it is the lane's fail — **Not good**: the card goes back (e.g. → Implement) with the
+   typed words as the reopen ask, and files typed with them travel as for any Not good; at an approval it is **Not yet**: the card
+   stays and its ferret reads the words. The words are never a chat message about the item, and an empty box sends nothing.
+
+There is **no "Not good" button, no "Card &F12: your answer for the card" box and no second place to answer** on a card's
+own agenda: two places to answer read as the card asking. (A ferret's own thread that carries a card ask keeps the
+card's heading and its own buttons, because it has an ask of its own beside the card's.) A gate that is not a try-it —
+an approval — reads as that and never as "try it". The wording lives in one place, read by the daemon and the app
+(`agenda-gate-wording.ts`, from the gate's options alone), so a workflow's style is its lane's stage and nothing else. **The agenda
+answer is the only thing that moves a gated card.**
 
 ### Card asks in the Inbox
 
