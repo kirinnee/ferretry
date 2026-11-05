@@ -402,7 +402,7 @@ it** (`navigator.gpu` adapter, `crossOriginIsolated`, `hardwareConcurrency`, `de
 candidate wins. Threads are half the cores, between 2 and 4, and not at all at or below 4 GB. `wasm-single`
 is always a candidate, so there is no input for which nothing is chosen.
 
-- **A failure is remembered, never shown.** If threads do not start or a threaded decode fails, the worker
+- **A failure is remembered, never shown as an error.** If threads do not start or a threaded decode fails, the worker
   answers `threads-failed`, the engine starts a **fresh** worker on one thread and repeats the audio still
   waiting (ONNX Runtime initialises once per worker, so it cannot retry in place), and the device records
   the failure. The person sees a slightly slower take. The thread count is **pinned per worker** by its first
@@ -411,10 +411,17 @@ is always a candidate, so there is no input for which nothing is chosen.
 - **Remembered per device** in `fy-stt-speed-v1` (`lib/stt/speed-memory.ts`): zod-parsed, versioned, at
   most 24 entries, one per model and path, forgotten after a week so a fixed driver or a new header is tried
   again. It holds a model id, a path and a time — no words.
-- **Settings › Voice** shows one read-only line under the engine list: **"Using: single-thread
-  WebAssembly"**, with a sentence of why (for example "More threads need a browser feature this page does
-  not turn on."). There is nothing to press. There is no manual override: with one path available it would
-  be a switch that does nothing.
+- **Settings › Voice** shows a read-only block under the engine list, in plain words (no technical names on
+  screen): **"Speech speed: standard (one core)"** or **"Speech speed: fast (several cores)"**, one sentence
+  of what that means ("Your words appear a moment after you stop talking." — or, for the fast mode, "sooner…
+  about 2–3 times faster than standard on a desktop we tested", the only number, from the table above), and one
+  sentence of why. When a faster mode was left out the sentence names it and says which it is: "A faster mode
+  (several cores) is not available on this site yet: it needs a browser setting the site has not switched
+  on." (this page is not isolated) or "…is available on this device but turned off for now, because it did
+  not work here last time." (a failure is remembered). The words live in `SPEED_PATH_LABEL`,
+  `SPEED_CONSEQUENCE_TEXT` and `SPEED_REASON_TEXT`; a test keeps WebAssembly, WebGPU and thread talk out of
+  them. There is nothing to press and no link to the speed test page. There is no manual override: with one
+  path available it would be a switch that does nothing.
 
 ### Starting to transcribe during the send countdown
 

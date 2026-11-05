@@ -13,6 +13,7 @@ import {
   MODEL_PATHS,
   NO_MEMORY,
   NO_SIGNALS,
+  SPEED_CONSEQUENCE_TEXT,
   SPEED_PATH_LABEL,
   SPEED_PATH_ORDER,
   SPEED_REASON_TEXT,
@@ -181,16 +182,39 @@ describe('threadsFor', () => {
 describe('the words', () => {
   it('names every path in the words Settings uses', () => {
     should(SPEED_PATH_LABEL).deepEqual({
-      webgpu: 'WebGPU',
-      'wasm-threads': 'multi-thread WebAssembly',
-      'wasm-single': 'single-thread WebAssembly',
+      webgpu: 'fast (graphics chip)',
+      'wasm-threads': 'fast (several cores)',
+      'wasm-single': 'standard (one core)',
     });
+  });
+
+  it('keeps technical names off the screen', () => {
+    const visible = [
+      ...Object.values(SPEED_PATH_LABEL),
+      ...Object.values(SPEED_CONSEQUENCE_TEXT),
+      ...Object.values(SPEED_REASON_TEXT),
+    ].join('\n');
+    should(visible).not.match(/webassembly|webgpu|thread|worker|wasm|gpu\b/i);
+  });
+
+  it('says what each speed means, with a number only for the one that was measured', () => {
+    should(SPEED_CONSEQUENCE_TEXT['wasm-single']).equal('Your words appear a moment after you stop talking.');
+    should(SPEED_CONSEQUENCE_TEXT['wasm-threads']).containEql('2–3 times faster');
+    should(SPEED_CONSEQUENCE_TEXT.webgpu).not.match(/\d/);
+  });
+
+  it('names the faster mode that was left out, and whether it is unavailable or turned off', () => {
+    should(SPEED_REASON_TEXT['not-isolated']).containEql('not available on this site yet');
+    should(SPEED_REASON_TEXT['failed-before']).containEql('available on this device but turned off');
+    should(SPEED_REASON_TEXT['low-memory']).containEql('turned off');
   });
 
   it('prints the read-only line', () => {
     should(speedLine({ path: 'wasm-single', threads: 1, reason: 'only-path' })).equal(
-      'Using: single-thread WebAssembly',
+      'Speech speed: standard (one core)',
     );
-    should(speedLine({ path: 'wasm-threads', threads: 4, reason: 'fastest' })).equal('Using: multi-thread WebAssembly');
+    should(speedLine({ path: 'wasm-threads', threads: 4, reason: 'fastest' })).equal(
+      'Speech speed: fast (several cores)',
+    );
   });
 });
