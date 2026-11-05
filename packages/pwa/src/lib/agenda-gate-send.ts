@@ -35,20 +35,34 @@ export const typedGateAnswer = (
   return { kind: 'answer', action: gateAnswerAction(label, words, ask.gate, attachments) };
 };
 
+/** The words a Send for an ask that is no longer the open one shows, in place of answering whatever ask is open now. */
+export const STALE_ASK_COPY = 'That ask has changed. Read the card again, then send.';
+
+/** What answers an ask: its name (`cardAskReference`) and what it does with the words typed under it. */
+export interface TypedAnswerTarget {
+  readonly key: string;
+  readonly send: (send: TypedSend) => void;
+}
+
 /**
- * A composer client whose Send hands the typed words to `answer` instead of chatting: the message is not sent, `answer`
- * may throw the composer's one error line, and every other method is the target's.
+ * A composer client whose Send hands the typed words to the ask it was BUILT FOR instead of chatting: the message is not
+ * sent, and `send` may throw the composer's one error line. The client belongs to the ask named `key`; `current` says
+ * which ask is open when Send finally runs (the composer may await before it), and a different one — replaced, answered
+ * or gone — throws {@link STALE_ASK_COPY} rather than answering another ask. Every other method is the target's.
  */
 export const withTypedSend = <T extends { readonly send: (...args: never[]) => unknown }>(
   client: T,
-  answer: (send: TypedSend) => void,
+  key: string,
+  current: () => TypedAnswerTarget | undefined,
 ): T =>
   new Proxy(client, {
-    get(target, key, receiver) {
-      const value = Reflect.get(target, key, receiver);
-      if (key !== 'send') return typeof value === 'function' ? value.bind(target) : value;
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== 'send') return typeof value === 'function' ? value.bind(target) : value;
       return (_session: string, input: TypedSend) => {
-        answer(input);
+        const open = current();
+        if (open === undefined || open.key !== key) throw new Error(STALE_ASK_COPY);
+        open.send(input);
         return Promise.resolve({});
       };
     },

@@ -1776,6 +1776,19 @@ an approval — reads as that and never as "try it". The wording lives in one pl
 (`agenda-gate-wording.ts`, from the gate's options alone), so a workflow's style is its lane's stage and nothing else. **The agenda
 answer is the only thing that moves a gated card.**
 
+**Where this is drawn: the Inbox, and only there.** The Good-only ask (`CardAskAnswer`) is drawn only when the host supplies the
+typed answer — the Inbox page sets `typedAnswer` on the item view because it also draws the box under the card. The chat's
+agenda (`features/agenda/agenda.tsx`, the session chat page) draws no such box, so a card's own agenda there keeps the card
+ask's own block with its own **Done** / **Not good** buttons: an ask is never drawn with "type what is wrong" and nowhere to type it.
+What Send does in the Inbox box is exactly one of two things, never a chat message:
+
+- **It answers the ask that was on the card when Send was pressed** (bound by the ask's reference, `gate:<card>:<lane>:<entry>`). If that
+  ask was replaced or answered before Send landed, Send fails with a plain line in the box ("That ask has changed. Read the
+  card again, then send.") and answers nothing — never the replacement ask.
+- **It is a direct call**, not a chat send: the box bypasses the device send outbox (a parked send would be re-sent later as
+  chat, never reaching the gate) and sends the words exactly as typed — no `!A404` reference prefix, no "See the attached
+  files." stand-in, no location block.
+
 ### Card asks in the Inbox
 
 Today's app draws a card ask from its mirror, `gateAttached`, as the agenda's second answer row (`attachedGateView`):

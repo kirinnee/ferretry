@@ -40,6 +40,7 @@ import {
   type AgendaId,
   type AgendaItem,
   agendaAnswerText,
+  cardAskReference,
   formatTaskRef,
   gateTypedLabel,
   gateTypedPlaceholder,
@@ -82,7 +83,7 @@ import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
-import { type TypedSend, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
+import { type TypedAnswerTarget, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
@@ -329,8 +330,7 @@ const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonI
  * `withComposerNote`), and the composer is emptied once it is spent.
  */
 /** What the composer under a card's own agenda does with typed words: answer the card, and say what to type. */
-export interface TypedAnswer {
-  readonly send: (send: TypedSend) => void;
+export interface TypedAnswer extends TypedAnswerTarget {
   readonly placeholder: string;
 }
 
@@ -345,6 +345,8 @@ const typedAnswerFor = (
   const ask = ownCardAsk(card.item);
   if (ask === undefined || gateTypedLabel(ask.gate) === undefined) return undefined;
   return {
+    // The ask's own name: a Send pressed for this ask answers only it, even if it finally runs after another replaced it.
+    key: cardAskReference(ask),
     placeholder: gateTypedPlaceholder(ask.gate),
     send: send => {
       const answer = typedGateAnswer(ask, send, card.view.config.id);
@@ -353,6 +355,17 @@ const typedAnswerFor = (
     },
   };
 };
+
+/**
+ * Whether the Inbox draws a composer under this open item: the host gave one, and the item is a ferret's own — not a machine
+ * notice, a gate item or a rule suggestion, which take no words.
+ */
+const composerDrawn = (card: InboxCard, renderComposer: AgendaInboxPageProps['renderComposer']): boolean =>
+  renderComposer !== undefined &&
+  !isMachineAgendaId(card.view.config.id) &&
+  !isGateItem(card.item) &&
+  // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
+  card.item.signInRuleSuggestion === undefined;
 
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
   const composer = composerQuoteTarget(scopeOf(card));
@@ -430,6 +443,7 @@ function OpenItem({
   place,
   canSnooze,
   askTap,
+  typedAnswer,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
@@ -439,6 +453,8 @@ function OpenItem({
   readonly canSnooze: boolean;
   /** A tapped notification opened it: it opens at its ask, and each tap is a new number. */
   readonly askTap?: number;
+  /** The words typed under this item answer its one card ask: the page draws that composer, so the card draws Good alone. */
+  readonly typedAnswer: boolean;
 }) {
   const entries = useItemConversation(card, readConversation);
   const connection = inbox.connectionFor(card.daemonId);
@@ -508,6 +524,7 @@ function OpenItem({
           // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
           // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
           swipeable={place.swipeable}
+          {...(typedAnswer ? { typedAnswer } : {})}
           {...(now === undefined ? {} : { now })}
           {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
         />
@@ -2079,6 +2096,7 @@ export function AgendaInboxPage({
                     canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}
+                    typedAnswer={composerDrawn(card, renderComposer) && typedAnswerFor(host, card) !== undefined}
                     place={{
                       index: Math.max(0, index),
                       total: runOrder.length,
@@ -2124,10 +2142,7 @@ export function AgendaInboxPage({
                 />
               ) : deck[0] === undefined ||
                 renderComposer === undefined ||
-                isMachineAgendaId(deck[0].view.config.id) ||
-                isGateItem(deck[0].item) ||
-                // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
-                deck[0].item.signInRuleSuggestion !== undefined ? null : (
+                !composerDrawn(deck[0], renderComposer) ? null : (
                 // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
                 <div
                   className="fy-inbox-composer"

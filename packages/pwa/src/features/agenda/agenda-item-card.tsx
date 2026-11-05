@@ -98,6 +98,11 @@ export interface AgendaItemCardProps {
   /** The ↓ swipe: Skip (the host moves to the next item, changing nothing), or absent where there is no next item. */
   readonly onSkip?: (() => void) | undefined;
   readonly onAct: (action: InboxAction) => void;
+  /**
+   * The host takes the words typed under the card as the one ask's other answer (the Inbox, which draws that box). Only
+   * then does a card's own agenda draw the Good-only ask; without it the ask keeps its own buttons, Done and Not good.
+   */
+  readonly typedAnswer?: boolean;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
   /** Why it cannot be answered here (parked, resolved): drawn in the answer row's place, and Not needed is gone. */
@@ -393,6 +398,7 @@ export function AgendaItemCard({
   onSkip,
   renderProse,
   onAct,
+  typedAnswer = false,
   onProgress,
   doneClose,
   settled,
@@ -516,7 +522,7 @@ export function AgendaItemCard({
   // A card's OWN agenda (the daemon opened it for the card) asks nothing else: its one ask is drawn INSIDE "What I need
   // from you", not in a box of its own, and the typed words under the card are its other answer. Any other item keeps
   // its own ask and draws each card ask it carries apart, with its heading.
-  const ownAsk = latest && settled === undefined ? ownCardAsk(item) : undefined;
+  const ownAsk = latest && settled === undefined && typedAnswer ? ownCardAsk(item) : undefined;
   const single = ownAsk === undefined ? undefined : allAsks.find(ask => ask.key === gateReference(ownAsk.gate));
   const cardAsks = allAsks.filter(ask => ask !== single);
   // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).

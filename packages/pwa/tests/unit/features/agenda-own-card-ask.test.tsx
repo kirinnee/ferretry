@@ -52,7 +52,12 @@ const cardAgenda = (gate: AgendaGate, howToTest?: string): AgendaItem =>
     cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z', ...(howToTest === undefined ? {} : { howToTest }) }],
   } as unknown as Partial<AgendaItem>);
 
-const draw = async (item: AgendaItem, howToTestFor?: (id: string) => string | null): Promise<InboxAction[]> => {
+/** `typedAnswer`: the host draws the box under the card and takes the typed words (the Inbox); the chat's agenda does not. */
+const draw = async (
+  item: AgendaItem,
+  howToTestFor?: (id: string) => string | null,
+  typedAnswer = true,
+): Promise<InboxAction[]> => {
   const acted: InboxAction[] = [];
   view = await mount(
     <AgendaItemView
@@ -68,6 +73,7 @@ const draw = async (item: AgendaItem, howToTestFor?: (id: string) => string | nu
       position={{ index: 0, total: 1 }}
       renderProse={text => <Markdown text={text} />}
       swipeable={false}
+      {...(typedAnswer ? { typedAnswer } : {})}
       {...(howToTestFor === undefined ? {} : { howToTestFor })}
     />,
   );
@@ -133,6 +139,25 @@ describe('a card’s own agenda asks ONE thing, inside “What I need from you�
     await draw(cardAgenda(tryGate));
     expect(needs().querySelector('[data-agenda-try-it]')).toBeNull();
     expect(needs().querySelector('[data-agenda-own-ask]')).not.toBeNull();
+  });
+
+  test('where the host takes no typed words (the chat’s agenda) keeps the ask’s own buttons: Done and Not good', async () => {
+    const acted = await draw(cardAgenda(tryGate, STEPS), undefined, false);
+    const part = needs();
+    expect(part.querySelector('[data-agenda-own-ask]')).toBeNull();
+    expect(part.querySelector('[data-agenda-typed-lead]')).toBeNull();
+    const block = must(part.querySelector<HTMLElement>('[data-agenda-card-ask="gate:F12:tested:3"]'), 'the card ask');
+    expect(block.querySelector('[data-agenda-card-ask-title]')).not.toBeNull();
+    const labels = [...block.querySelectorAll('button')].map(button => button.textContent ?? '');
+    expect(labels.some(label => label.includes('Done'))).toBe(true);
+    expect(labels.some(label => label.includes('Not good'))).toBe(true);
+    await interact(() =>
+      must(
+        [...block.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Done')),
+        'Done',
+      ).click(),
+    );
+    expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
   });
 
   test('keeps a ferret’s own thread apart: its card ask has its heading and both buttons', async () => {

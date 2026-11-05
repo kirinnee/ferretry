@@ -25,7 +25,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer, type ComposerProps, type ComposerSent } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';
-import { type TypedSend, withTypedSend } from '../../lib/agenda-gate-send.ts';
+import { type TypedAnswerTarget, withTypedSend } from '../../lib/agenda-gate-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -55,10 +55,12 @@ export interface AgendaInboxComposerProps {
   /** The open form's picks key: a changed pick clears the "nothing to send" line under the box. */
   readonly formKey?: string | undefined;
   /**
-   * The open item is a card's own agenda: what is typed here answers the card (Not good, with these words), so Send runs
-   * this instead of chatting, and `typedPlaceholder` says what to type. It never marks the item replied.
+   * The open item is a card's own agenda: what is typed here answers THAT ask (Not good, with these words), so Send runs
+   * this instead of chatting, and `typedPlaceholder` says what to type. It never marks the item replied. The box is
+   * bound to the ask's `key`: a Send that lands after the ask was replaced or answered shows an error and answers nothing.
+   * The typed words are the owner's exactly — the box sends them raw (no `!A404` prefix) and never through the device outbox.
    */
-  readonly answerTyped?: ((send: TypedSend) => void) | undefined;
+  readonly answerTyped?: TypedAnswerTarget | undefined;
   readonly typedPlaceholder?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
@@ -110,12 +112,15 @@ export function AgendaInboxComposer({
   const chat = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
   const form = useFormComposer(chat, answerForm, formKey);
   const forForm = form.allowEmptySend;
+  // The ask that is open NOW: a send bound to an earlier one asks this when it finally runs, and fails if it moved on.
   const typing = useRef(answerTyped);
   typing.current = answerTyped;
-  const forTyped = answerTyped !== undefined;
+  const askKey = answerTyped?.key;
+  const forTyped = askKey !== undefined;
+  // A typed answer goes through the raw client — never the chat's reference prefix — and one client per ask.
   const sender = useMemo(
-    () => (form.api === null || !forTyped ? form.api : withTypedSend(form.api, send => typing.current?.(send))),
-    [form.api, forTyped],
+    () => (forTyped ? (api === null ? null : withTypedSend(api, askKey, () => typing.current)) : form.api),
+    [api, askKey, forTyped, form.api],
   );
   if (sender === null) return null;
   return (
@@ -127,6 +132,7 @@ export function AgendaInboxComposer({
       daemon={connection}
       disabled={disabled}
       draftSlot={itemId}
+      {...(forTyped ? { directSend: true } : {})}
       {...(forForm || forTyped || onReplied === undefined ? {} : { onSent: onReplied })}
       {...(restore === undefined ? {} : { restore })}
       {...(onRestored === undefined ? {} : { onRestored })}

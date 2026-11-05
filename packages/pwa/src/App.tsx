@@ -2362,7 +2362,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             dictationSettings={dictation.settings}
             disabled={TERMINAL_STATUSES.has(card.view.state.status)}
             answerForm={answerForm}
-            {...(typed === undefined ? {} : { answerTyped: typed.send, typedPlaceholder: typed.placeholder })}
+            {...(typed === undefined ? {} : { answerTyped: typed, typedPlaceholder: typed.placeholder })}
             formKey={card.key}
             enterKeyPreference={controls.composerEnterKey}
             itemId={card.item.id}

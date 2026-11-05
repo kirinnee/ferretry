@@ -116,6 +116,12 @@ export interface AgendaItemViewProps {
   readonly howToTestFor?: (cardId: string) => string | null | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string;
+  /**
+   * The host draws the box under the card and takes what is typed there as the card's one ask's other answer (the
+   * Inbox's, docs/agenda.md § One ask). Only then does a card's own agenda draw Good alone; everywhere else (the
+   * chat's agenda) the ask keeps its own buttons, Done and Not good.
+   */
+  readonly typedAnswer?: boolean;
   /** The versions the machine keeps for the item (`useItemLifecycle`): the ⋯ menu's "Changes". Absent: none. */
   readonly versions?: AgendaVersionsView;
   /** "Merge with…" (`useItemLifecycle`), a row of the ⋯ menu. Absent: not offered. */
@@ -190,6 +196,7 @@ export function AgendaItemView({
   startTap,
   howToTestFor,
   itemKey,
+  typedAnswer = false,
   versions,
   merge,
   lineageTitles,
@@ -389,6 +396,7 @@ export function AgendaItemView({
             onMergeClose={() => setMergeFor(null)}
             history={history}
             {...(itemKey === undefined ? {} : { itemKey })}
+            {...(typedAnswer ? { typedAnswer } : {})}
             {...(versions === undefined ? {} : { versions })}
             {...(merge === undefined ? {} : { merge })}
             {...(lineageTitles === undefined ? {} : { lineageTitles })}

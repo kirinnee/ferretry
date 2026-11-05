@@ -355,6 +355,10 @@ describe('the open Inbox item', () => {
       }),
     );
     expect(typed?.placeholder).toBe('What is wrong, or what needs changing?');
+    // The answer is bound to this ask by name, and the card draws Good alone (the words go in the box).
+    expect(typed).toMatchObject({ key: 'gate:F12:tested:3' });
+    expect(mounted.container.querySelector('[data-agenda-own-ask="F12"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-card-ask-title]')).toBeNull();
     expect(() => send?.({ message: '  ' })).toThrow('Type what you want to say first.');
     await interact(() => send?.({ message: 'The badge is red', attachmentIds: ['a1'] }));
     expect(fake.deferred.getSnapshot().pending.map(entry => entry.action)).toEqual([
@@ -367,6 +371,38 @@ describe('the open Inbox item', () => {
         attachments: { from: 'sess-5', ids: ['a1'] },
       }),
     ]);
+    await mounted.unmount();
+  });
+
+  it('draws the ask’s own Done and Not good where the Inbox draws no box to type in', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'Ready to try',
+      entry: 3,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F12',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    // No `renderComposer`: nothing to type in, so the card must not say "type what is wrong".
+    const mounted = await mount(page(fakeInbox(), [own], { initialOpen: own.key }));
+    expect(mounted.container.querySelector('[data-agenda-own-ask]')).toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-card-ask-title]')).not.toBeNull();
     await mounted.unmount();
   });
 
