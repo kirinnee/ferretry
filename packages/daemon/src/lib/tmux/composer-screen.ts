@@ -55,6 +55,7 @@
 
 import { composerTransport, lonePasteOf, PASTE_PLACEHOLDER_PATTERN } from './composer.ts';
 import type { ComposerInk } from './composer-ink.ts';
+import { paneShowsStartupWait } from './pane.ts';
 
 /**
  * What tmux says beside a capture about the composer: where the cursor is, in the visible frame's own
@@ -451,8 +452,10 @@ export type PaneHold = HeldAt | 'absent' | 'unknown';
 export function paneHoldOf(visible: string, cursor: ComposerCursor, text: string, paste: boolean): PaneHold {
   const composer = readComposer(visible, cursor);
   if (composer !== undefined && composer.placeholder !== true) {
-    if (composerContains(composer.text, text)) return 'composer';
-    if (paste && composer.pasted) return 'composer';
+    // Under Codex's `Waiting for startup` line the drawn text is held by the HARNESS, which has taken it and
+    // will send it when startup ends — its queue in effect, not an unsent composer that a nudge could key.
+    if (composerContains(composer.text, text)) return paneShowsStartupWait(visible) ? 'queue' : 'composer';
+    if (paste && composer.pasted) return paneShowsStartupWait(visible) ? 'queue' : 'composer';
   }
   const queue = readHarnessQueue(visible);
   if (queue.entries.some(entry => showsPayload(entry, text))) return 'queue';

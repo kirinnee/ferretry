@@ -28,6 +28,9 @@ export function waitReasonOf(view: DeliveryView): QueueWaitReason | undefined {
   if (view.target.pendingQuestion !== undefined) return 'question';
   if (!view.pane.alive || view.pane.dead) return undefined;
   if (view.pane.blockingPrompt !== undefined) return 'dialog';
+  // Codex is holding an earlier submission until its startup ends: the pane is still starting, whatever the
+  // composer shows.
+  if (view.pane.startupParked === true) return 'launching';
   if (view.pane.draft !== undefined && view.pane.draft.trim() !== '') return 'draft';
   return undefined;
 }

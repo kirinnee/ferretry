@@ -16,11 +16,11 @@
 import {
   classifySubmit,
   composerHoldsOtherText,
+  draftBlockingReadiness,
   frameCursor,
   type InjectionOutcome,
   type LandingEvidence,
   nextReadinessStep,
-  occupiedComposer,
   paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
@@ -132,7 +132,8 @@ export class TmuxPaneDelivery {
         throw new PaneDeliveryError(`${step.reason}; tmux session ${session}`);
       // A composer holding typed input will never become ready by waiting, and the wait is long. Two
       // frames in a row, so a repaint caught halfway through clearing a submit is not mistaken for one.
-      const draft = step.kind === 'wait' ? occupiedComposer(frame) : undefined;
+      // Text parked behind Codex's startup wait is not a draft: Codex accepted it, so just keep waiting.
+      const draft = step.kind === 'wait' ? draftBlockingReadiness(frame) : undefined;
       occupied = draft === undefined ? 0 : occupied + 1;
       if (draft !== undefined && occupied >= 2)
         throw new ComposerOccupiedError(

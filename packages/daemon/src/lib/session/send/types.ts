@@ -234,6 +234,12 @@ export interface SendPaneObservation {
   /** A harness dialog the pane is parked on, in the words a person is shown for it. */
   readonly blockingPrompt?: string | undefined;
   /**
+   * Codex has accepted a submission and PARKED it until its startup ends (`paneShowsStartupWait`). The text
+   * is still drawn in the composer, but it is not a `draft` and nothing may press Enter into it: the pane
+   * is simply not ready yet, and a send arriving now is pending, not refused.
+   */
+  readonly startupParked?: boolean | undefined;
+  /**
    * Input already typed in the composer and not submitted. Anything typed now would be submitted
    * joined to it, so a send refuses rather than type.
    */
