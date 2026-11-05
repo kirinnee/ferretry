@@ -12,6 +12,10 @@
 import {
   type FleetCloneBundle,
   FleetCloneBundleSchema,
+  type FleetCloneReview,
+  type FleetCloneReviewRequest,
+  FleetCloneReviewRequestSchema,
+  FleetCloneReviewSchema,
   type FleetSetupScan,
   FleetSetupScanSchema,
   type FleetToolInstallRequest,
@@ -43,3 +47,19 @@ export const installFleetTools = async (
 /** The Clone bundle a source machine exports: no credential, no history. */
 export const readFleetExport = async (client: FleetClient): Promise<FleetCloneBundle> =>
   await client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema);
+
+export const FLEET_CLONE_REVIEW_PATH = '/v1/fleet/clone/review';
+
+/**
+ * What a copy from this source would change here, key by key for settings (design §5, §8b). Writes nothing. The
+ * answer's `fingerprint` is what the apply names, so the apply is refused if this machine has moved since.
+ */
+export const reviewFleetClone = async (
+  client: FleetClient,
+  request: FleetCloneReviewRequest,
+): Promise<FleetCloneReview> =>
+  await client.request(FLEET_CLONE_REVIEW_PATH, FleetCloneReviewSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(FleetCloneReviewRequestSchema.parse(request)),
+  });

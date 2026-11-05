@@ -10,6 +10,7 @@ import { describe, it } from 'bun:test';
 import type {
   FleetCloneBundle,
   FleetCloneReview,
+  FleetCloneReviewRequest,
   FleetSetupScan,
   FleetToolInstallRequest,
   FleetToolInstallResult,
@@ -66,11 +67,12 @@ interface Calls {
   exports: number;
   reviews: number;
   forgets: string[];
+  reviewed: { request: FleetCloneReviewRequest; governance: CallerGovernance | undefined }[];
   installs: { request: FleetToolInstallRequest; governance: CallerGovernance | undefined }[];
 }
 
 function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetSetupSubsystem; calls: Calls } {
-  const calls: Calls = { scans: 0, exports: 0, reviews: 0, forgets: [], installs: [] };
+  const calls: Calls = { scans: 0, exports: 0, reviews: 0, forgets: [], reviewed: [], installs: [] };
   return {
     calls,
     subsystem: {
@@ -86,8 +88,9 @@ function stub(overrides: Partial<FleetSetupSubsystem> = {}): { subsystem: FleetS
         calls.exports += 1;
         return BUNDLE;
       },
-      reviewClone: async () => {
+      reviewClone: async (body, governance) => {
         calls.reviews += 1;
+        calls.reviewed.push({ request: body, governance });
         return REVIEW;
       },
       forgetCloneSource: async source => {
@@ -184,6 +187,37 @@ describe('the fleet setup mount', () => {
     // Assert
     should(answer.status).equal(409);
     should(jsonBody(answer).code).equal('fleet_setup_refused');
+  });
+
+  it('should hand a clone review the caller governance and the settings documents, so each file can be checked for THEM', async () => {
+    const { subsystem, calls } = stub();
+    const settings = [
+      { path: 'warden.yaml', text: 'enabled: true\n' },
+      { path: 'controls', text: '{"agentPermissions":"auto"}' },
+    ];
+
+    const answered = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE, settings })),
+    );
+
+    should(answered.status).equal(200);
+    should(calls.reviewed[0]?.request.settings).deepEqual(settings as never);
+    should(calls.reviewed[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should refuse a review whose settings name a document a copy does not merge', async () => {
+    const { subsystem, calls } = stub();
+    for (const settings of [
+      [{ path: 'machine.yaml', text: 'agentPermissions: skip\n' }],
+      [{ path: '../../etc/passwd', text: '' }],
+      [{ path: 'warden.yaml', text: 'x', extra: 1 }],
+    ]) {
+      const bad = await dispatcher(subsystem).dispatch(
+        post('/v1/fleet/clone/review', JSON.stringify({ bundle: BUNDLE, settings })),
+      );
+      should(bad.status).equal(400);
+    }
+    should(calls.reviews).equal(0);
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {
