@@ -211,7 +211,7 @@ describe('the recipe card on the agenda', () => {
     for (let tries = 0; tries < 4; tries += 1) await settle();
 
     expect(view.container.querySelector('[data-recipe-settings]')?.getAttribute('href')).toBe(
-      `${daemonSettingsPath('workshop')}#accounts`,
+      `${daemonSettingsPath(connection.daemonId)}#accounts`,
     );
   });
 
