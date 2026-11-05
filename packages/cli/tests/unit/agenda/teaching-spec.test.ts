@@ -124,7 +124,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'log', taught: 'log <id> --reply|--rest' },
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
-  { verb: 'patch', taught: 'then `patch <id> --file f`' },
+  { verb: 'patch', taught: '→`patch <id> --file f`' },
   { verb: 'done', taught: 'mark it `done`' },
 ];
 
@@ -156,7 +156,7 @@ describe('the teaching names every agenda verb the spec lists', () => {
     // Assert
     should(prompt).not.containEql(stages.join('→'));
     should(prompt).not.containEql('`--stage`');
-    should(prompt).containEql('whole, then `patch');
+    should(prompt).containEql('whole→`patch');
   });
 
   it('should say a resting item is quiet, a Needs-you item buzzes, and rest --why means working', () => {
@@ -187,12 +187,12 @@ describe('the teaching says the tabs are the live document and the chat is its l
 
     // Assert
     should(prompt).containEql(
-      "asks/answers stack on the topic's one item: `show <id> --yaml` whole, then `patch <id> --file f`",
+      "asks/answers stack on the topic's one item: `show <id> --yaml` whole→`patch <id> --file f`",
     );
     // The owner on !A404: every unresolved ask stays floated; answered Q&A moves to a History tab.
     should(prompt).containEql('every open ask stays floated in premise (where we are) + ask (what i need)');
     should(prompt).containEql('answered q&a→`history` tab, oldest first, with answer');
-    should(prompt).containEql('tabs: any kind, serial stays one');
+    should(prompt).containEql('tabs by kind, serial stays one; steps/explainers stay.');
     should(prompt).containEql('chat points there');
     should(prompt).not.containEql('short status');
     should(prompt).not.containEql('one-screen summary');

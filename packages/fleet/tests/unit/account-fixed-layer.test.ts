@@ -824,7 +824,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // explainers stay in them.
     // And READ → EDIT (the owner: "we need to read to know what needs to be updated"): every part, the ask's too.
     should(text).containEql(
-      "Asks/answers stack on the topic's ONE item: `show <id> --yaml` whole, then `patch <id> --file f`; chat points there.",
+      "Asks/answers stack on the topic's ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there.",
     );
     should(text).not.containEql("rewrite all that's stale");
     // The owner on !A404: every unresolved ask stays floated in where-we-are and what-I-need; answered Q&A goes to a
@@ -832,7 +832,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       'EVERY open ask stays floated in premise (where we are) + ask (what I need); answered Q&A→`History` tab, oldest first, with answer.',
     );
-    should(text).containEql('Tabs: any kind, serial stays one.');
+    should(text).containEql('Tabs by kind, serial stays one; steps/explainers stay.');
     should(text).not.containEql('(main)');
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
@@ -840,9 +840,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).not.containEql('Type:');
     should(text).not.containEql('`--stage`');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
-    should(text).containEql(
-      'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
-    );
+    should(text).containEql('Chat: `log <id> --reply|--rest` logs their words verbatim; unsure→closest.');
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
@@ -886,7 +884,9 @@ describe('AGENDA_INSTRUCTION', () => {
     // runs (1,380, cap 1,390). Then 1,385 for the owner's float-open-asks rule (&F1166, !A404): asks and answers stack on
     // one item, every unresolved ask stays floated, answered Q&A goes to a History tab — paid for by dropping the
     // "rewrite all that's stale (…)" list and the tabs sentence's parenthesis, which the whole-prompt cap (8,000, 7,998
-    // measured) left no room to grow past.
+    // measured) left no room to grow past. Review then restored the owner's two tab rules (split by content kind, one
+    // tab per kind; steps and explainers stay in the tabs) as "Tabs by kind, serial stays one; steps/explainers stay.",
+    // paid for by "link it", "say so" and "then" (→): 1,383, the whole prompt 7,996.
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_390);
   });
 
