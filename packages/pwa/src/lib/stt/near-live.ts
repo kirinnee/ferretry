@@ -39,6 +39,9 @@
  */
 
 import { PARAKEET_SAMPLE_RATE } from './audio-capture.ts';
+import { FRAME_MS, frameLevels, hasSpeech, noiseFloor, quietThreshold } from './energy.ts';
+
+export { hasSpeech } from './energy.ts';
 
 /** One recognised word with its place in the audio, in seconds. */
 export interface TimedWord {
@@ -95,20 +98,10 @@ export const NEAR_LIVE_TIMING: NearLiveTiming = Object.freeze({
   backOffShare: 0.8,
 });
 
-/** Energy is measured in frames this long. */
-const FRAME_MS = 20;
 /** A quiet run at least this long is a pause a window may start in. */
 export const MIN_PAUSE_MS = 120;
 /** The next window starts this long before the voice resumes after a pause. */
 export const PRE_ROLL_MS = 180;
-/** The quietest a pause has to be, whatever the noise floor. */
-const QUIET_RMS = 0.004;
-/** Ambient noise raises the bar: quiet is under this multiple of the window's noise floor. */
-const NOISE_MULTIPLIER = 2.8;
-/** …but never so far that steady speech with no pause in the window reads as quiet. */
-const MAX_QUIET_RMS = 0.015;
-/** Below this RMS level a whole window is silence, not speech the model failed to hear. */
-const SPEECH_RMS = 0.005;
 /** Word times run early: a word timed to start this close before a pause ends belongs after it. */
 const WORD_SKEW_S = 0.15;
 /** At most this many re-heard committed words are dropped from the start of a window… */
@@ -157,15 +150,6 @@ export const joinWords = (...parts: readonly string[]): string =>
     .filter(Boolean)
     .join(' ');
 
-const rms = (samples: Float32Array, from: number, to: number): number => {
-  let energy = 0;
-  for (let index = from; index < to; index += 1) energy += (samples[index] as number) ** 2;
-  return to > from ? Math.sqrt(energy / (to - from)) : 0;
-};
-
-/** Whether some samples are loud enough to hold speech. */
-export const hasSpeech = (samples: Float32Array): boolean => rms(samples, 0, samples.length) >= SPEECH_RMS;
-
 /** A stretch of quiet audio, in samples: `[start, end)`. */
 export interface QuietRun {
   readonly start: number;
@@ -178,10 +162,8 @@ export interface QuietRun {
  */
 export function quietRuns(samples: Float32Array, from: number, to: number): QuietRun[] {
   const frame = msToSamples(FRAME_MS);
-  const levels: number[] = [];
-  for (let at = from; at + frame <= to; at += frame) levels.push(rms(samples, at, at + frame));
-  const floor = [...levels].sort((a, b) => a - b)[Math.floor(levels.length / 10)] ?? 0;
-  const quiet = Math.min(MAX_QUIET_RMS, Math.max(QUIET_RMS, floor * NOISE_MULTIPLIER));
+  const levels = frameLevels(samples, from, to, frame);
+  const quiet = quietThreshold(noiseFloor(levels));
   const minFrames = Math.ceil(MIN_PAUSE_MS / FRAME_MS);
   const runs: QuietRun[] = [];
   let runStart = -1;
