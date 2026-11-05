@@ -946,6 +946,8 @@ export function Composer({
     locating.current += 1;
     setLocation(null);
     setDraft(left);
+    // The box is empty again: what Live last showed is gone with it, so the emptying is not mistaken for typing.
+    if (left === '') liveWords.current = null;
     // The next message starts as text, not as commands.
     setVim(initialVimState);
     if (left === '') draftStore.clear(sentScope);
@@ -1468,6 +1470,11 @@ export function Composer({
         if (held !== null && held.shown === draftRef.current) put(held.base, held.base);
       },
       draft: () => draftRef.current,
+      typed: () => {
+        const held = liveWords.current;
+        const current = draftRef.current;
+        return held !== null && held.shown === current ? held.base : current;
+      },
       lastShown: () => liveWords.current?.shown ?? null,
       submit: () =>
         new Promise<boolean>(resolve => {

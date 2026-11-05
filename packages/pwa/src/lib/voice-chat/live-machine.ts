@@ -22,10 +22,15 @@
  *     attempt number advances, so a late answer from the cancelled attempt is ignored.
  *   - TYPING, HOLD AND A HIDDEN TAB each stop the auto-send and close the microphone; the words stay in the
  *     composer. If the words were still being worked out, the phase waits for them (`park`) so nothing said
- *     is lost — and that stop is STICKY: capture and level frames stop at once (`stopCapture`), renewed
+ *     is lost — and that includes a stop in the MIDDLE of a sentence (`hearing`): the turn is finished into the
+ *     same stop (`parkTurn`), its words worked out with no countdown and no send, then put in the box. The stop is STICKY: capture and level frames stop at once (`stopCapture`), renewed
  *     speech is ignored, and whatever the pending words turn out to be (words, nothing, a failure) the
  *     phase lands where the person put it, never back on listening and never on a send. NOTHING SENDS
  *     UNLESS THE VISIBLE COUNTDOWN ELAPSED IN AN UN-PARKED STATE.
+ *   - TYPING OUTLASTS THE REPLY: typing while `starting` holds at once; typing while `working` or `reading` sets
+ *     `typingHold` — the reply watch carries on, and when it lands Live goes to `hold` instead of reopening the
+ *     microphone. Only Resume forgets it. TEXT NOT PUT THERE BY LIVE (`typed` on the end-of-turn events) never
+ *     counts down: the turn parks on `hold`, so an unfinished typed draft never rides along with a voice send.
  *   - LISTENING NEEDS BOTH THE MICROPHONE AND THE LOCK: `starting` becomes `listening` only once the mic is
  *     open (`listening` event) AND the one-Live-tab lock is granted (`locks`); a refusal of the lock ends Live
  *     in any phase.
@@ -113,6 +118,11 @@ export interface LiveState {
   /** The voice came back during a countdown in this turn: a short burst afterwards ends it again. */
   readonly resumed: boolean;
   readonly park: Park | null;
+  /**
+   * The person typed while Live was starting, sending or working: nothing reopens the microphone or sends
+   * until they press Resume. It survives the reply (and its reading aloud) and ends only at Resume or Live's end.
+   */
+  readonly typingHold: boolean;
   readonly holdReason: HoldReason | null;
   readonly pauseReason: PauseReason | null;
   readonly notice: LiveNotice | null;
@@ -178,12 +188,14 @@ export type LiveEvent =
   | { readonly type: 'listening' }
   | { readonly type: 'blocked'; readonly block: LiveBlock }
   | { readonly type: 'speech-start' }
-  | { readonly type: 'speech-cancel'; readonly atMs: number }
+  | { readonly type: 'speech-cancel'; readonly atMs: number; readonly typed?: boolean }
   | {
       readonly type: 'turn-end';
       readonly atMs: number;
       readonly speechEndedAtMs: number;
       readonly reason: 'pause' | 'engine-hint' | 'max-turn';
+      /** The message box holds text Live did not put there: this turn's words never go by themselves. */
+      readonly typed?: boolean;
     }
   | { readonly type: 'live-words'; readonly text: string }
   | { readonly type: 'turn-words'; readonly attempt: number; readonly atMs: number; readonly text: string }
@@ -230,6 +242,7 @@ export const INITIAL_LIVE_STATE: LiveState = Object.freeze({
   sendInFlight: false,
   resumed: false,
   park: null,
+  typingHold: false,
   holdReason: null,
   pauseReason: null,
   notice: null,
@@ -315,6 +328,7 @@ function landOn(state: LiveState, target: Park, words: string, shown: boolean, n
  */
 function park(state: LiveState, target: Park): LiveStep {
   const stop: LiveEffect[] = [{ type: 'cancelCountdown' }, { type: 'cancelTimers' }];
+  if (state.phase === 'hearing') return parkTurn(state, target);
   if (state.phase === 'sending' && !state.wordsReady) {
     if (state.park !== null) return step(state);
     return step({ ...state, countdown: null, countdownElapsed: false, sendWhenReady: false, park: target }, [
@@ -323,6 +337,36 @@ function park(state: LiveState, target: Park): LiveStep {
     ]);
   }
   return step(landOn(state, target, state.words, state.shown, state.notice), [...stop, { type: 'closeMic' }]);
+}
+
+/**
+ * A stop in the middle of a spoken turn: what was said is NEVER thrown away. The turn is finished as if it had
+ * ended (its words are worked out) but with no countdown and no send, into a sticky stop that lands where the
+ * person put it; capture stops at once and the words go into the message box when they arrive.
+ */
+function parkTurn(state: LiveState, target: Park): LiveStep {
+  const attempt = state.attempt + 1;
+  const preview = state.words.trim() !== '';
+  const effects: LiveEffect[] = [{ type: 'cancelCountdown' }, { type: 'cancelTimers' }];
+  if (preview) effects.push({ type: 'showWords', text: state.words });
+  effects.push({ type: 'beginTurnWords', attempt }, { type: 'stopCapture' });
+  return step(
+    {
+      ...state,
+      phase: 'sending',
+      attempt,
+      shown: preview,
+      countdown: null,
+      countdownElapsed: false,
+      wordsReady: false,
+      wordsReadyAtMs: null,
+      sendWhenReady: false,
+      sendNow: false,
+      sendInFlight: false,
+      park: target,
+    },
+    effects,
+  );
 }
 
 /** Put the final words on screen and decide whether the send can go. */
@@ -347,7 +391,9 @@ function beginSend(state: LiveState, before: readonly LiveEffect[] = []): LiveSt
 }
 
 /** The end of a turn: start working out the words and the ring. */
-function endTurn(state: LiveState, atMs: number, speechEndedAtMs: number, reason: EndReason): LiveStep {
+function endTurn(state: LiveState, atMs: number, speechEndedAtMs: number, reason: EndReason, typed = false): LiveStep {
+  // Text Live did not put in the box is somebody's unfinished instruction: no countdown, no send — hold instead.
+  if (typed && reason !== 'user') return parkTurn(state, { phase: 'hold', reason: 'typing' });
   const attempt = state.attempt + 1;
   const zero = state.graceMs === 0;
   const effects: LiveEffect[] = [{ type: 'cancelTimers' }];
@@ -413,12 +459,34 @@ const reopen = (state: LiveState): LiveStep =>
       phase: 'starting',
       micReady: false,
       lockReady: true,
+      typingHold: false,
       holdReason: null,
       pauseReason: null,
       notice: null,
     },
     [{ type: 'openMic' }],
   );
+
+/** Resume from a stop that never had the one-Live-tab lock: the lock is asked for again with the microphone. */
+const restart = (state: LiveState): LiveStep =>
+  step(
+    {
+      ...state,
+      ...FRESH_TURN,
+      words: '',
+      phase: 'starting',
+      micReady: false,
+      lockReady: false,
+      typingHold: false,
+      holdReason: null,
+      pauseReason: null,
+    },
+    [{ type: 'acquireLocks' }, { type: 'openMic' }],
+  );
+
+/** The person typed while Live waited on the world: their stop stands until Resume, the mic stays shut. */
+const holdForTyping = (state: LiveState, effects: readonly LiveEffect[] = []): LiveStep =>
+  step({ ...state, ...FRESH_TURN, words: '', phase: 'hold', holdReason: 'typing', pauseReason: null }, effects);
 
 /** `starting` becomes `listening` only when the microphone is open AND the lock is ours. */
 function startedOrWaiting(state: LiveState): LiveStep {
@@ -470,6 +538,8 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
     }
 
     case 'starting': {
+      // Typing before the microphone is ready is a stop that stands: nothing listens or sends until Resume.
+      if (event.type === 'typing') return holdForTyping(state, [{ type: 'cancelTimers' }, { type: 'closeMic' }]);
       if (event.type === 'blocked') return toOff(state, { kind: 'blocked', block: event.block });
       if (event.type === 'locks') return startedOrWaiting({ ...state, lockReady: true });
       if (event.type === 'listening') return startedOrWaiting({ ...state, micReady: true });
@@ -484,6 +554,8 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
       return reduceSending(state, event);
 
     case 'working': {
+      // The reply watch carries on; only what happens when it lands changes.
+      if (event.type === 'typing') return step({ ...state, typingHold: true });
       if (event.type !== 'reply') return step(state);
       if (event.signal === 'needs-input')
         return step({ ...state, phase: 'hold', holdReason: 'needs-input', ...FRESH_TURN }, [
@@ -493,20 +565,26 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
       const stop: LiveEffect = { type: 'stopWatchReply' };
       if (state.hidden) return step({ ...state, phase: 'paused', pauseReason: 'hidden' }, [stop]);
       if (state.canRead) return step({ ...state, phase: 'reading' }, [stop, { type: 'speak' }]);
+      if (state.typingHold) return holdForTyping(state, [stop]);
       return step({ ...state, phase: 'starting', micReady: false, lockReady: true }, [stop, { type: 'openMic' }]);
     }
 
     case 'reading': {
+      if (event.type === 'typing') return step({ ...state, typingHold: true });
       if (event.type === 'speak-done' || event.type === 'skip')
-        return step({ ...state, phase: 'starting', micReady: false, lockReady: true }, [
-          { type: 'stopSpeaking' },
-          { type: 'openMic' },
-        ]);
+        return state.typingHold
+          ? holdForTyping(state, [{ type: 'stopSpeaking' }])
+          : step({ ...state, phase: 'starting', micReady: false, lockReady: true }, [
+              { type: 'stopSpeaking' },
+              { type: 'openMic' },
+            ]);
       return step(state);
     }
 
     case 'hold': {
-      if (event.type === 'resume') return reopen(state);
+      // The lock was still being asked for when a stop landed here: it is ours once it arrives.
+      if (event.type === 'locks') return step({ ...state, lockReady: true });
+      if (event.type === 'resume') return state.lockReady ? reopen(state) : restart(state);
       if (event.type === 'send-now' && state.holdReason !== 'needs-input')
         return beginSend({
           ...state,
@@ -521,19 +599,7 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
     }
 
     case 'paused': {
-      if (event.type === 'resume' && !state.hidden)
-        return step(
-          {
-            ...state,
-            ...FRESH_TURN,
-            words: '',
-            phase: 'starting',
-            micReady: false,
-            lockReady: false,
-            pauseReason: null,
-          },
-          [{ type: 'acquireLocks' }, { type: 'openMic' }],
-        );
+      if (event.type === 'resume' && !state.hidden) return restart(state);
       return step(state);
     }
   }
@@ -556,12 +622,14 @@ function reduceOpen(state: LiveState, event: LiveEvent): LiveStep {
       // A burst too short to be a turn. After a countdown was cancelled the earlier speech still stands.
       if (!hearing) return step(state);
       if (state.resumed && state.speechEndedAtMs !== null)
-        return endTurn(state, event.atMs, state.speechEndedAtMs, state.endReason ?? 'pause');
+        return endTurn(state, event.atMs, state.speechEndedAtMs, state.endReason ?? 'pause', event.typed === true);
       return step(toListening(state), [{ type: 'clearWords' }, idleTimer]);
     case 'live-words':
       return step({ ...state, words: event.text });
     case 'turn-end':
-      return hearing ? endTurn(state, event.atMs, event.speechEndedAtMs, event.reason) : step(state);
+      return hearing
+        ? endTurn(state, event.atMs, event.speechEndedAtMs, event.reason, event.typed === true)
+        : step(state);
     case 'send-now':
       return hearing ? endTurn(state, event.atMs, event.atMs, 'user') : step(state);
     case 'hold':

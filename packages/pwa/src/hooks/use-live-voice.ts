@@ -190,7 +190,8 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   useEffect(() => {
     const live = runnerRef.current;
     if (live === null || live.state.phase === 'off') return;
-    if (draft !== composer.lastShown()) live.typing();
+    // Nothing shown (or the box emptied by a send) expects an empty box: only a different text is a keystroke.
+    if (draft !== (composer.lastShown() ?? '')) live.typing();
   }, [draft]);
 
   // Live ends when it can no longer be offered (the composer was disabled, the session went), and with the page.

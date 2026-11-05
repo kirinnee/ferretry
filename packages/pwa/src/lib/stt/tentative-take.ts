@@ -66,6 +66,8 @@ interface Attempt {
   /** What the attempt learned, filled in as it runs. */
   readonly progress: { samples: number; discarded: boolean };
   readonly text: Promise<string>;
+  /** Settles (never rejects) once the recording was read for this attempt: after it the microphone is not needed. */
+  readonly snapshot: Promise<void>;
   readonly abort: AbortController;
 }
 
@@ -88,8 +90,8 @@ export class TentativeTranscriber {
     const relay = (): void => abort.abort();
     this.#outer.addEventListener('abort', relay, { once: true });
     const progress = { samples: 0, discarded: false };
-    const text = this.#ports
-      .peek()
+    const peeked = this.#ports.peek();
+    const text = peeked
       .then(heard => {
         progress.samples = heard.length;
         return this.#ports.transcribe(heard, abort.signal);
@@ -97,7 +99,15 @@ export class TentativeTranscriber {
       .finally(() => this.#outer.removeEventListener('abort', relay));
     // A rejection nobody awaits is not an error: `discard()` and a failed engine both end here quietly.
     text.catch(() => undefined);
-    const attempt: Attempt = { progress, text, abort };
+    const attempt: Attempt = {
+      progress,
+      text,
+      snapshot: peeked.then(
+        () => undefined,
+        () => undefined,
+      ),
+      abort,
+    };
     this.#attempt = attempt;
     return {
       text,
@@ -107,6 +117,14 @@ export class TentativeTranscriber {
         if (this.#attempt === attempt) this.#attempt = null;
       },
     };
+  }
+
+  /**
+   * Resolves once the live attempt has read the recording (at once when there is none). The microphone can be
+   * closed after that without losing the attempt's words: the decode that follows works on the snapshot alone.
+   */
+  snapshotTaken(): Promise<void> {
+    return this.#attempt?.snapshot ?? Promise.resolve();
   }
 
   /**

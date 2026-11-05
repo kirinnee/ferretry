@@ -749,6 +749,21 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   to nothing, or fail — Live lands on **On hold** / **Paused** with the microphone shut, never back on
   Listening and never on a send. The first stop stands: a later one does not change where it lands. The bar
   says "Getting your words…" with nothing to press until they land.
+- **A stop closes the microphone itself, at once.** Stopping capture also closes the take's own recording
+  (`TakeHandle.stopRecording` → the session's `closeCapture`): the early finish reads its snapshot first, then
+  the recorder stops and the tracks are released, while the model is still decoding. A slow or stuck decode can
+  no longer keep the person's microphone open; the words still arrive from the snapshot.
+- **A stop in the middle of a sentence keeps the sentence.** **Hold**, typing or a hidden tab pressed while you
+  are still speaking (before the pause that ends the turn) finish the turn into the same sticky stop: its words
+  are worked out with no countdown and no send, and they are put in the message box before Live lands on
+  **On hold** / **Paused**. Nothing said is thrown away.
+- **Typing is a hold that outlasts the reply.** Typing while Live is Starting holds it at once (the mic being
+  opened is closed). Typing while the ferret works (Working, or Reading when it exists) keeps watching for the
+  reply but remembers the hold: when the reply lands Live goes to **On hold**, does **not** reopen the mic, and
+  waits for **Resume**. Your draft is never touched, and nothing the room says can send it.
+- **Text you typed never rides along with a voice send.** If the message box holds any text Live did not put
+  there (typed before Live started, or since) when a countdown would start, the turn is not counted down: its
+  words are added after your text and Live goes **On hold**. Only **Send now** (your own press) sends them.
 - **Both the microphone and the lock before Listening.** The microphone and the one-tab Web Lock are asked for
   in parallel and Live listens only when both have answered; a refusal of the lock ends Live in any phase, so
   two tabs can never both capture and send. A lock granted after Live ended (End, the page leaving, a hidden
@@ -764,8 +779,10 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   typing and hiding the tab do nothing to it.
 - **Idle for 10 minutes ends Live** (`IDLE_END_MS`). It never turns itself back on.
 - **One Live tab:** it takes a Web Lock; a second tab says "Live is on in another tab". It asks for a Screen
-  Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. A hidden tab
-  **pauses** Live (mic closed) and resumes when visible.
+  Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. Hiding, showing
+  and Resume while a request is still pending share that one request; a grant that arrives after Live ended or
+  after a newer one replaced it is handed straight back, so End releases everything that was granted
+  (`wake-lock.ts`). A hidden tab **pauses** Live (mic closed) and resumes when visible.
 - **Buttons are at least 48 px tall on a phone and 44 px on a computer** (the harness measures them; the CSS
   outranks the app's coarse-pointer 44 px floor). On a phone **Hold** is the big round button only — there is no second one.
 - **The button is an icon** (44 px on a phone), and on a desktop it is **not drawn in a pane narrower than 300 px of row**
@@ -791,7 +808,8 @@ on-device engine). The words live in `lib/voice-chat/live-view.ts` (`LIVE_BLOCK_
 
 `lib/voice-chat/live-machine.ts` is a pure reducer `(state, event) → { state, effects }`, tested table-driven
 including every race (speech returning during the countdown, a late transcript for an old attempt, a failed
-send, typing while words are still being worked out, hiding the tab mid-send). `live-runner.ts` owns the I/O
+send, typing while words are still being worked out or while the ferret works, a stop in the middle of a sentence,
+hiding the tab mid-send). `live-runner.ts` owns the I/O
 through ports (`lib/voice-chat/ports.ts`: level frames, take, send, reply feed, wake lock, visibility, clock,
 mic lock) and drops every stale async answer by generation. `reply-feed.ts` counts a reply as finished only
 once `working` was seen or `turnStateAt` changed — never by comparing clocks.

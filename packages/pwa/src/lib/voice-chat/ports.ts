@@ -51,6 +51,12 @@ export interface TakeHandle {
   endTurn(): Promise<TakeOutcome>;
   /** The speaker is back: record on. Resolves once recording is open again (false: it could not be). */
   resume(): Promise<boolean>;
+  /**
+   * Close the microphone NOW and keep what was already asked for: the early finish's snapshot and its pending
+   * decode still answer `endTurn`. A decode that stalls can no longer leave the person's microphone open.
+   * Idempotent; after it the take cannot record on (`resume` answers false).
+   */
+  stopRecording(): void;
   /** Stop and forget everything, microphone included. Idempotent. */
   cancel(): void;
 }
@@ -89,6 +95,8 @@ export interface SendPort {
   clear(): void;
   /** What the box holds right now: what `send` will send. */
   shown(): string;
+  /** The text in the box that is NOT this turn's Live words: whatever a person typed, '' when there is none. */
+  typed(): string;
   send(): Promise<SendOutcome>;
 }
 

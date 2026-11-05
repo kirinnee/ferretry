@@ -478,3 +478,49 @@ describe('WhisperRecognitionSession — early finish', () => {
     should(w.transcribed.length).equal(0);
   });
 });
+
+describe('WhisperRecognitionSession — closing the microphone while the early finish decodes', () => {
+  it('stops the recording as soon as the snapshot is read, while the model is still decoding, and the words still arrive', async () => {
+    const w = await recordingWorld();
+    const pending = deferred<WhisperHeard>();
+    w.state.transcribe = (samples, signal) => {
+      w.transcribed.push({ samples, signal });
+      return pending.promise;
+    };
+    const take = w.session.beginFinish();
+    w.session.closeCapture();
+    await tick();
+    should(w.recording.stops).equal(1);
+    should(w.recording.peeks).equal(1);
+    should(w.transcribed.length).equal(1);
+    should(w.monitors.at(-1)).equal(null);
+    pending.resolve({ text: 'saved words', backend: 'wasm' });
+    should(await take?.text).equal('saved words');
+    should(w.session.beginFinish()).equal(null);
+  });
+
+  it('closes at once when no early finish is pending, once however often it is asked', async () => {
+    const w = await recordingWorld();
+    w.session.closeCapture();
+    w.session.closeCapture();
+    await tick();
+    should(w.recording.stops).equal(1);
+  });
+
+  it('does nothing before the microphone is open', async () => {
+    const w = world();
+    w.session.start();
+    w.session.closeCapture();
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.recording.stops).equal(0);
+  });
+
+  it('a recording that fails to stop is not an error', async () => {
+    const w = await recordingWorld();
+    w.recording.stop = () => Promise.reject(new Error('already gone'));
+    w.session.closeCapture();
+    await tick();
+    should(w.failures).deepEqual([]);
+  });
+});

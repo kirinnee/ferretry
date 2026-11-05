@@ -22,6 +22,7 @@ const bridge = (): LiveComposerBridge & { readonly shown: string[] } => {
     show: words => void shown.push(words),
     clear: () => void shown.push('<cleared>'),
     draft: () => shown.at(-1) ?? '',
+    typed: () => '',
     lastShown: () => shown.at(-1) ?? null,
     submit: async () => true,
   };

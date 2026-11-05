@@ -78,6 +78,8 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
   readonly #options: ParakeetSessionOptions;
   readonly #abort = new AbortController();
   #state: State = 'opening';
+  /** `closeCapture` released the microphone: no early finish starts after it. */
+  #captureClosed = false;
   #recording: Promise<AudioRecording> | null = null;
   #live: NearLiveTranscriber | null = null;
   #limitTimer: unknown = null;
@@ -106,13 +108,32 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
    * already re-read a window of their own.
    */
   beginFinish(): TentativeTake | null {
-    if (this.#state !== 'recording' || this.#live !== null) return null;
+    if (this.#state !== 'recording' || this.#captureClosed || this.#live !== null) return null;
     return this.#tentative.begin();
   }
 
   async #whenRecording(): Promise<AudioRecording> {
     if (this.#recording === null) throw new BrowserRecognitionError('aborted', 'Dictation has not started.');
     return await this.#recording;
+  }
+
+  /**
+   * Close the microphone now. An early finish in flight keeps working on the snapshot it took (the recording is
+   * released the moment that snapshot is read, not when the model is done), so a stalled decode cannot hold the
+   * person's microphone open. After this no new early finish starts.
+   */
+  closeCapture(): void {
+    if (this.#state !== 'recording' || this.#captureClosed) return;
+    this.#captureClosed = true;
+    this.#clearLimit();
+    this.#options.onMonitor?.(null);
+    void this.#tentative.snapshotTaken().then(async () => {
+      try {
+        await (await this.#whenRecording()).stop();
+      } catch {
+        // The recording ended on its own: nothing is left open.
+      }
+    });
   }
 
   /** Call synchronously from the reader's gesture: the permission prompt is attributed to it. */

@@ -139,6 +139,7 @@ describe('assembleLivePorts', () => {
       show: words => void calls.push(`show:${words}`),
       clear: () => void calls.push('clear'),
       draft: () => 'the box',
+      typed: () => 'typed first',
       lastShown: () => null,
       submit: async () => {
         calls.push('submit');
@@ -234,6 +235,7 @@ describe('assembleFromPage', () => {
       show: () => undefined,
       clear: () => undefined,
       draft: () => '',
+      typed: () => '',
       lastShown: () => null,
       submit: async () => true,
     },

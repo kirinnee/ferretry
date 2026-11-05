@@ -17,12 +17,14 @@ import type { LevelFrame } from '../../src/lib/voice-chat/turn-endpointer.ts';
 
 export interface FakeLive {
   readonly ports: LiveRunnerPorts;
-  readonly takes: { cancelled: boolean; endTurns: number }[];
+  readonly takes: { cancelled: boolean; stopped: boolean; endTurns: number }[];
   readonly listeners: TakeListener[];
   readonly shown: string[];
   readonly sends: number[];
   readonly log: string[];
   readonly lock: { granted: boolean };
+  /** The text in the box that Live did not put there (a person typed it): what `SendPort.typed` answers. */
+  readonly typed: { current: string };
   /** Advance the fake clock, firing due timers. */
   advance(ms: number): void;
   /** `ms` of speech (or quiet) as 20 ms frames. */
@@ -44,6 +46,7 @@ export const fakeLive = (): FakeLive => {
   const sends: number[] = [];
   const log: string[] = [];
   const lock = { granted: true };
+  const typed = { current: '' };
   const outcome = {
     current: { kind: 'words', text: 'Fix the bug.', raw: 'fix the bug', cleaned: true } as TakeOutcome,
   };
@@ -70,7 +73,7 @@ export const fakeLive = (): FakeLive => {
   const ports: LiveRunnerPorts = {
     take: {
       start: listener => {
-        const take = { cancelled: false, endTurns: 0 };
+        const take = { cancelled: false, stopped: false, endTurns: 0 };
         takes.push(take);
         listeners.push(listener);
         log.push('take.start');
@@ -81,6 +84,9 @@ export const fakeLive = (): FakeLive => {
             return outcome.current;
           },
           resume: async () => true,
+          stopRecording: () => {
+            take.stopped = true;
+          },
           cancel: () => {
             take.cancelled = true;
           },
@@ -98,6 +104,7 @@ export const fakeLive = (): FakeLive => {
       show: text => void shown.push(text),
       clear: () => void shown.push('<cleared>'),
       shown: () => shown.at(-1) ?? '',
+      typed: () => typed.current,
       send: async () => {
         sends.push(now);
         return sendResult.current;
@@ -146,6 +153,7 @@ export const fakeLive = (): FakeLive => {
     sends,
     log,
     lock,
+    typed,
     advance,
     hear: (rms, ms) => {
       for (let spent = 0; spent < ms; spent += 20) {

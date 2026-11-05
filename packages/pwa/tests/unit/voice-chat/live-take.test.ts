@@ -25,6 +25,7 @@ class FakeSession {
   cancelled = 0;
   finishes = 0;
   discarded = 0;
+  closedCaptures = 0;
   finishResult: Promise<string> = Promise.resolve('fix the bug');
   early: (() => TentativeTake | null) | null = null;
   startThrows: unknown = null;
@@ -44,6 +45,9 @@ class FakeSession {
   }
   beginFinish(): TentativeTake | null {
     return this.early === null ? null : this.early();
+  }
+  closeCapture(): void {
+    this.closedCaptures += 1;
   }
 }
 
@@ -441,6 +445,53 @@ describe('session callbacks', () => {
     const second = (sessions[1] as PlainSession).callbacks;
     second.onTranscript('late');
     should(events).deepEqual([]);
+  });
+});
+
+describe('closing the recording while the words are still being worked out', () => {
+  it("closes the session's capture at once, keeps the pending words, and once however often it is asked", async () => {
+    const { port, sessions, listener } = rig();
+    const take = port.start(listener);
+    const session = sessions[0] as FakeSession;
+    let answer: (text: string) => void = () => undefined;
+    session.early = () =>
+      earlyTake(
+        new Promise<string>(resolve => {
+          answer = resolve;
+        }),
+      );
+    const pending = take.endTurn();
+    take.stopRecording();
+    take.stopRecording();
+    should(session.closedCaptures).equal(1);
+    should(session.cancelled).equal(0);
+    answer('fix the bug');
+    should(await pending).deepEqual({ kind: 'words', text: 'Fix the bug.', raw: 'fix the bug', cleaned: true });
+  });
+
+  it('cannot record on afterwards: the voice coming back does not reopen anything', async () => {
+    const { port, sessions, listener } = rig();
+    const take = port.start(listener);
+    take.stopRecording();
+    should(await take.resume()).be.false();
+    should(sessions.length).equal(1);
+  });
+
+  it('an engine without a capture to close (it stopped recording when told to finish) has nothing to do', async () => {
+    const { port, sessions, listener } = rig({ plain: true });
+    const take = port.start(listener);
+    const pending = take.endTurn();
+    take.stopRecording();
+    should((sessions[0] as PlainSession).cancelled).equal(0);
+    should((await pending).kind).equal('words');
+  });
+
+  it('does nothing once the take is cancelled', () => {
+    const { port, sessions, listener } = rig();
+    const take = port.start(listener);
+    take.cancel();
+    take.stopRecording();
+    should((sessions[0] as FakeSession).closedCaptures).equal(0);
   });
 });
 

@@ -363,13 +363,21 @@ export class LiveRunner {
     const meter = this.#meter;
     this.#meter = null;
     meter?.release();
+    // The take's own recording closes too: a decode still pending must not keep the microphone open.
+    this.#handle?.stopRecording();
+  }
+
+  /** The message box holds text Live did not put there: an unfinished typed instruction never rides along with a voice send. */
+  #typed(): boolean {
+    return this.#ports.send.typed().trim() !== '';
   }
 
   /** The engine ended the take by itself: its own limit, or the browser gave up. */
   #takeEnded(): void {
     const { phase } = this.#state;
     const now = this.#ports.clock.now();
-    if (phase === 'hearing') this.dispatch({ type: 'turn-end', atMs: now, speechEndedAtMs: now, reason: 'max-turn' });
+    if (phase === 'hearing')
+      this.dispatch({ type: 'turn-end', atMs: now, speechEndedAtMs: now, reason: 'max-turn', typed: this.#typed() });
     else if (phase === 'listening') this.#resumeListening();
   }
 
@@ -384,7 +392,7 @@ export class LiveRunner {
           this.dispatch({ type: 'speech-start' });
           break;
         case 'speech-cancel':
-          this.dispatch({ type: 'speech-cancel', atMs: event.atMs });
+          this.dispatch({ type: 'speech-cancel', atMs: event.atMs, typed: this.#typed() });
           break;
         case 'turn-end':
           this.dispatch({
@@ -392,6 +400,7 @@ export class LiveRunner {
             atMs: event.atMs,
             speechEndedAtMs: event.speechEndedAtMs,
             reason: event.reason,
+            typed: this.#typed(),
           });
           // Keep listening for the voice coming back while the countdown runs.
           this.#endpointer = endpointerStart(this.#options.pauseMs, { floorLevels: this.#meter?.recent() ?? [] });
