@@ -25,7 +25,8 @@ export type RecipeCardPhase =
   | { readonly kind: 'open'; readonly view: RecipeProposalView }
   | { readonly kind: 'saving'; readonly view: RecipeProposalView; readonly decision: 'approve' | 'decline' }
   | { readonly kind: 'done'; readonly ok: boolean; readonly words: string }
-  | { readonly kind: 'failed'; readonly view: RecipeProposalView; readonly words: string };
+  /** `refused`: this device may not answer at all, so neither button can work; the words say where to answer. */
+  | { readonly kind: 'failed'; readonly view: RecipeProposalView; readonly words: string; readonly refused: boolean };
 
 export interface RecipeProposalCardProps {
   readonly phase: RecipeCardPhase;
@@ -108,6 +109,7 @@ export function RecipeProposalCard({
   }
 
   const busy = phase.kind === 'saving';
+  const refused = phase.kind === 'failed' && phase.refused;
   const where = placeTitle(view.signIn.place);
   return (
     <section className="flex min-w-0 flex-col gap-3" data-recipe-card="" data-recipe-state={state}>
@@ -142,7 +144,7 @@ export function RecipeProposalCard({
         <button
           className="kt-btn min-h-[44px]"
           data-recipe-decline=""
-          disabled={busy}
+          disabled={busy || refused}
           onClick={onDecline}
           type="button"
         >
@@ -152,7 +154,7 @@ export function RecipeProposalCard({
           className="kt-btn min-h-[44px] justify-center"
           data-recipe-approve=""
           data-variant="primary"
-          disabled={busy || view.kind !== 'ready'}
+          disabled={busy || refused || view.kind !== 'ready'}
           onClick={onApprove}
           type="button"
         >

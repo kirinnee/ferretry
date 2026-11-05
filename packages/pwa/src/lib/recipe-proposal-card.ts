@@ -13,6 +13,7 @@ import type {
   LoginRecipeProposal,
   SignInSummary,
 } from '@ferretry/protocol';
+import { grantRefusalNotice } from './grants.ts';
 
 export type RecipeProposalView =
   /** The proposal is waiting and was made against the recipe as it stands: Approve and Decline. */
@@ -50,11 +51,46 @@ export const RECIPE_UNREAD_WORDS =
   'Ferretry could not read this suggestion, so it cannot be answered here. Answer it in Settings › Accounts.';
 export const RECIPE_APPROVE_MEANS = 'Approving makes these the steps every ferret follows when it signs in here.';
 
-/** The daemon's refusal, in words the owner can act on; the daemon's own sentence when it gave one. */
-export function recipeDecideFailureWords(cause: unknown): string {
-  const code = typeof cause === 'object' && cause !== null && 'code' in cause ? cause.code : undefined;
-  if (code === 'stale_proposal') return RECIPE_STALE_WORDS;
-  if (code === 'unknown_proposal') return RECIPE_GONE_WORDS;
+export const RECIPE_REFUSED_WHERE =
+  'Answer it in Settings › Accounts on the machine, or run `fy account site recipe …` there.';
+
+/**
+ * What the owner may do next after the daemon would not take a decision.
+ * - `retry`: a transient failure (network, timeout, 5xx, a busy machine): both buttons stay, pressing one again is right.
+ * - `decline-only`: the recipe moved under the owner, so only Decline can still go through.
+ * - `refused`: this device is not allowed to answer (401/403 or a grant refusal): Approve and Decline travel the same
+ *   route and would be refused alike, so neither is drawn live, and the words say where to answer instead.
+ * - `gone`: the daemon no longer knows the proposal.
+ */
+export type RecipeDecideFailure =
+  | { readonly kind: 'retry'; readonly words: string }
+  | { readonly kind: 'decline-only'; readonly words: string }
+  | { readonly kind: 'refused'; readonly words: string }
+  | { readonly kind: 'gone'; readonly words: string };
+
+const fieldOf = (cause: unknown, key: 'code' | 'status'): unknown =>
+  typeof cause === 'object' && cause !== null && key in cause ? (cause as Record<string, unknown>)[key] : undefined;
+
+const REFUSAL_CODES: ReadonlySet<string> = new Set(['forbidden', 'not_permitted', 'unauthorized', 'owner_only']);
+
+/** Sorts a failed decision by what the owner can do about it; the daemon's own sentence is kept when it gave one. */
+export function classifyRecipeDecideFailure(cause: unknown): RecipeDecideFailure {
+  const code = fieldOf(cause, 'code');
+  if (code === 'stale_proposal') return { kind: 'decline-only', words: RECIPE_STALE_WORDS };
+  if (code === 'unknown_proposal') return { kind: 'gone', words: RECIPE_GONE_WORDS };
   const message = cause instanceof Error ? cause.message.trim() : '';
-  return message === '' ? 'That did not go through. Try again, or answer it in Settings › Accounts.' : message;
+  const status = fieldOf(cause, 'status');
+  if (
+    status === 401 ||
+    status === 403 ||
+    (typeof code === 'string' && REFUSAL_CODES.has(code)) ||
+    grantRefusalNotice(cause) !== null
+  ) {
+    const said = message === '' ? 'This device may not answer this.' : message;
+    return { kind: 'refused', words: `${said} ${RECIPE_REFUSED_WHERE}` };
+  }
+  return {
+    kind: 'retry',
+    words: message === '' ? 'That did not go through. Try again, or answer it in Settings › Accounts.' : message,
+  };
 }

@@ -1,6 +1,6 @@
 /**
  * The recipe card on the agenda (&F640): a ferret's proposed sign-in recipe, answered in chat with Approve and Decline.
- * Four states — ready, stale (Decline only), refused, and approved — on a phone and a desktop, light and dark.
+ * Six states — ready, standing rule, stale (Decline only), refused (both buttons off), network failure (both on), and approved — on a phone and a desktop, light and dark.
  *
  *   bun harness/recipe-proposal-card-screenshot.tsx [outDir]   # writes recipe-card-<theme>-<viewport>.png
  *
@@ -30,7 +30,7 @@ const run = (command: string, args: readonly string[]): void => {
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { RecipeProposalCard } from '../../src/features/input-request/recipe-proposal-card.tsx';
-import { RECIPE_APPROVED_WORDS } from '../../src/lib/recipe-proposal-card.ts';
+import { RECIPE_APPROVED_WORDS, RECIPE_REFUSED_WHERE } from '../../src/lib/recipe-proposal-card.ts';
 
 const AT = '2026-11-05T10:00:00.000Z';
 const account = { id: 'DEMO_GIT', label: 'Example Git', username: 'demo-user', fields: { password: true, totp: false }, factors: [], signIns: ['si_00000000000000a1'], createdAt: AT, updatedAt: AT };
@@ -51,7 +51,8 @@ const states = [
   ['Ready', { kind: 'open', view: ready }],
   ['Standing rule on this sign-in', { kind: 'open', view: ready }, withRule],
   ['Recipe changed since', { kind: 'open', view: stale }],
-  ['Refused by the machine', { kind: 'failed', view: ready, words: 'This device may not change accounts. Ask the owner to allow it in Settings › Devices.' }],
+  ['Refused by the machine', { kind: 'failed', view: ready, refused: true, words: 'This device may not change accounts. ' + RECIPE_REFUSED_WHERE }],
+  ['Network failed, try again', { kind: 'failed', view: ready, refused: false, words: 'Failed to fetch' }],
   ['Approved', { kind: 'done', ok: true, words: RECIPE_APPROVED_WORDS }],
 ];
 

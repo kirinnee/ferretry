@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { AccountListSchema, type AgendaRecipeProposalRef, type SignInRuleView } from '@ferretry/protocol';
 import { RecipeProposalCard } from '../../../src/features/input-request/recipe-proposal-card.tsx';
 import { RecipeProposalHost } from '../../../src/features/input-request/recipe-proposal-host.tsx';
+import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../../src/lib/pages/routes.ts';
 import {
@@ -10,7 +11,8 @@ import {
   RECIPE_GONE_WORDS,
   RECIPE_STALE_WORDS,
   RECIPE_UNREAD_WORDS,
-  recipeDecideFailureWords,
+  RECIPE_REFUSED_WHERE,
+  classifyRecipeDecideFailure,
   recipeProposalView,
 } from '../../../src/lib/recipe-proposal-card.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
@@ -88,10 +90,39 @@ describe('what a recipe card offers', () => {
     expect(recipeProposalView(list(), { ...REF, signIn: 'si_00000000000000ff' }).kind).toBe('gone');
   });
 
-  it('should word the daemon’s refusals', () => {
-    expect(recipeDecideFailureWords({ code: 'stale_proposal' })).toBe(RECIPE_STALE_WORDS);
-    expect(recipeDecideFailureWords({ code: 'unknown_proposal' })).toBe(RECIPE_GONE_WORDS);
-    expect(recipeDecideFailureWords(new Error('not allowed from this device'))).toBe('not allowed from this device');
+  it('should sort a failed decision by what the owner can do about it', () => {
+    expect(classifyRecipeDecideFailure({ code: 'stale_proposal' })).toEqual({
+      kind: 'decline-only',
+      words: RECIPE_STALE_WORDS,
+    });
+    expect(classifyRecipeDecideFailure({ code: 'unknown_proposal' })).toEqual({
+      kind: 'gone',
+      words: RECIPE_GONE_WORDS,
+    });
+    const refusal = (cause: unknown) => classifyRecipeDecideFailure(cause);
+    expect(refusal(new DaemonResponseError(403, 'This device may not change accounts.'))).toEqual({
+      kind: 'refused',
+      words: `This device may not change accounts. ${RECIPE_REFUSED_WHERE}`,
+    });
+    expect(refusal(new DaemonResponseError(401, '')).kind).toBe('refused');
+    expect(refusal(new DaemonResponseError(400, 'no', 'not_permitted')).kind).toBe('refused');
+    expect(refusal(new DaemonResponseError(403, 'no', 'grant_forbidden')).kind).toBe('refused');
+    expect(refusal(new DaemonResponseError(403, '')).words).toBe(
+      `This device may not answer this. ${RECIPE_REFUSED_WHERE}`,
+    );
+  });
+
+  it('should keep a transient failure retryable, in the daemon’s words when it gave any', () => {
+    expect(classifyRecipeDecideFailure(new Error('not allowed from this device'))).toEqual({
+      kind: 'retry',
+      words: 'not allowed from this device',
+    });
+    expect(classifyRecipeDecideFailure(new DaemonResponseError(503, 'machine busy')).kind).toBe('retry');
+    expect(classifyRecipeDecideFailure(new TypeError('Failed to fetch')).kind).toBe('retry');
+    expect(classifyRecipeDecideFailure('boom')).toEqual({
+      kind: 'retry',
+      words: 'That did not go through. Try again, or answer it in Settings › Accounts.',
+    });
   });
 });
 
@@ -184,6 +215,30 @@ describe('the recipe card on the agenda', () => {
 
     expect(card.q('[data-recipe-failed]')?.textContent).toBe(RECIPE_STALE_WORDS);
     expect((card.q('[data-recipe-approve]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('should take both buttons when this device is refused, and say where to answer', async () => {
+    const card = await draw({ failDecide: new DaemonResponseError(403, 'This device may not change accounts.') });
+
+    await click(card.q('[data-recipe-approve]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+
+    expect(card.q('[data-recipe-failed]')?.textContent).toBe(
+      `This device may not change accounts. ${RECIPE_REFUSED_WHERE}`,
+    );
+    expect((card.q('[data-recipe-approve]') as HTMLButtonElement).disabled).toBe(true);
+    expect((card.q('[data-recipe-decline]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('should keep both buttons for a failure that may pass, such as the network', async () => {
+    const card = await draw({ failDecide: new TypeError('Failed to fetch') });
+
+    await click(card.q('[data-recipe-approve]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+
+    expect(card.q('[data-recipe-failed]')?.textContent).toBe('Failed to fetch');
+    expect((card.q('[data-recipe-approve]') as HTMLButtonElement).disabled).toBe(false);
+    expect((card.q('[data-recipe-decline]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('should say the proposal is gone when the daemon no longer knows it at the moment of the answer', async () => {

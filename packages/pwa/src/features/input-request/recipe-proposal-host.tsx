@@ -16,8 +16,7 @@ import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import {
   RECIPE_APPROVED_WORDS,
   RECIPE_DECLINED_WORDS,
-  RECIPE_GONE_WORDS,
-  recipeDecideFailureWords,
+  classifyRecipeDecideFailure,
   recipeProposalView,
 } from '../../lib/recipe-proposal-card.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
@@ -36,9 +35,6 @@ export interface RecipeProposalHostProps {
   readonly offered?: boolean;
   readonly onDone?: () => void;
 }
-
-const codeOf = (cause: unknown): unknown =>
-  typeof cause === 'object' && cause !== null && 'code' in cause ? cause.code : undefined;
 
 const settled = (phase: RecipeCardPhase): boolean => phase.kind === 'saving' || phase.kind === 'done';
 
@@ -124,15 +120,16 @@ export function RecipeProposalHost({
         onDone?.();
       } catch (cause) {
         if (!mineStill()) return;
-        const code = codeOf(cause);
-        if (code === 'unknown_proposal') {
-          setPhase({ kind: 'done', ok: false, words: RECIPE_GONE_WORDS });
+        const failure = classifyRecipeDecideFailure(cause);
+        if (failure.kind === 'gone') {
+          setPhase({ kind: 'done', ok: false, words: failure.words });
           return;
         }
         inFlight.current = false;
         // A stale approval: the recipe moved under the owner, so Approve goes and only Decline stays.
-        const next = code === 'stale_proposal' ? { ...view, kind: 'stale' as const } : view;
-        setPhase({ kind: 'failed', view: next, words: recipeDecideFailureWords(cause) });
+        const next = failure.kind === 'decline-only' ? { ...view, kind: 'stale' as const } : view;
+        // A refusal this device cannot overcome takes both buttons; a transient failure keeps them for a retry.
+        setPhase({ kind: 'failed', view: next, words: failure.words, refused: failure.kind === 'refused' });
       }
     },
     [client, onDone, proposal, signIn],
