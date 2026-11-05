@@ -2142,6 +2142,35 @@ describe('CloneMachine · settings merged key by key', () => {
     }
   });
 
+  it('stays on the preview, copying nothing more, when this machine refuses the settings update', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget({
+        [REVIEW_PATH]: reviewing(),
+        '/v1/fleet/proposals': new FyHttpError(
+          'warden.yaml changed on this machine after it was reviewed; review it again',
+          409,
+          'fleet_change_stale',
+        ),
+      }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+      await click(submit(screen), 'Copy');
+
+      expect(screen.step()).toBe('preview');
+      expect(screen.text('[data-change-refusal]')).toContain('warden.yaml changed on this machine');
+      // Only the settings update was tried: no setup copy, no file written, and Copy is there to try again.
+      expect(changeKinds(calls.target)).toEqual(['clone.import']);
+      expect(putCalls(calls.target)).toEqual([]);
+      expect(submit(screen).disabled).toBe(false);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
   it('copies whole, as before, when this machine cannot review', async () => {
     const { calls, createClient } = daemons({ work: sourceFiles(), target: fullTarget() });
     const screen = await render({ createClient });

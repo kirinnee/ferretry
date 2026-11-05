@@ -331,6 +331,14 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
 
 // ── What a staged import or clone holds ──────────────────────────────────────────────────────────
 
+/** One settings file to write: the text, the version it was compared with, and the port's own way to write it. */
+interface ConfigWrite {
+  readonly path: string;
+  readonly text: string;
+  readonly etag: string;
+  readonly put: CloneConfigFiles['write'];
+}
+
 interface Composed {
   readonly model: AccountModel;
   readonly documents: readonly FleetDocumentWrite[];
@@ -341,7 +349,7 @@ interface Composed {
   /** What the person reviewed, so the apply runs that and nothing else. Holds no value. */
   readonly fingerprint: string;
   /** Configuration files the copy writes through the owner's door, each against the version it was compared with. */
-  readonly configWrites?: readonly { readonly path: string; readonly text: string; readonly etag: string }[];
+  readonly configWrites?: readonly ConfigWrite[];
   /** The copy turns what agents may control back on: the same passkey rule `machine.settings` has applies. */
   readonly widens?: boolean;
 }
@@ -599,16 +607,9 @@ export class FleetSetupService {
   }
 
   /** One settings file through `PUT /v1/config/file`'s semantics. Answers 1 when the write was held. */
-  async #writeConfigFile(
-    write: { readonly path: string; readonly text: string; readonly etag: string },
-    mayLoosen: boolean,
-  ): Promise<number> {
-    const files = this.deps.configFiles;
-    if (files === undefined) {
-      throw new FleetCatalogRefusal('fleet_change_refused', `This machine cannot write ${write.path} from a copy yet.`);
-    }
+  async #writeConfigFile(write: ConfigWrite, mayLoosen: boolean): Promise<number> {
     try {
-      return (await files.write(write.path, write.text, write.etag, mayLoosen)).outcome === 'pending' ? 1 : 0;
+      return (await write.put(write.path, write.text, write.etag, mayLoosen)).outcome === 'pending' ? 1 : 0;
     } catch (error) {
       if (error instanceof ConfigFileConflictError) {
         throw new FleetCatalogRefusal(
@@ -1070,11 +1071,13 @@ export class FleetSetupService {
         if (caller.governance.governed && !caller.freshStepUp) throw new FleetCatalogFreshStepUpRequired();
       }
     }
-    const configWrites: { path: string; text: string; etag: string }[] = [];
+    const configWrites: ConfigWrite[] = [];
+    const settingsFiles = this.deps.configFiles;
     for (const file of settingsPlan.files) {
       const etag = found.settings?.etags.get(file.path);
-      if (etag === undefined) continue;
-      const issues = (await this.deps.configFiles?.validate(file.path, file.text)) ?? [];
+      // A file with an etag was read through the port, so the port is there; the controls have neither.
+      if (etag === undefined || settingsFiles === undefined) continue;
+      const issues = await settingsFiles.validate(file.path, file.text);
       const broken = issues.filter(issue => issue.severity === 'error');
       if (broken.length > 0) {
         throw new FleetCatalogRefusal(
@@ -1085,7 +1088,7 @@ export class FleetSetupService {
             .join('; ')}. Nothing was changed.`,
         );
       }
-      configWrites.push({ path: file.path, text: file.text, etag });
+      configWrites.push({ path: file.path, text: file.text, etag, put: settingsFiles.write.bind(settingsFiles) });
     }
     const path = this.#cloneBasePath();
     const record =
@@ -1270,7 +1273,7 @@ export class FleetSetupService {
     documents: readonly FleetDocumentWrite[],
     secrets: readonly string[],
     timed: readonly string[] = [],
-    writes: readonly { readonly path: string; readonly text: string; readonly etag: string }[] = [],
+    writes: readonly Pick<ConfigWrite, 'path' | 'text' | 'etag'>[] = [],
   ): string {
     return this.deps.digest(
       JSON.stringify({

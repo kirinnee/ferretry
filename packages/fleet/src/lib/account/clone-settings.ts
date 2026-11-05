@@ -284,15 +284,13 @@ function merge(
   for (const [key, entry] of ordered) {
     const path = key.split('.');
     if (!entry.present) {
-      const trail: Record<string, unknown>[] = [];
+      // The mappings down to the key. A path that is not there (a parent already pruned, or a plain value in its
+      // place) leaves `at` undefined to the end, and there is then nothing to remove.
+      const trail: unknown[] = [];
       let at: unknown = merged;
       for (const segment of path.slice(0, -1)) {
-        if (!isPlainObject(at) || !Object.hasOwn(at, segment)) {
-          at = undefined;
-          break;
-        }
         trail.push(at);
-        at = at[segment];
+        at = isPlainObject(at) && Object.hasOwn(at, segment) ? at[segment] : undefined;
       }
       if (!isPlainObject(at)) continue;
       Reflect.deleteProperty(at, path.at(-1) as string);
@@ -342,16 +340,13 @@ function mergedText(
 const LOOSENING_JUDGED_LIMIT = 256;
 
 function analyseFile(input: CloneSettingsInput, known: Readonly<Record<string, string>> | undefined): FileAnalysis {
-  const theirs = (() => {
-    try {
-      return read(input.path, input.theirs, 'The');
-    } catch (error) {
-      if (error instanceof CloneRefusal) return error.message;
-      throw error;
-    }
-  })();
-  if (typeof theirs === 'string') {
-    return { input, rows: [], refused: theirs, theirsDigests: {}, root: {} };
+  let theirs: ReturnType<typeof read>;
+  try {
+    theirs = read(input.path, input.theirs, 'The');
+  } catch (error) {
+    // `read` refuses with a sentence; anything else is still a document this machine cannot take, never a crash.
+    const refused = error instanceof CloneRefusal ? error.message : `The ${input.path} could not be read.`;
+    return { input, rows: [], refused, theirsDigests: {}, root: {} };
   }
   if (isFileDoc(input.path) && findRawSecrets(theirs.root).length > 0) {
     return {
@@ -421,13 +416,7 @@ function withLoosening(
   return rows.map(row => {
     if (!KEY_CHOICES[row.outcome].includes('take')) return row;
     const taken = new Map([[row.key, { value: theirs.get(row.key), present: theirs.has(row.key) }]]);
-    let text: string;
-    try {
-      text = mergedText(path, input, root, taken);
-    } catch {
-      return row;
-    }
-    const sentences = looseningOf(path, input.effective, text);
+    const sentences = looseningOf(path, input.effective, mergedText(path, input, root, taken));
     return sentences === undefined ? row : { ...row, loosens: [...sentences].some(sentence => !already.has(sentence)) };
   });
 }

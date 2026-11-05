@@ -297,6 +297,25 @@ describe('clone settings: loosening is flagged per key', () => {
   });
 });
 
+describe('clone settings: a document with very many differing keys', () => {
+  const extra = (count: number): string =>
+    Array.from({ length: count }, (_, index) => `extra${String(index)}: ${String(index)}\n`).join('');
+
+  it('is not judged key by key past a few hundred: every key is flagged as loosening', () => {
+    const { review } = rowsOf(warden({ theirs: `${MINE}${extra(300)}` }), BASE_OF_MINE);
+    should(review.keys).have.length(300);
+    should(review.keys.every(row => row.loosens === true)).equal(true);
+  });
+
+  it('is refused outright past what a copy merges, naming the file and writing nothing', () => {
+    const analysis = analyseCloneSettings([warden({ theirs: `${MINE}${extra(2100)}` })], undefined);
+    const review = reviewCloneSettings(analysis)[0];
+    should(review?.refused).containEql('more than 2048 settings');
+    should(review?.keys).eql([]);
+    should(() => planCloneSettings(analysis, undefined)).throw(/Nothing was changed/);
+  });
+});
+
 describe('clone settings: the apply is refused until every both-changed key has a choice', () => {
   const mine = MINE.replace('intervalMinutes: 5', 'intervalMinutes: 7');
   const theirs = MINE.replace('intervalMinutes: 5', 'intervalMinutes: 10').replace(

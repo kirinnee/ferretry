@@ -44,7 +44,7 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import { ConfigFileConflictError } from '../../../src/lib/config-files/index.ts';
+import { ConfigFileConflictError, ConfigFileInvalidError } from '../../../src/lib/config-files/index.ts';
 import {
   type AccountDocumentReading,
   type ExecutorCaller,
@@ -2299,6 +2299,93 @@ intervalMinutes: 5
     should(refusal.message).containEql('warden.yaml');
   });
 
+  describe('a write that fails between the review and the write', () => {
+    /** A target whose file port fails the write with this error, as a file that moved or broke in that instant would. */
+    async function failing(error: Error) {
+      const own = files({ 'warden.yaml': WARDEN });
+      own.port.write = async () => {
+        throw error;
+      };
+      return { own, w: await copied(own) };
+    }
+    const take = { 'warden.yaml': { intervalMinutes: 'take' as const } };
+    const interval = () => [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+
+    it('should refuse as stale when the file moved, changing nothing else', async () => {
+      const { w } = await failing(new ConfigFileConflictError('warden.yaml'));
+      const refusal = await catalogRefusal(
+        apply(w, await sourceAt(), interval(), take, callerFor(REMOTE)),
+        'fleet_change_stale',
+      );
+      should(refusal.message).containEql('warden.yaml changed on this machine after it was reviewed');
+      should(w.applied).deepEqual([]);
+    });
+
+    it('should refuse naming the file when the write finds it does not check', async () => {
+      const { w } = await failing(
+        new ConfigFileInvalidError([
+          { path: 'warden.yaml', severity: 'error', message: 'intervalMinutes is wrong', fix: 'Use 5 or 10.' },
+        ]),
+      );
+      const refusal = await catalogRefusal(
+        apply(w, await sourceAt(), interval(), take, callerFor(REMOTE)),
+        'fleet_change_refused',
+      );
+      should(refusal.message).containEql('warden.yaml would not check on this machine, so it was not written');
+      should(refusal.message).containEql('intervalMinutes is wrong');
+      should(w.applied).deepEqual([]);
+    });
+
+    it('should let any other failure through as it is', async () => {
+      const broken = new Error('disk full');
+      const { w } = await failing(broken);
+      should(await thrown(apply(w, await sourceAt(), interval(), take, callerFor(REMOTE)))).equal(broken);
+      should(w.applied).deepEqual([]);
+    });
+  });
+
+  describe('what the confirm card says of a loosening', () => {
+    const loosening = [{ path: 'warden.yaml' as const, text: WARDEN.replace('jev: false', 'jev: true') }];
+    const describing = async (caller: ExecutorCaller): Promise<string> => {
+      const w = await copied(files({ 'warden.yaml': WARDEN }));
+      const bundle = await sourceAt();
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings: loosening }, caller.governance);
+      const change = request(bundle, {
+        reviewed: review.fingerprint,
+        decisions: {},
+        settings: loosening,
+        settingsDecisions: { 'warden.yaml': { 'layers.jev': 'take' } },
+      });
+      return await w.service.executors.clone.describe(change, caller);
+    };
+
+    it('should say a device away from the machine writes it but holds it until confirmed', async () => {
+      should(await describing(callerFor(REMOTE))).containEql(
+        'warden.yaml would loosen what studio may spend or do; it is written but held until you confirm it.',
+      );
+    });
+
+    it('should say at the machine it takes effect now', async () => {
+      should(await describing(callerFor(AT_THE_MACHINE))).containEql('you are at the machine, so it takes effect now.');
+    });
+  });
+
+  it('should refuse settings decisions when no settings were sent', async () => {
+    const w = await copied(files({ 'warden.yaml': WARDEN }));
+    const bundle = await sourceAt();
+    const review = await w.service.reviewClone({ bundle: bundle as never });
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' } },
+    });
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('Settings were decided, but no settings were sent');
+  });
+
   describe('the controls', () => {
     const controls = (patch: object) => [
       {
@@ -2348,6 +2435,34 @@ intervalMinutes: 5
       await apply(w, bundle, settings, decisions, callerFor(REMOTE, { freshStepUp: true }, spent));
       should(spent.count).equal(1);
       should(machineOf(w.applied[0]?.documents ?? []).agentControl.pageScripts).equal(true);
+    });
+
+    it('should refuse to widen what agents may control when the daemon cannot say what the caller may do', async () => {
+      const w = await copied(files({}));
+      const settings = controls({ agentControl: { pageScripts: true } });
+      const refusal = await catalogRefusal(
+        apply(
+          w,
+          await sourceAt(),
+          settings,
+          { controls: { 'agentControl.pageScripts': 'take' } },
+          callerFor(undefined),
+        ),
+        'fleet_change_refused',
+      );
+      should(refusal.message).containEql('cannot say whether this caller may widen what agents may control');
+      should(w.applied).deepEqual([]);
+    });
+
+    it('should refuse controls that would leave the machine with a setup it cannot read', async () => {
+      const w = await copied(files({}));
+      const settings = controls({ defaultRuntime: 'no-such-runtime' });
+      const refusal = await catalogRefusal(
+        apply(w, await sourceAt(), settings, { controls: { defaultRuntime: 'take' } }, callerFor(AT_THE_MACHINE)),
+        'fleet_change_refused',
+      );
+      should(refusal.message).containEql('would leave studio with a setup it cannot read');
+      should(w.applied).deepEqual([]);
     });
 
     it('should not ask at the machine, and never let a ferret widen', async () => {
