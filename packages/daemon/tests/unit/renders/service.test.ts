@@ -196,6 +196,15 @@ describe('RenderService quotas', () => {
     should(error.message).match(/1 GiB on this machine/u);
   });
 
+  it('should refuse past the machine’s count whoever asks', async () => {
+    const repository = new MemoryRenderRepository();
+    for (let n = 0; n < RENDER_QUOTAS.machineCount; n += 1) repository.metas.set(idOf(n), held(idOf(n), `s${n}`, 1));
+    const error = await refusal(renderService(repository).save(svg(), 'fresh'));
+
+    should(error.code).equal('quota_exceeded');
+    should(error.message).match(/20000 pictures on this machine/u);
+  });
+
   it('should not charge a repeated save against any quota', async () => {
     const repository = new MemoryRenderRepository();
     const service = renderService(repository);

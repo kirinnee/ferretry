@@ -4,7 +4,7 @@ import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { renderRoutes } from '../../../../src/lib/runtime/mounts/renders.ts';
-import { HTML, renderService, SVG } from '../../../support/renders.ts';
+import { HTML, MemoryRenderRepository, renderService, SVG } from '../../../support/renders.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FERRET_ARRIVAL, FERRET_SESSION, ferretOwn, human } from './support.ts';
 
@@ -156,6 +156,19 @@ describe('POST /v1/renders', () => {
   });
 });
 
+describe('a failure that is not the store’s refusal', () => {
+  it('should stay a server error instead of being reported as the caller’s fault', async () => {
+    const repository = new MemoryRenderRepository();
+    repository.failListing = true;
+    const routes = renderRoutes(renderService(repository));
+    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+
+    const response = await dispatcher.dispatch(request(save(circle)));
+
+    should(response.status).equal(500);
+  });
+});
+
 describe('GET /v1/renders/:id', () => {
   const html = { kind: 'html', alt: 'A page', payload: '<script>document.cookie</script><h1>Hi</h1>' };
 
@@ -243,6 +256,14 @@ describe('GET /v1/renders/:id', () => {
 });
 
 describe('GET /v1/renders/:id/meta', () => {
+  it('should answer 404 for a picture nothing holds', async () => {
+    const { dispatch } = fixture();
+    const response = await dispatch({ path: '/v1/renders/aaaaaa/meta', headers: human });
+
+    should(response.status).equal(404);
+    should(jsonBody(response).code).equal('render_not_found');
+  });
+
   it('should say which picture replaced this one, and never be cached', async () => {
     const { dispatch } = fixture();
     const first = jsonBody(await dispatch(save(circle))) as unknown as RenderSaveResponse;
