@@ -12,7 +12,7 @@ import sherpaWorkerUrl from '../src/worker/sherpa-worker.ts?worker&url';
 import voskWorkerUrl from '../src/worker/vosk-worker.ts?worker&url';
 import whisperWorkerUrl from '../src/worker/whisper-worker.ts?worker&url';
 import { ON_DEVICE_MODEL_IDS } from '../src/lib/stt/model-catalog.ts';
-import { parseSpeedBenchReport } from './report.ts';
+import { parseSpeedBenchReport } from '../src/lib/stt/speed-bench-report.ts';
 import { runBench } from './runner.ts';
 
 const element = <T extends HTMLElement>(id: string): T => {

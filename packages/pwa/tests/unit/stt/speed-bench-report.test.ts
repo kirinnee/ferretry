@@ -1,5 +1,5 @@
 /**
- * Proves the benchmark's data and arithmetic (`speed-bench/report.ts`): the result schema can hold timings and
+ * Proves the benchmark's data and arithmetic (`lib/stt/speed-bench-report.ts`): the result schema can hold timings and
  * nothing else, and the figures the docs quote are computed one way.
  */
 import { describe, it } from 'bun:test';
@@ -14,7 +14,7 @@ import {
   SPEED_BENCH_VERSION,
   syntheticClip,
   userAgentFamily,
-} from '../../speed-bench/report.ts';
+} from '../../../src/lib/stt/speed-bench-report.ts';
 
 const DEVICE = {
   userAgentFamily: 'Chrome',

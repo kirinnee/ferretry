@@ -24,7 +24,7 @@
  */
 
 import { z } from 'zod';
-import { ON_DEVICE_MODEL_IDS } from '../src/lib/stt/model-catalog.ts';
+import { ON_DEVICE_MODEL_IDS } from './model-catalog.ts';
 
 export const SPEED_BENCH_VERSION = 1;
 

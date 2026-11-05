@@ -3,7 +3,7 @@
  * the served app's real policy and hands back timings. Bundled by the driver; never part of the app.
  */
 import { runBench } from '../speed-bench/runner.ts';
-import { parseSpeedBenchReport } from '../speed-bench/report.ts';
+import { parseSpeedBenchReport } from '../src/lib/stt/speed-bench-report.ts';
 
 interface BenchWindow {
   __bench?: (options: Record<string, unknown>) => Promise<unknown>;

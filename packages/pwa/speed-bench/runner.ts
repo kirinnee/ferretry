@@ -5,7 +5,7 @@
  * For each engine and each path it starts a FRESH worker (so the load is a real cold load: read the
  * installed bytes, re-hash them, build the model), then decodes the same fixed 5 s clip several times,
  * then measures what an early finish leaves of the wait after a 1.5 s pause. What it returns is plain
- * timings (`speed-bench/report.ts`): no transcript text ever leaves this function.
+ * timings (`lib/stt/speed-bench-report.ts`): no transcript text ever leaves this function.
  *
  * It installs a model through the shipped store ONLY when `install` is true — that is a download the
  * person asked for by pressing the benchmark's button.
@@ -29,7 +29,7 @@ import {
   type SpeedBenchReport,
   syntheticClip,
   userAgentFamily,
-} from './report.ts';
+} from '../src/lib/stt/speed-bench-report.ts';
 import { threadsFor } from '../src/lib/stt/speed-plan.ts';
 import { TentativeTranscriber } from '../src/lib/stt/tentative-take.ts';
 import { trustedWorkerUrl } from '../src/lib/trusted-types.ts';
