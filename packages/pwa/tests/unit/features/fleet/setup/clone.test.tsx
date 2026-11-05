@@ -1857,8 +1857,11 @@ describe('CloneMachine · API keys and sign-ins', () => {
       const screen = await render({ createClient });
       try {
         await toPreview(screen);
-        expect(w.reviews).toHaveLength(1);
-        expect(w.reviews[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        // The settings review (key by key, PR 7) is a separate question; exactly one review asks about the keys.
+        const asking = w.reviews.filter(call => 'sourceSecrets' in (call.body as object));
+        expect(asking).toHaveLength(1);
+        expect(asking[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(asking[0]?.body).not.toHaveProperty('settings');
       } finally {
         await screen.view.unmount();
       }
