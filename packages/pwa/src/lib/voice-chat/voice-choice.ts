@@ -34,7 +34,7 @@ const fallbackRank = (voice: SpeakerVoice): number => (voice.local ? 0 : 2) + (v
 /**
  * The voice to speak `language` with. Never "whatever the browser would pick" — an unset voice can be a
  * remote one (Chrome's "Google …" default) and would send the reply away unannounced, so a voice is always
- * named: the best one in the language (the `preferred` one wins when it is still there and local); else
+ * named: the best one in the language (the `preferred` one — the voice the person picked in Settings — wins whenever it is still on the device, local or not); else
  * the device's own pick among the voices that stay on the device (it reads with a foreign accent, but it
  * reads in private); else, only when nothing local exists at all, the best remote one — which `voiceNote`
  * then says out loud. Null only when the device lists no voices (yet): the speaker then refuses to guess.
@@ -45,7 +45,7 @@ export const chooseVoice = (
   preferredId?: string,
 ): SpeakerVoice | null => {
   const preferred = voices.find(voice => voice.id === preferredId);
-  if (preferred?.local) return preferred;
+  if (preferred !== undefined) return preferred;
   let best: SpeakerVoice | null = null;
   let bestRank = Number.POSITIVE_INFINITY;
   for (const voice of voices) {

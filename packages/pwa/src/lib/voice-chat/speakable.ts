@@ -98,6 +98,18 @@ export const readingCapCharacters = (rate: number): number => {
   return Math.round(READING_CHARACTERS_PER_MINUTE * bounded);
 };
 
+/**
+ * The cap for a reading limited to `seconds` (null: no limit) at `rate`: a minute is
+ * `readingCapCharacters`, so 30 seconds is half of it. No limit leaves only the scan limit, which a
+ * reading never needs to go past.
+ */
+export const readingCapForSeconds = (rate: number, seconds: number | null): number =>
+  seconds === null
+    ? SCAN_LIMIT
+    : !Number.isFinite(seconds) || seconds <= 0
+      ? readingCapCharacters(rate)
+      : Math.max(1, Math.round((readingCapCharacters(rate) * seconds) / 60));
+
 interface Block {
   readonly kind: SpeakableKind;
   readonly text: string;

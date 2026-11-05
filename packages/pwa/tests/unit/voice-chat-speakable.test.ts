@@ -3,6 +3,7 @@ import {
   MORE_ON_SCREEN,
   READING_CHARACTERS_PER_MINUTE,
   readingCapCharacters,
+  readingCapForSeconds,
   sentencesOf,
   speakableSegments,
   speakInline,
@@ -190,6 +191,16 @@ describe('speakableSegments: a long reply', () => {
     const spoken = texts.slice(0, -1).join(' ').length;
     expect(spoken).toBeLessThanOrEqual(READING_CHARACTERS_PER_MINUTE);
     expect(spoken).toBeGreaterThan(READING_CHARACTERS_PER_MINUTE - 60);
+  });
+
+  test('a length in seconds scales the minute; no limit is the scan limit; nonsense is the minute', () => {
+    expect(readingCapForSeconds(1, 60)).toBe(900);
+    expect(readingCapForSeconds(1, 30)).toBe(450);
+    expect(readingCapForSeconds(2, 120)).toBe(3600);
+    expect(readingCapForSeconds(1, null)).toBeGreaterThan(readingCapForSeconds(2, 300));
+    for (const nonsense of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(readingCapForSeconds(1, nonsense)).toBe(900);
+    }
   });
 
   test('faster speech fits more into the same minute', () => {

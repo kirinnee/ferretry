@@ -39,6 +39,7 @@ import {
   type BrowserRecognitionSupport,
   browserRecognitionProvider,
 } from '../../lib/stt/browser-recognition.ts';
+import { type DeviceClass, type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-defaults.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
@@ -59,8 +60,8 @@ import {
   sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
 import { Badge, Textarea } from '../../shell/primitives.tsx';
+import { AutoReadSettings } from './auto-read-settings.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
-import { type DeviceClass, type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-defaults.ts';
 import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
 import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
 import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
@@ -445,6 +446,9 @@ export function DictationSettings({
           Dictation is disabled. Turn it on above whenever you want the microphone available again.
         </p>
       )}
+
+      {/* ---- hearing a reply: independent of dictation, so it stays whether dictation is on or off ---- */}
+      <AutoReadSettings />
 
       {!persisted && (
         <p className="text-meta leading-base text-warn" role="status">

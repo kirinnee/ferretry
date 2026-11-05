@@ -4,6 +4,7 @@ import { Pause, Play, Search } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
+import { AutoReadChip } from '../../components/auto-read-chip.tsx';
 import { CacheUpdating } from '../../components/cache-updating.tsx';
 import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
@@ -94,6 +95,7 @@ import { useSessionWorkspace } from '../../features/workspace/use-session-worksp
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
+import { useAutoRead } from '../../hooks/use-auto-read.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
@@ -112,11 +114,11 @@ import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
+import { useFormComposer } from '../agenda-form-send.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
-import { useFormComposer } from '../agenda-form-send.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { ChatTasksView } from '../board-chat-url.ts';
 import type { DaemonBoardStore } from '../board-store.ts';
@@ -929,6 +931,17 @@ export function SessionChatPage({
   const runtimeSwitchBusy = isPromptKnownBusy(session.state);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
+  // "Auto-read replies" (F137): off unless this device switched it on in Settings › Voice. It watches this
+  // conversation's turn and reads the reply aloud; a question is only ever read, never answered by voice.
+  const autoRead = useAutoRead({
+    scope: `${connection.daemonId}/${session.config.id}`,
+    entries,
+    turn,
+    turnStateAt: session.state.turnStateAt,
+    legacy: session.state.turnState === undefined,
+    question,
+    sendSignal: pinSignal,
+  });
   // The tool-permission prompt the agent's pane is parked on, answerable only while the session is live.
   const permissionRequest = TERMINAL_STATUSES.has(session.state.status) ? undefined : session.state.permissionRequest;
   // The harness's own dialog (hooks to review, a sign-in) — the same pane, so never beside a permission prompt.
@@ -1665,6 +1678,7 @@ export function SessionChatPage({
         <div className="fy-chat-input__column">
           {/* THE AGENDA: the drawer, the line and the "about" chip, all siblings above the composer, so the
               composer's own box never moves. */}
+          <AutoReadChip onStop={autoRead.stop} reading={autoRead.reading} />
           {agenda.above}
           {permissionRequest === undefined || !canControl ? null : (
             <ApprovalCard

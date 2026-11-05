@@ -100,9 +100,9 @@ describe('voice choice', () => {
     expect(chooseVoice([], 'de-DE', 'anything')).toBeNull();
   });
 
-  test('a remembered local voice wins; a remembered remote one does not beat a local one', () => {
+  test('a voice the person picked wins, local or remote; one that is gone falls back to the best', () => {
     expect(chooseVoice(voices, 'en-US', 'karen')?.name).toBe('Karen');
-    expect(chooseVoice(voices, 'en-US', 'g')?.name).toBe('Samantha');
+    expect(chooseVoice(voices, 'en-US', 'g')?.name).toBe('Google US English');
     expect(chooseVoice(voices, 'en-US', 'gone')?.name).toBe('Samantha');
   });
 

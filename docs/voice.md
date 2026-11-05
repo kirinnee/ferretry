@@ -456,7 +456,8 @@ Free voices **built into the device** (`speechSynthesis`): no paid or cloud voic
 - **Something else cancelling the speech** (another tab of the page, a browser extension) ends the reading as **Stopped** — the button
   does not stay on Stop forever. A cancel Ferretry itself caused (Stop, or a newer reading replacing this one) is told apart by a
   generation number and never reported twice.
-- **Rate** is 1.1 by default and always kept between 0.8 and 2.0 (a rate and voice picker arrive with the settings slice).
+- **Rate** is 1.1 by default and always kept between 0.8 and 2.0. The voice, rate and length are the device's own choices, made in
+  [Settings › Voice › Read replies aloud](#auto-read-replies-a-finished-turn-read-aloud); the Read aloud button uses them too.
 - **Chrome stops long speech** after about fifteen seconds, so each sentence is spoken as short pieces, one at a time
   (`speech-chunks.ts`); the captions still move one sentence at a time.
 - **iOS** only lets speech start from a tap. Read aloud starts inside the tap itself, and `SpeakerPort.unlock()` (a silent, zero-volume
@@ -475,6 +476,78 @@ Free voices **built into the device** (`speechSynthesis`): no paid or cloud voic
 over `speechSynthesis`, with the browser objects injected so every path is tested with a fake and no audio), `speech-chunks.ts`,
 `voice-choice.ts` (voice and rate, pure), `read-aloud.ts` (which message is being read and which sentence). `hooks/use-read-aloud.ts` is
 the composition point and `components/read-aloud.tsx` is the control and captions, drawn by `TranscriptTextRow` for assistant text.
+
+## Auto-read replies: a finished turn, read aloud
+
+The same reading, started by itself: when a ferret's turn ends, this device reads the reply. It is the second slice of live voice chat
+(F137) — "talk by typing, listen to answers". **Off by default**, and a device choice: Settings › This device › Voice › **Read replies
+aloud** (badge "This device"; the palette finds it by "read aloud", "voice chat", "hands-free", "auto-read"). Nothing is read unless the
+switch is on, and the microphone is never involved.
+
+### What is read
+
+`lib/voice-chat/reply-picker.ts` is pure and total (rows in, one pick out, never an exception).
+
+| The turn ended…                | Read                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| with text (`your-turn`)        | **Only the last message of the turn** — or every message of it, if "What to read" is "Every message"        |
+| with no text                   | "Done. No message." (a silent turn is not mistaken for a broken one)                                        |
+| waiting on you (`needs-input`) | The question, and its options numbered ("Options: one, Postgres; two, SQLite"). **Never answered by voice** |
+
+Never read: the person's own messages, **other ferrets' messages**, agenda and system rows, notices, thinking and tool calls (they are not
+assistant text at all), a message the ferret _sent to another ferret_, and Pack commands. The turn is what came after the person's last
+message, so a silent turn can never fall back to the previous turn's reply. Code, tables and pictures are described, not read (the
+speakable rules above), and one reading stops at the **longest reading** setting with "There's more on screen."
+
+### When a turn has "ended"
+
+`lib/voice-chat/auto-read.ts` is a small pure state machine over what the page can see; the clock is passed in, so every rule is a plain test.
+
+1. It follows a turn **it saw**: the daemon's `turnState` was `working` while the page was open, or this page just sent something. A
+   session already at `your-turn` when the page opens, or when the switch is turned on, reads nothing.
+2. It fires on the move to `your-turn` or `needs-input` with `turnStateAt` **later than the turn's start** — the old `your-turn` still
+   showing in the moment after a send is not the reply.
+3. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
+   nothing new before it reads.
+4. **Old daemon** (no `turnState`): it waits for 3 seconds with no new records and not working. That is a guess, and the setting says so.
+5. A turn that ends while the tab is **hidden** is not read when you come back.
+
+### What stops it
+
+A **tap anywhere**, **any key**, a new send from this page, the tab going to the background, leaving the conversation, switching the
+setting off, or the **Stop** button on the "Reading the reply" chip above the composer. The mic is off while it reads, so interrupting is
+by hand only. A tap or key stops only a reading the auto-reader started: pressing Read aloud on a message is not undone by that tap.
+One reading at a time — a new reading replaces any other.
+
+### The settings
+
+Kept in this browser under its own key, `fy-live-voice-v1` (`lib/voice-chat/live-settings.ts`): zod-parsed field by field, versioned,
+capped (a voice id is at most 200 characters), a bad field falls back by itself, a payload from another version is discarded, and
+refused storage keeps the choice in memory and says so. Nothing in it is a secret and no reply text is stored.
+
+| Setting           | Choices                                              | Default                  |
+| ----------------- | ---------------------------------------------------- | ------------------------ |
+| Auto-read replies | On / Off                                             | **Off**                  |
+| Voice             | the device's voices, or "Best voice for this device" | Best voice               |
+| Speed             | 0.8× – 2.0×                                          | 1.1×                     |
+| Longest reading   | 30 seconds · 1 · 2 · 5 minutes · No limit            | 1 minute                 |
+| What to read      | Last message of the turn · Every message             | Last message of the turn |
+
+The voice list groups voices **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as Chrome's
+"Google …" ones), and a remote voice is labelled "(sends text away)" and warns in words when chosen. **Preview voice** speaks one sentence
+with the chosen voice and speed. Free voices built into the device only: no paid or cloud voice and no new secret.
+
+### Accessibility
+
+State is always in words: the switch says **On**/**Off**, the chip says **Reading the reply** and how to stop, and a polite live region
+says only "Reading the reply" — never the reply itself, which the voice already says. Targets are 44 px; nothing moves (there is no
+animation to turn off); the settings carry no autofocus.
+
+### Where it lives
+
+`lib/voice-chat/` — `reply-picker.ts`, `auto-read.ts`, `live-settings.ts`. `hooks/use-auto-read.ts` is the composition point (one timer and a few
+document events), used by the chat page; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
+`features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice.
 
 ## Not built yet
 

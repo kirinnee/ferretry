@@ -75,3 +75,34 @@
     transition: background-color 120ms ease-out;
   }
 }
+
+/* THE "READING THE REPLY" CHIP (auto-read-chip.tsx): shown above the composer while a reply is read on its
+   own. Words say the state and how to stop; the button is a real 44px target. */
+.fy-auto-read {
+  align-items: center;
+  background: var(--accent-soft);
+  border: var(--stroke-control) solid var(--accent-border);
+  border-radius: var(--radius-control);
+  display: flex;
+  gap: var(--gap-md);
+  margin-bottom: var(--gap-md);
+  padding: var(--gap-sm) var(--flow-3);
+}
+.fy-auto-read-icon {
+  color: var(--accent-strong);
+  flex: none;
+}
+.fy-auto-read-words {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.fy-auto-read-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.fy-auto-read-hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
