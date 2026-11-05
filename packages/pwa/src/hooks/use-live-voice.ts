@@ -241,6 +241,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
         edited: text => {
           if (text !== (composer.lastShown() ?? '')) activeRunner(runnerRef)?.typing();
         },
+        composing: () => activeRunner(runnerRef)?.typing(),
         sending: outcome => activeRunner(runnerRef)?.personSent(outcome),
       }),
     [composer],
