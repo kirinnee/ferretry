@@ -322,6 +322,49 @@ describe('ContextMenu', () => {
       await view.cleanup();
     });
 
+    it('keeps the menu and scrim at the viewport point while a transformed ancestor keeps moving after the clamp (#B152)', async () => {
+      // The containing block travels with the scroll; the menu is already clamped to the top margin, so its placed
+      // point stops changing while the ancestor keeps moving: the measured frame must follow it anyway.
+      let ancestorTop = 0;
+      const original = HTMLElement.prototype.getBoundingClientRect;
+      HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+        const left = Number.parseFloat(this.style.left) || 0;
+        const top = (Number.parseFloat(this.style.top) || 0) + ancestorTop;
+        return {
+          left,
+          top,
+          right: left + 196,
+          bottom: top + 54,
+          width: 196,
+          height: 54,
+          x: left,
+          y: top,
+          toJSON: () => ({}),
+        };
+      };
+      try {
+        const view = await openInScroller();
+        const scrim = document.querySelector<HTMLElement>('button[aria-label="Close menu"]') as HTMLElement;
+        const scrollBy = async (triggerTop: number, parentTop: number) => {
+          view.moveTrigger(triggerTop);
+          ancestorTop = parentTop;
+          await interact(() => view.scroller.dispatchEvent(new Event('scroll')));
+        };
+
+        await scrollBy(-10, -40);
+        await scrollBy(-30, -60);
+
+        expect(view.state.closes).toBe(0);
+        // Clamped to the 8px margin both times, so the placed point did not change on the second move.
+        expect(view.menu.getBoundingClientRect().top).toBe(8);
+        expect(scrim.getBoundingClientRect().top).toBe(0);
+        expect(scrim.style.top).toBe('60px');
+        await view.cleanup();
+      } finally {
+        HTMLElement.prototype.getBoundingClientRect = original;
+      }
+    });
+
     it('closes when its container scrolls just after a wheel from the reader', async () => {
       const view = await openInScroller();
 

@@ -307,7 +307,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
   // right of the click or off screen (#B152). So read where the menu actually sits against where it was put, and
   // shift by the difference: the menu then opens at the viewport point it clamped to, whatever it is inside of.
   const [frame, setFrame] = useState<ScrollPoint>(NO_SHIFT);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the placed point changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the placed point changes, and while scroll-follow keeps moving the containing block after the clamp has stopped moving the point
   useLayoutEffect(() => {
     const element = menuRef.current;
     if (!open || !element || position === null) return;
@@ -318,7 +318,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
       y: Math.round(rect.top - (Number.parseFloat(element.style.top) || 0)),
     };
     setFrame(current => (current.x === next.x && current.y === next.y ? current : next));
-  }, [open, position?.left, position?.top]);
+  }, [open, position?.left, position?.top, shift.x, shift.y]);
 
   // Move DOM focus to the active item once it is on screen (positioned). Keyed
   // on the boolean rather than on the derived object, which is new every render.
