@@ -11,6 +11,7 @@ import {
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
   type CatalogInstallState,
+  CATALOG_INSTALLS_DUPLICATE_INSTALL,
   CATALOG_INSTALLS_UNPINNED_LINK,
   CatalogInstallStateError,
   CatalogInstallStateV1Schema,
@@ -242,5 +243,68 @@ describe('FileCatalogInstallStore', () => {
     // Assert
     should(await store.read()).deepEqual(v2);
     should(CatalogInstallStateV1Schema.safeParse(JSON.parse(text)).success).be.false();
+  });
+
+  it('should refuse to write a version 2 state its own reader would refuse, leaving the version 1 file and making no backup', async () => {
+    // Arrange: a version 1 file, then a state that repeats an install id
+    const { store, file, directory } = await fixture();
+    const sha256 = 'a'.repeat(64);
+    const install = {
+      installId: `cin_${'i'.repeat(22)}`,
+      installedAt: '2026-10-31T09:00:00.000Z',
+      provenance: {
+        publisher: `fy_daemon_${'A'.repeat(43)}`,
+        publisherName: 'kirin-box',
+        catalogId: `cat_${'c'.repeat(22)}`,
+        catalogName: "Kirin's catalog",
+        itemId: `itm_${'s'.repeat(22)}`,
+        kind: 'skill',
+        name: 'pdf-tools',
+        version: 1,
+        digest: `sha256:${sha256}`,
+      },
+      target: { scope: 'project', projectRoot: '/srv/app', harness: 'claude' },
+      destination: '/srv/app/.claude/skills/pdf-tools',
+      key: 'project:/srv/app/.claude/skills/pdf-tools',
+      root: '/srv/app',
+      folder: '.claude/skills/pdf-tools',
+      files: [{ path: 'SKILL.md', sha256 }],
+      secretBindings: {},
+    };
+    await store.write(SOME_STATE);
+    const old = await readFile(file, 'utf8');
+    const state = {
+      ...SOME_STATE,
+      schemaVersion: 2,
+      installs: [install, { ...install, key: 'project:/srv/app/.claude/skills/other', folder: '.claude/skills/other' }],
+      linkSequences: {},
+    } as unknown as CatalogInstallState;
+
+    // Act
+    const error = await store.write(state).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(error).be.instanceOf(CatalogInstallStateError);
+    should((error as Error).message).equal(
+      `${CATALOG_INSTALLS_DOCUMENT} would not be readable (${CATALOG_INSTALLS_DUPLICATE_INSTALL}), so nothing was written`,
+    );
+    should(await readFile(file, 'utf8')).equal(old);
+    should(await readdir(directory)).not.containEql(CATALOG_INSTALLS_V1_BACKUP);
+  });
+
+  it('should say so in generic words when the state to write is not a record of installs at all', async () => {
+    const { store } = await fixture();
+    const state = { ...SOME_STATE, schemaVersion: 2, linkSequences: {}, extra: 1 } as unknown as CatalogInstallState;
+
+    const error = await store.write(state).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    should(error).be.instanceOf(CatalogInstallStateError);
+    should((error as Error).message).containEql('it is not a record of installs this daemon writes');
   });
 });
