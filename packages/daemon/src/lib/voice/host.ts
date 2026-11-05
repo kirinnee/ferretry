@@ -178,6 +178,14 @@ export class VoiceWorkerHost {
         { ...this.envelope(), type: 'load', recognizers: this.recognizers },
         VOICE_LOAD_MS,
       );
+      // The load reply can resolve this promise and a following step (a queued cancel failing to send, the child
+      // exiting) can abort before this continuation runs; committing then would resurrect a loaded state with no child.
+      if (generation !== this.generation || this.closed || this.child !== child) {
+        if (!outcome.ok) return outcome;
+        return this.closed
+          ? fail('voice_cancelled', 'Speech worker is shutting down.')
+          : fail('worker_crashed', 'Speech worker exited during startup.');
+      }
       this.loaded = outcome.ok;
       if (!outcome.ok) this.abort(outcome);
       // Every stream may have been cancelled while the child was starting: nothing else would reap it then.
@@ -192,10 +200,7 @@ export class VoiceWorkerHost {
   private enqueue(request: VoiceWorkerRequest, timeout?: number): Promise<VoiceOutcome<string>> {
     return new Promise(resolve => {
       const job: Job = { request, resolve };
-      if (timeout !== undefined)
-        job.timer = this.ports.clock.after(timeout, () => {
-          this.abort(fail('engine_timeout', 'Speech worker did not answer before its deadline.'));
-        });
+      if (timeout !== undefined) job.timer = this.deadline(timeout);
       this.queue.push(job);
       this.pump();
     });
@@ -204,11 +209,18 @@ export class VoiceWorkerHost {
     if (this.active !== undefined || this.child === undefined) return;
     this.active = this.queue.shift();
     if (this.active === undefined) return;
+    // A cancel exchange is bounded from the moment it is sent, not from enqueue: waiting behind a decode is not a fault.
+    if (this.active.request.type === 'cancel') this.active.timer = this.deadline(VOICE_FINISH_MS);
     try {
       this.child.send(this.active.request);
     } catch {
       this.abort(fail('worker_crashed', 'Speech worker IPC disconnected.'));
     }
+  }
+  private deadline(ms: number): { cancel(): void } {
+    return this.ports.clock.after(ms, () => {
+      this.abort(fail('engine_timeout', 'Speech worker did not answer before its deadline.'));
+    });
   }
   private receive(raw: unknown): void {
     const parsed = VoiceWorkerResponseSchema.safeParse(raw);

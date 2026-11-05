@@ -95,8 +95,8 @@ function fixture(options: { memory?: number; failMemory?: boolean; failSpawn?: b
     reply,
     open,
     errors,
-    throwSend: () => {
-      throwSend = true;
+    throwSend: (value = true) => {
+      throwSend = value;
     },
     holdStop: (promise: Promise<void>) => {
       holdStop = promise;
@@ -521,5 +521,112 @@ test('empty audio creates no queue jobs while a decode is pending', async () => 
   expect(f.sent).toHaveLength(2);
   f.reply();
   await active;
+  await f.subject.close();
+});
+
+test('a load reply followed by a failed queued cancel never resurrects a loaded state without a child', async () => {
+  // Arrange
+  const f = fixture();
+  const opening = f.subject.open('one', 'one', e => f.errors.push(e));
+  await turns();
+  f.subject.cancel('one');
+  // Act: the load reply releases the queue, the queued cancel cannot be sent, and the host aborts before warm resumes
+  f.throwSend();
+  f.reply();
+  // Assert
+  expect(await opening).toMatchObject({ ok: false, code: 'worker_crashed' });
+  expect(f.subject.status().state).toBe('idle');
+  expect(f.workers[0]?.stopped).toBe(1);
+  f.throwSend(false);
+  expect(await f.open('two', 'two')).toMatchObject({ ok: true });
+  expect(f.workers).toHaveLength(2);
+  await f.subject.close();
+});
+
+test('a load reply immediately followed by the child exiting leaves the host unloaded so the next open respawns', async () => {
+  // Arrange
+  const f = fixture();
+  const opening = f.subject.open('one', 'one', e => f.errors.push(e));
+  await turns();
+  // Act
+  f.reply();
+  f.workers[0]?.handlers.exited('gone');
+  // Assert
+  expect(await opening).toMatchObject({ ok: false, code: 'worker_crashed' });
+  expect(f.subject.status().state).toBe('idle');
+  expect(await f.open('two', 'two')).toMatchObject({ ok: true });
+  expect(f.workers).toHaveLength(2);
+  await f.subject.close();
+});
+
+test('a direct cancel with no reply stops the worker after the finish deadline and frees admission', async () => {
+  // Arrange
+  const f = fixture();
+  await f.open('a', 'phone');
+  await f.open('b', 'tablet');
+  // Act
+  f.subject.cancel('a');
+  expect(f.sent.at(-1)).toMatchObject({ type: 'cancel', streamId: 'a' });
+  expect(await f.subject.open('c', 'laptop', () => {})).toMatchObject({ code: 'voice_busy' });
+  f.clock.advance(VOICE_FINISH_MS - 1);
+  expect(f.workers[0]?.stopped).toBe(0);
+  f.clock.advance(1);
+  // Assert
+  expect(f.workers[0]?.stopped).toBe(1);
+  expect(f.subject.status().state).toBe('idle');
+  expect(await f.open('c', 'phone')).toMatchObject({ ok: true });
+  await f.subject.close();
+});
+
+test('a cancel queued behind a decode gets its deadline when it is sent, not when it was enqueued', async () => {
+  // Arrange
+  const f = fixture();
+  await f.open('a', 'phone');
+  await f.open('b', 'tablet');
+  const audio = f.subject.audio('a', new Float32Array(1));
+  f.clock.advance(VOICE_FINISH_MS - 1000);
+  f.subject.cancel('a');
+  await audio;
+  f.clock.advance(VOICE_FINISH_MS - 1000 - 1);
+  // Act: the decode finishes late; only now is the cancel sent
+  f.reply();
+  expect(f.sent.at(-1)).toMatchObject({ type: 'cancel', streamId: 'a' });
+  f.clock.advance(VOICE_FINISH_MS - 1);
+  // Assert
+  expect(f.workers[0]?.stopped).toBe(0);
+  f.clock.advance(1);
+  expect(f.workers[0]?.stopped).toBe(1);
+  await f.subject.close();
+});
+
+test('a cancel after an audio reply is bounded while another stream stays open', async () => {
+  // Arrange
+  const f = fixture();
+  await f.open('a', 'phone');
+  await f.open('b', 'tablet');
+  const audio = f.subject.audio('a', new Float32Array(1));
+  f.reply();
+  await audio;
+  // Act
+  f.subject.cancel('a');
+  f.clock.advance(VOICE_FINISH_MS);
+  // Assert
+  expect(f.workers[0]?.stopped).toBe(1);
+  await f.subject.close();
+});
+
+test('a cancel answered in time sets no abort', async () => {
+  // Arrange
+  const f = fixture();
+  await f.open('a', 'phone');
+  await f.open('b', 'tablet');
+  // Act
+  f.subject.cancel('a');
+  f.reply();
+  f.clock.advance(VOICE_FINISH_MS * 2);
+  // Assert
+  expect(f.workers[0]?.stopped).toBe(0);
+  expect(f.errors).toHaveLength(1);
+  expect(await f.open('c', 'phone')).toMatchObject({ ok: true });
   await f.subject.close();
 });
