@@ -110,8 +110,8 @@ briefs its ferrets with today. kloop itself is seen through kautopilot's descrip
 
 ### 1.2 The loop
 
-A **loop** is one subject under review: a PR at a head commit (`build`), or an agenda item's spec tabs
-at a version (`spec`, presented by Part 2).
+A **loop** is one subject under review: a PR at a head commit (`build`), or a spec at a revision
+(`spec`; Part 2 presents it).
 
 A build loop can open before its PR exists (Part 2 starts one when a card enters In progress). It then
 waits in **`building`** — no round, no count — until a PR is linked to the card and is out of draft;
@@ -150,6 +150,11 @@ stateDiagram-v2
 - **Nothing merges.** `ready` is the end; the owner merges, as today.
 - **A rebase or a new base is not a new loop**, and never resets the round count. An open round is
   bound to a head; a new head before it closes marks it `superseded`, not failed.
+- **A spec has revisions the way a PR has heads.** Every spec draft is an immutable **revision** in the
+  loop store (`fy loop draft`), written by the spec writer or a fixer; nothing is shown to anybody.
+  Reviewers review a revision, a spec fixer submits the next one and resolves with `--fixed-rev <n>`,
+  and a re-check reads the diff between the two. Only `present` shows a revision that passed review:
+  to the owner on the card's agenda (2.4), or to the lead for an internal card.
 - **Bound to a head needs the head.** The board's PR cache records state, draft, aggregate checks and
   `mergeSha` (null until merged) — not the head commit. Slice 1.2 adds the head SHA to each PR
   observation, and the checks it was read with, so `ready` means "the grid passed on head X **and** CI
@@ -281,9 +286,10 @@ every lead runs the same loop with the same words.
 ```text
 Loop     { id, kind: build|spec, card, subject, state, round, cap, policyVersion,
            driver?: sessionId, createdAt, endedAt?, endReason? }
-Subject  { kind: 'pr', url, base, head } | { kind: 'agenda', itemId, version }
-       | { kind: 'spec', loop, version }   a loop-owned spec, for internal cards (2.1)
-SpecVersion { loop, version, tabs: { Spec, Plan }, at, approvedBy? }   whole snapshots, loop store
+Subject  { kind: 'pr', url, base, head } | { kind: 'spec', loop, revision }
+SpecRevision { loop, revision, tabs: { Spec, Plan }, by, at,
+               presented?: { at, agendaItem?, agendaVersion? }, approvedBy? }
+               immutable whole snapshots in the loop store, for every spec loop
 Round    { n, type: full|recheck|security|shots, reviewers: sessionId[], scope, openedAt,
            closedAt?, verdict?, supersededBy? }
 Finding  { id: <loop>/<n>, round, the 1.4 fields, outcome (computed), status:
@@ -301,13 +307,14 @@ Policy   { grid[impact][likelihood] → outcome, rules, caps }   from config/loo
 | `docs/loops.md`                        | the contract, written by slice 1.2; board.md, agenda.md and pack-mode.md link to it                                                                                                                                     |
 
 ```text
-fy loop start <card> --kind build --pr <url> | --kind spec --agenda !A412
+fy loop start <card> --kind build [--pr <url>] | --kind spec
 fy loop next [<loop>] [--json]                  the next step (above)
 fy loop findings <loop> --file f.yaml | --pass  one reviewer's verdict for the open round
-fy loop resolve <finding> --fixed <sha> | --known-limit --test <path> | --drop "<why>"
+fy loop resolve <finding> --fixed <sha> | --fixed-rev <n> | --known-limit --test <path> | --drop "<why>"
 fy loop reject <finding> --why "<reason>"       lead or owner only
-fy loop present <loop> --tab Spec=f.md --tab Plan=g.md [--internal]   a new spec version (2.4)
-fy loop approve <loop> --version N            internal cards only: the lead approves (2.1)
+fy loop draft <loop> --tab Spec=f.md --tab Plan=g.md   a new immutable spec revision, not shown to anyone
+fy loop present <loop> --revision N             show a reviewed revision: the card's agenda, or the lead (2.4)
+fy loop approve <loop> --revision N             internal cards only: the lead approves (2.1)
 fy loop show <loop> [--yaml|--json]             rounds, grid, open findings
 fy loop ls [--card F134] [--open]
 ```
@@ -391,10 +398,10 @@ Today's rules this part keeps, unchanged:
   private or not — is **external** and its gates ask the owner. An internal card gets no card ask; its
   owner ferret and that ferret's leads pass its gates (board.md › Authority). This part keeps that: a
   spec loop on an internal card presents to the **lead**, with no agenda at all. Its subject is a
-  **loop-owned spec** (1.7): `fy loop present --internal` stores each version as a whole snapshot in the
-  loop store, `fy loop show --version N` prints it, and the lead approves with
-  `fy loop approve <loop> --version N`, which moves the card out of Plan/Design (the lead's authority on
-  an internal card) and records "approved v N by <lead>"; 2.7 then reads that version. Everything
+  **loop-owned spec** (1.7): `present` marks a reviewed revision as shown to the lead,
+  `fy loop show --revision N` prints it, and the lead approves with `fy loop approve <loop> --revision
+N`, which moves the card out of Plan/Design (the lead's authority on an internal card) and records
+  "approved revision N by <lead>"; 2.7 then reads that revision. Everything
   owner-facing below — agenda tabs, the picture, the reader, OK to build — is for **external** cards.
 - **Cards never ask.** Every ask about a card rides its agenda; the daemon opens one card agenda on the
   card's ferret's agenda home when none carries it.
@@ -489,9 +496,19 @@ The card's agenda carries the documents as **tabs** (agenda.md › Stage, the ta
 | **Picture**      | the HTML picture of this version (2.5), when there is one                                   | the loop, on present     |
 | **Review**       | the spec loop's grid and rounds — drawn live from the loop route, not written into the item | nobody: the PWA draws it |
 
-- **One present = one agenda version.** `fy loop present <loop> --tab Spec=spec.md --tab Plan=plan.md`
-  writes every tab in **one edit** (one version, one revision), so the Changes diff between v2 and v3 is
-  exactly what changed. The owner's earlier version is never overwritten.
+- **One present = one agenda version.** `fy loop present <loop> --revision N` copies a reviewed loop
+  revision (1.2) into the agenda's tabs in **one edit** (one agenda version), so the Changes diff between
+  v2 and v3 is exactly what changed, and records the agenda snapshot on the revision and as the card
+  ask's `presented` reference. The owner's earlier version is never overwritten, and `plan-apply` reads
+  the immutable loop revision behind the answered snapshot.
+- **One spec, one carrier.** An agenda can carry several cards, and its tabs are named per item, so two
+  specs on one agenda would overwrite each other's Spec tab and a reply would have no clear target. So a
+  spec loop presents only onto a **dedicated carrier**: the agenda the daemon opened for this card
+  (`card-agenda:<card>`) while it carries no other card. If the card's agenda carries other cards, the
+  first `present` opens a dedicated one (the daemon already opens card agendas). A **merge** that would
+  put a live spec loop's carrier together with another card's is refused with that reason; a **split**
+  keeps the spec tabs and the card ask with the card. Every reply or section comment on a dedicated
+  carrier is feedback to its one loop.
 - **Who writes the tabs.** The spec writer and the driver are sub-ferrets, and a sub-ferret may not
   write the agenda. Proposal: **the daemon writes them on the loop's behalf** — `present` is accepted
   only from the loop's recorded driver or its lead, only for the **card's own agenda**, and only for the
@@ -548,7 +565,7 @@ excerpt}` (a new `agenda.quote.1` field), so the ferret knows exactly what was m
 
 ### 2.7 OK to build creates the child cards; each falls into the loop
 
-- **The plan is checked before it can be approved.** `fy loop present` parses the Plan tab's table
+- **The plan is checked before it can be approved.** `fy loop draft` and `fy loop present` parse the Plan tab's table
   (one row per child: title, repo, depends on, `until`, how to try) and refuses a version whose table
   does not parse, naming the row. So the version the owner approves always parses.
 - **The owner's OK to build is the trigger.** After the card moves (as today, first), the daemon reads
@@ -611,15 +628,15 @@ excerpt}` (a new `agenda.quote.1` field), so the ferret knows exactly what was m
 
 ### 2.9 Slices
 
-| #   | Slice                                                                                                                                                                                                                                                    | Outcome                                                                          | Try it                                                                                                                                        | Needs    |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| 2.1 | **Lanes name their loop**: `loop` field, template defaults, lane editor control; a gate with a loop asks on present; a builder done with no PR keeps its card open                                                                                       | a card entering Plan/Design or In progress starts its loop; no early OK to build | make a `design-first` card: no OK to build appears until the spec is presented                                                                | 1.4      |
-| 2.2 | **The spec in agenda tabs**: `fy loop present`, the daemon's narrow tab write, the card ask's `presented` reference, the loop-owned spec and `fy loop approve` for internal cards, Still open, "N still open" on OK to build, the litmus lens            | the spec arrives as v1 with Spec, Plan and Where we are now tabs                 | answer with a reply: v2 appears with a Changes diff; OK to build moves the card                                                               | 2.1      |
-| 2.3 | **The picture**: always on v1, **Make picture** after                                                                                                                                                                                                    | a Picture tab on v1; one on request later                                        | v1 has a Picture tab; tap Make picture on v2 and one appears                                                                                  | 2.2      |
-| 2.4 | **The full-width reader**: `agenda:<id>` workspace tab, contents, version picker, Changes, phone sheet                                                                                                                                                   | the spec reads like a document, chat still usable                                | Open in reader on desktop and on a phone; switch versions; answer from the reader                                                             | 2.2      |
-| 2.5 | **Comments on a section** (`agenda.quote.1`)                                                                                                                                                                                                             | the ferret sees exactly which words you meant                                    | select a sentence, comment; the next version answers it                                                                                       | 2.4      |
-| 2.6 | **Triage**: the triage step in a card's first session, spikes, the add-a-gate workflow change                                                                                                                                                            | a new card arrives with premise, context and the right workflow                  | ask for something vague: the card gets its workflow and only real questions reach you                                                         | 2.1      |
-| 2.7 | **OK to build creates child cards** (`plan-apply`), each starting its build loop; the parent moves on its children's merge and release facts; `until: released` waits for a merge-closed child's release; Not good on the parent starts a rework attempt | approve once, and the PRs plan themselves; you try the whole thing once          | approve a plan with two PRs: two child cards appear with the dependency, the second waits; when both ship the parent asks you Done / Not good | 2.2, 3.2 |
+| #   | Slice                                                                                                                                                                                                                                                                                             | Outcome                                                                          | Try it                                                                                                                                        | Needs    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 2.1 | **Lanes name their loop**: `loop` field, template defaults, lane editor control; a gate with a loop asks on present; a builder done with no PR keeps its card open                                                                                                                                | a card entering Plan/Design or In progress starts its loop; no early OK to build | make a `design-first` card: no OK to build appears until the spec is presented                                                                | 1.4      |
+| 2.2 | **The spec in agenda tabs**: `fy loop draft` revisions, `fy loop present` onto a dedicated carrier, the daemon's narrow tab write, the card ask's `presented` reference, the loop-owned spec and `fy loop approve` for internal cards, Still open, "N still open" on OK to build, the litmus lens | the spec arrives as v1 with Spec, Plan and Where we are now tabs                 | answer with a reply: v2 appears with a Changes diff; OK to build moves the card                                                               | 2.1      |
+| 2.3 | **The picture**: always on v1, **Make picture** after                                                                                                                                                                                                                                             | a Picture tab on v1; one on request later                                        | v1 has a Picture tab; tap Make picture on v2 and one appears                                                                                  | 2.2      |
+| 2.4 | **The full-width reader**: `agenda:<id>` workspace tab, contents, version picker, Changes, phone sheet                                                                                                                                                                                            | the spec reads like a document, chat still usable                                | Open in reader on desktop and on a phone; switch versions; answer from the reader                                                             | 2.2      |
+| 2.5 | **Comments on a section** (`agenda.quote.1`)                                                                                                                                                                                                                                                      | the ferret sees exactly which words you meant                                    | select a sentence, comment; the next version answers it                                                                                       | 2.4      |
+| 2.6 | **Triage**: the triage step in a card's first session, spikes, the add-a-gate workflow change                                                                                                                                                                                                     | a new card arrives with premise, context and the right workflow                  | ask for something vague: the card gets its workflow and only real questions reach you                                                         | 2.1      |
+| 2.7 | **OK to build creates child cards** (`plan-apply`), each starting its build loop; the parent moves on its children's merge and release facts; `until: released` waits for a merge-closed child's release; Not good on the parent starts a rework attempt                                          | approve once, and the PRs plan themselves; you try the whole thing once          | approve a plan with two PRs: two child cards appear with the dependency, the second waits; when both ship the parent asks you Done / Not good | 2.2, 3.2 |
 
 ### 2.10 Owner decisions — Part 2
 
