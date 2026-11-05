@@ -462,3 +462,17 @@ test('cancelled streams hold admission until their native state is released; fai
   expect(await f.open('c', 'phone')).toMatchObject({ ok: true });
   await f.subject.close();
 });
+
+test('empty audio creates no queue jobs while a decode is pending', async () => {
+  // Arrange
+  const f = fixture();
+  await f.open();
+  const active = f.subject.audio('one', new Float32Array(1));
+  // Act
+  expect(await f.subject.audio('one', new Float32Array(0))).toEqual({ ok: true, value: '' });
+  // Assert
+  expect(f.sent).toHaveLength(2);
+  f.reply();
+  await active;
+  await f.subject.close();
+});

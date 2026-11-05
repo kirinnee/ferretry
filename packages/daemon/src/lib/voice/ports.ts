@@ -28,7 +28,8 @@ export interface VoiceWorkerSpawner {
     recognizers: VoiceRecognizerSet,
   ): Promise<VoiceWorkerHandle>;
 }
-/** Implemented inside the child only. No native recognizer is ever constructed by the daemon. */
+/** Implemented inside the child only. Construction and description reads must not allocate models;
+ * load starts allocations and unload releases them. Available handles stay cheap until selected. */
 export interface VoiceRecognizer {
   readonly description: VoiceRecognizerDescription;
   load(): Promise<VoiceOutcome<void>>;

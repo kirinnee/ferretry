@@ -82,7 +82,7 @@ test('the process adapter reads child RSS on both OS paths and reports failed ps
   const script = fileURLToPath(new URL('../support/fake-voice-worker.ts', import.meta.url));
   const commands = new SpawnCgroupCommands();
   // Act / Assert
-  for (const platform of ['linux', 'darwin']) {
+  for (const platform of process.platform === 'linux' ? ['linux', 'darwin'] : ['darwin']) {
     const ready = Promise.withResolvers<void>();
     const exited = Promise.withResolvers<string>();
     const subject = new BunVoiceWorkerProcesses(commands, platform);

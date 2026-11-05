@@ -82,6 +82,7 @@ export class VoiceWorkerHost {
     const stream = this.streams.get(streamId);
     if (stream === undefined || stream.finishing || !this.loaded)
       return Promise.resolve(fail('voice_cancelled', 'Speech stream is not listening.'));
+    if (samples.length === 0) return Promise.resolve({ ok: true, value: '' });
     if (stream.samples + samples.length > 2 * VOICE_SAMPLE_RATE) {
       const failure = fail('engine_behind', 'Speech worker has more than two seconds of unprocessed audio.');
       this.cancelStream(streamId, failure);
