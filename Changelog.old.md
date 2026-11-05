@@ -1,3 +1,11 @@
+## [4.277.0](https://github.com/kirinnee/ferretry/compare/v4.276.0...v4.277.0) (2026-11-05)
+
+### Features
+
+* **agenda:** patch agenda items and cards as one YAML/JSON document ([#1458](https://github.com/kirinnee/ferretry/issues/1458)) ([3f5d2b5](https://github.com/kirinnee/ferretry/commit/3f5d2b5d8d06e37793f4aab48a1cc2be17ed4b0a))
+* **pwa:** make hypermedia look native — theme kit in the html sandbox, no pop-in, no inner scroll ([#1460](https://github.com/kirinnee/ferretry/issues/1460)) ([e37ff5a](https://github.com/kirinnee/ferretry/commit/e37ff5ad3470a8a1080f5fe752b9e405df692386))
+* **pwa:** make the board and card views read-only for the owner ([#1461](https://github.com/kirinnee/ferretry/issues/1461)) ([55d2be1](https://github.com/kirinnee/ferretry/commit/55d2be1261a6cd77ea6d055298167984a4903463))
+
 ## [4.276.0](https://github.com/kirinnee/ferretry/compare/v4.275.1...v4.276.0) (2026-11-04)
 
 ### Features

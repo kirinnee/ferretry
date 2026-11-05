@@ -3,78 +3,21 @@
  *
  * WHY THESE LIVE APART FROM THE GRAMMAR. The two sandbox shells' bootstraps
  * import these bounds and are hash-pinned, size-reviewed inline scripts; the
- * grammar imports the reference reader, whose module-level patterns a bundler
- * cannot prove side-effect free and would otherwise carry into every frame.
+ * grammar (in `@ferretry/protocol/fy-render`, and the fence reader in
+ * `fy-render.ts`) carries patterns and encoders a bundler cannot prove
+ * side-effect free and would otherwise carry into every frame.
  * `fy-render.ts` re-exports both objects, so every other reader still has one
  * place to import them from.
+ *
+ * WHY THE CAPS ARE A RE-EXPORT. `FY_RENDER_LIMITS` is owned by
+ * `@ferretry/protocol/fy-render-caps` — one fact, one owner, above every
+ * consumer, because the daemon and the CLI read the same numbers when they
+ * validate what the PWA will draw. It is re-exported unchanged from here (a
+ * constants-only module, so the shells' import stays as small as it was), and
+ * the sandbox-frame numbers below stay here beside the shells that read them.
  */
 
-/**
- * Every cap in one place, so the renderer, the tests and `docs/fy-render.md`
- * cannot drift into quoting three different numbers for the same limit.
- */
-export const FY_RENDER_LIMITS = {
-  altCharacters: 200,
-  htmlBytes: 200 * 1024,
-  svgBytes: 100 * 1024,
-  svgElements: 500,
-  mermaidCharacters: 20_000,
-  /** A `map` payload: JSON or YAML, a few markers and routes. Larger is a data dump, not an illustration. */
-  mapBytes: 32 * 1024,
-  /** A `card` or `board` payload: card references, nothing else. A board lists at most `embedCards` of them. */
-  embedBytes: 2 * 1024,
-  embedCards: 12,
-  /** A board built from a parent card draws at most this many of its children; the rest are counted, not drawn. */
-  embedChildren: 24,
-  /** A map draws at most this many pins, shapes (lines plus polygons) and vertices across all of them. */
-  mapMarkers: 100,
-  mapShapes: 50,
-  mapVertices: 2000,
-  /** A pin's label and its popup, cut to these rather than refused. */
-  mapLabelCharacters: 80,
-  mapPopupCharacters: 500,
-  /** A `chart` payload: JSON or YAML in this package's own small chart language. */
-  chartBytes: 64 * 1024,
-  /** Series per chart (or per frame), and points per series. A chart past these is a table, not a picture. */
-  chartSeries: 12,
-  chartPoints: 500,
-  /** Points across every series of every frame together — the most a chart can be made to draw at once. */
-  chartTotalPoints: 10_000,
-  /** Step-through frames, and the category labels on the x axis. */
-  chartFrames: 30,
-  chartLabels: 500,
-  /** A title, an axis label, a series name and a category or frame label — refused past these, never cut. */
-  chartTitleCharacters: 120,
-  chartLabelCharacters: 80,
-  lottieBytes: 1024 * 1024,
-  lottieLayers: 500,
-  lottieDepth: 64,
-  imageBytes: 2 * 1024 * 1024,
-  /** At most 32 filter primitives — the cheapest route to expensive rasterising. */
-  svgFilterPrimitives: 32,
-  /**
-   * Neither axis of anything that reaches a decoder may exceed this, and the
-   * product of the two may not exceed `maxPixels` (4096 × 4096, ≈64 MB at four
-   * bytes per pixel). Both bounds are read from the payload's own declaration
-   * BEFORE a decoder is handed it, because a 50-byte PNG can declare 65535 ×
-   * 65535 and the input-size cap is no defence at all against that.
-   */
-  maxDimension: 8192,
-  maxPixels: 16_777_216,
-  /** How much authored source the source panel prints before it truncates. */
-  sourcePreviewCharacters: 32 * 1024,
-  /** A `src:` value, either form. Long enough for any real link, short enough to print. */
-  srcCharacters: 2048,
-  /**
-   * A workspace file a media block may show. NOT A NUMBER THIS PACKAGE CHOSE:
-   * it mirrors the daemon's own per-file view limit (`MAX_FILE_BYTES`), which
-   * is what the session filesystem route serves. A larger file arrives as
-   * `tooLarge` whatever this says, so a bigger number here would only be a lie.
-   */
-  workspaceMediaBytes: 1024 * 1024,
-  /** An https image is fetched and admitted like an inline one, so it gets the inline cap. */
-  httpsImageBytes: 2 * 1024 * 1024,
-} as const;
+export { FY_RENDER_LIMITS } from '@ferretry/protocol/fy-render-caps';
 
 /**
  * The bounds on the sandbox frame — every number the parent and the shell must
