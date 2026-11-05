@@ -1,6 +1,6 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -1271,6 +1271,54 @@ describe('FileFleetProvisioner', () => {
       should(actual.prunedWrappers).deepEqual([]);
       await should(lstat(directory)).be.rejected();
       should(await Bun.file(path.join(root, 'fleet', 'manifest.json')).exists()).be.true();
+    });
+
+    it('should clear moved-aside residue an earlier interrupted apply left in a folder a runtime reads', async () => {
+      // Arrange — an apply that died between moving a skill aside and discarding it leaves
+      // `.fy-fleet-backup-…` beside the live skills. The sweep used to skip every reserved name, so the residue
+      // stayed for good and a runtime scanning the folder loaded each copy as a real skill.
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      const reserved = ['.fy-fleet-backup-abc', '.fy-fleet-displaced-abc', '.fy-fleet-staged-abc'];
+      for (const name of reserved) await Bun.write(path.join(directory, name, 'SKILL.md'), 'a leftover copy\n');
+      await Bun.write(path.join(directory, 'kept', 'SKILL.md'), 'a live skill\n');
+      await Bun.write(path.join(directory, 'stale', 'SKILL.md'), 'a skill the profile dropped\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const actual = await subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'prune-directory', path: directory, keep: ['kept'] }],
+      });
+
+      // Assert — only the kept skill is left, and nothing is reported as residue.
+      should((await readdir(directory)).toSorted()).deepEqual(['kept']);
+      should(actual.backupResidue).be.undefined();
+    });
+
+    it('should keep a reserved name this very batch minted until the commit discards it', async () => {
+      // Arrange — the live skill is replaced (moved aside, rewritten) and then swept in the same batch. The backup
+      // this batch just made must survive the sweep, or a rollback would have nothing to put back.
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      await Bun.write(path.join(directory, 'kept', 'SKILL.md'), 'the old skill\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const actual = await subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [
+          { kind: 'file', path: path.join(directory, 'kept', 'SKILL.md'), content: 'the new skill\n', mode: 0o644 },
+          { kind: 'prune-directory', path: directory, keep: ['kept'] },
+        ],
+      });
+
+      // Assert — committed, the rewritten skill is there and no backup is left beside it.
+      should(await readFile(path.join(directory, 'kept', 'SKILL.md'), 'utf8')).equal('the new skill\n');
+      should((await readdir(directory)).toSorted()).deepEqual(['kept']);
+      should(actual.backupResidue).be.undefined();
     });
 
     it('should surface a named entry it cannot inspect for any reason other than its absence', async () => {

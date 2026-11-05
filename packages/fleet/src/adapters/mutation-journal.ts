@@ -234,6 +234,17 @@ export class FileMutationJournal {
   }
 
   /**
+   * Whether `candidate` is moved-aside evidence THIS batch minted — as opposed to a reserved name an earlier,
+   * interrupted batch left behind. A sweep of a folder the fleet owns outright uses this to tell the one it must
+   * keep (a rollback needs it) from the one it must clear (nothing ever will, and a runtime that scans the folder
+   * loads it as a real entry).
+   */
+  minted(candidate: string): boolean {
+    const resolved = path.resolve(candidate);
+    return this.#entries.some(entry => entry.kind === 'restore' && entry.backup === resolved);
+  }
+
+  /**
    * Runs `read` with what the capture of `target` moved aside — its re-checked folder and its name there, to read
    * THROUGH that folder — or answers `undefined` when nothing was there.
    *
