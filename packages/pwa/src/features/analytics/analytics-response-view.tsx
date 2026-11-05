@@ -6,6 +6,7 @@
  * stays unknown instead of being silently represented as a zero-cost result.
  */
 import {
+  ANALYTICS_TOO_MANY_GROUPS_CODE,
   type AnalyticsMetric,
   type AnalyticsRawSession,
   type AnalyticsResponse,
@@ -27,6 +28,8 @@ import {
 export const analyticsErrorMessage = (error: unknown): string => {
   if (error instanceof DaemonResponseError && error.status === 503)
     return 'Analytics index is unavailable while the daemon catches up (503).';
+  if (error instanceof DaemonResponseError && error.code === ANALYTICS_TOO_MANY_GROUPS_CODE)
+    return `${error.message}. Narrow it with a matcher such as {model=…} or {project=…}, a shorter range, or fewer \`by\` labels.`;
   return error instanceof Error ? error.message : String(error);
 };
 

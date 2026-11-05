@@ -87,7 +87,7 @@ session-relative, `./`-relative or absolute-inside-the-folder forms
 parser; `http:` (a downgrade), `data:` (a second inline grammar), `blob:` (a page-local handle) and any
 URL carrying `user:pass@` (a credential written into a transcript) are refused.
 
-**Boundary line** — a line that is exactly `---`. It makes header parsing unambiguous, so a payload
+**Boundary line** — a line that is exactly `---` (trailing whitespace and CRLF line endings are forgiven, as are blank lines before the first header; case and the dash count are not). It makes header parsing unambiguous, so a payload
 may begin with anything, including a line that looks like `key: value`.
 
 **Payload** — every byte from the line after `---` to the fence close, verbatim. The one exception is
@@ -103,8 +103,11 @@ also what it is.
 
 ### Caps
 
-Single-owned constants in `packages/pwa/src/lib/fy-render.ts`; this table and the tests read the same
-numbers.
+Single-owned constants in `packages/protocol/src/lib/fy-render-caps.ts` (`@ferretry/protocol/fy-render-caps`);
+this table and the tests read the same numbers. The caps live in protocol — above every consumer —
+because a daemon or CLI validating a saved picture reads the same numbers the reader enforces, and
+`packages/pwa/src/lib/fy-render-bounds.ts` re-exports them unchanged beside the sandbox-frame limits
+that stay with the shells.
 
 | Type      | Payload cap                      | Also refused                                                                                                                                                                                                                                                                                                          |
 | --------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

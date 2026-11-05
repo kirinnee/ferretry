@@ -195,6 +195,8 @@ What this class already has on `main`:
 | the default state home path             | derived from the product name                                 | `cli-contracts.sh state-home-default`       |
 | the log directory inside the state home | shared between the CLI and the daemon                         | `cli-contracts.sh state-home-log-directory` |
 | a pane process's start identity         | `protocol/src/{lib,adapters}/process-incarnation.ts`          | one module, imported by both                |
+| the fy-render caps                      | `protocol/src/lib/fy-render-caps.ts`                          | re-exported, never redefined                |
+| the fy-render svg and html rules        | `protocol/src/lib/fy-render.ts`                               | one module, read by the PWA's fence reader  |
 | the default daemon address              | `protocol/src/lib/address.ts`                                 | `cli-contracts.sh daemon-default-address`   |
 | the product and binary names            | `package.json` × 2 ([Architecture](../architecture/index.md)) | `cli-contracts.sh name-single-source`       |
 | a daemon's data, per daemon, in the PWA | `daemonSessionKey()` and `DaemonConnection`                   | `daemon-scope.sh`                           |
