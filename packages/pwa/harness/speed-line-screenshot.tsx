@@ -113,17 +113,7 @@ mkdirSync(outDir, { recursive: true });
 // The page's CSS asks for the self-hosted fonts at /assets/fonts/…; serve the real files so the shots use them.
 cpSync(join(packageDir, 'src', 'assets', 'fonts'), join(outDir, 'assets', 'fonts'), { recursive: true });
 await Bun.write(join(outDir, 'speed-entry.tsx'), PAGE_ENTRY);
-// The link to the speed test page is dev-server only (`speedTestHref`); show it here as the dev server would.
-run('bun', [
-  'build',
-  join(outDir, 'speed-entry.tsx'),
-  '--outdir',
-  outDir,
-  '--target',
-  'browser',
-  '--define',
-  'import.meta.env.DEV=true',
-]);
+run('bun', ['build', join(outDir, 'speed-entry.tsx'), '--outdir', outDir, '--target', 'browser']);
 run('./node_modules/.bin/tailwindcss', [
   '--config',
   'tailwind.config.ts',

@@ -1,8 +1,8 @@
 /**
- * THE ONE-CLICK SPEED BENCHMARK PAGE, served by the dev server: `bunx vite` in `packages/pwa`, then open
- * `/speed-bench/`. For a phone, `adb reverse tcp:5173 tcp:5173` makes the phone's `localhost` the dev
+ * THE ONE-CLICK SPEED BENCHMARK PAGE, linked from Settings › Voice ("Test speed on this device") and served at
+ * `/speed-bench/` by the deployed site and by the dev server (`bunx vite` in `packages/pwa`). For a phone, `adb reverse tcp:5173 tcp:5173` makes the phone's `localhost` the dev
  * box (a secure context, which on-device speech needs). To measure multi-thread WebAssembly start the
- * server with `FY_DEV_ISOLATED=1` (docs/voice.md › Speed). Not part of the shipped bundle.
+ * server with `FY_DEV_ISOLATED=1` (docs/voice.md › Speed). Self-contained: timings only, nothing is sent anywhere, models only from the app's own files.
  */
 import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
 import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';

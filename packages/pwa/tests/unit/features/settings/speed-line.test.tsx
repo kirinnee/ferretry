@@ -13,7 +13,9 @@ describe('<SpeedLine>', () => {
     const section = view.container.querySelector('section[aria-label="Speed"]');
     expect(section?.textContent).toContain('Speech speed: standard (one core)');
     expect(section?.textContent).toContain('Your words appear a moment after you stop talking.');
-    expect(section?.textContent).toContain('A faster mode (several cores) is not available on this site yet');
+    expect(section?.textContent).toContain(
+      'A faster mode (several cores) is not available on this site: it needs a site setting we haven’t turned on yet.',
+    );
     expect(view.container.querySelector('button, input, [role="switch"]')).toBeNull();
   });
 
@@ -51,28 +53,20 @@ describe('<SpeedLine>', () => {
 });
 
 describe('<SpeedLine> speed test link', () => {
-  it('offers a safe, tall, plain-worded link to the speed test page when one is served', async () => {
-    const view = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} testHref="/speed-bench/" />);
+  it('ends with a safe, tall, plain-worded link to the speed test page, in every build', async () => {
+    const view = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} />);
     const link = view.container.querySelector('section[aria-label="Speed"] a');
     expect(link?.textContent).toContain('Test speed on this device');
-    expect(link?.getAttribute('href')).toBe('/speed-bench/');
+    expect(link?.getAttribute('href')).toBe(SPEED_TEST_PATH);
+    expect(SPEED_TEST_PATH).toBe('/speed-bench/');
     expect(link?.getAttribute('target')).toBe('_blank');
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
     expect(link?.className).toContain('min-h-[44px]');
     expect(link?.textContent).toContain('(opens in a new tab)');
   });
 
-  it('shows no link when the build serves no speed test page (the production default under test)', async () => {
-    const none = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} testHref={null} />);
-    expect(none.container.querySelector('a')).toBeNull();
-    const byDefault = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} />);
-    expect(byDefault.container.querySelector('a')).toBeNull();
-  });
-
-  it("shows the link on the dev server's default address for every engine that has a block", async () => {
-    const view = await mount(
-      <SpeedLine engine="vosk-small-en" planner={flatSpeedPlanner()} testHref={SPEED_TEST_PATH} />,
-    );
+  it('has the link for every engine that has a block', async () => {
+    const view = await mount(<SpeedLine engine="vosk-small-en" planner={flatSpeedPlanner()} />);
     expect(view.container.querySelector('a')?.getAttribute('href')).toBe('/speed-bench/');
   });
 });

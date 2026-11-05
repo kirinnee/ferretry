@@ -21,7 +21,6 @@ import {
   type SpeedPath,
   type SpeedSignals,
   speedLine,
-  speedTestHref,
   threadsFor,
 } from '../../../src/lib/stt/speed-plan.ts';
 
@@ -199,10 +198,8 @@ describe('the words', () => {
     should(visible).not.match(/webassembly|webgpu|thread|worker|wasm|gpu\b/i);
   });
 
-  it('offers the speed test page only on the dev server, never in a production build', () => {
-    should(speedTestHref(true)).equal(SPEED_TEST_PATH);
-    should(speedTestHref(false)).equal(null);
-    should(speedTestHref(undefined)).equal(null);
+  it('names the speed test page the production build serves', () => {
+    should(SPEED_TEST_PATH).equal('/speed-bench/');
   });
 
   it('says the speed gain without naming the desktop it was measured on', () => {
@@ -216,7 +213,9 @@ describe('the words', () => {
   });
 
   it('names the faster mode that was left out, and whether it is unavailable or turned off', () => {
-    should(SPEED_REASON_TEXT['not-isolated']).containEql('not available on this site yet');
+    should(SPEED_REASON_TEXT['not-isolated']).equal(
+      'A faster mode (several cores) is not available on this site: it needs a site setting we haven’t turned on yet.',
+    );
     should(SPEED_REASON_TEXT['failed-before']).containEql('available on this device but turned off');
     should(SPEED_REASON_TEXT['low-memory']).containEql('turned off');
   });

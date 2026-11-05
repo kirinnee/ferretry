@@ -221,7 +221,7 @@ export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
   fastest: 'This is the fastest mode this device offers.',
   'only-path': 'This voice has no faster mode.',
   'not-isolated':
-    'A faster mode (several cores) is not available on this site yet: it needs a browser setting the site has not switched on.',
+    'A faster mode (several cores) is not available on this site: it needs a site setting we haven’t turned on yet.',
   'no-gpu':
     'A faster mode (graphics chip) is not available: this device has no graphics chip the browser can use for it.',
   'low-memory': 'A faster mode (several cores) is available on this device but turned off, to save memory.',
@@ -230,14 +230,5 @@ export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
     'A faster mode (several cores) is available on this device but turned off for now, because it did not work here last time.',
 };
 
-/** Where the dev server serves the one-click speed test page (`speed-bench/index.html`). */
+/** Where the site serves the one-click speed test page (`speed-bench/index.html`, built with the app). */
 export const SPEED_TEST_PATH = '/speed-bench/';
-
-/**
- * The speed test page's address, or `null` when this build does not serve one. The page is dev tooling:
- * `vite.config.ts` builds only `index.html`, `app/` and `get-started/`, so the deployed site answers
- * `/speed-bench/` with its fallback page, not a test. The link is therefore offered only where Vite's dev
- * server is running (`import.meta.env?.DEV`: optional, because a bundler that does not know Vite — the
- * screenshot harnesses — leaves `import.meta.env` undefined and a bare `.DEV` would throw), never in a production build.
- */
-export const speedTestHref = (dev: boolean | undefined): string | null => (dev === true ? SPEED_TEST_PATH : null);
