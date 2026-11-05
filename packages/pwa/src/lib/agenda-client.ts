@@ -262,6 +262,21 @@ export const markAgendaVersionSeen = async (
  */
 export const AGENDA_READS_PER_DAEMON = 4;
 
+/** What re-reads one conversation's row: the fleet store's single-session read. */
+export interface LandedRowReader {
+  fetchSession(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<unknown>;
+}
+
+/**
+ * The client's `landed` hook over the fleet: an answer that landed re-reads its conversation's row at once, so every
+ * badge and the Inbox agree with the board. A read that fails leaves the fleet feed to catch up; the answer has landed.
+ */
+export const rereadRowOnLanding =
+  (fleet: LandedRowReader) =>
+  (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
+    void fleet.fetchSession(daemon, scope).catch(() => undefined);
+  };
+
 interface ConnectionBinding {
   readonly baseUrl: string;
   readonly deviceId: string;

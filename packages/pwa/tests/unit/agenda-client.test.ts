@@ -13,6 +13,7 @@ import {
   MAX_CONVERSATION_FRAGMENTS,
   MERGE_NEEDS_UPDATE,
   markAgendaVersionSeen,
+  rereadRowOnLanding,
   SNOOZE_NEEDS_UPDATE,
   sendAgendaReplies,
 } from '../../src/lib/agenda-client.ts';
@@ -259,6 +260,24 @@ describe('DaemonAgendaClient', () => {
     should(landed).deepEqual(['daemon-a/same/session']);
     should(refused).be.instanceOf(DaemonResponseError);
     should(client.store.status(scopeA)).equal('error');
+  });
+
+  it('re-reads exactly the landed session through the fleet, and swallows a failed read', async () => {
+    // Arrange
+    const read: string[] = [];
+    const landed = rereadRowOnLanding({
+      fetchSession: async (daemon, scope) => {
+        read.push(`${daemon.daemonId}/${scope.sessionId}`);
+        throw new Error('offline');
+      },
+    });
+
+    // Act
+    landed(daemonA, scopeA);
+    await tick();
+
+    // Assert — one read for that row; the rejection reaches nobody
+    should(read).deepEqual(['daemon-a/same/session']);
   });
 
   it('answers the owner even when the row re-read cannot start', async () => {
