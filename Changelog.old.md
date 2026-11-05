@@ -1,3 +1,10 @@
+## [4.280.0](https://github.com/kirinnee/ferretry/compare/v4.279.0...v4.280.0) (2026-11-05)
+
+### Features
+
+* **cli:** fy machine clone updates by default, diff --dry-run, choice flags, --forget ([#1478](https://github.com/kirinnee/ferretry/issues/1478)) ([b3aa97f](https://github.com/kirinnee/ferretry/commit/b3aa97fa4b2556a334c0b76c242e345541d73b8f))
+* **insights:** show a query as one result or as a trend over time ([#1475](https://github.com/kirinnee/ferretry/issues/1475)) ([7bf5987](https://github.com/kirinnee/ferretry/commit/7bf598770a91f8b88dd7ffcc0fcb02a0a443fa24))
+
 ## [4.279.0](https://github.com/kirinnee/ferretry/compare/v4.278.0...v4.279.0) (2026-11-05)
 
 ### Features
