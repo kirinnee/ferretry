@@ -1864,11 +1864,10 @@ describe('CloneMachine · API keys and sign-ins', () => {
       const screen = await render({ createClient });
       try {
         await toPreview(screen);
-        // The settings review (key by key, PR 7) is a separate question; exactly one review asks about the keys.
-        const asking = w.reviews.filter(call => 'sourceSecrets' in (call.body as object));
-        expect(asking).toHaveLength(1);
-        expect(asking[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
-        expect(asking[0]?.body).not.toHaveProperty('settings');
+        // The one review of the settings (key by key, PR 7) carries the keys too: no second question about them.
+        expect(w.reviews).toHaveLength(1);
+        expect(w.reviews[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(w.reviews[0]?.body).toHaveProperty('settings');
       } finally {
         await screen.view.unmount();
       }
@@ -1901,6 +1900,29 @@ describe('CloneMachine · API keys and sign-ins', () => {
         }
       });
     }
+
+    it('asks a review of just the keys when the settings review cannot be made, and still reports the newer one', async () => {
+      const w = setup('newer');
+      const { createClient } = daemons({
+        work: sourceFiles(w.work),
+        target: {
+          ...w.target,
+          '/v1/fleet/clone/review': (call: Call) => {
+            w.reviews.push(call);
+            return 'settings' in (call.body as object) ? new Error('network down') : review('newer');
+          },
+        },
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(w.reviews.map(call => 'settings' in (call.body as object))).toEqual([true, false]);
+        expect(w.reviews[1]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(screen.text('[data-clone-newer-key]')).toContain('A newer ZAI_API_KEY exists on');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
 
     it('says nothing about a key that is the same', async () => {
       const w = setup('same');

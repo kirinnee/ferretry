@@ -105,7 +105,7 @@ export function CloneItemsChoices({
  * Clone never writes a key this machine already holds, so it says how to replace it by hand instead, and says so
  * plainly when this machine changed the key too.
  */
-function NewerKeyRow({
+export function NewerKeyRow({
   keyName,
   both,
   machineName,

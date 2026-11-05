@@ -5,7 +5,7 @@
  *
  *   bun harness/clone-review-screenshot.tsx [out-dir]   # writes <out-dir>/<scheme>/<state>-<viewport>.png
  *
- * `out-dir` defaults to harness/out/clone-review. The states:
+ * `out-dir` defaults to harness/out/clone-review; `SHOT_STATES=a,b` shoots just those states. The states:
  *
  *   first-copy         a source never copied before: the preview, as it has always been
  *   existing-step      the three-choice step: Update (default), Add alongside, Start over (Replace)
@@ -22,6 +22,8 @@
  *   relocated          an item that lands elsewhere, and why
  *   stale-review       the apply refused because the review moved, with Review again
  *   done-held          Done: what changed per group, and a held setting with Confirm
+ *   update-newer-key   an Update that reports "A newer X exists on <source>" with the command to run by hand
+ *   update-both-key    the same for a key changed on both machines, said so, with the secret copy panel open
  *
  * It renders the REAL `CloneMachine` against two invented machines; the review is the invented one in
  * `tests/unit/features/fleet/setup/clone-review-support.ts`. No credential, token or real name exists in it.
@@ -115,6 +117,16 @@ const REVIEWS = {
   'logins-ask': MORE_LOGINS,
   relocated: review({ items: [ITEMS.relocated, ITEMS.theirsHooks], same: { count: 9, probable: 1 } }),
   'stale-review': FULL_REVIEW,
+  'update-newer-key': review({
+    items: [ITEMS.newMcp],
+    keys: [{ name: 'DEMO_API_KEY', outcome: 'newer' }],
+    same: { count: 9, probable: 0 },
+  }),
+  'update-both-key': review({
+    items: [ITEMS.newMcp],
+    keys: [{ name: 'DEMO_API_KEY', outcome: 'both' }],
+    same: { count: 9, probable: 0 },
+  }),
   'done-held': review({ items: [ITEMS.newMcp, ITEMS.theirsHooks], same: { count: 8, probable: 0 } }),
 };
 
@@ -429,6 +441,14 @@ const walk = async (page: Page, state: string, scheme: string, vp: string): Prom
       await click(page, '[data-change-submit]');
       await page.locator('[data-setup-note="stale-review"]').waitFor({ state: 'visible' });
       break;
+    case 'update-newer-key':
+      await toChanges(page);
+      await page.locator('[data-clone-newer-key="DEMO_API_KEY"]').waitFor({ state: 'visible' });
+      break;
+    case 'update-both-key':
+      await toChanges(page);
+      await page.locator('[data-clone-newer-key="DEMO_API_KEY"]').waitFor({ state: 'visible' });
+      break;
     case 'done-held':
       await toChanges(page);
       await click(page, '[data-setup-choice="warden"]');
@@ -457,13 +477,18 @@ const STATES = [
   'logins-ask',
   'relocated',
   'stale-review',
+  'update-newer-key',
+  'update-both-key',
   'done-held',
 ] as const;
+
+// `SHOT_STATES=update-newer-key,update-both-key` shoots only those states (the rest are left as they were).
+const only = process.env.SHOT_STATES?.split(',');
 
 try {
   for (const scheme of Object.keys(SCHEMES)) {
     for (const [vp, options] of Object.entries(VIEWPORTS)) {
-      for (const state of STATES) {
+      for (const state of STATES.filter(each => only === undefined || only.includes(each))) {
         const context = await browser.newContext({
           ...options,
           deviceScaleFactor: vp === 'phone' ? 2 : 1,

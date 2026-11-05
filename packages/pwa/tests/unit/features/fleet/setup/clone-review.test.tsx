@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CLONE_REVIEW_STALE,
+  CLONE_SOURCE_SECRETS_LIMIT,
   CloneableSecretNameSchema,
   type CloneSettingsDoc,
   type FleetCloneReview,
@@ -1272,14 +1273,144 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
     try {
       await toChanges(screen);
       expect(screen.text('[data-setup-row="key-NOTES_TOKEN"]')).toContain('Missing here: copied with its login');
-      expect(screen.text('[data-setup-row="key-JEV_API_KEY"]')).toContain('A newer one exists on work-linux');
-      expect(screen.text('[data-setup-row="key-GROQ_API_KEY"]')).toContain('Changed on both machines');
+      // A newer or both-changed key is a REPORT with the command to take it by hand, never a row to tick.
+      const newer = screen.text('[data-clone-newer-key="JEV_API_KEY"]');
+      expect(newer).toContain('A newer JEV_API_KEY exists on work-linux');
+      expect(newer).toContain('fy secret set JEV_API_KEY');
+      expect(newer).not.toContain('You changed it');
+      const both = screen.text('[data-clone-newer-key="GROQ_API_KEY"]');
+      expect(both).toContain('A newer GROQ_API_KEY exists on work-linux');
+      expect(both).toContain('You changed it on studio-mac too');
+      expect(both).toContain('fy secret set GROQ_API_KEY');
+      expect(screen.q('[data-clone-newer-key] input')).toBeNull();
+      expect(screen.q('[data-clone-newer-key="SAME_KEY"]')).toBeNull();
       expect(screen.q('[data-setup-row="key-SAME_KEY"]')).toBeNull();
       expect(screen.text('[data-setup-row="settings-warden.yaml"]')).toContain('2 settings differ: caps.daily, triage');
       expect(screen.q('[data-setup-row="settings-voice.yaml"]')).toBeNull();
     } finally {
       await screen.view.unmount();
     }
+  });
+
+  describe('the keys the source holds (a newer key is reported, never copied)', () => {
+    const SOURCE_AT = '2026-11-02T09:30:00.000Z';
+    const HERE_AT = '2026-10-13T07:00:00.000Z';
+    const stampedSecrets = (names: readonly string[], updatedAt: string) => ({
+      v: 1,
+      health: 'ready',
+      secrets: names.map(name => ({ name, createdAt: HERE_AT, updatedAt })),
+      references: [],
+    });
+    const keyed = (outcome: 'newer' | 'both' | 'same') =>
+      review({
+        items: [ITEMS.newMcp],
+        keys: [{ name: secretName('DEMO_API_KEY'), outcome }],
+        same: { count: 3, probable: 0 },
+      });
+    const keysSetup = (outcome: 'newer' | 'both' | 'same') =>
+      daemons(
+        { '/v1/fleet/clone/review': keyed(outcome), '/v1/secrets': stampedSecrets(['DEMO_API_KEY'], HERE_AT) },
+        { '/v1/secrets': stampedSecrets(['DEMO_API_KEY', 'DEMO_SERVICE_TOKEN'], SOURCE_AT) },
+      );
+
+    it('asks the Update’s own review with the source’s key names and instants, and asks nothing else about the keys', async () => {
+      const { createClient, calls } = keysSetup('newer');
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        const reviews = calls.target.filter(call => call.path === '/v1/fleet/clone/review');
+        expect(reviews.length).toBeGreaterThan(0);
+        // Every review the Update stands on carries the keys (names and instants), so it can report a newer one.
+        for (const asked of reviews) {
+          expect(asked.body).toMatchObject({
+            sourceSecrets: [
+              { name: 'DEMO_API_KEY', updatedAt: SOURCE_AT },
+              { name: 'DEMO_SERVICE_TOKEN', updatedAt: SOURCE_AT },
+            ],
+          });
+        }
+        // No value, and no digest of one, is in anything sent to this machine.
+        expect(JSON.stringify(reviews.map(call => call.body))).not.toMatch(/value|digest|sk-/u);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('sends no key list a review cannot take (more than the route allows) and still makes the review', async () => {
+      const many = Array.from({ length: CLONE_SOURCE_SECRETS_LIMIT + 1 }, (_, index) => `MANY_KEY_${String(index)}`);
+      const { createClient, calls } = daemons(
+        { '/v1/fleet/clone/review': keyed('same'), '/v1/secrets': stampedSecrets([], HERE_AT) },
+        { '/v1/secrets': stampedSecrets(many, SOURCE_AT) },
+      );
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        const reviews = calls.target.filter(call => call.path === '/v1/fleet/clone/review');
+        expect(reviews.length).toBeGreaterThan(0);
+        for (const asked of reviews) expect(asked.body).not.toHaveProperty('sourceSecrets');
+        expect(screen.submit()?.textContent).toContain('Update 1 thing');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    for (const outcome of ['newer', 'both'] as const) {
+      it(`reports a ${outcome} key on the Update screen with the command to take it by hand, and writes nothing for it`, async () => {
+        const { createClient, calls } = keysSetup(outcome);
+        const screen = await render(createClient);
+        try {
+          await toChanges(screen);
+          const row = screen.text('[data-clone-newer-key="DEMO_API_KEY"]');
+          expect(row).toContain('A newer DEMO_API_KEY exists on work-linux');
+          expect(row).toContain('Clone does not replace a key studio-mac already has');
+          expect(row).toContain('fy secret set DEMO_API_KEY');
+          expect(row.includes('You changed it on studio-mac too')).toBe(outcome === 'both');
+          // A report: nothing to tick, no passkey to ask for, and the button counts only the one item.
+          expect(screen.q('[data-clone-newer-key] input')).toBeNull();
+          expect(row).not.toContain('passkey');
+          expect(screen.submit()?.textContent).toContain('Update 1 thing');
+
+          await click(screen.submit(), 'Update');
+          expect(screen.step()).toBe('done');
+          expect(calls.work.some(call => call.path.startsWith('/v1/secrets/exports/'))).toBe(false);
+          expect(calls.target.some(call => call.path.startsWith('/v1/secrets/imports'))).toBe(false);
+          expect(calls.target.some(call => call.path === '/v1/fleet/clone/keys')).toBe(false);
+          expect(calls.target.filter(call => call.path === '/v1/secrets' && call.body !== undefined)).toEqual([]);
+        } finally {
+          await screen.view.unmount();
+        }
+      });
+    }
+
+    it('says nothing about a key that is the same', async () => {
+      const { createClient } = keysSetup('same');
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        expect(screen.q('[data-clone-newer-key]')).toBeNull();
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('shows the secret copy panel on the Update with the held key kept: locked, not ticked, not counted', async () => {
+      const { createClient } = keysSetup('both');
+      const screen = await render(createClient);
+      try {
+        await toChanges(screen);
+        await click(screen.q('[data-secret-copy-launch]'), 'Copy secrets');
+        const kept = screen.q('[data-secret-copy-kept][data-secret-copy-row="DEMO_API_KEY"]');
+        expect(kept?.textContent).toContain('already on');
+        expect(kept?.textContent).toContain('kept');
+        expect(kept?.textContent).toContain('fy secret set DEMO_API_KEY');
+        expect(kept?.querySelector('input')).toBeNull();
+        // The key this machine lacks is the one to pick, unticked; the held one adds nothing to the button.
+        expect(screen.q('[data-secret-copy-row="DEMO_SERVICE_TOKEN"] input')).not.toBeNull();
+        expect(screen.submit()?.textContent).toContain('Update 1 thing');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
   });
 });
 
@@ -1391,11 +1522,9 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
     };
   const keyRadios = (screen: Screen, name: string) =>
     screen.all(`[data-clone-key="${name}"] input[type="radio"]`) as HTMLInputElement[];
-  /** The reviews of the items and settings; the one that asks which keys are newer (`sourceSecrets`) is another question. */
+  /** Every review this machine was asked for: each one also carries the source's keys (`sourceSecrets`). */
   const reviewBodies = (calls: readonly Call[]) =>
-    calls
-      .filter(call => call.path === '/v1/fleet/clone/review' && !('sourceSecrets' in (call.body as object)))
-      .map(call => call.body as { settings?: unknown[] });
+    calls.filter(call => call.path === '/v1/fleet/clone/review').map(call => call.body as { settings?: unknown[] });
 
   const setup = (target: Answers = {}) => {
     const { target: here, work } = settingsAnswers();
@@ -1495,8 +1624,8 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
     const plain = answering();
     const { createClient, calls } = setup({
       '/v1/fleet/clone/review': (call: Call) => {
-        // The third review of items and settings: the one the tick asks for (a keys question does not count).
-        if (!('sourceSecrets' in (call.body as object))) asked += 1;
+        // The third review: the one the tick asks for (the Update's own review already carries the keys).
+        asked += 1;
         return asked === 3 ? new Error('network down') : plain(call);
       },
     });

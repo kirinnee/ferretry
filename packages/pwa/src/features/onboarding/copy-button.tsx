@@ -53,8 +53,8 @@ const COPY_MESSAGE: Record<CopyState, string> = {
 /** 32px: smaller than a control, still comfortably bigger than the icon in it. */
 const COPY_SIZE = 'h-8 w-8';
 
-/** A copy that is the one thing to press (a command with no other way to take it): the control floor. */
-const COPY_SIZE_TOUCH = 'h-control w-[var(--control-h)]';
+/** A copy that is the one thing to press (a command with no other way to take it): never under 44px, at any width. */
+const COPY_SIZE_TOUCH = 'h-control w-[var(--control-h)] min-h-[44px] min-w-[44px]';
 
 const COPY_CONTROL =
   'inline-flex shrink-0 items-center justify-center rounded-control border border-transparent bg-transparent text-faint transition-colors hover:border-border-strong hover:bg-surface hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus';

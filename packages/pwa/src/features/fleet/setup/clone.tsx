@@ -28,6 +28,7 @@
 
 import {
   CLONE_REVIEW_STALE,
+  CLONE_SOURCE_SECRETS_LIMIT,
   type CloneChoice,
   type CloneKeyChoice,
   type CloneLoginTarget,
@@ -191,6 +192,9 @@ interface CloneResult {
 function Foot({ children }: { readonly children: ReactNode }) {
   return <div className="mt-4 flex flex-wrap gap-3">{children}</div>;
 }
+
+/** A key the source holds and when it last changed it: names and instants, never a value. */
+type SourceStamp = { readonly name: string; readonly updatedAt: string };
 
 /**
  * How asking this machine to review the settings ended. `unsupported` is a machine that positively has no such
@@ -392,6 +396,7 @@ export function CloneMachine(props: CloneMachineProps) {
     ticked: readonly CloneItemId[],
     sourceView: typeof sourceMachine,
     always = false,
+    stamps: readonly SourceStamp[] = [...sourceStamps].map(([name, updatedAt]) => ({ name, updatedAt })),
   ): Promise<SettingsReview> => {
     const settings = settingsToSend(ticked, read, sourceView);
     if ((settings.length === 0 && !always) || pickedRecord === undefined) return { kind: 'none' };
@@ -402,6 +407,9 @@ export function CloneMachine(props: CloneMachineProps) {
         source: { daemonId: String(pickedRecord.daemonId) },
         names: { source: sourceName, target: machineName },
         ...(settings.length === 0 ? {} : { settings: [...settings] }),
+        // The keys the source holds (names and instants), so an Update reports a newer or both-changed key too.
+        // (More than the route takes are not sent: no key is reported, and the review is still made.)
+        ...(stamps.length === 0 || stamps.length > CLONE_SOURCE_SECRETS_LIMIT ? {} : { sourceSecrets: [...stamps] }),
       });
       return { kind: 'reviewed', review: made };
     } catch (error) {
@@ -438,7 +446,7 @@ export function CloneMachine(props: CloneMachineProps) {
 
   const offeredFor = async (
     exported: FleetCloneBundle,
-    stamps: readonly { readonly name: string; readonly updatedAt: string }[] | null,
+    stamps: readonly SourceStamp[] | null,
   ): Promise<readonly NewerKey[]> => {
     if (stamps === null || stamps.length === 0 || pickedRecord === undefined) return [];
     // `read` turns any failure (a review that is refused, a list too long to send) into a refusal: none offered.
@@ -504,11 +512,25 @@ export function CloneMachine(props: CloneMachineProps) {
       // What differs from an earlier copy, when there was one. It is asked about the settings a first copy would
       // send, key by key, so a first copy needs no second question; a machine that cannot answer (an older
       // Ferretry) leaves the first-copy preview as it has always been.
-      let answer = await reviewSettings(exported.value, read, chosenFor('alongside', read), sourceMachine);
+      const stamps =
+        sourceList.kind === 'done' && sourceList.value.health === 'ready'
+          ? sourceList.value.secrets
+              .filter(secret => !isSignInSecretName(secret.name))
+              .map(({ name, updatedAt }) => ({ name, updatedAt }))
+          : null;
+      const keyStamps = stamps ?? [];
+      let answer = await reviewSettings(
+        exported.value,
+        read,
+        chosenFor('alongside', read),
+        sourceMachine,
+        false,
+        keyStamps,
+      );
       let found: FleetCloneReview | null = answer.kind === 'reviewed' ? answer.review : null;
       if (found?.mode === 'update') {
         // An Update starts with no settings ticked, and the apply names exactly the review it was made from.
-        answer = await reviewSettings(exported.value, read, chosenFor('update', read), sourceMachine, true);
+        answer = await reviewSettings(exported.value, read, chosenFor('update', read), sourceMachine, true, keyStamps);
         found = answer.kind === 'reviewed' ? answer.review : null;
       }
       const updatable = found?.mode === 'update';
@@ -540,16 +562,12 @@ export function CloneMachine(props: CloneMachineProps) {
           ? sourceList.value.secrets.map(secret => secret.name)
           : null,
       );
-      const stamps =
-        sourceList.kind === 'done' && sourceList.value.health === 'ready'
-          ? sourceList.value.secrets
-              .filter(secret => !isSignInSecretName(secret.name))
-              .map(({ name, updatedAt }) => ({ name, updatedAt }))
-          : null;
       setSourceStamps(new Map((stamps ?? []).map(({ name, updatedAt }) => [name, updatedAt])));
       // Which keys are newer on the source is this machine's call, from timestamps alone. A review that cannot be
       // read (or a source list too long to send) offers none: the keys the logins need still copy as they always did.
-      const offered = await offeredFor(exported.value, stamps);
+      // A review already asked with the source's keys (every Update, and a first copy with settings) answered it;
+      // otherwise one is asked just for the keys.
+      const offered = found === null ? await offeredFor(exported.value, stamps) : newerKeys(found.keys);
       setOfferedKeys(offered);
       setCopyKeys(true);
       setFiles(read);

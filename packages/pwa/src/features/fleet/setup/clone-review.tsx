@@ -18,7 +18,9 @@
 import type { CloneChoice, CloneReviewItem, CloneReviewLogin, FleetCloneReview } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
+import { browserClipboardWriter, type ClipboardWriter } from '../../onboarding/copy-button.tsx';
 import { documentSize } from './clone-model.ts';
+import { NewerKeyRow } from './clone-settings.tsx';
 import {
   type DiffLine,
   type ItemCompare,
@@ -493,10 +495,13 @@ interface CloneReviewSheetProps {
   readonly sameNames: readonly string[] | null;
   /** Extra rows for the Logins and keys group (the sealed key copy). */
   readonly keysAccessory?: ReactNode;
+  /** Writes the `fy secret set` command to the clipboard; the browser's own unless a host or a test brings one. */
+  readonly write?: ClipboardWriter;
 }
 
 export function CloneReviewSheet(props: CloneReviewSheetProps) {
   const { review, source, machineName, picks, onPick, loginPicks, onLoginPick, sameNames, keysAccessory } = props;
+  const write = props.write ?? browserClipboardWriter();
   const groups = reviewGroups(review, source);
   const shownLogins = review.logins;
   const shownKeys = review.keys.filter(key => key.outcome !== 'same');
@@ -554,21 +559,27 @@ export function CloneReviewSheet(props: CloneReviewSheetProps) {
                 />
               );
             })}
-            {shownKeys.map(key => (
-              <SetupRow
-                key={key.name}
-                name={`key-${key.name}`}
-                status="ready"
-                title={<span className="font-mono">{key.name}</span>}
-                detail={
-                  key.outcome === 'missing'
-                    ? `Missing here: copied with its login, sealed, with a passkey on ${source}`
-                    : key.outcome === 'newer'
-                      ? `A newer one exists on ${source}. This copy doesn’t replace a key that is already here`
-                      : `Changed on both machines. This copy doesn’t replace a key that is already here`
-                }
-              />
-            ))}
+            {shownKeys.map(key =>
+              key.outcome === 'missing' ? (
+                <SetupRow
+                  key={key.name}
+                  name={`key-${key.name}`}
+                  status="ready"
+                  title={<span className="font-mono">{key.name}</span>}
+                  detail={`Missing here: copied with its login, sealed, with a passkey on ${source}`}
+                />
+              ) : (
+                // A newer key is only REPORTED: never copied over the one held here, with the command to take it.
+                <NewerKeyRow
+                  key={key.name}
+                  keyName={key.name}
+                  both={key.outcome === 'both'}
+                  machineName={machineName}
+                  sourceName={source}
+                  write={write}
+                />
+              ),
+            )}
             {review.settings
               .filter(file => file.keys.length > 0)
               .map(file => (
