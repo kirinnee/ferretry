@@ -1545,7 +1545,7 @@ describe('the whole app copy leaves a signed-in login, its secrets, its factors 
     // The key it lacked arrived; nothing it held was named, replaced or rewritten.
     should(keys.names).deepEqual([MISSING]);
     should(keys.result.imported).deepEqual([MISSING]);
-    should(keys.result.replaced).deepEqual([]);
+    should(keys.result.kept).deepEqual([]);
     should(Object.keys((await vault.documents.read())?.entries ?? {}).toSorted()).deepEqual(
       [HELD, MISSING, OTHER_HELD].toSorted(),
     );

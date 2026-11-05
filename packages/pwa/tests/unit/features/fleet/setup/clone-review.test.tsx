@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { CLONE_REVIEW_STALE, type CloneSettingsDoc, type FleetCloneReview } from '@ferretry/protocol';
+import {
+  CLONE_REVIEW_STALE,
+  CloneableSecretNameSchema,
+  type CloneSettingsDoc,
+  type FleetCloneReview,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
@@ -32,6 +37,7 @@ import {
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────────────────────
 
+const secretName = (name: string) => CloneableSecretNameSchema.parse(name);
 const WORK_RECORD: DaemonConnectionRecord = { ...WORK, label: 'work-linux', pairedAt: 0, lastSelectedAt: 0 };
 const EXECUTED = { outcome: 'executed', executor: 'clone', summary: 'Updated studio-mac from work-linux' };
 /** A tappable control is at least 44 x 44 CSS px at every width, not only on a coarse pointer. */
@@ -1225,10 +1231,10 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
       },
     ],
     keys: [
-      { name: 'NOTES_TOKEN', outcome: 'missing' },
-      { name: 'JEV_API_KEY', outcome: 'newer' },
-      { name: 'GROQ_API_KEY', outcome: 'both' },
-      { name: 'SAME_KEY', outcome: 'same' },
+      { name: secretName('NOTES_TOKEN'), outcome: 'missing' },
+      { name: secretName('JEV_API_KEY'), outcome: 'newer' },
+      { name: secretName('GROQ_API_KEY'), outcome: 'both' },
+      { name: secretName('SAME_KEY'), outcome: 'same' },
     ],
     settings: [
       {
@@ -1385,8 +1391,11 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
     };
   const keyRadios = (screen: Screen, name: string) =>
     screen.all(`[data-clone-key="${name}"] input[type="radio"]`) as HTMLInputElement[];
+  /** The reviews of the items and settings; the one that asks which keys are newer (`sourceSecrets`) is another question. */
   const reviewBodies = (calls: readonly Call[]) =>
-    calls.filter(call => call.path === '/v1/fleet/clone/review').map(call => call.body as { settings?: unknown[] });
+    calls
+      .filter(call => call.path === '/v1/fleet/clone/review' && !('sourceSecrets' in (call.body as object)))
+      .map(call => call.body as { settings?: unknown[] });
 
   const setup = (target: Answers = {}) => {
     const { target: here, work } = settingsAnswers();
@@ -1486,7 +1495,8 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
     const plain = answering();
     const { createClient, calls } = setup({
       '/v1/fleet/clone/review': (call: Call) => {
-        asked += 1;
+        // The third review of items and settings: the one the tick asks for (a keys question does not count).
+        if (!('sourceSecrets' in (call.body as object))) asked += 1;
         return asked === 3 ? new Error('network down') : plain(call);
       },
     });

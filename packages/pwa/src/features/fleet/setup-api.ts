@@ -10,8 +10,13 @@
  */
 
 import {
+  FLEET_CLONE_KEYS_PATH,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
+  type FleetCloneKeysRecordRequest,
+  FleetCloneKeysRecordRequestSchema,
+  type FleetCloneKeysRecordResult,
+  FleetCloneKeysRecordResultSchema,
   type FleetCloneReview,
   type FleetCloneReviewRequest,
   FleetCloneReviewRequestSchema,
@@ -28,6 +33,7 @@ import type { FleetClient } from './fleet-client.ts';
 export const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
 export const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
 export const FLEET_EXPORT_PATH = '/v1/fleet/export';
+export const FLEET_CLONE_REVIEW_PATH = '/v1/fleet/clone/review';
 
 /** What the first run (and Import again) would find on this machine. Names only, never a value. */
 export const readFleetSetupScan = async (client: FleetClient): Promise<FleetSetupScan> =>
@@ -48,11 +54,12 @@ export const installFleetTools = async (
 export const readFleetExport = async (client: FleetClient): Promise<FleetCloneBundle> =>
   await client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema);
 
-export const FLEET_CLONE_REVIEW_PATH = '/v1/fleet/clone/review';
-
 /**
- * What a copy from this source would change here, key by key for settings (design §5, §8b). Writes nothing. The
- * answer's `fingerprint` is what the apply names, so the apply is refused if this machine has moved since.
+ * What a copy from this source would change here, key by key for settings (design §5, §8b), and how each API key
+ * stands (`newer` on the source, changed `both` sides, `missing` here): this machine compares `updatedAt`
+ * timestamps with its own record of the last copy. Writes nothing, and carries no value: `sourceSecrets` is names
+ * and instants. The answer's `fingerprint` is what the apply names, so the apply is refused if this machine has
+ * moved since.
  */
 export const reviewFleetClone = async (
   client: FleetClient,
@@ -62,4 +69,23 @@ export const reviewFleetClone = async (
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(FleetCloneReviewRequestSchema.parse(request)),
+  });
+
+/**
+ * After a sealed copy has landed here: remember when the source last changed each key it filed. `filedAt` is the
+ * instant this machine says it filed them (the import's own answer); a key it cannot prove it made then is not
+ * remembered. Timestamps only.
+ */
+export const recordCloneKeys = async (
+  client: FleetClient,
+  request: {
+    readonly source: FleetCloneKeysRecordRequest['source'];
+    readonly filedAt: string;
+    readonly keys: readonly { readonly name: string; readonly sourceUpdatedAt: string }[];
+  },
+): Promise<FleetCloneKeysRecordResult> =>
+  await client.request(FLEET_CLONE_KEYS_PATH, FleetCloneKeysRecordResultSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(FleetCloneKeysRecordRequestSchema.parse(request)),
   });

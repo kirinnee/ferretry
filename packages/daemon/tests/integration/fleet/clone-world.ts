@@ -120,7 +120,11 @@ export async function machine(
       secrets: {
         list: async () =>
           options.vault === undefined
-            ? [...secrets.keys()].map(secret => ({ name: secret }))
+            ? [...secrets.keys()].map(secret => ({
+                name: secret,
+                createdAt: '2026-11-01T00:00:00.000Z',
+                updatedAt: '2026-11-01T00:00:00.000Z',
+              }))
             : await options.vault.list(),
         put: async (secret, value) => {
           if (options.vault === undefined) secrets.set(secret, value);

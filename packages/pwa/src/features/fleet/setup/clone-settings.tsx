@@ -12,6 +12,8 @@ import { Check, KeyRound, Lock } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { LoosensBadge } from './clone-loosens-badge.tsx';
+import { browserClipboardWriter, type ClipboardWriter } from '../../onboarding/copy-button.tsx';
+import { ReplaceKeyCommand } from '../../secrets/replace-key-command.tsx';
 import { CLONE_KEEP_DEFAULT, CLONE_NO_DEFAULT, type CloneDefaultView } from './clone-model.ts';
 import {
   CLONE_ITEMS,
@@ -20,6 +22,7 @@ import {
   type CloneLogin,
   type CloneNeed,
   type CloneOutcomeItem,
+  type NewerKey,
   needsSentence,
   outcomeSentence,
 } from './clone-settings-model.ts';
@@ -97,6 +100,38 @@ export function CloneItemsChoices({
   );
 }
 
+/**
+ * One API key the source changed since the last copy: "A newer X exists on <source>". A REPORT, nothing to tick:
+ * Clone never writes a key this machine already holds, so it says how to replace it by hand instead, and says so
+ * plainly when this machine changed the key too.
+ */
+function NewerKeyRow({
+  keyName,
+  both,
+  machineName,
+  sourceName,
+  write,
+}: {
+  readonly keyName: string;
+  readonly both: boolean;
+  readonly machineName: string;
+  readonly sourceName: string;
+  readonly write: ClipboardWriter;
+}) {
+  return (
+    <div className="kt-panel relative flex min-h-control min-w-0 flex-col gap-1 p-panel" data-clone-newer-key={keyName}>
+      <span className="text-row font-semibold text-fg">
+        A newer <span className="font-mono">{keyName}</span> exists on {sourceName}
+      </span>
+      <span className="text-cell text-muted">
+        {both ? `You changed it on ${machineName} too. ` : ''}
+        Clone does not replace a key {machineName} already has. To use the newer one, run this on {machineName}:
+      </span>
+      <ReplaceKeyCommand name={keyName} write={write} />
+    </div>
+  );
+}
+
 /** The row's verdict in words, above its reason: the status mark alone is only spoken. */
 function LoginDetail({ word, tone, text }: { readonly word: string; readonly tone: string; readonly text: string }) {
   return (
@@ -119,6 +154,8 @@ export function CloneLoginsSection({
   keys,
   copyKeys,
   onCopyKeys,
+  newer = [],
+  write = browserClipboardWriter(),
 }: {
   readonly logins: readonly CloneLogin[];
   readonly machineName: string;
@@ -127,8 +164,12 @@ export function CloneLoginsSection({
   readonly keys: readonly string[];
   readonly copyKeys: boolean;
   readonly onCopyKeys: (on: boolean) => void;
+  /** Keys the source changed since the last copy, each reported on its own; Clone never copies one over the one here. */
+  readonly newer?: readonly NewerKey[];
+  /** Writes the `fy secret set` command to the clipboard; the browser's own unless a host or a test brings one. */
+  readonly write?: ClipboardWriter;
 }) {
-  if (logins.length === 0 && keys.length === 0) return null;
+  if (logins.length === 0 && keys.length === 0 && newer.length === 0) return null;
   const sending = copyKeys && keys.length > 0;
   return (
     <SetupSection title="Logins and keys" name="clone-logins">
@@ -177,6 +218,16 @@ export function CloneLoginsSection({
           />
         ),
       )}
+      {newer.map(key => (
+        <NewerKeyRow
+          key={key.name}
+          keyName={key.name}
+          both={key.outcome === 'both'}
+          machineName={machineName}
+          sourceName={sourceName}
+          write={write}
+        />
+      ))}
       {keys.length === 0 ? null : (
         <CloneKeysBox
           keys={keys}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   CLONE_REVIEW_KINDS,
   CLONE_REVIEW_STALE,
+  CloneableSecretNameSchema,
   type CloneLoginTarget,
   type CloneReviewItem,
 } from '@ferretry/protocol';
@@ -168,7 +169,9 @@ describe('nothing differs, the stale refusal and Done', () => {
     expect(nothingDiffers(NOTHING_REVIEW)).toBe(true);
     expect(nothingDiffers(FULL_REVIEW)).toBe(false);
     expect(nothingDiffers(review({ logins: [{ sourceId: 'x', outcome: 'slot' }] }))).toBe(false);
-    expect(nothingDiffers(review({ keys: [{ name: 'JEV_API_KEY', outcome: 'newer' }] }))).toBe(false);
+    expect(
+      nothingDiffers(review({ keys: [{ name: CloneableSecretNameSchema.parse('JEV_API_KEY'), outcome: 'newer' }] })),
+    ).toBe(false);
   });
 
   it('knows the sentence a moved review is refused with', () => {

@@ -4,6 +4,7 @@ export const packageRole = 'fleet' as const;
 export * from './account/adapt.ts';
 export * from './account/budget.ts';
 export * from './account/clone-base.ts';
+export * from './account/clone-keys.ts';
 export * from './account/clone.ts';
 export * from './account/clone-settings.ts';
 export * from './account/clone-update.ts';
