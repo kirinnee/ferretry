@@ -864,6 +864,7 @@ import {
   claimStartName,
   classifyPaneProcesses,
   codexModelProvider,
+  codexStartupEffortRefusal,
   combinedMcpOAuthServers,
   combinedReferences,
   combinedValues,
@@ -974,7 +975,6 @@ import {
   harnessMigrationRefusal,
   harnessOverrideFailures,
   harnessPreflightSummary,
-  harnessQuirks,
   INSTRUCTIONS_FEATURE,
   InferredLaneProposer,
   InitialAttachmentError,
@@ -1332,6 +1332,7 @@ import {
   sessionScopedAttachments,
   shareLinkTarget,
   stampedProjectOf,
+  startupEffort,
   suggestedOllamaModel,
   supersededCarrierKeys,
   TaskPlanAgendaAdapter,
@@ -2646,11 +2647,11 @@ async function storeAttachments(
  * but it also loses the connection the retry would have travelled on, so the client sees a transport
  * failure rather than a duplicate session.
  */
-/** The two reads a start makes only when it names fast mode. */
+/** The reads a start makes only when it names fast mode or, on Codex, a reasoning level. */
 interface StartFastPorts {
   /** The text of the login's fixed Claude `--settings` file: empty when it has none, nothing when unreadable. */
   readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
-  /** The models a Codex login advertises, for a start asking for fast mode on one of them. */
+  /** The models a Codex login advertises, for a start asking for fast mode or a reasoning level on one of them. */
   readonly codexChoices: (executable: string, cwd: string) => Promise<readonly RuntimeModelChoice[]>;
 }
 
@@ -2924,19 +2925,27 @@ function createSessionControlSubsystem(
           'the login’s fixed settings could not be read, so fast mode cannot be applied',
         );
       }
+      // THE REQUESTED LEVEL: on the argv for Codex, a command before turn one for Claude (`startupEffort`).
+      // A Codex level on the argv is checked here against the login's live catalog, the check the picker
+      // drive used to make after the pane existed; a refusal releases the callsign like the ones above.
+      const effortAtStart = startupEffort(account.kind, request.effort);
+      if (effortAtStart?.kind === 'argv') {
+        const choices = await fast.codexChoices(executable, cwd).catch(() => undefined);
+        const refusal = codexStartupEffortRefusal(plan.model, effortAtStart.effort, choices);
+        if (refusal !== undefined) {
+          await releaseCallsign();
+          throw new SessionControlError('unservable_model', refusal);
+        }
+      }
       const startupRuntime: RuntimeControlRequest | undefined =
-        request.effort === undefined
-          ? undefined
-          : harnessQuirks(account.kind).effortIsRuntimeCommand
-            ? { action: 'effort', effort: request.effort }
-            : { action: 'model', model: plan.model, effort: request.effort };
+        effortAtStart?.kind === 'command' ? { action: 'effort', effort: effortAtStart.effort } : undefined;
       // The remote-control arguments are added only when the caller asked for the surface, because
       // they are what makes the harness publish one — adding them anyway would open a control channel
       // for a session whose own document records that it has none.
       // THE SAME BUILD a Restart CLI, a migration and a revive run, so the four can never disagree
-      // about what a launch carries. Effort is not on it: a start applies the requested level as a
-      // runtime command before turn one (`startupRuntime` above), and a relaunch passes the level the
-      // session is on by then.
+      // about what a launch carries. A Codex start carries its level here; a Claude start applies it as a
+      // runtime command before turn one (`startupRuntime` above); a relaunch passes the level the session
+      // is on by then.
       const command = await (async (): Promise<readonly string[]> => {
         try {
           return buildLaunchArgv({
@@ -2946,6 +2955,7 @@ function createSessionControlSubsystem(
             transcript: transcript.launchArguments,
             readableFolders: readableHandoffs(id),
             model: plan.model,
+            ...(effortAtStart?.kind === 'argv' ? { effort: effortAtStart.effort } : {}),
             ...(request.fast === undefined ? {} : { fast: request.fast }),
             ...(launchCompactAt === undefined ? {} : { compactAt: launchCompactAt }),
             ...(request.fast === undefined && launchCompactAt === undefined ? {} : { fixedSettings }),

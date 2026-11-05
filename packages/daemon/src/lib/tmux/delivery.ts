@@ -17,7 +17,7 @@ import { composerHolds } from './composer.ts';
 import type { ComposerInk } from './composer-ink.ts';
 import type { ComposerCursor } from './composer-screen.ts';
 import { composerContains, readComposer, showsPayload } from './composer-screen.ts';
-import { paneShowsActiveWork } from './pane.ts';
+import { paneShowsActiveWork, paneShowsStartupWait } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
 import { startupDialogAction } from './startup.ts';
 
@@ -159,6 +159,13 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // A pane that died or started working took the payload with it either way.
   if (!frame.alive || frame.dead || paneShowsActiveWork(frame.visible))
     return { kind: 'delivered', outcome: 'turn-started' };
+  // Codex took the submission and parked it until its startup ends (`paneShowsStartupWait`). The
+  // payload is still DRAWN in the composer, so the composer reading below would call it held and press
+  // Enter again — into a harness that has already accepted it, and that may open a picker or start the
+  // turn between that frame and the key. What follows is what the payload would have done unparked: a
+  // slash command is the TUI's own, anything else is a turn.
+  if (paneShowsStartupWait(frame.visible))
+    return { kind: 'delivered', outcome: text.trimStart().startsWith('/') ? 'handled-local' : 'turn-started' };
   // Exact `/model` opens Codex's native picker. The pane often keeps `› /model` above it, which
   // `composerHolds` cannot tell from an occupied composer — an OPEN picker proves the first Enter
   // was consumed, and a second one would make a choice on the user's behalf.

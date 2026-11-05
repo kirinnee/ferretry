@@ -22,6 +22,8 @@ import {
   PASTE_TRANSPORT_CHARS,
   paneResponded,
   paneShowsOpenPicker,
+  paneShowsStartupWait,
+  promptIsReady,
   resumeMenuAction,
   type StartupDialogAction,
   startupDialogAction,
@@ -808,5 +810,69 @@ describe('a peer message pasted into a Claude composer', () => {
     const submitted: DeliveryFrame = { ...chip, visible: '❯ \n', cursorX: 2, cursorY: 0 };
 
     should(classifySubmit(submitted, peer, 'placeholder')).deepEqual({ kind: 'delivered', outcome: 'turn-started' });
+  });
+});
+
+describe('a submission Codex 0.166 parks until its startup ends', () => {
+  // Real panes from codex-cli 0.166.0 at 80x24: the composer is drawn before startup ends, and a
+  // payload submitted then stays drawn in it above `Waiting for startup · esc cancel`.
+  const capture = (state: string): DeliveryFrame => {
+    const dir = join(import.meta.dir, '../../fixtures/composer');
+    const [x, y] = readFileSync(join(dir, `codex-0.166.0-${state}.cursor`), 'utf8')
+      .trim()
+      .split('|');
+    const visible = readFileSync(join(dir, `codex-0.166.0-${state}.txt`), 'utf8');
+    const cursorX = Number(x);
+    const cursorY = Number(y);
+    return {
+      alive: true,
+      dead: false,
+      promptReady: promptIsReady(visible, cursorY, cursorX),
+      visible,
+      cursorX,
+      cursorY,
+    };
+  };
+
+  it('should call a parked message delivered, as the turn it becomes, so Enter is never pressed into it again', () => {
+    should(classifySubmit(capture('startup-queued-message'), 'say hello', 'chars')).deepEqual({
+      kind: 'delivered',
+      outcome: 'turn-started',
+    });
+  });
+
+  it('should call a parked slash command delivered as the TUI’s own, so a picker it opens later is not keyed', () => {
+    should(classifySubmit(capture('startup-queued-slash'), '/model', 'chars')).deepEqual({
+      kind: 'delivered',
+      outcome: 'handled-local',
+    });
+  });
+
+  it('should hold a draft whose park was cancelled: the same text, no longer taken', () => {
+    should(classifySubmit(capture('startup-queued-cancelled'), 'say hello', 'chars')).deepEqual({ kind: 'holding' });
+  });
+
+  it('should never read a parked composer as an idle prompt', () => {
+    should(capture('startup-queued-message').promptReady).be.false();
+    should(capture('startup-queued-slash').promptReady).be.false();
+    // The empty composers on either side of the park are ready, as before.
+    should(capture('startup-composer').promptReady).be.true();
+    should(capture('started-idle').promptReady).be.true();
+  });
+
+  it('should hear the park only from the bottom line, never from the same words in the conversation', () => {
+    // Arrange — a transcript ABOUT this screen, with an idle composer below it.
+    const quoted = [
+      '• Codex showed:',
+      '  Waiting for startup  · esc cancel',
+      '',
+      '› Ask Codex to do anything',
+      '',
+    ].join('\n');
+
+    // Act / Assert
+    should(paneShowsStartupWait(capture('startup-queued-slash').visible)).be.true();
+    should(paneShowsStartupWait(quoted)).be.false();
+    should(promptIsReady(quoted, 3, 2)).be.true();
   });
 });

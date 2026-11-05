@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import should from 'should';
 import {
   CodexModelPickerDriver,
@@ -673,5 +675,79 @@ describe('the Codex model picker on a login catalog (captured from Codex 0.156.1
         quickPickerDefaultEffort: 'high',
       }),
     ).match(/quick picker can only apply its default high reasoning level/u);
+  });
+});
+
+describe('a Codex 0.166 picker opened before Codex has finished starting', () => {
+  // Real panes captured from codex-cli 0.166.0 at the daemon's 80x24. From 0.166 the composer is drawn
+  // before startup ends, and a `/model` typed into it is parked behind `Waiting for startup` until an
+  // `account/read` round trip to chatgpt.com returns — on a slow link, for many seconds.
+  const fixture = (name: string): string => readFileSync(join(import.meta.dir, '../../../fixtures', name), 'utf8');
+  const PARKED = fixture('composer/codex-0.166.0-startup-queued-slash.txt');
+  const PICKER = fixture('codex/picker-0.166.0-all-models.txt');
+  const REASONING = fixture('codex/picker-0.166.0-reasoning.txt');
+
+  it('should read the 0.166 model list and reasoning screens, rows by digit', async () => {
+    // Act
+    const models = parseCodexPickerScreen(PICKER);
+    const levels = parseCodexPickerScreen(REASONING);
+
+    // Assert
+    should(models.kind).equal('all-models');
+    should(models.rows.slice(0, 3)).deepEqual([
+      { number: 1, name: 'GPT-6.1-Sol' },
+      { number: 2, name: 'GPT-6-Astra' },
+      { number: 3, name: 'GPT-6.1 Terra' },
+    ]);
+    should(levels.kind).equal('reasoning');
+    should(levels.rows.map(row => row.name)).deepEqual(['Low', 'Medium', 'High', 'Extra high', 'More reasoning…']);
+  });
+
+  it('should wait out a startup longer than its whole picker budget without spending it', async () => {
+    // Arrange — twenty parked frames against a budget of three: the frames a slow network costs.
+    const transport = new ScriptedPicker([
+      ...Array.from({ length: 20 }, () => ({ visible: PARKED })),
+      { visible: PICKER },
+    ]);
+    const subject = driver(transport, 3);
+
+    // Act
+    const screen = await subject.preflight({ model: 'gpt-6.1-sol', rowName: 'GPT-6.1-Sol', effort: 'high' });
+
+    // Assert
+    should(screen.kind).equal('all-models');
+    should(transport.keys).have.length(0);
+  });
+
+  it('should still give up when Codex never finishes starting, and say that it had not', async () => {
+    // Arrange
+    const transport = new ScriptedPicker([{ visible: PARKED }]);
+    const subject = new CodexModelPickerDriver(transport, noSleep, {
+      settleMs: 0,
+      maxObservations: 3,
+      maxStartupWaitObservations: 5,
+    });
+
+    // Act
+    const failure = await subject.preflight({ model: 'gpt-6.1-sol', effort: 'high' }).catch(error => error);
+
+    // Assert
+    should(failure).be.instanceOf(CodexPickerDriveError);
+    should(failure).match({
+      message: /did not reach a model list within 3 observations \(last: Codex still starting\)/u,
+    });
+  });
+
+  it('should end the wait the moment Codex exits, as 0.166 does when its startup times out', async () => {
+    // Arrange
+    const transport = new ScriptedPicker([{ visible: PARKED }, { visible: PARKED }, { visible: '', alive: false }]);
+
+    // Act
+    const failure = await driver(transport, 3)
+      .preflight({ model: 'gpt-6.1-sol', effort: 'high' })
+      .catch(error => error);
+
+    // Assert
+    should(failure).match({ message: 'Codex exited while reaching a model list' });
   });
 });

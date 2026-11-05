@@ -295,6 +295,32 @@ The daemon waits at least one poll (250 ms) between typing and Enter, which is o
 window, and if an Enter only opened a new line the composer still holds the message, so Enter is
 pressed again — bounded, and only while that exact message is still there.
 
+### Codex 0.166: a submission parked until startup ends
+
+Measured on real **Codex 0.166.0** at the daemon's 80x24 (fixtures `codex-0.166.0-startup-*` and
+`started-idle`; no inference: the probes were `/model`, and the one plain message was captured while a
+loopback proxy held every connection, then the pane was killed before startup could finish).
+
+- The composer is drawn **before startup has finished**, about 0.4 s in, with no status line under it.
+  Startup then waits on an `account/read` round trip to chatgpt.com — under a second on a good link,
+  and up to a timeout of about fifteen seconds, after which Codex exits with `account/read failed during
+TUI bootstrap: … workspace routing discovery timed out`.
+- A payload submitted in that window **stays drawn in the composer** with `Waiting for startup · esc
+cancel` as the pane's last line, and is sent when startup ends. Escape cancels the park and leaves the
+  same text as an ordinary draft.
+- So the composer cannot tell a parked payload from an unsent one; the bottom line can. Delivery reads
+  that line as **delivered** (`paneShowsStartupWait`): a turn for a message, the TUI's own for a slash
+  command. Pressing Enter again would key a harness that has already taken the payload — and a `/model`
+  whose picker opened between the frame and the key would have its first row chosen.
+- **A start no longer types `/model` at all.** It used to set a Codex start's reasoning level by
+  driving the picker the instant the composer appeared, which on 0.166 meant typing into a Codex that
+  could not run it yet; the picker driver's bounded wait then failed the start with "Codex did not
+  reach a model list" whenever startup outlasted it. The level now rides the launch command
+  (`-c model_reasoning_effort="<level>"`), checked against the login's catalog before the pane exists
+  (`startupEffort`, `codexStartupEffortRefusal`). A live switch still drives the picker, and a frame
+  showing the park is not charged to its budget (`CODEX_STARTUP_WAIT_OBSERVATIONS`, which outlasts
+  Codex's own startup timeout).
+
 ## Measured Claude Code behaviour
 
 Measured on **Claude Code 2.1.281** from live captures of the incident below (fixtures:
