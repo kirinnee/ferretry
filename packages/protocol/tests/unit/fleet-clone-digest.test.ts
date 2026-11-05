@@ -226,6 +226,18 @@ describe('cloneItemDigest', () => {
       should(cloneItemDigest(runtime({}), NONE, identityOf)).not.equal(digest);
     });
 
+    it('should hold where a runtime or profile compacts, but not whether a runtime is switched off here', () => {
+      const digest = cloneItemDigest(runtime({ harness: 'claude' }), NONE, identityOf);
+      should(cloneItemDigest(runtime({ harness: 'claude', compactAt: 250000 }), NONE, identityOf)).not.equal(digest);
+      should(cloneItemDigest(runtime({ harness: 'claude', compactAt: 'auto' }), NONE, identityOf)).not.equal(digest);
+      should(cloneItemDigest(runtime({ harness: 'claude', compactAt: undefined }), NONE, identityOf)).equal(digest);
+      should(
+        cloneItemDigest(runtime({ harness: 'claude', disabled: { reason: 'spend limit' } }), NONE, identityOf),
+      ).equal(digest);
+      const layered: CloneDigestItem = { kind: 'profile', value: { layers: ['mcp/a'], compactAt: 200000 } };
+      should(cloneItemDigest(layered, NONE)).not.equal(cloneItemDigest(profile(['mcp/a']), NONE));
+    });
+
     it('should hold a login as what it signs in with, not the id this machine files it under', () => {
       const login = (value: Record<string, unknown>): CloneDigestItem => ({ kind: 'login', value });
       const base = { id: 'one', harness: 'claude', label: 'work', store: 'environment', env: { A: '1' } };

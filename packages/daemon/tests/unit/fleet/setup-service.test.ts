@@ -15,6 +15,7 @@ import {
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
   parseCloneBase,
+  serializeCloneBase,
   originKeyOfId,
   parseExportKeys,
   FleetApplyFailureError,
@@ -1282,6 +1283,369 @@ describe('the clone.import executor', () => {
   });
 });
 
+// ── The update copy ──────────────────────────────────────────────────────────────────────────────
+
+describe('the clone.import executor in update mode', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+
+  const sourceAt = async (content: string): Promise<Record<string, unknown>> => {
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(SET_UP_MODEL(), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+  const request = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+  /** A target that already took its first copy from the source, as it stands afterwards. */
+  const copied = async (): Promise<World> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const alongside = {
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle: await sourceAt('Main.\n'),
+    } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+    await first.service.executors.clone.describe(alongside);
+    await first.service.executors.clone.execute(alongside);
+    const documents = first.applied[0]?.documents ?? [];
+    const target = world({ overrides: { daemonId: () => 'daemon-target' } });
+    target.state.reading = configReading(modelOfWrites(documents), 'r');
+    for (const document of documents) target.state.assets[document.path] = document.content;
+    target.state.emails = async () => [];
+    return target;
+  };
+
+  const batchRecord = (w: World) => (w.applied[0]?.documents ?? []).find(document => document.path === BASE_PATH);
+
+  it('should list nothing and write nothing for a copy that has not changed', async () => {
+    const w = await copied();
+    const review = await w.service.reviewClone({ bundle: await sourceAt('Main.\n') });
+    should(review.mode).equal('update');
+    should(review.items).deepEqual([]);
+    should(review.same.count).be.above(0);
+  });
+
+  it('should take a change made on the source, and record it as the new last-copied in the same batch', async () => {
+    // Arrange
+    const w = await copied();
+    const bundle = await sourceAt('Main, changed on the source.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const item = review.items.find(row => row.ref === 'instructions/main');
+    should(item?.outcome).equal('theirs');
+    should(item?.choice).equal('take');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    const written = (w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY);
+    should(written?.content).equal('Main, changed on the source.\n');
+    should(batchRecord(w)?.path).equal(BASE_PATH);
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    const after = await w.service.reviewClone({ bundle });
+    should(after.items.map(row => row.ref)).not.containEql('instructions/main');
+  });
+
+  it('should refuse an apply whose review has moved since the person saw it', async () => {
+    const w = await copied();
+    const bundle = await sourceAt('Main, changed on the source.\n');
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(request(bundle, { reviewed: 'stale', decisions: {} })),
+      'fleet_change_refused',
+    );
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should leave an item changed here alone when the source did not change it', async () => {
+    const w = await copied();
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main.\n');
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'instructions/main')?.outcome).equal('mine');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+
+  it('should refuse an item changed on both sides until the person chooses, then honour either choice', async () => {
+    const w = await copied();
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main, edited there.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const item = review.items.find(row => row.ref === 'instructions/main');
+    should(item?.outcome).equal('both');
+    should(item?.choice).be.undefined();
+
+    const unchosen = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+    const refusal = await catalogRefusal(w.service.executors.clone.describe(unchosen), 'fleet_change_refused');
+    should(refusal.message).containEql('instructions/main');
+
+    const take = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+    await w.service.executors.clone.describe(take);
+    await w.service.executors.clone.execute(take);
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)?.content).equal(
+      'Main, edited there.\n',
+    );
+
+    const keep = await copied();
+    keep.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const keeping = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'keep' } });
+    await keep.service.executors.clone.describe(keeping);
+    await keep.service.executors.clone.execute(keeping);
+    should((keep.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+
+  it('should never write a login or a secret, whatever the person chose (account-model §14.4)', async () => {
+    // Arrange: a target holding a signed-in login and a stored secret.
+    const w = await copied();
+    w.secrets.set('NOTES_TOKEN', 'ghp_do_not_touch');
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main, edited there.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    should(configTextOf(w.applied[0]?.documents ?? [])).not.containEql('claude-you');
+    should([...w.secrets]).deepEqual([['NOTES_TOKEN', 'ghp_do_not_touch']]);
+  });
+
+  it('should refuse a review of a setup exported from this very machine', async () => {
+    const w = await copied();
+    const bundle = { ...(await sourceAt('Main.\n')), machine: 'studio' };
+    const refusal = await setupRefusal(w.service.reviewClone({ bundle }), 'fleet_setup_refused');
+    should(refusal.message).containEql('itself');
+  });
+
+  it('should let an unexpected failure through, in a review and in an apply, rather than call it a refusal', async () => {
+    const broken = world({
+      overrides: {
+        cloneBase: {
+          read: async () => {
+            throw new Error('disk gone');
+          },
+          write: async () => undefined,
+        },
+      },
+    });
+    broken.state.reading = configReading(SET_UP_MODEL(), 'r');
+    const bundle = await sourceAt('Main.\n');
+    await broken.service.reviewClone({ bundle }).then(
+      () => should.fail('resolved', 'rejected'),
+      (error: unknown) => should((error as Error).message).equal('disk gone'),
+    );
+    await broken.service.executors.clone.describe(request(bundle, { reviewed: 'x', decisions: {} })).then(
+      () => should.fail('resolved', 'rejected'),
+      (error: unknown) => should((error as Error).message).equal('disk gone'),
+    );
+  });
+
+  it('should record nothing for a source that carries no identity, but still write what was chosen', async () => {
+    const w = await copied();
+    const { daemon: _daemon, keys: _keys, ...rest } = await sourceAt('Main, changed on the source.\n');
+    const bundle = { ...rest, version: 1 };
+    const review = await w.service.reviewClone({ bundle });
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should(batchRecord(w)).be.undefined();
+  });
+});
+
+// ── The update copy: security review regressions (#F544) ─────────────────────────────────────────
+
+describe('the clone.import executor in update mode refuses what the review did not say', () => {
+  const KEY_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const KEY_API = 'cccccccccccccccccccccccccc';
+  // A copy made from a file: no id a browser verified is stamped on it.
+  const FROM_SOURCE = { clonedFrom: 'source' };
+  const bundleOf = (patch: Record<string, unknown> = {}) =>
+    FleetCloneBundleSchema.parse({
+      format: 'ferretry-clone',
+      version: 2,
+      daemon: 'daemon-source',
+      keys: {},
+      machine: 'source',
+      exportedAt: '2026-10-13T07:00:00.000Z',
+      credentials: [],
+      components: {},
+      profiles: {},
+      runtimes: {},
+      files: [],
+      notCopied: [],
+      ...patch,
+    }) as unknown as Record<string, unknown>;
+  const update = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+  const run = async (w: World, change: Extract<FleetAccountChange, { kind: 'clone.import' }>) => {
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    return w.applied[0]?.documents ?? [];
+  };
+
+  it('should honour skip: a left-out new component is not written, and a contradicting decision is refused', async () => {
+    // Arrange
+    const w = world();
+    const bundle = bundleOf({
+      keys: { 'mcp/skip-me': KEY_A },
+      components: { mcp: { 'skip-me': { command: 'not-supposed-to-copy' } } },
+    });
+    const review = await w.service.reviewClone({ bundle });
+
+    // Act
+    const documents = await run(w, update(bundle, { skip: ['mcp/skip-me'], reviewed: review.fingerprint }));
+
+    // Assert
+    should(documents.map(document => document.path).filter(path => path.includes('skip-me'))).eql([]);
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(bundle, {
+          skip: ['mcp/skip-me'],
+          decisions: { 'mcp/skip-me': 'add' },
+          reviewed: review.fingerprint,
+        }),
+      ),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('mcp/skip-me is left out');
+  });
+
+  it('should refuse an environment login changed after the review, writing nothing', async () => {
+    // Arrange
+    const environment = (value: string) =>
+      bundleOf({
+        keys: { 'login/api': KEY_API },
+        credentials: [{ id: 'api', harness: 'claude', store: 'environment', env: { NODE_OPTIONS: value } }],
+        profiles: { default: { layers: [] } },
+        runtimes: { agent: { credential: 'api', profile: 'default', agent: false } },
+      });
+    const w = world();
+    const review = await w.service.reviewClone({ bundle: environment('--trace-warnings') });
+    should(review.logins[0]?.runnable?.entries).containEql({
+      label: 'Environment NODE_OPTIONS',
+      text: '--trace-warnings',
+      document: false,
+    });
+
+    // Act
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(environment('--require /tmp/other-module.cjs'), { reviewed: review.fingerprint }),
+      ),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(w.applied).eql([]);
+  });
+
+  it('should refuse a bundle that carries a script and also says it could not, on review and on apply', async () => {
+    const masked = bundleOf({
+      keys: { 'hooks/a': KEY_A },
+      components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+      files: [{ path: 'components/hooks/a/run.sh', content: 'different script' }],
+      notCopied: [{ path: 'components/hooks/a/run.sh', reason: 'too large' }],
+    });
+    const w = world();
+    const reviewing = await setupRefusal(w.service.reviewClone({ bundle: masked }), 'fleet_setup_refused');
+    should(reviewing.message).containEql('also says it could not carry it');
+    const applying = await catalogRefusal(
+      w.service.executors.clone.describe(update(masked, { reviewed: 'any' })),
+      'fleet_change_refused',
+    );
+    should(applying.message).containEql('also says it could not carry it');
+    should(w.applied).eql([]);
+  });
+
+  /** A target whose hooks/a, copied before from the source, owns a folder holding `files`. */
+  const withHooks = (directory: string, files: string[], layout = LAYOUT): World => {
+    const w = world({ catalog: { layout } });
+    w.state.reading = configReading(
+      parseAccountModel({
+        version: 2,
+        components: { hooks: { a: { harness: 'claude', directory, ...FROM_SOURCE, clonedFromKey: KEY_A } } },
+      }),
+      'r',
+    );
+    const folder = `${layout.assetsDirectory}/${directory}`;
+    w.state.folders[folder] = { files: files.map(path => ({ path, content: `${path} here` })), skipped: [] };
+    for (const path of files) w.state.assets[`${folder}/${path}`] = `${path} here`;
+    return w;
+  };
+  const keepOnly = bundleOf({
+    keys: { 'hooks/a': KEY_A },
+    components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+    files: [{ path: 'components/hooks/a/keep.sh', content: 'keep, from the source' }],
+  });
+
+  it('should remove a file the review listed as removed, in the same batch and only if unchanged', async () => {
+    // Arrange
+    const w = withHooks('components/hooks/a', ['keep.sh', 'gone.sh']);
+    const review = await w.service.reviewClone({ bundle: keepOnly });
+    should(review.items[0]?.files).containEql({
+      path: 'components/hooks/a/gone.sh',
+      change: 'removed',
+      lines: { added: 0, removed: 1 },
+    });
+
+    // Act
+    const documents = await run(
+      w,
+      update(keepOnly, { reviewed: review.fingerprint, decisions: { 'hooks/a': 'take' } }),
+    );
+
+    // Assert
+    should(documents.find(document => document.path.endsWith('/gone.sh'))).eql({
+      path: '/state/fleet/assets/components/hooks/a/gone.sh',
+      content: '',
+      mode: 0o600,
+      expect: 'digest:/state/fleet/assets/components/hooks/a/gone.sh',
+      remove: true,
+    });
+    should(documents.find(document => document.path.endsWith('/keep.sh'))?.content).equal('keep, from the source');
+  });
+
+  it('should refuse to remove anything inside a credential store, even if the planner named it (§14.4)', async () => {
+    // Arrange: a layout whose asset tree holds the credential store, and a folder pointed into it.
+    const w = withHooks('credentials/claude-you', ['keep.sh', '.credentials.json'], {
+      ...LAYOUT,
+      assetsDirectory: '/state/fleet',
+    });
+    const review = await w.service.reviewClone({ bundle: keepOnly });
+
+    // Act
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(keepOnly, { reviewed: review.fingerprint, decisions: { 'hooks/a': 'take' } }),
+      ),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refusal.message).equal(
+      "credentials/claude-you/.credentials.json is not one of this machine's own setup documents, so an update never removes it. Nothing was changed.",
+    );
+    should(w.applied).eql([]);
+  });
+});
+
 // ── The "last copied" record ─────────────────────────────────────────────────────────────────────
 
 describe('the clone-base record', () => {
@@ -1469,6 +1833,34 @@ describe('the clone-base record', () => {
     should(await w.service.forgetCloneSource('self:daemon-source')).equal(true);
     should(parseCloneBase(w.state.baseWrites[0]).sources).deepEqual({});
     should(w.applied).have.length(1);
+  });
+
+  it('should forget a source named by its bare id or its machine name, and refuse a name that fits two', async () => {
+    const w = target();
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    const recorded = parseCloneBase(batchRecord(w)?.content);
+    const filed = recorded.sources['self:daemon-source'];
+    should(filed).not.be.undefined();
+
+    // By the bare id the export carries, and by the machine name the source gave itself.
+    w.state.assets[BASE_PATH] = batchRecord(w)?.content ?? '';
+    should(await w.service.forgetCloneSource('daemon-source')).equal(true);
+    should(Object.keys(parseCloneBase(w.state.baseWrites[0]).sources)).deepEqual([]);
+
+    // Two sources under one name: nothing is forgotten, and the answer names both ids.
+    const twice = serializeCloneBase({
+      version: 1,
+      sources: { 'self:one': filed as never, 'self:two': filed as never },
+    });
+    w.state.assets[BASE_PATH] = twice;
+    w.state.baseWrites.length = 0;
+    const name = (filed as { name: string }).name;
+    await should(w.service.forgetCloneSource(name)).be.rejectedWith(
+      `More than one source is called ${name}: self:one, self:two. Name one by its id.`,
+    );
+    should(w.state.baseWrites).deepEqual([]);
   });
 });
 

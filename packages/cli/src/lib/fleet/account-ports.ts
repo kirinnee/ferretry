@@ -4,6 +4,8 @@ import type {
   FleetAccountChangeOutcome,
   FleetAccountChangeView,
   FleetCloneBundle,
+  FleetCloneReview,
+  FleetCloneReviewRequest,
   FleetComponentCatalog,
   FleetCredentialList,
   FleetCredentialTestResult,
@@ -56,6 +58,10 @@ export interface IAccountGateway {
   scan(): Promise<FleetSetupScan>;
   installTools(harnesses: readonly AccountHarness[]): Promise<FleetToolInstallResult>;
   exportBundle(): Promise<FleetCloneBundle>;
+  /** What a copy from this bundle would change here and why. Writes nothing. */
+  reviewClone(request: FleetCloneReviewRequest): Promise<FleetCloneReview>;
+  /** Drop the record of one earlier copy source (by id or name); nothing copied, no login, no secret changes. Whether there was one. */
+  forgetCloneSource(source: string): Promise<boolean>;
   /** `method` is Codex's choice of sign-in; absent means its default, a device code. */
   /**
    * Start a credential's sign-in, or pick up the one already running for it (`resumed`). `restart`

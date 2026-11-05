@@ -92,6 +92,11 @@ export const CloneBaseSourceSchema = z.strictObject({
   name: z.string().max(120),
   /** Whether the id was verified by the browser that did the copy, or is only what the source said of itself. */
   verified: z.enum(['browser', 'self']),
+  /**
+   * A source filed from its own word: the machine its bundle names, which every component and login copied
+   * from it is stamped with (`clonedFrom`). Two such sources are told apart by it, since neither stamps an id.
+   */
+  machine: z.string().min(1).max(120).optional(),
   lastCopiedAt: InstantSchema,
   items: z
     .record(OriginKeySchema, CloneBaseItemSchema)
@@ -215,6 +220,8 @@ export interface CloneSourceIdentity {
   readonly id: string;
   readonly name: string;
   readonly verified: 'browser' | 'self';
+  /** Only for a source filed from its own word: the machine its bundle names, as copies stamp it (`clonedFrom`). */
+  readonly machine?: string;
 }
 
 /**
@@ -263,6 +270,7 @@ export function cloneSourceIdentity(
     id,
     name: (displayName ?? bundle.machine).slice(0, 120),
     verified: verifiedDaemon === undefined ? 'self' : 'browser',
+    ...(verifiedDaemon === undefined && bundle.machine.length <= 120 ? { machine: bundle.machine } : {}),
   };
 }
 
@@ -390,28 +398,37 @@ export interface CloneBaseUpdate {
   readonly sourceKeys: ReadonlySet<OriginKey>;
   /** The setup this machine is left with: what still links to the source is read from it. */
   readonly model: AccountModel;
+  /** Items the source dropped that the person chose to keep: not offered for removal again. */
+  readonly settled?: ReadonlySet<OriginKey>;
+}
+
+/** What an item says of where it was copied from. */
+interface Stamped {
+  readonly clonedFromKey?: string;
+  readonly clonedFromDaemon?: string;
+  readonly clonedFrom?: string;
 }
 
 /**
  * Every origin key the model's items carry; with `from`, only those on items copied from that source. A
  * browser-verified source owns the items stamped with its id; a source filed under {@link SELF_REPORTED_PREFIX}
- * owns the items no browser stamped (a copy made from a file), so one source never keeps another's entry alive.
+ * owns the items no browser stamped (a copy made from a file) — and, when it knows the machine it came from,
+ * only those of them that name that machine, so one source never keeps another's entry alive. A profile or
+ * runtime names no machine, so it still counts for every source filed from its own word.
  */
 export function linkedKeys(
   model: AccountModel,
-  from?: Pick<CloneSourceIdentity, 'id' | 'verified'>,
+  from?: Pick<CloneSourceIdentity, 'id' | 'verified' | 'machine'>,
 ): ReadonlySet<OriginKey> {
   const keys = new Set<OriginKey>();
-  const take = (item: { readonly clonedFromKey?: string; readonly clonedFromDaemon?: string }): void => {
+  const take = (item: Stamped): void => {
     if (item.clonedFromKey === undefined) return;
     if (from !== undefined && item.clonedFromDaemon !== (from.verified === 'browser' ? from.id : undefined)) return;
+    if (from?.machine !== undefined && item.clonedFrom !== undefined && item.clonedFrom !== from.machine) return;
     keys.add(item.clonedFromKey);
   };
   for (const entries of Object.values(model.components)) {
-    for (const item of Object.values(
-      entries as Readonly<Record<string, { clonedFromKey?: string; clonedFromDaemon?: string }>>,
-    ))
-      take(item);
+    for (const item of Object.values(entries as Readonly<Record<string, Stamped>>)) take(item);
   }
   for (const item of Object.values(model.profiles)) take(item);
   for (const item of Object.values(model.runtimes)) take(item);
@@ -452,12 +469,20 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
   for (const [key, item] of Object.entries(items)) {
     if (update.sourceKeys.has(key) || linked(key, item)) kept[key] = item;
   }
+  for (const key of update.settled ?? []) {
+    const item = kept[key];
+    if (item !== undefined && !update.sourceKeys.has(key)) kept[key] = { ...item, settled: true };
+  }
 
   // A Replace can leave another source with nothing here to link to; that source goes too.
   const sources = plain<CloneBaseSource>();
   for (const [id, source] of Object.entries(previous.sources)) {
     if (id === update.source.id) continue;
-    const its = linkedKeys(update.model, { id, verified: source.verified });
+    const its = linkedKeys(update.model, {
+      id,
+      verified: source.verified,
+      ...(source.machine === undefined ? {} : { machine: source.machine }),
+    });
     if (Object.entries(source.items).some(([key, item]) => its.has(key) || viaLogin(item))) sources[id] = source;
   }
   if (
@@ -467,6 +492,7 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
     sources[update.source.id] = {
       name: update.source.name,
       verified: update.source.verified,
+      ...(update.source.machine === undefined ? {} : { machine: update.source.machine }),
       lastCopiedAt: update.at,
       items: { ...kept },
       ...(before?.settings === undefined ? {} : { settings: before.settings }),
@@ -481,6 +507,20 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
     delete sources[id];
   }
   return { version: CLONE_BASE_VERSION, sources: { ...sources } };
+}
+
+/**
+ * The ids of the sources a person's word names: an id as filed, the bare id an export carries (filed under
+ * {@link SELF_REPORTED_PREFIX}), or the name the source was copied under (its display name, or the machine
+ * name its export gave). An exact id wins outright; a name can name several, and the caller says so.
+ */
+export function findCloneSources(base: CloneBase, word: string): readonly string[] {
+  if (Object.hasOwn(base.sources, word)) return [word];
+  const bare = `${SELF_REPORTED_PREFIX}${word}`;
+  if (Object.hasOwn(base.sources, bare)) return [bare];
+  return Object.entries(base.sources)
+    .filter(([, source]) => source.name === word || source.machine === word)
+    .map(([id]) => id);
 }
 
 /** The record without one source: the next copy from it starts as if there was never one. Nothing else changes. */

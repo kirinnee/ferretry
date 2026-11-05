@@ -5,6 +5,8 @@
  *   bun harness/analytics-screenshots.ts [outDir] [page-prefix]   # default harness/out/analytics, every page
  *   ANALYTICS_DESKTOP_WIDTH=1280 bun harness/analytics-screenshots.ts …   # desktop width other than 1440
  *
+ * A capture taller than two viewports is written as `<name>-part1.png`, `-part2.png`, … instead of one tall image.
+ *
  * Each capture also MEASURES the page: any element whose right edge passes the viewport, any leaf whose
  * text is clipped by its own box, and the document's scroll width, written to `facts.json` beside the
  * images. A run with any overflow exits non-zero, so a clipped axis label or a value column pushed off a
@@ -54,7 +56,7 @@ const VIEWPORTS = [
 ] as const;
 const FAMILIES = ['neo', 'studio'] as const;
 const SCHEMES = ['light', 'dark'] as const;
-const PAGES = [
+const PAGES: readonly { readonly name: string; readonly search: string; readonly view?: 'single' | 'trend' }[] = [
   { name: 'overview', search: '?app-chrome=analytics' },
   {
     name: 'query',
@@ -71,9 +73,29 @@ const PAGES = [
     name: 'query-older-machine-missing',
     search: `?app-chrome=analytics&analytics-view=query&analytics-older-machine&q=${encodeURIComponent('sum(cost_usd) by (model) [7d]')}`,
   },
-] as const;
+  // The same questions as a trend: a stack per model, and one series.
+  {
+    name: 'query-trend-stacked',
+    view: 'trend',
+    search: `?app-chrome=analytics&analytics-view=query&q=${encodeURIComponent('sum(cost_usd) by (model) [14d]')}`,
+  },
+  {
+    name: 'query-trend-single',
+    view: 'trend',
+    search: `?app-chrome=analytics&analytics-view=query&q=${encodeURIComponent('sum(turns) [14d]')}`,
+  },
+  // The query names its own bucket, so the control shows it chosen and the other one locked.
+  {
+    name: 'query-trend-locked',
+    view: 'trend',
+    search: `?app-chrome=analytics&analytics-view=query&q=${encodeURIComponent('sum(turns) by (week) [90d]')}`,
+  },
+];
 /** Only the pages whose name starts with this, when given (`bun harness/analytics-screenshots.ts out query-`). */
 const pagePrefix = process.argv[3] ?? '';
+
+/** The Query page's Single/Trend choice, kept on the device. */
+const VIEW_KEY = 'fy-analytics-query-view-v1';
 
 /** A reader's saved queries, so the Query page's saved list is not empty in review. */
 const SAVED_KEY = 'fy-analytics-saved-queries-v1';
@@ -117,10 +139,20 @@ try {
         );
         for (const target of PAGES.filter(candidate => candidate.name.startsWith(pagePrefix))) {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
+          await page.evaluate(([key, value]) => localStorage.setItem(key, value), [
+            VIEW_KEY,
+            target.view ?? 'single',
+          ] as const);
           await page.goto(`${server.url.href}${target.search}`);
           await page.locator('#harness-app-chrome').waitFor();
           await page
-            .locator(target.name === 'overview' ? '[data-analytics-figure]' : '[data-analytics-view="query"]')
+            .locator(
+              target.name === 'overview'
+                ? '[data-analytics-figure]'
+                : target.view === 'trend'
+                  ? '[data-analytics-chart]'
+                  : '[data-analytics-view="query"]',
+            )
             .first()
             .waitFor();
           await page.waitForTimeout(600);
@@ -170,7 +202,21 @@ try {
             });
             await page.waitForTimeout(300);
           }
-          await page.screenshot({ path: join(outDir, `${name}.png`) });
+          // A page taller than ~2 viewports is ALSO cut into viewport-height parts (<name>-part1.png, …) so each
+          // image stays readable at review size; the single full image is kept only when it is short enough.
+          const tall = measured.scrollHeight > viewport.height * 2;
+          if (!tall) await page.screenshot({ path: join(outDir, `${name}.png`) });
+          else {
+            const total = Math.min(measured.scrollHeight + 200, 6000);
+            const count = Math.ceil(total / viewport.height);
+            for (let index = 0; index < count; index += 1) {
+              const top = index * viewport.height;
+              await page.screenshot({
+                path: join(outDir, `${name}-part${index + 1}.png`),
+                clip: { x: 0, y: top, width: viewport.width, height: Math.min(viewport.height, total - top) },
+              });
+            }
+          }
           process.stdout.write(`📸 ${name} ${JSON.stringify(measured)}\n`);
         }
       }
