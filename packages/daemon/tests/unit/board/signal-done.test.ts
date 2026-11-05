@@ -117,6 +117,15 @@ describe('where a done card goes', () => {
     should(doneLane(card({ laneId: 'implement' }), lanes())?.id).equal('review');
   });
 
+  it('should prefer an open PR over an older merged one', () => {
+    // Arrange
+    const merged = { ...PR, number: 929, state: 'merged' as const, mergedAt: NOW, mergeSha: 'a'.repeat(40) };
+    const both = card({ laneId: 'implement', links: { prs: [merged, PR], branch: null, commits: [], docs: [] } });
+
+    // Act / Assert
+    should(doneLane(both, lanes())?.id).equal('review');
+  });
+
   it('should stay put outside an active lane, dropped, or when the only lane ahead is closed', () => {
     // Arrange
     const dropped = card({ laneId: 'implement', dropped: { reason: 'superseded', at: NOW } });

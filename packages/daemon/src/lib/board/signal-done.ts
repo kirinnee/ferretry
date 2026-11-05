@@ -48,8 +48,8 @@ export const doneReason = (message: string | undefined): string => {
 export const doneLane = (card: BoardTask, laneSet: LaneSet): Lane | null => {
   if (card.dropped !== null) return null;
   const prs = card.links.prs;
-  if (prs.some(pr => pr.state === 'merged')) return null;
   const openPr = prs.some(pr => pr.state === 'open');
+  if (!openPr && prs.some(pr => pr.state === 'merged')) return null;
   const category = categoryOf(laneSet, card.laneId);
   if (!category.ok || category.value !== 'active') return null;
   const lanes = variantLanes(laneSet, card.workflow);
