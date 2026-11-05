@@ -10,12 +10,24 @@
       ],
       "leakGuard": true
     },
-    { "name": "pwa", "prefixes": ["packages/pwa/"] },
-    { "name": "everything-else", "prefixes": ["packages/"] }
+    {
+      "name": "pwa",
+      "prefixes": ["packages/pwa/"]
+    },
+    {
+      "name": "everything-else",
+      "prefixes": ["packages/"]
+    }
   ],
   "int": [
-    { "name": "daemon-runtime", "prefixes": ["packages/daemon/tests/integration/runtime/"] },
-    { "name": "daemon", "prefixes": ["packages/daemon/"] },
+    {
+      "name": "daemon-runtime",
+      "prefixes": ["packages/daemon/tests/integration/runtime/"]
+    },
+    {
+      "name": "daemon",
+      "prefixes": ["packages/daemon/"]
+    },
     {
       "name": "pwa-render",
       "prefixes": ["packages/pwa/tests/integration/fy-render-", "packages/pwa/tests/integration/composer-"]
@@ -28,6 +40,65 @@
       "name": "pwa-surfaces",
       "prefixes": ["packages/pwa/tests/integration/features/", "packages/pwa/tests/integration/send-handover."]
     },
-    { "name": "everything-else", "prefixes": ["packages/"], "processes": 2 }
+    {
+      "name": "pwa-visual-a",
+      "prefixes": [
+        "packages/pwa/tests/integration/agenda-clip.visual.test.ts",
+        "packages/pwa/tests/integration/gate-swipe.visual.test.ts",
+        "packages/pwa/tests/integration/inbox-text-voice.visual.test.ts",
+        "packages/pwa/tests/integration/occupied-composer.visual.test.ts",
+        "packages/pwa/tests/integration/snoozed-tidy.visual.test.ts"
+      ]
+    },
+    {
+      "name": "pwa-visual-b",
+      "prefixes": [
+        "packages/pwa/tests/integration/agenda-head-oneline.visual.test.ts",
+        "packages/pwa/tests/integration/agenda-sticky-gap.visual.test.ts",
+        "packages/pwa/tests/integration/browser-pane-jumpy.visual.test.ts",
+        "packages/pwa/tests/integration/cancelled-rows.visual.test.ts",
+        "packages/pwa/tests/integration/inbox-card-once.visual.test.ts",
+        "packages/pwa/tests/integration/jump-latest-covers.visual.test.ts",
+        "packages/pwa/tests/integration/plus-viewer.visual.test.ts"
+      ]
+    },
+    {
+      "name": "pwa-visual-c",
+      "prefixes": [
+        "packages/pwa/tests/integration/agenda-tab.visual.test.ts",
+        "packages/pwa/tests/integration/chat-polish.visual.test.ts",
+        "packages/pwa/tests/integration/chat-rerender.visual.test.ts",
+        "packages/pwa/tests/integration/ledger-actions.visual.test.ts",
+        "packages/pwa/tests/integration/pages/warden-page.visual.test.tsx",
+        "packages/pwa/tests/integration/shell/whats-new.visual.test.ts"
+      ]
+    },
+    {
+      "name": "pwa-visual-d",
+      "prefixes": [
+        "packages/pwa/tests/integration/agenda-table-head.visual.test.ts",
+        "packages/pwa/tests/integration/board-switch.visual.test.ts",
+        "packages/pwa/tests/integration/chat-history.visual.test.ts",
+        "packages/pwa/tests/integration/gallery-capture.visual.test.ts",
+        "packages/pwa/tests/integration/jump-latest-flicker.visual.test.ts",
+        "packages/pwa/tests/integration/shell/theme-picker.visual.test.tsx"
+      ]
+    },
+    {
+      "name": "pwa-visual-e",
+      "prefixes": [
+        "packages/pwa/tests/integration/attached-gate.visual.test.ts",
+        "packages/pwa/tests/integration/browser-tab-bars.visual.test.ts",
+        "packages/pwa/tests/integration/inbox-find.visual.test.ts",
+        "packages/pwa/tests/integration/inbox-layout.visual.test.ts",
+        "packages/pwa/tests/integration/inbox-machine.visual.test.ts",
+        "packages/pwa/tests/integration/snooze-head.visual.test.ts"
+      ]
+    },
+    {
+      "name": "everything-else",
+      "prefixes": ["packages/"],
+      "processes": 2
+    }
   ]
 }

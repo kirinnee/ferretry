@@ -315,6 +315,10 @@ jobs:
   # minutes. The real-time budget suites that once had a group are the realworld tier's now
   # (realworld.yaml): they asserted the machine, not the code, so they cannot gate a merge. GitHub
   # runs these for free; the cost is two more jobs in its 20-job queue, measured as worth it.
+  # `everything-else` once held every PWA visual test as well, ~290s of browser walks in the one process that
+  # also ran fleet, protocol and relay, so it took 7-8 min. Those files now have five groups of their own
+  # (`pwa-visual-a`..`e`, ~70s of walks each, packed from measured per-file times); a visual test added later
+  # lands in `everything-else` until it is listed in config/test-groups.json.
   int:
     name: Integration Tests (${{ matrix.group }})
     permissions:
@@ -335,7 +339,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [daemon-runtime, daemon, pwa-render, pwa-chat, pwa-surfaces, everything-else]
+        group:
+          [
+            daemon-runtime,
+            daemon,
+            pwa-render,
+            pwa-chat,
+            pwa-surfaces,
+            pwa-visual-a,
+            pwa-visual-b,
+            pwa-visual-c,
+            pwa-visual-d,
+            pwa-visual-e,
+            everything-else,
+          ]
     steps:
       - uses: actions/checkout@v5
         with:
