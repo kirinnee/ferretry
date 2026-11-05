@@ -217,10 +217,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
       read: async path => (await keyWriter.read(path)) ?? undefined,
       // One of these at a time, each a compare-and-swap against what a fleet apply may write meanwhile.
       update: async (path, change) => {
-        const run = cloneBaseTurn.then(
-          async () => await compareAndSwap(path, change),
-          async () => await compareAndSwap(path, change),
-        );
+        const run = cloneBaseTurn.then(async () => await compareAndSwap(path, change));
         cloneBaseTurn = run.catch(() => undefined);
         return await run;
       },
