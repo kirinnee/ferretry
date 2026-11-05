@@ -928,17 +928,17 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
 
 ### What it does
 
-| State              | What you see                                                                                                                          | Mic     |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Starting           | "Starting…" until the mic is open **and** the Live-tab lock is ours ("Allow the microphone if your browser asks." on the first start) | opening |
-| Listening          | level bars (one labelled "Mic level" meter with reduced motion), "Listening"                                                          | open    |
-| Hearing            | the words appearing in the composer                                                                                                   | open    |
-| Sending in 1.5 s   | a ring counting down, **Hold**, **Send now**                                                                                          | open    |
-| Working            | "Working 0:12", **End**                                                                                                               | **off** |
-| Reading            | "Reading reply" (or "Reading question"): the sentence being said is highlighted in the chat; **Stop reading**, **Repeat**, **End**    | **off** |
-| Your turn (iPhone) | "The reply has been read. Tap Listen to talk." and one big **Listen** button                                                          | off     |
-| On hold            | "On hold — paused while you type", **Resume**                                                                                         | off     |
-| Paused             | the tab is hidden                                                                                                                     | off     |
+| State              | What you see                                                                                                                                 | Mic     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Starting           | "Starting…" until the mic is open **and** the Live-tab lock is ours ("Allow the microphone if your browser asks." on the first start)        | opening |
+| Listening          | level bars (one labelled "Mic level" meter with reduced motion), "Listening"                                                                 | open    |
+| Hearing            | the words appearing in the composer                                                                                                          | open    |
+| Sending in 1.5 s   | a ring counting down, **Hold**, **Send now**                                                                                                 | open    |
+| Working            | "Working 0:12", **End**                                                                                                                      | **off** |
+| Reading            | "Reading reply" (or "Reading question"): the sentence being said is highlighted in the chat; **Stop reading**, **Hold**, **Repeat**, **End** | **off** |
+| Your turn (iPhone) | "The reply has been read. Tap Listen to talk." and one big **Listen** button                                                                 | off     |
+| On hold            | "On hold — paused while you type", **Resume**                                                                                                | off     |
+| Paused             | the tab is hidden                                                                                                                            | off     |
 
 - **The words are in the composer, visibly, during the countdown.** What is sent is exactly what the composer
   shows at that moment. Edit them, add to them or delete them: typing pauses the countdown and holds, and
@@ -958,8 +958,8 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   reply is read, so nothing it or the room says can send or stop anything.
 - **Keys** (only when focus is not in a text field, and never with Ctrl, Cmd or Alt held): **Enter** = Send now,
   **H** = Hold, **Space** = Resume. **While a reply is being read:** **Space**, **Esc** and **S** stop the
-  reading and Live listens again (Esc does _not_ end Live then — use **End**), **R** reads it again. Otherwise
-  **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat page).
+  reading and Live listens again (Esc does _not_ end Live then — use **End**), **R** reads it again, **H** holds
+  (the speech stops and the microphone stays shut until **Resume**). Otherwise **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat page).
 - **A stop is sticky (the surprise-send rule).** Nothing sends unless the visible countdown elapsed in an
   un-parked state. **Hold**, typing and a hidden tab pressed while the words are still being worked out stop
   capture and the level frames at once (the transcription already under way is allowed to finish, so nothing
@@ -993,13 +993,28 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   words are added after your text and Live goes **On hold**. Only **Send now** (your own press) sends them.
 - **One revocable send path (nothing is sent that was not on screen exactly as sent, never twice, never after a stop).**
   Live sends through exactly one door: a `SendTicket` (`ports.ts`) carrying the words on screen when the machine
-  approved the send. The composer sends them a render later (`liveBridge.submit`) and, **in that render, immediately
-  before sending**, checks that the box still reads exactly the approved words and calls `ticket.commit()`, which is
-  false once the ticket is revoked or the page is hidden. Until it commits the send is only _queued_: **Hold**, typing,
-  a hidden tab, **End**, a refused lock and the page leaving each revoke the ticket (Hold, typing and a hidden tab first
-  tell the machine `send-withdrawn`, so they land exactly as in the countdown, words kept), and the composer then sends
-  nothing. A send the composer has committed is on the wire and stands. Only the _current_ ticket's answer is heard, so
-  a taken-back send that answers late cannot fail the next one.
+  approved the send. The composer sends them a render later (`liveBridge.submit`) and carries the ticket **into the
+  one `sendDraft`**, where it stays revocable across **every await** — the wait for the shared draft's acknowledgement
+  included. **Immediately before the message is submitted** (the daemon call, or the outbox), with nothing awaited in
+  between, the composer checks that the ticket is unrevoked, that the box still reads exactly the approved words, that
+  no composition is open and that the page is visible, and only then calls `ticket.commit()`. Until that moment the
+  send is only _queued_: **Hold**, typing, a composition starting, a hidden tab, **End**, a refused lock and the page
+  leaving each revoke the ticket (Hold, typing, a composition and a hidden tab first tell the machine `send-withdrawn`,
+  so they land exactly as in the countdown, words kept), and the composer then sends nothing — also if the shared
+  draft's answer only arrives later or its wait only runs out later. A send the composer has committed is on the wire
+  and stands. Only the _current_ ticket's answer is heard, so a taken-back send that answers late cannot fail the next
+  one.
+- **A composition holds Live, and Live never becomes an ordinary press.** An input-method composition starting
+  (`compositionstart`) is the person typing before the first `input` is reported: it pauses auto-send and takes back
+  a queued send at once (`LiveComposerObserver.composing`). A Live attempt never ends a composition to read its word
+  (a person's press does that, and resubmits as the person); a ticketed attempt that finds a composition open, a
+  revoked ticket or a box that differs from the approved words **returns false and sends nothing** — it is never
+  deferred and never promoted into the ordinary send, so text the person did not approve cannot go as a voice send.
+- **A hide while Live's send is on its way or the ferret is working is latched.** The hide during `sending` (send in
+  flight) or `working` sets `LiveState.hiddenHold`, which showing the tab does **not** clear: the reply watch carries
+  on, the finished reply lands **Paused** (not Listening, not Reading) with the microphone shut, and only **Resume**
+  reopens it. Anything that ends the wait (the reply needing input, a failed send, **End**) drops the latch, so it never
+  carries into a later turn.
 - **Typing is heard at the keystroke.** The composer tells Live about every write to its draft the moment it is made
   (`LiveComposerBridge.observe`), so typing pauses auto-send and takes back a queued send before React renders — not in an
   effect after it. A write that is exactly the words Live just put there is not typing.
@@ -1030,9 +1045,11 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. Hiding, showing
   and Resume while a request is still pending share that one request; a grant that arrives after Live ended or
   after a newer one replaced it is handed straight back, so End releases everything that was granted
-  (`wake-lock.ts`). A hidden tab **pauses** Live (mic closed) and resumes when visible.
+  (`wake-lock.ts`). A hidden tab **pauses** Live (mic closed); coming back to the tab does not reopen the microphone — **Resume** does.
 - **Buttons are at least 48 px tall on a phone and 44 px on a computer** (the harness measures them; the CSS
-  outranks the app's coarse-pointer 44 px floor). On a phone **Hold** is the big round button only — there is no second one.
+  outranks the app's coarse-pointer 44 px floor). On a phone **Hold** is the big round button wherever the big button is Hold (listening, hearing, the countdown) — there is
+  never a second one. While a reply is read the big button is **Stop reading**, so **Hold** is a 48 px button of its own in
+  the row beside **Repeat** and **End**.
 - **The button is an icon** (44 px on a phone), and on a desktop it is **not drawn in a pane narrower than 300 px of row**
   (a split agent pane beside Info): five buttons would push Send past the pane. The palette entry still starts it.
 - **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
@@ -1170,7 +1187,14 @@ described](#what-is-read-and-what-is-described), [Which voice](#which-voice)); L
      the middle of a sentence is parked with its words kept in the box and never sent — and Live waits On hold the same way.
   3. **Starting Live while something is being read** cuts that speech before the microphone opens (pressing Live is
      the decision to talk).
-  4. Every road back to listening checks the voice first (`VoicePort`: `busy` / `watch` / `silence`): a reply
+  4. **The row's own Stop is a stop, not a license to listen.** Pressing **Stop** on the message being read (or anything else
+     that stops the shared voice) cancels the browser's speech queue **before** Live is told the reading ended: the speech
+     adapter bumps its generation (so the browser's own cancellation callbacks are stale and ignored), calls
+     `speechSynthesis.cancel()`, and only then publishes `stopped` (`speech-synthesis.ts`). Live's reader forwards that
+     `stopped` as the end of the reading, so the microphone reopens only once nothing is queued or audible. The same order
+     holds when one reading replaces another. `composer-live-half-duplex.test.tsx` presses the row's Stop button (not
+     only the Live bar's) and watches the order of cancel and stopped.
+  5. Every road back to listening checks the voice first (`VoicePort`: `busy` / `watch` / `silence`): a reply
      that lands while another message is read waits On hold too, and the runner's `openMic` itself refuses to open over
      speech as a last line of defence, so no event order can put the microphone under a speaker.
      The integrated tests (`composer-live-half-duplex.test.tsx`) run the real Composer, hook, runner, reader, read-aloud
@@ -1185,7 +1209,18 @@ described](#what-is-read-and-what-is-described), [Which voice](#which-voice)); L
   question and its options, then lands **On hold** with the normal prompt on screen. It does **not** listen for an
   answer and has **no way to accept an approval by voice** — permission, sudo, secret and payment prompts are
   only ever read. A skipped, broken or hidden-tab reading lands at the same prompt, never on Listening. The
-  machine tests assert that no event can produce a send from a question or its prompt.
+  machine tests assert that no event can produce a send from a question or its prompt. **Hold** while a question is read
+  is the same as stopping it: Live lands at the prompt.
+- **A question that arrives as a form is still read.** A _structured_ question (`pendingQuestion`) replaces the composer
+  with the question form, and Live belongs to the composer, so Live ends with it. Before that, the page hands the question to
+  a reader that outlives the composer (`use-live-question-handoff.ts`): when the composer leaves while Live is Working
+  (or Reading) and a prompt is waiting, the page reads the question **and its options** over the same one voice, once the
+  text has settled. By then the microphone and the sends are gone with the runner, so the question is read and **never
+  answerable by voice**. It ends with the speech, when the row's Stop is pressed, when the question is answered or goes
+  away, and with the page; a hidden tab or a device that cannot speak reads nothing (the form is on screen). While it
+  speaks the page's Auto-read stays out of the way, and the composer's unmount tells the page Live is off (it used to
+  stay "on", leaving Auto-read suspended). A question that arrives while Live is only Listening is not read: Live was
+  not waiting on the ferret. `session-chat-page-live-question.test.tsx` proves it through the real page.
 - **A message you send by hand while a reply is being read** stops the reading — it belongs to an older turn. Typing
   comes first and already put Live On hold (above), so the usual hand send leaves it there until Resume; for a press that
   Live sees begin while reading (nothing typed — a files-only message), Live waits for its ANSWER (`LiveRunner.personSent`,

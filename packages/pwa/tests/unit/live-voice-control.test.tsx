@@ -141,6 +141,38 @@ describe('useLiveVoiceControl', () => {
     await view.unmount();
   });
 
+  it('a control that leaves while Live is ON tells the page Live is off, and hands over the phase it was in', async () => {
+    const fake = fakeLive();
+    const seen: boolean[] = [];
+    const retired: string[] = [];
+    let control: ReturnType<typeof useLiveVoiceControl> | null = null;
+    const view = await mount(
+      <Host
+        props={props({
+          onActiveChange: active => void seen.push(active),
+          onRetire: phase => void retired.push(phase),
+          seams: { ports: fake.ports },
+        })}
+        onControl={next => (control = next)}
+      />,
+    );
+    await interact(() => (control as ReturnType<typeof useLiveVoiceControl> | null)?.live.start());
+    await flush();
+    expect(seen.at(-1)).toBe(true);
+    await view.unmount();
+    expect(retired).toEqual(['listening']);
+    expect(seen.at(-1)).toBe(false);
+  });
+
+  it('a control that leaves with Live OFF retires nothing', async () => {
+    const retired: string[] = [];
+    const view = await mount(
+      <Host props={props({ onRetire: phase => void retired.push(phase) })} onControl={() => undefined} />,
+    );
+    await view.unmount();
+    expect(retired).toEqual([]);
+  });
+
   it('answers the palette request itself, but not while the mic is busy', async () => {
     const fake = fakeLive();
     const target = new EventTarget();

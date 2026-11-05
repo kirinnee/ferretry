@@ -94,7 +94,8 @@ export interface SendTicket {
   /** The approval was taken back (Hold, typing, a hidden tab, End, the page leaving). */
   readonly revoked: boolean;
   /**
-   * Called by the composer IMMEDIATELY before it starts the send, once it holds exactly `text`. True: go — from here
+   * Called by the composer at the moment of the actual submission — after every wait the send has, with nothing awaited
+   * between this call and the submission, once it holds exactly `text` and no composition is open. True: go — from here
    * the send is on its way and a stop can no longer take it back. False: revoked (or the page is hidden) — send nothing.
    */
   commit(): boolean;

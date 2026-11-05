@@ -291,6 +291,14 @@ describe('Live reading — a question', () => {
     }
   });
 
+  it('Hold while the question is read is the same as stopping it: Live lands at the prompt, not On hold for the user', () => {
+    const held = run([{ type: 'hold' }], ASKING.state);
+    should(held.state.phase).equal('hold');
+    should(held.state.holdReason).equal('needs-input');
+    should(held.effects).deepEqual([{ type: 'stopSpeaking' }]);
+    should(micIsOpen(held.state)).be.false();
+  });
+
   it('Repeat reads the question again', () => {
     const again = run([{ type: 'repeat' }], ASKING.state);
     should(again.effects).deepEqual([{ type: 'stopSpeaking' }, { type: 'speak', what: 'question', id: 2 }]);

@@ -12,7 +12,7 @@
  * gesture, so `start()` is called straight from the handler.
  */
 
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { useEffectiveDictation } from '../hooks/use-effective-dictation.ts';
 import { extractHeldMessages, hasUsableContext } from '../hooks/use-dictation.ts';
 import { type LiveVoiceHandle, type UseLiveVoiceOptions, useLiveVoice } from '../hooks/use-live-voice.ts';
@@ -40,6 +40,8 @@ export interface LiveVoiceControlProps {
   readonly readConversation?: () => readonly string[];
   /** The conversation on screen, for reading the ferret's reply (and its questions) aloud. Absent: nothing is read. */
   readonly reading?: LiveReadingSource;
+  /** The composer is leaving while Live is on; see `UseLiveVoiceOptions.onRetire`. */
+  readonly onRetire?: UseLiveVoiceOptions['onRetire'];
   /** Phone chrome: the big-button bar. Otherwise the desktop strip. */
   readonly compact: boolean;
   /** The mic is recording: Live waits. */
@@ -77,6 +79,7 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
   });
   const readConversation = props.readConversation;
   const reading = props.reading;
+  const onRetire = props.onRetire;
   const live = useLiveVoice({
     enabled: offered,
     daemon: props.daemon,
@@ -87,6 +90,7 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
     reply: props.reply ?? NO_REPLY,
     ...(readConversation === undefined ? {} : { readConversation }),
     ...(reading === undefined ? {} : { reading }),
+    ...(onRetire === undefined ? {} : { onRetire }),
     readContext: needsEvidence => {
       const held = extractHeldMessages(readConversation?.() ?? []);
       return !needsEvidence || hasUsableContext(held) ? held : [];
@@ -98,6 +102,10 @@ export function useLiveVoiceControl(props: LiveVoiceControlProps): LiveVoiceCont
   useEffect(() => {
     onActiveChange?.(live.active);
   }, [live.active, onActiveChange]);
+  // Live goes with this control: whoever was told it is on is told it is not (their auto-read stands down for Live only).
+  const reportActive = useRef(onActiveChange);
+  reportActive.current = onActiveChange;
+  useEffect(() => () => reportActive.current?.(false), []);
 
   // The command palette's "Live voice" toggles the same Live the button does.
   const { start, end, active } = live;

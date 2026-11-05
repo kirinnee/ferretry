@@ -96,6 +96,8 @@ import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspa
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { type SendAcceptance, useAutoRead } from '../../hooks/use-auto-read.ts';
+import { useLiveQuestionHandoff } from '../../hooks/use-live-question-handoff.ts';
+import type { LivePhase } from '../voice-chat/live-machine.ts';
 import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
@@ -979,8 +981,25 @@ export function SessionChatPage({
     () => ({ rows: () => liveSources.current.entries, question: () => liveSources.current.spokenPrompt }),
     [],
   );
+  // A structured question swaps the composer — and Live with it — for the question form. Live's reading of that
+  // question is handed to a reader that stays on the page: it speaks the question and its options, with the microphone
+  // and the sends already gone, so the question is read and never answerable by voice. Auto-read stays out meanwhile.
+  const questionHandoff = useLiveQuestionHandoff(liveReading);
+  const { begin: beginQuestionReading, cancel: cancelQuestionReading } = questionHandoff;
+  const retireLive = useCallback(
+    (phase: LivePhase) => {
+      // Only a Live that was waiting on the ferret (or already reading to the person) has a question to say.
+      if ((phase === 'working' || phase === 'reading') && liveSources.current.spokenPrompt !== null)
+        beginQuestionReading();
+    },
+    [beginQuestionReading],
+  );
+  // The question went (answered, or the turn moved on): nothing is left to read.
+  useEffect(() => {
+    if (spokenPrompt === null) cancelQuestionReading();
+  }, [spokenPrompt, cancelQuestionReading]);
   const autoRead = useAutoRead({
-    suspended: liveOn,
+    suspended: liveOn || questionHandoff.reading,
     scope: `${connection.daemonId}/${session.config.id}`,
     entries,
     authoritative,
@@ -1804,6 +1823,7 @@ export function SessionChatPage({
               liveReply={liveReply}
               liveReading={liveReading}
               onLiveActiveChange={setLiveOn}
+              onLiveRetire={retireLive}
               enterKeyPreference={composerEnterKey}
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}

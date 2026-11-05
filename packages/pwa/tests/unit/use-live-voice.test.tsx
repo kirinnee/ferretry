@@ -173,6 +173,12 @@ describe('useLiveVoice', () => {
     expect(get().view.stateWord).toBe('On hold');
     await interact(() => get().resume());
     await flush();
+    // A composition begins: the word is the person's and not in the draft yet, so Live holds at once.
+    await interact(() => held.observer?.composing());
+    expect(get().view.stateWord).toBe('On hold');
+    await interact(() => get().resume());
+    await flush();
+    expect(get().view.stateWord).toBe('Listening');
     // The person's own Send retires what Live was doing and puts it on the ferret's side of the turn.
     await interact(() => held.observer?.sending(Promise.resolve(true)));
     await flush();

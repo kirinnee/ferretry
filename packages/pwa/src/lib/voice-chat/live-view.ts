@@ -205,6 +205,9 @@ export function liveView(
         detail: question ? 'Your ferret is asking you something.' : null,
         tone: 'active',
         big: { label: 'Stop reading', action: 'skip' },
+        // Hold (H) stops the voice and keeps the microphone shut until Resume; the big button is Skip, so a phone gets
+        // Hold as a button of its own in the row.
+        canHold: true,
         canSkip: true,
         canRepeat: true,
       };

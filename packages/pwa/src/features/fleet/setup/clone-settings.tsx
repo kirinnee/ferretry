@@ -4,7 +4,7 @@
  * list are `clone-settings-model.ts`.
  *
  * THE INLINE ADD WRITES ONE WAY. A pasted value goes to THIS machine's secret store through the
- * ordinary secret route and is never shown again — the row only flips to "set ✓". Nothing here can
+ * ordinary secret route and is never shown again — the row only flips to "set". Nothing here can
  * read a value back, because no route returns one.
  */
 
@@ -26,7 +26,7 @@ import {
   needsSentence,
   outcomeSentence,
 } from './clone-settings-model.ts';
-import { CheckChoices, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
+import { CheckChoices, SetupNote, SetupRow, SetupSection, TOUCH_BUTTON } from './setup-ui.tsx';
 import { countWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 /** The checkboxes: every item, its one-line summary from the source, and why one cannot be picked. */
@@ -36,8 +36,16 @@ export function CloneItemsChoices({
   unavailable,
   source,
   onToggle,
+  omit = [],
+  title = 'What to copy',
+  intro,
 }: {
   readonly chosen: readonly CloneItemId[];
+  /** Items left off the list: an Update decides the fleet in its own review. */
+  readonly omit?: readonly CloneItemId[];
+  readonly title?: string;
+  /** Replaces the sentence under the heading. */
+  readonly intro?: ReactNode;
   readonly summaries: Readonly<Partial<Record<CloneItemId, string>>>;
   /** Items that could not be read from the source, with the reason. */
   readonly unavailable: Readonly<Partial<Record<CloneItemId, string>>>;
@@ -45,10 +53,14 @@ export function CloneItemsChoices({
   readonly onToggle: (id: CloneItemId, on: boolean) => void;
 }) {
   return (
-    <SetupSection title="What to copy" name="clone-items">
+    <SetupSection title={title} name="clone-items">
       <p className="m-0 text-cell leading-base text-muted">
-        These are the YAML files under <span className="font-mono">$FY_HOME/config</span> on{' '}
-        <span className="font-mono">{source}</span>, minus secrets. Device settings are never copied.
+        {intro ?? (
+          <>
+            These are the YAML files under <span className="font-mono">$FY_HOME/config</span> on{' '}
+            <span className="font-mono">{source}</span>, minus secrets. Device settings are never copied.
+          </>
+        )}
       </p>
       <CheckChoices
         legend="What to copy"
@@ -56,7 +68,7 @@ export function CloneItemsChoices({
         name="clone-items"
         values={chosen}
         onToggle={onToggle}
-        options={CLONE_ITEMS.map(item => {
+        options={CLONE_ITEMS.filter(item => !omit.includes(item.id)).map(item => {
           const reason = unavailable[item.id];
           return {
             id: item.id,
@@ -93,7 +105,7 @@ export function CloneItemsChoices({
  * Clone never writes a key this machine already holds, so it says how to replace it by hand instead, and says so
  * plainly when this machine changed the key too.
  */
-function NewerKeyRow({
+export function NewerKeyRow({
   keyName,
   both,
   machineName,
@@ -157,7 +169,6 @@ export function CloneLoginsSection({
   /** Writes the `fy secret set` command to the clipboard; the browser's own unless a host or a test brings one. */
   readonly write?: ClipboardWriter;
 }) {
-  const boxId = useId();
   if (logins.length === 0 && keys.length === 0 && newer.length === 0) return null;
   const sending = copyKeys && keys.length > 0;
   return (
@@ -218,39 +229,65 @@ export function CloneLoginsSection({
         />
       ))}
       {keys.length === 0 ? null : (
-        <label
-          htmlFor={boxId}
-          className="kt-panel relative flex min-h-control min-w-0 cursor-pointer items-start gap-3 p-panel has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
-          data-clone-keys=""
-        >
-          <input
-            id={boxId}
-            type="checkbox"
-            className="mt-1 shrink-0 accent-[var(--accent)]"
-            checked={copyKeys}
-            onChange={event => onCopyKeys(event.currentTarget.checked)}
-            data-clone-keys-copy=""
-          />
-          <span className="flex min-w-0 flex-col gap-1">
-            <span className="text-row font-semibold text-fg">
-              Copy {countWords(keys.length, 'API key')} with the logins
-            </span>
-            <span className="[overflow-wrap:anywhere] font-mono text-meta text-fg" data-clone-keys-names="">
-              {keys.join(', ')}
-            </span>
-            <span className="text-cell text-muted">
-              {copyKeys
-                ? `${sourceName} seals them for ${machineName} and asks for your passkey once. This browser carries them and can’t read them.`
-                : `Not copied: add each one on ${machineName} yourself, below.`}
-            </span>
-          </span>
-        </label>
+        <CloneKeysBox
+          keys={keys}
+          copyKeys={copyKeys}
+          onCopyKeys={onCopyKeys}
+          machineName={machineName}
+          sourceName={sourceName}
+        />
       )}
     </SetupSection>
   );
 }
 
-/** One need: held ("set ✓"), a sign-in (done after the copy), or a field to add the secret now. */
+/** The one box that sends the keys the copied logins need, sealed, for one passkey on the source. */
+export function CloneKeysBox({
+  keys,
+  copyKeys,
+  onCopyKeys,
+  machineName,
+  sourceName,
+}: {
+  readonly keys: readonly string[];
+  readonly copyKeys: boolean;
+  readonly onCopyKeys: (on: boolean) => void;
+  readonly machineName: string;
+  readonly sourceName: string;
+}) {
+  const boxId = useId();
+  return (
+    <label
+      htmlFor={boxId}
+      className="kt-panel relative flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+      data-clone-keys=""
+    >
+      <input
+        id={boxId}
+        type="checkbox"
+        className="mt-1 shrink-0 accent-[var(--accent)]"
+        checked={copyKeys}
+        onChange={event => onCopyKeys(event.currentTarget.checked)}
+        data-clone-keys-copy=""
+      />
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="text-row font-semibold text-fg">
+          Copy {countWords(keys.length, 'API key')} with the logins
+        </span>
+        <span className="[overflow-wrap:anywhere] font-mono text-meta text-fg" data-clone-keys-names="">
+          {keys.join(', ')}
+        </span>
+        <span className="text-cell text-muted">
+          {copyKeys
+            ? `${sourceName} seals them for ${machineName} and asks for your passkey once. This browser carries them and can’t read them.`
+            : `Not copied: add each one on ${machineName} yourself, below.`}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/** One need: held ("set", with a tick), a sign-in (done after the copy), or a field to add the secret now. */
 function NeedRow({
   need,
   signIn,
@@ -288,21 +325,21 @@ function NeedRow({
       </span>
       {need.held ? (
         <Badge tone="ok">
-          <Check size={12} aria-hidden="true" /> set ✓
+          <Check size={12} aria-hidden="true" /> set
         </Badge>
       ) : need.kind === 'sign-in' ? (
         (signIn ?? <span className="text-meta text-muted">Sign in after copying</span>)
       ) : need.secretName === undefined ? (
         <span className="text-meta text-muted">Add it in Settings › Speed-ups</span>
       ) : (
-        <span className="flex min-w-0 flex-[1_1_16rem] flex-wrap items-center gap-2">
+        <span className="flex min-w-0 flex-[1_1_16rem] flex-wrap items-center gap-3">
           <label htmlFor={fieldId} className="sr-only">
             {need.secretName}
           </label>
           <input
             id={fieldId}
             type="password"
-            className="kt-input min-w-0 flex-1 font-mono"
+            className="kt-input !min-h-[44px] min-w-0 flex-1 font-mono"
             autoComplete="off"
             spellCheck={false}
             placeholder="paste value"
@@ -313,6 +350,7 @@ function NeedRow({
           <Button
             type="button"
             size="sm"
+            className={TOUCH_BUTTON}
             data-clone-need-add={need.secretName}
             disabled={busy || value.trim() === ''}
             onClick={() => add(need.secretName as string)}
@@ -428,7 +466,7 @@ export function CloneOutcomes({
                     type="button"
                     size="sm"
                     variant="primary"
-                    className="min-h-[44px] min-w-[96px]"
+                    className={TOUCH_BUTTON}
                     data-clone-confirm={outcome.path}
                     onClick={() =>
                       void onConfirm(outcome.path, outcome.etag).then(failure => {

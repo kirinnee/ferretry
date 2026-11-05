@@ -156,6 +156,12 @@ export interface LiveState {
   readonly outside: boolean;
   /** The tab is hidden now (kept in every phase: a reply that lands while away pauses instead of listening). */
   readonly hidden: boolean;
+  /**
+   * The tab was hidden while a send was in flight or the ferret was working, and that stop is LATCHED: showing the
+   * tab does not undo it. The reply watch carries on, and the finished reply lands paused (not listening) until an
+   * explicit Resume. Only ever true in `working` and in `sending` with the send in flight.
+   */
+  readonly hiddenHold: boolean;
   /** While `starting`: the microphone and the level meter are open. */
   readonly micReady: boolean;
   /** While `starting`: the one-Live-tab lock is ours. */
@@ -311,6 +317,7 @@ export const INITIAL_LIVE_STATE: LiveState = Object.freeze({
   voiceBusy: false,
   outside: false,
   hidden: false,
+  hiddenHold: false,
   micReady: false,
   lockReady: false,
   words: '',
@@ -676,7 +683,19 @@ function startedOrWaiting(state: LiveState): LiveStep {
   return state.hidden ? stepToPaused(state) : step(toListening(state, { notice }), [idleTimer]);
 }
 
+/**
+ * One event, one step. The latched hide (`hiddenHold`) belongs to a send in flight and to the ferret working on it; any
+ * step that leaves them (the reply landed, the send failed, Live ended) has consumed or dropped it, so it can never
+ * carry into a later turn.
+ */
 export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
+  const next = reduceEvent(state, event);
+  const { phase, sendInFlight, hiddenHold } = next.state;
+  if (!hiddenHold || phase === 'working' || (phase === 'sending' && sendInFlight)) return next;
+  return { ...next, state: { ...next.state, hiddenHold: false } };
+}
+
+function reduceEvent(state: LiveState, event: LiveEvent): LiveStep {
   const { phase } = state;
 
   // Events that mean the same in every phase.
@@ -700,6 +719,8 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
         : step({ ...seen, ...FRESH_TURN, phase: 'paused', pauseReason: 'hidden', readKind: null }, [
             { type: 'stopSpeaking' },
           ]);
+    // A send already on its way, or the ferret working on it: the hide is latched (see `hiddenHold`).
+    if (phase === 'working' || (phase === 'sending' && state.sendInFlight)) return step({ ...seen, hiddenHold: true });
     return step(seen);
   }
   // Something else took, or let go of, the page's one voice. While Live reads, the voice is Live's own: the reader
@@ -759,13 +780,14 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
       if (event.type === 'typing') return step({ ...state, typingHold: true });
       if (event.type !== 'reply') return step(state);
       const stop: LiveEffect = { type: 'stopWatchReply' };
-      // The ferret needs the person: read the question (and options) if this device can, then stop at the prompt.
+      // The ferret needs the person: read the question (and options) if this device can and the person is here (a
+      // latched hide is not "here"), then stop at the prompt.
       if (event.signal === 'needs-input')
-        return state.canRead && !state.hidden
+        return state.canRead && !state.hidden && !state.hiddenHold
           ? beginReading(state, 'question', [stop])
           : step({ ...state, phase: 'hold', holdReason: 'needs-input', ...FRESH_TURN }, [stop]);
       if (event.signal !== 'done') return step(state);
-      if (state.hidden) return step({ ...state, phase: 'paused', pauseReason: 'hidden' }, [stop]);
+      if (state.hidden || state.hiddenHold) return step({ ...state, phase: 'paused', pauseReason: 'hidden' }, [stop]);
       if (state.canRead) return beginReading(state, 'reply', [stop]);
       const again = listenAgain(state, null);
       return step(again.state, [stop, ...again.effects]);
@@ -784,6 +806,8 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
         case 'typing':
           return holdForTyping(state, [{ type: 'stopSpeaking' }]);
         case 'hold':
+          // A question already ends On hold at its prompt (nothing to resume into): Hold there is the same as stopping it.
+          if (state.readKind === 'question') return finishReading(state, 'stopped', [{ type: 'stopSpeaking' }]);
           return step({ ...state, ...FRESH_TURN, phase: 'hold', holdReason: 'user', readKind: null }, [
             { type: 'stopSpeaking' },
           ]);

@@ -308,6 +308,17 @@ try {
             settingsScene ? 44 : minimum,
           );
           if (small.length > 0) fail(`${label}: buttons under the minimum: ${JSON.stringify(small)}`);
+          if (scene === 'reading') {
+            // The measured heights of every Live control while a reply is read (Hold is a button of its own on a phone).
+            const measured = await page.evaluate(() =>
+              [...document.querySelectorAll('.fy-live button')].map(
+                button => `${(button.textContent ?? '').trim()}=${Math.round(button.getBoundingClientRect().height)}px`,
+              ),
+            );
+            if (layout === 'phone' && !measured.some(entry => entry.startsWith('Hold=')))
+              fail(`${label}: no Hold button while a reply is read: ${measured.join(', ')}`);
+            process.stdout.write(`📏 ${label} ${scene}: ${measured.join(', ')}\n`);
+          }
           // The live region says the state in words and never a word of the reply.
           const said = await page.evaluate(() => document.querySelector('[data-live-region]')?.textContent ?? '');
           if (/login form|token|tests pass/iu.test(said)) fail(`${label}: the live region carries the reply: ${said}`);

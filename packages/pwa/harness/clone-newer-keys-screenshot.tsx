@@ -76,8 +76,9 @@ const file = path => ({ path, absolutePath: '/home/me/.fy/config/' + path, kind:
 const secrets = (names, updatedAt) => ({ v: 1, health: 'ready', secrets: names.map(name => ({ name, createdAt: AT, updatedAt })), references: [] });
 
 const REVIEW = {
-  mode: STATE === 'missing' ? 'first' : 'update',
-  source: { name: 'work-linux', ...(STATE === 'missing' ? {} : { lastCopiedAt: AT }), verified: 'browser' },
+  // The Preview step is what this shows: an Update has a screen of its own (harness/clone-review-screenshot.tsx).
+  mode: 'first',
+  source: { name: 'work-linux', verified: 'browser' },
   items: [],
   settings: [],
   logins: [],
@@ -237,6 +238,22 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
     if (state !== 'missing') await page.locator('[data-clone-newer-key="DEMO_API_KEY"]').waitFor({ state: 'visible' });
     await shot(page, name, theme, vp, '[data-setup-section="clone-logins"]', '[data-clone-step="preview"]');
   }
+  // A key changed on both machines, with the secret copy panel open beside the report: the report keeps the
+  // command to run by hand, and the panel says the key here is kept.
+  await page.goto(`${server.url}?theme=${theme}&state=both`);
+  await page.locator('[data-setup-choice="work"]').click();
+  await page.locator('[data-step-next]').click();
+  await page.locator('[data-clone-newer-key="DEMO_API_KEY"]').waitFor({ state: 'visible' });
+  await page.locator('[data-secret-copy-launch]').click();
+  await page.locator('[data-secret-copy-row="DEMO_API_KEY"]').waitFor({ state: 'visible' });
+  await shot(
+    page,
+    'both-changed-panel',
+    theme,
+    vp,
+    '[data-setup-section="clone-logins"]',
+    '[data-clone-step="preview"]',
+  );
   for (const { state, name } of STATES.filter(each => each.state !== 'both')) {
     await page.goto(`${server.url}?theme=${theme}&state=${state}&view=panel`);
     await page.locator('[data-secret-copy-launch]').click();
