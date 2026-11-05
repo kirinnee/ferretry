@@ -27,7 +27,12 @@ export const RUNTIME_SETTINGS_FILE: Readonly<Record<HarnessKind, string>> = {
 /** A level as a harness would accept it: a short word, never prose or a blank. */
 const LEVEL = /^[a-z][a-z-]{0,23}$/u;
 
-const level = (value: unknown): string | undefined => {
+/**
+ * A level as it is spelled on the argv and recorded on the document: trimmed, lowercased, and only when it
+ * is a short word. ONE normaliser, so the level a launch carries and the level the session records can
+ * never differ; anything it rejects is no level at all.
+ */
+export const reasoningLevel = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim().toLowerCase();
   return LEVEL.test(trimmed) ? trimmed : undefined;
@@ -38,7 +43,7 @@ function claudeLevel(document: string): string | undefined {
   try {
     const parsed: unknown = JSON.parse(document);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
-    return level((parsed as Record<string, unknown>).effortLevel);
+    return reasoningLevel((parsed as Record<string, unknown>).effortLevel);
   } catch {
     return undefined;
   }
@@ -55,7 +60,7 @@ function codexLevel(document: string): string | undefined {
     const trimmed = line.trim();
     if (trimmed.startsWith('[')) return undefined;
     const match = /^model_reasoning_effort\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/u.exec(trimmed);
-    if (match !== null) return level(match[1] ?? match[2]);
+    if (match !== null) return reasoningLevel(match[1] ?? match[2]);
   }
   return undefined;
 }
@@ -106,5 +111,5 @@ export function launchReasoningEffort(
   requested: string | undefined,
   persisted: string | undefined,
 ): string | undefined {
-  return level(requested) ?? persisted;
+  return reasoningLevel(requested) ?? persisted;
 }

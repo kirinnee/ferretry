@@ -14,3 +14,4 @@ export * from './runtime-switch.ts';
 export * from './service.ts';
 export * from './fast-mode.ts';
 export * from './launch-effort.ts';
+export * from './startup.ts';
