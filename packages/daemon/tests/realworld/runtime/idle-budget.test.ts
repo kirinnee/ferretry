@@ -20,6 +20,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protocol';
+import { DAEMON_RUNTIME_TUNING } from '@ferretry/protocol/daemon-runtime-tuning';
 import should from 'should';
 import { IDLE_DAEMON_BUDGETS } from '../../../src/lib/performance/budgets.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../../integration/support/os-port.ts';
@@ -131,6 +132,8 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
     const daemon = Bun.spawn([process.execPath, FYD_ENTRY], {
       env: {
         ...process.env,
+        // The options the service definition hands the real daemon, so the budget is measured on them.
+        ...DAEMON_RUNTIME_TUNING,
         FY_HOME: fleet.home,
         HOME: fleet.userHome,
         FYD_BACKGROUND_DELAY_SECONDS: '1',
