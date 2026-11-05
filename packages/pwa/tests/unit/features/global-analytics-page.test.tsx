@@ -474,7 +474,17 @@ describe('one query across every machine', () => {
         },
         'dead',
       ),
-    ).rejects.toThrow('daemon-a down');
+    ).rejects.toThrow('studio-mac: daemon-a down. kirin-box: daemon-b down.');
+    // One machine: its reason alone, as it said it — there is no other machine to tell it apart from.
+    await expect(
+      askEveryMachine(
+        [MACHINES[0]!],
+        async () => {
+          throw new Error('asleep');
+        },
+        'dead',
+      ),
+    ).rejects.toMatchObject({ name: 'AnalyticsFleetError', message: 'asleep' });
     await expect(askEveryMachine([], async () => rawResponse([]), '{}')).rejects.toThrow('there is no machine to ask');
   });
 });
