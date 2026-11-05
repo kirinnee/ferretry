@@ -14,8 +14,10 @@
  * system rows, notices, thinking and tool calls (they are not `assistant` rows at all), a message this
  * ferret SENT to another one, and Pack commands. Only the agent's own words to the person.
  *
- * "The turn" is what came after the person's last message that started it. A row from before that point
- * is never picked, so a turn with no text cannot fall back to the previous turn's last reply.
+ * "The turn" is what came after the person's last message. A row from before that point is never picked, so a
+ * turn with no text cannot fall back to the previous turn's last reply. `pickLatestReply` is that and nothing
+ * more (the reply to a send); `pickReply` can also cut a turn by its dated start or by rows already held
+ * (a turn only watched, and the live reader).
  */
 
 /** The part of a transcript row this module reads: `TranscriptEntry` satisfies it as it is. */
@@ -72,12 +74,6 @@ export interface TurnStart {
 
 const isPersonsRow = (row: PickerRow): boolean => row.kind === 'user' && row.peer === undefined;
 
-/** The person's own row for a send: one of theirs that was NOT among `knownIds`, the rows the page held when send was pressed. */
-export const hasRowSince = (rows: readonly PickerRow[], knownIds: readonly string[]): boolean => {
-  const known = new Set(knownIds);
-  return rows.some(row => isPersonsRow(row) && !known.has(row.id));
-};
-
 /** The index of the row that begins the turn (-1: the whole conversation is the turn). */
 const boundaryOf = (rows: readonly PickerRow[], start: TurnStart, startedAt: number | null): number => {
   if (start.knownIds !== undefined) {
@@ -116,20 +112,34 @@ const rowsOfTurn = (rows: readonly PickerRow[], start: TurnStart): readonly Pick
   return after.filter(row => row.at === undefined || row.at >= startedAt - CLOCK_SLACK_MS);
 };
 
-/** The words of a turn that ended with `your-turn`. */
-export const pickReply = (
-  rows: readonly PickerRow[],
-  from: TurnStart | number | null,
-  whatToRead: WhatToRead = 'last',
-): ReplyPick => {
-  const start: TurnStart = typeof from === 'object' && from !== null ? from : { startedAt: from };
-  const texts = rowsOfTurn(Array.isArray(rows) ? rows : [], start).filter(isAssistantWords);
+/** The words to say for the assistant texts of a turn (oldest first), or that there were none. */
+const replyOf = (texts: readonly PickerRow[], whatToRead: WhatToRead): ReplyPick => {
   const last = texts.at(-1);
   if (last === undefined) return { key: SILENT_TURN_KEY, markdown: NO_MESSAGE_WORDS, reason: 'no-message' };
   if (whatToRead === 'every') {
     return { key: last.id, markdown: texts.map(row => row.text.trim()).join('\n\n'), reason: 'reply' };
   }
   return { key: last.id, markdown: last.text, reason: 'reply' };
+};
+
+/** The words of a turn that ended with `your-turn`, cut by the turn's dated start (or by the rows held when a send was pressed). */
+export const pickReply = (
+  rows: readonly PickerRow[],
+  from: TurnStart | number | null,
+  whatToRead: WhatToRead = 'last',
+): ReplyPick => {
+  const start: TurnStart = typeof from === 'object' && from !== null ? from : { startedAt: from };
+  return replyOf(rowsOfTurn(Array.isArray(rows) ? rows : [], start).filter(isAssistantWords), whatToRead);
+};
+
+/**
+ * The words of the turn that has just ended, with nothing inferred: the assistant text AFTER THE LAST ROW
+ * THE PERSON PUT TO THE AGENT that is present now (the whole conversation when there is none). A turn that
+ * wrote no text after that row says "Done. No message." — it never falls back to an earlier turn's words.
+ */
+export const pickLatestReply = (rows: readonly PickerRow[], whatToRead: WhatToRead = 'last'): ReplyPick => {
+  const held = Array.isArray(rows) ? rows : [];
+  return replyOf(held.slice(held.findLastIndex(isPersonsRow) + 1).filter(isAssistantWords), whatToRead);
 };
 
 /** The question a `needs-input` turn is waiting on: the shape of the daemon's `pendingQuestion`. */

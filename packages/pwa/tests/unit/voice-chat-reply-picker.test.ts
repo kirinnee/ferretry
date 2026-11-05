@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   NO_MESSAGE_WORDS,
-  hasRowSince,
   needsInputOf,
   type PickerRow,
+  pickLatestReply,
   pickQuestion,
   pickReply,
   QUESTION_KEY,
@@ -279,14 +279,45 @@ describe('needsInputOf: every needs-input prompt becomes read-only question data
   });
 });
 
-describe('hasRowSince: the send’s own row', () => {
-  test('is a row of the person’s that was not held when send was pressed — theirs only, never an agent’s or a peer’s', () => {
-    const held = [row('u1', 'user', 'first', 1), row('a1', 'assistant', 'reply', 2)];
-    const known = held.map(entry => entry.id);
-    expect(hasRowSince(held, known)).toBe(false);
-    expect(hasRowSince([...held, row('a2', 'assistant', 'more', 3)], known)).toBe(false);
-    expect(hasRowSince([...held, row('u9', 'user', 'from a ferret', 3, { peer: { from: 'x' } })], known)).toBe(false);
-    expect(hasRowSince([...held, row('u2', 'user', 'second', 3)], known)).toBe(true);
-    expect(hasRowSince([row('u2', 'user', 'second')], [])).toBe(true);
+describe('pickLatestReply: the last assistant text after the last row of the person’s', () => {
+  const held = [
+    row('u1', 'user', 'first', 1),
+    row('a1', 'assistant', 'first reply', 2),
+    row('a2', 'assistant', 'second thought', 3),
+  ];
+
+  test('reads the last text after the last user row', () => {
+    expect(pickLatestReply(held)).toEqual({ key: 'a2', markdown: 'second thought', reason: 'reply' });
+  });
+
+  test('R4 #1: a silent turn says "Done. No message." however many older rows were hydrated before it', () => {
+    const rows = [
+      ...held,
+      row('u0', 'user', 'older, hydrated late', 0),
+      row('a0', 'assistant', 'Historical answer.', 0),
+      row('u2', 'user', 'second', 5),
+    ];
+    expect(pickLatestReply(rows)).toEqual({ key: SILENT_TURN_KEY, markdown: NO_MESSAGE_WORDS, reason: 'no-message' });
+  });
+
+  test('every message of the turn, when chosen — and only that turn’s', () => {
+    const rows = [
+      ...held,
+      row('u2', 'user', 'second', 5),
+      row('a3', 'assistant', ' one ', 6),
+      row('a4', 'assistant', 'two', 7),
+    ];
+    expect(pickLatestReply(rows, 'every')).toEqual({ key: 'a4', markdown: 'one\n\ntwo', reason: 'reply' });
+  });
+
+  test('a ferret’s message (peer) is not the person’s row, and not read; no user row at all means the whole conversation', () => {
+    const rows = [
+      row('a1', 'assistant', 'hello', 1),
+      row('p1', 'user', 'from a ferret', 2, { peer: { from: 'x' } }),
+      row('a2', 'assistant', 'bye', 3),
+    ];
+    expect(pickLatestReply(rows).markdown).toBe('bye');
+    expect(pickLatestReply([]).reason).toBe('no-message');
+    expect(pickLatestReply('nope' as unknown as readonly PickerRow[]).reason).toBe('no-message');
   });
 });

@@ -55,6 +55,7 @@ const BASE: AutoReadInput = {
   turnStateAt: iso(-1000),
   question: null,
   sends: [],
+  authoritative: true,
 };
 const working = (extra: Partial<AutoReadInput> = {}): AutoReadInput => ({
   ...BASE,
@@ -639,5 +640,115 @@ describe('useAutoRead: history is never a fresh arrival', () => {
     await mounted.render(tree(r, ended(history)));
     await settle();
     expect(r.synth.spoken).toHaveLength(0);
+  });
+});
+
+describe('useAutoRead: round 4 — identity, short turns, hidden-before-ack, cached state', () => {
+  test('REGRESSION (round 4, #3): a cached working snapshot cannot turn the authoritative historical completion into speech', async () => {
+    const r = rig(true);
+    // Persisted fleet snapshot saved while this turn was working; it ended before the page opened.
+    mounted = await mount(tree(r, working({ authoritative: false })));
+    await mounted.render(tree(r, ended([user, reply('Finished before page load.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    // …and the first live snapshot only seeded the watermark: the next turn is watched and read.
+    await mounted.render(tree(r, { ...working(), turnStateAt: iso(20_000) }));
+    await mounted.render(
+      tree(r, ended([user, { ...reply('Live answer.', 'a3'), at: AT + 25_000 }], { turnStateAt: iso(30_000) })),
+    );
+    await settle();
+    expect(said(r)).toBe('Live answer.');
+  });
+
+  test('a press made while the state on screen is still the cached copy arms nothing', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, { ...BASE, authoritative: false }));
+    await press('s1');
+    const rows = [user, asked('u2', 30_100), { ...reply('Answer.', 'a2'), at: AT + 30_900 }];
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(31_000), sends: [accepted('s1', 30_000)] })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 4, #4): a fast turn whose working was never rendered is read after the ack', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, BASE));
+    await interact(() => handle?.beginSend());
+    // The refresh read the snapshot after the nudges settled: no working was ever rendered.
+    const rows = [user, asked('u2', 30_100), { ...reply('Fast answer.', 'a2'), at: AT + 30_900 }];
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(31_000), sends: [accepted('s1', 30_000)] })));
+    await interact(() => handle?.sent('s1'));
+    await settle();
+    expect(said(r)).toBe('Fast answer.');
+  });
+
+  test('REGRESSION (round 4, #2): a completion seen hidden before the send is acknowledged stays silent on return', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, BASE));
+    await interact(() => handle?.beginSend());
+    const rows = [user, asked('u2', 30_100), { ...reply('Ended while hidden.', 'a2'), at: AT + 30_900 }];
+    await mounted.render(tree(r, working({ entries: rows.slice(0, 2), turnStateAt: iso(30_500) })));
+    await interact(() => setVisibility('hidden'));
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(31_000), sends: [accepted('s1', 30_000)] })));
+    await interact(() => setVisibility('visible'));
+    await interact(() => handle?.sent('s1'));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 4, #1): a hydrated prior user row cannot stand in for this send’s row — a silent turn says so', async () => {
+    const r = rig(true);
+    const cached = [user, OLD];
+    mounted = await mount(tree(r, { ...BASE, entries: cached, turnStateAt: iso(20_000) }));
+    await press('s2');
+    const sends = [accepted('s2', 30_000)];
+    const hydrated = [
+      ...cached,
+      asked('prior-user', 15_000),
+      { id: 'prior-answer', kind: 'assistant', text: 'Historical answer.', at: AT + 19_000 },
+    ];
+    await mounted.render(tree(r, working({ entries: hydrated, turnStateAt: iso(30_500), sends })));
+    await mounted.render(
+      tree(r, ended([...hydrated, asked('actual-user', 30_100)], { turnStateAt: iso(40_000), sends })),
+    );
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+
+  test('REGRESSION (round 4, #1): two sends, the first user row late — the first answer is not read for the second', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, { ...BASE, entries: [user, OLD] }));
+    await press('s1');
+    await mounted.render(
+      tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: [accepted('s1', 30_000)] })),
+    );
+    await press('s2');
+    const sends = [accepted('s1', 30_000), accepted('s2', 35_000)];
+    const firstTurnRows = [
+      user,
+      OLD,
+      asked('first-user', 30_100),
+      { id: 'first-answer', kind: 'assistant', text: 'First answer.', at: AT + 39_000 },
+    ];
+    // The first turn ends (dated after the second send was accepted): that end is the first turn's, not the reply.
+    await mounted.render(tree(r, ended(firstTurnRows, { turnStateAt: iso(40_000), sends })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.render(tree(r, working({ entries: firstTurnRows, turnStateAt: iso(40_500), sends })));
+    await mounted.render(
+      tree(r, ended([...firstTurnRows, asked('second-user', 40_510)], { turnStateAt: iso(45_000), sends })),
+    );
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+
+  test('a turn the page only watched is still cut at its dated start; the last send-less words are not guessed', async () => {
+    const r = rig(true);
+    const rows = [user, OLD, asked('u2', 20_000), { ...reply('Historical.', 'h1'), at: AT + 30_000 }];
+    mounted = await mount(tree(r, { ...BASE, entries: rows, turnStateAt: iso(30_500) }));
+    await mounted.render(tree(r, working({ entries: rows, turnStateAt: iso(60_000) })));
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(70_000) })));
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
   });
 });

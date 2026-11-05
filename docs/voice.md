@@ -686,10 +686,11 @@ in that order. Only when none has readable words does it say "The ferret needs y
 
 Never read: the person's own messages, **other ferrets' messages**, agenda and system rows, notices, thinking and tool calls (they are not
 assistant text at all), a message the ferret _sent to another ferret_, and Pack commands. The turn is what came after the person's last
-message, so a silent turn can never fall back to the previous turn's reply. For a reply to a send from this page the turn begins at the
-person's own row — the first one the page had not held when send was pressed — so a follow-up typed a moment later never moves it, whatever the
-clocks say. A turn that was only watched is cut by its start time: the last message of the person's at or before the start (a later one moves it only
-when the clock is skewed, it is the first, and the agent has not answered before it). Code, tables and pictures are described, not read (the
+message, so a silent turn can never fall back to the previous turn's reply. The reply to a send from this page is simply **the last
+assistant text after the last message of the person's that is in the conversation when the turn is seen to end** ("Done. No message." when
+there is none) — there is no per-send bookkeeping of which row is whose. A turn that was only watched is cut by its start time: the last message of the
+person's at or before the start (a later one moves it only when the clock is skewed, it is the first, and the agent has not answered before it).
+Code, tables and pictures are described, not read (the
 speakable rules above), and one reading stops at the **longest reading** setting with "There's more on screen."
 
 ### When a turn has "ended"
@@ -701,31 +702,38 @@ with the browser's clock. A machine that sends no `turnState` gives it nothing t
 row says so in plain words ("Auto-read needs a newer Ferretry daemon on this machine"), and **Read aloud** on a message still works. There is
 deliberately no guess for an old daemon: a guess timed by "3 seconds of quiet" read history three reviews in a row.
 
-1. **The watermark.** The newest turn-state date the page has looked at. The first thing it sees seeds it: a session already at `your-turn`
-   when the page opens, or when the switch is turned on, reads nothing. A `working` only starts a watch when it is dated **after** everything
-   already seen, so a replay of an older working → your-turn pair (a reconnect, a snapshot arriving late) is at or below the watermark and arms
-   nothing. Whatever is read, skipped or merely looked at raises it: consumed is consumed.
+0. **Only the daemon's live word counts.** The page draws this device's cached copy first (the fleet's seeded view, a transcript from the
+   local cache). A cached snapshot is not the daemon's word about the session now: it is not looked at, raises no watermark and arms
+   nothing. The page tells the hook so (`authoritative`), and the hook never arms a send off a cached copy either.
+1. **The watermark.** The newest turn-state date the page has looked at. The first **live** snapshot seeds it: a session already at
+   `your-turn` when the page opens, or when the switch is turned on, reads nothing. A `working` only starts a watch when it is dated
+   **after** everything already seen, so a replay of an older working → your-turn pair (a reconnect, a snapshot arriving late) is at or
+   below the watermark and arms nothing. Whatever is read, skipped or merely looked at raises it: consumed is consumed.
 2. **A watched turn** is one seen `working` after the watermark. It ends at the next `your-turn` or `needs-input` dated after its `working`.
-3. **A send is a token taken when the press happens**, before the request is awaited, remembering the watermark (the floor). When the request
-   comes back the token is **bound to the send's own id**, and the daemon's send ledger says when the daemon **accepted** it. The reply to a
-   send is a completion that follows a `working` dated at or after that acceptance — a turn that began because of the send. Everything else
-   is the old turn: a previous completion that turns up late, a replayed older working, an idle session at the moment of the press are all
-   dated before the acceptance and prove nothing, and a new row or a state merely newer than an old snapshot is not evidence. Until the
-   ledger shows the send, nothing is read (a turn that was fast enough to finish first is read the moment it does). A newer send drops
-   whatever was waiting on the older one, and a send whose request failed drops its token. The press itself reads nothing, and the
-   acknowledgement of a press the composer already announced stops nothing — above all not a fast reply already being read. A message sent
-   without going through the composer's press (answering a form) stops a reading and is followed like any other turn.
-4. **The person's own row** must be in the conversation before a send is read, because the reply is cut at it. If the completion is seen
-   first it waits; it never reads the wrong reply.
+3. **A send is a token taken when the press happens**, before the request is awaited, remembering the watermark (the floor) and whether a
+   turn was already running (the newest `working` with no completion after it). When the request comes back the token is **bound to the
+   send's own id**, and the daemon's send ledger says when the daemon **accepted** it. A completion is the send's own only if the
+   **daemon dated it after that acceptance** — daemon against daemon, never the browser's clock — and either (a) a `working` of the
+   new turn was seen and is itself dated at or after the acceptance, with the end after it, or (b) none was seen (a short turn can flip
+   faster than the page renders it) and the turn that was running at the press has already ended — that earlier end is the old turn's
+   and is consumed, never read. A previous completion that turns up late is dated before the acceptance; a replayed older `working` is
+   at or below the floor. Until the ledger shows the send, nothing is read (a turn that was fast enough to finish first is read the moment
+   it does). A newer send drops whatever was waiting on the older one, and a send whose request failed drops its token. The press itself
+   reads nothing, and the acknowledgement of a press the composer already announced stops nothing — above all not a fast reply already
+   being read. A message sent without going through the composer's press (answering a form) stops a reading and is followed like any
+   other turn.
+4. **Hidden before the ledger answers.** A completion seen while the tab is hidden is remembered by the send's token even when the
+   ledger has not yet shown the send; once it has, that completion (and anything dated at or before it) is consumed silently and the
+   token is spent — so coming back and the acknowledgement arriving can never read it.
 5. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
    nothing new before it reads.
 6. A turn that ends while the tab is **hidden** is never read: it is judged when it is seen (and the moment the tab hides cancels a
    pending reading), not when the timer would have fired, so coming back changes nothing.
 7. **History is never a fresh arrival.** The page draws this device's cached transcript first and replaces it with the authoritative log;
-   rows are only ever _picked from_ (cut at the person's own row or at the daemon's start of the turn), never counted as arrivals, so that
-   hydration reads nothing.
+   rows are only ever _picked from_, never counted as arrivals, so that hydration reads nothing.
 
-A turn whose `working` the page never saw (it finished between two looks) is not read — silent rather than risk the wrong reply.
+A turn that was only watched, and whose `working` the page never saw (it finished between two looks), is not read — silent rather than
+risk the wrong reply. A **send** whose `working` was never rendered is read, because the daemon's own dates prove it.
 
 ### What stops it
 
