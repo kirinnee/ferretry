@@ -114,6 +114,7 @@ verb-unproven GET /v1/sessions/:sessionId/fs/diff # ANALYSIS: cli filesystem/gat
 verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
+
 unreached GET /v1/secrets/logins/hint # CORRECT: the saved-login projection kept one release for older clients (docs/secrets.md); `fy account hint` dials /v1/accounts/hint
 unreached PATCH /v1/accounts/:id/factors/:factor # TEMPORARY (&F291 audit C67): no caller yet (the 2FA key relabel); wire it into Settings › Accounts or delete the route
 unreached GET /v1/sessions/:sessionId/phone-approvals/:approvalId # TEMPORARY (&F291 R2-5): the approve card reads the list (/v1/phone-approvals); a single-approval read has no caller yet
@@ -134,5 +135,5 @@ unreached POST /v1/catalog-links/:linkId/copy # CORRECT: daemon-first slice (cat
 unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
 unreached PUT /v1/catalog-links/:linkId/version # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
-
 unreached POST /v1/fleet/runtimes/:runtimeId/check # CORRECT: daemon-first slice (simpler onboarding PR 4a); New machine setup dials it after an import in PR 4b
+
