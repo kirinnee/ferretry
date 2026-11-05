@@ -87,6 +87,16 @@ export const secretFields = (preset: FleetProviderPresetView): readonly SecretFi
   return [...fields.values()];
 };
 
+/**
+ * A secret field in plain words, never its variable name: "DeepSeek key" for a preset with one key;
+ * otherwise its name spelled out ("Extra key").
+ */
+export const secretFieldLabel = (preset: FleetProviderPresetView, secret: string): string => {
+  if (secretFields(preset).length <= 1) return `${preset.label} key`;
+  const words = secret.toLowerCase().split('_').filter(Boolean).join(' ');
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+};
+
 /** The plain values the minimal form asks for: required, with no default, and not empty on purpose. */
 export const blankRequiredValues = (preset: FleetProviderPresetView): readonly string[] =>
   preset.variables

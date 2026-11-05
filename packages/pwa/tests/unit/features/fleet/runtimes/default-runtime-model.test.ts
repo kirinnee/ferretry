@@ -42,6 +42,9 @@ describe('the control’s words', () => {
     const plain = runtime({ name: 'plain' });
     const agent = runtime({ name: 'agent', agent: true });
     expect(defaultOptionLabel(agent, machine())).toBe('agent · ready');
+    // A login whose state is not known yet is not being checked: the option is the name alone.
+    const unknown = runtime({ name: 'quiet', agent: true, credential: { id: 'x', store: 'host' } });
+    expect(defaultOptionLabel(unknown, machine())).toBe('quiet');
     expect(agentRuntimes([plain, agent])).toEqual([agent]);
     expect(isDefaultRuntime(machine({ defaultRuntime: 'agent' }), agent)).toBe(true);
     expect(isDefaultRuntime(null, agent)).toBe(false);

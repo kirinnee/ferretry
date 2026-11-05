@@ -20,6 +20,7 @@ import type { FleetClientFactory } from '../fleet-client.ts';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { uniqueName } from '../runtimes/runtimes-model.ts';
+import { useQuietFooter } from './footer-slot.tsx';
 import type { SetupAccess } from './setup-access.ts';
 import { SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
 
@@ -56,6 +57,8 @@ export function FirstRunSignIn({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const name = SETUP_HARNESS_NAMES[harness];
+  // The sign-in is a form with primaries of its own: it takes the footer's, unless another form got there first.
+  const leads = useQuietFooter(true);
 
   /** The person's own login on this machine: the one already listed, or one made now. */
   const ownLogin = async (): Promise<FleetCredentialView | undefined> => {
@@ -115,6 +118,8 @@ export function FirstRunSignIn({
           busyLabel="Starting sign-in…"
           refusal={changes.refusal}
           submitLabel={`Sign in to ${name}`}
+          quiet={!leads}
+          lead={leads}
           onSubmit={() => void begin()}
         >
           <Button type="button" data-first-run-sign-in-close="" onClick={onClose}>
@@ -129,6 +134,7 @@ export function FirstRunSignIn({
             connection={connection}
             createClient={createClient}
             changes={changes}
+            quiet={!leads}
             {...(started === null ? {} : { initialFlow: started })}
             {...(pollMs === undefined ? {} : { pollMs })}
             onSignedIn={onSignedIn}

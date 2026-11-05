@@ -1,7 +1,7 @@
 /**
- * New machine setup's Claude Code step before and after an import: the "what changed" line collapsed and
- * open, the one-line import result, and the one-choice "Import conversations" — on a phone and a desktop,
- * light and dark.
+ * New machine setup's Claude Code step before and after an import: the ticked "found" lines, Details, the
+ * "what changed" line collapsed and open, the conversations tick, the footer's one Import, and what the step
+ * hands the page when it finishes — on a phone and a desktop, light and dark.
  *
  *   bun harness/setup-import-screenshot.tsx      # writes harness/out/setup-import-*.png
  *
@@ -28,7 +28,9 @@ const run = (command: string, args: readonly string[]): void => {
 };
 
 const PAGE_ENTRY = `
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { FooterSlotContext } from '../../src/features/fleet/setup/footer-slot.tsx';
 import { OnboardingHarnessStep } from '../../src/features/fleet/setup/harness-step.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { PROVIDERS } from '../../tests/unit/features/fleet/credentials/environment-support.ts';
@@ -83,17 +85,30 @@ const client = {
 const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
-createRoot(root).render(
-  <main data-fixture="" style={{ margin: '0 auto', maxWidth: 720, padding: '12px 16px' }}>
-    <OnboardingHarnessStep
-      tab={{ connection, machineName: 'studio-mac', machine: machineAnswer(), online: true, checking: false, onRetry: () => undefined, createClient: async () => client }}
-      harness="claude"
-      answers={{}}
-      onAnswers={() => undefined}
-      onReady={() => undefined}
-    />
-  </main>,
-);
+function Page() {
+  const [slot, setSlot] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [report, setReport] = useState(undefined);
+  return (
+    <main data-fixture="" style={{ margin: '0 auto', maxWidth: 720, padding: '12px 16px' }}>
+      <FooterSlotContext.Provider value={slot}>
+        <OnboardingHarnessStep
+          tab={{ connection, machineName: 'studio-mac', machine: machineAnswer(), online: true, checking: false, onRetry: () => undefined, createClient: async () => client }}
+          harness="claude"
+          answers={answers}
+          onAnswers={next => setAnswers(next)}
+          onReady={() => undefined}
+          onFinished={next => setReport(next)}
+        />
+      </FooterSlotContext.Provider>
+      <footer data-onboarding-foot="" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, borderTop: '1px solid var(--color-border-strong, #888)', paddingTop: 12 }}>
+        <span className="contents" ref={setSlot} />
+      </footer>
+      {report === undefined ? null : <p data-fixture-finished="" className="text-meta text-muted">The page moves on. {report === null ? '' : [report.summary, report.conversations].filter(Boolean).join(' · ')}</p>}
+    </main>
+  );
+}
+createRoot(root).render(<Page />);
 `;
 
 const html = (theme: string) => `<!doctype html>
@@ -152,10 +167,6 @@ const shot = async (page: Page, name: string, theme: string, vp: string): Promis
   process.stdout.write(`📸 ${join(outDir, file)}\n`);
 };
 
-const choose = async (page: Page, value: string): Promise<void> => {
-  await page.locator('[data-conversation-window]').selectOption(value);
-};
-
 try {
   for (const theme of ['studio-light', 'studio-dark'] as const) {
     for (const [vp, options] of Object.entries(VIEWPORTS)) {
@@ -170,21 +181,22 @@ try {
         );
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=${theme}`);
-        await page.locator('[data-harness-changed]').waitFor({ state: 'visible' });
+        await page.locator('[data-found-line]').first().waitFor({ state: 'visible' });
         await shot(page, 'before-collapsed', theme, vp);
+        await page.locator('[data-setup-disclosure="found-details"] summary').click();
+        await shot(page, 'before-details-open', theme, vp);
         await page.locator('[data-setup-disclosure="changed-list"] summary').click();
         await shot(page, 'before-changed-open', theme, vp);
-        await page.locator('[data-change-submit]').click();
-        await page.locator('[data-harness-imported]').waitFor({ state: 'visible' });
-        await page.locator('[data-conversation-window]').waitFor({ state: 'visible' });
+        await page.locator('[data-harness-conversations]').check();
+        await shot(page, 'before-conversations-ticked', theme, vp);
+        await page.locator('[data-onboarding-foot] [data-onboarding-primary]').click();
+        await page.locator('[data-fixture-finished]').waitFor({ state: 'visible' });
         await shot(page, 'after-import', theme, vp);
-        await choose(page, '7');
-        await shot(page, 'after-conversations-chosen', theme, vp);
-        await page.locator('[data-conversations-import]').click();
-        await page.locator('[data-conversations-result]').waitFor({ state: 'visible' });
-        await shot(page, 'after-conversations-imported', theme, vp);
         await page.locator('[data-setup-disclosure="import-details"] summary').click();
         await shot(page, 'after-details-open', theme, vp);
+        await page.goto(`${server.url}?theme=${theme}&state=imported`);
+        await page.locator('[data-onboarding-foot] [data-onboarding-primary]').waitFor({ state: 'visible' });
+        await shot(page, 'revisit', theme, vp);
         await page.close();
       } finally {
         await context.close();

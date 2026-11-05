@@ -4,11 +4,12 @@ import {
   changedItems,
   changeList,
   changeSummary,
+  foundLines,
   foundRows,
+  type FoundRow,
   type HarnessAnswers,
   harnessImportChange,
   harnessProblems,
-  importButtonLabel,
   importCounts,
   importNotes,
   importSummary,
@@ -463,21 +464,61 @@ describe('runtimeName', () => {
   });
 });
 
-describe('importButtonLabel', () => {
-  it('names the runtime the import creates', () => {
-    expect(importButtonLabel(NEW, NO_ANSWERS, true)).toBe('Import and create claude-default');
-    expect(importButtonLabel(NEW, { name: 'work' }, true)).toBe('Import and create work');
-    expect(importButtonLabel(DUPLICATE, { addAnother: true }, true)).toBe('Import and create claude-default-2');
+describe('foundLines', () => {
+  it('ticks what the CLI has, a line each', () => {
+    const lines = foundLines(foundRows(scan(), 'claude', false));
+    expect(lines[0]).toEqual({ ok: true, text: 'Signed in as you@example.com' });
+    expect(lines.every(line => line.text.length > 0)).toBe(true);
   });
 
-  it('is a plain Import when no runtime is made', () => {
-    expect(importButtonLabel(DUPLICATE, NO_ANSWERS, true)).toBe('Import');
-    expect(importButtonLabel(NONE, NO_ANSWERS, true)).toBe('Import');
+  it('says a login that is not signed in can be signed in after importing (E4)', () => {
+    const [line] = foundLines(foundRows(scan(), 'codex', false));
+    expect(line).toEqual({ ok: false, text: 'Not signed in — sign in now, or after importing' });
   });
 
-  it('offers to sign in later when the login is not signed in (E4)', () => {
-    expect(importButtonLabel(NEW, NO_ANSWERS, false)).toBe('Import and create claude-default, sign in later');
-    expect(importButtonLabel(NONE, NO_ANSWERS, false)).toBe('Import, sign in later');
+  it('says a due refresh renews itself', () => {
+    const [line] = foundLines(
+      foundRows(withCodex({ account: { state: 'refresh-due', email: 'a@b.test' } }), 'codex', false),
+    );
+    expect(line?.ok).toBe(true);
+    expect(line?.text).toContain('renews itself');
+  });
+
+  const line = (row: Partial<FoundRow> & Pick<FoundRow, 'key' | 'title'>) =>
+    foundLines([{ label: row.key, badges: [], ...row }])[0];
+
+  it('names a signed-in account with and without an email', () => {
+    expect(line({ key: 'account', title: 'Signed in', status: 'ready' })).toEqual({ ok: true, text: 'Signed in' });
+    expect(line({ key: 'account', title: 'Signed in', detail: 'a@b.test', status: 'ready' })).toEqual({
+      ok: true,
+      text: 'Signed in as a@b.test',
+    });
+  });
+
+  it('says any other login that is not ready can be signed in after importing', () => {
+    expect(line({ key: 'account', title: 'Login expired', status: 'needs_sign_in' })).toEqual({
+      ok: false,
+      text: 'Login expired — sign in now, or after importing',
+    });
+  });
+
+  it('counts MCP servers and skills, singular and plural', () => {
+    expect(line({ key: 'mcp', title: '1' })?.text).toBe('1 MCP server');
+    expect(line({ key: 'mcp', title: '3' })?.text).toBe('3 MCP servers');
+    expect(line({ key: 'skills', title: '1' })?.text).toBe('1 skill');
+    expect(line({ key: 'skills', title: '2' })?.text).toBe('2 skills');
+  });
+
+  it('says an empty setup will get a plain Starter profile', () => {
+    expect(line({ key: 'setup', title: 'Nothing found' })).toEqual({
+      ok: true,
+      text: 'Nothing to copy yet — Ferretry will make a plain Starter profile',
+    });
+  });
+
+  it('joins any other row’s title and detail', () => {
+    expect(line({ key: 'instructions', title: 'CLAUDE.md' })?.text).toBe('CLAUDE.md');
+    expect(line({ key: 'instructions', title: 'CLAUDE.md', detail: '4 KB' })?.text).toBe('CLAUDE.md · 4 KB');
   });
 });
 

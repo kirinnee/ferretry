@@ -167,6 +167,7 @@ describe('MachineSetupScreen', () => {
     const storage = memory();
     const screen = await open(freshClient(), storage);
     await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="codex"]');
+    await screen.click('[data-harness-name-change]');
     const field = must(screen.q('[data-harness-name="codex"]') as HTMLInputElement | null, 'name field');
     await interact(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, 'codex-mine');
@@ -179,7 +180,7 @@ describe('MachineSetupScreen', () => {
 
     const again = await open(freshClient(), storage);
     expect(at(again)).toBe('codex');
-    expect((again.q('[data-harness-name="codex"]') as HTMLInputElement).value).toBe('codex-mine');
+    expect(again.q('[data-harness-runtime-line]')?.textContent).toContain('codex-mine');
   });
 
   it('does not resume a place kept by the old rail’s own key', async () => {

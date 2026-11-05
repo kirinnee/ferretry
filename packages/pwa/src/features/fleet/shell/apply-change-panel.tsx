@@ -9,11 +9,12 @@
  */
 
 import type { FleetAccountChange, FleetAccountChangeView } from '@ferretry/protocol';
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { grantGuidance } from '../../../lib/grants.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
+import { FooterSlotContext, PrimaryAction } from '../setup/footer-slot.tsx';
 import {
   applyAccountChange,
   applyStagedChange,
@@ -114,6 +115,8 @@ export interface ChangeApplyPanelProps {
   /** Shown while busy; defaults to "Saving…". */
   readonly busyLabel?: string;
   readonly variant?: 'primary' | 'danger';
+  /** Another form on the page owns the primary: draw this submit as a plain button (it still saves). */
+  readonly quiet?: boolean;
   /** The step's own answer is not ready yet (an invalid name). */
   readonly disabled?: boolean;
   readonly onSubmit: () => void;
@@ -121,7 +124,18 @@ export interface ChangeApplyPanelProps {
   readonly children?: ReactNode;
   /** Extra classes for the submit button: a label long enough to need two lines on a phone wraps. */
   readonly submitClassName?: string;
+  /** The caller draws the submit button itself (in a pinned footer); the sentences here still show. */
+  readonly hideSubmit?: boolean;
+  /**
+   * This form leads a setup page: its submit is the pinned footer's one primary. Outside setup (no footer)
+   * it changes nothing.
+   */
+  readonly lead?: boolean;
 }
+
+/** Whether the change may be sent now: the authority is read and allows it, and nothing is in flight. */
+export const changeReady = (authority: FleetApplyAuthority | null, disabled: boolean, busy: boolean): boolean =>
+  authority !== null && authority.kind !== 'refused' && !disabled && !busy;
 
 export function ChangeApplyPanel({
   machineName,
@@ -131,12 +145,18 @@ export function ChangeApplyPanel({
   submitLabel,
   busyLabel = 'Saving…',
   variant = 'primary',
+  quiet = false,
   disabled = false,
   onSubmit,
   children,
   submitClassName,
+  hideSubmit = false,
+  lead = false,
 }: ChangeApplyPanelProps) {
-  const ready = authority !== null && authority.kind !== 'refused' && !disabled && !busy;
+  const ready = changeReady(authority, disabled, busy);
+  const slot = useContext(FooterSlotContext);
+  const inFooter = lead && !hideSubmit && slot !== null;
+  const bodySubmit = !hideSubmit && !inFooter;
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -160,12 +180,25 @@ export function ChangeApplyPanel({
           {refusal}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
-          {busy ? busyLabel : submitLabel}
-        </Button>
-        {children}
-      </div>
+      {inFooter ? (
+        <PrimaryAction lead label={busy ? busyLabel : submitLabel} disabled={!ready} onClick={onSubmit} name="change" />
+      ) : null}
+      {!bodySubmit && children === undefined ? null : (
+        <div className="flex flex-wrap gap-2">
+          {!bodySubmit ? null : (
+            <Button
+              type="submit"
+              variant={quiet && variant === 'primary' ? 'outline' : variant}
+              disabled={!ready}
+              className={submitClassName}
+              data-change-submit=""
+            >
+              {busy ? busyLabel : submitLabel}
+            </Button>
+          )}
+          {children}
+        </div>
+      )}
     </form>
   );
 }

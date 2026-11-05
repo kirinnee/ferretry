@@ -28,9 +28,11 @@ export interface PasteVariablesProps {
   readonly onBack: () => void;
   /** Continue to this preset's form, filled in from the paste. */
   readonly onContinue: (presetId: string, prefill: Prefill) => void;
+  /** Another form on the page owns the primary: Continue is drawn as a plain button. */
+  readonly quiet?: boolean;
 }
 
-export function PasteVariables({ presets, onBack, onContinue }: PasteVariablesProps) {
+export function PasteVariables({ presets, onBack, onContinue, quiet = false }: PasteVariablesProps) {
   const ids = useId();
   const [text, setText] = useState('');
   const [reading, setReading] = useState<PasteReading | null>(null);
@@ -118,7 +120,7 @@ export function PasteVariables({ presets, onBack, onContinue }: PasteVariablesPr
         <div>
           <Button
             type="button"
-            variant="primary"
+            variant={quiet ? 'outline' : 'primary'}
             data-paste-continue=""
             disabled={target === undefined}
             onClick={() => {

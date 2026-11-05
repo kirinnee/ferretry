@@ -16,7 +16,7 @@
  * Pure: the progress in, the next progress and the words out.
  */
 
-import type { WardenConfig } from '@ferretry/protocol';
+import type { VoiceEngine, WardenConfig } from '@ferretry/protocol';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { type MachineTabId, machineHash } from '../shell/machine-route.ts';
@@ -92,12 +92,13 @@ export const goToOnboardingStep = (progress: MachineSetupProgress, id: MachineSe
 });
 
 /**
- * The steps that are set only by their own button: a CLI's step is set once its import made the runtime,
- * so Continue past one that was not imported says "skipped" rather than claiming a runtime exists.
+ * The steps that are set only by what they did: a CLI's step once its import made the runtime, Voice once
+ * the machine names a speech engine. Continue past one that did nothing says "skipped" rather than
+ * claiming a runtime or an engine exists.
  */
-const SET_BY_THEIR_OWN_BUTTON: ReadonlySet<MachineSetupStepId> = new Set(['claude', 'codex']);
+const SET_BY_THEIR_OWN_BUTTON: ReadonlySet<MachineSetupStepId> = new Set(['claude', 'codex', 'voice']);
 
-/** Continue: this step is set, and the next one opens. A CLI step not imported yet counts as skipped. */
+/** Continue: this step is set, and the next one opens. A step set only by what it did counts as skipped until then. */
 export const continueOnboarding = (progress: MachineSetupProgress): MachineSetupProgress =>
   SET_BY_THEIR_OWN_BUTTON.has(progress.at)
     ? skipOnboardingStep(progress)
@@ -106,6 +107,23 @@ export const continueOnboarding = (progress: MachineSetupProgress): MachineSetup
         at: after(progress.at),
         states: isTask(progress.at) ? { ...progress.states, [progress.at]: 'done' } : progress.states,
       };
+
+/** The step that follows another, whether or not anyone is on it. */
+export const onboardingStepAfter = after;
+
+/**
+ * A step's own action worked (an import the daemon did not refuse, keys that tested): it is set, and the
+ * page moves on only when the person is still on the visit that asked for it. Someone who tapped Skip or
+ * the rail while it ran keeps the page they chose; the step is still set.
+ */
+export const completeOnboardingStep = (
+  progress: MachineSetupProgress,
+  id: MachineSetupTaskId,
+  stillHere: boolean,
+): MachineSetupProgress =>
+  stillHere && progress.at === id
+    ? continueOnboarding(markOnboardingStep(progress, id))
+    : markOnboardingStep(progress, id);
 
 /** Keep what was answered on a CLI's step. */
 export const answerOnboardingHarness = (
@@ -213,7 +231,16 @@ export interface OnboardingDoneFacts {
   readonly passiveDefault?: boolean;
   /** The runtimes each CLI has on the machine now, by name. */
   readonly runtimes?: Readonly<Partial<Record<SetupHarness, readonly string[]>>>;
+  /** The runtimes whose login still needs a sign-in, by name, as the machine reads now. */
+  readonly needsSignIn?: readonly string[];
+  /** The machine's default speech engine; `null` when `voice.yaml` names none. */
+  readonly voiceEngine?: VoiceEngine | null;
 }
+
+const VOICE_WORDS: Readonly<Record<VoiceEngine, string>> = {
+  parakeet: 'Parakeet, on each device',
+  browser: 'phone/browser voice',
+};
 
 const detailOf = (
   id: MachineSetupTaskId,
@@ -238,6 +265,12 @@ const detailOf = (
             .join(' · ');
     case 'warden':
       return facts.warden;
+    case 'voice':
+      return facts.voiceEngine === undefined
+        ? undefined
+        : facts.voiceEngine === null
+          ? 'no speech engine picked'
+          : VOICE_WORDS[facts.voiceEngine];
     case 'learning':
       return facts.passiveDefault === undefined
         ? undefined
@@ -257,7 +290,9 @@ export const onboardingDoneRows = (
   machineName: string,
 ): readonly OnboardingDoneRow[] =>
   ONBOARDING_TASKS.map(id => {
-    const state = progress.states[id];
+    // Continue past Voice with no engine picked set nothing: it is not claimed as set.
+    const kept = progress.states[id];
+    const state = id === 'voice' && kept === 'done' && facts.voiceEngine === null ? 'skipped' : kept;
     const shown: OnboardingDoneRow['state'] =
       state === 'done' ? 'set' : state === 'skipped' ? 'skipped' : 'not visited';
     const detail = detailOf(id, progress, facts);

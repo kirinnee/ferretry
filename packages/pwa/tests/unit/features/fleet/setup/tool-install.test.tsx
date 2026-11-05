@@ -49,6 +49,7 @@ interface HarnessProps {
   readonly tools: readonly MissingTool[];
   readonly initial?: InstallPhase;
   readonly skippable?: boolean;
+  readonly inFooter?: boolean;
   readonly doneHint?: string;
   /** Holds the install request open until it resolves. */
   readonly hold?: Promise<void>;
@@ -61,6 +62,7 @@ function Harness({
   tools,
   initial = { kind: 'choose' },
   skippable = true,
+  inFooter = false,
   doneHint,
   hold,
 }: HarnessProps) {
@@ -90,6 +92,7 @@ function Harness({
       onInstalled={harnesses => seen.installed.push(harnesses)}
       {...(skippable ? { onSkip: () => (seen.skips += 1) } : {})}
       {...(doneHint === undefined ? {} : { doneHint })}
+      inFooter={inFooter}
     />
   );
 }
@@ -124,6 +127,26 @@ describe('ToolInstall', () => {
       expect(submit.disabled).toBe(false);
       expect(view.container.querySelector('[data-change-step-up]')).toBeNull();
       expect(calls.filter(call => call.path === INSTALL_PATH)).toHaveLength(0);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('counts the ticked tools on the footer\u2019s primary when several can be installed', async () => {
+    const { calls, seen } = fresh();
+    const view = await mount(
+      <Harness
+        answers={{ '/v1/fleet/machine': machineAnswer() }}
+        calls={calls}
+        seen={seen}
+        tools={BOTH_RUNNABLE}
+        inFooter
+      />,
+    );
+    try {
+      await settle();
+      const labels = Array.from(view.container.querySelectorAll('button')).map(button => button.textContent);
+      expect(labels).toContain('Install 2 tools');
     } finally {
       await view.unmount();
     }

@@ -17,7 +17,6 @@ import {
   OnboardingDoneStep,
   OnboardingLearningStep,
   OnboardingPairStep,
-  OnboardingSpeedupsStep,
   OnboardingStartStep,
   OnboardingVoiceStep,
   OnboardingWardenStep,
@@ -263,20 +262,6 @@ describe('OnboardingStartStep', () => {
     expect(body.querySelector('[data-stepper-back]')).toBeNull();
     expect(body.querySelector('[data-stepper-cancel]')).toBeNull();
     expect(started).toEqual([]);
-  });
-});
-
-// ── Speed-ups ────────────────────────────────────────────────────────────────────────────────────
-
-describe('OnboardingSpeedupsStep', () => {
-  it('renders the Speed-ups surface and says keys are used, never read back', async () => {
-    const { tab } = tabFor({ '/v1/speedups': speedups('set') });
-    await show(<OnboardingSpeedupsStep tab={tab} />);
-    expect(q('[data-onboarding-step-body="speedups"]')).not.toBeNull();
-    expect(q('[data-speedup="jev"]')).not.toBeNull();
-    expect(q('[data-speedup="groq"]')).not.toBeNull();
-    expect(text('[data-speedup="jev"] [data-speedup-set]').toLowerCase()).toContain('set');
-    expect(text()).toContain('studio-mac’s secret store: used, never read back.');
   });
 });
 
@@ -710,11 +695,34 @@ describe('OnboardingDoneStep', () => {
     expect(heading()).toBe('studio-mac has no runtime yet, so nothing can start here.');
     const link = must(q('[data-onboarding-create-runtime]'), 'the create link') as HTMLAnchorElement;
     expect(link.textContent).toBe('Create a runtime');
-    expect(link.getAttribute('data-variant')).toBe('primary');
+    // Finish setup owns the page's one primary button.
+    expect(link.getAttribute('data-variant')).not.toBe('primary');
+    expect(view?.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(0);
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
     await interact(() => link.dispatchEvent(event));
     expect(event.defaultPrevented).toBe(true);
     expect(navigated).toEqual(['#settings/studio/runtimes']);
+  });
+
+  it('lists what the imports left to do, and leaves the list out when there is nothing', async () => {
+    await show(
+      <OnboardingDoneStep
+        rows={[SET]}
+        machineName="studio-mac"
+        onNavigate={() => undefined}
+        notes={['Brought in 4 conversations.', 'claude-default still needs a sign-in (Settings › Sign-ins).']}
+      />,
+    );
+    const items = Array.from(view?.container.querySelectorAll('[data-onboarding-notes] li') ?? []).map(
+      item => item.textContent,
+    );
+    expect(items).toEqual([
+      'Brought in 4 conversations.',
+      'claude-default still needs a sign-in (Settings › Sign-ins).',
+    ]);
+    await view?.unmount();
+    await done([SET]);
+    expect(q('[data-onboarding-notes]')).toBeNull();
   });
 
   it('offers no Create a runtime once a runtime exists', async () => {

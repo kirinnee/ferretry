@@ -59,13 +59,15 @@ const percent = (snapshot: ParakeetInstallSnapshot): number =>
 export interface ParakeetInstallStepProps {
   readonly voice: ParakeetVoice | null;
   readonly className?: string;
+  /** The page has its own one primary (setup's footer): the install is an ordinary button. */
+  readonly quiet?: boolean;
 }
 
 /**
  * Parakeet's install on this device: its size before anything downloads, progress with Cancel while
  * it does, Resume after an interruption, and the installed version with Remove.
  */
-export function ParakeetInstallStep({ voice, className }: ParakeetInstallStepProps) {
+export function ParakeetInstallStep({ voice, className, quiet = false }: ParakeetInstallStepProps) {
   const snapshot = useParakeetInstall(voice);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const progressId = useId();
@@ -192,7 +194,7 @@ export function ParakeetInstallStep({ voice, className }: ParakeetInstallStepPro
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          variant="primary"
+          variant={quiet ? 'outline' : 'primary'}
           size="sm"
           className="min-h-[44px]"
           disabled={busy}
@@ -232,10 +234,19 @@ export interface VoiceEngineChoiceProps {
   /** Whether the browser engine works on this page; production reads the page. */
   readonly browserSupport: BrowserRecognitionSupport;
   readonly className?: string;
+  /** The page has its own one primary (setup's footer): the install is an ordinary button. */
+  readonly quiet?: boolean;
 }
 
 /** The two engines as a radio group, with Parakeet's install inside its own option. */
-export function VoiceEngineChoice({ value, onChange, voice, browserSupport, className }: VoiceEngineChoiceProps) {
+export function VoiceEngineChoice({
+  value,
+  onChange,
+  voice,
+  browserSupport,
+  className,
+  quiet = false,
+}: VoiceEngineChoiceProps) {
   const name = useId();
   const parakeet = useParakeetInstall(voice);
   const options = [
@@ -282,7 +293,7 @@ export function VoiceEngineChoice({ value, onChange, voice, browserSupport, clas
               </span>
             </label>
             {option.id === 'parakeet' ? (
-              <ParakeetInstallStep voice={voice} className="pl-6" />
+              <ParakeetInstallStep voice={voice} className="pl-6" quiet={quiet} />
             ) : option.available ? null : (
               <p className="m-0 flex items-start gap-1 pl-6 text-meta leading-base text-warn">
                 <CircleSlash2 size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
