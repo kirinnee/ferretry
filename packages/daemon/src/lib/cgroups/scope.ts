@@ -117,3 +117,13 @@ export function agentScopeCommand(input: {
     ...input.command,
   ];
 }
+
+/** Voice is a sibling of the fleet, derived from the same product owner. */
+export const VOICE_SLICE = `${productName}-voice.slice`;
+export function voiceScopeName(nonce: string): string {
+  return `${productName}-voice-${safeUnitPart(nonce)}.scope`;
+}
+/** Weight belongs to the sibling slice; a weight on its only child cannot prioritize voice. */
+export function sliceWeightCommand(slice: string, weight: number): readonly string[] {
+  return ['systemctl', '--user', 'set-property', '--runtime', slice, `CPUWeight=${weight}`];
+}

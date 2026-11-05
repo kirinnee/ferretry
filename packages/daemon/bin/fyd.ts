@@ -1,4 +1,10 @@
 #!/usr/bin/env bun
+import { startVoiceWorker } from './voice-worker.ts';
+import { VoiceProcessSpawner } from '../src/lib/voice/process-spawner.ts';
+import { VoiceWorkerHost } from '../src/lib/voice/host.ts';
+import { describeVoice, notInstalledVoiceDescription, voiceCores } from '../src/lib/voice/policy.ts';
+import { availableVoiceMemory } from '../src/adapters/voice/host-memory.ts';
+import { BunVoiceWorkerProcesses } from '../src/adapters/voice/worker-spawner.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   accessSync,
@@ -2031,6 +2037,8 @@ export interface DaemonWorld {
    * ask whether a daemon would start.
    */
   readonly webrtcEngine: WebRtcEnginePort & WebRtcPeerEngine;
+  /** One lazy speech child per daemon lifetime; routes in the next slice consume this port. */
+  readonly voice: VoiceWorkerHost;
   /**
    * Starts every worker thread this binary carries and reports whether each one ran — for `--check`.
    * A compiled binary that did not embed a worker's program used to fail only when someone needed it.
@@ -8138,6 +8146,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // that accepts a connection and never answers would otherwise stall every session start, stop and
   // resume in the daemon for as long as it stayed silent.
   const cgroupCommands = new SpawnCgroupCommands();
+  const voiceClock = {
+    after: (milliseconds: number, callback: () => void) => {
+      const timer = setTimeout(callback, milliseconds);
+      timer.unref();
+      return { cancel: () => clearTimeout(timer) };
+    },
+  };
+  const voice = new VoiceWorkerHost({
+    recognizers: [notInstalledVoiceDescription(voiceCores(cgroupHost.cpus))],
+    spawner: new VoiceProcessSpawner({
+      processes: new BunVoiceWorkerProcesses(cgroupCommands),
+      clock: voiceClock,
+      host: cgroupHost,
+      commands: cgroupCommands,
+      runtime: process.execPath,
+      entry: Bun.main,
+      nonce: () => crypto.randomUUID(),
+    }),
+    availableMemory: availableVoiceMemory,
+    clock: voiceClock,
+  });
   const sessionSpawnFacts = new FileSessionSpawnFacts(stateFiles, paths);
   const cgroupLaunchPlanner = new CgroupLaunchPlanner({
     store: cgroupConfigStore,
@@ -9825,6 +9854,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         random: Math.random,
       });
     },
+    voice,
     webrtcEngine: new NodeDataChannelEngine(),
     probeWorkers: async () => [
       await probeBundledWorker('agenda-versions'),
@@ -14513,6 +14543,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * kteam's own supervisor hit that window routinely and reported a permanent failure for a condition
    * that clears in a second.
    */
+  cleanups.unshift(() => world.voice.close());
   const startedAtMs = world.clock.now();
   const surface = new StagedApiSurface(world.clock, startedAtMs, liveness);
   progress.enter('binding the address');
@@ -15623,6 +15654,14 @@ export async function checkConfiguration(
       `webrtc       switched off in ${world.config.path} — devices reach this daemon directly or through the relay instead`,
     );
   }
+  say(
+    `voice        ${describeVoice(
+      world.voice.status().placement ?? {
+        hardCapped: false,
+        reason: 'worker is idle; placement is verified on first use',
+      },
+    )}`,
+  );
   // The worker threads this binary carries, each started for real. Like the engine above it never changes
   // the exit code: the daemon serves without them, but the feature each one runs does not work.
   const workerProbes = await world.probeWorkers();
@@ -15775,7 +15814,9 @@ if (import.meta.main) {
     clientName: CLIENT_NAME,
     version: daemonVersion,
   });
-  if (answer.kind === 'print') {
+  if (answer.kind === 'voice-worker') {
+    startVoiceWorker();
+  } else if (answer.kind === 'print') {
     writeSync(1, `${answer.text}\n`);
     process.exit(answer.exitCode);
   }
@@ -15783,5 +15824,5 @@ if (import.meta.main) {
     writeSync(2, `${answer.text}\n`);
     process.exit(answer.exitCode);
   }
-  process.exit(await execute(answer));
+  if (answer.kind !== 'voice-worker') process.exit(await execute(answer));
 }

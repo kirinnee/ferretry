@@ -164,3 +164,10 @@ You can read the whole report before you send it.
   towards the targets in `packages/daemon/src/lib/performance/budgets.ts`.
 
 The staged plan for meeting the targets is [docs/design/event-driven-daemon.md](design/event-driven-daemon.md).
+
+### Speech worker
+
+The speech host starts one separate child lazily; the ordinary child-process instruments count its
+launch. Recognition CPU and resident memory belong to that child, outside the daemon process gauges.
+This plumbing slice installs no recognition engine and publishes no decode-speed measurements.
+The caps and lifecycle are owned by [Voice](voice.md#on-my-machine-the-speech-worker--plumbing-only-no-engine-yet).

@@ -54,3 +54,8 @@ export function effectiveCgroupLimits(config: CgroupConfig, host: CgroupHostFact
 export function cgroupsSupported(host: CgroupHostFacts): boolean {
   return host.platform === 'linux' && host.unifiedHierarchy;
 }
+
+/** Absolute ceilings use the same manager value format as percentage-based fleet limits. */
+export function absoluteUnitLimits(cores: number, memoryBytes: number): CgroupUnitLimits {
+  return { cpuQuota: `${cores * 100}%`, memoryMax: String(memoryBytes) };
+}
