@@ -100,10 +100,26 @@ export function createSpeechSynthesisSpeaker(deps: SpeechSynthesisDeps): Speaker
   let listener: ((event: SpeakerEvent) => void) | null = null;
   let unlocked = false;
 
+  const cancelQuietly = (): void => {
+    if (synth === null) return;
+    try {
+      synth.cancel();
+    } catch {
+      // Nothing was speaking that could be cancelled.
+    }
+  };
+
+  /**
+   * Ends the live reading. The order is the point: the generation is bumped first (so the browser's own
+   * cancellation callbacks are stale and ignored), the engine is cancelled SECOND, and only then is the
+   * listener told `stopped`. Whoever hears `stopped` (the Live loop opening its microphone) therefore never
+   * hears it while a queued utterance is still audible.
+   */
   const stopListener = (): void => {
     const heard = listener;
     listener = null;
     generation += 1;
+    cancelQuietly();
     heard?.({ type: 'stopped' });
   };
 
@@ -127,11 +143,7 @@ export function createSpeechSynthesisSpeaker(deps: SpeechSynthesisDeps): Speaker
         return;
       }
       if (listener !== null) stopListener();
-      try {
-        synth.cancel();
-      } catch {
-        // Nothing was speaking that could be cancelled.
-      }
+      else cancelQuietly();
       generation += 1;
       const mine = generation;
       listener = onEvent;
@@ -202,11 +214,6 @@ export function createSpeechSynthesisSpeaker(deps: SpeechSynthesisDeps): Speaker
     stop: () => {
       if (synth === null || listener === null) return;
       stopListener();
-      try {
-        synth.cancel();
-      } catch {
-        // Already quiet.
-      }
     },
   };
 }

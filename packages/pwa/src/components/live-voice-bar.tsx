@@ -315,7 +315,13 @@ export function LiveVoiceBar(props: LiveVoiceBarProps) {
         </button>
       </div>
       <div className="fy-live-targets">
-        {/* Hold is the big button wherever it is offered: one Hold on screen, not two. */}
+        {/* Hold is the big button wherever the big button is Hold: one Hold on screen, not two. While a reply is read
+            the big button is Stop reading, so Hold is a button of its own here. */}
+        {view.canHold && view.big.action !== 'hold' ? (
+          <button type="button" className="fy-live-btn" onClick={onHold} aria-keyshortcuts="H">
+            Hold
+          </button>
+        ) : null}
         {view.canSendNow ? (
           <button type="button" className="fy-live-btn" onClick={onSendNow}>
             Send now

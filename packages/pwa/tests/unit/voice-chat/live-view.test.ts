@@ -308,23 +308,26 @@ describe('liveView — reading (slice 5)', () => {
     should(view.stateWord).equal('Reading reply');
     should(view.big).deepEqual({ label: 'Stop reading', action: 'skip' });
     should(view.canSkip && view.canRepeat && view.canEnd).be.true();
-    should(view.canHold || view.canSendNow || view.canResume).be.false();
+    should(view.canHold).be.true();
+    should(view.canSendNow || view.canResume).be.false();
     should(view.micOpen).be.false();
     should(JSON.stringify(view)).not.containEql('Fix it');
   });
 
   it('says "Reading question" when it is the ferret\'s question, and says who is asking', () => {
     const view = liveView(asking, 0);
+    should(view.canHold).be.true();
     should(view.stateWord).equal('Reading question');
     should(view.detail).equal('Your ferret is asking you something.');
     should(view.canSkip).be.true();
   });
 
-  it('Space, Esc and S stop the reading (Esc does NOT end Live while reading), R repeats, Enter and H do nothing', () => {
+  it('Space, Esc and S stop the reading (Esc does NOT end Live while reading), R repeats, H holds, Enter does nothing', () => {
     const view = liveView(reading, 0);
     for (const key of [' ', 'Spacebar', 'Escape', 's', 'S']) should(liveKeyAction(key, view)).equal('skip');
     for (const key of ['r', 'R']) should(liveKeyAction(key, view)).equal('repeat');
-    for (const key of ['Enter', 'h', 'H', 'x']) should(liveKeyAction(key, view)).equal(null);
+    for (const key of ['h', 'H']) should(liveKeyAction(key, view)).equal('hold');
+    for (const key of ['Enter', 'x']) should(liveKeyAction(key, view)).equal(null);
   });
 
   it('another message taking the voice is On hold with a Listen button: it says why, and Listen is the way back', () => {

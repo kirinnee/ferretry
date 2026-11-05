@@ -320,6 +320,7 @@ packages/pwa/src/features/catalogs/local-skill-installs-api.ts # the copy-from-t
 packages/pwa/src/features/context-rail/machine-skills-model.ts # the On this machine rows, used by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-auto-read.ts # Auto-read replies: reads a finished turn aloud, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/voice-chat/auto-read.ts # the pure turn watcher behind Auto-read replies, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-live-question-handoff.ts # the page-level reader that speaks a Live question after its form replaces the composer, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
 
 # The Live voice noise harness's judging rules (&F137 slice 3), dev tooling only.

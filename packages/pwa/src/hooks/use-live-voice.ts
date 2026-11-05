@@ -31,7 +31,7 @@ import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-clean
 import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
 import { type AudioContextConstructor, navigatorHaptics, webAudioEarcons } from '../lib/voice-chat/earcons.ts';
 import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '../lib/voice-chat/live-assembly.ts';
-import { INITIAL_LIVE_STATE } from '../lib/voice-chat/live-machine.ts';
+import { INITIAL_LIVE_STATE, type LivePhase } from '../lib/voice-chat/live-machine.ts';
 import { createLiveReader, type LiveReadingSource, pageVoice } from '../lib/voice-chat/live-reader.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
 import { DEFAULT_LIVE_VOICE_SETTINGS } from '../lib/voice-chat/live-settings.ts';
@@ -66,6 +66,12 @@ export interface UseLiveVoiceOptions {
    * (nothing is read). The voice, speed, length and the tones come from this device's voice settings.
    */
   readonly reading?: LiveReadingSource;
+  /**
+   * The host is taking Live away while it is ON (the composer unmounts: a structured question replaced it). Called with
+   * the phase Live was in, BEFORE the runner is disposed, so the host can hand what Live was about to say to a reader
+   * that outlives the composer. Never called for an Live that was off.
+   */
+  readonly onRetire?: (phase: LivePhase) => void;
   readonly graceMs?: unknown;
   readonly pauseMs?: unknown;
   // Seams for tests and the visual harness.
@@ -254,7 +260,14 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     stop();
     repaint();
   }, [enabled, stop]);
-  useEffect(() => stop, [stop]);
+  useEffect(
+    () => () => {
+      const leaving = activeRunner(runnerRef);
+      if (leaving !== null) latest.current.onRetire?.(leaving.state.phase);
+      stop();
+    },
+    [stop],
+  );
 
   // A refusal says its words for a while and then leaves; the next press of Live starts clean anyway.
   const refused = phase === 'off' && runner?.state.notice != null;

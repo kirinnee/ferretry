@@ -766,6 +766,8 @@ export function liveReduce(state: LiveState, event: LiveEvent): LiveStep {
         case 'typing':
           return holdForTyping(state, [{ type: 'stopSpeaking' }]);
         case 'hold':
+          // A question already ends On hold at its prompt (nothing to resume into): Hold there is the same as stopping it.
+          if (state.readKind === 'question') return finishReading(state, 'stopped', [{ type: 'stopSpeaking' }]);
           return step({ ...state, ...FRESH_TURN, phase: 'hold', holdReason: 'user', readKind: null }, [
             { type: 'stopSpeaking' },
           ]);

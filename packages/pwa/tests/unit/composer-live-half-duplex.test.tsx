@@ -13,7 +13,10 @@
  *   2. a Read aloud tap while Live LISTENS (and while it hears you mid-sentence);
  *   3. Live starts while something is already being read;
  *   4. typing during a reading: the speech stops and the stop is the person's until Resume;
- *   5. a message sent by hand that does not go.
+ *   5. a message sent by hand that does not go;
+ *   6. (fix round 2) the transcript row's OWN Stop during Live's reading: the browser is cancelled BEFORE Live hears
+ *      that the speech ended, so the microphone never opens under a still-queued utterance;
+ *   7. (fix round 2) Hold (the H key, the Hold button) during a reading: the speech stops and the stop stands.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -131,6 +134,7 @@ const rig = async () => {
         liveVoiceSeams={{ ports }}
       />
       <ReadAloudControl entryId="old" text={OLDER} />
+      <ReadAloudControl entryId="a1" text={REPLY} />
     </ReadAloudProvider>,
   );
   const root = composer.container;
@@ -401,6 +405,92 @@ describe('Live is half-duplex against every speaker on the page', () => {
     expect(r.sent.messages).toEqual(['Fix the bug.', 'one more thing']);
     expect(r.audible()).toBe(false);
     expect(r.phase()).toBe('working');
+    expect(r.micOpen()).toBe(false);
+    expect(r.overlaps).toEqual([]);
+    await r.composer.unmount();
+  });
+
+  it("6. the transcript row's own Stop during Live's reading cancels the browser BEFORE the microphone may open", async () => {
+    const r = await rig();
+    await r.reading();
+    const cancelsBefore = r.synth.cancels;
+    // The microphone is not opened by anything that has not seen the cancel: the speaker's own stop is the order.
+    const trace: string[] = [];
+    const cancel = r.synth.cancel.bind(r.synth);
+    r.synth.cancel = () => {
+      trace.push('cancel');
+      cancel();
+    };
+    const unsubscribe = r.controller.subscribe(() => {
+      if (r.controller.getState().status === 'stopped') trace.push(`stopped, queue ${r.synth.queue.length}`);
+    });
+    await flush();
+    const rowStop = must(r.composer.container.querySelector<HTMLButtonElement>('button[data-reading]'), 'the row Stop');
+    await interact(() => rowStop.click());
+    await flush();
+    unsubscribe();
+    expect(trace).toEqual(['cancel', 'stopped, queue 0']);
+    expect(r.synth.cancels).toBeGreaterThan(cancelsBefore);
+    expect(r.audible()).toBe(false);
+    expect(r.controller.getState().status).toBe('stopped');
+    // Live listens again, but only after the voice was already quiet.
+    expect(r.phase()).toBe('listening');
+    expect(r.micOpen()).toBe(true);
+    expect(r.overlaps).toEqual([]);
+    await r.composer.unmount();
+  });
+
+  it('6b. a reading replaced by another message cancels the browser before the old reading is told', async () => {
+    const r = await rig();
+    await r.reading();
+    const trace: string[] = [];
+    const speak = r.synth.speak.bind(r.synth);
+    r.synth.speak = utterance => {
+      trace.push(`speak, queue ${r.synth.queue.length}`);
+      speak(utterance);
+    };
+    await interact(() => r.readAloudButton().click());
+    await flush();
+    // The older utterance was cancelled before the new one was queued, and Live heard the takeover once it was.
+    expect(trace).toEqual(['speak, queue 0']);
+    expect(r.phase()).toBe('hold');
+    expect(r.micOpen()).toBe(false);
+    expect(r.overlaps).toEqual([]);
+    await r.composer.unmount();
+  });
+
+  it('7. H during a reading holds: the speech stops at once, the microphone stays shut, and the completion reopens nothing', async () => {
+    const r = await rig();
+    await r.reading();
+    expect(r.barButton(/^Hold/)).toBeTruthy();
+    await interact(() => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true, cancelable: true }));
+    });
+    await flush();
+    expect(r.phase()).toBe('hold');
+    expect(r.composer.container.textContent).toContain('Resume');
+    expect(r.audible()).toBe(false);
+    expect(r.micOpen()).toBe(false);
+    // Time and a loud room afterwards change nothing: the hold is the person's until Resume.
+    await r.echo();
+    await r.advance(30_000);
+    expect(r.phase()).toBe('hold');
+    expect(r.micOpen()).toBe(false);
+    expect(r.sent.messages).toEqual(['Fix the bug.']);
+    await interact(() => r.barButton(/^Resume/).click());
+    await flush();
+    expect(r.phase()).toBe('listening');
+    expect(r.overlaps).toEqual([]);
+    await r.composer.unmount();
+  });
+
+  it('7b. the Hold BUTTON on the bar during a reading does the same as H', async () => {
+    const r = await rig();
+    await r.reading();
+    await interact(() => r.barButton(/^Hold/).click());
+    await flush();
+    expect(r.phase()).toBe('hold');
+    expect(r.audible()).toBe(false);
     expect(r.micOpen()).toBe(false);
     expect(r.overlaps).toEqual([]);
     await r.composer.unmount();

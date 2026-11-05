@@ -222,6 +222,8 @@ export interface ComposerProps {
   readonly liveReading?: LiveReadingSource;
   /** Told when Live turns on or off, so the page's own auto-read stands down while Live reads its turns. */
   readonly onLiveActiveChange?: (active: boolean) => void;
+  /** This composer is leaving while Live is on (a question form replaced it): see `UseLiveVoiceOptions.onRetire`. */
+  readonly onLiveRetire?: LiveVoiceControlProps['onRetire'];
   /** Test/visual seam: the ports, clock and engines Live voice runs over. Production uses the page's own. */
   readonly liveVoiceSeams?: LiveVoiceControlProps['seams'];
   /** One already-read daemon fleet slice, shared with transcript references. */
@@ -499,6 +501,7 @@ export function Composer({
   liveReply,
   liveReading,
   onLiveActiveChange,
+  onLiveRetire,
   liveVoiceSeams,
   autocompleteSessions,
   autocompleteAgenda,
@@ -1589,6 +1592,7 @@ export function Composer({
     compact,
     busyElsewhere: dictating,
     onActiveChange: handleLiveActive,
+    ...(onLiveRetire === undefined ? {} : { onRetire: onLiveRetire }),
     ...(liveReading === undefined ? {} : { reading: liveReading }),
     ...(liveVoiceSeams === undefined ? {} : { seams: liveVoiceSeams }),
   });

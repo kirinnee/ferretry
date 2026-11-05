@@ -242,6 +242,31 @@ describe('<LiveVoiceBar> — the phone', () => {
     await stopped.unmount();
   });
 
+  it('draws Hold as a button of its own while a reply is read (the big button is Stop reading), 48 px high by the page css', async () => {
+    const working = run(SENT);
+    const reading = liveView(run([{ type: 'reply', signal: 'done' }], { ...working, canRead: true }), 0);
+    const held = harness(reading);
+    const mounted = await mount(held.element);
+    const targets = [...mounted.container.querySelectorAll<HTMLButtonElement>('.fy-live-targets button')];
+    expect(targets.map(button => button.textContent)).toEqual(['Hold', 'Repeat', 'End']);
+    expect(targets[0]?.className).toContain('fy-live-btn');
+    expect(targets[0]?.getAttribute('aria-keyshortcuts')).toBe('H');
+    await interact(() => must(targets[0], 'Hold').click());
+    expect(held.calls.hold).toBe(1);
+    await mounted.unmount();
+  });
+
+  it('draws ONE Hold where the big button already is Hold', async () => {
+    for (const shown of [view(HEARING), view(LISTENING)]) {
+      const mounted = await mount(harness(shown).element);
+      expect(mounted.container.querySelectorAll('[data-live-big="hold"]').length).toBe(1);
+      expect(
+        [...mounted.container.querySelectorAll('button')].filter(button => button.textContent === 'Hold').length,
+      ).toBe(0);
+      await mounted.unmount();
+    }
+  });
+
   it('disables the big button when it has nothing to do', async () => {
     for (const shown of [view(LISTENING.slice(0, 1)), view(SENT, 18_700)]) {
       const { element, calls } = harness(shown);
@@ -396,7 +421,7 @@ describe('<LiveVoiceBar> — the desktop strip', () => {
     const working = run(SENT);
     const reading = liveView(run([{ type: 'reply', signal: 'done' }], { ...working, canRead: true }), 0);
     const speaking = await mount(harness(reading, { layout: 'desktop' }).element);
-    expect(names(speaking.container)).toEqual(['Stop reading Space', 'Repeat R', 'End']);
+    expect(names(speaking.container)).toEqual(['Hold H', 'Stop reading Space', 'Repeat R', 'End']);
     await speaking.unmount();
   });
 
@@ -515,6 +540,8 @@ describe('<LiveVoiceBar> — keys', () => {
     const speaking = await mount(reading.element);
     await interact(() => pressKey(document.body, ' '));
     expect(reading.calls.skip).toBe(1);
+    await interact(() => pressKey(document.body, 'h'));
+    expect(reading.calls.hold).toBe(1);
     await speaking.unmount();
   });
 
