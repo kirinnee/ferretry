@@ -512,7 +512,7 @@ const unavailableCopy = (availability: ComposerAvailability): string =>
  *
  * Drawn only where a composer scope is known (`AttachmentReferenceTarget`) and only for a name the attachment
  * grammar can write; inline and transcript-record pictures have no stored id and never get one. The hit area is
- * 44px; the visible mark is smaller and, where there is a pointer, appears on hover and focus.
+ * 44px; the visible mark is smaller, solid and always drawn (never hover-only), on every tile kind.
  */
 function AttachmentReferenceButton({ attachment }: { readonly attachment: StoredTranscriptAttachment }) {
   const scope = useAttachmentReferenceTarget();

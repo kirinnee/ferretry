@@ -96,7 +96,7 @@ no tombstone, and no live owner to ask — the proof is the transcript itself (s
 
 The **+** is the way in. Every **stored** attachment tile the chat draws — the files of a message handed to
 the agent through a turn file, which is every message that carries files, whoever sent it — has a small **+**, with a
-44px hit area (visible on hover and keyboard focus with a pointer, always visible on a touch screen) labelled
+44px hit area (always visible — on a picture, a document card and audio alike, on a touch screen and with a pointer — never hover-only) labelled
 "Reference `shot.png` in your message". Tapping it:
 
 1. attaches the file to the composer **by its existing id — no re-upload** (skipped when it is already a chip);

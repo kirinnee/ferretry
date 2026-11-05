@@ -539,15 +539,18 @@ pre,
 /* A proved `%attachment:name` is a chip, not a bare link: a small file icon says "this is a file you attached
    earlier", and the pill shape keeps a filename with dots and dashes reading as one thing. */
 .md a.fy-attachment-ref {
-  display: inline-block;
+  display: inline-flex;
+  align-items: baseline;
   box-sizing: border-box;
   max-width: 100%;
-  padding: 0 0.5em;
+  padding: 0 0.4em;
+  font-size: 0.9em;
   border-radius: var(--radius-badge);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   text-decoration: none;
   vertical-align: bottom;
-  /* A long name wraps rather than being cut: the reader must be able to read which file it is. */
+  /* The icon stays beside the first letters of the name, and the whole chip drops to the next line before it
+     splits. Only a name wider than the column itself wraps, so the reader can still read which file it is. */
   overflow-wrap: anywhere;
 }
 .md a.fy-attachment-ref:hover {
@@ -555,6 +558,7 @@ pre,
 }
 .fy-attachment-ref-icon {
   display: inline-block;
+  flex: none;
   margin-right: 0.3em;
   vertical-align: -2px;
 }
@@ -582,8 +586,9 @@ pre,
   }
 }
 /* The + on a stored attachment tile. The BUTTON is the 44px touch target; the round mark inside it is what is
-   seen. With a pointer it appears on hover and on keyboard focus; on a touch screen (no hover) it is always
-   there, because a control nobody can find by hovering is not a control. */
+   seen. It is ALWAYS drawn — on every tile kind (picture, document card, audio), on a touch screen and with a
+   pointer, enabled or not — because a control that appears only on hover is invisible to a finger, and a
+   touch emulation that still reports `hover: hover` would hide it. */
 .fy-attachment-add {
   position: absolute;
   top: 0;
@@ -606,7 +611,7 @@ pre,
   width: 28px;
   height: 28px;
   border-radius: var(--radius-pill);
-  border: var(--border-width) solid var(--border);
+  border: var(--border-width) solid var(--border-strong);
   background: var(--surface);
   box-shadow: var(--shadow-control);
 }
@@ -620,25 +625,19 @@ pre,
   outline-offset: -4px;
   border-radius: var(--radius-pill);
 }
+/* Disabled dims the glyph, never the mark: the solid surface and border stay, so the + still reads on a dark
+   thumbnail and on a light one. */
 .fy-attachment-add:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 1;
 }
-@media (hover: hover) and (pointer: fine) {
-  .fy-attachment-add {
-    opacity: 0;
-  }
-  .fy-attachment-tile:hover .fy-attachment-add,
-  .fy-attachment-tile:focus-within .fy-attachment-add {
-    opacity: 1;
-  }
-  .fy-attachment-tile:hover .fy-attachment-add:disabled {
-    opacity: 0.45;
-  }
+.fy-attachment-add:disabled .fy-attachment-add-mark {
+  border-color: var(--border-strong);
+  color: var(--muted);
 }
-/* A document card keeps its text clear of the +. */
+/* A document card keeps its text clear of the + (the 44px target plus a gap), so a long type or name never runs under it. */
 .fy-attachment-tile--card > :first-child {
-  padding-right: 40px;
+  padding-right: 56px;
 }
 /* A reference inside code — inline span or fence — keeps the CODE's colour,
    including whichever highlight token it landed in. The accent colour that
