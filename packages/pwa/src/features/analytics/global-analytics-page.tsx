@@ -111,21 +111,23 @@ export function GlobalAnalyticsPage({
         className={`${INSIGHTS_COLUMN_CLASS} flex shrink-0 flex-wrap items-center justify-between gap-x-md gap-y-sm pt-3 sm:pt-4`}
       >
         <h2 className="m-0 text-title font-semibold leading-tight text-fg">Analytics</h2>
-        <InsightsTimeZonePicker choice={zoneChoice} onChoose={chooseZone} />
-        <div className="w-48">
-          <Segmented<AnalyticsView>
-            label="Analytics page"
-            name="analytics-view"
-            options={VIEWS}
-            value={view}
-            onChoose={next =>
-              onNavigate(
-                next === 'query'
-                  ? daemonAnalyticsQueryPath(connection.daemonId)
-                  : daemonAnalyticsPath(connection.daemonId),
-              )
-            }
-          />
+        <div className="flex min-w-0 flex-wrap items-center gap-x-md gap-y-sm">
+          <InsightsTimeZonePicker choice={zoneChoice} onChoose={chooseZone} />
+          <div className="w-48">
+            <Segmented<AnalyticsView>
+              label="Analytics page"
+              name="analytics-view"
+              options={VIEWS}
+              value={view}
+              onChoose={next =>
+                onNavigate(
+                  next === 'query'
+                    ? daemonAnalyticsQueryPath(connection.daemonId)
+                    : daemonAnalyticsPath(connection.daemonId),
+                )
+              }
+            />
+          </div>
         </div>
       </header>
       {view === 'overview' ? (
