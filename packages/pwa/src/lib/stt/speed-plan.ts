@@ -237,6 +237,7 @@ export const SPEED_TEST_PATH = '/speed-bench/';
  * The speed test page's address, or `null` when this build does not serve one. The page is dev tooling:
  * `vite.config.ts` builds only `index.html`, `app/` and `get-started/`, so the deployed site answers
  * `/speed-bench/` with its fallback page, not a test. The link is therefore offered only where Vite's dev
- * server is running (`import.meta.env.DEV`), never in a production build.
+ * server is running (`import.meta.env?.DEV`: optional, because a bundler that does not know Vite — the
+ * screenshot harnesses — leaves `import.meta.env` undefined and a bare `.DEV` would throw), never in a production build.
  */
 export const speedTestHref = (dev: boolean | undefined): string | null => (dev === true ? SPEED_TEST_PATH : null);

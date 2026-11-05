@@ -39,7 +39,7 @@ export function SpeedLine({ engine, planner, testHref }: SpeedLineProps) {
   const model = onDeviceModel(engine);
   if (model === null) return null;
   const plan = pagePlanner.planFor(model.id);
-  const href = testHref === undefined ? speedTestHref(import.meta.env.DEV) : testHref;
+  const href = testHref === undefined ? speedTestHref(import.meta.env?.DEV) : testHref;
   return (
     <section aria-label="Speed" className="flex flex-col gap-1">
       <p className="m-0 text-ui font-semibold">{speedLine(plan)}</p>
