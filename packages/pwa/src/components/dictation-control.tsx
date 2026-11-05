@@ -43,13 +43,11 @@
 import type { IFyApiClient } from '@ferretry/protocol';
 import { Mic } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMachineVoiceEngine } from '../features/fleet/setup/voice-default.ts';
 import {
   type DictationShortcutBinding,
   dictationShortcutAria,
   dictationShortcutLabel,
 } from '../features/settings/dictation-shortcut.ts';
-import { useMachineVoiceCleanup } from '../features/settings/use-machine-voice-cleanup.ts';
 import {
   type DictationAutoInsertion,
   type DictationDraftResult,
@@ -58,21 +56,17 @@ import {
   useDictation,
 } from '../hooks/use-dictation.ts';
 import { browserShortcutHost, type ShortcutHost, useDictationShortcut } from '../hooks/use-dictation-shortcut.ts';
+import { useEffectiveDictation } from '../hooks/use-effective-dictation.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { useDictationDebugSnapshot, useSttSettingsStore } from '../lib/store.tsx';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
-import {
-  type DeviceClass,
-  type DeviceClassGlobalLike,
-  deviceClassOf,
-  effectiveEngine,
-} from '../lib/stt/engine-defaults.ts';
+import type { DeviceClass } from '../lib/stt/engine-defaults.ts';
 import { onDeviceModel } from '../lib/stt/model-catalog.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
-import { isOnDeviceEngine, isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
+import { isOnDeviceEngine, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import { DictationDebugSheet } from './dictation-debug-sheet.tsx';
 import { DictationInsertedToast } from './dictation-inserted-toast.tsx';
@@ -123,6 +117,11 @@ export interface DictationControlProps {
   /** Phone or computer, for the default engine (`lib/stt/engine-defaults.ts`). Read from the page when omitted. */
   readonly deviceClass?: DeviceClass;
   readonly disabled?: boolean;
+  /**
+   * Told whenever a dictation flow starts or ends (anything but idle is busy), so the host can keep Live voice
+   * and the mic from holding the microphone at once.
+   */
+  onBusyChange?(busy: boolean): void;
   /**
    * `compact` keeps the 44px square icon-only, for the mobile action column.
    * `full` shows the word too, for the desktop action row.
@@ -212,21 +211,11 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     now = () => performance.now(),
     clockIntervalMs = 250,
   } = props;
-  // A device that has not picked an engine dictates with its machine's default (voice.yaml), if it names
-  // one, and otherwise with the default for a phone or a computer (`lib/stt/engine-defaults.ts`).
-  const machineEngine = useMachineVoiceEngine(deviceSettings.engine === null ? props.daemon : undefined);
-  const pageDeviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
-  const deviceClass = props.deviceClass ?? pageDeviceClass;
-  const voiceCleanup = useMachineVoiceCleanup(
-    isRemoteEnhancementProvider(deviceSettings.enhancementProvider) ? props.daemon : undefined,
-  ).cleanup;
-  const settings = useMemo(
-    () =>
-      deviceSettings.engine === null
-        ? { ...deviceSettings, engine: effectiveEngine(null, machineEngine, deviceClass) }
-        : deviceSettings,
-    [deviceSettings, machineEngine, deviceClass],
-  );
+  const { settings, voiceCleanup } = useEffectiveDictation({
+    deviceSettings,
+    daemon: props.daemon,
+    deviceClass: props.deviceClass,
+  });
 
   const [open, setOpen] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -286,6 +275,11 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   });
 
   const phase = dictation.phase;
+  const busyRef = useRef(props.onBusyChange);
+  busyRef.current = props.onBusyChange;
+  useEffect(() => {
+    busyRef.current?.(phase !== 'idle');
+  }, [phase]);
   const visibleError = dictation.error;
   const hasError = visibleError !== null;
 

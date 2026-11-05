@@ -8,7 +8,8 @@
  * refusal say what to do next. See docs/voice.md › Live voice.
  */
 
-import { type LiveNotice, type LivePhase, type LiveState, micIsOpen } from './live-machine.ts';
+import { type LiveNotice, type LivePhase, type LiveState, micIsOpen, type TurnNumbers } from './live-machine.ts';
+import { lastTurnCopy } from './live-turn-log.ts';
 import type { LiveBlock } from './ports.ts';
 
 /** The words for every reason Live cannot start or stops. */
@@ -93,8 +94,16 @@ const OFF_VIEW: LiveView = {
   workingSeconds: null,
 };
 
-/** The bar for `state` at `nowMs` (the machine's clock). `composerHasWords`: the box holds something to send. */
-export function liveView(state: LiveState, nowMs: number, composerHasWords = false): LiveView {
+/**
+ * The bar for `state` at `nowMs` (the machine's clock). `composerHasWords`: the box holds something to send.
+ * `lastTurn`: the numbers of the message just sent, said under Working.
+ */
+export function liveView(
+  state: LiveState,
+  nowMs: number,
+  composerHasWords = false,
+  lastTurn: TurnNumbers | null = null,
+): LiveView {
   const base: LiveView = {
     ...OFF_VIEW,
     visible: true,
@@ -156,6 +165,7 @@ export function liveView(state: LiveState, nowMs: number, composerHasWords = fal
       return {
         ...base,
         stateWord: `Working ${mmss(seconds)}`,
+        detail: lastTurn === null ? null : lastTurnCopy(lastTurn),
         tone: 'calm',
         workingSeconds: seconds,
         big: { label: `Working ${mmss(seconds)}`, action: 'none' },

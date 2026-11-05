@@ -226,3 +226,21 @@ describe('liveKeyAction', () => {
     should(liveKeyAction('Escape', noEnd)).equal(null);
   });
 });
+
+describe('liveView — the last turn', () => {
+  it('says how long the last message took under Working, and nothing before there is one', () => {
+    const working = run([...WORDS, { type: 'countdown-done', atMs: 6_500 }, { type: 'sent', atMs: 6_600 }]);
+    should(liveView(working, 7_000).detail).equal(null);
+    const last = {
+      turn: 1,
+      endReason: 'pause' as const,
+      endToWordsMs: 300,
+      graceMs: 1_500,
+      endToSendMs: 1_600,
+      lastWordToSentMs: 3_100,
+      resumed: false,
+      sendNow: false,
+    };
+    should(liveView(working, 7_000, false, last).detail).equal('Sent 3.1 s after your last word.');
+  });
+});

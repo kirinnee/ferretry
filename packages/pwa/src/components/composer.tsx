@@ -49,6 +49,8 @@ import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import { useSendOutbox } from '../lib/store.tsx';
+import type { LiveComposerBridge } from '../lib/voice-chat/live-assembly.ts';
+import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
@@ -74,6 +76,7 @@ import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { useSharedComposerItems } from './composer-shared-items.ts';
 import { ContextRing } from './context-ring.tsx';
 import { DictationControl } from './dictation-control.tsx';
+import { useLiveVoiceControl } from './live-voice-control.tsx';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { type LocationDraft, PendingLocationChip } from './location-chip.tsx';
@@ -189,6 +192,11 @@ export interface ComposerProps {
   readonly dictationRecognition?: BrowserRecognitionProvider;
   /** The conversation on screen, oldest first, which dictation clean-up reads for names and terms. */
   readonly dictationConversation?: () => readonly string[];
+  /**
+   * The session's turn state, which Live voice watches to know when the ferret has finished. Absent, there is no
+   * Live button: the page that holds the session offers it.
+   */
+  readonly liveReply?: ReplySource;
   /** One already-read daemon fleet slice, shared with transcript references. */
   readonly autocompleteSessions?: readonly SessionView[];
   /** The session's unresolved Agenda items, shared with reference proof. */
@@ -459,6 +467,7 @@ export function Composer({
   dictationSettings,
   dictationRecognition,
   dictationConversation,
+  liveReply,
   autocompleteSessions,
   autocompleteAgenda,
   autocompleteTasks,
@@ -940,13 +949,13 @@ export function Composer({
     onSent?.(sent);
   };
 
-  const submit = async (interrupt = false) => {
-    if (!canSubmit || submitLock.current) return;
+  const submit = async (interrupt = false): Promise<boolean> => {
+    if (!canSubmit || submitLock.current) return false;
     // The word a phone keyboard is still composing is part of the message: the composition ends here,
     // and when that changed the text this press goes once the composer holds it (the effect below).
     if (inputRef.current?.endComposition?.() === true) {
       setResubmit({ interrupt });
-      return;
+      return false;
     }
     submitLock.current = true;
     // What this press sends, remembered against everything typed before it lands.
@@ -1024,6 +1033,7 @@ export function Composer({
           ? (sent as { sendId: string }).sendId
           : undefined);
       finishSent(mark, sentScope, { words: typed, sendId, disposition }, requestId);
+      return true;
     } catch (cause) {
       shared.abandonSend(mark);
       const held = occupiedDraftOf(cause);
@@ -1033,6 +1043,7 @@ export function Composer({
       if (typed !== undefined) setUnconfirmed({ sendId: typed, busy: false });
       else if (held === undefined) setError(sendFailure(cause));
       else setOccupied({ draft: held, busy: false });
+      return false;
     } finally {
       submitLock.current = false;
       setSending(false);
@@ -1426,13 +1437,74 @@ export function Composer({
     </button>
   ) : null;
 
+  // LIVE VOICE. The composer is where a Live turn's words are shown (in the box, editable) and where they are sent
+  // from (this component's own send: same route, grants, ledger and audit as a typed message). `show` replaces the
+  // words of the turn in front of whatever was typed before them; a draft that is not what `show` last put there was
+  // edited by a person, which pauses Live (`use-live-voice.ts`). `submit` waits for the render that holds the
+  // words, then runs the ordinary send and says whether it went.
+  const liveWords = useRef<{ readonly base: string; readonly shown: string } | null>(null);
+  const [liveSendRequest, setLiveSendRequest] = useState(0);
+  const liveSendResolve = useRef<((sent: boolean) => void) | null>(null);
+  const liveBridge = useMemo<LiveComposerBridge>(() => {
+    const place = (base: string, words: string): string =>
+      words === '' ? base : base.trim() === '' ? words : `${base}${/\s$/u.test(base) ? '' : ' '}${words}`;
+    const put = (base: string, next: string): void => {
+      liveWords.current = { base, shown: next };
+      draftRef.current = next;
+      applyDictation({ text: next, caret: next.length });
+    };
+    return {
+      show: words => {
+        const held = liveWords.current;
+        const current = draftRef.current;
+        const base = held !== null && held.shown === current ? held.base : current;
+        put(base, place(base, words));
+      },
+      clear: () => {
+        const held = liveWords.current;
+        if (held !== null && held.shown === draftRef.current) put(held.base, held.base);
+      },
+      draft: () => draftRef.current,
+      lastShown: () => liveWords.current?.shown ?? null,
+      submit: () =>
+        new Promise<boolean>(resolve => {
+          liveSendResolve.current?.(false);
+          liveSendResolve.current = resolve;
+          setLiveSendRequest(count => count + 1);
+        }),
+    };
+  }, [applyDictation]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `submit` is this render's, which is the point
+  useEffect(() => {
+    if (liveSendRequest === 0) return;
+    const resolve = liveSendResolve.current;
+    liveSendResolve.current = null;
+    void submit().then(sent => resolve?.(sent));
+  }, [liveSendRequest]);
+  const [liveActive, setLiveActive] = useState(false);
+  const [dictating, setDictating] = useState(false);
+  const liveControl = useLiveVoiceControl({
+    settings: dictationSettings,
+    // `disabled`, not `fieldDisabled`: Live's own send makes the field busy for a moment, and that must not end it.
+    disabled,
+    daemon,
+    bridge: liveBridge,
+    draft,
+    reply: liveReply,
+    ...(dictationConversation === undefined ? {} : { readConversation: dictationConversation }),
+    compact,
+    busyElsewhere: dictating,
+    onActiveChange: setLiveActive,
+  });
+
   const dictation = dictationSettings ? (
     <DictationControl
       {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
       className="fy-composer-icon"
       composerRef={elementRef}
       daemon={daemon}
-      disabled={fieldDisabled}
+      disabled={fieldDisabled || liveActive}
+      onBusyChange={setDictating}
       draft={draft}
       layout="compact"
       onDraftChange={applyDictation}
@@ -1545,6 +1617,7 @@ export function Composer({
           }}
         />
       ) : null}
+      {liveControl.bar}
       <div className="fy-composer-row">
         {/* THE PHONE ROW: attach and the mic on the LEFT, Interrupt & send and Send on the RIGHT, the field
             between them — laid out as Settings › Composer › Button layout says (`data-composer-dock-layout`).
@@ -1554,6 +1627,7 @@ export function Composer({
           <div className="fy-composer-dock" data-composer-dock="start">
             {attachButton}
             {dictation}
+            {liveControl.button}
           </div>
         ) : (
           attachButton
@@ -1649,6 +1723,7 @@ export function Composer({
             Interrupt & send's slot then Send — side by side while empty, stacked with a draft. */}
         <div className="fy-composer-dock" data-composer-dock="">
           {compact ? null : dictation}
+          {compact ? null : liveControl.button}
           {busy ? (
             <button
               aria-label="Interrupt & send"

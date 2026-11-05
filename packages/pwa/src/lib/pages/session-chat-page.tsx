@@ -98,6 +98,7 @@ import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
+import { useSessionReplySource } from '../../hooks/use-session-reply-source.ts';
 import { useProjectCards } from '../../hooks/use-ferret-cards.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
@@ -891,6 +892,12 @@ export function SessionChatPage({
   // the notifications read. The pane is read only to print the harness's own working line — and, for
   // a daemon that sends no `turnState`, as the fallback evidence.
   const working = session.state.turnState === 'working';
+  // Live voice watches the same turn state to know when the ferret has finished.
+  const liveReply = useSessionReplySource({
+    turnState: session.state.turnState,
+    turnStateAt: session.state.turnStateAt,
+    status: session.state.status,
+  });
   const legacyLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
   const readActivityFrame = useCallback<PaneFrameReader>(
     async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true, 'screen'),
@@ -1736,6 +1743,7 @@ export function SessionChatPage({
               vimMode={composerVimMode}
               {...(dictationSettings === undefined ? {} : { dictationSettings })}
               dictationConversation={readDictationConversation}
+              liveReply={liveReply}
               enterKeyPreference={composerEnterKey}
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}

@@ -1,5 +1,5 @@
 import { DoctorReportSchema, HealthViewSchema, isMachineAgendaId, type QueuedMessage } from '@ferretry/protocol';
-import { KanbanSquare, QrCode, Sparkles } from 'lucide-react';
+import { AudioLines, KanbanSquare, QrCode, Sparkles } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -300,6 +300,7 @@ import {
   UPDATE_CHIP,
   type UpdateReason,
 } from './shell/app-bar.tsx';
+import { requestLiveToggle } from './lib/voice-chat/live-command.ts';
 import { AppUpdatedToast } from './shell/app-updated-toast.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
@@ -307,6 +308,7 @@ import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
 import {
   boardForFerretPaletteCommand,
+  liveVoicePaletteCommand,
   pairPhonePaletteCommand,
   whatsNewPaletteCommand,
 } from './shell/palette-destinations.ts';
@@ -3191,6 +3193,10 @@ export function AppShell() {
                         : []),
                       whatsNewPaletteCommand(Sparkles, whatsNew.entry.open),
                       ...(boardForFerret === null ? [] : [boardForFerret]),
+                      // Only on a chat, where a composer with a Live button can answer it.
+                      ...(pageRoute.kind === 'session'
+                        ? [liveVoicePaletteCommand(AudioLines, () => requestLiveToggle(document))]
+                        : []),
                     ]}
                   />
                   {/* After the finder, so the finder hands focus back to its opener before this captures it. */}
