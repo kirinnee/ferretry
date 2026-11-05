@@ -326,6 +326,32 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('iPad’s access');
   });
 
+  it('keeps what revoking does behind the (i), still describing the Revoke button, with name, badge and last seen on the row', () => {
+    // Arrange
+    const renderer = card();
+    const consequence = () => marked(renderer, 'data-revoke-consequence')[0];
+    const info = () => marked(renderer, 'aria-label', 'More about revoking Pixel 8')[0];
+    const revoke = () => marked(renderer, 'data-pair-revoke-device', DEVICE_ID)[0];
+
+    // Assert: the row carries who it is; the consequence is in the page for a screen reader but not shown
+    expect(marked(renderer, 'data-paired-device').length).toBe(1);
+    expect(text(renderer)).toContain('Pixel 8');
+    expect(marked(renderer, 'data-paired-device-self').length).toBe(1);
+    expect(marked(renderer, 'data-setting-hint').length).toBeGreaterThan(0);
+    expect(consequence()?.props.className).toContain('sr-only');
+    expect(revoke()?.props['aria-describedby']).toBe(consequence()?.props.id);
+    expect(info()?.props['aria-expanded']).toBe(false);
+    expect(info()?.props['aria-controls']).toBe(consequence()?.props.id);
+
+    // Act: open the (i)
+    run(() => info()?.props.onClick());
+
+    // Assert: shown now, and still what describes Revoke
+    expect(consequence()?.props.className).not.toContain('sr-only');
+    expect(info()?.props['aria-expanded']).toBe(true);
+    expect(revoke()?.props['aria-describedby']).toBe(consequence()?.props.id);
+  });
+
   it('reports each revoke against the device the row is for', () => {
     // Arrange
     const asked: string[] = [];

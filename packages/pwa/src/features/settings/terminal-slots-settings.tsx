@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../shell/primitives.tsx';
+import { SettingGroup, SettingRow } from './setting-row.tsx';
 import { closeFinishedTerminals, readTerminalHolders, type TerminalSlotsClient } from './terminal-slots-api.ts';
 
 export type TerminalSlotsClientFactory = (connection: DaemonConnection) => Promise<TerminalSlotsClient>;
@@ -98,48 +99,62 @@ export function TerminalSlotsSettings({
   const { view } = load;
   const finished = view.holders.filter(isFinished);
   return (
-    <section className="kt-panel p-panel" aria-labelledby="terminal-slots-heading" data-terminal-slots="">
-      <div className="flex items-center gap-2">
-        <SquareTerminal size={17} className="text-accent" aria-hidden="true" />
-        <h3 id="terminal-slots-heading" className="m-0 text-row font-semibold text-fg">
-          Terminals
-        </h3>
-      </div>
-      <p className="mb-3 mt-1 text-cell leading-base text-muted" data-terminal-slots-summary="">
-        {terminals(view.open)} open of {view.limit}.
-        {finished.length === 0 ? '' : ' Some belong to ferrets that are done; closing them frees the slots.'}
-      </p>
+    <section className="flex min-w-0 flex-col gap-3" aria-labelledby="terminal-slots-heading" data-terminal-slots="">
+      <header>
+        <div className="flex items-center gap-2">
+          <SquareTerminal size={17} className="text-accent" aria-hidden="true" />
+          <h3 id="terminal-slots-heading" className="m-0 text-row font-semibold text-fg">
+            Terminals
+          </h3>
+        </div>
+        <p className="m-0 text-cell leading-base text-muted" data-terminal-slots-summary="">
+          {terminals(view.open)} open of {view.limit}.
+          {finished.length === 0 ? '' : ' Some belong to ferrets that are done; closing them frees the slots.'}
+        </p>
+      </header>
       {view.holders.length === 0 ? null : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Who holds the terminals">
+        <SettingGroup label="Who holds the terminals">
           {view.holders.map(holder => (
-            <li
+            <SettingRow
               key={holder.sessionId}
-              className="flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-ui"
-              data-terminal-holder={holder.sessionId}
-            >
-              <span className="min-w-0 break-words font-semibold text-fg">{holder.label}</span>
-              <Badge tone={isFinished(holder) ? 'warn' : 'ok'}>{holder.status}</Badge>
-              <span className="ml-auto text-meta text-muted">{terminals(holder.count)}</span>
-            </li>
+              name={holder.label}
+              dataAttributes={{ 'data-terminal-holder': holder.sessionId }}
+              control={() => (
+                <>
+                  <Badge tone={isFinished(holder) ? 'warn' : 'ok'}>{holder.status}</Badge>
+                  <span className="text-meta text-muted">{terminals(holder.count)}</span>
+                </>
+              )}
+            />
           ))}
-        </ul>
+        </SettingGroup>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          variant="primary"
-          disabled={closing || finished.length === 0}
-          onClick={closeFinished}
-          data-terminal-slots-close=""
-        >
-          Close finished ferrets’ terminals
-        </Button>
-        {load.closed === null ? null : (
-          <span role="status" className="text-cell text-muted" data-terminal-slots-closed="">
-            Closed {terminals(load.closed)}.
-          </span>
-        )}
-      </div>
+      <SettingGroup label="Free the slots">
+        <SettingRow
+          name="Finished ferrets"
+          hint="Only terminals of ferrets that are done are closed; a running ferret’s are never touched."
+          wide
+          control={() => (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                disabled={closing || finished.length === 0}
+                onClick={closeFinished}
+                data-terminal-slots-close=""
+              >
+                Close finished ferrets’ terminals
+              </Button>
+              {load.closed === null ? null : (
+                <span role="status" className="text-cell text-muted" data-terminal-slots-closed="">
+                  Closed {terminals(load.closed)}.
+                </span>
+              )}
+            </>
+          )}
+        />
+      </SettingGroup>
     </section>
   );
 }

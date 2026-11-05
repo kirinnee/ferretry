@@ -827,12 +827,15 @@ function ApplicabilityDisclosure({ view }: { readonly view: AnalyticsPricingView
   const toolStored = view.rateApplicability.tool === 'stored_not_applied';
   const reasoningApplied = view.rateApplicability.reasoning === 'applied_when_evidenced';
   return (
-    <section className="kt-panel p-panel" aria-labelledby="pricing-coverage-heading" data-pricing-applicability="">
-      <h4 id="pricing-coverage-heading" className="m-0 text-ui font-semibold text-fg">
+    <details className="kt-groupcard min-w-0 px-panel" data-pricing-applicability="">
+      <summary
+        id="pricing-coverage-heading"
+        className="flex min-h-[var(--row-min-h)] cursor-pointer items-center text-ui font-semibold text-fg"
+      >
         What analytics applies
-      </h4>
+      </summary>
       <p
-        className="mb-0 mt-1 text-meta leading-base text-muted"
+        className="mb-0 mt-0 text-meta leading-base text-muted"
         data-rate-applicability={`image:${view.rateApplicability.image},tool:${view.rateApplicability.tool}`}
       >
         {imageStored && toolStored
@@ -847,7 +850,8 @@ function ApplicabilityDisclosure({ view }: { readonly view: AnalyticsPricingView
           ? 'Reasoning rates are applied when transcript evidence exists.'
           : 'Reasoning rates are recorded but this daemon does not currently apply them.'}
       </p>
-    </section>
+      <span className="block pb-3" />
+    </details>
   );
 }
 
@@ -1379,7 +1383,7 @@ export function PricingSettings({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="kt-btn min-h-[44px]"
+              className="kt-btn kt-btn--sm"
               disabled={refreshing || state.status !== 'ready'}
               data-pricing-refresh=""
               onClick={() => void refresh(true)}
@@ -1388,7 +1392,7 @@ export function PricingSettings({
             </button>
             <button
               type="button"
-              className="kt-btn kt-btn-primary min-h-[44px]"
+              className="kt-btn kt-btn--sm kt-btn-primary"
               disabled={state.status !== 'ready' || mutationBusy}
               data-pricing-add=""
               onClick={openAdd}

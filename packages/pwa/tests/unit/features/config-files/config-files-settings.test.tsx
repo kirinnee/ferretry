@@ -99,7 +99,7 @@ describe('Settings › Files', () => {
 
     // Grouped in the order kinds are declared, whatever order the daemon listed them in.
     const groups = [...panel.querySelectorAll('[data-config-group]')];
-    expect(groups.map(group => group.querySelector('h4')?.textContent)).toEqual(['Machine', 'AI logins', 'Warden']);
+    expect(groups.map(group => group.querySelector('h3')?.textContent)).toEqual(['Machine', 'AI logins', 'Warden']);
     expect(
       [...panel.querySelectorAll('[data-config-file-state]')].map(chip => [
         chip.getAttribute('data-config-file-state'),
@@ -116,6 +116,7 @@ describe('Settings › Files', () => {
     const row = must(q('[data-config-file="logins/glm.yaml"]'), 'the glm login row');
     expect(row.querySelector('a')).toBeNull();
     expect(row.textContent).toContain(`${DIRECTORY}/logins/glm.yaml`);
+    expect(row.querySelector('[title]')?.getAttribute('title')).toBe(`${DIRECTORY}/logins/glm.yaml`);
     await interact(() => must(row.querySelector<HTMLButtonElement>('[data-onboarding-copy]'), 'copy').click());
     await interact(() =>
       must(

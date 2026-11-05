@@ -45,9 +45,10 @@ import {
   pairingMintOutcome,
   refusalNotice,
 } from '@ferretry/protocol';
-import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, Info, MonitorSmartphone, Plus, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
 
+import { SettingGroup, SettingRow } from './setting-row.tsx';
 import { QrSymbol } from '../../components/qr-symbol.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -341,53 +342,74 @@ function PairedDeviceRow({
   readonly onChangeGrants: (patch: DeviceGrantsPatch) => void;
 }) {
   const mine = isThisDevice(device, view);
-  const describedBy = useId();
+  const consequenceId = useId();
+  const [consequenceOpen, setConsequenceOpen] = useState(false);
   const [open, setOpen] = useState(initiallyOpen);
   const held = DAEMON_CAPABILITIES.filter(capability => CAPABILITY_AXES.some(axis => device.grants[capability][axis]));
 
   return (
-    <li
-      className="flex min-w-0 flex-col gap-1 border-t border-border-soft py-2 first:border-t-0"
-      data-paired-device={device.id}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <li className="min-w-0 border-t border-border-soft first:border-t-0" data-paired-device={device.id}>
+      <div className="flex min-h-[var(--row-min-h)] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
         <MonitorSmartphone size={15} className="shrink-0 text-muted" aria-hidden="true" />
-        {/* Attacker-influenced text: the redeeming device chose this name, so it is rendered as text.
-            It WRAPS rather than truncating, and the row wraps with it: a phone squeezing three items
-            onto one line turned "Ernest's Pixel 8" into "Ernest's Pi…", and a device somebody is about
-            to revoke is the last place to hide which device it is. */}
-        <span className="min-w-[9rem] flex-1 break-words text-ui font-semibold text-fg">{device.name}</span>
-        {mine ? (
-          <span
-            className="rounded-control border border-accent bg-accent-soft px-2 py-0.5 text-meta font-medium text-accent"
-            data-paired-device-self=""
-          >
-            this device
+        <span className="flex min-w-0 flex-1 basis-40 flex-col">
+          {/* Attacker-influenced text: the redeeming device chose this name, so it is rendered as text.
+              It WRAPS rather than truncating, and the row wraps with it: a device somebody is about to
+              revoke is the last place to hide which device it is. */}
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+            <span className="min-w-0 break-words text-ui font-semibold text-fg">{device.name}</span>
+            {mine ? (
+              <span className="kt-badge" data-tone="accent" data-paired-device-self="">
+                this device
+              </span>
+            ) : null}
           </span>
-        ) : null}
-        <button
-          type="button"
-          disabled={busy}
-          aria-describedby={describedBy}
-          data-pair-revoke-device={device.id}
-          onClick={onRevoke}
-          className="kt-btn min-h-[40px] shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
-          data-variant="danger"
-        >
-          <Trash2 size={14} aria-hidden="true" />
-          Revoke
-        </button>
+          <span className="text-meta leading-tight text-muted" data-setting-hint="">
+            {pairedDeviceSummary(device)}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-expanded={consequenceOpen}
+            aria-controls={consequenceId}
+            aria-label={`More about revoking ${device.name}`}
+            data-setting-info=""
+            onClick={() => setConsequenceOpen(value => !value)}
+            className={cn(
+              'inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 hover:text-fg',
+              consequenceOpen ? 'text-accent' : 'text-muted',
+            )}
+          >
+            <Info size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            aria-describedby={consequenceId}
+            data-pair-revoke-device={device.id}
+            onClick={onRevoke}
+            className="kt-btn kt-btn--sm shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+            data-variant="danger"
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            Revoke
+          </button>
+        </span>
       </div>
-      <p className="m-0 text-meta leading-base text-faint">{pairedDeviceSummary(device)}</p>
-      {/* What the button will do, in the same breath as the button. Never after the press. */}
-      <p id={describedBy} className="m-0 text-meta leading-base text-muted">
+      {/* What the button will do, in the same breath as the button. It is always in the page — the
+          Revoke button is described by it — and shown when the (i) is open. */}
+      <p
+        id={consequenceId}
+        className={cn('m-0 px-panel text-cell leading-base text-muted', consequenceOpen ? 'pb-2' : 'sr-only')}
+        data-revoke-consequence=""
+      >
         {revokeConsequence(device, view)}
       </p>
       {note}
       <details
         open={open}
         onToggle={event => setOpen(event.currentTarget.open)}
-        className="min-w-0"
+        className="min-w-0 px-panel"
         data-device-capabilities={device.id}
       >
         <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 text-ui font-medium text-fg">
@@ -498,43 +520,36 @@ export function AddDeviceCard({
   onRevokeDevice,
   onChangeDeviceGrants,
 }: AddDeviceCardProps) {
-  const headingId = useId();
   const devices = orderedPairedDevices(view);
   const countdown = invite === null ? null : pairingCountdown(invite.expiresAt, nowMs);
 
   return (
     <section
       className="flex min-w-0 flex-col gap-3"
-      aria-labelledby={headingId}
+      aria-label="Devices on this machine"
       data-add-device-surface={String(connection.daemonId)}
     >
-      <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-            <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
-            Devices on this machine
-          </h3>
-        </div>
-        <p className="m-0 text-cell leading-base text-muted">
-          A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
-          that reads it becomes a device you can see and revoke below.
-        </p>
-        {invite === null ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              data-pair-mint=""
-              onClick={onMint}
-              className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Plus size={15} aria-hidden="true" />
-              Add a device
-            </button>
-            <span className="text-meta leading-base text-faint">{PAIRING_EXPIRY_NOTE}</span>
-          </div>
-        ) : null}
-      </section>
+      <SettingGroup label="Devices on this machine">
+        <SettingRow
+          name="Add a device"
+          hint={PAIRING_EXPIRY_NOTE}
+          explanation="A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone that reads it becomes a device you can see and revoke below."
+          control={() =>
+            invite === null ? (
+              <button
+                type="button"
+                disabled={busy}
+                data-pair-mint=""
+                onClick={onMint}
+                className="kt-btn kt-btn--sm disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Plus size={15} aria-hidden="true" />
+                Add a device
+              </button>
+            ) : null
+          }
+        />
+      </SettingGroup>
 
       {invite !== null && countdown !== null ? (
         <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-label="Pairing code" data-pair-invite="">
@@ -601,36 +616,35 @@ export function AddDeviceCard({
         </section>
       ) : null}
 
-      <section className="kt-panel flex min-w-0 flex-col gap-1 p-panel" aria-label="Paired devices">
-        <p className="m-0 text-ui font-semibold text-fg">
-          {devices.length === 0
+      <SettingGroup
+        label={
+          devices.length === 0
             ? 'No devices are paired to this machine'
-            : `${String(devices.length)} device${devices.length === 1 ? '' : 's'} may reach this machine`}
-        </p>
+            : `${String(devices.length)} device${devices.length === 1 ? '' : 's'} may reach this machine`
+        }
+      >
         {devices.length === 0 ? (
-          <p className="m-0 text-meta leading-base text-muted">
+          <li className="px-panel py-2 text-meta leading-base text-muted">
             No paired device can reach this daemon yet. Adding a device is how that changes, and every device you add
             appears here with its own revoke.
-          </p>
+          </li>
         ) : (
-          <ul className="m-0 list-none p-0">
-            {devices.map(device => (
-              <PairedDeviceRow
-                key={device.id}
-                device={device}
-                view={view}
-                busy={busy}
-                clientName={clientName}
-                grantFailure={grantFailure?.deviceId === device.id ? grantFailure.failure : null}
-                initiallyOpen={capabilitiesOpenFor === device.id}
-                note={deviceNote?.(device.id)}
-                onRevoke={() => onRevokeDevice(device.id)}
-                onChangeGrants={patch => onChangeDeviceGrants(device.id, patch)}
-              />
-            ))}
-          </ul>
+          devices.map(device => (
+            <PairedDeviceRow
+              key={device.id}
+              device={device}
+              view={view}
+              busy={busy}
+              clientName={clientName}
+              grantFailure={grantFailure?.deviceId === device.id ? grantFailure.failure : null}
+              initiallyOpen={capabilitiesOpenFor === device.id}
+              note={deviceNote?.(device.id)}
+              onRevoke={() => onRevokeDevice(device.id)}
+              onChangeGrants={patch => onChangeDeviceGrants(device.id, patch)}
+            />
+          ))
         )}
-      </section>
+      </SettingGroup>
 
       {failure === null ? null : (
         <p

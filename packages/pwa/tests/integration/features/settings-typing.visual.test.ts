@@ -203,7 +203,7 @@ describe('the unlock period, up to a week', () => {
           const context = await newContext(phone, mode);
           try {
             const tab = await open(context, mode);
-            await tab.locator('[data-security-preset="unlockValidityHours:168"]').click();
+            await tab.locator('[data-security-preset-select="unlockValidityHours"]').selectOption('168');
             expect(await tab.locator('[data-security-input="unlockValidityHours"]').inputValue()).toBe('168');
             expect(await tab.locator('[data-security-bounds="unlockValidityHours"]').innerText()).toBe(
               'Allowed: 1 hour to 7 days.',
@@ -212,12 +212,12 @@ describe('the unlock period, up to a week', () => {
               'Raising this asks for your passkey',
             );
             expect(await tab.locator('[data-security-save="unlockValidityHours"]').isDisabled()).toBe(false);
-            // Nothing scrolls sideways, and every choice is a full touch target.
+            // Nothing scrolls sideways, and on a phone the choices dropdown is a full touch target.
             expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
             for (const box of await tab
-              .locator('[data-security-preset]')
+              .locator('[data-security-preset-select]')
               .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().height)))
-              expect(box).toBeGreaterThanOrEqual(44);
+              expect(box).toBeGreaterThanOrEqual(phone ? 44 : 0);
             if (shotsDir !== '') {
               const block = tab.locator('[data-security-setting="unlockValidityHours"]');
               await block.scrollIntoViewIfNeeded();

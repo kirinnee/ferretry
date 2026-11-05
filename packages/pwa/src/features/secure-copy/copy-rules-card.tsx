@@ -253,10 +253,10 @@ function AddRuleForm({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className="kt-btn min-h-[44px]" data-variant="primary" disabled={busy}>
+        <button type="submit" className="kt-btn kt-btn--sm" data-variant="primary" disabled={busy}>
           <Plus size={14} aria-hidden="true" /> {busy ? 'Saving…' : 'Approve this route'}
         </button>
-        <button type="button" className="kt-btn min-h-[44px]" onClick={onClose}>
+        <button type="button" className="kt-btn kt-btn--sm" onClick={onClose}>
           Cancel
         </button>
       </div>
@@ -278,10 +278,7 @@ function RuleRow({
   readonly onRemove: CopyRulesCardProps['onRemove'];
 }) {
   return (
-    <li
-      className="flex flex-wrap items-center gap-2 rounded-control border border-border bg-surface-2 p-3"
-      data-copy-rule={rule.id}
-    >
+    <li className="flex min-h-[var(--row-min-h)] flex-wrap items-center gap-2 px-panel py-2" data-copy-rule={rule.id}>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="m-0">
           <span className="min-w-0 break-words text-ui text-fg" data-copy-route="">
@@ -315,7 +312,7 @@ function RuleRow({
       </div>
       <button
         type="button"
-        className="kt-btn min-h-[44px]"
+        className="kt-btn kt-btn--sm"
         disabled={busy}
         aria-label={`Remove the rule ${fromWords(rule.from)} into ${toWords(rule.to)}`}
         onClick={() => void onRemove(rule.id)}
@@ -339,10 +336,7 @@ function WaitingRule({
   readonly onDeny: NonNullable<CopyRulesCardProps['onDenyWaiting']>;
 }) {
   return (
-    <li
-      className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
-      data-copy-rule-waiting={staged.stage}
-    >
+    <li className="flex flex-col gap-2 px-panel py-2" data-copy-rule-waiting={staged.stage}>
       <p className="m-0 text-ui text-fg">{staged.does}</p>
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta">
         {staged.rows.map((row, index) => (
@@ -364,7 +358,7 @@ function WaitingRule({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="kt-btn min-h-[44px]"
+          className="kt-btn kt-btn--sm"
           disabled={busy}
           data-copy-rule-waiting-approve=""
           onClick={() => void onApprove(staged)}
@@ -373,7 +367,7 @@ function WaitingRule({
         </button>
         <button
           type="button"
-          className="kt-btn min-h-[44px]"
+          className="kt-btn kt-btn--sm"
           disabled={busy}
           data-copy-rule-waiting-deny=""
           onClick={() => void onDeny(staged)}
@@ -397,10 +391,7 @@ function ProfileTargetsSetting({
 }) {
   const id = useId();
   return (
-    <div
-      className="flex items-start gap-3 rounded-control border border-border bg-surface-2 p-3"
-      data-copy-profile-setting=""
-    >
+    <div className="kt-groupcard flex items-start gap-3 px-panel py-2" data-copy-profile-setting="">
       <input
         id={id}
         type="checkbox"
@@ -456,7 +447,7 @@ export function CopyRulesCard({
           <h3 id="copy-rules-waiting-heading" className="m-0 text-ui font-semibold text-fg">
             Waiting for your passkey
           </h3>
-          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paste rules waiting for your passkey">
+          <ul className="kt-groupcard m-0 list-none p-0" aria-label="Paste rules waiting for your passkey">
             {waiting.map(staged => (
               <WaitingRule
                 key={staged.stage}
@@ -474,7 +465,7 @@ export function CopyRulesCard({
           No paste rules: every paste asks you.
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paste rules">
+        <ul className="kt-groupcard m-0 list-none p-0" aria-label="Paste rules">
           {rules.map(rule => (
             <RuleRow
               key={rule.id}
@@ -507,7 +498,7 @@ export function CopyRulesCard({
         <div>
           <button
             type="button"
-            className="kt-btn min-h-[44px]"
+            className="kt-btn kt-btn--sm"
             data-copy-rule-add-open=""
             onClick={() => setAdding(true)}
           >

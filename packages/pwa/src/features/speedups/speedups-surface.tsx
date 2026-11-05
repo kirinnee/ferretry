@@ -29,6 +29,7 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/store.tsx';
 import { putSecret } from '../secrets/secrets-api.ts';
+import { SettingGroup, SettingRow } from '../settings/setting-row.tsx';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
 
 export type SpeedupClientFactory = (connection: DaemonConnection) => Promise<SpeedupClient>;
@@ -87,7 +88,6 @@ function StatusChip({ status, vaultReadable }: { readonly status: SpeedupStatus;
 
 export function SpeedupCard({ status, vaultReadable, busy, locked = false, error, onSave, onTest }: SpeedupCardProps) {
   const fieldId = useId();
-  const headingId = useId();
   const [value, setValue] = useState('');
   const [replacing, setReplacing] = useState(false);
   const problem = keyDraftProblem(value);
@@ -106,121 +106,128 @@ export function SpeedupCard({ status, vaultReadable, busy, locked = false, error
   };
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby={headingId}
-      data-speedup={status.provider}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
-          {status.label}
-        </h3>
-        <StatusChip status={status} vaultReadable={vaultReadable} />
-      </div>
-      <p className="m-0 text-cell leading-base text-fg">{status.purpose}</p>
-      <p className="m-0 text-meta leading-base text-muted">{status.costNote}</p>
-      <p className="m-0 text-meta leading-base text-muted">{status.privacyNote}</p>
-      <p className="m-0 flex min-w-0 flex-wrap items-center gap-1 text-meta leading-base text-muted">
-        <span>Get a key:</span>
-        <a
-          href={status.keyUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="inline-flex min-w-0 items-center gap-1 break-all text-accent underline"
-        >
-          {status.keyUrl}
-          <ExternalLink size={12} aria-hidden="true" className="shrink-0" />
-        </a>
-      </p>
-
-      {showField ? (
-        <form className="flex min-w-0 flex-col gap-1" onSubmit={submit} aria-label={`Save the ${status.label} key`}>
-          <label className="text-cell font-medium text-fg" htmlFor={fieldId}>
-            {status.label} key <span className="mono text-meta font-normal text-faint">({status.secretName})</span>
-          </label>
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-            <input
-              id={fieldId}
-              // `password` so it is not read over a shoulder; `new-password` so no password manager
-              // keeps a copy of a credential this browser only relays.
-              type="password"
-              autoComplete="new-password"
-              spellCheck={false}
-              className="kt-input min-h-[44px] w-full min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
-              value={value}
-              placeholder="paste it here — it is never shown again"
-              onChange={event => setValue(event.target.value)}
-            />
-            <button
-              type="submit"
-              className="kt-btn min-h-[44px] justify-center"
-              data-variant="primary"
-              disabled={!ready}
+    <div className="min-w-0" data-speedup={status.provider}>
+      <SettingGroup label={status.label}>
+        <SettingRow
+          name="Key"
+          hint={status.purpose}
+          explanation={
+            <div className="flex flex-col gap-1">
+              <p className="m-0">{status.costNote}</p>
+              <p className="m-0">{status.privacyNote}</p>
+            </div>
+          }
+          control={() => (
+            <>
+              <StatusChip status={status} vaultReadable={vaultReadable} />
+              {!showField && (
+                <button
+                  type="button"
+                  className="kt-btn kt-btn--sm"
+                  disabled={!idle}
+                  onClick={() => setReplacing(true)}
+                  aria-label={`Replace the ${status.label} key`}
+                >
+                  <KeyRound size={14} aria-hidden="true" /> Replace key
+                </button>
+              )}
+            </>
+          )}
+        />
+        <SettingRow
+          name="Get a key"
+          wide
+          control={() => (
+            <a
+              href={status.keyUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex min-w-0 items-center gap-1 break-all text-meta text-accent underline"
             >
-              <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}
-            </button>
-            {status.set && (
-              <button
-                type="button"
-                className="kt-btn min-h-[44px] justify-center"
-                onClick={() => {
-                  setValue('');
-                  setReplacing(false);
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-          {problem !== undefined && <p className="m-0 text-meta text-err">{problem}</p>}
-        </form>
-      ) : (
-        <div>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            disabled={!idle}
-            onClick={() => setReplacing(true)}
-            aria-label={`Replace the ${status.label} key`}
-          >
-            <KeyRound size={14} aria-hidden="true" /> Replace key
-          </button>
-        </div>
-      )}
-
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            disabled={!status.set || !idle}
-            onClick={() => void onTest()}
-            aria-label={`Test the ${status.label} key`}
-          >
-            <FlaskConical size={14} aria-hidden="true" /> {busy === 'testing' ? 'Testing…' : 'Test'}
-          </button>
-          <span className="text-meta leading-base text-faint">{status.testNote}</span>
-        </div>
-        {line !== undefined && (
-          <p
-            className={cn(
-              'm-0 text-meta leading-base',
-              status.lastTest?.ok === true && !status.testStale ? 'text-ok' : 'text-warn',
-            )}
-            role="status"
-            data-speedup-last-test=""
-          >
-            {line}
-          </p>
+              {status.keyUrl}
+              <ExternalLink size={12} aria-hidden="true" className="shrink-0" />
+            </a>
+          )}
+        />
+        {showField && (
+          <li className="min-w-0 px-panel py-2">
+            <form className="flex min-w-0 flex-col gap-1" onSubmit={submit} aria-label={`Save the ${status.label} key`}>
+              <label className="text-meta font-medium text-fg" htmlFor={fieldId}>
+                {status.label} key <span className="mono text-meta font-normal text-faint">({status.secretName})</span>
+              </label>
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                <input
+                  id={fieldId}
+                  // `password` so it is not read over a shoulder; `new-password` so no password manager
+                  // keeps a copy of a credential this browser only relays.
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  className="kt-input min-h-[var(--control-h-sm)] w-full min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
+                  value={value}
+                  placeholder="paste it here — it is never shown again"
+                  onChange={event => setValue(event.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="kt-btn kt-btn--sm justify-center"
+                  data-variant="primary"
+                  disabled={!ready}
+                >
+                  <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}
+                </button>
+                {status.set && (
+                  <button
+                    type="button"
+                    className="kt-btn kt-btn--sm justify-center"
+                    onClick={() => {
+                      setValue('');
+                      setReplacing(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {problem !== undefined && <p className="m-0 text-meta text-err">{problem}</p>}
+            </form>
+          </li>
         )}
-      </div>
-
-      {error !== null && (
-        <p role="alert" className="m-0 text-ui text-err">
-          {error}
-        </p>
-      )}
-    </section>
+        <SettingRow
+          name="Test"
+          hint={status.testNote}
+          control={() => (
+            <button
+              type="button"
+              className="kt-btn kt-btn--sm"
+              disabled={!status.set || !idle}
+              onClick={() => void onTest()}
+              aria-label={`Test the ${status.label} key`}
+            >
+              <FlaskConical size={14} aria-hidden="true" /> {busy === 'testing' ? 'Testing…' : 'Test'}
+            </button>
+          )}
+        >
+          {line !== undefined && (
+            <p
+              className={cn(
+                'm-0 px-panel pb-2 text-meta leading-base',
+                status.lastTest?.ok === true && !status.testStale ? 'text-ok' : 'text-warn',
+              )}
+              role="status"
+              data-speedup-last-test=""
+            >
+              {line}
+            </p>
+          )}
+        </SettingRow>
+        {error !== null && (
+          <li role="alert" className="px-panel py-2 text-ui text-err">
+            {error}
+          </li>
+        )}
+      </SettingGroup>
+    </div>
   );
 }
 

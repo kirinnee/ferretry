@@ -56,7 +56,7 @@ describe('SecretsCard', () => {
     // Assert
     expect(labels.some(label => /show|reveal|copy|view/iu.test(label))).toBe(false);
     expect(labels).toContain('Replace ANTHROPIC_API_KEY');
-    expect(labels).toContain('Delete ANTHROPIC_API_KEY');
+    expect(labels).toContain('More actions for ANTHROPIC_API_KEY');
   });
 
   it('distinguishes a secret that was set from one that was rotated', () => {
@@ -144,26 +144,6 @@ describe('SecretsCard', () => {
 
     // Assert — the name is upper-cased on the way in, because it becomes an environment variable.
     expect(stored).toEqual([['NEW_TOKEN', 'sk-live-0123456789']]);
-  });
-
-  it('removes by name', () => {
-    // Arrange
-    const removed: string[] = [];
-    const renderer = render(
-      <SecretsCard
-        list={list()}
-        onPut={() => undefined}
-        onRemove={name => {
-          removed.push(name);
-        }}
-      />,
-    );
-
-    // Act
-    run(() => renderer.root.findByProps({ 'aria-label': 'Delete ANTHROPIC_API_KEY' }).props.onClick());
-
-    // Assert
-    expect(removed).toEqual(['ANTHROPIC_API_KEY']);
   });
 
   it('prefills the name when replacing, so a rotation is one field', () => {

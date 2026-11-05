@@ -129,15 +129,14 @@ describe('SpeedupCard', () => {
     const renderer = render(
       <SpeedupCard status={status()} vaultReadable busy={null} error={null} onSave={noop} onTest={noop} />,
     );
-    const rendered = text(renderer.toJSON());
-    for (const copy of [
-      'Cleans up dictated text.',
-      'Well under a cent.',
-      'audio never leaves',
-      'Not set',
-      'GROQ_API_KEY',
-    ])
-      expect(rendered).toContain(copy);
+    for (const copy of ['Cleans up dictated text.', 'Not set', 'GROQ_API_KEY'])
+      expect(text(renderer.toJSON())).toContain(copy);
+    // Cost and privacy sit behind the (i) until it is opened; they are never dropped.
+    expect(text(renderer.toJSON())).not.toContain('Well under a cent.');
+    run(() =>
+      renderer.root.find(node => node.type === 'button' && node.props['data-setting-info'] === '').props.onClick(),
+    );
+    for (const copy of ['Well under a cent.', 'audio never leaves']) expect(text(renderer.toJSON())).toContain(copy);
     const link = renderer.root.findByType('a');
     expect(link.props.href).toBe('https://console.groq.com/keys');
     expect(link.props.rel).toContain('noopener');

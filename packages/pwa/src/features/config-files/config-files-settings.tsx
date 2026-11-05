@@ -45,6 +45,7 @@ import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { PanelPath } from '../../shell/panel-typography.tsx';
 import { Badge, type BadgeTone, Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import { SettingGroup, SettingRow } from '../settings/setting-row.tsx';
 import {
   type ConfigFilesClient,
   configErrorCode,
@@ -227,26 +228,25 @@ function FileRow({
   const chip = STATE_CHIPS[file.state];
   const absolute = absoluteConfigPath(directory, file.path);
   return (
-    <li
-      className="flex min-w-0 flex-col gap-1 border-t border-border py-2 first:border-t-0 first:pt-0 last:pb-0"
-      data-config-file={file.path}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <PanelPath value={file.path} className="min-w-0 text-ui font-semibold text-fg" />
-        <Badge tone={chip.tone} data-config-file-state={file.state}>
-          {chip.label}
-        </Badge>
-      </div>
-      <div className="flex min-w-0 items-center gap-1">
-        <PanelPath value={absolute} className="min-w-0 text-meta text-muted" label="Full path" />
-        <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
-      </div>
-      <div>
-        <Button type="button" size="sm" data-config-edit={file.path} onClick={onEdit}>
-          Edit as YAML
-        </Button>
-      </div>
-    </li>
+    <SettingRow
+      name={file.path}
+      title={absolute}
+      wide
+      dataAttributes={{ 'data-config-file': file.path }}
+      // On a desktop the full path is the name's tooltip; on a phone it sits under the name.
+      hint={<PanelPath value={absolute} className="min-w-0 text-meta text-muted md:sr-only" label="Full path" />}
+      control={() => (
+        <span className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1">
+          <Badge tone={chip.tone} data-config-file-state={file.state}>
+            {chip.label}
+          </Badge>
+          <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
+          <Button type="button" size="sm" data-config-edit={file.path} onClick={onEdit}>
+            Edit as YAML
+          </Button>
+        </span>
+      )}
+    />
   );
 }
 
@@ -323,9 +323,8 @@ export function ConfigFilesPanel({
           </p>
         ) : (
           groups.map(group => (
-            <div key={group.kind} className="flex min-w-0 flex-col gap-1" data-config-group={group.kind}>
-              <h4 className="m-0 text-ui font-semibold text-fg">{CONFIG_KIND_WORDS[group.kind]}</h4>
-              <ul className="m-0 list-none p-0">
+            <div key={group.kind} className="min-w-0" data-config-group={group.kind}>
+              <SettingGroup label={CONFIG_KIND_WORDS[group.kind]}>
                 {group.files.map(file => (
                   <FileRow
                     key={file.path}
@@ -335,7 +334,7 @@ export function ConfigFilesPanel({
                     onEdit={() => onEdit(file.path)}
                   />
                 ))}
-              </ul>
+              </SettingGroup>
             </div>
           ))
         )}

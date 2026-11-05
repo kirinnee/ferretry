@@ -58,6 +58,8 @@ describe('Settings › Pack mode', () => {
     expect(root.querySelector('[data-pack-outcome]')?.getAttribute('data-pack-outcome')).toBe('pending');
 
     expect(textOf(must(root.querySelector('[data-pack-jev-cap]'), 'cap'))).toBe('Daily cap: $0.25 (default $0.25)');
+    expect(textOf(root)).not.toContain('Jev spends money on every pick');
+    await click(must(root.querySelector('[aria-label="More about Jev decides"]'), 'the (i)'));
     expect(textOf(root)).toContain('Jev spends money on every pick');
     const jev = must([...root.querySelectorAll<HTMLInputElement>('input[name="pack-decision"]')][1], 'jev');
     await click(jev);
