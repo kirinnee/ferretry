@@ -1,3 +1,10 @@
+## [4.282.0](https://github.com/kirinnee/ferretry/compare/v4.281.0...v4.282.0) (2026-11-05)
+
+### Features
+
+* **clone:** merge repeat-copy settings key by key ([#1482](https://github.com/kirinnee/ferretry/issues/1482)) ([9d01d27](https://github.com/kirinnee/ferretry/commit/9d01d27ce296099d79cfecff06e5776b0a6b6ce0))
+* **fleet:** offer a newer API key from the source, replacing only what is named ([#1476](https://github.com/kirinnee/ferretry/issues/1476)) ([7d58a8f](https://github.com/kirinnee/ferretry/commit/7d58a8f461649b9bb775fe2541785c98d7ab027b))
+
 ## [4.281.0](https://github.com/kirinnee/ferretry/compare/v4.280.0...v4.281.0) (2026-11-05)
 
 ### Features
