@@ -8,6 +8,12 @@
  *
  * The worker is started on first use, not at page load; `preload()` starts loading the model the
  * moment the microphone opens, so the load overlaps with the person speaking.
+ *
+ * THREADS (`speed-plan.ts`). `options.threads()` is how many the page wants the runtime to use; it is a
+ * request. If the worker answers `threads-failed` the engine tells the page (`onThreadsFailed`, which
+ * remembers it for this device), starts a FRESH worker on one thread and repeats everything still
+ * waiting — the person sees a slower take, never an error. Only a threaded request keeps a copy of its
+ * audio for that repeat; the usual single-thread path copies nothing.
  */
 
 import type { TimedTranscript, TimedWord } from './near-live.ts';
@@ -34,6 +40,23 @@ export class ParakeetEngineError extends Error {
 interface Pending {
   resolve(heard: TimedTranscript): void;
   reject(error: ParakeetEngineError): void;
+}
+
+/** What the page decides about speed; every part optional so a caller that cares about none passes none. */
+export interface ParakeetEngineSpeed {
+  /** Threads to ask the runtime for. 1 (the default) means no threads. */
+  threads?(): number;
+  /** Several threads did not work; the engine is now on one. `reason` is the runtime's own sentence, for a log line. */
+  onThreadsFailed?(reason: string): void;
+}
+
+/** The `threads` field of a request: present only when more than one is asked for. */
+const threadsField = (threads: number): { readonly threads?: number } => (threads > 1 ? { threads } : {});
+
+/** A threaded request's audio, kept until it is answered, in case it must run again on one thread. */
+interface Replay {
+  readonly samples: Float32Array;
+  readonly timed: boolean;
 }
 
 /** Word times from the worker, kept only where they are what they claim to be. */
@@ -63,17 +86,33 @@ export class ParakeetEngine {
   /** When the model began loading in the current worker, until the worker says it is ready. */
   #loadStartedAt: number | null = null;
   #loadMs: number | null = null;
+  readonly #speed: ParakeetEngineSpeed;
+  readonly #replay = new Map<number, Replay>();
+  /** Set once several threads failed: this engine asks for one from then on. */
+  #oneThread = false;
 
-  constructor(spawn: () => ParakeetWorkerLike, now: () => number = () => globalThis.performance.now()) {
+  constructor(
+    spawn: () => ParakeetWorkerLike,
+    now: () => number = () => globalThis.performance.now(),
+    speed: ParakeetEngineSpeed = {},
+  ) {
     this.#spawn = spawn;
     this.#now = now;
+    this.#speed = speed;
+  }
+
+  /** The thread count to ask for now. */
+  #threads(): number {
+    if (this.#oneThread) return 1;
+    const asked = this.#speed.threads?.() ?? 1;
+    return Number.isSafeInteger(asked) && asked > 1 ? asked : 1;
   }
 
   /** Start loading the model now, so the first utterance does not wait for it. */
   preload(): void {
     const worker = this.#ensure();
     this.#loadStartedAt ??= this.#now();
-    worker.postMessage({ type: 'load' });
+    worker.postMessage({ type: 'load', ...threadsField(this.#threads()) });
   }
 
   /**
@@ -105,6 +144,7 @@ export class ParakeetEngine {
       const onAbort = (): void => {
         // ONNX cannot interrupt a decode in flight; the answer is simply not waited for.
         this.#pending.delete(id);
+        this.#replay.delete(id);
         reject(new ParakeetEngineError('cancelled', 'Transcription was cancelled.'));
       };
       if (signal?.aborted) {
@@ -122,9 +162,12 @@ export class ParakeetEngine {
           reject(error);
         },
       });
-      worker.postMessage({ type: 'transcribe', id, samples, ...(timed ? { timed: true as const } : {}) }, [
-        samples.buffer,
-      ]);
+      const threads = this.#threads();
+      if (threads > 1) this.#replay.set(id, { samples: samples.slice(), timed });
+      worker.postMessage(
+        { type: 'transcribe', id, samples, ...threadsField(threads), ...(timed ? { timed: true as const } : {}) },
+        [samples.buffer],
+      );
     });
   }
 
@@ -134,6 +177,7 @@ export class ParakeetEngine {
     this.#worker = null;
     this.#loadStartedAt = null;
     this.#loadMs = null;
+    this.#replay.clear();
     worker?.terminate();
     this.#failAll(new ParakeetEngineError('cancelled', 'The speech model was unloaded.'));
   }
@@ -171,16 +215,42 @@ export class ParakeetEngine {
     if (data.type === 'result') {
       const pending = this.#pending.get(data.id);
       this.#pending.delete(data.id);
+      this.#replay.delete(data.id);
       pending?.resolve({ text: data.text, words: timedWords(data.words) });
+      return;
+    }
+    if (data.code === 'threads-failed') {
+      this.#retryOnOneThread(data.message);
       return;
     }
     if (data.id === null) return;
     const pending = this.#pending.get(data.id);
     this.#pending.delete(data.id);
+    this.#replay.delete(data.id);
     pending?.reject(new ParakeetEngineError(data.code, data.message));
   }
 
+  /** Threads did not work: tell the page, start a fresh worker on one thread, and repeat what is waiting. */
+  #retryOnOneThread(reason: string): void {
+    if (this.#oneThread) return;
+    this.#oneThread = true;
+    this.#speed.onThreadsFailed?.(reason);
+    const stale = this.#worker;
+    this.#worker = null;
+    stale?.terminate();
+    const worker = this.#ensure();
+    worker.postMessage({ type: 'load' });
+    const jobs = [...this.#replay];
+    this.#replay.clear();
+    for (const [id, job] of jobs)
+      worker.postMessage(
+        { type: 'transcribe', id, samples: job.samples, ...(job.timed ? { timed: true as const } : {}) },
+        [job.samples.buffer],
+      );
+  }
+
   #failAll(error: ParakeetEngineError): void {
+    this.#replay.clear();
     const waiting = [...this.#pending.values()];
     this.#pending.clear();
     for (const pending of waiting) pending.reject(error);

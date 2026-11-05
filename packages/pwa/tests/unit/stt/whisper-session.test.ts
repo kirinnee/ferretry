@@ -427,3 +427,54 @@ describe('WhisperRecognitionSession', () => {
     should(w.recording.cancels).equal(0);
   });
 });
+
+describe('WhisperRecognitionSession — early finish', () => {
+  it('is only offered while the microphone is open', async () => {
+    const w = world();
+    w.session.start();
+    should(w.session.beginFinish()).equal(null);
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.session.beginFinish()).not.equal(null);
+    await w.session.finish();
+    should(w.session.beginFinish()).equal(null);
+  });
+
+  it('decodes while recording carries on, and finish reuses that answer when only quiet followed', async () => {
+    const w = await recordingWorld();
+    const take = w.session.beginFinish();
+    should(await take?.text).equal('hello world');
+    should(w.recording.stops).equal(0);
+    w.recording.samples = new Float32Array(40_000);
+    should(await w.session.finish()).equal('hello world');
+    should(w.transcribed.length).equal(1);
+    should(w.session.timings()?.model).equal(`${VERSION} · WebAssembly`);
+  });
+
+  it('decodes the whole take afresh when speech followed the early finish', async () => {
+    const w = await recordingWorld();
+    await w.session.beginFinish()?.text;
+    w.recording.samples = new Float32Array(40_000).fill(0.2);
+    await w.session.finish();
+    should(w.transcribed.length).equal(2);
+    should(w.transcribed[1]?.samples.length).equal(40_000);
+  });
+
+  it('discarding it leaves the recording open', async () => {
+    const w = await recordingWorld();
+    const take = w.session.beginFinish();
+    await tick();
+    take?.discard();
+    should(w.recording.stops).equal(0);
+    w.recording.samples = new Float32Array(40_000);
+    await w.session.finish();
+    should(w.transcribed.length).equal(2);
+  });
+
+  it('never sends a snapshot too short to hold speech to Whisper, which would invent words', async () => {
+    const w = await recordingWorld();
+    w.recording.peek = async () => new Float32Array(100);
+    should(await w.session.beginFinish()?.text).equal('');
+    should(w.transcribed.length).equal(0);
+  });
+});

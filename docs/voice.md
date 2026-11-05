@@ -91,8 +91,9 @@ lands on, which Hugging Face may change.
   memory whole.
 - **WebAssembly, single-threaded.** ONNX Runtime's WebGPU provider cannot run this int8 encoder (the
   fp32 one is a 2.5 GB download), and the app sends no cross-origin-isolation headers, so there is no
-  `SharedArrayBuffer` for threads. Expect transcription to take a few seconds on a laptop and longer on a
-  phone. The model loads when the microphone opens, so loading overlaps with speaking.
+  `SharedArrayBuffer` for threads. Measured on a fast desktop: about 1.8 s for 5 s of speech; expect longer
+  on a phone. The model loads when the microphone opens, so loading overlaps with speaking. Why not threads,
+  what they would give, and what turning them on would cost: [Speed](#speed-which-path-each-engine-runs-on).
 - The recording is `MediaRecorder` audio decoded and resampled to 16 kHz mono by `decodeAudioData`
   (`lib/stt/audio-capture.ts`) — no AudioWorklet, so no second script for the page policy to allow.
 
@@ -220,7 +221,7 @@ there are no live words.
   revision); its `fetch` answers `404` for anything not pinned; its browser and WASM caches are off; and
   ONNX Runtime gets its binary as bytes with `wasmPaths` cleared, so it uses the glue embedded in the
   bundle and never jsDelivr.
-- **WebAssembly only, no WebGPU.** The WebGPU-capable build's binary
+- **WebAssembly only, no WebGPU** (more in [Speed](#speed-which-path-each-engine-runs-on)). The WebGPU-capable build's binary
   (`ort-wasm-simd-threaded.asyncify.wasm`, 27,084,114 bytes) is over Cloudflare Pages' 25 MiB per-file
   limit: while the app shipped it, every Pages deploy failed (2026-10-23 to 2026-10-24). So the worker's
   `gpu` port answers `false` and the core builds every model on WebAssembly, under the page's CSP and
@@ -281,6 +282,165 @@ The browser's own `SpeechRecognition` (`lib/stt/browser-recognition.ts`). Nothin
 words while you speak, and on Chrome, Android and Safari the audio goes to the vendor's speech service,
 so it needs a connection and the vendor's privacy policy applies. Firefox does not offer it, and an
 installed iPhone/iPad Home Screen app cannot use it.
+
+## Speed: which path each engine runs on
+
+**Short version.** On-device speech runs on single-thread WebAssembly today, and the app picks that for
+every device. Two faster paths exist in principle — WebGPU and multi-thread WebAssembly — and this section
+says what each needs, what was measured, and why neither is switched on. The code that chooses between them
+automatically, remembers a failure, and shows the result in Settings **is** shipped; it simply has nothing
+faster to choose until the owner decides on the one trade-off below.
+
+### What is true today (read from the code, 2026-11-05)
+
+| Question                                | Answer                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What does ONNX Runtime Web 1.24.1 ship? | Two builds. The default entry is **WebGPU + WebAssembly** (`ort-wasm-simd-threaded.asyncify.wasm`, 27,084,114 bytes). `onnxruntime-web/wasm` is **WebAssembly only** (`ort-wasm-simd-threaded.wasm`, ~12 MB). The wasm file is threads-capable; threads need `SharedArrayBuffer`.                                                  |
+| Which one does this app ship?           | **WebAssembly only.** `vite.config.ts` aliases the WebGPU entry away because its binary is over Cloudflare Pages' 25 MiB per-file limit (every Pages deploy failed 2026-10-23 → 10-24). `scripts/ci/build-pwa.sh` fails any build that emits a file over 24 MiB.                                                                   |
+| What do the workers ask for?            | Parakeet 0.6B: `executionProviders: ['wasm']`; Whisper (transformers.js): `device: 'wasm'`; Parakeet 110M and the other sherpa models: sherpa-onnx's prebuilt `asr.wasm` (no pthreads, no WebGPU); Vosk: Kaldi WebAssembly. Thread count is now the page's request (below).                                                        |
+| Is the PWA cross-origin isolated?       | **No.** `public/_headers` has no `Cross-Origin-Opener-Policy` or `Cross-Origin-Embedder-Policy`, so `crossOriginIsolated` is `false` and `SharedArrayBuffer` does not exist.                                                                                                                                                       |
+| Can the host set those headers?         | **Yes.** The hosted app is on **Cloudflare Pages**, which applies `public/_headers` (GitHub Pages could not). The signed-release service worker re-applies the same header rules to what it serves. The daemon does not serve the PWA, so there is no second place.                                                                |
+| Does WebGPU help the engines we have?   | **Not the pinned files.** The int8 Parakeet encoder cannot run on ONNX Runtime's WebGPU provider (parakeet.js swaps to a 2.5 GB fp32 encoder to use it); the q8 Whisper graphs are quantized the same way and are expected to hit the same limit (not measured — there is no GPU here); sherpa-onnx and Vosk have no WebGPU build. |
+
+So **WebGPU needs three things at once** — a runtime binary that fits the host, fp32/q4 model files (a
+bigger download) and a device with an adapter — and none of the three exists in this build. It is wired
+(`WhisperWorkerCore` is WebGPU-first and `speed-plan.ts` knows the path) and inert.
+
+### Measured, on this machine
+
+Box: Linux x64, **32 logical cores, 32 GB**, headless Chrome 154, **no GPU adapter** (`navigator.gpu`
+answers none, so WebGPU was **not** measured at all). Clip: one fixed **5.000 s synthetic voice** (eSpeak
+NG, no real person; `speed-bench/clip-5s.wav`). Each row is a fresh worker (cold load, which includes
+re-hashing the installed bytes), one warm-up decode that is dropped, then the median of three. The page is
+served with the app's real `_headers` (CSP, Trusted Types); the threaded rows add COOP `same-origin` + COEP
+`require-corp` and nothing else. "Last audio → text" is what is left to wait after the last audio arrives;
+RTF is decode time over audio time (below 1 is faster than speaking).
+
+| Engine               | Path                      | Load   | Last audio → text                    | RTF  | After early finish (1.5 s pause) |
+| -------------------- | ------------------------- | ------ | ------------------------------------ | ---- | -------------------------------- |
+| Parakeet 0.6B        | single thread (**today**) | 11.9 s | **1.76 s**                           | 0.35 | **0.22 s**                       |
+| Parakeet 0.6B        | 4 threads (isolated)      | 10.4 s | 0.65 s                               | 0.13 | 0 s                              |
+| Parakeet 110M        | single thread (**today**) | 3.3 s  | **0.42 s**                           | 0.08 | 0 s                              |
+| Whisper base.en (q8) | single thread (**today**) | 2.7 s  | **3.22 s**                           | 0.64 | **1.79 s**                       |
+| Whisper base.en (q8) | 4 threads (isolated)      | 2.4 s  | 1.34 s                               | 0.27 | 0 s                              |
+| Vosk small           | single thread (**today**) | 1.8 s  | **0.05 s** (streams while you speak) | —    | —                                |
+
+- **Threads are worth ~2.5–2.8×** for the two ONNX Runtime engines on this CPU. Parakeet 110M (sherpa) and
+  Vosk cannot use them.
+- **"After early finish"** is the new `beginFinish()` (below): the decode starts when speech stops, so by the
+  time the 1.5 s countdown ends only the remainder is left to wait for. Parakeet 0.6B drops from 1.76 s to
+  0.22 s after the pause is confirmed (0.22–0.40 s over three runs), Whisper from 3.22 s to 1.79 s, with no
+  change to the model, the headers or the audio. Run-to-run noise on this box is about ±5 %.
+- **Not measured, and the numbers must not be assumed for them:** phones (the defaults assume a phone-speed
+  CPU is several times slower — `research-numbers.ts` measured Parakeet 110M at 1.7 s there), any real GPU or
+  WebGPU at all, Safari, Firefox, Windows, macOS, low-memory devices. The harness below measures them in one
+  click.
+
+### Why threads did not simply work: two layers, only one of them header-shaped
+
+1. **Isolation.** Without COOP + COEP the page has no `SharedArrayBuffer`, so ONNX Runtime asks for one
+   thread whatever the page asks.
+2. **Trusted Types.** With isolation on, a threaded run **still fell back to one thread** under the real
+   policy — measured: `Failed to construct 'Worker': This document requires 'TrustedScriptURL' assignment`.
+   `worker-src 'self'` is **not** the problem (ONNX Runtime starts each sub-worker from the speech worker's
+   own `/assets/parakeet-worker-<hash>.js`, which `'self'` allows), and `blob:` is **not** needed (a run
+   with `blob:` added fell back identically). The sub-worker constructor is a script sink, and the page
+   requires a `TrustedScriptURL` at every one. `lib/stt/pthread-workers.ts` fixes exactly that, inside the
+   speech workers: a `Worker` URL that is one of the app's own speech worker scripts on this origin goes
+   through the page's existing `fy-worker` policy; every other URL is handed on unchanged and refused as
+   before. No policy name is added and the CSP is unchanged. A single-thread run never builds a worker, so
+   this changes nothing until threads are asked for.
+
+### What turning isolation on would break
+
+Isolation is two headers on **every** response: `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Read from the code, not all exercised in a browser:
+
+| Thing                                                                                        | What happens under `require-corp`                                                                                                                                                                                                                                                  | Matters?                                                                            |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **`fy-render` `video` and `audio` with `src: https://…`** (`components/fy-render-media.tsx`) | A no-CORS cross-origin media load is blocked unless the host sends `Cross-Origin-Resource-Policy: cross-origin`. Most hosts do not. The `<video>`/`<audio>` tags carry no `crossorigin` attribute.                                                                                 | **Yes** — a documented feature stops working for arbitrary https media.             |
+| **`fy-render` maps** (OpenStreetMap tiles, `fy-render-map-engine.ts`)                        | Tiles are `<img>`s with no `crossorigin`; OSM sends `Access-Control-Allow-Origin: *` but **no** CORP, so they are blocked. Fixable in code (`crossOrigin` on the tile layer) but not done.                                                                                         | **Yes** — maps go blank until fixed.                                                |
+| **The `fy-render` sandbox frames** (`/fy-render-sandbox`, `/fy-render-html`, opaque origin)  | Under COEP every framed document must itself send COEP. `_headers` gives those two paths their own rules (with a `!` line to keep `frame-ancestors`), so each would need COEP added, then `fy-render-pages.e2e` and the Safari harness re-run.                                     | **Yes** — Mermaid, Lottie and interactive `html` blocks. Doable, must be re-proved. |
+| **Cross-origin popups and OAuth**                                                            | COOP `same-origin` severs `window.opener` for any cross-origin popup. The app's only `window.open` is `noopener` (`composer.tsx`) and the MCP sign-in is a navigation plus a same-origin `BroadcastChannel`, which COOP does not affect.                                           | Low — but a provider that needs `window.opener` would break.                        |
+| **Safari / iPhone**                                                                          | Safari supports `require-corp` isolation but, as far as this was checked, **not** `credentialless`, the milder COEP that would spare the media and map rows (Chrome and Firefox have it). The phone is the device that most needs speed and the one that cannot take the shortcut. | **Yes** for the design.                                                             |
+| **Third-party iframes** (in-app browser)                                                     | A framed site must send COEP/CORP. The page's CSP has no `frame-src`, so `default-src 'self'` already refuses third-party frames; COEP is a second reason, not a new loss.                                                                                                         | No (already refused).                                                               |
+| **Service worker**                                                                           | It re-applies `_headers` rules, so a header change reaches what it serves — but a copy cached before the change keeps the old headers until the release is re-verified, so the rollout needs a release cycle.                                                                      | Care, not a blocker.                                                                |
+| **WebSocket, WebRTC, `fetch` to a daemon or relay at any https origin**                      | Unaffected: they are CORS or non-resource connections, not no-CORS subresource loads. The relay carriers and the hosted-PWA-to-your-daemon path keep working.                                                                                                                      | No.                                                                                 |
+| **Fonts, scripts, styles, images from the app itself**                                       | Same origin: always allowed.                                                                                                                                                                                                                                                       | No.                                                                                 |
+
+**`coi-serviceworker`** (the trick that adds the headers from a service worker on hosts that cannot set
+them) is **not** the answer here, for three reasons: this deployment CAN set headers; the app already runs
+one signed service worker per scope and a second would collide with it, and with the signed-release check;
+and it needs a reload on first visit. On a host that cannot set headers (a self-hosted GitHub Pages copy)
+the page stays non-isolated and runs single-thread, which is correct and silent.
+
+### Decision for the owner (not made in this change)
+
+**Shipped: single-thread everywhere, and everything needed to switch.** Turning isolation on gets
+Parakeet 0.6B from 1.76 s to 0.65 s and Whisper from 3.22 s to 1.34 s on a fast desktop, but it breaks
+https media, blanks maps and needs the sandbox frames re-proved, and the phone cannot use the milder variant.
+The early finish already hides most of the wait (Parakeet 1.76 s → 0.22 s) without any of that.
+
+The work to enable it, if wanted: add the two headers to `/*` in `public/_headers`; add COEP to the two
+sandbox-frame rules; give the map tile layer `crossOrigin: ''`; decide what `fy-render` does with a video or
+audio host that sends no CORP (proxy it, or show a link); re-run `fy-render-pages.e2e` and the Safari
+harness; then watch that a new release reaches installed copies. Until then the chooser reads
+`crossOriginIsolated`, sees `false`, and keeps one thread.
+
+### The automatic choice, and the line in Settings
+
+`lib/stt/speed-plan.ts` is a pure, total function: `chooseSpeedPlan(model, signals, memory, now)`. A path is
+a candidate only when **the build ships it**, **the model's files can run on it** and **the device offers
+it** (`navigator.gpu` adapter, `crossOriginIsolated`, `hardwareConcurrency`, `deviceMemory`); the fastest
+candidate wins. Threads are half the cores, between 2 and 4, and not at all at or below 4 GB. `wasm-single`
+is always a candidate, so there is no input for which nothing is chosen.
+
+- **A failure is remembered, never shown.** If threads do not start or a threaded decode fails, the worker
+  answers `threads-failed`, the engine starts a **fresh** worker on one thread and repeats the audio still
+  waiting (ONNX Runtime initialises once per worker, so it cannot retry in place), and the device records
+  the failure. The person sees a slightly slower take.
+- **Remembered per device** in `fy-stt-speed-v1` (`lib/stt/speed-memory.ts`): zod-parsed, versioned, at
+  most 24 entries, one per model and path, forgotten after a week so a fixed driver or a new header is tried
+  again. It holds a model id, a path and a time — no words.
+- **Settings › Voice** shows one read-only line under the engine list: **"Using: single-thread
+  WebAssembly"**, with a sentence of why (for example "More threads need a browser feature this page does
+  not turn on."). There is nothing to press. There is no manual override: with one path available it would
+  be a switch that does nothing.
+
+### Starting to transcribe during the send countdown
+
+Live voice sends a message 1.5 s after the last word, with a visible countdown. `beginFinish()`
+(`lib/stt/tentative-take.ts`, an optional method on the session contract) lets the caller start decoding
+**while the pause is still being confirmed**:
+
+```ts
+const take = session.beginFinish(); // null when this engine cannot, or the mic is not open
+// speech resumed:  take?.discard()          // instant; the recording is still open
+// the pause held:  await session.finish()   // reuses the decode when only quiet followed it
+```
+
+`finish()` reuses the early answer only when the audio since the snapshot is **quiet** (RMS under 0.01);
+otherwise it decodes the whole take afresh, so the words are always those of the audio that was said. It
+never stops the microphone and never sends anything. Offered by the whole-take engines (Parakeet 0.6B and
+110M, the other sherpa batch models, Whisper); not by Vosk (already ~0.05 s), Browser voice, or Parakeet
+with near-live words on. The Live loop calls it; nothing in dictation does yet.
+
+### Measuring your own device
+
+```sh
+# one click, any device — the dev server serves a page that prints a JSON result (timings only, no words):
+cd packages/pwa && bunx vite              # then open http://localhost:5173/speed-bench/
+FY_DEV_ISOLATED=1 bunx vite               # the same, with COOP/COEP, to measure threads (dev server only)
+adb reverse tcp:5173 tcp:5173             # a phone then reaches it as localhost, which is a secure context
+
+# headless, under the app's real policy (downloads the models; manual, never in CI):
+bunx vite build && bun harness/stt-speed-bench.ts [--isolated] [--blob-workers] [--engines parakeet,whisper-base-en]
+```
+
+The result is parsed against a strict schema before it is shown: it can hold timings, a device class
+(browser family, cores, memory, isolation, a WebGPU adapter's vendor/architecture) and a failure **code** —
+never a transcript, an address or an error message. `FY_DEV_ISOLATED` is read by the dev server only; the
+deployed site's headers are `public/_headers`, which this change does not touch.
 
 ## Clean-up: prompts you can edit
 

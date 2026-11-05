@@ -247,3 +247,88 @@ describe('WhisperWorkerCore', () => {
     should(replies).eql([{ type: 'ready', backend: 'wasm' }]);
   });
 });
+
+describe('WhisperWorkerCore — threads', () => {
+  it('accepts a thread count only above one, clamped', () => {
+    should(parseWhisperRequest({ type: 'load', model: TINY, threads: 4 })).eql({
+      type: 'load',
+      model: TINY,
+      threads: 4,
+    });
+    should(parseWhisperRequest({ type: 'load', model: TINY, threads: 99 })).eql({
+      type: 'load',
+      model: TINY,
+      threads: 8,
+    });
+    for (const bad of [1, 0, -2, 2.5, '4', null])
+      should(parseWhisperRequest({ type: 'load', model: TINY, threads: bad })).eql({ type: 'load', model: TINY });
+  });
+
+  const build = (decodeFails: boolean, loadFails = false) => {
+    const replies: WhisperWorkerReply[] = [];
+    const loads: string[] = [];
+    const disposed: string[] = [];
+    const core = new WhisperWorkerCore<Bytes>({
+      read: async model => ({ model }),
+      gpu: async () => false,
+      runtime: {
+        load: async (model, _bytes, backend, threads): Promise<WhisperLoadedModel> => {
+          loads.push(`${backend}x${threads}`);
+          if (loadFails && threads > 1) throw new Error('worker blocked');
+          return {
+            transcribe: async () => {
+              if (decodeFails && threads > 1) throw new Error('out of memory');
+              return `heard by ${model}`;
+            },
+            dispose: async () => {
+              disposed.push(`${backend}x${threads}`);
+            },
+          };
+        },
+      },
+      post: reply => replies.push(reply),
+    });
+    return { core, replies, loads, disposed };
+  };
+
+  it('hands the requested threads to the WebAssembly build', async () => {
+    const h = build(false);
+    await h.core.handle({ type: 'load', model: TINY, threads: 4 });
+    should(h.loads).eql(['wasmx4']);
+  });
+
+  it('answers threads-failed when a threaded load fails', async () => {
+    const h = build(false, true);
+    await h.core.handle({ type: 'transcribe', id: 1, model: TINY, samples: samples(), threads: 4 });
+    should(h.replies[0]).have.properties({ type: 'failed', id: 1, code: 'threads-failed' });
+  });
+
+  it('answers threads-failed when a threaded decode fails, drops that model, and builds the next on request', async () => {
+    const h = build(true);
+    await h.core.handle({ type: 'transcribe', id: 1, model: TINY, samples: samples(), threads: 4 });
+    should(h.replies[0]).have.properties({ code: 'threads-failed' });
+    should(h.disposed).eql(['wasmx4']);
+    await h.core.handle({ type: 'transcribe', id: 2, model: TINY, samples: samples() });
+    should(h.replies[1]).have.properties({ type: 'result', id: 2 });
+    should(h.loads).eql(['wasmx4', 'wasmx1']);
+  });
+
+  it('a single-thread failure stays an ordinary transcribe-failed', async () => {
+    const replies: WhisperWorkerReply[] = [];
+    const core = new WhisperWorkerCore<Bytes>({
+      read: async model => ({ model }),
+      gpu: async () => false,
+      runtime: {
+        load: async () => ({
+          transcribe: async () => {
+            throw new Error('bad audio');
+          },
+          dispose: async () => undefined,
+        }),
+      },
+      post: reply => replies.push(reply),
+    });
+    await core.handle({ type: 'transcribe', id: 1, model: TINY, samples: samples() });
+    should(replies[0]).have.properties({ code: 'transcribe-failed' });
+  });
+});

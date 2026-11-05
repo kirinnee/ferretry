@@ -72,6 +72,9 @@ const WORKER_SCRIPT = new RegExp(
 const SPEECH_WORKER_SCRIPT =
   /^(?:\/assets\/(?:parakeet|sherpa|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/src\/worker\/(?:parakeet|sherpa|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
 
+/** Whether a URL is one of the app's own SPEECH worker scripts (not the service worker). */
+export const isSpeechWorkerScriptUrl = (url: string): boolean => SPEECH_WORKER_SCRIPT.test(url);
+
 /** Whether a URL is one of the app's own worker scripts: the service worker or the speech worker. */
 export const isWorkerScriptUrl = (url: string): boolean => WORKER_SCRIPT.test(url) || SPEECH_WORKER_SCRIPT.test(url);
 

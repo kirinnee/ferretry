@@ -215,3 +215,58 @@ describe('WhisperEngine', () => {
     should(workers[0]?.terminated).equal(1);
   });
 });
+
+describe('WhisperEngine — threads', () => {
+  const threaded = (threads: number) => {
+    const workers: FakeWorker[] = [];
+    let failed = 0;
+    const engine = new WhisperEngine(
+      MODEL,
+      () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      undefined,
+      { threads: () => threads, onThreadsFailed: () => (failed += 1) },
+    );
+    return { engine, workers, failed: () => failed };
+  };
+
+  it('asks for no threads by default', () => {
+    const { engine, workers } = setup();
+    engine.preload();
+    should(workers[0]?.posts[0]?.message).eql({ type: 'load', model: MODEL });
+  });
+
+  it('puts the requested threads on load and on transcribe', () => {
+    const { engine, workers } = threaded(3);
+    engine.preload();
+    void engine.transcribe(new Float32Array(4));
+    const [load, transcribe] = workers[0]?.posts.map(post => post.message) ?? [];
+    should(load?.type === 'load' && load.threads).equal(3);
+    should(transcribe?.type === 'transcribe' && transcribe.threads).equal(3);
+  });
+
+  it('on threads-failed: tells the page once, replaces the worker, and repeats the waiting audio on one thread', async () => {
+    const { engine, workers, failed } = threaded(3);
+    const outcome = settle(engine.transcribe(new Float32Array([0.5, 0.25])));
+    const first = workers[0] as FakeWorker;
+    const asked = first.posts[0]?.message;
+    first.emit({
+      type: 'failed',
+      id: asked?.type === 'transcribe' ? asked.id : null,
+      code: 'threads-failed',
+      message: 'out of memory',
+    });
+    should(failed()).equal(1);
+    should(first.terminated).equal(1);
+    const second = workers[1] as FakeWorker;
+    const repeat = second.posts.find(post => post.message.type === 'transcribe')?.message;
+    should(repeat?.type === 'transcribe' && [...repeat.samples]).eql([0.5, 0.25]);
+    should(repeat?.type === 'transcribe' && repeat.threads).equal(undefined);
+    second.emit({ type: 'result', id: repeat?.type === 'transcribe' ? repeat.id : -1, text: 'hi', backend: 'wasm' });
+    await tick();
+    should(outcome.value).eql({ text: 'hi', backend: 'wasm' });
+  });
+});
