@@ -21,12 +21,6 @@ import { typeInto } from '../support/dom-form.ts';
 import { fakeRecognitionProvider } from '../support/browser-recognition.ts';
 import { type FakeLive, fakeLive } from '../support/live-ports.ts';
 
-beforeEach(() => {
-  writeMdComposePref('off');
-  unitClock.hold();
-});
-afterEach(() => writeMdComposePref('on'));
-
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'https://daemon-a.example.test',
@@ -62,7 +56,7 @@ interface Sent {
   fail: boolean;
 }
 
-const rig = async (options: { live?: boolean; disabled?: boolean } = {}) => {
+const rig = async (options: { live?: boolean; disabled?: boolean; compact?: boolean } = {}) => {
   const fake = fakeLive();
   // Everything but the send is a fake: the words go through the composer's own send.
   const { send: _send, ...ports } = fake.ports;
@@ -84,6 +78,7 @@ const rig = async (options: { live?: boolean; disabled?: boolean } = {}) => {
       sessionId="live"
       {...(options.live === false ? {} : { liveReply: replySource() })}
       {...(options.disabled === true ? { disabled: true } : {})}
+      {...(options.compact === true ? { compact: true } : {})}
       liveVoiceSeams={{ ports }}
     />,
   );
@@ -101,6 +96,13 @@ const speakTurn = async (fake: FakeLive): Promise<void> => {
 };
 
 describe('Composer Live voice', () => {
+  // Hooks inside the describe: a top-level one would also run for every other file in the same process.
+  beforeEach(() => {
+    writeMdComposePref('off');
+    unitClock.hold();
+  });
+  afterEach(() => writeMdComposePref('on'));
+
   it('offers no Live button without a session to watch, or to a composer that may not send', async () => {
     const noReply = await rig({ live: false });
     expect(liveButton(noReply.composer.container)).toBeNull();
@@ -147,6 +149,21 @@ describe('Composer Live voice', () => {
     });
     await flush();
     expect(sent.messages).toEqual(['Please Fix the bug.']);
+    await composer.unmount();
+  });
+
+  it('takes the preview words out again when the turn came to nothing, leaving what was typed', async () => {
+    const { composer, fake, sent } = await rig();
+    const textarea = textareaOf(composer.container);
+    await typeInto(textarea, 'Please', 'textarea');
+    await interact(() => must(liveButton(composer.container), 'the Live button').click());
+    await flush();
+    fake.outcome.current = { kind: 'empty' };
+    await interact(() => fake.listeners[0]?.onLive('hmm'));
+    await speakTurn(fake);
+    expect(textarea.value).toBe('Please');
+    expect(composer.container.textContent).toContain('Listening');
+    expect(sent.messages).toEqual([]);
     await composer.unmount();
   });
 
@@ -213,6 +230,23 @@ describe('Composer Live voice', () => {
     await interact(() => void document.dispatchEvent(new Event(LIVE_VOICE_TOGGLE_EVENT)));
     await flush();
     expect(fake.takes.length).toBe(1);
+    await composer.unmount();
+  });
+
+  it('puts the Live button in the phone dock beside the mic, and runs from there', async () => {
+    const { composer, fake, sent } = await rig({ compact: true });
+    const dock = must(composer.container.querySelector('[data-composer-dock="start"]'), 'the start dock');
+    const button = must(liveButton(composer.container), 'the Live button');
+    expect(dock.contains(button)).toBe(true);
+    await interact(() => button.click());
+    await flush();
+    await speakTurn(fake);
+    await interact(async () => {
+      fake.advance(1_500);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(sent.messages).toEqual(['Fix the bug.']);
     await composer.unmount();
   });
 

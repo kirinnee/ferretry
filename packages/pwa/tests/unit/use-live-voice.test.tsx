@@ -19,9 +19,6 @@ import type { LiveComposerBridge } from '../../src/lib/voice-chat/live-assembly.
 import { interact, mount } from '../support/dom.ts';
 import { type FakeLive, fakeLive } from '../support/live-ports.ts';
 
-// Time moves only when a test moves it: a refusal's ten seconds must not pass while it is still being read.
-beforeEach(() => unitClock.hold());
-
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'http://127.0.0.1:1', deviceId: 'token-a' });
 
 const bridge = (lastShown: string | null = null): LiveComposerBridge => ({
@@ -72,6 +69,10 @@ const rig = async (fake: FakeLive, patch: Partial<UseLiveVoiceOptions> = {}) => 
 };
 
 describe('useLiveVoice', () => {
+  // Time moves only when a test moves it: a refusal's ten seconds must not pass while it is still read.
+  // (Inside the describe: a top-level hook would also run for every other file in the same process.)
+  beforeEach(() => unitClock.hold());
+
   it('starts from the tap, mirrors the loop into a view, and ends cleanly', async () => {
     const fake = fakeLive();
     const { view, get } = await rig(fake);
@@ -205,6 +206,8 @@ describe('useLiveVoice', () => {
 });
 
 describe('useLiveVoice with the ports of the page itself', () => {
+  beforeEach(() => unitClock.hold());
+
   it('refuses with words when no engine was chosen', async () => {
     let handle: LiveVoiceHandle | null = null;
     const view = await mount(
