@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { PointForm } from '../../../src/features/agenda/agenda-brief.tsx';
 import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
-import { AgendaDetail } from '../../../src/features/agenda/agenda-detail.tsx';
+import { AgendaDetail, agendaHasDetail } from '../../../src/features/agenda/agenda-detail.tsx';
 import type { InboxAction } from '../../../src/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -117,7 +117,7 @@ describe('AgendaCard several questions', () => {
       view.container.querySelector('[data-agenda-send-answers], [data-agenda-pick], [data-agenda-option]'),
     ).toBeNull();
     expect(view.container.querySelector('[data-agenda-composer-hint]')?.textContent).toBe(
-      'Reply with your answers below, numbered.',
+      'Reply with your answers below, numbered. Skip any you like.',
     );
     expect(view.container.querySelector('input[type="text"], textarea')).toBeNull();
     expect(sent).toEqual([]);
@@ -191,5 +191,32 @@ describe('a paste plan on the swipe card', () => {
     );
 
     expect(view.container.querySelector('[data-agenda-plan-form] [data-fake-plan]')).not.toBeNull();
+  });
+});
+
+describe('the brief previews the live document (&F923)', () => {
+  test('the main tab’s own words, then the ferret’s own tabs by name', async () => {
+    const tabbed = agendaItem('A9', {
+      subject: 'Relay plan',
+      whereWeAre: 'Building the relay.',
+      tabs: [
+        { id: 'decisions', name: 'Decisions', body: 'SQLite.' },
+        { id: 'risks', name: 'Risks', body: 'Slip.' },
+      ],
+    } as never);
+    expect(agendaHasDetail(tabbed)).toBe(true);
+    view = await mount(<AgendaDetail item={tabbed} layout="panel" />);
+    expect(view.container.querySelector('[data-agenda-section="where-now"]')?.textContent).toContain(
+      'Building the relay.',
+    );
+    expect(view.container.querySelector('[data-agenda-brief-also]')?.textContent).toBe(
+      'Also in the item: Decisions, Risks',
+    );
+  });
+
+  test('an item with only its own tabs still has something to read', () => {
+    expect(agendaHasDetail(agendaItem('A9', { tabs: [{ id: 'risks', name: 'Risks', body: 'Slip.' }] } as never))).toBe(
+      true,
+    );
   });
 });

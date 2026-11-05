@@ -1,12 +1,14 @@
 import type {
   AgendaConfirms,
-  AgendaGate,
+  AgendaConversationPage,
   AgendaId,
   AgendaItem,
   AgendaKind,
   AgendaResponse,
   AgendaSnapshot,
   AgendaSource,
+  AgendaVersion,
+  AgendaVersionSummary,
   ResolvedAgendaItem,
   TaskRef,
 } from '@ferretry/protocol';
@@ -15,23 +17,28 @@ import {
   clipAtWord,
   formatTaskRef,
   MACHINE_AGENDA_ID,
+  MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
 } from '@ferretry/protocol';
-import { type AgendaHomeResolver, handsOnRaise, handsOnSource, SELF_AGENDA_HOME } from './home.ts';
-import type { MachineAgendaPort } from './machine-agenda.ts';
+import type { CardAskOperation } from './card-asks.ts';
 import {
   isAncestorOf,
   isSubFerret,
   NO_SUB_FERRETS,
+  SUB_FERRET_MAY_ON_AGENDA,
   type SubFerretDirectory,
   subFerretRefusal,
 } from '../sub-ferret/index.ts';
+import { type AgendaHomeResolver, handsOnRaise, handsOnSource, SELF_AGENDA_HOME } from './home.ts';
+import type { MachineAgendaPort } from './machine-agenda.ts';
+import { NO_OWNER_CHAT, type OwnerChat } from './owner-chat.ts';
 import {
   type AgendaActor,
   type AgendaChange,
   type AgendaFailure,
   type AgendaLedger,
   type AgendaMutation,
+  type AgendaNudgeTarget,
   agendaSnapshot,
   agentConfinedTo,
   applyAgendaCommandToSession,
@@ -40,6 +47,13 @@ import {
   emptyAgendaLedger,
   type RaiseAgendaRequest,
 } from './state-machine.ts';
+import {
+  type AgendaSeenStore,
+  type AgendaVersionStore,
+  NO_AGENDA_SEEN,
+  NO_AGENDA_VERSIONS,
+  versionAuthor,
+} from './versions.ts';
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
@@ -62,7 +76,17 @@ export interface AgendaClock {
 /** The adapter must serialize each callback with every other callback for the same session. */
 export interface AgendaLedgerRepository {
   read(sessionId: string): Promise<AgendaLedger | null>;
-  transact(sessionId: string, apply: (current: AgendaLedger | null) => AgendaMutation): Promise<AgendaMutation>;
+  /** Durable original changes, delivered outside the ledger transaction queue, including recovered mutations. */
+  readonly changeOutbox?: {
+    flush(sessionId: string, observer: AgendaChangeObserver): Promise<void>;
+  };
+  /** `by` names who made the change, for the version it is kept as (see {@link AgendaVersionStore}). */
+  transact(
+    sessionId: string,
+    apply: (current: AgendaLedger | null) => AgendaMutation,
+    by?: AgendaVersionSummary['by'],
+    provenance?: { readonly actor: AgendaActor; readonly via: AgendaVia },
+  ): Promise<AgendaMutation>;
 }
 
 /**
@@ -99,8 +123,10 @@ export interface AgendaBoardChange {
   readonly addressed?: ResolvedAgendaItem;
 }
 
-/** Told after every mutation that changed a board has durably committed. Total: implementations never reject. */
+/** Told after a durable board change. Presentation is best effort; critical delivery rejects until accepted. */
 export interface AgendaChangeObserver {
+  /** A failure must keep the durable change pending rather than count as an acknowledgement. */
+  readonly requiresAcceptance?: true;
   changed(sessionId: string, change: AgendaBoardChange): Promise<void>;
 }
 
@@ -137,6 +163,10 @@ const SUB_FERRET_DOING: Readonly<Record<string, string>> = {
   resolve: 'close agenda items',
   dismiss: 'dismiss agenda items',
   progress: 'tick agenda items',
+  rest: 'take agenda items on',
+  log: 'log the owner\u2019s words on agenda items',
+  merge: 'merge agenda items',
+  split: 'split agenda items',
 };
 
 export function isAgendaSessionId(value: string): boolean {
@@ -163,19 +193,28 @@ export interface AgendaGateAsking {
 const UNREADABLE = 'unreadable' as const;
 
 /**
- * An agent's ask that NAMES a card whose gate is asking the owner already is refused: two asks about one card are
- * two things in the owner's Inbox. What it has to say goes on the card.
+ * Where to put what an agent wanted to ask about a card whose ask is already open on an agenda (docs/agenda.md § Card
+ * asks): that agenda carries the card, so the words go there — by `agenda edit` when it is on the asker's own agenda,
+ * else on the card.
+ */
+const carriedBy = (
+  task: TaskRef,
+  asking: { readonly sessionId: string; readonly id: AgendaId },
+  from: string,
+): string =>
+  asking.sessionId === from
+    ? `${formatTaskRef(task)} already asks the owner on !${asking.id}, which carries the card; put yours on it: fy agenda edit ${asking.id} --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`
+    : `${formatTaskRef(task)} already asks the owner on !${asking.id} (${asking.sessionId}'s agenda), which carries the card; add what the card needs to it: fy task note ${task.id} "<text>"`;
+
+/**
+ * An agent's ask that NAMES a card whose ask is open already is refused: two asks about one card are two things in the
+ * owner's Inbox. It points to the agenda that carries the card.
  */
 const refusedForGate = (
   task: TaskRef,
   asking: { readonly sessionId: string; readonly id: AgendaId },
-): AgendaMutation => ({
-  ok: false,
-  error: {
-    code: 'invalid',
-    message: `${formatTaskRef(task)} is already asking the owner (!${asking.id} on ${asking.sessionId}'s agenda); add what you need to it instead: fy task note ${task.id} "<text>"`,
-  },
-});
+  from: string,
+): AgendaMutation => ({ ok: false, error: { code: 'invalid', message: carriedBy(task, asking, from) } });
 
 /** No card is known to be asking: every ask keeps the card it names. */
 export const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined };
@@ -201,6 +240,12 @@ export class AgendaService {
     private readonly gates: AgendaGateAsking = NO_AGENDA_GATE_ASKING,
     /** Where a notice about a sub-ferret lands when the owner has no home for it: the machine agenda (§ The machine agenda). */
     private readonly machine?: MachineAgendaPort,
+    /** The owner's chat messages, which `fy agenda log` copies verbatim onto an item. */
+    private readonly chat: OwnerChat = NO_OWNER_CHAT,
+    /** The full versions of every item (`agenda.conversation.1`). */
+    private readonly versions: AgendaVersionStore = NO_AGENDA_VERSIONS,
+    /** Which version of an item each device last opened. */
+    private readonly seen: AgendaSeenStore = NO_AGENDA_SEEN,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
@@ -208,7 +253,7 @@ export class AgendaService {
       return { ok: true, value: await this.machine.list() };
     const unauthorized = await this.authorize(sessionId);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
-    const current = await this.repository.read(sessionId);
+    const current = await this.read(sessionId);
     return {
       ok: true,
       value: agendaSnapshot(current ?? emptyAgendaLedger(sessionId, this.clock.now())),
@@ -251,7 +296,7 @@ export class AgendaService {
     const focused = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
     const asking = await this.gateAsking(focused, actor);
     if (asking !== undefined && asking !== UNREADABLE && named.task !== undefined)
-      return refusedForGate(named.task, asking);
+      return refusedForGate(named.task, asking, home);
     const carded = asking === undefined ? focused : { ...focused, task: undefined };
     const offered = await this.withOfferClose(carded);
     const mutation = await this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
@@ -260,7 +305,7 @@ export class AgendaService {
     const warning =
       asking === UNREADABLE
         ? `${ref}'s gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`
-        : `${ref} is already asking the owner (!${asking.id} on ${asking.sessionId}'s agenda), so this was raised without the card; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`;
+        : `this was raised without the card: ${carriedBy(focused.task, asking, home)}`;
     return { ...mutation, notes: [...(mutation.notes ?? []), warning] };
   }
 
@@ -309,11 +354,22 @@ export class AgendaService {
     note?: string | null,
     via: AgendaVia = 'board',
     receipt?: string,
+    /** The ask the answer was given to: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
   ): Promise<AgendaMutation> {
     const at = this.clock.now();
     return this.apply(
       sessionId,
-      { action: 'answer', actor, id, response, note, at, ...(receipt === undefined ? {} : { receipt }) },
+      {
+        action: 'answer',
+        actor,
+        id,
+        response,
+        note,
+        at,
+        ...(receipt === undefined ? {} : { receipt }),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      },
       via,
     );
   }
@@ -363,8 +419,203 @@ export class AgendaService {
   }
 
   /** The owner's chat message named this item: it closes as `replied`, their words kept; nobody is pushed. */
-  async reply(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'reply', actor, id, note, at: this.clock.now() }, 'conversation');
+  async reply(
+    sessionId: string,
+    id: AgendaId,
+    actor: AgendaActor,
+    note?: string | null,
+    /** The chat message the words are, kept on the conversation so `fy agenda log` does not enter it twice. */
+    fromChat?: { readonly messageId: string; readonly at: string },
+  ): Promise<AgendaMutation> {
+    return this.apply(
+      sessionId,
+      { action: 'reply', actor, id, note, ...(fromChat === undefined ? {} : { fromChat }), at: this.clock.now() },
+      'conversation',
+    );
+  }
+
+  /**
+   * The ferret LOGS the owner's chat words on an item (`fy agenda log`): the daemon copies them verbatim from this
+   * session's own messages — the owner's latest, or `messageId` — and they rest the item; then `text` answers them
+   * (`reply`: the item returns to the owner's queue, to its old place) or says what the ferret is doing (`rest`).
+   * A message that is not the owner's, one that is not this session's and one already logged are refused.
+   */
+  async log(
+    sessionId: string,
+    id: AgendaId,
+    mode: 'reply' | 'rest',
+    text: string,
+    actor: AgendaActor,
+    messageId?: string,
+  ): Promise<AgendaMutation> {
+    const unauthorized = await this.authorize(sessionId, actor);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    const found = await this.chat.find(sessionId, messageId);
+    if (!found.ok) {
+      const error: AgendaFailure =
+        found.reason === 'not-owner'
+          ? {
+              code: 'forbidden',
+              message: `message ${messageId ?? ''} is not the owner's: only their own words are logged`,
+            }
+          : {
+              code: 'not-found',
+              message:
+                found.reason === 'none'
+                  ? 'the owner has sent this session no message to log'
+                  : `no message ${messageId ?? ''} from the owner in this session`,
+            };
+      return { ok: false, error };
+    }
+    return this.apply(
+      sessionId,
+      { action: 'log', actor, id, mode, words: text, chat: found.message, at: this.clock.now() },
+      'conversation',
+    );
+  }
+
+  /** `from` is merged into `id` (`fy agenda merge`): one conversation, every card and link kept, `from` closed. */
+  async merge(sessionId: string, id: AgendaId, from: AgendaId, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'merge', actor, id, from, at: this.clock.now() });
+  }
+
+  /** A new item is split off `id` (`fy agenda split`), linked both ways; `moveCards` go along with it. */
+  async split(
+    sessionId: string,
+    id: AgendaId,
+    request: RaiseAgendaRequest,
+    actor: AgendaActor,
+    moveCards?: readonly TaskRef[],
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'split',
+      actor,
+      id,
+      request,
+      ...(moveCards === undefined ? {} : { moveCards }),
+      at: this.clock.now(),
+    });
+  }
+
+  /** Full conversation, one bounded text fragment at a time, with the same session authority as item reads. */
+  async conversationOf(
+    sessionId: string,
+    id: AgendaId,
+    index = 0,
+    offset = 0,
+    version?: number,
+  ): Promise<AgendaQueryResult<AgendaConversationPage>> {
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    if (
+      ![index, offset].every(value => Number.isSafeInteger(value) && value >= 0) ||
+      (version !== undefined && (!Number.isSafeInteger(version) || version < 1))
+    ) {
+      return {
+        ok: false,
+        error: { code: 'invalid', message: 'conversation index and offset must be nonnegative integers' },
+      };
+    }
+    const ledger = await this.read(sessionId);
+    const current = ledger?.entries.find(entry => entry.item.id === id)?.item;
+    // Pruned items keep the same read route and wire: their latest complete thread lives in the archive.
+    const coldVersion =
+      version === undefined && current === undefined
+        ? (await this.versions.list(sessionId, id)).at(-1)?.version
+        : undefined;
+    const selected = version ?? coldVersion;
+    const historical = selected === undefined ? undefined : await this.versions.get(sessionId, id, selected);
+    if (version !== undefined && historical === undefined)
+      return { ok: false, error: { code: 'not-found', message: 'no such agenda version' } };
+    const item = historical?.item ?? current;
+    if (item === undefined) return { ok: false, error: { code: 'not-found', message: 'no such agenda item' } };
+    const full =
+      selected === undefined
+        ? (ledger?.conversations?.[id] ?? item.conversation ?? [])
+        : ((await this.versions.conversation?.(sessionId, id, selected)) ?? historical?.item.conversation ?? []);
+    const entry = full[index];
+    if (index > full.length || (entry === undefined ? offset !== 0 : offset > entry.text.length)) {
+      return { ok: false, error: { code: 'invalid', message: 'conversation cursor is outside the thread' } };
+    }
+    if (entry === undefined) return { ok: true, value: { total: full.length, index, offset } };
+    const text = entry.text.slice(offset, offset + MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH);
+    const end = offset + text.length;
+    const next =
+      end < entry.text.length
+        ? { index, offset: end }
+        : index + 1 < full.length
+          ? { index: index + 1, offset: 0 }
+          : undefined;
+    return {
+      ok: true,
+      value: { total: full.length, index, offset, entry: { ...entry, text }, ...(next === undefined ? {} : { next }) },
+    };
+  }
+
+  /** Every version kept of an item, oldest first, and the newest this device has opened. */
+  async versionsOf(
+    sessionId: string,
+    id: AgendaId,
+    deviceId?: string,
+  ): Promise<AgendaQueryResult<{ readonly versions: readonly AgendaVersionSummary[]; readonly seen?: number }>> {
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    await this.read(sessionId);
+    const [listed, seen] = await Promise.all([
+      this.versions.list(sessionId, id).then(
+        versions => ({ versions }),
+        (error: unknown) => ({ error }),
+      ),
+      deviceId === undefined ? undefined : this.seen.seen(sessionId, id, deviceId).catch(() => undefined),
+    ]);
+    if ('error' in listed) return { ok: false, error: versionsUnavailable(id, listed.error) };
+    return { ok: true, value: { versions: listed.versions, ...(seen === undefined ? {} : { seen }) } };
+  }
+
+  /** One version of an item in full. */
+  async versionOf(sessionId: string, id: AgendaId, version: number): Promise<AgendaQueryResult<AgendaVersion>> {
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    await this.read(sessionId);
+    let found: AgendaVersion | undefined;
+    try {
+      found = await this.versions.get(sessionId, id, version);
+    } catch (error) {
+      return { ok: false, error: versionsUnavailable(id, error) };
+    }
+    return found === undefined
+      ? { ok: false, error: { code: 'not-found', message: `${id} has no version ${version} in this session` } }
+      : { ok: true, value: found };
+  }
+
+  /** This device opened `id` at `version`. A device that has seen a later one keeps it; the mark that stands is answered. */
+  async markSeen(
+    sessionId: string,
+    id: AgendaId,
+    version: number,
+    deviceId: string,
+  ): Promise<AgendaQueryResult<number>> {
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    await this.read(sessionId);
+    let kept: readonly AgendaVersionSummary[];
+    try {
+      kept = await this.versions.list(sessionId, id);
+    } catch (error) {
+      return { ok: false, error: versionsUnavailable(id, error) };
+    }
+    const latest = kept.at(-1)?.version ?? 0;
+    if (version > latest) {
+      return {
+        ok: false,
+        error: { code: 'invalid', message: `${id} has no version ${version}: its newest is ${latest}` },
+      };
+    }
+    try {
+      return { ok: true, value: await this.seen.mark(sessionId, id, deviceId, version) };
+    } catch (error) {
+      return { ok: false, error: { code: 'corrupt', message: `the mark could not be kept: ${String(error)}` } };
+    }
   }
 
   /**
@@ -379,6 +630,34 @@ export class AgendaService {
     now = false,
   ): Promise<AgendaMutation> {
     return this.apply(sessionId, { action: 'surface', actor, id, why, ...(now ? { now } : {}), at: this.clock.now() });
+  }
+
+  /** The ferret takes an item on without asking anything yet: it rests as `working`, quiet (docs/agenda.md § States). */
+  async rest(sessionId: string, id: AgendaId, why: string, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'rest', actor, id, why, at: this.clock.now() });
+  }
+
+  /** The Warden decided on one nudge message for these resting items: each records its send id first (`rest-nudge.ts`). */
+  async nudging(sessionId: string, items: readonly AgendaNudgeTarget[], sendId: string): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'nudging',
+      actor: { kind: 'daemon', cause: 'warden-escalation' },
+      items,
+      sendId,
+      at: this.clock.now(),
+    });
+  }
+
+  /** The Warden nudged the ferret about a resting item: the item records it, if it is still the rest nudged for. */
+  async nudged(sessionId: string, target: AgendaNudgeTarget): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'nudged',
+      actor: { kind: 'daemon', cause: 'warden-escalation' },
+      id: target.id,
+      since: target.since,
+      nudges: target.nudges,
+      at: this.clock.now(),
+    });
   }
 
   /** The owner puts an open item away until a time still ahead (docs/agenda.md § Parked items). */
@@ -407,12 +686,39 @@ export class AgendaService {
     actor: AgendaActor,
     note?: string | null,
     via: AgendaVia = 'board',
+    /** The ask the close was given from: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
   ): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'resolve', actor, id, note, at: this.clock.now() }, via);
+    return this.apply(
+      sessionId,
+      {
+        action: 'resolve',
+        actor,
+        id,
+        note,
+        at: this.clock.now(),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      },
+      via,
+    );
   }
 
-  async dismiss(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'dismiss', actor, id, note, at: this.clock.now() });
+  async dismiss(
+    sessionId: string,
+    id: AgendaId,
+    actor: AgendaActor,
+    note?: string | null,
+    /** The ask the close was given from: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'dismiss',
+      actor,
+      id,
+      note,
+      at: this.clock.now(),
+      ...(askVersion === undefined ? {} : { askVersion }),
+    });
   }
 
   /**
@@ -452,21 +758,15 @@ export class AgendaService {
   }
 
   /**
-   * A card's gate is asked on this thread, or no longer is (`gate: null`; docs/agenda.md § One ask per thing).
-   * Daemon-only: the card's lane is the witness.
+   * A card ask on this agenda (docs/agenda.md § Card asks): put on it, restated, withdrawn, or the owner's answer
+   * recorded (`CardAskOperation`). Daemon-only: the card's lane is the witness.
    */
-  async attachGate(
-    sessionId: string,
-    id: AgendaId,
-    gate: AgendaGate | null,
-    answered?: AgendaGate,
-  ): Promise<AgendaMutation> {
+  async cardAsk(sessionId: string, id: AgendaId, operation: CardAskOperation): Promise<AgendaMutation> {
     return this.apply(sessionId, {
-      action: 'attach-gate',
+      action: 'card-ask',
       actor: { kind: 'daemon', cause: 'system' },
       id,
-      gate,
-      ...(answered === undefined ? {} : { answered }),
+      operation,
       at: this.clock.now(),
     });
   }
@@ -534,7 +834,7 @@ export class AgendaService {
 
   private async holdsOpenSource(sessionId: string, source: AgendaSource, sourceRef: string): Promise<boolean> {
     if (invalidSession(sessionId) !== null) return false;
-    const ledger = await this.repository.read(sessionId).catch(() => null);
+    const ledger = await this.read(sessionId).catch(() => null);
     return (
       ledger?.entries.some(
         entry => entry.lifecycle === 'active' && entry.item.source === source && entry.item.sourceRef === sourceRef,
@@ -555,31 +855,54 @@ export class AgendaService {
         ? null
         : await this.limitSubFerret(command.actor, command.action);
     if (limited !== null) return { ok: false, error: limited };
-    const mutation = await this.repository.transact(sessionId, current =>
-      applyAgendaCommandToSession(current, sessionId, command),
+    const mutation = await this.repository.transact(
+      sessionId,
+      current => applyAgendaCommandToSession(current, sessionId, command),
+      versionAuthor(command.actor),
+      { actor: command.actor, via },
     );
-    if (mutation.ok && mutation.change === 'created' && mutation.item !== undefined) {
+    if (this.repository.changeOutbox !== undefined) {
+      await this.flushChanges(sessionId);
+    } else if (mutation.ok && mutation.changed && mutation.change !== 'unchanged') {
+      await this.notifyChange(sessionId, {
+        change: mutation.change,
+        actor: command.actor,
+        via,
+        snapshot: mutation.snapshot,
+        ...(mutation.item === undefined ? {} : { item: mutation.item }),
+        ...(mutation.addressed === undefined ? {} : { addressed: mutation.addressed }),
+      });
+    }
+    return mutation;
+  }
+
+  private async read(sessionId: string): Promise<AgendaLedger | null> {
+    const ledger = await this.repository.read(sessionId);
+    await this.flushChanges(sessionId);
+    return ledger;
+  }
+
+  private async flushChanges(sessionId: string): Promise<void> {
+    await this.repository.changeOutbox?.flush(sessionId, {
+      changed: (id, change) => this.notifyChange(id, change),
+    });
+  }
+
+  private async notifyChange(sessionId: string, change: AgendaBoardChange): Promise<void> {
+    if (change.change === 'created' && change.item !== undefined) {
       try {
-        await this.observer.raised(sessionId, mutation.item, mutation.snapshot);
+        await this.observer.raised(sessionId, change.item, change.snapshot);
       } catch {
         // Persistence is primary: presentation can neither revise nor fail the committed mutation.
       }
     }
-    if (mutation.ok && mutation.changed && mutation.change !== 'unchanged') {
-      try {
-        await this.changes.changed(sessionId, {
-          change: mutation.change,
-          actor: command.actor,
-          via,
-          snapshot: mutation.snapshot,
-          ...(mutation.item === undefined ? {} : { item: mutation.item }),
-          ...(mutation.addressed === undefined ? {} : { addressed: mutation.addressed }),
-        });
-      } catch {
-        // The same rule: a projection or a delivery never revises a committed board.
-      }
+    try {
+      await this.changes.changed(sessionId, change);
+    } catch (error) {
+      // The board is already committed. Critical delivery must remain pending until its queue accepts it;
+      // presentation failures still cannot fail a mutation or hold an otherwise accepted event.
+      if (this.repository.changeOutbox !== undefined && this.changes.requiresAcceptance === true) throw error;
     }
-    return mutation;
   }
 
   /**
@@ -604,6 +927,7 @@ export class AgendaService {
       this.subFerrets,
       actor.sessionId,
       SUB_FERRET_DOING[action] ?? 'change the agenda',
+      SUB_FERRET_MAY_ON_AGENDA,
     );
     return refusal === null ? null : { code: 'forbidden', message: refusal };
   }
@@ -618,10 +942,15 @@ export class AgendaService {
   }
 }
 
-const LEAD_VERBS: ReadonlySet<string> = new Set(['edit', 'surface', 'resolve', 'dismiss']);
+const LEAD_VERBS: ReadonlySet<string> = new Set(['edit', 'surface', 'rest', 'resolve', 'dismiss', 'merge', 'split']);
 
 function invalidSession(sessionId: string): AgendaFailure | null {
   return isAgendaSessionId(sessionId)
     ? null
     : { code: 'invalid', message: `not a valid agenda session id: ${sessionId}` };
+}
+
+/** A version store that cannot answer is not an item with no versions: say it is unavailable. */
+function versionsUnavailable(id: AgendaId, error: unknown): AgendaFailure {
+  return { code: 'corrupt', message: `the versions of ${id} could not be read: ${String(error)}` };
 }

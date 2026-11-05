@@ -13,8 +13,8 @@ import {
   HOSTED_APP_ORIGIN,
   isLoopbackHost,
   isWildcardHost,
-  linkStoreOriginProblem,
   LOOPBACK,
+  linkStoreOriginProblem,
   MEMBER_UNLOCK_DAYS_DEFAULT,
   MEMBER_UNLOCK_DAYS_MAX,
   MEMBER_UNLOCK_DAYS_MIN,
@@ -359,8 +359,22 @@ export const DaemonConfigDocumentSchema = z
      * message to a ferret — a person's, another ferret's, the daemon's — is written to that ferret's queue
      * and its deliverer types it, owner first, as soon as the input box is empty. `queue: false` types each
      * one down the send path directly, as before the queue. Read at start; a change needs a restart.
+     *
+     * COMBINED DELIVERY (docs/message-delivery.md § Labels and combined delivery): with the queue on, a
+     * ferret's message labelled `action` waits `actionWindowMs` (60 s) so what arrives with it is delivered
+     * as ONE turn, an `fyi` waits for the receiver's turn to end or `fyiMaxHoldMs` (10 min), and one turn
+     * carries at most `batchMax` messages. A blocker, a reply, the owner's message and the daemon's are
+     * never held. `coalesce: false` is the kill switch: every ferret message goes at once, one turn each.
      */
-    delivery: z.object({ queue: z.boolean().default(true) }).prefault({}),
+    delivery: z
+      .object({
+        queue: z.boolean().default(true),
+        coalesce: z.boolean().default(true),
+        actionWindowMs: z.number().int().min(1_000).max(600_000).default(60_000),
+        fyiMaxHoldMs: z.number().int().min(1_000).max(86_400_000).default(600_000),
+        batchMax: z.number().int().min(2).max(100).default(20),
+      })
+      .prefault({}),
     /**
      * WHAT A SHARED-CATALOG MEMBER MAY DO WITH THIS MACHINE (docs/catalogs.md § Members). `memberUnlockDays` is how
      * long one passkey assertion unlocks a member's browser (1 to 90 days, default 30): a member only reads, so the

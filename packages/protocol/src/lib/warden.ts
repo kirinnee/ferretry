@@ -449,6 +449,11 @@ export const WardenAnomalyKindSchema = z.enum([
    * (`input-stuck.ts`). Its `sessionId` is that ferret.
    */
   'input_stuck',
+  /**
+   * A ferret whose oldest undelivered message has waited in Ferretry's own queue far past due
+   * (`inbox-stuck.ts`). Its `sessionId` is that ferret. Never in `anomalies`: see `stuckInbox`.
+   */
+  'inbox_stuck',
 ]);
 export type WardenAnomalyKind = z.infer<typeof WardenAnomalyKindSchema>;
 
@@ -499,12 +504,23 @@ export type WardenAnomaly = z.infer<typeof WardenAnomalySchema>;
 export const WardenStuckInputFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('input_stuck') });
 export type WardenStuckInputFlag = z.infer<typeof WardenStuckInputFlagSchema>;
 
-/** Every flag a status or run view carries: its `anomalies`, and the ferrets stuck on an unsent message. */
+/**
+ * An `inbox_stuck` flag (B148): a ferret whose oldest undelivered message has waited in Ferretry's own queue far
+ * past due. In its own optional field for the reason `stuckInput` is.
+ */
+export const WardenStuckInboxFlagSchema = WardenAnomalySchema.extend({ kind: z.literal('inbox_stuck') });
+export type WardenStuckInboxFlag = z.infer<typeof WardenStuckInboxFlagSchema>;
+
+/**
+ * Every flag a status or run view carries: its `anomalies`, the ferrets stuck on an unsent message, and the
+ * ferrets whose inbox is stuck.
+ */
 export function wardenFlags(view: {
   readonly anomalies: readonly WardenAnomaly[];
   readonly stuckInput?: readonly WardenStuckInputFlag[] | undefined;
+  readonly stuckInbox?: readonly WardenStuckInboxFlag[] | undefined;
 }): readonly WardenAnomaly[] {
-  return [...view.anomalies, ...(view.stuckInput ?? [])];
+  return [...view.anomalies, ...(view.stuckInput ?? []), ...(view.stuckInbox ?? [])];
 }
 
 // ── Accounts ────────────────────────────────────────────────────────────────────────────────────
@@ -1166,6 +1182,8 @@ export const WardenStatusViewSchema = z.object({
   anomalies: z.array(WardenAnomalySchema),
   /** Ferrets stuck on an unsent message of ours (`WardenStuckInputFlagSchema`). Absent from an older daemon. */
   stuckInput: z.array(WardenStuckInputFlagSchema).optional(),
+  /** Ferrets whose messages wait in Ferretry's queue far past due (`WardenStuckInboxFlagSchema`). Absent from an older daemon. */
+  stuckInbox: z.array(WardenStuckInboxFlagSchema).optional(),
   fingerprint: z.string(),
   liveWarden: z.string().optional(),
   lastSpawnAt: InstantSchema.optional(),
@@ -1200,6 +1218,8 @@ export const WardenRunViewSchema = z.object({
   anomalies: z.array(WardenAnomalySchema),
   /** Ferrets stuck on an unsent message of ours (`WardenStuckInputFlagSchema`). Absent from an older daemon. */
   stuckInput: z.array(WardenStuckInputFlagSchema).optional(),
+  /** Ferrets whose messages wait in Ferretry's queue far past due (`WardenStuckInboxFlagSchema`). Absent from an older daemon. */
+  stuckInbox: z.array(WardenStuckInboxFlagSchema).optional(),
   spawned: z.string().optional(),
   assignedWardens: z.array(z.string()).optional(),
   message: z.string().optional(),

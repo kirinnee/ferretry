@@ -3,6 +3,7 @@ import should from 'should';
 import {
   auditHost,
   CredentialAgentIdentities,
+  CredentialDigestLocations,
   type CredentialedSession,
   clipOutput,
   controlRefusal,
@@ -53,9 +54,11 @@ describe('CredentialAgentIdentities', () => {
     { id: 's3', name: 'Marin', active: false, sessionCapabilityHash: 'hash:gamma' },
   ];
   const resolver = new CredentialAgentIdentities(
-    { snapshot: async () => sessions },
+    { snapshot: async () => sessions, session: async id => sessions.find(session => session.id === id) },
     capability => `hash:${capability}`,
     secretsMatch,
+    new CredentialDigestLocations(),
+    () => '',
   );
 
   it('should resolve a credential to the live session it was minted for, and to nothing else', async () => {

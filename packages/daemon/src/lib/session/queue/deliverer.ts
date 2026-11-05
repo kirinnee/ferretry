@@ -5,8 +5,9 @@ import type { SendScheduler } from '../send/tracker.ts';
 import type { SendFate } from '../send/types.ts';
 import { type DeliveryView, type HandOver, movesFrom, type OwnDraft, waitReasonOf } from './delivery.ts';
 import { foldQueue, type QueueEvent } from './model.ts';
-import { deliveryOrder, nextToDeliver } from './policy.ts';
+import { deliveryOrder, planDelivery } from './policy.ts';
 import type { SessionQueueStore } from './ports.ts';
+import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './settings.ts';
 
 /**
  * THE ONE OWNER OF DELIVERY for a session's queue: it decides WHEN a message goes and IN WHAT ORDER, and
@@ -29,17 +30,29 @@ import type { SessionQueueStore } from './ports.ts';
  * behind it, and Codex's transcript — through the send ledger — moves it on within seconds.
  */
 
+/**
+ * What one hand-over carries: ONE queued message, or several ferret messages delivered as one turn.
+ *
+ * `sendId` is the id the send ledger records the delivery under — the OLDEST member's own id, so the
+ * ledger row, `fy send --wait` for that id and every consumer keyed by it work as they always did. A single
+ * message is a delivery of one member whose `sendId` is its own id.
+ */
+export interface QueueDelivery {
+  readonly sendId: string;
+  /** Oldest first, in acceptance order. Never empty; two or more are all a ferret's. */
+  readonly members: readonly QueuedMessage[];
+}
+
 /** The send path, as delivery uses it. */
 export interface QueueTransport {
   /**
-   * Hands one message to the pane under its own id; says what the pane proved.
+   * Hands one delivery to the pane under `delivery.sendId`; says what the pane proved.
    *
-   * This is the ONE place a queued message becomes a delivery: the banner, the direct-or-turn-file rule
-   * (`isDirectSend`) and the landing proof all sit behind it. A later change that folds several waiting
-   * messages into one payload hands that payload to this call as a single `QueuedMessage` and changes
-   * nothing else here.
+   * This is the ONE place queued messages become a delivery: the banner, the combined format, the
+   * direct-or-turn-file rule (`isDirectSend`) and the landing proof all sit behind it. The outcome applies
+   * to EVERY member.
    */
-  handOver(id: SessionId, message: QueuedMessage): Promise<HandOver>;
+  handOver(id: SessionId, delivery: QueueDelivery): Promise<HandOver>;
   /** Where a message handed over before now stands, per the send ledger; `undefined` when it never got there. */
   fate(id: SessionId, messageId: string): Promise<SendFate | undefined>;
   /**
@@ -65,7 +78,7 @@ export interface QueueDeliveryPorts {
   sleep(milliseconds: number): Promise<void>;
 }
 
-export interface QueueDeliverySettings {
+export interface QueueDeliverySettings extends QueueCoalesceSettings {
   /** How soon a session with a message waiting or unproven is looked at again. */
   readonly lookMs: number;
   /** How long a delivered message is watched for its read tick before the session stops being looked at. */
@@ -77,6 +90,7 @@ export interface QueueDeliverySettings {
 }
 
 export const defaultQueueDeliverySettings: QueueDeliverySettings = {
+  ...defaultQueueCoalesceSettings,
   lookMs: 5_000,
   readWatchMs: 60 * 60_000,
   perLook: 8,
@@ -145,18 +159,40 @@ export class QueueDeliverer {
       more = await this.handOverNext(id, await this.messages(id));
     // Looked at again only for what can still move without anybody enqueueing: a message waiting for a
     // reason, one handed over and not yet proven, one delivered and not yet read — or a queue longer
-    // than one look hands over.
-    if (more || (await this.messages(id)).some(message => this.unsettled(message))) {
+    // than one look hands over — and, for a message held to combine with others, the moment its hold ends.
+    // The scheduler keeps ONE pending look per session, so the soonest of the two reasons is the one asked for.
+    const remaining = await this.messages(id);
+    const now = Date.parse(this.ports.clock.now());
+    const polls = more || remaining.some(message => this.unsettled(message));
+    const holdEndsIn = this.earliestHold(remaining, now);
+    if (polls || holdEndsIn !== undefined) {
       this.open.add(id);
-      this.ports.scheduler.schedule(id, this.settings.lookMs, () => void this.look(id).catch(() => undefined));
+      const delay = polls
+        ? Math.min(this.settings.lookMs, holdEndsIn ?? Infinity)
+        : (holdEndsIn ?? this.settings.lookMs);
+      this.ports.scheduler.schedule(id, delay, () => void this.look(id).catch(() => undefined));
     } else this.open.delete(id);
+  }
+
+  /** Milliseconds until the soonest hold on a still-waiting ferret message ends; `undefined` when none is held. */
+  private earliestHold(messages: readonly QueuedMessage[], now: number): number | undefined {
+    // A hold already over is not a reason to wake: that message is waiting on something else, which has its own.
+    const ends = messages
+      .flatMap(message =>
+        message.state === 'queued' && message.sender === 'agent' && message.holdUntil !== undefined
+          ? [Date.parse(message.holdUntil) - now]
+          : [],
+      )
+      .filter(remaining => remaining > 0);
+    return ends.length === 0 ? undefined : Math.min(...ends);
   }
 
   /** Brings every message already handed over up to what the send ledger proves. */
   private async settle(id: SessionId): Promise<void> {
     for (const message of await this.messages(id)) {
       if (message.state !== 'typing' && message.state !== 'delivered' && message.state !== 'unconfirmed') continue;
-      const fate = await this.ports.transport.fate(id, message.id);
+      // A member of a combined turn is proven by the ONE ledger record the turn was sent under.
+      const fate = await this.ports.transport.fate(id, message.deliveredAs ?? message.id);
       for (const move of movesFrom(message, fate)) await this.move(id, message.id, move.state, move.failure);
     }
   }
@@ -173,8 +209,16 @@ export class QueueDeliverer {
       await this.waiting(id, messages, 'unreadable');
       return false;
     }
-    const next = nextToDeliver(messages, view.target.mode);
-    if (next === undefined) return false;
+    const plan = planDelivery(messages, view, this.ports.clock.now(), this.settings);
+    if (plan === undefined) return false;
+    if (plan.kind === 'hold') {
+      // Held to combine, or an FYI kept from reviving a stopped ferret: the only reason on show is the
+      // second; a hold's own end time is on the message (`holdUntil`) and in the send's answer.
+      await this.waiting(id, deliveryOrder(messages, view.target.mode), plan.reason);
+      return false;
+    }
+    const members = plan.kind === 'single' ? [plan.message] : plan.members;
+    const delivery: QueueDelivery = { sendId: members[0]?.id ?? '', members };
     let reason = waitReasonOf(view);
     let behind: string | undefined;
     // NEVER QUEUE BEHIND A GHOST (B144). A "draft" that is a send of this session's own, typed by the daemon
@@ -195,8 +239,11 @@ export class QueueDeliverer {
     }
     await this.waiting(id, deliveryOrder(messages, view.target.mode), reason, behind);
     if (reason !== undefined) return false;
-    await this.move(id, next.id, 'typing');
-    const outcome = await this.ports.transport.handOver(id, next).catch(
+    // Every member is `typing` under the delivery's id BEFORE anything is handed over, so a daemon that
+    // dies in between leaves them all to be settled from the one ledger record — or, with none, all back.
+    for (const member of members)
+      await this.move(id, member.id, 'typing', undefined, members.length > 1 ? delivery.sendId : undefined);
+    const outcome = await this.ports.transport.handOver(id, delivery).catch(
       (error: unknown): HandOver => ({
         kind: 'failed',
         failure: error instanceof Error ? error.message : String(error),
@@ -204,20 +251,20 @@ export class QueueDeliverer {
     );
     switch (outcome.kind) {
       case 'landed':
-        await this.move(id, next.id, 'delivered');
+        for (const member of members) await this.move(id, member.id, 'delivered');
         return true;
       case 'unproven':
         return false;
       case 'refused':
-        await this.move(id, next.id, 'queued');
+        for (const member of members) await this.move(id, member.id, 'queued');
         await this.waiting(id, deliveryOrder(await this.messages(id), view.target.mode), outcome.reason);
         return false;
       case 'failed':
         // A hand-over that threw may still have typed: when the ledger, keyed by this id, has a record of
         // it, it stays `typing` and the next look settles it. With no record nothing was typed, so it
         // fails and the next message may go.
-        if ((await this.ports.transport.fate(id, next.id)) !== undefined) return false;
-        await this.move(id, next.id, 'failed', outcome.failure);
+        if ((await this.ports.transport.fate(id, delivery.sendId)) !== undefined) return false;
+        for (const member of members) await this.move(id, member.id, 'failed', outcome.failure);
         return true;
     }
   }
@@ -250,7 +297,13 @@ export class QueueDeliverer {
     return Date.parse(this.ports.clock.now()) - Date.parse(message.stateAt) < this.settings.readWatchMs;
   }
 
-  private async move(id: SessionId, messageId: string, state: QueuedMessage['state'], failure?: string): Promise<void> {
+  private async move(
+    id: SessionId,
+    messageId: string,
+    state: QueuedMessage['state'],
+    failure?: string,
+    batch?: string,
+  ): Promise<void> {
     await this.append(id, {
       v: 1,
       kind: 'moved',
@@ -258,6 +311,7 @@ export class QueueDeliverer {
       id: messageId,
       state,
       ...(failure === undefined ? {} : { failure }),
+      ...(batch === undefined ? {} : { batch }),
     });
   }
 

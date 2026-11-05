@@ -1,5 +1,5 @@
 /**
- * The Info panel's content: a title line, six tabs, and the shown tab's rows. Presentational — the
+ * The Info panel's content: a title line, seven tabs, and the shown tab's rows. Presentational — the
  * frame around it (a resizable right panel on a desktop, a half/full bottom sheet on a phone) is
  * `info-frame.tsx`, and each tab's body is the host's render prop, so the panel never reads a daemon.
  */

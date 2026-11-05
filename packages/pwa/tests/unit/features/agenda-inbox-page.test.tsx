@@ -21,8 +21,9 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
-import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
+import { openConversation } from '../../support/agenda-folds.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
@@ -666,6 +667,7 @@ describe('AgendaInboxPage on a phone', () => {
     );
     await flush();
     expect(reads).toEqual(['A2']);
+    await openConversation(mounted.container);
     const history = must(mounted.container.querySelector('[data-agenda-history]'), 'the History');
     expect(history.textContent).not.toContain('Cut the release branch.');
     expect(history.querySelector('[data-history="owner"]')?.textContent).toContain('is staging green?');
@@ -710,7 +712,7 @@ describe('AgendaInboxPage on a phone', () => {
       page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readConversation: async () => [] }),
     );
     await flush();
-    expect(quiet.container.querySelector('[data-agenda-history]')).toBeNull();
+    expect(quiet.container.querySelector('[data-agenda-part="conversation"]')).toBeNull();
     await quiet.unmount();
     const failing = await mount(
       page(fakeInbox(), [twoWay], {
@@ -722,10 +724,10 @@ describe('AgendaInboxPage on a phone', () => {
       }),
     );
     await flush();
-    expect(failing.container.querySelector('[data-agenda-history]')).toBeNull();
+    expect(failing.container.querySelector('[data-agenda-part="conversation"]')).toBeNull();
     await failing.unmount();
     const none = await mount(page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key }));
-    expect(none.container.querySelector('[data-agenda-history]')).toBeNull();
+    expect(none.container.querySelector('[data-agenda-part="conversation"]')).toBeNull();
     await none.unmount();
   });
 });

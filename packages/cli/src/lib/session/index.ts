@@ -18,3 +18,5 @@ export * from './signal-controller.ts';
 export * from './start-controller.ts';
 export * from './start-request.ts';
 export * from './status-controller.ts';
+export * from './subtree-controller.ts';
+export * from './subtree-table.ts';

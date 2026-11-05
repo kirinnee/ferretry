@@ -79,6 +79,9 @@ export const AUDIT_EVENTS = [
   'catalog.link.minted',
   'catalog.link.copied',
   'catalog.link.ended',
+  'catalog.link.moved',
+  'catalog.link.changed',
+  'catalog.link.revived',
   'security.changed',
   'device.key-rotated',
   'pairing.code-revoked',
@@ -147,6 +150,8 @@ export const AUDIT_KEPT_EVENTS: readonly AuditEvent[] = [
   'catalog.link.minted',
   'catalog.link.copied',
   'catalog.link.ended',
+  'catalog.link.moved',
+  'catalog.link.changed',
   'security.changed',
   'warden.configured',
 ];

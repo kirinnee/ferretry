@@ -38,7 +38,11 @@ import {
   type BoardTaskView,
   BoardTaskOriginSchema,
   BoardTaskViewSchema,
+  BoardTaskVisibilitySchema,
+  BoardTaskVisibilitySourceSchema,
+  BoardVisibilityFilterSchema,
   BoardTermSchema,
+  BoardStatusSchema,
   BoardTermsSchema,
   DependencyOverrideSchema,
   ExternalBlockSchema,
@@ -47,6 +51,7 @@ import {
   LaneSetActionRequestSchema,
   LegacyTaskRefSchema,
   MAX_BOARD_HOW_TO_TEST_LENGTH,
+  MAX_BOARD_STATUS_PART_LENGTH,
   laneEditProblems,
   moveReasonProblem,
   PrChecksSchema,
@@ -57,6 +62,7 @@ import {
   ReleasedInSchema,
   RollupSchema,
   taskIdPrefix,
+  writtenStatusParts,
 } from '../../src/lib/board.ts';
 import { LANE_TEMPLATES, type LaneSet, LaneSetSchema } from '../../src/lib/board-lanes.ts';
 import { BoardActorViaSchema, BoardReopenAttachmentsSchema } from '../../src/lib/board-refs.ts';
@@ -187,6 +193,7 @@ const CARD: BoardTask = BoardTaskSchema.parse({
   terms: [{ term: 'Lane', meaning: 'a project-defined column with a fixed category' }],
   brief: '# U1\n\nBuild the protocol.',
   howToTest: '1. Open the Board\n2. See the card',
+  status: { now: 'writing the route', doneSoFar: '- the field', next: '1. the CLI' },
   owner: LEAD,
   assignee: CHILD,
   parent: { id: 'F18' },
@@ -253,6 +260,7 @@ const VALID: readonly SchemaCase[] = [
   { name: 'clarification', schema: BoardClarificationSchema, value: CARD.clarifications[0] },
   { name: 'term', schema: BoardTermSchema, value: CARD.terms[0] },
   { name: 'terms', schema: BoardTermsSchema, value: CARD.terms },
+  { name: 'status', schema: BoardStatusSchema, value: CARD.status },
   { name: 'override', schema: DependencyOverrideSchema, value: { by: 'owner', reason: 'ship it', at: INSTANT } },
   { name: 'dependency', schema: BoardDependencySchema, value: CARD.dependsOn[0] },
   {
@@ -310,6 +318,11 @@ const VALID: readonly SchemaCase[] = [
   { name: 'activity filter', schema: BoardActivityFilterSchema, value: 'to_test' },
   { name: 'state filter', schema: BoardStateFilterSchema, value: 'dropped' },
   { name: 'query', schema: BoardQuerySchema, value: { project: PROJECT, activity: 'waiting_on_you', query: 'tunnel' } },
+  { name: 'query for private cards', schema: BoardQuerySchema, value: { visibility: 'private' } },
+  { name: 'view of a private card', schema: BoardTaskViewSchema, value: { ...VIEW, visibility: 'private' } },
+  { name: 'visibility', schema: BoardTaskVisibilitySchema, value: 'public' },
+  { name: 'visibility source', schema: BoardTaskVisibilitySourceSchema, value: 'default' },
+  { name: 'visibility filter', schema: BoardVisibilityFilterSchema, value: 'all' },
   { name: 'counts', schema: BoardCountsSchema, value: COUNTS },
   { name: 'board', schema: BoardResponseSchema, value: BOARD },
   { name: 'all projects', schema: BoardResponseSchema, value: { ...BOARD, projectId: null, laneSet: null } },
@@ -503,6 +516,9 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'stray query field', schema: BoardQuerySchema, value: { lane: 'todo' } },
   { name: 'page too big', schema: BoardQuerySchema, value: { limit: 501 } },
   { name: 'empty text query', schema: BoardQuerySchema, value: { query: '  ' } },
+  { name: 'unknown visibility filter', schema: BoardVisibilityFilterSchema, value: 'hidden' },
+  { name: 'unknown visibility', schema: BoardTaskVisibilitySchema, value: 'all' },
+  { name: 'unknown visibility source', schema: BoardTaskVisibilitySourceSchema, value: 'owner' },
   { name: 'negative count', schema: BoardCountsSchema, value: { ...COUNTS, stale: -1 } },
   { name: 'lanes across projects', schema: BoardResponseSchema, value: { ...BOARD, projectId: null } },
   {
@@ -578,6 +594,62 @@ describe('How to test', () => {
     should(
       BoardTaskSchema.safeParse({ ...CARD, howToTest: 'x'.repeat(MAX_BOARD_HOW_TO_TEST_LENGTH + 1) }).success,
     ).be.false();
+  });
+});
+
+describe('Status', () => {
+  const STATUS = { now: 'writing the route', doneSoFar: '- the field', next: '1. the CLI' };
+
+  it('should read a card with no status as having none, never an invented one', () => {
+    const { status: _status, ...stored } = CARD;
+    should(BoardTaskSchema.parse(stored)).not.have.property('status');
+    const { status: _viewStatus, ...sent } = VIEW;
+    should(BoardTaskViewSchema.parse(sent)).not.have.property('status');
+    should(BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask })).not.have.property(
+      'status',
+    );
+  });
+
+  it('should keep a card’s status, and let a create and an edit carry it whole as their own field', () => {
+    should(BoardTaskSchema.parse(CARD).status).eql(STATUS);
+    should(BoardEditableFieldSchema.options).containEql('status');
+    should(
+      BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'X', ask: CARD.ask, status: STATUS }).status,
+    ).eql(STATUS);
+    should(BoardTaskActionRequestSchema.parse({ action: 'edit', status: STATUS })).match({ status: STATUS });
+    should(BoardTaskActionRequestSchema.safeParse({ action: 'edit' }).success).be.false();
+  });
+
+  it('should store all three parts, and let an edit name only the parts it replaces', () => {
+    const edit = (status: unknown) => BoardTaskActionRequestSchema.safeParse({ action: 'edit', status }).success;
+    should(edit({ now: '', doneSoFar: '', next: '' })).be.true();
+    // An edit names the parts it replaces; the daemon merges them in the card's own write.
+    should(edit({ now: 'x', doneSoFar: 'y' })).be.true();
+    should(BoardTaskSchema.safeParse({ ...CARD, status: { now: 'x', doneSoFar: 'y' } }).success).be.false();
+    should(edit({ ...STATUS, extra: 'z' })).be.false();
+    should(edit({ ...STATUS, next: 3 })).be.false();
+    should(edit('**Now:** x')).be.false();
+  });
+
+  it('should bound each part at 8 KiB on the card, a create and an edit', () => {
+    const fits = { ...STATUS, now: 'x'.repeat(MAX_BOARD_STATUS_PART_LENGTH) };
+    const long = { ...STATUS, next: 'x'.repeat(MAX_BOARD_STATUS_PART_LENGTH + 1) };
+    should(MAX_BOARD_STATUS_PART_LENGTH).equal(8 * 1024);
+    should(BoardTaskSchema.safeParse({ ...CARD, status: fits }).success).be.true();
+    should(BoardTaskSchema.safeParse({ ...CARD, status: long }).success).be.false();
+    should(
+      BoardTaskCreateRequestSchema.safeParse({ kind: 'feature', title: 'X', ask: CARD.ask, status: long }).success,
+    ).be.false();
+    should(BoardTaskActionRequestSchema.safeParse({ action: 'edit', status: long }).success).be.false();
+  });
+
+  it('should list the written parts in reading order, and none for an absent or empty status', () => {
+    should(writtenStatusParts(undefined)).eql([]);
+    should(writtenStatusParts({ now: '', doneSoFar: ' \n', next: '' })).eql([]);
+    should(writtenStatusParts({ now: 'a', doneSoFar: '', next: 'c' }).map(part => [part.label, part.text])).eql([
+      ['Now', 'a'],
+      ['Next', 'c'],
+    ]);
   });
 });
 
@@ -726,10 +798,30 @@ describe('board query', () => {
       'blocked',
     ]);
   });
+
+  it('should take a visibility filter and leave it out unless asked', () => {
+    should(BoardQuerySchema.parse({ visibility: 'all' })).deepEqual({ state: 'open', limit: 100, visibility: 'all' });
+    should(BoardQuerySchema.parse({})).not.have.property('visibility');
+    should(BoardVisibilityFilterSchema.options).deepEqual(['public', 'private', 'all']);
+  });
 });
 
 describe('board mutations', () => {
   const action = (value: Record<string, unknown>) => BoardTaskActionRequestSchema.safeParse(value).success;
+
+  it('should take a visibility action of public or private and nothing else', () => {
+    should(action({ action: 'visibility', visibility: 'private' })).be.true();
+    should(action({ action: 'visibility', visibility: 'public', reason: 'the owner asked' })).be.true();
+    should(action({ action: 'visibility', visibility: 'all' })).be.false();
+    should(action({ action: 'visibility' })).be.false();
+    should(action({ action: 'visibility', visibility: 'private', extra: 1 })).be.false();
+  });
+
+  it('should take a visibility on a new card, and default to none', () => {
+    const base = { kind: 'feature', title: 'X', ask: CARD.ask };
+    should(BoardTaskCreateRequestSchema.parse({ ...base, visibility: 'private' }).visibility).equal('private');
+    should(BoardTaskCreateRequestSchema.parse(base)).not.have.property('visibility');
+  });
 
   it('should fill a new card’s defaults', () => {
     should(BoardTaskCreateRequestSchema.parse({ kind: 'feature', title: 'Board page', ask: CARD.ask })).deepEqual({
@@ -777,6 +869,8 @@ describe('board mutations', () => {
       { action: 'assign', assignee: null },
       { action: 'note', text: 'checked' },
       { action: 'edit', title: 'Board page' },
+      { action: 'edit', visibility: 'private' },
+      { action: 'edit', title: 'Board page', visibility: 'public' },
       { action: 'edit', terms: [{ term: 'Lane', meaning: 'a column' }] },
       { action: 'edit', howToTest: '1. Open the Board' },
       { action: 'file', path: 'a.ts', release: true, reason: 'done' },
@@ -803,6 +897,7 @@ describe('board mutations', () => {
       { action: 'link', pr: PR_URL, branch: 'feat/x' },
       { action: 'link', pr: 'https://example.com/pr/1' },
       { action: 'edit' },
+      { action: 'edit', visibility: 'all' },
       { action: 'edit', owner: LEAD },
       { action: 'drop' },
       { action: 'block', reason: '' },

@@ -43,8 +43,9 @@ export function DaemonTaskReferences({
             ...outer,
             taskReferenceResolver: createTaskReferenceResolver([], ids),
             onTaskOpen: (written: string) => onNavigate(daemonBoardCardPath(daemonId, written.toUpperCase())),
+            ...(board === undefined || connection === undefined ? {} : { cardEmbed: { store: board, connection } }),
           },
-    [outer, ids, daemonId, onNavigate],
+    [outer, ids, daemonId, onNavigate, board, connection],
   );
   if (outer.taskReferenceResolver !== undefined) return <>{children}</>;
   return <ReferenceSurfaceProvider surface={surface}>{children}</ReferenceSurfaceProvider>;

@@ -125,11 +125,13 @@ describe('Segmented', () => {
     expect(radios(root).every(r => r.props.className === 'sr-only')).toBe(true);
   });
 
-  it('keeps the compact height on a desktop and the 44px floor on a phone', () => {
+  it('keeps the compact height, wraps long labels at every width, and the 44px floor on a phone', () => {
     const root = render(<Segmented label="Pick" value="a" options={options} onChange={() => {}} />).root;
 
     for (const label of root.findAllByType('label')) {
-      expect(label.props.className).toContain('h-control-sm');
+      expect(label.props.className).toContain('min-h-[var(--control-h-sm)]');
+      expect(label.props.className).toContain('whitespace-normal');
+      expect(label.props.className).not.toContain('whitespace-nowrap');
       expect(label.props.className).toContain('max-md:min-h-[44px]');
     }
   });
@@ -216,6 +218,20 @@ describe('SettingDisclosureRow', () => {
     expect(button().props['aria-expanded']).toBe(true);
     expect(byAttr(renderer.root, 'data-setting-panel')[0]?.props.id).toBe(button().props['aria-controls']);
     expect(opened).toEqual([true]);
+  });
+
+  it('is not a deep-link target without a setting id', () => {
+    const renderer = render(
+      <SettingDisclosureRow name="Viewport" hint="Where the screen ends">
+        <p>details</p>
+      </SettingDisclosureRow>,
+    );
+    const row = renderer.root.findByType('li');
+
+    expect(row.props.id).toBeUndefined();
+    expect(row.props['data-setting-id']).toBeUndefined();
+    expect(row.props.tabIndex).toBeUndefined();
+    expect(row.props['data-setting-row']).toBe('Viewport');
   });
 });
 

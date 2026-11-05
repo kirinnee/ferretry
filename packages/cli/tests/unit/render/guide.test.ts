@@ -77,7 +77,7 @@ describe('renderGuideSection', () => {
 
   it('should read every section of the shipped guide', () => {
     // Arrange — every type, plus the overview the bare command prints
-    const names = ['overview', 'mermaid', 'svg', 'html', 'chart', 'map', 'media', 'lottie'];
+    const names = ['overview', 'mermaid', 'svg', 'html', 'chart', 'map', 'media', 'lottie', 'card'];
 
     // Act + Assert
     for (const name of names) {
@@ -99,6 +99,8 @@ describe('renderGuideSectionName', () => {
     should(renderGuideSectionName('audio')).equal('media');
     should(renderGuideSectionName('pdf')).equal('media');
     should(renderGuideSectionName('lottie')).equal('lottie');
+    should(renderGuideSectionName('card')).equal('card');
+    should(renderGuideSectionName('board')).equal('card');
   });
 
   it('should refuse a type the guide does not know', () => {

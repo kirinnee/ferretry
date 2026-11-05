@@ -1,6 +1,6 @@
 /**
  * GATE ITEMS: the agenda item the daemon raises when an owner-asked card enters a lane whose stage is a gate
- * (docs/board.md § Gates ask the owner). The wire field is `AgendaItem.gate` (`agenda.ts`); this file owns the
+ * (docs/board.md § Cards show progress). The wire field is `AgendaItem.gate` (`agenda.ts`); this file owns the
  * pure facts both ends read off it — the item's stable reference, the ask it presents, which swipe gives which
  * option, and what a chosen label means.
  */

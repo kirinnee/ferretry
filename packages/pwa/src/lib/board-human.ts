@@ -6,11 +6,16 @@
  * card it serves. Internal cards never reach an overview count while it is off.
  *
  * THE DAEMON OWNS THE FACT: it sends `askedBy` (person | agent), `origin` (human | agent) and `humanParent`
- * on a card, all optional on the wire. {@link taskAsker} is the ONE place the first two are read: `askedBy`
- * is the answer, and `origin` is what an older daemon that sends no `askedBy` still says. A daemon that
+ * on a card, all optional on the wire. {@link taskAsker} is the ONE place the first two are read for the split:
+ * a card is the owner's when `askedBy` is `person` or `origin` is `human`, so a card the daemon shows the owner
+ * is never hidden because its ask could not be matched to the owner's words. A daemon that
  * sends neither is older still, and the app does not guess: it shows every card and hides the filter
  * ({@link splitAvailable}). {@link askedByPerson} is the stricter "a person asked" the cards to test are
  * limited to; there, silence reads as no.
+ *
+ * PUBLIC AND PRIVATE: a newer daemon also sends `visibility` (public | private) on every card, and that is the
+ * answer to "does the Board show it by default" ({@link isPrivateCard}). A card from a daemon that sends none
+ * keeps the older rule ({@link isFerretCard}), so the toggle works the same on an older machine.
  */
 
 import { isSubCard, type TaskRef } from '@ferretry/protocol';
@@ -20,13 +25,19 @@ type TaskAsker = 'person' | 'agent';
 /** A field a newer daemon sends on a card; an older one sends nothing. */
 const declared = (task: object, name: string): unknown => (name in task ? Reflect.get(task, name) : undefined);
 
-/** Who asked for this card, as the daemon said (`askedBy`, else its older `origin`); `null` when it said nothing. */
+/**
+ * Who this card is for, as the daemon said; `null` when it said nothing. `askedBy: person` is the owner's, and
+ * otherwise `origin` decides: a top-level ferret's card from the owner's own chat is `origin: human` yet may be
+ * stored `askedBy: agent` because no owner message matches its ask word for word, and it is still the owner's
+ * card. `askedBy` alone decides only for a daemon that sends no `origin`.
+ */
 export const taskAsker = (task: object): TaskAsker | null => {
   const asked = declared(task, 'askedBy');
-  if (asked === 'person' || asked === 'agent') return asked;
+  if (asked === 'person') return 'person';
   const origin = declared(task, 'origin');
   if (origin === 'human') return 'person';
-  return origin === 'agent' ? 'agent' : null;
+  if (origin === 'agent') return 'agent';
+  return asked === 'agent' ? 'agent' : null;
 };
 
 /** An INTERNAL card: one a ferret asked for, not a person. */
@@ -35,12 +46,28 @@ export const isAgentTask = (task: object): boolean => taskAsker(task) === 'agent
 /** Whether the daemon says a person asked for this card; a daemon that says nothing reads as "no". */
 export const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
 
-/** A FERRET card: one a ferret asked for, or a sub-card no person asked for (hidden unless "Ferret cards" is on). */
-export const isFerretCard = (task: { readonly parent: TaskRef | null }): boolean =>
+/** A FERRET card by the older rule: one a ferret asked for, or a sub-card no person asked for. Only an older daemon needs it. */
+const isFerretCard = (task: { readonly parent: TaskRef | null }): boolean =>
   isAgentTask(task) || (isSubCard(task) && !askedByPerson(task));
 
-/** Whether the daemons behind these cards say who asked for a card: without it there is nothing to split. */
-export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskAsker(task) !== null);
+/** What a daemon said about a card's visibility, `null` when it said nothing (an older daemon). */
+const declaredVisibility = (task: object): 'public' | 'private' | null => {
+  const value = declared(task, 'visibility');
+  return value === 'public' || value === 'private' ? value : null;
+};
+
+/**
+ * A PRIVATE card: the ferrets' own bookkeeping, hidden unless "Show private" is on. The daemon's `visibility` is
+ * believed; a card without one reads by the older {@link isFerretCard} rule.
+ */
+export const isPrivateCard = (task: { readonly parent: TaskRef | null }): boolean => {
+  const visibility = declaredVisibility(task);
+  return visibility === null ? isFerretCard(task) : visibility === 'private';
+};
+
+/** Whether the daemons behind these cards say who asked for a card, or its visibility: without either there is nothing to split. */
+export const splitAvailable = (tasks: readonly object[]): boolean =>
+  tasks.some(task => taskAsker(task) !== null || declaredVisibility(task) !== null);
 
 /** The card an agent card serves, as the daemon declared it: `undefined` when the daemon said nothing, `null` for none. */
 const declaredHumanParent = (task: object): TaskRef | null | undefined => {

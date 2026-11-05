@@ -145,6 +145,11 @@ const wardenCases: SchemaCase[] = [
     value: { ...anomaly, kind: 'input_stuck' },
   },
   {
+    name: 'stuck-inbox flag',
+    schema: warden.WardenStuckInboxFlagSchema,
+    value: { ...anomaly, kind: 'inbox_stuck' },
+  },
+  {
     name: 'failover account view',
     schema: warden.WardenFailoverAccountViewSchema,
     value: { agent: 'agent', eligible: true },
@@ -676,5 +681,18 @@ describe('the flags a Warden view carries (B144)', () => {
 
     should(warden.wardenFlags({ anomalies: [flag] })).deepEqual([flag]);
     should(warden.wardenFlags({ anomalies: [flag], stuckInput: [stuck] })).deepEqual([flag, stuck]);
+  });
+
+  it('should list the ferrets whose inbox is stuck last, from their own field (B148)', () => {
+    const flag = { kind: 'owner_request' as const, sessionId: 's-1', status: 'running' as const, detail: 'asked' };
+    const stuck = { kind: 'input_stuck' as const, sessionId: 's-2', status: 'running' as const, detail: 'stuck' };
+    const inbox = { kind: 'inbox_stuck' as const, sessionId: 's-3', status: 'waiting' as const, detail: 'queued' };
+
+    should(warden.wardenFlags({ anomalies: [flag], stuckInbox: [inbox] })).deepEqual([flag, inbox]);
+    should(warden.wardenFlags({ anomalies: [flag], stuckInput: [stuck], stuckInbox: [inbox] })).deepEqual([
+      flag,
+      stuck,
+      inbox,
+    ]);
   });
 });

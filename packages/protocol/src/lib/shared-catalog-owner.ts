@@ -31,6 +31,7 @@ import {
   SharedCatalogItemIdSchema,
 } from './shared-catalog.ts';
 import { CatalogChangesSchema } from './shared-catalog-diff.ts';
+import { CatalogLinkIdSchema } from './shared-catalog-link.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 
 export const SHARED_CATALOGS_PATH = '/v1/catalogs';
@@ -166,7 +167,11 @@ export const OwnedSharedItemVersionSchema = z.strictObject({
   /** Skills only: how many files it holds. */
   fileCount: z.number().int().min(0).optional(),
   /** Every catalog lists the current version, so this is the live catalogs for it and empty for any other. */
-  usedBy: z.strictObject({ catalogIds: z.array(SharedCatalogIdSchema).readonly() }),
+  usedBy: z.strictObject({
+    catalogIds: z.array(SharedCatalogIdSchema).readonly(),
+    /** Links serving this version that are pending, live or ending (catalogs 3f-5); absent from a daemon that has no links. */
+    linkIds: z.array(CatalogLinkIdSchema).readonly().optional(),
+  }),
 });
 export type OwnedSharedItemVersion = z.infer<typeof OwnedSharedItemVersionSchema>;
 

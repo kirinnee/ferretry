@@ -40,7 +40,9 @@ export class AgendaItemDraftDiscard implements AgendaChangeObserver {
   constructor(private readonly drafts: { discard(sessionId: string, item: AgendaId): Promise<void> }) {}
 
   async changed(sessionId: string, change: AgendaBoardChange): Promise<void> {
-    if (change.addressed === undefined) return;
-    await this.drafts.discard(sessionId, change.addressed.id).catch(() => undefined);
+    // An answer that rested the item sent what the draft held, so it goes too; a chat reply keeps it (above).
+    const id = change.addressed?.id ?? (change.change === 'answered' ? change.item?.id : undefined);
+    if (id === undefined) return;
+    await this.drafts.discard(sessionId, id).catch(() => undefined);
   }
 }

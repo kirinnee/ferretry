@@ -109,3 +109,25 @@ export const cardModel = (item: AgendaItem): CardModel => {
           : undefined,
   };
 };
+
+/** The buttons an answer row draws, and whether "Done · closes" is one of them. */
+export interface AnswerRowLayout {
+  /** "Done · closes &F12" takes the → slot when the card gave fewer than three answers; with three it sits under them. */
+  readonly closeInRow: boolean;
+  /** The buttons on the row, which sets how many words each says (`agendaAnswerText`). */
+  readonly slots: number;
+}
+
+/**
+ * What the answer row draws for `model`: its answers, Request changes when the row has a composer to take its words
+ * (`requestChanges`), and "Done · closes" when the item offers it (`doneClose`). The row and the deck's arrow-key hints
+ * both count through this, so a label is cut to the same words on the button and beside its key.
+ */
+export const answerRowLayout = (
+  model: Pick<CardModel, 'answers' | 'requestChanges'>,
+  drawn: { readonly requestChanges: boolean; readonly doneClose: boolean },
+): AnswerRowLayout => {
+  const answers = model.answers.length + (drawn.requestChanges && model.requestChanges !== undefined ? 1 : 0);
+  const closeInRow = drawn.doneClose && answers < 3;
+  return { closeInRow, slots: answers + (closeInRow ? 1 : 0) };
+};

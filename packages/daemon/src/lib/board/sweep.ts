@@ -18,13 +18,22 @@
  *    `&F20 can go ahead: &F18 merged.` Nobody else is.
  *
  * NO NEWS. A card's move, block, drop, reopen or done is never typed into anybody's chat — not the
- * lead's, and not as a batched digest. The owner (2026-10-30): "there should not be any append or prepend
- * on any feature". The ferret that finished tells its lead in its own words, the board shows the state,
- * and the card's history keeps every event.
+ * lead's, not alone, and not in any digest: the owner's "no batched digest" rule (2026-10-30: "there should
+ * not be any append or prepend on any feature") still holds for everything the board, and every other part
+ * of Ferretry, sends. The one digest the owner has allowed (2026-11-03) is for FERRET messages that a
+ * ferret labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers together with the
+ * receiver's other pending ferret messages (docs/message-delivery.md § Labels and combined delivery). A
+ * board message is the daemon's, never labelled, and never held. The ferret that finished tells its lead in
+ * its own words, the board shows the state, and the card's history keeps every event.
  *
  * 3. **A helper whose ferret ended is closed**: a sub-card with no PR to ship, assigned to a ferret that is gone for
  *    longer than {@link HELPER_ENDED_GRACE_MS}, closes as "helper finished" (docs/board.md § Sub-cards close
  *    themselves). A sub-card whose ferret is merely idle, unreadable or the lead itself is never closed here.
+ *
+ * 4. **A card whose ferret ended goes back to its lead**: an open card in a working lane (`active` or `review`),
+ *    whose assignee is gone for longer than the grace, is assigned to the nearest live ancestor of that ferret,
+ *    with `returned to <lead>: <ferret> finished` in its history (docs/board.md § A finished helper's card goes
+ *    back to its lead). It sits behind rule 3: a helper that closes is not also returned.
  *
  * The first sight of a card is a baseline: a daemon that boots onto a board with a thousand cards says
  * nothing about any of them.
@@ -37,16 +46,22 @@ import {
   formatTaskRef,
   InstantSchema,
   isBlockerDone,
-  isSubCard,
   laneOf,
   type TaskRef,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { cardStaleAfterMs, presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
+import {
+  cardStaleAfterMs,
+  presenceOf,
+  type SessionLivenessGuard,
+  type SessionLivenessSource,
+  type SessionRoster,
+} from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
 import { cardCategory, type LaneSets } from './graph.ts';
 import { noticeRecipient } from './notice-route.ts';
-import { HELPER_ENDED_GRACE_MS, isPrFreeHelper } from './sub-card-close.ts';
+import { endedForGrace, lineageThrough, returnTarget } from './return-to-lead.ts';
+import { isHandedHelper, isPrFreeHelper } from './sub-card-close.ts';
 import type { BoardClock, BoardDiagnostics } from './ports.ts';
 
 /** How often the daemon sweeps the board. */
@@ -87,6 +102,15 @@ export interface SweepPlan {
   readonly nudges: readonly BoardNudge[];
   /** The open helpers whose ferret ended with no PR to ship: they close. */
   readonly closes: readonly BoardTaskId[];
+  /** The open cards whose ferret ended and that have a live lead above it: they go back to that lead. */
+  readonly returns: readonly CardReturn[];
+}
+
+/** One card going back: to `lead`, because `from` (its ferret) ended. */
+interface CardReturn {
+  readonly id: BoardTaskId;
+  readonly lead: string;
+  readonly from: string;
 }
 
 export interface SweepBoard {
@@ -179,10 +203,7 @@ const unblockNudge = (
  * bookkeeping), with no PR to ship, whose session is gone and untouched for the grace.
  */
 const helperEnded = (view: BoardTaskView, roster: SessionRoster, nowMs: number): boolean => {
-  if (!isSubCard(view) || view.assignee === null || view.assignee === view.owner) return false;
-  if (!isPrFreeHelper(view) || presenceOf(roster, view.assignee) !== 'dead') return false;
-  const touched = Date.parse(view.lastTouchedAt ?? view.createdAt);
-  return Number.isNaN(touched) || nowMs - touched >= HELPER_ENDED_GRACE_MS;
+  return isHandedHelper(view) && isPrFreeHelper(view) && endedForGrace(view, roster, effectiveAssignee(view), nowMs);
 };
 
 /**
@@ -203,10 +224,16 @@ export const planSweep = (memory: SweepMemory, board: SweepBoard, roster: Sessio
   const nudged: Record<string, string> = {};
   const nudges: BoardNudge[] = [];
   const closes: BoardTaskId[] = [];
+  const returns: CardReturn[] = [];
   for (const view of board.views) {
     if (!isOpen(view, board)) continue;
     if (helperEnded(view, roster, nowMs)) {
       closes.push(view.id);
+      continue;
+    }
+    const lead = returnTarget(view, cardCategory(view, board.laneSets), roster, nowMs);
+    if (lead !== null) {
+      returns.push({ id: view.id, lead, from: effectiveAssignee(view) });
       continue;
     }
     const unblocked = unblockNudge(view, memory.seen[view.id], board, byId, roster);
@@ -227,7 +254,7 @@ export const planSweep = (memory: SweepMemory, board: SweepBoard, roster: Sessio
       message: nudgeMessage(view, idle, laneName(board, view, view.laneId)),
     });
   }
-  return { memory: { v: 1, sweptAt: now, nudged, seen }, nudges, closes };
+  return { memory: { v: 1, sweptAt: now, nudged, seen }, nudges, closes, returns };
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -252,8 +279,18 @@ export interface BoardSweepPorts {
     sweepBoard(): Promise<SweepBoard>;
     /** Closes a helper whose ferret ended; `true` when it closed. */
     closeEndedHelper(id: BoardTaskId): Promise<boolean>;
+    /**
+     * Hands a card whose ferret ended to its live lead; `true` when it moved. `settle` holds the standing of the
+     * sessions the return rests on and hands the card's write a fresh roster of them (see {@link SessionLivenessGuard}).
+     */
+    returnToLead(
+      id: BoardTaskId,
+      plan: { readonly lead: string; readonly from: string },
+      settle: <T>(work: (fresh: SessionRoster) => Promise<T>) => Promise<T>,
+    ): Promise<boolean>;
   };
   readonly sessions: SessionLivenessSource;
+  readonly guard: SessionLivenessGuard;
   readonly memory: SweepMemoryStore;
   readonly nudges: BoardNudgeSender;
   readonly clock: BoardClock;
@@ -265,6 +302,7 @@ export interface SweepReport {
   readonly nudged: readonly BoardTaskId[];
   readonly unblocked: readonly BoardTaskId[];
   readonly closed: readonly BoardTaskId[];
+  readonly returned: readonly BoardTaskId[];
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -280,7 +318,7 @@ export class BoardSweep {
   constructor(private readonly ports: BoardSweepPorts) {}
 
   async tick(): Promise<SweepReport> {
-    if (this.running) return { nudged: [], unblocked: [], closed: [] };
+    if (this.running) return { nudged: [], unblocked: [], closed: [], returned: [] };
     this.running = true;
     try {
       return await this.sweep();
@@ -319,8 +357,21 @@ export class BoardSweep {
         (error: unknown) => this.ports.diagnostics.warn(`could not close helper &${id}: ${messageOf(error)}`),
       );
     }
+    const returned: BoardTaskId[] = [];
+    for (const { id, lead, from } of plan.returns) {
+      const line = lineageThrough(roster, from, lead);
+      if (line === null) continue;
+      await this.ports.board
+        .returnToLead(id, { lead, from }, async work => await this.ports.guard.settled(line, work))
+        .then(
+          done => {
+            if (done) returned.push(id);
+          },
+          (error: unknown) => this.ports.diagnostics.warn(`could not return &${id} to ${lead}: ${messageOf(error)}`),
+        );
+    }
     const marks = Object.fromEntries(nudged.map(id => [id, now]));
     await this.ports.memory.write({ ...plan.memory, seen, nudged: { ...plan.memory.nudged, ...marks } });
-    return { nudged, unblocked, closed };
+    return { nudged, unblocked, closed, returned };
   }
 }

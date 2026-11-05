@@ -27,7 +27,13 @@ const theme = (mode: 'light' | 'dark' = 'dark', overrides: Partial<Record<ThemeT
   const colors = Object.fromEntries(
     THEME_TOKENS.map((token, index) => [token, `#0000${(index + 1).toString(16).padStart(2, '0')}`]),
   ) as Record<ThemeToken, string>;
-  return { colors: { ...colors, ...overrides }, font: 'Inter, system-ui, sans-serif', mode, radius: 4 };
+  return {
+    backdrop: '#0a0b0c',
+    colors: { ...colors, ...overrides },
+    font: 'Inter, system-ui, sans-serif',
+    mode,
+    radius: 4,
+  };
 };
 
 const spec = (payload: string): ChartSpec => {
@@ -89,6 +95,21 @@ describe('fy-render palette — the diagram cache key', () => {
     // Two dark themes that differ in one hue are two keys: "dark" alone would keep a stale diagram up.
     should(paletteKey(theme('dark', { 'viz-3': '#123456' }))).not.equal(base);
     should(paletteKey({ ...theme('dark'), font: 'Georgia, serif' })).not.equal(base);
+    // The surface the diagram sits on is part of the key: a page that repaints it redraws the diagram.
+    should(paletteKey({ ...theme('dark'), backdrop: '#0b0b0d' })).not.equal(base);
+  });
+});
+
+describe('fy-render palette — Mermaid edge labels', () => {
+  test('should paint the edge-label box in what the diagram sits on, not in the card surface', () => {
+    const read = { ...theme('dark'), backdrop: '#0b0b0d' };
+    should(mermaidThemeVariables(read).colors.edgeLabelBackground).equal('#0b0b0d');
+    should(mermaidThemeVariables(read).colors.edgeLabelBackground).not.equal(read.colors.surface);
+  });
+
+  test('should fall back to the page background when nothing painted could be read', () => {
+    const read = { ...theme('dark'), backdrop: '' };
+    should(mermaidThemeVariables(read).colors.edgeLabelBackground).equal(read.colors.bg);
   });
 });
 
@@ -99,7 +120,8 @@ describe('fy-render palette — Mermaid theme variables', () => {
     const variables = mermaidThemeVariables(read);
 
     // Assert
-    const tokenValues = new Set(Object.values(read.colors));
+    // The edge-label box is the one variable painted from what the diagram sits on rather than from a token.
+    const tokenValues = new Set([...Object.values(read.colors), read.backdrop]);
     for (const [key, value] of Object.entries(variables.colors)) {
       should(MERMAID_COLOR_VARIABLES as readonly string[]).containEql(key);
       should(tokenValues.has(value)).be.true();
@@ -295,5 +317,38 @@ describe('fy-render chart configuration — callbacks', () => {
       'Runs: 1 KiB, 2 s',
     );
     should(pie.tooltip.callbacks.label({ dataset: { label: 'Share' }, label: 'Build', raw: 3 })).equal('Build: 3');
+  });
+});
+
+describe('fy-render chart — value-axis tick labels', () => {
+  type Callback = (value: number, index: number, ticks: readonly { readonly value: number }[]) => string;
+  const callbackOf = (config: ChartConfiguration, scale: 'y' | 'r'): Callback => {
+    const ticks = config.options?.scales?.[scale]?.ticks as { callback?: Callback } | undefined;
+    if (ticks?.callback === undefined) throw new Error(`no tick callback on scale ${scale}`);
+    return ticks.callback;
+  };
+
+  test('should give every tick on a money axis one format, from the whole tick list', () => {
+    const config = chartConfiguration(
+      spec('{kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [5, 25]}]}'),
+      0,
+      theme(),
+      interaction,
+    );
+    const callback = callbackOf(config, 'y');
+    should(callback(5, 1, [{ value: 0 }, { value: 5 }, { value: 10 }])).equal('$5');
+    should(callback(5, 2, [{ value: 0 }, { value: 2.5 }, { value: 5 }])).equal('$5.00');
+  });
+
+  test('should do the same on a radar scale', () => {
+    const config = chartConfiguration(
+      spec('{kind: radar, x: [A, B, C], y: {format: money}, series: [{name: Cost, data: [5, 25, 10]}]}'),
+      0,
+      theme(),
+      interaction,
+    );
+    const callback = callbackOf(config, 'r');
+    should(callback(10, 1, [{ value: 0 }, { value: 10 }, { value: 20 }])).equal('$10');
+    should(callback(10, 1, [{ value: 0 }, { value: 7.5 }, { value: 10 }])).equal('$10.00');
   });
 });

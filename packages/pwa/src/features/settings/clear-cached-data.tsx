@@ -55,33 +55,36 @@ export function ClearCachedDataSetting({ onClear }: ClearCachedDataSettingProps)
         )
       }
       explanation={`${settingDefinition('clear-cached-data').description} Nothing on your machines is removed and no pairing is forgotten; the next open reads everything afresh.`}
-      control={() => (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-[44px]"
-          disabled={phase === 'clearing' || phase === 'confirming'}
-          onClick={() => setPhase('confirming')}
-        >
-          {phase === 'clearing' ? 'Clearing…' : 'Clear'}
-        </Button>
-      )}
+      dataAttributes={{ 'data-clear-cached-data': phase }}
+      control={() =>
+        // While asking, the question below is the control, as it was before the row was compact.
+        phase === 'confirming' ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-[44px]"
+            aria-label={phase === 'clearing' ? undefined : 'Clear cached data'}
+            disabled={phase === 'clearing'}
+            onClick={() => setPhase('confirming')}
+          >
+            {phase === 'clearing' ? 'Clearing…' : 'Clear'}
+          </Button>
+        )
+      }
     >
-      <div data-clear-cached-data={phase}>
-        {phase === 'confirming' ? (
-          <div className="flex flex-wrap items-center gap-2 px-panel pb-3">
-            <span className="text-meta text-fg">Clear this device’s cached sessions and messages?</span>
-            <Button type="button" variant="danger" size="sm" className="min-h-[44px]" onClick={clear}>
-              <Trash2 size={14} aria-hidden="true" />
-              <span className="ml-1">Clear</span>
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setPhase('idle')}>
-              Keep it
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      {phase === 'confirming' ? (
+        <div className="flex flex-wrap items-center gap-2 px-panel pb-3">
+          <span className="text-meta text-fg">Clear this device’s cached sessions and messages?</span>
+          <Button type="button" variant="danger" size="sm" className="min-h-[44px]" onClick={clear}>
+            <Trash2 size={14} aria-hidden="true" />
+            <span className="ml-1">Clear</span>
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setPhase('idle')}>
+            Keep it
+          </Button>
+        </div>
+      ) : null}
     </SettingRow>
   );
 }

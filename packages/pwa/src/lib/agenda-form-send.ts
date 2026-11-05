@@ -3,8 +3,11 @@
  * which the daemon records by field id and delivers to the ferret as the numbered answer (`formWords`).
  *
  * - The composer's text answers the form's `text` field; a form with no such field sends it as the answer's note.
- * - A required field left empty is asked about ONCE: the first Send says which, the next Send as it stands goes through.
- * - Nothing picked and nothing to send is not a form answer; Send says so instead.
+ * - EVERY FIELD IS OPTIONAL (&F922): Send goes through with any subset, at once — no field is asked about first. What
+ *   the owner skipped reads `(skipped)` in the one numbered answer the ferret receives (`formWords`).
+ * - Words with nothing picked still go, as a plain reply to the form's ask (`{ kind: 'open-question' }`, a form's ask
+ *   kind): the shape every app and daemon already takes, so an older one never meets a form answer with no field.
+ * - Nothing picked and nothing typed is not an answer; Send says so instead.
  */
 
 import {
@@ -13,7 +16,6 @@ import {
   type AgendaItem,
   formAnswerOf,
   formFieldName,
-  formMissing,
   formValues,
 } from '@ferretry/protocol';
 import { useMemo, useRef } from 'react';
@@ -60,29 +62,19 @@ export const formAnswersFrom = (
 
 export type FormSendPlan =
   | { readonly kind: 'send'; readonly action: InboxAction }
-  | { readonly kind: 'ask'; readonly message: string; readonly signature: string }
   | { readonly kind: 'nothing'; readonly message: string };
 
-/** What Send does now: answer, ask once about the empty fields, or say there is nothing to send. */
-export const planFormSend = (
-  item: Pick<AgendaItem, 'fields'>,
-  picks: FormPicks,
-  typed: string,
-  askedAbout: string | undefined,
-): FormSendPlan => {
+/** What Send does now: answer with whatever is filled in (any subset), or say there is nothing to send. */
+export const planFormSend = (item: Pick<AgendaItem, 'fields'>, picks: FormPicks, typed: string): FormSendPlan => {
   const fields = item.fields ?? [];
   const answers = formAnswersFrom(fields, picks, typed);
-  if (answers.length === 0) return { kind: 'nothing', message: 'Fill in at least one field before you send the form.' };
-  const missing = formMissing(fields, answers);
-  const signature = missing.map(field => field.id).join(',');
-  if (missing.length > 0 && askedAbout !== signature) {
-    const names = missing.map(field => `${String(fields.indexOf(field) + 1)}. ${formFieldName(field)}`).join(', ');
+  if (answers.length === 0 && typed.trim() === '')
+    return { kind: 'nothing', message: 'Pick an answer or type something before you send the form.' };
+  if (answers.length === 0)
     return {
-      kind: 'ask',
-      signature,
-      message: `Not answered yet: ${names}. Press Send again to send it as it is.`,
+      kind: 'send',
+      action: { kind: 'respond', label: FORM_SENT_LABEL, response: { kind: 'open-question', answer: typed.trim() } },
     };
-  }
   const hasTextField = fields.some(field => field.type === 'text');
   const note = hasTextField || typed.trim() === '' ? {} : { note: typed.trim() };
   return {
@@ -98,7 +90,7 @@ export const planFormSend = (
 
 /**
  * Sends the form `key` names through `schedule` (the Inbox's undo window), or throws the plain sentence the composer
- * shows under its box: the one question about empty fields, or that there is nothing to send.
+ * shows under its box: that there is nothing to send.
  */
 export const sendForm = (
   key: string,
@@ -106,12 +98,8 @@ export const sendForm = (
   typed: string,
   schedule: (action: InboxAction) => void,
 ): void => {
-  const plan = planFormSend(item, agendaForms.picks(key, item.fields ?? []), typed, agendaForms.asked(key));
+  const plan = planFormSend(item, agendaForms.picks(key, item.fields ?? []), typed);
   if (plan.kind === 'nothing') throw new Error(plan.message);
-  if (plan.kind === 'ask') {
-    agendaForms.markAsked(key, plan.signature);
-    throw new Error(plan.message);
-  }
   schedule(plan.action);
   agendaForms.forget(key);
 };
@@ -140,7 +128,7 @@ export interface FormComposer<T> {
   readonly api: T;
   /** A form item is open: Send answers it even with an empty box. */
   readonly allowEmptySend: boolean;
-  /** Bumped when a pick changes, so the "Not answered yet" line under the box goes away with it. */
+  /** Bumped when a pick changes, so the "nothing to send" line under the box goes away with it. */
   readonly clearErrorOn?: number;
 }
 

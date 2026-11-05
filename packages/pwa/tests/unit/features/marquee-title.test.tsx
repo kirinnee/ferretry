@@ -28,7 +28,9 @@ const draw = async (title: string): Promise<void> => {
   view = await mount(<MarqueeTitle title={title} />);
 };
 const heading = (): HTMLElement => must(view?.container.querySelector<HTMLElement>('[data-agenda-title]'), 'title');
-const click = (): Promise<void> => interact(() => heading().click());
+const toggle = (): HTMLButtonElement | null => heading().querySelector<HTMLButtonElement>('[data-agenda-title-toggle]');
+/** A tap on the title: on its open-the-whole-title button when it has one, else on the heading itself. */
+const click = (): Promise<void> => interact(() => (toggle() ?? heading()).click());
 
 beforeEach(() => {
   textWidth = 300;
@@ -100,6 +102,36 @@ describe('the one-line title', () => {
     expect(heading().hasAttribute('data-expanded')).toBe(false);
   });
 
+  test('a title too long for its row opens with a real button in the heading, so a keyboard can open it too', async () => {
+    textWidth = 100;
+    await draw('Short');
+    expect(toggle()).toBeNull();
+    await view?.unmount();
+    textWidth = 300;
+    reduceMotion(true);
+    await draw('A title that is far too long for the row');
+    const button = must(toggle(), 'the title button');
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(heading().tagName).toBe('H2');
+    // The whole title is still the heading's words; the cut copy is only drawn.
+    expect(must(button.querySelector('.fy-item-view__title-text'), 'words').textContent).toBe(
+      'A title that is far too long for the row',
+    );
+    await interact(() => button.click());
+    expect(heading().hasAttribute('data-expanded')).toBe(true);
+    expect(must(toggle(), 'the title button').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('a linked title keeps its link: no button of its own', async () => {
+    view = await mount(
+      <MarqueeTitle title="A title that is far too long for the row" wrap={text => <a href="#x">{text}</a>} />,
+    );
+    expect(heading().hasAttribute('data-marquee')).toBe(true);
+    expect(toggle()).toBeNull();
+  });
+
   test('starts folded again when the title changes, and stops watching when it goes', async () => {
     await draw('A title that is far too long for the row');
     await click();
@@ -157,5 +189,41 @@ describe('the title where motion is reduced', () => {
     await draw(LONG);
     expect(heading().hasAttribute('data-cut')).toBe(false);
     expect(view?.container.querySelector('.fy-item-view__title-probe')).toBeNull();
+  });
+});
+
+describe('measuring again when the fonts change', () => {
+  test('measures again once the page’s fonts are in and when a later face loads, and stops listening when it goes', async () => {
+    const listeners = new Set<() => void>();
+    let fontsIn: () => void = () => undefined;
+    const fonts = {
+      ready: new Promise<void>(resolve => {
+        fontsIn = resolve;
+      }),
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    };
+    const own = Object.getOwnPropertyDescriptor(document, 'fonts');
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    try {
+      textWidth = 100;
+      await draw('A title the web face makes wider');
+      expect(heading().hasAttribute('data-marquee')).toBe(false);
+      // The face is wider than the fallback: the same words no longer fit, and nothing resized.
+      textWidth = 300;
+      await interact(() => fontsIn());
+      expect(heading().hasAttribute('data-marquee')).toBe(true);
+      textWidth = 100;
+      await interact(() => {
+        for (const listener of listeners) listener();
+      });
+      expect(heading().hasAttribute('data-marquee')).toBe(false);
+      await view?.unmount();
+      view = null;
+      expect(listeners.size).toBe(0);
+    } finally {
+      if (own === undefined) Reflect.deleteProperty(document, 'fonts');
+      else Object.defineProperty(document, 'fonts', own);
+    }
   });
 });

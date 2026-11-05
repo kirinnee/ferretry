@@ -93,12 +93,6 @@ const open = async (context: BrowserContext, theme: string, view: string): Promi
   return page;
 };
 
-/** A one-pixel PNG, as a picked file. */
-const PIXEL = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64',
-);
-
 const shot = async (page: Page, name: string): Promise<void> => {
   const path = join(shotsDir, `board-detail-v2-${name}.png`);
   await page.screenshot({ path });
@@ -137,37 +131,10 @@ try {
           await small.close();
         }
       }
-      // The verdict on a card to try: Not good opens the composer (words and a picture); Close spins in place.
-      for (const [label, context] of [
-        ['phone', phone],
-        ['desktop', desktop],
-      ] as const) {
-        const page = await open(context, theme, 'tested');
-        const detail = page.locator('.fy-board-detail');
-        await detail.locator('[data-verdict="not-good"]').click();
-        const composer = page.locator('[data-board-send-back]');
-        await composer.locator('button[data-composer-attach]:not([disabled])').waitFor({ state: 'visible' });
-        await composer
-          .locator('textarea, [contenteditable="true"]')
-          .first()
-          .fill('Pairing worked, but the QR is cut off on a small phone.');
-        await composer.locator('input[type="file"]:not([accept])').setInputFiles([
-          { name: 'qr-cut-off.png', mimeType: 'image/png', buffer: PIXEL },
-          { name: 'settings.png', mimeType: 'image/png', buffer: PIXEL },
-        ]);
-        await composer.locator('[aria-label="Attached files"] li').nth(1).waitFor({ state: 'visible' });
-        await shot(page, `not-good-${scheme}-${label}`);
-        await composer.locator('button', { hasText: 'Cancel' }).click();
-        const works = detail.locator('[data-verdict="works"]');
-        const before = await works.boundingBox();
-        await works.click();
-        await detail.locator('[data-verdict="works"][data-pending] [data-spinner]').waitFor({ state: 'visible' });
-        const after = await works.boundingBox();
-        if (before === null || after === null || Math.abs(before.width - after.width) > 0.5)
-          fail('Close changed width while it spins');
-        if (!(await detail.locator('[data-verdict="not-good"]').isDisabled()))
-          fail('Not good is pressable while Close is on its way');
-        await shot(page, `in-flight-${scheme}-${label}`);
+      // A card draws no owner button: no Done, no Not good, on any state of the card.
+      for (const view of ['card', 'tested', 'ask'] as const) {
+        const page = await open(desktop, theme, view);
+        if ((await page.locator('.fy-board-done, [data-verdict]').count()) > 0) fail(`${view} draws an owner button`);
         await page.close();
       }
     } finally {

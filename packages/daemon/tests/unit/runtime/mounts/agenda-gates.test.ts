@@ -1,5 +1,5 @@
 /**
- * The agenda route's half of a card's gate (docs/board.md § Gates ask the owner): an answer to a gate item goes to
+ * The agenda route's half of a card's gate (docs/board.md § Cards show progress): an answer to a gate item goes to
  * the gate items first, with who the board records the move as and whether this caller may move cards at all; their
  * refusals come back as the route's statuses. The gate items themselves are `tests/unit/board/gate-items.test.ts`.
  */
@@ -225,7 +225,7 @@ describe('a gate answer on the agenda route', () => {
     // Assert
     should(response).eql({
       status: 400,
-      body: { error: 'files can only come with the answer to a gate item', code: 'invalid' },
+      body: { error: 'files can only come with the answer to a card ask', code: 'invalid' },
     });
   });
 

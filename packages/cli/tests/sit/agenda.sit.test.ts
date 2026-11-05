@@ -10,11 +10,14 @@ import {
   AgendaItemSchema,
   type AgendaSnapshot,
   agendaBriefOf,
+  DAEMON_FEATURES,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { type AgendaLedger, applyAgendaCommandToSession } from '../../../daemon/src/lib/agenda/state-machine.ts';
 import pkg from '../../package.json' with { type: 'json' };
+import { health } from '../unit/daemon/fixtures';
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';
 
 // SIT journeys; SIT_DRIVER picks the compiled binary (no coverage) or in-process (coverage). See
@@ -52,6 +55,7 @@ class FakeAgendaDaemon {
   readonly #items: AgendaItem[] = [];
   readonly #resolved: ResolvedAgendaItem[] = [];
   #ordinal = 0;
+  #conversations: AgendaLedger['conversations'];
   readonly #server: ReturnType<typeof Bun.serve>;
 
   constructor() {
@@ -64,6 +68,11 @@ class FakeAgendaDaemon {
 
   stop(): void {
     this.#server.stop(true);
+  }
+
+  /** An item the daemon itself opened, as it would on a card's behalf: the CLI never raises one. */
+  seed(item: AgendaItem): void {
+    this.#items.push(item);
   }
 
   #snapshot(): AgendaSnapshot {
@@ -81,6 +90,11 @@ class FakeAgendaDaemon {
   async #handle(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     const session = `/v1/sessions/${encodeURIComponent(SESSION)}`;
+    if (path === '/v1/health' && request.method === 'GET') {
+      return Response.json(
+        health({ features: [DAEMON_FEATURES.agendaConversation, DAEMON_FEATURES.agendaLinkMeaning] }),
+      );
+    }
     // A daemon of this build answers the agenda spelling and the older attention one alike
     // (docs/agenda.md § Compatibility), and refuses anything else the way the real one does.
     if (path !== `${session}/agenda` && path !== `${session}/attention`) {
@@ -97,7 +111,11 @@ class FakeAgendaDaemon {
       } catch {
         return Response.json({ error: 'invalid body' }, { status: 400 });
       }
-      this.#apply(AgendaActionRequestSchema.parse(body));
+      try {
+        this.#apply(AgendaActionRequestSchema.parse(body));
+      } catch (error) {
+        return Response.json({ error: String(error), code: 'invalid' }, { status: 400 });
+      }
       return Response.json(this.#snapshot());
     }
     return Response.json({ error: 'method not allowed' }, { status: 405 });
@@ -131,10 +149,58 @@ class FakeAgendaDaemon {
       return;
     }
 
+    if (request.action === 'log' || request.action === 'merge' || request.action === 'split') {
+      const actor = { kind: 'agent' as const, sessionId: SESSION, name: null };
+      const ledger: AgendaLedger = {
+        sessionId: SESSION,
+        nextId: this.#ordinal + 1,
+        updatedAt: EPOCH,
+        conversations: this.#conversations,
+        entries: [
+          ...this.#items.map(item => ({ lifecycle: 'active' as const, origin: actor, item })),
+          ...this.#resolved.map(item => ({ lifecycle: 'addressed' as const, origin: actor, item })),
+        ],
+      };
+      // This seam exercises shipped transitions behind the binary's HTTP/argv/schema path. No live daemon or tmux.
+      const command =
+        request.action === 'log'
+          ? {
+              action: 'log' as const,
+              actor,
+              at: EPOCH,
+              id: request.id,
+              mode: request.mode,
+              words: request.text,
+              chat: {
+                messageId: request.messageId ?? 'owner-1',
+                at: EPOCH,
+                text: request.messageId === 'owner-2' ? 'Second owner message' : '    Use eu-west, please.\n',
+              },
+            }
+          : request.action === 'merge'
+            ? { action: 'merge' as const, actor, at: EPOCH, id: request.id, from: request.from }
+            : {
+                action: 'split' as const,
+                actor,
+                at: EPOCH,
+                id: request.id,
+                request: { source: 'agent-raised' as const, sourceRef: null, ...request.item },
+                moveCards: request.moveCards,
+              };
+      const mutation = applyAgendaCommandToSession(ledger, SESSION, command);
+      if (!mutation.ok) throw new Error(mutation.error.message);
+      this.#conversations = mutation.ledger.conversations;
+      this.#ordinal = mutation.ledger.nextId - 1;
+      this.#items.splice(0, this.#items.length, ...mutation.snapshot.items);
+      this.#resolved.splice(0, this.#resolved.length, ...mutation.snapshot.resolved);
+      return;
+    }
+
     if (
       request.action === 'edit' ||
       request.action === 'progress' ||
       request.action === 'surface' ||
+      request.action === 'rest' ||
       request.action === 'snooze' ||
       request.action === 'unsnooze'
     ) {
@@ -294,7 +360,17 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
     try {
       // Act
-      const added = await cli(['add', '--json-file', body, '--urgency', 'today', '--link', '#F12']);
+      const added = await cli([
+        'add',
+        '--json-file',
+        body,
+        '--urgency',
+        'today',
+        '--link',
+        '#F12',
+        '--link',
+        'Plan=&F9=The plan to keep the login alive',
+      ]);
       const listed = await cli(['ls']);
 
       // Assert
@@ -306,7 +382,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
       should(listed.out).containEql('recommended: Defaults');
       should(listed.out).containEql('impact: You stay logged out — by today');
       should(listed.out).containEql('terms: OCI = Oracle Cloud Infrastructure');
-      should(listed.out).containEql('links: #F12');
+      should(listed.out).containEql('links: #F12 · Plan (The plan to keep the login alive)');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -347,9 +423,35 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(refused.err).containEql('give the card a title: --title');
   });
 
+  it('lists the open agenda before opening another, then opens it with --new "<why none fits>"', async () => {
+    // Act — !A5 is still open: search, check, then open.
+    const refused = await cli(['add', 'Ship the release now?', '--title', 'Release', '--kind', 'yesno']);
+    const listed = await cli(['ls']);
+
+    // Assert — a ferret (nobody at the terminal) is refused with the candidates and the way out; a yes or no cannot be
+    // squeezed into !A5, so no edit is offered and nothing is opened.
+    should(refused.code).not.equal(0);
+    should(refused.err).containEql('Search, check, then open: these agendas are open, closest first.');
+    should(refused.err).containEql('!A5  needs you  Work login plan');
+    should(refused.err).containEql('Should this join !A5?');
+    should(refused.err).containEql('which an agenda edit cannot add');
+    should(refused.err).not.containEql('fy agenda edit A5');
+    should(refused.err).containEql('--new "<why none fits; closest is !A5>"');
+    should(listed.out).not.containEql('!A6');
+  });
+
   it('lists a titled yes or no card as a heading, the ask and its swipe answers, and answers it with --yes', async () => {
     // Act
-    const added = await cli(['add', 'Ship the release now?', '--title', 'Release', '--kind', 'yesno']);
+    const added = await cli([
+      'add',
+      'Ship the release now?',
+      '--title',
+      'Release',
+      '--kind',
+      'yesno',
+      '--new',
+      'the release is its own decision',
+    ]);
     const listed = await cli(['ls']);
     const answered = await cli(['done', '!A6', '--yes']);
     const history = await cli(['history']);
@@ -358,7 +460,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(added.code).equal(0, added.err);
     should(listed.out).containEql('!A6  [agent-raised]  Release');
     should(listed.out).containEql('ask: Ship the release now?');
-    should(listed.out).containEql('answers: ← Yes · → No');
+    should(listed.out).containEql('answers: ← No · → Yes');
     should(answered.code).equal(0, answered.err);
     should(history.out).containEql('chose "Yes"');
   });
@@ -389,5 +491,119 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(listed.out).containEql('notice: read, not answered (pinged)');
     should(retired.code).not.equal(0);
     should(retired.err).containEql("unknown option '--title'");
+  });
+
+  it('lists a card agenda that carries a card ask as one agenda, read through the wire contract (docs/agenda.md § Card asks)', async () => {
+    // Arrange — the daemon opened ONE agenda for a card at its gate, carrying the ask with its How to test
+    daemon.seed(
+      AgendaItemSchema.parse({
+        id: 'A90',
+        source: 'task',
+        sourceRef: 'card-agenda:F412',
+        subject: 'Try it: open the Board',
+        why: '&F412 reached Released.',
+        waitingSince: EPOCH,
+        howToResolve: 'Answer the card’s ask here (its buttons move the card); reply to talk it over.',
+        ask: { kind: 'open-question' },
+        kind: 'reply',
+        title: 'Badge fix',
+        task: { id: 'F412' },
+        stage: 'test',
+        cardAsks: [
+          {
+            gate: {
+              cardId: 'F412',
+              laneId: 'released',
+              laneName: 'Released',
+              entry: 2,
+              projectId: 'p-1',
+              options: [
+                { id: 'done', label: 'Done', outcome: 'close' },
+                { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+              ],
+            },
+            at: EPOCH,
+            howToTest: '1. Open the Board\n2. Look for the badge',
+          },
+        ],
+        raisedBy: 'daemon',
+        raisedBySession: null,
+        raisedByName: null,
+      }),
+    );
+
+    // Act
+    const listed = await cli(['ls']);
+
+    // Assert — the real CLI parsed the card ask and lists the agenda, never a separate gate item
+    should(listed.code).equal(0, listed.err);
+    should(listed.out).containEql('!A90');
+    should(listed.out).containEql('Badge fix');
+  });
+});
+
+describe('agenda conversation verbs (SIT)', () => {
+  it('logs exact words and repeated replies, refuses duplicates, merges and splits through the CLI', async () => {
+    const server = new FakeAgendaDaemon();
+    const run = (args: string[]) =>
+      driver.run(['agenda', ...args, '--session', SESSION], {
+        FY_URL: server.baseUrl,
+        FY_TOKEN: 'sit-test-token',
+        FY_SESSION_ID: SESSION,
+      });
+    try {
+      const add = (ask: string) =>
+        run([
+          'add',
+          ask,
+          '--title',
+          ask,
+          '--premise',
+          'A release is ready.',
+          '--context',
+          'The deploy needs a region.',
+          '--new',
+          'This decision has its own rollout schedule.',
+        ]);
+      for (const ask of ['Which region?', 'Which quota?']) {
+        const result = await add(ask);
+        should(result.code).equal(0, result.err);
+      }
+      for (const message of ['owner-1', 'owner-2']) {
+        const result = await run(['log', 'A1', '--reply', 'OK', '--message', message]);
+        should(result.code).equal(0, result.err);
+      }
+      const duplicate = await run(['log', 'A1', '--reply', 'OK', '--message', 'owner-1']);
+      should(duplicate.code).not.equal(0);
+      should(duplicate.err).containEql('already');
+      const logged = await run(['ls', '--json']);
+      should(logged.code).equal(0, logged.err);
+      should(logged.out).containEql('    Use eu-west, please.\\n');
+      should(logged.out.match(/"text":\s*"OK"/gu) ?? []).have.length(2);
+      const merged = await run(['merge', 'A1', 'A2']);
+      should(merged.code).equal(0, merged.err);
+      const split = await run([
+        'split',
+        'A1',
+        'Which cache?',
+        '--title',
+        'Cache',
+        '--premise',
+        'A cache is needed.',
+        '--context',
+        'Cache rollout has its own schedule.',
+      ]);
+      should(split.code).equal(0, split.err);
+      should(split.out).containEql('!A3');
+      const listed = await run(['ls', '--json']);
+      should(listed.code).equal(0, listed.err);
+      should(listed.out).containEql('splitInto');
+      should(listed.out).containEql('splitFrom');
+      const history = await run(['history', '--json']);
+      should(history.code).equal(0, history.err);
+      should(history.out).containEql('mergedInto');
+    } finally {
+      server.stop();
+    }
   });
 });

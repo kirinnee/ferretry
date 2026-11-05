@@ -1,8 +1,8 @@
 import { appendFile, mkdir, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { deepFreezeJson, type JsonValue } from '../../../lib/json.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import type { SendLedger, SendRecord, SendSettlement } from '../../../lib/session/send/types.ts';
-import { deepFreezeJson, type JsonValue } from '../../../lib/json.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 
 /** How many sessions' ledgers are kept read; the one read longest ago is let go first and read whole if asked again. */
@@ -162,8 +162,9 @@ export class FileSendLedger implements SendLedger {
     let handle: Awaited<ReturnType<typeof open>>;
     try {
       handle = await open(this.file(id), 'r');
-    } catch {
+    } catch (error) {
       this.read.delete(id);
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return new Map();
     }
     try {

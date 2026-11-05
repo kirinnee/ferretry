@@ -5,8 +5,14 @@ import {
   AGENDA_READS_PER_DAEMON,
   applyAgendaAction,
   DaemonAgendaClient,
+  fetchAgendaConversation,
   fetchAgendaCount,
   fetchAgendaSnapshot,
+  fetchAgendaVersion,
+  fetchAgendaVersions,
+  MAX_CONVERSATION_FRAGMENTS,
+  MERGE_NEEDS_UPDATE,
+  markAgendaVersionSeen,
   SNOOZE_NEEDS_UPDATE,
   sendAgendaReplies,
 } from '../../src/lib/agenda-client.ts';
@@ -61,6 +67,13 @@ const tick = async (): Promise<void> => {
 };
 
 describe('attention transport', () => {
+  it('should opt into the channel on Send now and retain its request identity', async () => {
+    await sendAgendaReplies(daemonA, scopeA, async (_input, init) => {
+      should(new Headers(init?.headers).get('x-fy-agenda-channel')).equal('1');
+      should(new Headers(init?.headers).get('x-fy-request-id')).not.be.empty();
+      return response(snapshot(scopeA.sessionId));
+    });
+  });
   it('binds board, derived badge, and mutation requests to the paired daemon', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -85,6 +98,7 @@ describe('attention transport', () => {
     should(new Headers(calls[2]?.init.headers).get('content-type')).equal('application/json');
     should(new Headers(calls[2]?.init.headers).get('x-fy-request-id')).not.be.empty();
     should(calls[2]?.init.method).equal('POST');
+    for (const call of calls) should(new Headers(call.init.headers).get('x-fy-agenda-channel')).equal('1');
     should(JSON.parse(String(calls[2]?.init.body))).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 
@@ -230,6 +244,107 @@ describe('DaemonAgendaClient', () => {
     await client.respond(daemonA, scopeA, 'A2', choice, 'ok', true);
 
     should(actions).deepEqual([{ action: 'resolve', id: 'A2', response: choice, note: 'ok', gate: true }]);
+  });
+
+  it('names the ask version an answer was given to only where the machine checks it, or the ask was replaced', async () => {
+    const actions: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'EU' };
+
+    // An older machine refuses the field as malformed, and has never replaced an ask: version 1 is left out
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, 1);
+    // A machine that reports `agenda.asks.1` checks it
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaAsks]),
+    });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, 1);
+    // A replaced ask proves the machine replaces asks, whatever its health has said so far
+    wires.clearDaemon(daemonA.daemonId);
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, 2);
+
+    should(actions).deepEqual([
+      { action: 'resolve', id: 'A1', response: choice },
+      { action: 'resolve', id: 'A1', response: choice, askVersion: 1 },
+      { action: 'resolve', id: 'A1', response: choice, askVersion: 2 },
+    ]);
+  });
+
+  it('names the ask version a Done or a Skip was given from under the same rule as an answer', async () => {
+    const actions: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+
+    // An older machine refuses the field as malformed: version 1 is left out, and so is a close that names none
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    await client.resolve(daemonA, scopeA, 'A1', undefined, 1);
+    await client.dismiss(daemonA, scopeA, 'A1', 'no', 1);
+    await client.resolve(daemonA, scopeA, 'A1', 'ok');
+    // A machine that reports `agenda.asks.1` checks it
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaAsks]),
+    });
+    await client.resolve(daemonA, scopeA, 'A1', undefined, 1);
+    await client.dismiss(daemonA, scopeA, 'A1', undefined, 2);
+
+    should(actions).deepEqual([
+      { action: 'resolve', id: 'A1' },
+      { action: 'dismiss', id: 'A1', note: 'no' },
+      { action: 'resolve', id: 'A1', note: 'ok' },
+      { action: 'resolve', id: 'A1', askVersion: 1 },
+      { action: 'dismiss', id: 'A1', askVersion: 2 },
+    ]);
+  });
+
+  it('names the card ask an answer is to only for a machine that takes it, and only for a gate answer', async () => {
+    const actions: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Done' };
+    const reference = 'gate:F1:tested:2';
+
+    // A machine whose health has not answered, or that predates card asks, would refuse the field as malformed
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, true, undefined, undefined, reference);
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, true, undefined, undefined, reference);
+    // A machine that reports `agenda.card-asks.1` takes it, on a gate answer only
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaCardAsks]),
+    });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, true, undefined, undefined, reference);
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, undefined, reference);
+
+    should(actions).deepEqual([
+      { action: 'resolve', id: 'A1', response: choice, gate: true },
+      { action: 'resolve', id: 'A1', response: choice, gate: true },
+      { action: 'resolve', id: 'A1', response: choice, gate: true, cardAsk: reference },
+      { action: 'resolve', id: 'A1', response: choice },
+    ]);
   });
 
   it('sends the files of a Not good with its answer, and none when there are none', async () => {
@@ -840,5 +955,159 @@ describe('DaemonAgendaClient reading many boards', () => {
     await Promise.allSettled(reads);
     should(asked).have.length(AGENDA_READS_PER_DAEMON);
     should(client.store.agenda(daemonSessionScope(daemonA, 's0'))).be.undefined();
+  });
+});
+
+describe('item versions', () => {
+  it('lists the versions of an item from the item’s own path, with this device’s last seen', async () => {
+    const asked: Array<{ url: string; method: string | undefined }> = [];
+    const list = {
+      sessionId: 'same/session',
+      id: 'A1',
+      latest: 2,
+      seen: 1,
+      versions: [
+        { version: 1, at: '2026-07-31T00:00:00.000Z', by: 'ferret', change: 'created', lifecycle: 'active' },
+        { version: 2, at: '2026-07-31T00:01:00.000Z', by: 'owner', change: 'replied', lifecycle: 'active' },
+      ],
+    };
+
+    const got = await fetchAgendaVersions(daemonA, scopeA, 'A1', async (input, init) => {
+      asked.push({ url: String(input), method: init?.method });
+      return response(list);
+    });
+
+    should(got).deepEqual(list);
+    should(asked).deepEqual([
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda/A1/versions', method: 'GET' },
+    ]);
+  });
+
+  it('fetches one version in full, and marks a version seen with a PUT that answers the mark that stands', async () => {
+    const asked: Array<{ url: string; method: string | undefined; body: unknown }> = [];
+    const version = {
+      version: 2,
+      at: '2026-07-31T00:01:00.000Z',
+      by: 'owner',
+      change: 'replied',
+      lifecycle: 'active',
+      item: snapshot('same/session', undefined, 1).items[0],
+    };
+    const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      asked.push({ url: String(input), method: init?.method, body: init?.body });
+      return String(input).endsWith('/seen') ? response({ seen: 3 }) : response(version);
+    };
+
+    const got = await fetchAgendaVersion(daemonA, scopeA, 'A1', 2, fetcher);
+    const mark = await markAgendaVersionSeen(daemonA, scopeA, 'A1', 2, fetcher);
+
+    should(got.version).equal(2);
+    should(mark).equal(3);
+    should(asked.map(each => [each.method, each.url.replace('https://a.example.test', '')])).deepEqual([
+      ['GET', '/v1/sessions/same%2Fsession/agenda/A1/versions/2'],
+      ['PUT', '/v1/sessions/same%2Fsession/agenda/A1/seen'],
+    ]);
+    should(asked[1]?.body).equal(JSON.stringify({ version: 2 }));
+  });
+});
+
+describe('merging agendas (agenda.conversation.1)', () => {
+  it('sends a merge to a machine that offers it, and refuses to send one to a machine that does not', async () => {
+    const wires = new AgendaWireDirectory();
+    const actions: unknown[] = [];
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+
+    await should(client.merge(daemonA, scopeA, 'A2', 'A5')).be.rejectedWith(MERGE_NEEDS_UPDATE);
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire]),
+    });
+    await should(client.merge(daemonA, scopeA, 'A2', 'A5')).be.rejectedWith(MERGE_NEEDS_UPDATE);
+    should(actions).be.empty();
+
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
+    });
+    await client.merge(daemonA, scopeA, 'A2', 'A5');
+    should(actions).deepEqual([{ action: 'merge', id: 'A2', from: 'A5' }]);
+  });
+});
+
+describe('the whole stored conversation', () => {
+  const at = '2026-11-01T10:00:00.000Z';
+  const entry = (text: string) => ({ at, by: 'owner', text, via: 'reply' });
+
+  it('reads every fragment through the cursor and joins an entry that arrived in pieces', async () => {
+    const asked: string[] = [];
+    const pages: Record<string, unknown> = {
+      'index=0&offset=0': { total: 2, index: 0, offset: 0, entry: entry('Hello, '), next: { index: 0, offset: 7 } },
+      'index=0&offset=7': { total: 2, index: 0, offset: 7, entry: entry('world.'), next: { index: 1, offset: 0 } },
+      'index=1&offset=0': { total: 2, index: 1, offset: 0, entry: entry('Second.') },
+    };
+
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', undefined, async input => {
+      const url = String(input);
+      asked.push(url.replace('https://a.example.test', ''));
+      return response(pages[url.split('?')[1] ?? ''] ?? {});
+    });
+
+    should(got.entries.map(each => each.text)).deepEqual(['Hello, world.', 'Second.']);
+    should(got.capped).equal(false);
+    should(asked[0]).equal('/v1/sessions/same%2Fsession/agenda/A1/conversation?index=0&offset=0');
+  });
+
+  it('reads a frozen earlier thread by its version, and a thread with no entries as empty', async () => {
+    const asked: string[] = [];
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', { version: 3 }, async input => {
+      asked.push(String(input));
+      return response({ total: 0, index: 0, offset: 0 });
+    });
+
+    should(got).deepEqual({ entries: [], capped: false });
+    should(asked).have.length(1);
+    should(asked[0]).containEql('version=3');
+  });
+
+  it('reads only the entries from where it starts to where it stops', async () => {
+    const asked: string[] = [];
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', { from: 2, until: 4 }, async input => {
+      const url = new URL(String(input));
+      asked.push(`${url.searchParams.get('index')}.${url.searchParams.get('offset')}`);
+      const index = Number(url.searchParams.get('index'));
+      return response({
+        total: 6,
+        index,
+        offset: 0,
+        entry: entry(`e${index}`),
+        next: { index: index + 1, offset: 0 },
+      });
+    });
+
+    should(asked).deepEqual(['2.0', '3.0']);
+    should(got.entries.map(each => each.text)).deepEqual(['e2', 'e3']);
+    should(got.capped).equal(false);
+  });
+
+  it('says it was capped, and gives only whole entries, when the thread is longer than one read takes', async () => {
+    let calls = 0;
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', undefined, async input => {
+      calls += 1;
+      const url = new URL(String(input));
+      const index = Number(url.searchParams.get('index'));
+      const offset = Number(url.searchParams.get('offset'));
+      return response({ total: 3, index, offset, entry: entry('x'), next: { index, offset: offset + 1 } });
+    });
+
+    should(calls).equal(MAX_CONVERSATION_FRAGMENTS);
+    should(got.capped).equal(true);
+    should(got.entries).deepEqual([]);
   });
 });

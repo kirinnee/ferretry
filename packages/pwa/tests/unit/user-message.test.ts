@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { peerEnvelopePreamble, queuedMessageInstruction, turnFileInstruction } from '@ferretry/protocol';
+import {
+  combinedDelivery,
+  peerEnvelopePreamble,
+  queuedMessageInstruction,
+  turnFileInstruction,
+} from '@ferretry/protocol';
 import { peerFrom } from '../../src/lib/peer-message.ts';
 import { readUserMessage, unwrapPastedContent } from '../../src/lib/user-message.ts';
 
@@ -171,5 +176,54 @@ describe('peerFrom', () => {
       from: null,
       body: 'long\ntext',
     });
+  });
+});
+
+describe("a delivery of several ferrets' messages at once", () => {
+  const parts = [
+    {
+      sender: { name: 'rhett', sessionId: 's-rhett', kind: 'message', label: 'action' },
+      body: 'first\n\nafter a blank line',
+    },
+    { sender: { name: 'sada', sessionId: 's-sada', kind: 'question', label: 'blocker' }, body: 'second' },
+    { sender: { name: 'rhett', sessionId: 's-rhett', kind: 'message', label: 'fyi' }, body: 'third' },
+  ] as const;
+  const combined = combinedDelivery(parts, 'fy');
+
+  test('reads each part with its own sender, kind, label and body, in order', () => {
+    const message = readUserMessage(combined);
+    expect(message.kind).toBe('combined');
+    if (message.kind !== 'combined') return;
+    expect(message.parts.map(part => [part.from.name, part.from.kind, part.from.label, part.body])).toEqual([
+      ['rhett', 'message', 'action', 'first\n\nafter a blank line'],
+      ['sada', 'question', 'blocker', 'second'],
+      ['rhett', 'message', 'fyi', 'third'],
+    ]);
+    expect(message.parts[1]?.from.replyExpected).toBe(true);
+  });
+
+  test('reads it from inside a Claude paste wrapper', () => {
+    expect(readUserMessage(`<pasted_content id="c">\n${combined}\n</pasted_content>`).kind).toBe('combined');
+  });
+
+  test("is never the owner's own send, and stands for its first part where a single message is wanted", () => {
+    expect(peerFrom(combined)).toMatchObject({
+      from: { name: 'rhett', label: 'action' },
+      body: 'first\n\nafter a blank line',
+    });
+  });
+
+  test("stays the person's words when the count lies or a person types the header", () => {
+    const lying = combined.replace('[3 messages', '[4 messages');
+    expect(readUserMessage(lying).kind).not.toBe('combined');
+    expect(readUserMessage('[2 messages from ferrets, oldest first — not from the owner]\n\nhello')).toEqual({
+      kind: 'human',
+      text: '[2 messages from ferrets, oldest first — not from the owner]\n\nhello',
+    });
+  });
+
+  test('leaves a single banner a single peer message', () => {
+    const preamble = peerEnvelopePreamble({ name: 'kamila', sessionId: 's2', kind: 'message', clientName: 'fy' });
+    expect(readUserMessage(`${preamble}hi`).kind).toBe('peer');
   });
 });

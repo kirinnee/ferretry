@@ -51,7 +51,7 @@ export interface AgendaInboxComposerProps {
   readonly disabled?: boolean;
   /** The open item is a form: Send runs this instead of chatting, even with an empty box. */
   readonly answerForm?: (() => void) | undefined;
-  /** The open form's picks key: a changed pick clears the "not answered yet" line under the box. */
+  /** The open form's picks key: a changed pick clears the "nothing to send" line under the box. */
   readonly formKey?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];

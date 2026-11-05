@@ -1,7 +1,7 @@
 import type { SessionList, SessionView } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
-import { conditional, jsonResponse } from '../../api/responses.ts';
+import { conditionalWithTag, entityTag, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
@@ -92,9 +92,33 @@ function refuse(error: unknown): never {
  * over the JSON this route already built: one serialisation and one hash, never a second rendering kept
  * only to compare.
  */
-async function list(subsystem: SessionDirectorySubsystem, context: RouteContext): Promise<ApiResponse> {
-  const sessions: SessionList = [...(await subsystem.list().catch(refuse))];
-  return conditional(jsonResponse(sessions), context.request.headers.get('if-none-match'));
+function createListRoute(subsystem: SessionDirectorySubsystem) {
+  /**
+   * The list the last request was answered from, with the body and tag that answer was: ONE previous answer,
+   * so what is held is one body and one list of views however long the daemon runs.
+   *
+   * THE SERIALISATION IS THE COST. On a fleet of ~1,400 sessions the body is ~3.7 MB and stringifying it
+   * stalled the loop for seconds, a dozen times a minute, for apps that were then told nothing had changed.
+   * The reader hands out the same view objects while a session has not moved (and each mark layer keeps its own
+   * output per input), so a list whose elements are, one for one, the objects of the previous list is the same
+   * JSON by construction — its body and tag are reused, and an `If-None-Match` that names the tag is answered
+   * without rendering or hashing anything. Any element that is a different object, or a list of another
+   * length, is rendered afresh: identity may miss a body that happens to be equal, never serve one that differs.
+   */
+  let previous: { readonly sessions: SessionList; readonly response: ApiResponse; readonly etag: string } | undefined;
+  return async (context: RouteContext): Promise<ApiResponse> => {
+    const sessions: SessionList = [...(await subsystem.list().catch(refuse))];
+    if (previous === undefined || !sameSessions(previous.sessions, sessions)) {
+      const response = jsonResponse(sessions);
+      previous = { sessions, response, etag: entityTag(response.body) };
+    }
+    return conditionalWithTag(previous.response, previous.etag, context.request.headers.get('if-none-match'));
+  };
+}
+
+/** Whether two lists hold, position for position, the very same view objects. */
+function sameSessions(left: SessionList, right: SessionList): boolean {
+  return left.length === right.length && left.every((view, at) => view === right[at]);
 }
 
 /** One session in full, or a stated refusal. */
@@ -125,7 +149,7 @@ export function sessionRoutes(subsystem: SessionDirectorySubsystem): readonly Ap
       caller: 'any',
       noStore: true,
       compress: true,
-      handle: async context => await list(subsystem, context),
+      handle: createListRoute(subsystem),
     },
     {
       method: 'GET',

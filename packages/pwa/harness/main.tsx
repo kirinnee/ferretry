@@ -8409,7 +8409,6 @@ const CARD_DETAIL_STORE = new DaemonBoardStore(
 const CARD_DETAIL_AGENDA = {
   store: new DaemonAgendaStore(),
   hydrate: async () => undefined,
-  respond: async () => undefined,
 };
 
 function SessionWorkspaceHarness() {
@@ -8533,7 +8532,6 @@ function SessionWorkspaceHarness() {
             onSearch={() => undefined}
             openCard={{ daemonId: daemon.daemonId, taskId: openCard }}
             phone={layout === 'drawer'}
-            ports={{ sendMessage: async () => undefined, startFerret: async () => 'harness-workspace' }}
             search=""
             store={CARD_DETAIL_STORE}
           />

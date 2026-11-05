@@ -21,7 +21,7 @@ import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { Segmented, SettingDisclosureRow, SettingGroup, SettingRow, SettingSwitch } from './setting-row.tsx';
 import { settingDefinition } from './settings-catalog.ts';
 
-export const TEXT_SCALE_OPTIONS = [
+const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
   { id: 'large', label: 'Large', description: '112% of default.' },
   { id: 'larger', label: 'Larger', description: '125% of default.' },
@@ -45,12 +45,12 @@ const WIDTH_HINT: Readonly<Record<ChatWidth, string>> = {
 
 const OPEN_LINK_LABEL: Readonly<Record<OpenLinksIn, string>> = {
   browser: 'Your browser',
-  panel: 'Side panel',
-  computer: 'Default browser',
+  panel: 'Ferretry side panel',
+  computer: "Your computer's default browser",
 };
 
 const COMPUTER_LINKS_NOTE =
-  'Default browser opens links in whichever browser this computer picks, so a link router can choose the profile.';
+  "Your computer's default browser opens links in whichever browser this computer picks, so a link router can choose the profile.";
 
 /** The sentence each choice carries, one per line, so the (i) says what every option does and not only the chosen one. */
 function OptionNotes({ notes }: { readonly notes: readonly (readonly [label: string, text: string])[] }) {

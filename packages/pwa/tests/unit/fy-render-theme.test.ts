@@ -91,6 +91,34 @@ describe('readTheme', () => {
     should(theme.radius).equal(0);
   });
 
+  test('should read the backdrop from the first opaque background up the tree, skipping transparent layers', () => {
+    // Arrange
+    const page = element({ bg: '#0B0B0D' });
+    page.style.backgroundColor = '#0B0B0D';
+    const layer = document.createElement('div');
+    layer.style.backgroundColor = 'rgba(0, 0, 0, 0)';
+    page.appendChild(layer);
+    const host = document.createElement('div');
+    layer.appendChild(host);
+
+    // Act
+    const theme = readTheme(host, fakeCanvas());
+
+    // Assert — the page's colour, found two ancestors up, and not the (different) --surface token.
+    should(theme.backdrop).equal('#0b0b0d');
+  });
+
+  test('should fall back to --bg when no ancestor paints an opaque background', () => {
+    // Arrange
+    const host = element({ bg: '#101112', surface: '#202122' });
+
+    // Act
+    const theme = readTheme(host, fakeCanvas());
+
+    // Assert
+    should(theme.backdrop).equal('#101112');
+  });
+
   test('should read the document root, with the shared pixel, when no element is given', () => {
     // Act — this DOM has no canvas, so the shared pixel is `null` and nothing throws.
     const theme = readTheme(null);

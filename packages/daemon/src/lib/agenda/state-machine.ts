@@ -1,58 +1,118 @@
 import {
   AGENDA_SCHEMA_VERSION,
   AGENDA_URGENT_WAKE_MS,
+  canCarryCardAsk,
   type AgendaAsk,
   type AgendaBrief,
   type AgendaCardAnswer,
-  type AgendaClearableField,
-  type AgendaConfirms,
-  type AgendaCopyPlanRef,
-  type AgendaTaskPlanRef,
-  type AgendaSignInRuleSuggestionRef,
   type AgendaCardRow,
-  type AgendaPhoneApprovalRef,
-  type AgendaTwoFactorSeedRef,
+  type AgendaClearableField,
+  agendaItemRevision,
+  type AgendaConfirms,
+  type AgendaConversationEntry,
+  AgendaConversationEntrySchema,
+  type AgendaCopyPlanRef,
   type AgendaDisposition,
   type AgendaErrorCode,
+  type AgendaCardAsk,
   type AgendaGate,
   type AgendaHistoryEntry,
+  AgendaHistoryEntrySchema,
   type AgendaId,
+  AgendaIdSchema,
   type AgendaInputRef,
   type AgendaItem,
   AgendaItemSchema,
   type AgendaKind,
+  type AgendaPhoneApprovalRef,
   type AgendaResponse,
+  type AgendaResting,
   type AgendaRevisableField,
   type AgendaRevision,
+  type AgendaSignInRuleSuggestionRef,
   type AgendaSnapshot,
   type AgendaSource,
+  type AgendaStage,
+  type AgendaTaskPlanRef,
+  type AgendaTwoFactorSeedRef,
   type AgendaUndelivered,
   agendaBriefOf,
-  agendaCardKind,
-  agendaFormProblems,
   agendaBriefRequiredProblems,
+  agendaCardKind,
+  applyAgendaTabEdits,
+  type AgendaTabEdit,
   agendaEditShapeProblems,
+  agendaFormProblems,
   agendaNoticeProblems,
   agendaOfferCloseProblems,
   agendaOptionDetailProblems,
+  agendaReplyEnvelopeLength,
   agendaShape,
+  agendaAnswerProblems,
   agendaShapeProblems,
+  agendaStage,
+  agendaStageOfKind,
+  agendaState,
   agendaWakeAt,
+  fitAgendaItem,
   formAnswerProblems,
   formatTaskRef,
+  cardAgendaReference,
+  cardAskReference,
+  cardAskStage,
+  hasOpenCardAsk,
+  openCardAsks,
+  parseCardAgendaReference,
   gateReference,
-  parseGateFollowupReference,
-  parseGateReference,
-  MAX_AGENDA_DETAIL_LENGTH,
-  MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
+  MAX_AGENDA_CARDS,
+  MAX_AGENDA_LINKS,
+  MAX_AGENDA_REST_WHY_LENGTH,
+  MAX_AGENDA_REPLY_ENVELOPE_LENGTH,
+  MAX_AGENDA_REPLY_LENGTH,
   MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_REVISIONS,
+  MAX_AGENDA_STAGES,
+  parseGateFollowupReference,
+  parseGateReference,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
+  restoredLegacyAgendaReply,
+  StoredAgendaItemSchema,
+  StoredResolvedAgendaItemSchema,
   type TaskRef,
 } from '@ferretry/protocol';
-import type { z } from 'zod';
+import { z } from 'zod';
+import {
+  type AgendaArchiveCursor,
+  AgendaArchiveCursorSchema,
+  type AgendaArchiveRecord,
+  AgendaArchiveRecordSchema,
+} from './archive.ts';
+import {
+  interleaved,
+  loggedFromChat,
+  mergedThreads,
+  type RecordedItem,
+  relinked,
+  responseWords,
+  resumedConversation,
+  said,
+  seedConversation,
+  speakerOf,
+  wordsOf,
+} from './item-words.ts';
+import {
+  applyCardAsk,
+  type CardAskOperation,
+  closeRefusal,
+  joinCardAsks,
+  leaveCardAsks,
+  restRefusal,
+  sealCardAsks,
+  withCardAsks,
+  withoutCardAsks,
+} from './card-asks.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -99,18 +159,42 @@ export type AgendaEntry =
   | { readonly lifecycle: 'active'; readonly origin: AgendaActor; readonly item: AgendaItem }
   | { readonly lifecycle: 'addressed'; readonly origin: AgendaActor; readonly item: ResolvedAgendaItem };
 
+const ArchivedOwnerHistorySchema = z.array(z.strictObject({ id: AgendaIdSchema, entry: AgendaHistoryEntrySchema }));
+
 /** Internal durable state. Active state and count are both derived from the entry lifecycle. */
 export interface AgendaLedger {
+  /** Bounded position in the private append-only sidecar. */
+  readonly archive?: AgendaArchiveCursor;
+  /** Transaction-local records. The repository appends these before committing and clears them from the hot file. */
+  readonly archivePending?: readonly AgendaArchiveRecord[];
   readonly sessionId: string;
   readonly nextId: number;
   readonly entries: readonly AgendaEntry[];
+  /** Full threads, outside the bounded current item, committed atomically with the ledger. Never sent in snapshots. */
+  readonly conversations?: Readonly<Record<string, readonly AgendaConversationEntry[]>>;
+  /** Original legacy entries whose bounded history/revisions had to move to make room for new metadata. */
+  readonly carriedEntries?: Readonly<Record<string, AgendaEntry>>;
   readonly updatedAt: string;
   /**
    * The entries on disk that do not read as an item, exactly as they were read: kept so a write never drops
    * them, counted as the snapshot's `parseErrors`, and never handed to a transition. Absent when there are none.
    */
   readonly unreadable?: readonly unknown[];
+  /**
+   * The shape the file was written in: {@link AGENDA_LEDGER_VERSION} once this daemon read it; absent on a file an
+   * older one wrote, which reads as 1 and is brought to the current shape as it is read ({@link toChannel}).
+   */
+  readonly version?: number;
 }
+
+/**
+ * The ledger shape this daemon writes. 2 (docs/agenda.md § States): an item an owner's reply parked RESTS, saying
+ * how (`resting`), and every item names its stage. 3 (§ The conversation): an item stores what is said on it
+ * (`conversation`), seeded from its history as it is read. Version 4 moves full threads into the ledger-level
+ * conversations map, leaving bounded recent tails in current items and wire snapshots. Card asks (docs/agenda.md
+ * § Card asks) need no new shape marker: {@link liftGateItems} reads every ledger, of any version, into them.
+ */
+export const AGENDA_LEDGER_VERSION = 4;
 
 /** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
 export interface AgendaCardFields {
@@ -157,8 +241,13 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly cards?: readonly AgendaCardRow[];
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
-  /** The card gate the item asks about (`AgendaGate`); only the daemon raises one, under its `gate:` reference. */
+  /** DEPRECATED: a standalone gate item (`AgendaGate`). No daemon raises one any more; kept for an item carried over. */
   readonly gate?: AgendaGate;
+  /**
+   * The card asks the new agenda carries (docs/agenda.md § Card asks): only the daemon raises one with any, when it
+   * opens the agenda of a card that nobody's agenda carries yet. `gateAttached` mirrors the first open one.
+   */
+  readonly cardAsks?: readonly AgendaCardAsk[];
   /**
    * The item starts on the FERRET's turn, in discussion (`waitingFor: 'discussion'`), instead of the owner's: a
    * gate's follow-up conversation, which the owner opened by saying Not good. Only the daemon raises one so.
@@ -169,6 +258,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
    * goes on as that one stood (`AgendaCarried`). Only the daemon carries one (a gate item moved on a hand-over, an item moved to its agenda home).
    */
   readonly carried?: AgendaCarried;
+  /** What the item needs from the owner now (`--stage`); its kind says when absent (`agendaStageOfKind`). */
+  readonly stage?: AgendaStage;
 }
 
 /**
@@ -185,7 +276,14 @@ export type AgendaCarried = Pick<
   | 'infoRequests'
   | 'history'
   | 'revisions'
+  | 'conversation'
   | 'urgentAt'
+  | 'resting'
+  | 'stage'
+  | 'stages'
+  | 'cardAsks'
+  | 'gateAttached'
+  | 'gateAttachedChangedAt'
 >;
 
 const CARRIED_FIELDS = [
@@ -197,7 +295,15 @@ const CARRIED_FIELDS = [
   'infoRequests',
   'history',
   'revisions',
+  'conversation',
   'urgentAt',
+  'resting',
+  'stage',
+  'stages',
+  // An agenda carried to another ferret takes its card asks with it: they are the card's, not the ferret's.
+  'cardAsks',
+  'gateAttached',
+  'gateAttachedChangedAt',
 ] as const satisfies readonly (keyof AgendaCarried)[];
 
 /** The carried fields an item has, and only those: an absent one stays absent. */
@@ -206,13 +312,36 @@ const agendaCarriedOf = (item: AgendaCarried): AgendaCarried =>
     CARRIED_FIELDS.flatMap(field => (item[field] === undefined ? [] : [[field, item[field]]])),
   ) as AgendaCarried;
 
-/** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
+/** One RESTING item a nudge is about: which rest (`since`) and how many nudges it had had when the Warden looked. */
+export interface AgendaNudgeTarget {
+  readonly id: AgendaId;
+  readonly since: string;
+  readonly nudges: number;
+}
+
+/**
+ * What an edit may change: the writing, the stage, and — REPLACING the ask (`askReplaced`) — the ask, the kind, the
+ * answers and the questions; never the reason or who raised the item.
+ */
 export interface EditAgendaPatch extends AgendaBrief {
   readonly subject?: string;
   readonly title?: string;
   readonly context?: string | null;
+  readonly stage?: AgendaStage;
+  readonly ask?: AgendaAsk;
+  readonly kind?: AgendaKind;
+  readonly answers?: AgendaCardAnswer[];
+  /** The why line and the how-to-resolve line (`agenda.patch.1`): rewritten, never removed. */
+  readonly why?: string;
+  readonly howToResolve?: string;
+  /** READ BEFORE WRITE (`agenda.patch.1`): the revision the writer read; refused `stale` once the item moved on. */
+  readonly revision?: string;
   /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
   readonly clear?: readonly AgendaClearableField[];
+  /** Tab operations (`agenda.tabs.1`), turned into the new `tabs` before the edit applies (`withTabEdits`). */
+  readonly tabEdits?: readonly AgendaTabEdit[];
+  /** The edit's tab operations removed every tab of the ferret's own: `tabs` is cleared. Set by `withTabEdits`. */
+  readonly clearTabs?: true;
 }
 
 export type AgendaCommand =
@@ -229,6 +358,8 @@ export type AgendaCommand =
       readonly response: AgendaResponse;
       readonly note?: string | null;
       readonly receipt?: string;
+      /** The ask the answer was given to (`AgendaItem.askVersion`); refused `ask_changed` once the ask moved on. */
+      readonly askVersion?: number;
       readonly at: string;
     }
   | {
@@ -236,6 +367,8 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      /** The ask this close was given from (a to-do's Done); refused `ask_changed` once the ask moved on. */
+      readonly askVersion?: number;
       readonly at: string;
     }
   | {
@@ -243,6 +376,8 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      /** The ask this close was given from; refused `ask_changed` once the ask moved on. */
+      readonly askVersion?: number;
       readonly at: string;
     }
   | {
@@ -289,6 +424,40 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly note?: string | null;
+      /** The chat message the words came from, kept on the conversation entry; a message is logged on an item once. */
+      readonly fromChat?: { readonly messageId: string; readonly at: string };
+      readonly at: string;
+    }
+  | {
+      /**
+       * The ferret LOGS the owner's chat message on the item (`fy agenda log`, docs/agenda.md § The conversation): the
+       * daemon copied `chat` verbatim from the session's own messages. The owner's words rest the item, as a reply
+       * does; then the ferret's `words` either answer them (`reply`: the item returns to the owner, to its old place)
+       * or say what it is doing (`rest`: the item rests as working).
+       */
+      readonly action: 'log';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly mode: 'reply' | 'rest';
+      readonly words: string;
+      readonly chat: { readonly messageId: string; readonly at: string; readonly text: string };
+      readonly at: string;
+    }
+  | {
+      /** `from` is merged into `id` (`fy agenda merge`): one conversation, every card and link kept, `from` closed. */
+      readonly action: 'merge';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly from: AgendaId;
+      readonly at: string;
+    }
+  | {
+      /** A new item is split off `id` (`fy agenda split`), linked both ways; `moveCards` go along with it. */
+      readonly action: 'split';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly request: RaiseAgendaRequest;
+      readonly moveCards?: readonly TaskRef[];
       readonly at: string;
     }
   | {
@@ -299,6 +468,42 @@ export type AgendaCommand =
       readonly why?: string | null;
       /** The ferret says it is urgent: a SNOOZED item wakes (`backFromParked`), at most once an hour. */
       readonly now?: boolean;
+      readonly at: string;
+    }
+  | {
+      /**
+       * The raising ferret takes an item on without asking anything yet (docs/agenda.md § States): it RESTS as
+       * `working`, quiet and never nudged, `why` saying what it is doing.
+       */
+      readonly action: 'rest';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly why: string;
+      readonly at: string;
+    }
+  | {
+      /**
+       * The Warden decided to nudge the ferret about these RESTING items with one message, `sendId`: each records it
+       * BEFORE the send, so a restart resumes that very message. Each names the rest it saw (`since`, `nudges`); one
+       * that has moved on is left alone. Daemon-only.
+       */
+      readonly action: 'nudging';
+      readonly actor: AgendaActor;
+      readonly items: readonly AgendaNudgeTarget[];
+      readonly sendId: string;
+      readonly at: string;
+    }
+  | {
+      /**
+       * The Warden nudged the ferret about this RESTING item (`rest-nudge.ts`): its nudge record moves on. It names the
+       * rest it nudged for (`since`, `nudges`): a delivery that finishes after the owner replied again, or the ferret
+       * answered, records nothing on the newer rest. Daemon-only.
+       */
+      readonly action: 'nudged';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly since: string;
+      readonly nudges: number;
       readonly at: string;
     }
   | {
@@ -352,15 +557,14 @@ export type AgendaCommand =
     }
   | {
       /**
-       * A card's gate is asked ON this thread (docs/agenda.md § One ask per thing): the thread carries `gateAttached`
-       * and the card raises no gate item of its own; `gate: null` clears it. Daemon-only: the card is the witness.
+       * A card ask on this agenda (docs/agenda.md § Card asks): put on it, restated, withdrawn, or the owner's answer to
+       * it recorded (`CardAskOperation`). Daemon-only: the card's lane is the witness, and the gate engine moved the
+       * card before it records an answer.
        */
-      readonly action: 'attach-gate';
+      readonly action: 'card-ask';
       readonly actor: AgendaActor;
       readonly id: AgendaId;
-      readonly gate: AgendaGate | null;
-      /** The gate the OWNER just answered on this thread: kept in its history, so that gate stays asked for good. */
-      readonly answered?: AgendaGate;
+      readonly operation: CardAskOperation;
       readonly at: string;
     }
   | {
@@ -402,7 +606,12 @@ export type AgendaChange =
   | 'parked'
   | 'unparked'
   | 'woke'
+  | 'rested'
+  | 'nudged'
   | 'answered'
+  | 'logged'
+  | 'merged'
+  | 'split'
   | 'resolved'
   | 'dismissed'
   | 'unchanged';
@@ -417,14 +626,17 @@ export type AgendaMutation =
       readonly snapshot: AgendaSnapshot;
       /** The item on every change that leaves it open; absent for the ones that close it. */
       readonly item?: AgendaItem;
-      /** The item as it was closed, on answered, resolved and dismissed mutations; absent otherwise. */
+      /**
+       * The item as it was closed, on resolved and dismissed mutations and on an answer that closed it; absent
+       * otherwise. An answer that RESTS a ferret's item (`restsOnAnswer`) is `answered` with the open `item` instead.
+       */
       readonly addressed?: ResolvedAgendaItem;
       /** What the daemon changed about the request the caller should be told, as the route prints it. */
       readonly notes?: readonly string[];
     };
 
 export function emptyAgendaLedger(sessionId: string, at: string): AgendaLedger {
-  return { sessionId, nextId: 1, entries: [], updatedAt: at };
+  return { sessionId, nextId: 1, entries: [], updatedAt: at, version: AGENDA_LEDGER_VERSION };
 }
 
 export function isActiveAgenda(entry: AgendaEntry): entry is Extract<AgendaEntry, { lifecycle: 'active' }> {
@@ -445,19 +657,29 @@ function isGateItem(item: Pick<AgendaItem, 'gate' | 'source'>): boolean {
   return item.gate !== undefined && item.source === 'task';
 }
 
-/**
- * The follow-up conversation a gate's Not good opened (`gate-followup:`): raised by the daemon ON BEHALF of the card's
- * ferret, so the ferret whose board holds it edits, surfaces and closes it as its own.
- */
-export function isGateFollowupAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
-  return entry.origin.kind === 'daemon' && isGateFollowupItem(entry.item);
-}
-
 /** A gate follow-up as its item says: the gate producer's `task` source, raised by the daemon, under its reference. */
 export function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return (
     item.raisedBy === 'daemon' && item.source === 'task' && parseGateFollowupReference(item.sourceRef) !== undefined
   );
+}
+
+/**
+ * The agenda the daemon opened for a card nobody's agenda carried (`card-agenda:`, docs/agenda.md § Card asks): like a
+ * follow-up, raised ON BEHALF of the card's ferret, which works and closes it as its own.
+ */
+export function isCardAgendaItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+  return item.raisedBy === 'daemon' && item.source === 'task' && parseCardAgendaReference(item.sourceRef) !== undefined;
+}
+
+/** An item the daemon raised on behalf of the ferret whose board holds it: a gate's follow-up, or a card's agenda. */
+export function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+  return isGateFollowupItem(item) || isCardAgendaItem(item);
+}
+
+/** {@link isOnBehalfItem}, of an entry the daemon raised. */
+export function isOnBehalfAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
+  return entry.origin.kind === 'daemon' && isOnBehalfItem(entry.item);
 }
 
 export function canDismissAgenda(actor: AgendaActor, entry: AgendaEntry): boolean {
@@ -466,7 +688,7 @@ export function canDismissAgenda(actor: AgendaActor, entry: AgendaEntry): boolea
     // A gate is the owner's: no ferret, lead or ancestor answers, closes or rewords one (docs/board.md § Gates).
     if (isGateAgenda(entry)) return false;
     // Confined to its own board (or a sub-ferret's) by `agentConfinedTo` before it gets here.
-    if (isGateFollowupAgenda(entry)) return true;
+    if (isOnBehalfAgenda(entry)) return true;
     if (actor.overSubFerret === true) return !isWardenEscalationAgenda(entry);
     return entry.origin.kind === 'agent' && entry.origin.sessionId === actor.sessionId;
   }
@@ -514,7 +736,12 @@ export function applyAgendaCommandToSession(
  * machine. Keeping this validation in the pure layer prevents corrupt storage
  * from being silently replaced by a fresh board.
  */
-export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedger | null {
+export function parseAgendaLedger(
+  value: unknown,
+  sessionId: string,
+  archived: readonly AgendaArchiveRecord[] = [],
+  recorded?: Readonly<Record<string, RecordedItem>>,
+): AgendaLedger | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   if (
@@ -527,7 +754,29 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   ) {
     return null;
   }
+  const threads = z.record(AgendaIdSchema, z.array(AgendaConversationEntrySchema)).safeParse(raw.conversations ?? {});
+  if (!threads.success) return null;
+  const carriedEntries: Record<string, AgendaEntry> = {};
+  if (raw.carriedEntries !== undefined) {
+    if (raw.carriedEntries === null || typeof raw.carriedEntries !== 'object' || Array.isArray(raw.carriedEntries))
+      return null;
+    for (const [id, value] of Object.entries(raw.carriedEntries)) {
+      const entry = parseAgendaEntry(value, false, []);
+      if (entry === null || entry.item.id !== id) return null;
+      carriedEntries[id] = entry;
+    }
+  }
   const entries: AgendaEntry[] = [];
+  const archive = ArchivedOwnerHistorySchema.safeParse(raw.ownerHistory ?? []);
+  if (!archive.success) return null;
+  const pending = z.array(AgendaArchiveRecordSchema).safeParse(raw.archivePending ?? []);
+  const cursor = AgendaArchiveCursorSchema.optional().safeParse(raw.archive);
+  if (!pending.success || !cursor.success) return null;
+  const archivePending: AgendaArchiveRecord[] = [
+    ...pending.data,
+    ...archive.data.map(record => ({ kind: 'owner-history' as const, ...record })),
+  ];
+  const legacy = raw.version === undefined || raw.version === 1;
   const unreadable: unknown[] = [];
   const ids = new Set<string>();
   let maxId = 0;
@@ -539,7 +788,7 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   // "Couldn't read" for all of them. It still counts as what it was (`setAsideOf`): its id is never reused and
   // it holds its place under the caps, so the board stays one that reads whole should the entry read again.
   for (const rawEntry of raw.entries) {
-    const entry = parseAgendaEntry(rawEntry);
+    const entry = parseAgendaEntry(rawEntry, legacy, archivePending);
     if (entry === null) {
       unreadable.push(rawEntry);
       continue;
@@ -565,13 +814,330 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   ) {
     return null;
   }
-  return parkOwnerReplies({
+  const parked = parkOwnerReplies({
     sessionId,
     nextId: raw.nextId as number,
     entries,
+    ...(Object.keys(threads.data).length === 0 ? {} : { conversations: threads.data }),
+    ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
     updatedAt: raw.updatedAt,
+    ...(cursor.data === undefined ? {} : { archive: cursor.data }),
+    ...(archivePending.length === 0 ? {} : { archivePending }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
   });
+  return liftedOnRead(toChannel(parked, legacy, archived, recorded));
+}
+
+/**
+ * THE MIGRATION TO THE AGENDA AS A CHANNEL (docs/agenda.md § States), read-time, so no file is rewritten until a
+ * transition writes it: every item still reads, and nothing on it is dropped.
+ *
+ * - An open item PARKED as `replied` with no `resting` rests as `waiting-on-ferret`, its reply time its nudge clock.
+ *   One from a file an older daemon wrote (`legacy`) is marked `migrated`: the Warden nudges it once after the
+ *   upgrade, never again, so a board of old replies is not a burst of nudges. One without it here is an item a
+ *   path parked without saying how; it rests the same way, unmarked.
+ * - An item that names no stage gets the one its kind says (`done` once it is closed), as the first of its stages.
+ * - The ledger is marked {@link AGENDA_LEDGER_VERSION}.
+ * - An item with no stored conversation gets one, seeded from the words its history, answers and closing note kept
+ *   ({@link seedConversation}); nothing is dropped, and an item that has one is left as it is. An item with a
+ *   `recorded` version (a board an older daemon wrote after this one kept it) starts from that version's whole thread
+ *   and its merge and split links, and adds only the words said since ({@link resumedConversation}).
+ * - What the fit to the transport bound shed from an item's history of the owner's words goes to `archivePending`.
+ *
+ * Pure, total and idempotent: a ledger already in this shape comes back as it came, the same object.
+ */
+export function toChannel(
+  ledger: AgendaLedger,
+  legacy: boolean,
+  archived: readonly AgendaArchiveRecord[] = [],
+  recorded?: Readonly<Record<string, RecordedItem>>,
+): AgendaLedger {
+  let moved = ledger.version !== AGENDA_LEDGER_VERSION;
+  const conversations = { ...(ledger.conversations ?? {}) };
+  const carriedEntries = { ...(ledger.carriedEntries ?? {}) };
+  const shed: AgendaArchiveRecord[] = [];
+  const entries = ledger.entries.map(entry => {
+    const history = [
+      ...[...archived, ...(ledger.archivePending ?? [])]
+        .filter(
+          (record): record is Extract<AgendaArchiveRecord, { kind: 'owner-history' }> =>
+            record.kind === 'owner-history' && record.id === entry.item.id,
+        )
+        .map(record => record.entry),
+      ...(entry.item.history ?? []),
+    ];
+    const stored = conversations[entry.item.id] ?? entry.item.conversation;
+    const version = recorded?.[entry.item.id];
+    const seed = (): AgendaConversationEntry[] => {
+      const seeded = seedConversation({ ...entry.item, history });
+      return version === undefined ? seeded : resumedConversation(version, seeded);
+    };
+    const previous = stored ?? seed();
+    const full = interleaved(previous, undefined);
+    if (full.some((word, index) => word !== previous[index])) moved = true;
+    conversations[entry.item.id] = full;
+    const normalized = channelItem(version === undefined ? entry.item : relinked(entry.item, version), legacy);
+    const item = fitAgendaItem(boundedConversation(normalized, full));
+    (entry.lifecycle === 'active' ? AgendaItemSchema : ResolvedAgendaItemSchema).parse(item);
+    shed.push(...shedOwnerHistory(entry.item, item));
+    if (
+      item.history !== normalized.history ||
+      item.revisions !== normalized.revisions ||
+      (entry.item.stages !== undefined && normalized.stages !== entry.item.stages)
+    ) {
+      carriedEntries[entry.item.id] ??= entry;
+    }
+    if (item === entry.item) return entry;
+    moved = true;
+    return { ...entry, item } as AgendaEntry;
+  });
+  return moved
+    ? {
+        ...ledger,
+        entries,
+        ...(Object.keys(conversations).length === 0 ? {} : { conversations }),
+        ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
+        ...(shed.length === 0 ? {} : { archivePending: [...(ledger.archivePending ?? []), ...shed] }),
+        version: AGENDA_LEDGER_VERSION,
+      }
+    : ledger;
+}
+
+/** The owner's words in history entries that `fitted` shed from `before` (they are kept in the sidecar, as the fit does). */
+function shedOwnerHistory(before: AgendaItem | ResolvedAgendaItem, after: AgendaItem | ResolvedAgendaItem) {
+  const kept = (after.history ?? []).map(record => JSON.stringify(record));
+  const shed: AgendaArchiveRecord[] = [];
+  for (const record of before.history ?? []) {
+    const index = kept.indexOf(JSON.stringify(record));
+    if (index >= 0) kept.splice(index, 1);
+    else if (['replied', 'needs-info', 'discuss'].includes(record.kind))
+      shed.push({ kind: 'owner-history', id: before.id, entry: record });
+  }
+  return shed;
+}
+
+/** A bounded recent tail; complete entries only. The durable thread is held separately. */
+function boundedConversation<Item extends AgendaItem | ResolvedAgendaItem>(
+  item: Item,
+  full: readonly AgendaConversationEntry[],
+): Item {
+  const tail: AgendaConversationEntry[] = [];
+  let size = 0;
+  for (const entry of [...full].reverse()) {
+    size += JSON.stringify(entry).length;
+    if (size > 8192) break;
+    tail.unshift(entry);
+  }
+  const { conversation: _conversation, conversationCount: _count, conversationLastAt: _last, ...rest } = item;
+  const next = {
+    ...rest,
+    ...(tail.length === 0 ? {} : { conversation: tail }),
+    conversationCount: full.length,
+    ...(full.at(-1) === undefined ? {} : { conversationLastAt: full.at(-1)?.at }),
+  } as Item;
+  return JSON.stringify(next) === JSON.stringify(item) ? item : next;
+}
+
+/** Internal reopen boundary: validate the current item without putting the full thread on the wire. */
+function parseTransitionItem(item: AgendaItem) {
+  const parsed = AgendaItemSchema.safeParse(fitAgendaItem(boundedConversation(item, item.conversation ?? [])));
+  return parsed.success
+    ? {
+        ...parsed,
+        data: { ...parsed.data, ...(item.conversation === undefined ? {} : { conversation: item.conversation }) },
+      }
+    : parsed;
+}
+
+/** One item in the channel's shape: resting as its park says, and naming its stage; the same item when it already is. */
+function channelItem<Item extends AgendaItem | ResolvedAgendaItem>(item: Item, legacy: boolean): Item {
+  const closed = 'resolvedAt' in item && typeof item.resolvedAt === 'string';
+  const rests = !closed && item.parked?.reason === 'replied' && item.resting === undefined;
+  const staged = item.stage === undefined;
+  if (!rests && !staged) return item;
+  const stage = agendaStage(item);
+  const since = closed ? (item as ResolvedAgendaItem).resolvedAt : item.waitingSince;
+  return {
+    ...item,
+    ...(rests && item.parked !== undefined
+      ? {
+          resting: {
+            sub: 'waiting-on-ferret',
+            at: item.parked.at,
+            ...(legacy ? { migrated: true as const } : {}),
+          } satisfies AgendaResting,
+        }
+      : {}),
+    ...(staged ? { stage, stages: [...(item.stages ?? []), { stage, at: since }].slice(-MAX_AGENDA_STAGES) } : {}),
+  };
+}
+
+/** What a card's agenda asks of its own, beside its card asks: a reply, if the owner wants to talk it over. */
+export const CARD_AGENDA_HOW_TO_RESOLVE =
+  "Answer the card's ask here (its buttons move the card); reply to talk it over. The ferret marks this done.";
+
+const MIGRATION_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
+
+/** A gate item's gate as the card ask it becomes: open, put on the agenda when the gate item was raised. */
+const liftedAsk = (item: AgendaItem, gate: AgendaGate): AgendaCardAsk => {
+  const notYet = (item.history ?? []).findLast(
+    entry => entry.kind === 'gate-answered' && entry.note === gateReference(gate),
+  );
+  return {
+    gate,
+    at: item.waitingSince,
+    ...(item.gate !== undefined && item.body !== undefined && item.body.trim() !== '' ? { howToTest: item.body } : {}),
+    ...(notYet === undefined ? {} : { notYet: { at: notYet.at } }),
+  };
+};
+
+/** The item as it reads, or `undefined` when the lifted shape would not read back (it is then left as it was). */
+const readable = (item: AgendaItem): AgendaItem | undefined => {
+  const parsed = AgendaItemSchema.safeParse(item);
+  return parsed.success ? parsed.data : undefined;
+};
+
+/**
+ * An open gate item as its card's agenda (docs/agenda.md § Card asks): the same id, history, snooze and turn, raised
+ * on its ferret's behalf (`card-agenda:<card>`), its gate now its card ask, asking nothing of its own but a reply.
+ */
+const cardAgendaOf = (item: AgendaItem & { readonly gate: AgendaGate }, at: string): AgendaItem => {
+  const { gate, ask: _ask, answers: _answers, kind: _kind, ...rest } = item;
+  const stage = cardAskStage(gate);
+  const base: AgendaItem = {
+    ...rest,
+    sourceRef: cardAgendaReference(gate.cardId),
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+    howToResolve: CARD_AGENDA_HOW_TO_RESOLVE,
+    ...staged({ ...rest, kind: 'reply', ask: { kind: 'open-question' } }, stage, at),
+  };
+  return withCardAsks(base, [liftedAsk(item, gate)]);
+};
+
+/** Whether an open item is a thread about this card: an agent's own item on it, never a notice or a gate item. */
+const isCardThread = (item: AgendaItem, cardId: string): boolean =>
+  item.raisedBy === 'agent' && canCarryCardAsk(item) && item.task?.id === cardId;
+
+/** The thread that takes a card's ask: one already carrying it, else one on the owner's turn, else the newest. */
+const threadFor = (entries: readonly AgendaEntry[], cardId: string): AgendaItem | undefined => {
+  const threads = entries
+    .filter(isActiveAgenda)
+    .flatMap(entry => (isCardThread(entry.item, cardId) ? [entry.item] : []));
+  const newest = (pool: readonly AgendaItem[]): AgendaItem | undefined =>
+    pool.reduce<AgendaItem | undefined>(
+      (kept, each) =>
+        kept === undefined || Date.parse(each.waitingSince) > Date.parse(kept.waitingSince) ? each : kept,
+      undefined,
+    );
+  return (
+    newest(threads.filter(each => (each.cardAsks ?? []).some(ask => ask.gate.cardId === cardId))) ??
+    newest(threads.filter(each => each.waitingOn === undefined && each.parked === undefined)) ??
+    newest(threads)
+  );
+};
+
+/**
+ * The thread with a gate item's ask added: when the gate item was in the owner's queue and the thread was not, the
+ * thread takes its place there (`waitingSince`), so moving the ask never takes it out of the owner's sight.
+ */
+const threadWithAsk = (thread: AgendaItem, gateItem: AgendaItem & { readonly gate: AgendaGate }): AgendaItem => {
+  const ask = liftedAsk(gateItem, gateItem.gate);
+  const asks = thread.cardAsks ?? [];
+  const carried = asks.some(each => cardAskReference(each) === cardAskReference(ask)) ? asks : [...asks, ask];
+  const shown = agendaState(gateItem).state === 'needs-you' && agendaState(thread).state !== 'needs-you';
+  if (!shown) return withCardAsks(thread, carried);
+  const {
+    parked: _parked,
+    resting: _resting,
+    waitingOn: _waitingOn,
+    askedAt: _askedAt,
+    waitingFor: _waitingFor,
+    ...awake
+  } = thread;
+  return withCardAsks({ ...awake, waitingSince: gateItem.waitingSince }, carried);
+};
+
+const withItem = (ledger: AgendaLedger, item: AgendaItem): AgendaLedger => ({
+  ...ledger,
+  entries: ledger.entries.map(entry =>
+    entry.lifecycle === 'active' && entry.item.id === item.id ? { ...entry, item } : entry,
+  ),
+});
+
+/**
+ * THE MIGRATION TO CARD ASKS (docs/agenda.md § Card asks), read-time like {@link toChannel}: a card never asks the
+ * owner itself any more, so no open standalone gate item is left on a board, and nothing on one is lost.
+ *
+ * - A thread with a bare `gateAttached` (no `cardAsks`) carries that gate as its open card ask; a `gate-answered`
+ *   entry for it in its history (the owner's Not yet) is kept as the ask's `notYet`.
+ * - An open gate item whose card has an open thread on this board (an agent's own item about the card) puts its ask
+ *   on that thread and closes, saying where its ask went, so the card has ONE agenda here. The thread takes the gate
+ *   item's place in the owner's queue when only the gate item was in it. The closed item keeps its history.
+ * - Any other open gate item BECOMES its card's agenda in place: the same id, history, snooze and turn, its gate now
+ *   its card ask, asking nothing of its own but a reply, at stage `test` or `plan`, raised on its ferret's behalf.
+ *   A second open gate item of the same card adds its ask to that agenda and closes the same way.
+ * - Closed items are left exactly as they are: an answered gate keeps its receipt, so a replay still finds it.
+ * - An item whose lifted shape would not read back is left as it was.
+ *
+ * Pure, total and idempotent: a board with no open gate item and no bare `gateAttached` comes back as it came.
+ */
+export function liftGateItems(ledger: AgendaLedger): AgendaLedger {
+  const at = ledger.updatedAt;
+  let current = ledger;
+  for (const entry of ledger.entries.filter(isActiveAgenda)) {
+    const gate = entry.item.gateAttached;
+    if (gate === undefined || entry.item.cardAsks !== undefined || isGateItem(entry.item)) continue;
+    const lifted = readable(
+      withCardAsks(entry.item, [{ ...liftedAsk(entry.item, gate), at: entry.item.waitingSince }]),
+    );
+    if (lifted !== undefined) current = withItem(current, lifted);
+  }
+  const gateItems = current.entries
+    .filter(isActiveAgenda)
+    .flatMap(entry =>
+      isGateItem(entry.item) && entry.item.gate !== undefined
+        ? [entry.item as AgendaItem & { readonly gate: AgendaGate }]
+        : [],
+    )
+    .sort((left, right) => Date.parse(right.waitingSince) - Date.parse(left.waitingSince));
+  for (const cardId of new Set(gateItems.map(item => item.gate.cardId))) {
+    const ofCard = gateItems.filter(item => item.gate.cardId === cardId);
+    let carrier = threadFor(current.entries, cardId);
+    let closing = ofCard;
+    if (carrier === undefined) {
+      const [newest, ...older] = ofCard;
+      const converted = newest === undefined ? undefined : readable(cardAgendaOf(newest, at));
+      if (converted === undefined) continue;
+      current = withItem(current, converted);
+      carrier = converted;
+      closing = older;
+    }
+    for (const gateItem of closing) {
+      const carrying = current.entries.find(
+        (entry): entry is Extract<AgendaEntry, { lifecycle: 'active' }> =>
+          entry.lifecycle === 'active' && entry.item.id === carrier?.id,
+      );
+      const target = current.entries.find(
+        (entry): entry is Extract<AgendaEntry, { lifecycle: 'active' }> =>
+          entry.lifecycle === 'active' && entry.item.id === gateItem.id,
+      );
+      if (carrying === undefined || target === undefined) continue;
+      const taken = readable(threadWithAsk(carrying.item, gateItem));
+      if (taken === undefined) continue;
+      const closed = addressed(
+        withItem(current, taken),
+        target,
+        MIGRATION_ACTOR,
+        `its card's ask is now on !${taken.id}`,
+        at,
+        'done',
+        'resolved',
+      );
+      if (closed.ok) current = { ...closed.ledger, updatedAt: ledger.updatedAt };
+    }
+  }
+  return current;
 }
 
 const isWardenActor = (actor: AgendaActor): boolean => actor.kind === 'daemon' && actor.cause === 'warden-escalation';
@@ -716,14 +1282,158 @@ function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
  * held to the schema the reader holds it to, and a change that fails is refused instead of written.
  */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
-  const mutation = transition(ledger, command);
-  if (!mutation.ok || !mutation.changed) return mutation;
+  command = restoredRetry(ledger, command);
+  // Accepted chat has its own send bound: reply keeps that full source outside the bounded legacy history note.
+  if (
+    ['answer', 'resolve', 'dismiss', 'needs-info', 'discuss', 'reply'].includes(command.action) &&
+    !(command.action === 'reply' && command.fromChat !== undefined) &&
+    agendaReplyEnvelopeLength(command as { response?: AgendaResponse; note?: string | null }) >
+      MAX_AGENDA_REPLY_ENVELOPE_LENGTH
+  ) {
+    return failure('invalid', `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`);
+  }
+  // Transitions see the full thread; only the fitted, validated item can leave this boundary.
+  const transitioned = transition(withWholeThreads(ledger), command);
+  if (!transitioned.ok) return transitioned;
+  if (!transitioned.changed) return unchanged(ledger);
+  const mutation = fitted(ledger, transitioned);
   const problem = unreadableWrite(ledger, mutation.ledger);
   return problem === undefined ? mutation : failure('invalid', problem);
 }
 
+/** The ledger with every item holding its whole thread from the conversations map, as a transition reads it. */
+function withWholeThreads(ledger: AgendaLedger): AgendaLedger {
+  return {
+    ...ledger,
+    entries: ledger.entries.map(entry => {
+      const conversation = ledger.conversations?.[entry.item.id];
+      return conversation === undefined || conversation.length === 0
+        ? entry
+        : ({ ...entry, item: { ...entry.item, conversation: [...conversation] } } as AgendaEntry);
+    }),
+  };
+}
+
+/**
+ * {@link liftGateItems} as a read runs it: on the whole threads, as a transition, and what it changed stored as every
+ * write is ({@link fitted}: the thread in the conversations map, a bounded tail on the item), so the words it says
+ * when it closes a gate item read back. The same ledger when there is nothing to lift.
+ */
+function liftedOnRead(channel: AgendaLedger): AgendaLedger {
+  const expanded = withWholeThreads(channel);
+  const lifted = liftGateItems(expanded);
+  if (lifted === expanded) return channel;
+  // An entry the lift left alone is the stored one again, so only what it changed is fitted.
+  const stored = new Map(expanded.entries.map((entry, index) => [entry, channel.entries[index] ?? entry]));
+  const mutation = success(
+    { ...lifted, entries: lifted.entries.map(entry => stored.get(entry) ?? entry) },
+    true,
+    'refreshed',
+  );
+  return mutation.ok ? fitted(channel, mutation).ledger : channel;
+}
+
+/** Old apps post the clipped Retry view. Match it exactly and replay the stored words inside the ledger transition. */
+function restoredRetry(ledger: AgendaLedger, command: AgendaCommand): AgendaCommand {
+  if (command.actor.kind !== 'human' || !('id' in command)) return command;
+  const item = ledger.entries.find(entry => entry.lifecycle === 'active' && entry.item.id === command.id)?.item;
+  const stored = item?.undelivered?.reply;
+  if (item === undefined || stored === undefined) return command;
+  if (command.action === 'answer') {
+    const reply = restoredLegacyAgendaReply(item, {
+      action: 'resolve',
+      response: command.response,
+      note: command.note ?? undefined,
+    });
+    return { ...command, response: reply.response, note: reply.note };
+  }
+  if (
+    command.action === 'resolve' ||
+    command.action === 'dismiss' ||
+    command.action === 'needs-info' ||
+    command.action === 'discuss'
+  ) {
+    const reply = restoredLegacyAgendaReply(item, { action: command.action, note: command.note ?? undefined });
+    return { ...command, note: reply.note };
+  }
+  return command;
+}
+
+/**
+ * Every item a change made or changed, fit to the transport bound by shedding its oldest versions (`fitAgendaItem`):
+ * a long item stays closable, restable and shortenable, because its history never crowds the room those need.
+ */
+function fitted(
+  before: AgendaLedger,
+  mutation: Extract<AgendaMutation, { ok: true }>,
+): Extract<AgendaMutation, { ok: true }> {
+  const kept = new Set(before.entries);
+  const conversations = { ...(before.conversations ?? {}) };
+  const swaps = new Map<object, object>();
+  const archived = [...(mutation.ledger.archivePending ?? [])];
+  const remaining = new Set(mutation.ledger.entries.map(entry => entry.item.id));
+  // Closed-history pruning removes the hot view, never the owner's words: the conversation, and the closing note or
+  // answer, go to the sidecar as the item's complete last snapshot. An item this very change closed is archived
+  // closed, not as the open copy it was: with every closed slot held by a set-aside entry it is pruned at once.
+  for (const entry of before.entries) {
+    if (remaining.has(entry.item.id)) continue;
+    const last = mutation.addressed?.id === entry.item.id ? mutation.addressed : entry.item;
+    archived.push({ kind: 'version', id: last.id, item: last });
+    for (const record of last.history ?? []) {
+      if (['replied', 'needs-info', 'discuss'].includes(record.kind)) {
+        archived.push({ kind: 'owner-history', id: last.id, entry: record });
+      }
+    }
+  }
+  const entries = mutation.ledger.entries.map(entry => {
+    if (kept.has(entry)) return entry;
+    const full = entry.item.conversation ?? conversations[entry.item.id] ?? [];
+    conversations[entry.item.id] = full;
+    const item = fitAgendaItem(boundedConversation(entry.item, full));
+    // Include the old history too: some transitions fit an intermediate item before returning it.
+    const previous = before.entries.find(old => old.item.id === entry.item.id)?.item.history ?? [];
+    const candidates = [...(entry.item.history ?? [])];
+    const present = candidates.map(record => JSON.stringify(record));
+    for (const record of previous) {
+      const index = present.indexOf(JSON.stringify(record));
+      if (index < 0) candidates.push(record);
+      else present.splice(index, 1);
+    }
+    const retained = (item.history ?? []).map(record => JSON.stringify(record));
+    for (const record of candidates) {
+      const index = retained.indexOf(JSON.stringify(record));
+      if (index >= 0) retained.splice(index, 1);
+      else if (['replied', 'needs-info', 'discuss'].includes(record.kind)) {
+        archived.push({ kind: 'owner-history', id: item.id, entry: record });
+      }
+    }
+    if (item === entry.item) return entry;
+    swaps.set(entry.item, item);
+    return { ...entry, item } as typeof entry;
+  });
+  if (swaps.size === 0 && archived.length === (mutation.ledger.archivePending?.length ?? 0)) return mutation;
+  const ledger = {
+    ...mutation.ledger,
+    entries,
+    conversations,
+    ...(archived.length === 0 ? {} : { archivePending: archived }),
+  };
+  const item = mutation.item === undefined ? undefined : (swaps.get(mutation.item) as AgendaItem | undefined);
+  const addressed =
+    mutation.addressed === undefined ? undefined : (swaps.get(mutation.addressed) as ResolvedAgendaItem | undefined);
+  return {
+    ...mutation,
+    ledger,
+    snapshot: agendaSnapshot(ledger),
+    ...(item === undefined ? {} : { item }),
+    ...(addressed === undefined ? {} : { addressed }),
+  };
+}
+
 /** Why one of the entries `after` made or changed would not read back, or `undefined` when every one does. */
 function unreadableWrite(before: AgendaLedger, after: AgendaLedger): string | undefined {
+  const threads = z.record(AgendaIdSchema, z.array(AgendaConversationEntrySchema)).safeParse(after.conversations ?? {});
+  if (!threads.success) return 'conversation words would not read back';
   const kept = new Set(before.entries);
   for (const entry of after.entries) {
     if (kept.has(entry)) continue;
@@ -765,8 +1475,20 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
       return discuss(ledger, command);
     case 'reply':
       return reply(ledger, command);
+    case 'log':
+      return log(ledger, command);
+    case 'merge':
+      return merge(ledger, command);
+    case 'split':
+      return split(ledger, command);
     case 'surface':
       return surface(ledger, command);
+    case 'rest':
+      return rest(ledger, command);
+    case 'nudging':
+      return nudging(ledger, command);
+    case 'nudged':
+      return nudged(ledger, command);
     case 'snooze':
       return snooze(ledger, command);
     case 'unsnooze':
@@ -777,8 +1499,8 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
       return undelivered(ledger, command);
     case 'restate-confirms':
       return restateConfirms(ledger, command);
-    case 'attach-gate':
-      return attachGate(ledger, command);
+    case 'card-ask':
+      return cardAsk(ledger, command);
     case 'link-task':
       return linkTask(ledger, command);
     case 'resolve-source':
@@ -810,14 +1532,20 @@ type ProgressCommand = Extract<AgendaCommand, { action: 'progress' }>;
 type NeedsInfoCommand = Extract<AgendaCommand, { action: 'needs-info' }>;
 type DiscussCommand = Extract<AgendaCommand, { action: 'discuss' }>;
 type ReplyCommand = Extract<AgendaCommand, { action: 'reply' }>;
+type LogCommand = Extract<AgendaCommand, { action: 'log' }>;
+type MergeCommand = Extract<AgendaCommand, { action: 'merge' }>;
+type SplitCommand = Extract<AgendaCommand, { action: 'split' }>;
 type SurfaceCommand = Extract<AgendaCommand, { action: 'surface' }>;
+type RestCommand = Extract<AgendaCommand, { action: 'rest' }>;
+type NudgingCommand = Extract<AgendaCommand, { action: 'nudging' }>;
+type NudgedCommand = Extract<AgendaCommand, { action: 'nudged' }>;
 type SnoozeCommand = Extract<AgendaCommand, { action: 'snooze' }>;
 type UnsnoozeCommand = Extract<AgendaCommand, { action: 'unsnooze' }>;
 type WakeCommand = Extract<AgendaCommand, { action: 'wake' }>;
 type ResolveSourceCommand = Extract<AgendaCommand, { action: 'resolve-source' }>;
 type UndeliveredCommand = Extract<AgendaCommand, { action: 'undelivered' }>;
 type RestateConfirmsCommand = Extract<AgendaCommand, { action: 'restate-confirms' }>;
-type AttachGateCommand = Extract<AgendaCommand, { action: 'attach-gate' }>;
+type CardAskCommand = Extract<AgendaCommand, { action: 'card-ask' }>;
 type LinkTaskCommand = Extract<AgendaCommand, { action: 'link-task' }>;
 
 function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
@@ -828,8 +1556,11 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   if (request.sourceRef !== null && actor.kind !== 'daemon') {
     return failure('forbidden', 'stable agenda source references are reserved for trusted daemon producers');
   }
-  if ((request.gate !== undefined || request.discussion === true) && actor.kind !== 'daemon') {
-    return failure('forbidden', 'only the daemon raises a gate item or its follow-up');
+  if (
+    (request.gate !== undefined || request.discussion === true || request.cardAsks !== undefined) &&
+    actor.kind !== 'daemon'
+  ) {
+    return failure('forbidden', 'only the daemon raises a gate item, its follow-up or a card ask');
   }
   if (request.carried !== undefined && actor.kind !== 'daemon') {
     return failure('forbidden', 'only the daemon carries an item over to another ferret\u2019s agenda');
@@ -912,7 +1643,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     return failure('full', 'this session has exhausted its agenda id sequence');
   }
 
-  const item = withRaisedBy(
+  const raised = withRaisedBy(
     {
       id: `A${ledger.nextId}` as AgendaId,
       source: request.source,
@@ -943,11 +1674,16 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.discussion === true
         ? { waitingOn: 'ferret' as const, askedAt: command.at, waitingFor: 'discussion' as const }
         : {}),
+      ...firstStage(request.stage ?? agendaStageOfKind(agendaCardKind(request)), command.at),
       // A gate item moved to its card's new ferret goes on as the one it replaces stood.
       ...(request.carried === undefined ? {} : agendaCarriedOf(request.carried)),
     },
     actor,
   );
+  // A card agenda opens with its card asks, the first open one mirrored for an app that predates them.
+  // One that carries its talk over from another ferret's is not sealed: it reads its activity lines, as one from before the seal does.
+  const asked = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
+  const item = request.cardAsks === undefined || request.carried !== undefined ? asked : sealCardAsks(asked);
   const next: AgendaLedger = {
     ...ledger,
     nextId: ledger.nextId + 1,
@@ -975,9 +1711,10 @@ function refreshStable(
     return unchanged(ledger);
   }
 
-  const { parked: _parked, ...kept } = existing.item;
+  const { parked: _parked, resting: _resting, ...kept } = existing.item;
   const item: AgendaItem = {
     ...(unpark ? kept : existing.item),
+    ...(request.stage === undefined ? {} : staged(existing.item, request.stage, command.at)),
     // The gate it asks about follows the lane: a renamed lane or edited options are restated too.
     ...(request.gate === undefined ? {} : { gate: request.gate }),
     subject: request.subject,
@@ -1011,6 +1748,8 @@ function refreshStable(
     steps: request.steps,
     body: request.body,
     questionAnswer: request.questionAnswer,
+    whereWeAre: request.whereWeAre,
+    detail: request.detail,
     // Ticks belong to the steps they were made on: the same steps keep them, new steps start clean.
     stepsDone: sameSteps(existing.item.steps, request.steps) ? existing.item.stepsDone : undefined,
   };
@@ -1051,7 +1790,26 @@ function addressById(
       `answer ${command.id} instead: one of its options (Done / Not good / Not yet), or Not needed`,
     );
   }
-  if (command.action === 'resolve' && command.actor.kind === 'agent' && isQuestionShape(target.item)) {
+  // A card ask is the owner's to answer (docs/agenda.md § Card asks): no ferret or lead closes the agenda that carries
+  // an open one, and the owner's bare done would close it with the card unmoved, so they answer the ask or say Not needed.
+  if (command.actor.kind === 'agent') {
+    const refusal = closeRefusal(target.item);
+    if (refusal !== undefined) return failure('invalid', refusal);
+  }
+  if (command.action === 'resolve' && command.actor.kind === 'human' && hasOpenCardAsk(target.item)) {
+    const labels = openCardAsks(target.item).flatMap(ask => ask.gate.options.map(option => option.label));
+    return failure(
+      'invalid',
+      `answer ${command.id}'s card ask instead (${[...new Set(labels)].join(' / ')}), or Not needed`,
+    );
+  }
+  // A question the owner has ANSWERED (it rests on the answer) is not withdrawn by the ferret's done: it is settled.
+  if (
+    command.action === 'resolve' &&
+    command.actor.kind === 'agent' &&
+    isQuestionShape(target.item) &&
+    target.item.ownerAnswer === undefined
+  ) {
     if ((command.note ?? '').trim() === '') {
       return failure(
         'invalid',
@@ -1059,7 +1817,24 @@ function addressById(
       );
     }
   }
+  // An answer — or a Done or Skip given from the ask — to an ask the ferret has since REPLACED is never applied to the
+  // new one (a stale tab, the undo window). A close that names no version is the owner's deliberate closing of the item
+  // as it stands now (the CLI, an older app): it closes whatever the item asks.
+  if (command.askVersion !== undefined && command.askVersion !== (target.item.askVersion ?? 1)) {
+    return failure(
+      'ask_changed',
+      `${command.id} asks something else now: the ferret replaced the ask you answered, so nothing was sent; read it again and answer the new ask`,
+    );
+  }
   if (command.action === 'answer') {
+    // An answer that names no version cannot say which ask it answered: once the ferret has replaced the ask it may be
+    // the old one (a stale tab, an older app, the undo window), so the owner re-reads it. A ferret's own answer is its own.
+    if (command.askVersion === undefined && command.actor.kind === 'human' && (target.item.askVersion ?? 1) > 1) {
+      return failure(
+        'ask_changed',
+        `${command.id} asks something else now: the ferret replaced the ask, and this answer does not say which ask it answers, so nothing was sent; read it again and answer the new ask`,
+      );
+    }
     // The input form answers an input card, because the value never travels as an agenda answer.
     if (target.item.kind === 'input') {
       return failure('use_input_form', `${command.id} is answered in its input form, not as an agenda answer`);
@@ -1122,6 +1897,9 @@ function addressById(
           : `${command.id} asks for a ${target.item.ask.kind} response`;
       return failure('invalid', message);
     }
+    // THE OWNER'S ANSWER NEVER CLOSES A FERRET'S ITEM: it rests, waiting on the ferret, until the ferret answers on it
+    // (back to the owner) or marks it done. A ferret's own answer to its item (`done --choice`) still closes it.
+    if (command.actor.kind === 'human' && restsOnAnswer(target)) return restAnswered(ledger, target.item, command);
   }
   // A structured ask may still be RESOLVED without its response: the owner can reply in words instead
   // of picking (the note carries them to the ferret), and the raising ferret closes its own item once
@@ -1151,6 +1929,56 @@ function addressById(
   return closed;
 }
 
+/**
+ * Whether the owner's ANSWER rests an item rather than closing it (docs/agenda.md § States): an item a ferret speaks
+ * for — one it raised, or a gate's follow-up conversation opened on its behalf — that waits on the ferret's next move.
+ * Exempt, and still closed by the answer, are the items whose answer the DAEMON acts on: a card's gate (until card
+ * asks move into agendas), a held configuration change, an input card, and every item the daemon raised for itself.
+ */
+export function restsOnAnswer(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
+  const speaksForFerret = entry.origin.kind === 'agent' || isOnBehalfAgenda(entry);
+  return (
+    speaksForFerret &&
+    !isGateAgenda(entry) &&
+    entry.item.confirms === undefined &&
+    entry.item.kind !== 'input' &&
+    entry.item.notice !== true
+  );
+}
+
+/**
+ * The owner answered a ferret's item: it RESTS, waiting on the ferret (`parked: replied` for every app, `resting` for
+ * this one), the answer kept on it (`ownerAnswer`) and its words in the history. Whatever the item waited on before
+ * (more information, a discussion, a snooze) ends with it. The answer's place in the request counter names its one
+ * delivery (`needsInfoReplyKey`), so a second answer after the ferret replied is delivered too. Its place in the
+ * queue (`waitingSince`) is kept, for the ferret's answer to bring it back to.
+ */
+function restAnswered(
+  ledger: AgendaLedger,
+  item: AgendaItem,
+  command: Extract<AgendaCommand, { action: 'answer' }>,
+): AgendaMutation {
+  const request = (item.infoRequests ?? 0) + 1;
+  const words = command.note?.trim() ?? '';
+  const note = words === '' ? undefined : words.slice(0, MAX_AGENDA_REPLY_LENGTH);
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, undelivered: _u, parked: _p, resting: _r, ...open } = item;
+  const rested: AgendaItem = {
+    ...open,
+    infoRequests: request,
+    ownerAnswer: { at: command.at, response: command.response, ...(note === undefined ? {} : { note }), request },
+    parked: { reason: 'replied', at: command.at },
+    resting: { sub: 'waiting-on-ferret', at: command.at },
+    history: withHistory(open.history, {
+      at: command.at,
+      kind: 'replied',
+      ...(note === undefined ? {} : { note }),
+      response: command.response,
+    }),
+    ...said(open, ...responseWords(command.response, note).map(text => wordsOf(command.at, 'owner', 'answer', text))),
+  };
+  return replaceItem(ledger, rested, command.at, 'answered');
+}
+
 function isQuestionShape(item: AgendaItem): boolean {
   const shape = agendaShape(item);
   return shape !== 'info' && shape !== 'input';
@@ -1168,20 +1996,39 @@ function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): Age
     : addressed(ledger, target, command.actor, command.note ?? null, command.at, 'done', 'resolved');
 }
 
-function parseAgendaEntry(value: unknown): AgendaEntry | null {
+export function parseAgendaEntry(value: unknown, legacy: boolean, pending: AgendaArchiveRecord[]): AgendaEntry | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const origin = parseAgendaActor(raw.origin);
   if (origin === null) return null;
   if (raw.lifecycle === 'active') {
-    const item = parseEntryItem(AgendaItemSchema, raw.item, origin);
+    const decoded = parseEntryItem(legacy ? StoredAgendaItemSchema : AgendaItemSchema, raw.item, origin);
+    const item = decoded === null ? null : migrateStoredItem(decoded, legacy, pending);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'active', origin, item } : null;
   }
   if (raw.lifecycle === 'addressed') {
-    const item = parseEntryItem(ResolvedAgendaItemSchema, raw.item, origin);
+    const decoded = parseEntryItem(
+      legacy ? StoredResolvedAgendaItemSchema : ResolvedAgendaItemSchema,
+      raw.item,
+      origin,
+    );
+    const item = decoded === null ? null : migrateStoredItem(decoded, legacy, pending);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'addressed', origin, item } : null;
   }
   return null;
+}
+
+/** Old writers had no aggregate wire limit. Decode their versions first and preserve them before fitting the view. */
+function migrateStoredItem<Item extends AgendaItem | ResolvedAgendaItem>(
+  item: Item,
+  legacy: boolean,
+  pending: AgendaArchiveRecord[],
+): Item {
+  if (!legacy) return item;
+  const migrated = channelItem(item, true);
+  const fitted = fitAgendaItem(migrated);
+  if (fitted !== migrated) pending.push({ kind: 'version', id: item.id, item });
+  return fitted;
 }
 
 /**
@@ -1248,12 +2095,20 @@ function addressed(
     askedAt: _askedAt,
     waitingFor: _waitingFor,
     undelivered: _undelivered,
+    resting: _resting,
     ...open
   } = target.item;
   const item = withResolvedBy(
     {
       ...open,
+      ...staged(open, 'done', at),
       ...(entry === undefined ? {} : { history: withHistory(open.history, entry) }),
+      ...said(
+        open,
+        ...responseWords(response, note).map(text =>
+          wordsOf(at, speakerOf(actor), change === 'answered' ? 'answer' : 'close', text),
+        ),
+      ),
       resolvedAt: at,
       resolutionNote: note,
       disposition,
@@ -1395,8 +2250,13 @@ function failure(code: AgendaErrorCode, message: string): AgendaMutation {
 
 const EDITABLE_FIELDS = [
   'subject',
+  'why',
+  'howToResolve',
   'title',
   'context',
+  'ask',
+  'kind',
+  'answers',
   'premise',
   'decided',
   'stillOpen',
@@ -1414,12 +2274,36 @@ const EDITABLE_FIELDS = [
   'steps',
   'body',
   'questionAnswer',
+  'whereWeAre',
+  'tabs',
+  'detail',
 ] as const satisfies readonly AgendaRevisableField[];
 
-/** The option labels of each question, in order — what an edit must leave alone to keep the ask true. */
+/**
+ * An edit's TAB OPERATIONS as the new `tabs` (&F923): applied in order to the item's own tabs, so the edit stores the
+ * whole list through the ordinary path — one edit, one version, one revision. Every tab removed clears `tabs`. A plain
+ * sentence when one operation cannot apply, or when the edit also replaces `tabs` whole.
+ */
+function withTabEdits(item: AgendaItem, patch: EditAgendaPatch): EditAgendaPatch | string {
+  const { tabEdits, ...rest } = patch;
+  if (tabEdits === undefined) return patch;
+  if (patch.tabs !== undefined) return 'an edit gives tabs or tab operations, not both';
+  const applied = applyAgendaTabEdits(item.tabs, tabEdits);
+  if (!applied.ok) return applied.problem;
+  return applied.tabs.length === 0 ? { ...rest, clearTabs: true } : { ...rest, tabs: [...applied.tabs] };
+}
+
+/** The option labels of each question, in order — what an edit that keeps the ask leaves alone. */
 function questionShape(questions: AgendaBrief['questions']): string {
   return JSON.stringify(
     (questions ?? []).map(question => question.options?.map(option => option.label.trim()) ?? null),
+  );
+}
+
+/** The identity, type and option labels of each form field, in order — what an edit that rewords a field leaves alone. */
+function fieldShape(fields: AgendaItem['fields']): string {
+  return JSON.stringify(
+    (fields ?? []).map(field => [field.id, field.type, field.options?.map(option => option.label.trim()) ?? null]),
   );
 }
 
@@ -1429,29 +2313,133 @@ function sameField(left: unknown, right: unknown): boolean {
 }
 
 /**
- * Whether an edit asks to put a replied item back in front of the owner: the ferret's explicit `back`, or an
- * answer to the owner's own question (`questionAnswer`) — the owner asked, so the answer is what they are waiting for.
+ * Whether an edit REPLACES THE ASK (docs/agenda.md § Editable asks): a new ask or answers, questions that are added,
+ * removed or given other options, form fields that are added, removed, retyped or given other options, or an explicit `kind` — even the kind the item already has, which is how a ferret
+ * says "this is a different question". Rewording a question, or restating what the item says, is no new ask.
  */
-function bringsBack(command: EditCommand): boolean {
-  return command.back === true || (command.patch.questionAnswer ?? '').trim() !== '';
+function askReplaced(item: AgendaItem, patch: EditAgendaPatch): boolean {
+  return (
+    (patch.ask !== undefined && !sameField(patch.ask, item.ask)) ||
+    patch.kind !== undefined ||
+    (patch.answers !== undefined && !sameField(patch.answers, item.answers)) ||
+    (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(item.questions)) ||
+    (patch.fields !== undefined && fieldShape(patch.fields) !== fieldShape(item.fields))
+  );
+}
+
+/** Whether an edit carries the ferret's ANSWER on the item (`fy agenda answer`, `edit --question-answer`). */
+function answersOn(patch: EditAgendaPatch): boolean {
+  return (patch.questionAnswer ?? '').trim() !== '';
 }
 
 /**
- * Rewords an OPEN item in place. The writing changes (summary, context, premise, what is decided and still
- * open, terms, question wording, recommendation, impact, urgency, links); the ask, the reason and the raiser
- * do not, and neither does the item's place in line, so an edit never re-notifies. Only whoever may close an
- * item may edit it. Questions keep their count and their options, because the ask was derived from them.
+ * Whether an edit asks to put a resting item back in front of the owner: the ferret's answer on it, a replaced ask,
+ * or the older CLIs' explicit `back`.
+ */
+function bringsBack(command: EditCommand, item: AgendaItem): boolean {
+  return command.back === true || answersOn(command.patch) || askReplaced(item, command.patch);
+}
+
+/**
+ * Where a resting item the ferret brings back goes in the owner's queue: its OLD place when it is the ferret's
+ * answer to the owner's reply (`waiting-on-ferret`), a FRESH one when it is a genuinely new ask — a replaced ask,
+ * the older `back`, or any need after the ferret took the item on (`working`).
+ */
+function placeOnReturn(command: EditCommand, item: AgendaItem): 'old' | 'fresh' {
+  const view = agendaState(item);
+  const working = view.state === 'resting' && view.sub === 'working';
+  return command.back === true || askReplaced(item, command.patch) || working ? 'fresh' : 'old';
+}
+
+/** The shape fields an item of one kind cannot carry over to another: a new kind takes only what its edit gives. */
+const REPLACED_SHAPE = ['ask', 'answers', 'questions', 'optionDetails', 'fields', 'steps'] as const;
+
+/**
+ * The old shape an edit that REPLACES the ask leaves behind, which the edit does not give again: a moved kind takes
+ * none of it; a new ask of the same kind (an explicit `kind`, or an ask or answers given) takes none of the old
+ * questions or option details, which described the ask it replaces.
+ */
+function droppedShape(item: AgendaItem, patch: EditAgendaPatch): readonly (typeof REPLACED_SHAPE)[number][] {
+  const newAsk = patch.kind !== undefined || patch.ask !== undefined || patch.answers !== undefined;
+  const dropped: readonly (typeof REPLACED_SHAPE)[number][] = kindMoved(item, patch)
+    ? REPLACED_SHAPE
+    : newAsk
+      ? ['questions', 'optionDetails']
+      : [];
+  return dropped.filter(field => patch[field] === undefined);
+}
+
+/** The item an edit that REPLACES the ask leaves: the old shape it drops goes, and the edit's own fields land. */
+function composeReplacement(item: AgendaItem, patch: EditAgendaPatch): AgendaItem {
+  const gone = new Set(droppedShape(item, patch));
+  const { ask, answers, questions, optionDetails, fields, steps, ...rest } = item;
+  return {
+    ...rest,
+    ...(ask === undefined || gone.has('ask') ? {} : { ask }),
+    ...(answers === undefined || gone.has('answers') ? {} : { answers }),
+    ...(questions === undefined || gone.has('questions') ? {} : { questions }),
+    ...(optionDetails === undefined || gone.has('optionDetails') ? {} : { optionDetails }),
+    ...(fields === undefined || gone.has('fields') ? {} : { fields }),
+    ...(steps === undefined || gone.has('steps') ? {} : { steps }),
+    ...(patch.ask === undefined ? {} : { ask: patch.ask }),
+    ...(patch.kind === undefined ? {} : { kind: patch.kind }),
+    ...(patch.answers === undefined ? {} : { answers: patch.answers }),
+    ...(patch.questions === undefined ? {} : { questions: patch.questions }),
+    ...(patch.optionDetails === undefined ? {} : { optionDetails: patch.optionDetails }),
+    ...(patch.fields === undefined ? {} : { fields: patch.fields }),
+    ...(patch.steps === undefined ? {} : { steps: patch.steps }),
+  };
+}
+
+/** Why an edit may not replace this item's ask, or `undefined` when it may. */
+function replaceProblem(item: AgendaItem, patch: EditAgendaPatch, actor: AgendaActor): string | undefined {
+  if (item.confirms !== undefined) return `${item.id} confirms a configuration change: its answers are fixed`;
+  if (item.notice === true || item.kind === 'input' || patch.kind === 'input') {
+    return `${item.id} has no ask to replace`;
+  }
+  // A new kind takes none of the old shape: an old choice's options never answer an explainer.
+  const next = composeReplacement(item, patch);
+  const kind = agendaCardKind(next);
+  if (next.ask === undefined && kind !== 'info') {
+    return `a new ${kind} needs its ask: give it with the kind (\`--kind ${kind}\` with --option or --question)`;
+  }
+  return (
+    agendaAnswerProblems(next.answers ?? [], next.ask)[0]?.[1] ??
+    (actor.kind === 'agent' ? agendaShapeProblems(next)[0] : undefined) ??
+    agendaFormProblems(next)[0]
+  );
+}
+
+/** Whether an edit moves the item to another kind. */
+function kindMoved(item: AgendaItem, patch: EditAgendaPatch): boolean {
+  return patch.kind !== undefined && patch.kind !== agendaCardKind(item);
+}
+
+/**
+ * Rewrites an OPEN item in place. Only whoever may close an item may edit it.
  *
- * Every edit that changes something appends ONE revision (who, which fields, what they said before) so the
- * card can be read as a living summary of its discussion; an edit that changes nothing adds none. An edit of
- * an item on the FERRET's turn by the ferret hands it back to the owner (`surface` does the same without words); it pings nobody.
- * An edit of an item the owner REPLIED to updates the card and keeps it parked; only `back: true` (with the whole
- * card refreshed) brings it to the owner's list again.
+ * - THE WRITING changes in place (summary, context, premise, what is decided and still open, terms, question wording,
+ *   recommendation, impact, urgency, links, where we are, the detail), and so may the stage (`--stage`, kept in
+ *   `stages`). An edit that changes nothing adds nothing; one that changes something appends ONE revision (who,
+ *   which fields, what they said before), so the card reads as a living summary of its discussion.
+ * - THE FERRET'S ANSWER on the item (`questionAnswer`) brings a RESTING item back to the owner: to its OLD place in the
+ *   queue when it answers their reply, FRESH after the ferret took it on (`placeOnReturn`). An item on the ferret's
+ *   turn for more information is handed back by any edit of the ferret's, as before.
+ * - A REPLACED ASK (`askReplaced`) is a new ask: the item asks again, fresh, as its one entry in the queue; its
+ *   `askVersion` moves on so an answer to the old one is refused; the owner's old answer and the ferret's old
+ *   answer to their question go, unless this edit gives a new one; a kind that moves takes the stage it says.
+ * - A resting item edited any other way stays resting: nothing it writes reaches the owner.
+ * - A SNOOZED item stays asleep unless the ferret says it is urgent (`now`, at most once an hour per item
+ *   (`AGENDA_URGENT_WAKE_MS`)) or newly marks it blocking, which wakes it whenever it happens.
  */
 function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) {
-    // An edit of an item the owner replied to is the ferret asking again, in new words: it reopens, then edits.
+    // A patch read an OPEN item: one that has closed since is not the item it read.
+    if (command.patch.revision !== undefined) {
+      return failure('stale', `${command.id} is no longer open: read it again (agenda show ${command.id})`);
+    }
+    // An edit of an item closed as replied (before replies parked) is the ferret asking again: it reopens, then edits.
     const reopened = reopenReplied(
       ledger,
       command.id,
@@ -1459,7 +2447,7 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
       command.at,
       { at: command.at, kind: 'updated' },
       command.patch,
-      bringsBack(command),
+      command.back === true || answersOn(command.patch),
     );
     if (reopened === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
     if (!reopened.ok) return reopened;
@@ -1469,83 +2457,148 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
   }
-  // A ferret's edit of an item the owner REPLIED to rewrites the card and leaves it parked: the owner has already
-  // answered, so nothing it writes puts the item back in front of them. Only `back` does, with the card refreshed.
-  const staysParked =
-    target.item.parked?.reason === 'replied' && command.actor.kind === 'agent' && !bringsBack(command);
-  if (target.item.parked?.reason === 'replied' && !staysParked) {
-    const stale = repliedRefreshProblem(command.actor, command.id, command.patch, bringsBack(command));
+  if (command.patch.revision !== undefined) {
+    // READ BEFORE WRITE: the writer read the item at `revision`; anything written since would be overwritten unseen.
+    if (agendaItemRevision(target.item) !== command.patch.revision) {
+      return failure(
+        'stale',
+        `${command.id} changed since you read it: read it again (agenda show ${command.id} --yaml), update every part that is out of date, and patch it back`,
+      );
+    }
+    const { revision: _revision, ...patch } = command.patch;
+    return edit(ledger, { ...command, patch });
+  }
+  if (command.patch.tabEdits !== undefined) {
+    const tabbed = withTabEdits(target.item, command.patch);
+    return typeof tabbed === 'string' ? failure('invalid', tabbed) : edit(ledger, { ...command, patch: tabbed });
+  }
+  const replaces = askReplaced(target.item, command.patch);
+  if (replaces) {
+    const problem = replaceProblem(target.item, command.patch, command.actor);
+    if (problem !== undefined) return failure('invalid', problem);
+  }
+  // A ferret's edit of a RESTING item rewrites the card and leaves it resting, unless it answers on it or asks anew.
+  const repliedTo = target.item.parked?.reason === 'replied';
+  const staysResting = repliedTo && command.actor.kind === 'agent' && !bringsBack(command, target.item);
+  if (repliedTo && !staysResting && command.back === true) {
+    const stale = repliedRefreshProblem(command.actor, command.id, command.patch, true);
     if (stale !== null) return failure('invalid', stale);
   }
-  const back = staysParked ? target.item : backFromParked(target.item, command.actor, command.at, command.now === true);
+  const newlyBlocking = command.patch.blockingNow === true && target.item.blockingNow !== true;
+  const back = staysResting
+    ? target.item
+    : backFromParked(
+        target.item,
+        command.actor,
+        command.at,
+        command.now === true,
+        placeOnReturn(command, target.item),
+        newlyBlocking,
+      );
   if ('code' in back) return failure(back.code, back.message);
-  if (back !== target.item) {
-    // The ferret's edit brings a parked item back first (fresh and unread), then edits it as it stands.
+  if (!('code' in back) && back !== target.item) {
+    // The ferret's edit brings a parked item back first, then edits it as it stands.
     const unparked = replaceItem(ledger, back, command.at, 'unparked');
     if (!unparked.ok) return unparked;
     const edited = edit(unparked.ledger, { ...command, now: false, back: false });
     return !edited.ok || edited.change === 'unchanged' ? (edited.ok ? unparked : edited) : edited;
   }
+  return editInPlace(ledger, target.item, command, replaces);
+}
+
+/** The edit applied to an item that is where it stays: in the queue, resting, snoozed, or on the ferret's turn. */
+function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditCommand, replaces: boolean): AgendaMutation {
   const patch = command.patch;
-  const clears = (patch.clear ?? []).filter(field => target.item[field] !== undefined);
-  if (EDITABLE_FIELDS.every(field => patch[field] === undefined) && (patch.clear ?? []).length === 0) {
-    return failure('invalid', `nothing to edit: give at least one of ${EDITABLE_FIELDS.join(', ')}`);
+  // A replaced ask takes the ferret's old answer to the owner's question with it, unless the edit gives a new one.
+  const dropsAnswer = replaces && patch.questionAnswer === undefined && item.questionAnswer !== undefined;
+  // A new ask brings its own shape: the old fields it does not re-give go, and the revision records them.
+  const clearing: (typeof EDITABLE_FIELDS)[number][] = [
+    ...(patch.clear ?? []),
+    ...(patch.clearTabs === true ? (['tabs'] as const) : []),
+    ...(dropsAnswer ? (['questionAnswer'] as const) : []),
+    ...(replaces ? droppedShape(item, patch) : []),
+  ];
+  const clears = clearing.filter(field => item[field] !== undefined);
+  if (
+    EDITABLE_FIELDS.every(field => patch[field] === undefined) &&
+    clearing.length === 0 &&
+    patch.stage === undefined
+  ) {
+    return failure('invalid', `nothing to edit: give at least one of stage, ${EDITABLE_FIELDS.join(', ')}`);
   }
-  if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
-    return failure('invalid', 'questions may be reworded but not added, removed or given other options');
-  }
+  const composed = replaces ? composeReplacement(item, patch) : item;
   const optionDetailProblem = agendaOptionDetailProblems({
-    ...target.item,
+    ...composed,
+    ...(patch.ask === undefined ? {} : { ask: patch.ask }),
+    ...(patch.answers === undefined ? {} : { answers: patch.answers }),
+    ...(patch.questions === undefined ? {} : { questions: patch.questions }),
     ...(patch.optionDetails === undefined ? {} : { optionDetails: patch.optionDetails }),
   })[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   const fieldsProblem = agendaFormProblems({
-    kind: agendaCardKind(target.item),
-    fields: patch.fields ?? target.item.fields,
+    kind: patch.kind ?? agendaCardKind(item),
+    fields: patch.fields ?? composed.fields,
   })[0];
   if (patch.fields !== undefined && fieldsProblem !== undefined) return failure('invalid', fieldsProblem);
-  // Steps belong to a to-do alone: an edit never gives them to a card of another shape.
-  const shapeProblem = command.actor.kind === 'agent' ? agendaEditShapeProblems(target.item, patch)[0] : undefined;
+  // Steps belong to a to-do alone: an edit that keeps the ask never gives them to a card of another shape.
+  const shapeProblem =
+    command.actor.kind === 'agent' && !replaces ? agendaEditShapeProblems(item, patch)[0] : undefined;
   if (shapeProblem !== undefined) return failure('invalid', shapeProblem);
   const changed = EDITABLE_FIELDS.filter(
     field =>
       clears.some(cleared => cleared === field) ||
-      (patch[field] !== undefined && !sameField(patch[field], target.item[field])),
+      (patch[field] !== undefined && !sameField(patch[field], item[field])),
   );
+  const stage =
+    patch.stage ?? (kindMoved(item, patch) && patch.kind !== undefined ? agendaStageOfKind(patch.kind) : undefined);
+  const stageFields = stage === undefined || stage === agendaStage(item) ? {} : staged(item, stage, command.at);
   // The ferret's edit answers its turn: the item goes back to the owner, whether or not the words changed.
-  const handsBack = target.item.waitingOn !== undefined && command.actor.kind === 'agent';
-  if (changed.length === 0 && !handsBack) return unchanged(ledger);
-  const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = target.item;
+  const handsBack = (item.waitingOn !== undefined && command.actor.kind === 'agent') || replaces;
+  const answering = patch.questionAnswer !== undefined && !clears.includes('questionAnswer');
+  if (changed.length === 0 && !handsBack && !answering && Object.keys(stageFields).length === 0)
+    return unchanged(ledger);
+  const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = item;
   const revision: AgendaRevision = {
     at: command.at,
     by: command.actor.kind,
     changed,
-    previous: Object.fromEntries(
-      changed.flatMap(field => (target.item[field] === undefined ? [] : [[field, target.item[field]]])),
-    ),
+    previous: Object.fromEntries(changed.flatMap(field => (item[field] === undefined ? [] : [[field, item[field]]]))),
   };
   const edited: AgendaItem = {
     ...kept,
-    ...(!handsBack && target.item.waitingOn !== undefined
+    ...(!handsBack && item.waitingOn !== undefined
       ? {
-          waitingOn: target.item.waitingOn,
-          ...(target.item.askedAt === undefined ? {} : { askedAt: target.item.askedAt }),
-          ...(target.item.waitingFor === undefined ? {} : { waitingFor: target.item.waitingFor }),
+          waitingOn: item.waitingOn,
+          ...(item.askedAt === undefined ? {} : { askedAt: item.askedAt }),
+          ...(item.waitingFor === undefined ? {} : { waitingFor: item.waitingFor }),
         }
       : {}),
     ...(stepsDone === undefined || changed.includes('steps') ? {} : { stepsDone }),
     ...Object.fromEntries(
       changed.map(field => [field, clears.some(cleared => cleared === field) ? undefined : patch[field]]),
     ),
-    ...(changed.length === 0
-      ? {}
-      : { revisions: [...(target.item.revisions ?? []), revision].slice(-MAX_AGENDA_REVISIONS) }),
+    ...(changed.length === 0 ? {} : { revisions: [...(item.revisions ?? []), revision].slice(-MAX_AGENDA_REVISIONS) }),
+    ...said(
+      item,
+      answering ? wordsOf(command.at, speakerOf(command.actor), 'question-answer', patch.questionAnswer) : undefined,
+    ),
+    ...stageFields,
+    // A new ask: asked again, fresh, under the next version; the owner's answer to the old one is history.
+    // The answer that failed to reach the ferret answered the OLD ask: its Retry goes with it.
+    ...(replaces
+      ? {
+          askVersion: (item.askVersion ?? 1) + 1,
+          waitingSince: command.at,
+          ownerAnswer: undefined,
+          undelivered: undefined,
+        }
+      : {}),
   };
   const final: AgendaItem = handsBack
     ? { ...edited, history: withHistory(edited.history, { at: command.at, kind: 'updated' }) }
     : edited;
   // Only an answer to a request for MORE INFORMATION is `info-added`; a discussion handed back is a plain refresh.
-  const change = handsBack && target.item.waitingFor !== 'discussion' ? 'info-added' : 'refreshed';
+  const change = handsBack && !replaces && item.waitingFor !== 'discussion' ? 'info-added' : 'refreshed';
   return replaceItem(ledger, final, command.at, change);
 }
 
@@ -1565,16 +2618,21 @@ function replaceItem(
     | 'parked'
     | 'unparked'
     | 'woke'
+    | 'rested'
+    | 'nudged'
+    | 'answered'
+    | 'logged'
   >,
 ): AgendaMutation {
+  const tidy = tidied(item);
   const next: AgendaLedger = {
     ...ledger,
     entries: ledger.entries.map(entry =>
-      entry.lifecycle === 'active' && entry.item.id === item.id ? { ...entry, item } : entry,
+      entry.lifecycle === 'active' && entry.item.id === tidy.id ? { ...entry, item: tidy } : entry,
     ),
     updatedAt: at,
   };
-  return success(next, true, change, item);
+  return success(next, true, change, tidy);
 }
 
 /** JSON with keys in sorted order, so two items compare by content and not by how their keys were spread. */
@@ -1586,12 +2644,37 @@ function sortedJson(value: unknown): string {
   );
 }
 
-/** The history with one more entry, the oldest dropped past the bound. */
+/** The stage fields of a new item: the stage it starts at, as the first of its stages. */
+function firstStage(stage: AgendaStage, at: string): Pick<AgendaItem, 'stage' | 'stages'> {
+  return { stage, stages: [{ stage, at }] };
+}
+
+/** The stage fields of an item moved to `stage` at `at`, or none when it is already there. */
+function staged(
+  item: Pick<AgendaItem, 'stage' | 'stages' | 'kind' | 'ask'>,
+  stage: AgendaStage,
+  at: string,
+): Partial<Pick<AgendaItem, 'stage' | 'stages'>> {
+  if (agendaStage(item) === stage && item.stage !== undefined) return {};
+  return { stage, stages: [...(item.stages ?? []), { stage, at }].slice(-MAX_AGENDA_STAGES) };
+}
+
+/**
+ * An item with its `resting` only while something says it rests (`parked: replied`, or a wait on the ferret): every
+ * path that brings an item back by dropping its park drops the detail of how it rested with it.
+ */
+function tidied(item: AgendaItem): AgendaItem {
+  if (item.resting === undefined || item.parked?.reason === 'replied' || item.waitingOn !== undefined) return item;
+  const { resting: _resting, ...rest } = item;
+  return rest;
+}
+
+/** History before fitting: the fitter archives owner records before applying the wire bounds. */
 function withHistory(
   history: readonly AgendaHistoryEntry[] | undefined,
   entry: AgendaHistoryEntry,
 ): AgendaHistoryEntry[] {
-  return [...(history ?? []), entry].slice(-MAX_AGENDA_HISTORY);
+  return [...(history ?? []), entry];
 }
 
 /**
@@ -1614,8 +2697,10 @@ function needsInfo(ledger: AgendaLedger, command: NeedsInfoCommand): AgendaMutat
     ...current,
     waitingOn: 'ferret',
     askedAt: command.at,
+    resting: { sub: 'waiting-on-ferret', at: command.at },
     infoRequests: (target.item.infoRequests ?? 0) + 1,
     history: withHistory(target.item.history, { at: command.at, kind: 'needs-info', ...(note === '' ? {} : { note }) }),
+    ...said(current, wordsOf(command.at, 'owner', 'needs-info', note)),
   };
   return replaceItem(ledger, item, command.at, 'needs-info');
 }
@@ -1643,8 +2728,10 @@ function discuss(ledger: AgendaLedger, command: DiscussCommand): AgendaMutation 
     waitingOn: 'ferret',
     askedAt: command.at,
     waitingFor: 'discussion',
+    resting: { sub: 'waiting-on-ferret', at: command.at },
     infoRequests: (target.item.infoRequests ?? 0) + 1,
     history: withHistory(target.item.history, { at: command.at, kind: 'discuss', ...(note === '' ? {} : { note }) }),
+    ...said(current, wordsOf(command.at, 'owner', 'discuss', note)),
   };
   return replaceItem(ledger, item, command.at, 'discussing');
 }
@@ -1669,38 +2756,338 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
   if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
   // A gate item is never parked by a chat message: nobody but the owner's answer could bring it back.
   if (isGateAgenda(target)) return unchanged(ledger);
+  if (command.fromChat !== undefined && loggedFromChat(target.item, command.fromChat.messageId)) {
+    return unchanged(ledger);
+  }
   const words = command.note?.trim() ?? '';
-  const note = words === '' ? null : words.slice(0, MAX_AGENDA_DETAIL_LENGTH);
-  // PARKED, not closed: the item leaves the owner's queue (and any discussion) and waits for the ferret to
-  // bring it back or close it. A reply to a snoozed item is a reply too: it parks as replied.
-  const { waitingOn: _w, askedAt: _a, waitingFor: _f, parked: _p, ...open } = target.item;
-  const item: AgendaItem = {
-    ...open,
-    parked: { reason: 'replied', at: command.at },
-    history: withHistory(open.history, { at: command.at, kind: 'replied', ...(note === null ? {} : { note }) }),
-  };
-  return replaceItem(ledger, item, command.at, 'replied');
+  const note = words === '' ? null : words.slice(0, MAX_AGENDA_REPLY_LENGTH);
+  return restOnOwnerWords(
+    ledger,
+    target.item,
+    command.at,
+    note,
+    wordsOf(command.fromChat?.at ?? command.at, 'owner', 'reply', command.note, command.fromChat),
+  );
 }
 
 /**
- * What a ferret's `surface`, or its `edit` with `back`, does to a PARKED item: one parked as `replied` comes back
- * — fresh, so the owner sees it as new; one the owner `snoozed` stays asleep unless the ferret says it is urgent (`now`), and
- * then at most once an hour per item (`AGENDA_URGENT_WAKE_MS`). Anyone else's move, and any item in play, is
- * returned as it is.
+ * RESTING, not closed: the item leaves the owner's queue (and any discussion) and waits on the ferret, whose answer
+ * brings it back to its place and whose `done` closes it. A reply to a snoozed or working item is a reply too.
  */
-function backFromParked(item: AgendaItem, actor: AgendaActor, at: string, now: boolean): AgendaItem | AgendaFailure {
+function restOnOwnerWords(
+  ledger: AgendaLedger,
+  item: AgendaItem,
+  at: string,
+  note: string | null,
+  entry: AgendaConversationEntry | undefined,
+): AgendaMutation {
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, parked: _p, resting: _r, ...open } = item;
+  const rested: AgendaItem = {
+    ...open,
+    parked: { reason: 'replied', at },
+    resting: { sub: 'waiting-on-ferret', at },
+    history: withHistory(open.history, { at, kind: 'replied', ...(note === null ? {} : { note }) }),
+    ...said(open, entry),
+  };
+  return replaceItem(ledger, rested, at, 'replied');
+}
+
+/**
+ * What a ferret's edit that brings an item back does to a PARKED one: a RESTING item (parked as `replied`) comes back
+ * to the owner, in its old place or a fresh one (`place`, see `placeOnReturn`); one the owner `snoozed` stays asleep
+ * unless the ferret says it is urgent (`now`), and then at most once an hour per item (`AGENDA_URGENT_WAKE_MS`), fresh.
+ * A newly asserted blocker (`blocker`) wakes it too, but it is a separate reason: the hourly throttle belongs to the
+ * optional urgency only, so a new blocker is never left asleep because of an earlier urgent wake.
+ * Anyone else's move, and any item in play, is returned as it is.
+ */
+function backFromParked(
+  item: AgendaItem,
+  actor: AgendaActor,
+  at: string,
+  now: boolean,
+  place: 'old' | 'fresh' = 'fresh',
+  blocker = false,
+): AgendaItem | AgendaFailure {
   if (item.parked === undefined || actor.kind !== 'agent') return item;
   if (item.parked.reason === 'snoozed') {
-    if (!now) return item;
-    if (item.urgentAt !== undefined && Date.parse(at) - Date.parse(item.urgentAt) < AGENDA_URGENT_WAKE_MS) {
+    if (!now && !blocker) return item;
+    if (
+      now &&
+      !blocker &&
+      item.urgentAt !== undefined &&
+      Date.parse(at) - Date.parse(item.urgentAt) < AGENDA_URGENT_WAKE_MS
+    ) {
       return {
         code: 'rate-limited',
         message: `${item.id} was already woken as urgent at ${item.urgentAt}; the owner snoozed it, so it may be woken again an hour after that`,
       };
     }
   }
-  const { parked, ...rest } = item;
-  return { ...rest, waitingSince: at, ...(parked.reason === 'snoozed' ? { urgentAt: at } : {}) };
+  const { parked, resting: _resting, ...rest } = item;
+  // A woken snooze and a new ask are fresh; the ferret's answer to the owner's reply goes back to its old place.
+  const fresh = parked.reason === 'snoozed' || place === 'fresh';
+  return { ...rest, ...(fresh ? { waitingSince: at } : {}), ...(parked.reason === 'snoozed' ? { urgentAt: at } : {}) };
+}
+
+/**
+ * The ferret LOGS the owner's chat message on an item it speaks for (docs/agenda.md § The conversation). The owner's
+ * words, copied verbatim by the daemon, are entered with their chat tag and rest the item as a chat reply does; then
+ * the ferret's `words` follow: `reply` answers them — the item is back with the owner, to its old place — and `rest`
+ * says what it is doing, so the item rests as working. One message is logged on an item once. Nothing is written
+ * unless both steps are.
+ */
+function log(ledger: AgendaLedger, command: LogCommand): AgendaMutation {
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (command.actor.kind !== 'agent' || !canAddressAgenda(command.actor, target)) {
+    return failure('forbidden', 'only the ferret that raised an item (or its lead) logs the owner\u2019s words on it');
+  }
+  if (target.item.notice === true) return failure('invalid', 'a notice is read, not talked through');
+  if (isGateAgenda(target)) return failure('forbidden', `${command.id} is a card's gate: only the owner answers it`);
+  if (loggedFromChat(target.item, command.chat.messageId)) {
+    return failure(
+      'invalid',
+      `message ${command.chat.messageId} is already on ${command.id}\u2019s conversation: its words are kept; answer them with an edit (--back) or take the item on with rest`,
+    );
+  }
+  if (command.chat.text.trim() === '') return failure('invalid', 'the owner message has no words');
+  const words = command.words.trim();
+  if (words === '') return failure('invalid', 'say what you answer or what you are doing');
+  if (command.mode === 'rest' && words.length > MAX_AGENDA_REST_WHY_LENGTH) {
+    return failure(
+      'too-long',
+      `what you are doing is held to ${MAX_AGENDA_REST_WHY_LENGTH} characters: say it shorter`,
+    );
+  }
+  const fromChat = { messageId: command.chat.messageId, at: command.chat.at };
+  const rested = restOnOwnerWords(
+    ledger,
+    target.item,
+    command.at,
+    command.chat.text.slice(0, MAX_AGENDA_REPLY_LENGTH),
+    wordsOf(command.chat.at, 'owner', 'chat-log', command.chat.text, fromChat),
+  );
+  if (!rested.ok) return rested;
+  const next =
+    command.mode === 'rest'
+      ? rest(rested.ledger, { action: 'rest', actor: command.actor, id: command.id, why: words, at: command.at })
+      : edit(rested.ledger, {
+          action: 'edit',
+          actor: command.actor,
+          id: command.id,
+          patch: { questionAnswer: words },
+          at: command.at,
+        });
+  return next.ok ? { ...next, change: 'logged' } : next;
+}
+
+/** Without `machineId` a ref means "on this machine", which this layer cannot name, so a bare ref matches any machine's id. */
+const sameCard = (left: TaskRef, right: TaskRef): boolean =>
+  left.id === right.id &&
+  (left.machineId === undefined || right.machineId === undefined || left.machineId === right.machineId);
+
+/** `items` without a repeat, by `key`; the first of each kept, in order. */
+function distinctBy<Item>(items: readonly Item[], key: (item: Item) => string): Item[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const each = key(item);
+    if (seen.has(each)) return false;
+    seen.add(each);
+    return true;
+  });
+}
+
+/**
+ * A thread the owner and a ferret talk through: not a gate item, a notice, or a card the daemon acts on. One carrying
+ * card asks is one (docs/agenda.md § Card asks): `gateAttached` is then only their mirror for an older app.
+ */
+function plainThread(item: AgendaItem): boolean {
+  return (
+    !isGateItem(item) &&
+    item.notice !== true &&
+    (item.gateAttached === undefined || item.cardAsks !== undefined) &&
+    item.confirms === undefined &&
+    item.kind !== 'input' &&
+    item.input === undefined &&
+    item.taskPlan === undefined &&
+    item.copyPlan === undefined &&
+    item.signInRuleSuggestion === undefined &&
+    item.twoFactorSeed === undefined &&
+    item.phoneApproval === undefined
+  );
+}
+
+/**
+ * `from` is MERGED INTO `id` (docs/agenda.md § Merge and split): the two are one thread. Their conversations are one,
+ * interleaved by time; every card, related card and link of both is kept, and nothing is trimmed to fit — a merge that
+ * would pass a bound is refused. `id` keeps its state and its ask, and takes `from`'s card asks, once per card and
+ * entry ({@link joinCardAsks}). `from` closes as "merged into !<id>", carrying no card ask, with both
+ * pointing at the other (`mergedFrom`, `mergedInto`) and its versions kept. The owner may merge, and a ferret over
+ * its own board (or a lead over a sub-ferret's); never a gate, a notice or a card the daemon acts on, an item with
+ * itself, or into a closed item.
+ */
+function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
+  if (command.id === command.from) return failure('invalid', `${command.id} cannot be merged into itself`);
+  if (command.actor.kind === 'daemon') return failure('forbidden', 'only the owner or a ferret merges items');
+  const active = ledger.entries.filter(isActiveAgenda);
+  const into = active.find(entry => entry.item.id === command.id);
+  const from = active.find(entry => entry.item.id === command.from);
+  const closedOrMissing = (id: AgendaId): AgendaMutation =>
+    ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === id)
+      ? failure('invalid', `${id} is already done: merge into, and from, open items`)
+      : failure('not-found', `no unresolved agenda item ${id} in this session`);
+  if (into === undefined) return closedOrMissing(command.id);
+  if (from === undefined) return closedOrMissing(command.from);
+  if (!canAddressAgenda(command.actor, into) || !canAddressAgenda(command.actor, from)) {
+    return failure(
+      'forbidden',
+      'a ferret merges only the items it raised (or a sub-ferret\u2019s); the owner merges any',
+    );
+  }
+  for (const entry of [into, from]) {
+    if (!plainThread(entry.item)) {
+      return failure('invalid', `${entry.item.id} is a gate, a notice or a card the daemon acts on: it is not merged`);
+    }
+  }
+  const survivor = into.item;
+  const absorbed = from.item;
+  const cards = distinctBy([...(survivor.cards ?? []), ...(absorbed.cards ?? [])], row => formatTaskRef(row.task));
+  const links = distinctBy([...(survivor.links ?? []), ...(absorbed.links ?? [])], link => sortedJson(link));
+  const adopts = survivor.task === undefined || survivor.task === null ? absorbed.task : undefined;
+  const task = adopts ?? survivor.task;
+  const related = distinctBy(
+    [...(survivor.relatedTasks ?? []), ...(absorbed.task ? [absorbed.task] : []), ...(absorbed.relatedTasks ?? [])],
+    formatTaskRef,
+  ).filter(ref => task === undefined || task === null || !sameCard(ref, task));
+  if (cards.length > MAX_AGENDA_CARDS || related.length > MAX_AGENDA_CARDS || links.length > MAX_AGENDA_LINKS) {
+    return failure(
+      'full',
+      `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_CARDS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
+    );
+  }
+  // Every card ask of both rides the one item, once per card and entry; the absorbed item keeps none.
+  const asked = joinCardAsks(survivor, absorbed.cardAsks ?? [], command.at, (item, stage) => ({
+    ...item,
+    ...staged(item, stage, command.at),
+  }));
+  if (asked.kind === 'refused') return failure(asked.code, asked.message);
+  const conversation = mergedThreads(survivor.conversation, absorbed.conversation);
+  const mergedFrom = distinctBy(
+    [...(survivor.mergedFrom ?? []), absorbed.id, ...(absorbed.mergedFrom ?? [])],
+    id => id,
+  );
+  const { cards: _cards, links: _links, task: _task, relatedTasks: _related, ...base } = asked.into;
+  const merged: AgendaItem = {
+    ...base,
+    ...(cards.length === 0 ? {} : { cards }),
+    ...(links.length === 0 ? {} : { links }),
+    ...(task === undefined ? {} : { task }),
+    ...(related.length === 0 ? {} : { relatedTasks: related }),
+    ...(conversation.length === 0 ? {} : { conversation }),
+    mergedFrom,
+  };
+  const bare = { ...from, item: withoutCardAsks(absorbed) };
+  const kept: AgendaLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry =>
+      entry === into ? { ...into, item: tidied(merged) } : entry === from ? bare : entry,
+    ),
+  };
+  const closed = addressed(
+    kept,
+    bare,
+    command.actor,
+    `merged into !${command.id}`,
+    command.at,
+    'dismissed',
+    'dismissed',
+  );
+  if (!closed.ok || closed.addressed === undefined) return closed;
+  const absorbedItem: ResolvedAgendaItem = { ...closed.addressed, mergedInto: command.id };
+  const next: AgendaLedger = {
+    ...closed.ledger,
+    entries: closed.ledger.entries.map(entry =>
+      entry.lifecycle === 'addressed' && entry.item.id === absorbedItem.id ? { ...entry, item: absorbedItem } : entry,
+    ),
+  };
+  return success(next, true, 'merged', tidied(merged), absorbedItem);
+}
+
+/**
+ * A new item is SPLIT OFF `id` (docs/agenda.md § Merge and split): part of it stopped passing the one-agenda test. The
+ * new item is raised as a fresh item of the same ferret (its own ask, its own place in the owner's queue), linked both
+ * ways (`splitFrom`, `splitInto`); the cards named in `moveCards` go along with it, and so do their card asks
+ * ({@link leaveCardAsks}, {@link joinCardAsks}). `id` keeps its state, ask and
+ * conversation. Refused for a gate, a notice or a card the daemon acts on, a card `id` does not hold, and a request an
+ * open item of the ferret already makes.
+ */
+function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (command.actor.kind === 'daemon' || !canAddressAgenda(command.actor, target)) {
+    return failure(
+      'forbidden',
+      'a ferret splits only the items it raised (or a sub-ferret\u2019s); the owner splits any',
+    );
+  }
+  if (!plainThread(target.item)) {
+    return failure('invalid', `${command.id} is a gate, a notice or a card the daemon acts on: it is not split`);
+  }
+  const original = target.item;
+  const moving = command.moveCards ?? [];
+  const holds = (ref: TaskRef): boolean =>
+    (original.task !== undefined && original.task !== null && sameCard(original.task, ref)) ||
+    (original.cards ?? []).some(row => sameCard(row.task, ref)) ||
+    (original.relatedTasks ?? []).some(card => sameCard(card, ref)) ||
+    (original.cardAsks ?? []).some(ask => ask.gate.cardId === ref.id);
+  const missing = moving.find(ref => !holds(ref));
+  if (missing !== undefined) return failure('invalid', `${formatTaskRef(missing)} is not a card of ${command.id}`);
+  const made = raise(ledger, { action: 'raise', actor: target.origin, request: command.request, at: command.at });
+  if (!made.ok) return made;
+  if (made.change !== 'created' || made.item === undefined) {
+    return failure('invalid', 'an open item of this ferret already says the same: nothing was split off');
+  }
+  const moves = (ref: TaskRef): boolean => moving.some(card => sameCard(card, ref));
+  // A moved card's asks go with it (docs/agenda.md § Merge and split): the new item carries them, the original keeps the rest.
+  const { left, moved } = leaveCardAsks(original, ask => moves({ id: ask.gate.cardId }), command.at);
+  const carried = joinCardAsks(made.item, moved, command.at, (item, stage) => ({
+    ...item,
+    ...staged(item, stage, command.at),
+  }));
+  if (carried.kind === 'refused') return failure(carried.code, carried.message);
+  const movedRows = (original.cards ?? []).filter(row => moves(row.task));
+  const keptRows = (original.cards ?? []).filter(row => !moves(row.task));
+  const movedRelated = (original.relatedTasks ?? []).filter(moves);
+  const keptRelated = (original.relatedTasks ?? []).filter(ref => !moves(ref));
+  const movesTask = original.task !== undefined && original.task !== null && moves(original.task);
+  const { cards: _cards, task: _task, relatedTasks: _related, ...base } = left;
+  const parent: AgendaItem = {
+    ...base,
+    ...(keptRows.length === 0 ? {} : { cards: keptRows }),
+    ...(original.task === undefined || movesTask ? {} : { task: original.task }),
+    ...(keptRelated.length === 0 ? {} : { relatedTasks: keptRelated }),
+    splitInto: [...(original.splitInto ?? []), made.item.id],
+  };
+  const child: AgendaItem = {
+    ...carried.into,
+    ...(movedRows.length === 0 ? {} : { cards: movedRows }),
+    ...(movesTask && original.task ? { task: original.task } : {}),
+    ...(movedRelated.length === 0 ? {} : { relatedTasks: movedRelated }),
+    splitFrom: original.id,
+  };
+  const next: AgendaLedger = {
+    ...made.ledger,
+    entries: made.ledger.entries.map(entry =>
+      entry.lifecycle !== 'active'
+        ? entry
+        : entry.item.id === original.id
+          ? { ...entry, item: parent }
+          : entry.item.id === child.id
+            ? { ...entry, item: child }
+            : entry,
+    ),
+  };
+  return success(next, true, 'split', child);
 }
 
 /** The owner puts an open item away until a time still ahead: off their queue, back as fresh when it wakes. */
@@ -1712,8 +3099,98 @@ function snooze(ledger: AgendaLedger, command: SnoozeCommand): AgendaMutation {
   if (!(Date.parse(command.until) > Date.parse(command.at))) {
     return failure('invalid', 'snooze an item until a time that is still ahead');
   }
+  // A snooze is the owner's: whatever the item rested on, it now sleeps until then (`tidied` drops the rest).
   const item: AgendaItem = { ...target.item, parked: { reason: 'snoozed', at: command.at, until: command.until } };
   return replaceItem(ledger, item, command.at, 'parked');
+}
+
+/** The waiting-on-ferret item a Warden record is about, when it is still in the rest the Warden saw. */
+function restedFor(ledger: AgendaLedger, target: AgendaNudgeTarget) {
+  const entry = ledger.entries.filter(isActiveAgenda).find(each => each.item.id === target.id);
+  const view = entry === undefined ? undefined : agendaState(entry.item);
+  if (entry === undefined || view?.state !== 'resting' || view.sub !== 'waiting-on-ferret') return undefined;
+  const resting: AgendaResting = entry.item.resting ?? { sub: 'waiting-on-ferret', at: view.since };
+  // A newer rest (the owner replied again) or a nudge already recorded is not the one the Warden looked at.
+  return view.since === target.since && (resting.nudges ?? 0) === target.nudges ? { entry, resting } : undefined;
+}
+
+/**
+ * The Warden decided on ONE nudge message (`sendId`) for these resting items, before it sends it: each item records
+ * the id, so a sweep after a restart resumes that message — the same id, which the send path deduplicates — and not a
+ * second one for the items it did not get to record. An item that is no longer the rest the Warden saw is skipped.
+ */
+function nudging(ledger: AgendaLedger, command: NudgingCommand): AgendaMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the Warden records a nudge');
+  const marked = new Map<AgendaId, AgendaResting>();
+  for (const target of command.items) {
+    const rested = restedFor(ledger, target);
+    if (rested !== undefined && rested.resting.nudgeSend === undefined) {
+      marked.set(target.id, { ...rested.resting, nudgeSend: command.sendId });
+    }
+  }
+  if (marked.size === 0) return unchanged(ledger);
+  const next: AgendaLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry => {
+      if (entry.lifecycle !== 'active') return entry;
+      const resting = marked.get(entry.item.id);
+      return resting === undefined ? entry : { ...entry, item: { ...entry.item, resting } };
+    }),
+    updatedAt: command.at,
+  };
+  return success(next, true, 'nudged');
+}
+
+/**
+ * The Warden nudged the ferret about a RESTING item waiting on it: the item records when, and how many times, so the
+ * next nudge waits its backoff and a migrated item is never nudged twice. Only the daemon says so, and only of the
+ * rest it nudged for (`since`, `nudges`) — a rest that has moved on since is left as it is.
+ */
+function nudged(ledger: AgendaLedger, command: NudgedCommand): AgendaMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the Warden records a nudge');
+  const rested = restedFor(ledger, { id: command.id, since: command.since, nudges: command.nudges });
+  if (rested === undefined) return unchanged(ledger);
+  const { nudgeSend: _sent, ...resting } = rested.resting;
+  const item: AgendaItem = {
+    ...rested.entry.item,
+    resting: { ...resting, nudgedAt: command.at, nudges: (resting.nudges ?? 0) + 1 },
+  };
+  return replaceItem(ledger, item, command.at, 'nudged');
+}
+
+/**
+ * The raising ferret (or its lead) takes an item on without asking anything yet: it RESTS as `working`, saying what it
+ * is doing — off the owner's queue, quiet, never nudged — until the ferret answers on it (it then asks again, fresh)
+ * or marks it done. A wait for more information or a discussion ends with it: the ferret has the item. Refused for an
+ * item the owner snoozed (theirs until then), a card's gate (the owner's), and a notice (read, not worked on).
+ */
+function rest(ledger: AgendaLedger, command: RestCommand): AgendaMutation {
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (command.actor.kind !== 'agent' || !canAddressAgenda(command.actor, target)) {
+    return failure('forbidden', 'only the ferret that raised an item (or its lead) takes it on');
+  }
+  if (target.item.notice === true) return failure('invalid', 'a notice is read, not worked on');
+  const waiting = restRefusal(target.item);
+  if (waiting !== undefined) return failure('invalid', waiting);
+  if (target.item.parked?.reason === 'snoozed') {
+    return failure(
+      'invalid',
+      `${command.id} is snoozed by the owner until ${target.item.parked.until}: it stays away until then`,
+    );
+  }
+  const why = command.why.trim();
+  const view = agendaState(target.item);
+  if (view.state === 'resting' && view.sub === 'working' && target.item.resting?.why === why) return unchanged(ledger);
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, resting: _r, ...open } = target.item;
+  const item: AgendaItem = {
+    ...open,
+    parked: { reason: 'replied', at: command.at },
+    resting: { sub: 'working', at: command.at, why },
+    history: withHistory(open.history, { at: command.at, kind: 'updated', note: `working: ${why}` }),
+    ...said(open, wordsOf(command.at, 'ferret', 'rest', why)),
+  };
+  return replaceItem(ledger, item, command.at, 'rested');
 }
 
 /**
@@ -1765,10 +3242,10 @@ function repliedRefreshProblem(
 ): string | null {
   if (actor.kind !== 'agent') return null;
   if (patch === null) {
-    return `${id} was replied to and is off the owner's list: bring it back only if you need something new from them, with the whole card refreshed — \`fy agenda edit ${id} --back --summary … --premise … --context …\`, not surface`;
+    return `${id} rests, waiting on you, since the owner replied: answer on it — \`fy agenda answer ${id} "<text>"\` brings it back to their list in its old place — or \`fy agenda done ${id}\` when nothing more is expected; not surface`;
   }
   if (!back) {
-    return `${id} was replied to and is off the owner's list: add --back to bring it back to them`;
+    return `${id} rests, waiting on you, since the owner replied: \`fy agenda answer ${id} "<text>"\` brings it back to them`;
   }
   const blank = (field: string | null | undefined): boolean => (field ?? '').trim() === '';
   if (!blank(patch.questionAnswer)) return null;
@@ -1820,7 +3297,13 @@ function reopenReplied(
     resolvedByName: _resolvedByName,
     ...rest
   } = closed.item;
-  const parsed = AgendaItemSchema.safeParse({ ...rest, history: withHistory(rest.history, entry) });
+  const parsed = parseTransitionItem(
+    fitAgendaItem({
+      ...rest,
+      history: withHistory(rest.history, entry),
+      ...said(rest, entry.kind === 'surfaced' ? wordsOf(at, speakerOf(actor), 'surface', entry.note) : undefined),
+    }),
+  );
   if (!parsed.success) return unchanged(ledger);
   const next: AgendaLedger = {
     ...ledger,
@@ -1880,6 +3363,7 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
     const item: AgendaItem = {
       ...(back.waitingFor === 'discussion' ? open : back),
       history: withHistory(back.history, { at: command.at, kind: 'surfaced', ...(why === '' ? {} : { note: why }) }),
+      ...said(back, wordsOf(command.at, speakerOf(command.actor), 'surface', why)),
     };
     return replaceItem(ledger, item, command.at, 'unparked');
   }
@@ -1896,6 +3380,7 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
       kind: 'surfaced',
       ...(why === '' ? {} : { note: why }),
     }),
+    ...said(open, wordsOf(command.at, speakerOf(command.actor), 'surface', why)),
   };
   return replaceItem(ledger, item, command.at, 'surfaced');
 }
@@ -1919,6 +3404,32 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
   const active = ledger.entries.filter(isActiveAgenda);
   if (command.request !== undefined) {
     const target = active.find(entry => entry.item.id === command.id);
+    // An ANSWER that rested the item and never arrived: the item is the owner's again, in its old place, with the
+    // answer kept for a retry — but only while it still rests, waiting on the ferret, from that very answer: the
+    // ferret may have taken it on (`rest --why`) or the owner replied again since, and then the old failure is stale.
+    const answer = target?.item.ownerAnswer;
+    if (
+      target !== undefined &&
+      answer?.request === command.request &&
+      target.item.parked?.reason === 'replied' &&
+      target.item.resting?.sub === 'waiting-on-ferret' &&
+      target.item.resting.at === answer.at
+    ) {
+      const { parked: _p, resting: _r, ...open } = target.item;
+      const item: AgendaItem = {
+        ...open,
+        undelivered: {
+          at: command.at,
+          reply: {
+            action: 'resolve',
+            response: answer.response,
+            ...(answer.note === undefined || answer.note.trim() === '' ? {} : { note: answer.note }),
+          },
+          reason: command.reason,
+        },
+      };
+      return replaceItem(ledger, item, command.at, 'reopened');
+    }
     if (target === undefined || target.item.waitingOn === undefined || target.item.infoRequests !== command.request)
       return unchanged(ledger);
     const note = lastNote(target.item.history, target.item.waitingFor === 'discussion' ? 'discuss' : 'needs-info');
@@ -1964,10 +3475,9 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
           ...(note === undefined ? {} : { note }),
           ...(response === undefined ? {} : { response }),
         };
-  const parsed = AgendaItemSchema.safeParse({
-    ...rest,
-    undelivered: { at: command.at, reply, reason: command.reason },
-  });
+  const parsed = parseTransitionItem(
+    fitAgendaItem({ ...rest, undelivered: { at: command.at, reply, reason: command.reason } }),
+  );
   if (!parsed.success) return unchanged(ledger);
   const next: AgendaLedger = {
     ...ledger,
@@ -2014,35 +3524,30 @@ function restateConfirms(ledger: AgendaLedger, command: RestateConfirmsCommand):
 }
 
 /**
- * A card's gate is asked on an open thread of the card's ferret (docs/agenda.md § One ask per thing), or no longer is.
- * Only the daemon says so, and only of an open thread: not a gate item (it IS the ask) and not a notice (it asks
- * nothing). The thread is otherwise left exactly as it was.
+ * A card ask on an open agenda (docs/agenda.md § Card asks): put on it, restated, withdrawn, or answered
+ * (`applyCardAsk`). Only the daemon writes one, and only on an open agenda that can carry it: not a notice (it asks
+ * nothing) and not a standalone gate item from before card asks (it IS the ask).
  */
-function attachGate(ledger: AgendaLedger, command: AttachGateCommand): AgendaMutation {
-  if (command.actor.kind !== 'daemon')
-    return failure('forbidden', 'only the daemon may attach a card gate to a thread');
+function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon puts a card ask on an agenda');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (isGateItem(target.item) || target.item.notice === true) {
-    return failure('invalid', `${command.id} is a gate item or a notice, so it carries no attached gate`);
+    return failure('invalid', `${command.id} is a gate item or a notice, so it carries no card ask`);
   }
-  if (command.answered === undefined && sameField(command.gate ?? undefined, target.item.gateAttached)) {
-    return unchanged(ledger);
+  const outcome = applyCardAsk(target.item, command.operation, command.at, {
+    stage: (item, stage) => ({ ...item, ...staged(item, stage, command.at) }),
+    history: (item, kind, note) => ({ ...item, history: withHistory(item.history, { at: command.at, kind, note }) }),
+    tidy: item => fitAgendaItem(tidied(item)),
+  });
+  if (outcome.kind === 'unchanged') return unchanged(ledger);
+  if (outcome.kind === 'refused') return failure(outcome.code, outcome.message);
+  if (outcome.kind === 'closed') {
+    const moved = { ...target, item: outcome.item };
+    const entries = ledger.entries.map(entry => (entry === target ? moved : entry));
+    return addressed({ ...ledger, entries }, moved, command.actor, outcome.note, command.at, 'done', 'resolved');
   }
-  const { gateAttached: _gone, ...rest } = target.item;
-  const kept: AgendaItem =
-    command.answered === undefined
-      ? rest
-      : {
-          ...rest,
-          history: withHistory(rest.history, {
-            at: command.at,
-            kind: 'gate-answered',
-            note: gateReference(command.answered),
-          }),
-        };
-  const item: AgendaItem = command.gate === null ? kept : { ...kept, gateAttached: command.gate };
-  return replaceItem(ledger, item, command.at, 'refreshed');
+  return replaceItem(ledger, outcome.item, command.at, outcome.change);
 }
 
 /**

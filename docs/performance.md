@@ -84,6 +84,17 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
 - **What a crash or power cut can lose:** only the index's last few writes, never a session's history.
   Every event is saved in its session's journal first, and that journal is synced to disk. On the next
   start the daemon checks the index against every journal and fills in anything missing.
+- **Agenda versions** (`agenda-versions/<id>.sqlite`) open, initialize, import legacy JSONL, read and commit on
+  the **agenda versions worker**. Archive requests are awaited in the session transaction queue, so numbering
+  and commit order stay intact. A slow commit holds that session's next transaction while the main event loop
+  serves other requests. This archive has no write-behind or main-thread fallback. A synced transaction intent
+  preserves every draft across worker failure or uncertain acknowledgement; replay uses per-item idempotency keys.
+  Closed threads leave the hot ledger only after cold archive acknowledgement, so unrelated edits no longer
+  rewrite pruned lifetime conversations. Active conversations remain uncapped and are still rewritten with state.
+  The intent costs one more serialization of the agenda file per change (the text it commits, written to the intent
+  and then to `agenda.json` as it is) and one SHA-256 of it; the digest of the file it was prepared from is taken
+  from the read the change already made, so nothing is read or parsed again. Both run on the daemon thread, so
+  they grow with the agenda's size, thread text included.
 - **What a crash loses from analytics:** the rows of sessions that finished in the last few seconds.
   The analytics index is disposable. Every row is rebuilt from the session's own records and
   transcript, and the next start's sweep writes again each one that is missing, so a crash costs one
@@ -114,12 +125,15 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
   as before. Measured on a 100 MB transcript without a memory cap, the longest the main thread
   was held went from 60–130 ms to under 40 ms. The guard is `io-pressure-transcript.test.ts`, which
   also runs with memory capped and prints each path's longest block on a `TRANSCRIPT-BUDGET` line.
-- `fyd --check` lists `session-index`, `analytics-index` and `transcript-parse` with the other workers.
-  If one of these threads fails five times in ten minutes, the daemon does its work on the main thread
-  instead and says so once in its log.
+- `fyd --check` lists `agenda-versions`, `session-index`, `analytics-index` and `transcript-parse` with the other workers.
+  If a session-index, analytics-index or transcript-parse thread fails five times in ten minutes,
+  the daemon does its work on the main thread instead and says so once in its log. Agenda archive requests
+  fail without that fallback.
 
 The guards are `packages/daemon/tests/realworld/runtime/io-pressure-index.test.ts` and
-`io-pressure-analytics.test.ts`. They make every disk write take 1.5 s, and check that the event loop
+`io-pressure-analytics.test.ts`. The agenda archive guard is `agenda-versions-responsiveness.test.ts`
+in that directory: it imports 100 legacy versions sharing a 1.1 MB message and injects 1.5 s SQLite commits,
+checking the same 200 ms main-loop ceiling. The index guards make every disk write take 1.5 s, and check that the event loop
 (and, for the session index, a health check) stays under 200 ms. For the analytics index the same
 test shows the old behaviour first: a 1,500-row sweep committing on the main thread stalled the loop
 for 1,520 ms; with the writer thread the longest stall was about 85 ms.

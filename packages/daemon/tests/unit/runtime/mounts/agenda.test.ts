@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AgendaSnapshotSchema as OldAgendaSnapshotSchema } from '../../../../../protocol/tests/fixtures/agenda-before-channel.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import {
@@ -9,6 +10,7 @@ import {
   AgendaService,
 } from '../../../../src/lib/agenda/index.ts';
 import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
+import type { AgendaGatePort } from '../../../../src/lib/runtime/mounts/agenda-gates.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,
@@ -53,8 +55,9 @@ function fixture(
   repository?: AgendaLedgerRepository,
   notifications: DirectNotificationSubsystem = new FakeNotifications(),
   credentials: ApiCredentials = CREDENTIALS,
+  gates?: AgendaGatePort,
 ) {
-  const routes = agendaRoutes(agendaService(repository), notifications, NO_HELD_REPLIES);
+  const routes = agendaRoutes(agendaService(repository), notifications, NO_HELD_REPLIES, undefined, gates);
   const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), credentials, NO_GOVERNED_ROUTES_GUARD);
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
@@ -94,6 +97,56 @@ describe('agendaActor', () => {
 });
 
 describe('attention routes', () => {
+  it('should replay the full stored owner answer when an old app retries its clipped view', async () => {
+    const repository = new FakeLedgerRepository();
+    const service = agendaService(repository);
+    const notes: (string | null | undefined)[] = [];
+    const gates: AgendaGatePort = {
+      isGate: async () => false,
+      answer: async answer => {
+        notes.push(answer.note);
+        return { handled: false };
+      },
+    };
+    const dispatch = fixture(repository, new FakeNotifications(), CREDENTIALS, gates);
+    await dispatch(post({ ...raise, ask: { kind: 'open-question' } }, agentIn('s1')));
+    const response = { kind: 'open-question', answer: 'a'.repeat(9_000) };
+    const note = 'n'.repeat(3_000);
+    await dispatch(post({ action: 'resolve', id: 'A1', response, note }));
+    const failed = await service.undelivered('s1', 'A1', 'offline', 1);
+    should(failed.ok).be.true();
+    const read = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
+    const oldBoard = OldAgendaSnapshotSchema.parse(jsonBody(read));
+    const clipped = oldBoard.items[0]?.undelivered?.reply;
+    if (clipped === undefined) throw new Error('no Retry');
+    const retried = await dispatch(post({ ...clipped, id: 'A1' }));
+    should(retried.status).equal(200);
+    should(notes.at(-1)).equal(note);
+    const stored = await service.list('s1');
+    if (!stored.ok) throw new Error(stored.error.message);
+    should(stored.value.items[0]?.ownerAnswer).containDeep({ response, note });
+  });
+  it('should serve Send now in the old schema unless the caller opts into the channel', async () => {
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as { id: string }[])[0]?.id;
+    await dispatch(
+      post({ action: 'edit', id, whereWeAre: 'new location', questionAnswer: 'q'.repeat(9_000) }, agentIn('s1')),
+    );
+    const path = '/v1/sessions/s1/agenda/replies';
+    const legacy = await dispatch({ method: 'POST', path, headers: human, body: '{}' });
+    const channel = await dispatch({
+      method: 'POST',
+      path,
+      headers: { ...human, 'x-fy-agenda-channel': '1' },
+      body: '{}',
+    });
+    should(legacy.status).equal(200);
+    should(channel.status).equal(200);
+    should(OldAgendaSnapshotSchema.safeParse(jsonBody(legacy)).success).be.true();
+    should(OldAgendaSnapshotSchema.safeParse(jsonBody(channel)).success).be.false();
+    should((jsonBody(channel).items as { questionAnswer: string }[])[0]?.questionAnswer).have.length(9_000);
+  });
   it('should answer an empty board rather than a 404 for a session with no ledger yet', async () => {
     // A session that has never blocked has an empty board, which is not the same as a missing one.
     // Arrange
@@ -194,6 +247,41 @@ describe('attention routes', () => {
     });
   });
 
+  it('should take a body of exactly 200,000 characters and refuse 200,001 with the count and the remedy', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const exact = await dispatch(post({ ...raise, body: 'x'.repeat(200_000) }, agentIn('s1')));
+    const over = await dispatch(post({ ...raise, body: 'x'.repeat(200_001) }, agentIn('s1')));
+
+    // Assert
+    should(exact.status).equal(200);
+    should(over.status).equal(400);
+    should(JSON.stringify(jsonBody(over)))
+      .match(/the body is 200,001 characters; the most is 200,000\. Do not trim it/u)
+      .match(/add it with --link/u);
+  });
+
+  it('should hold an edit’s body and question answer to the same 200,000 characters', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+    const edit = (fields: object) => post({ action: 'edit', id: 'A1', ...fields }, agentIn('s1'));
+
+    // Act
+    const body = await dispatch(edit({ body: 'x'.repeat(200_001) }));
+    const answer = await dispatch(edit({ questionAnswer: 'x'.repeat(200_001) }));
+    const fits = await dispatch(edit({ questionAnswer: 'x'.repeat(200_000) }));
+
+    // Assert
+    should(body.status).equal(400);
+    should(JSON.stringify(jsonBody(body))).match(/the body is 200,001 characters; the most is 200,000/u);
+    should(answer.status).equal(400);
+    should(JSON.stringify(jsonBody(answer))).match(/the question answer is 200,001 characters; the most is 200,000/u);
+    should(fits.status).equal(200);
+  });
+
   it('should refuse a ferret’s new item with no premise or no context, naming what is missing', async () => {
     // Arrange
     const dispatch = fixture();
@@ -265,6 +353,23 @@ describe('attention routes', () => {
     should(unknown.status).equal(404);
   });
 
+  it('should take an item on for its ferret with rest, quiet, as working', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+
+    // Act
+    const rested = await dispatch(
+      post({ action: 'rest', id, why: 'checking both branches' }, { ...agentIn('s1'), 'x-fy-agenda-channel': '1' }),
+    );
+
+    // Assert
+    should(rested.status).equal(200);
+    const items = jsonBody(rested).items as readonly { resting?: { sub: string; why?: string } }[];
+    should(items[0]?.resting).containDeep({ sub: 'working', why: 'checking both branches' });
+  });
+
   it('should record the human’s choice when a resolve carries a response', async () => {
     // kteam wrote the resolution without the answer, so an agent waiting on a choice was unblocked
     // with nothing to read.
@@ -275,15 +380,95 @@ describe('attention routes', () => {
 
     // Act
     const answered = await dispatch(
-      post({ action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } }),
+      post(
+        { action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } },
+        { ...human, 'x-fy-agenda-channel': '1' },
+      ),
+    );
+
+    // Assert — a ferret's item RESTS on the owner's answer (docs/agenda.md § States): still open, the choice on it.
+    should(answered.status).equal(200);
+    const items = jsonBody(answered).items as readonly {
+      ownerAnswer?: { response?: { choice?: string } };
+      parked?: { reason: string };
+      resting?: { sub: string };
+    }[];
+    should(jsonBody(answered).resolved).be.empty();
+    should(items[0]?.ownerAnswer?.response?.choice).equal('main');
+    should(items[0]?.parked?.reason).equal('replied');
+    should(items[0]?.resting?.sub).equal('waiting-on-ferret');
+  });
+
+  it('should refuse an answer to an ask the ferret has since replaced, 409 ask_changed', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    const replaced = await dispatch(
+      post(
+        { action: 'edit', id, ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'dev' }] } },
+        agentIn('s1'),
+      ),
+    );
+
+    // Act
+    const stale = await dispatch(
+      post({ action: 'resolve', id, askVersion: 1, response: { kind: 'multiple-choice', choice: 'main' } }),
+    );
+    const current = await dispatch(
+      post({ action: 'resolve', id, askVersion: 2, response: { kind: 'multiple-choice', choice: 'dev' } }),
     );
 
     // Assert
-    should(answered.status).equal(200);
-    should(jsonBody(answered)).have.property('count', 0);
-    should((jsonBody(answered).resolved as readonly { response?: { choice?: string } }[])[0]?.response?.choice).equal(
-      'main',
+    should(replaced.status).equal(200);
+    should(stale.status).equal(409);
+    should(jsonBody(stale)).have.property('code', 'ask_changed');
+    should(current.status).equal(200);
+  });
+
+  it('should refuse a Done or Skip given from an ask the ferret has since replaced, 409 ask_changed', async () => {
+    // Arrange — the owner's Mark as done is held in the undo window while the ferret replaces the ask
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    await dispatch(
+      post(
+        { action: 'edit', id, ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'dev' }] } },
+        agentIn('s1'),
+      ),
     );
+
+    // Act
+    const staleDone = await dispatch(post({ action: 'resolve', id, askVersion: 1 }));
+    const staleSkip = await dispatch(post({ action: 'dismiss', id, askVersion: 1 }));
+    const current = await dispatch(post({ action: 'dismiss', id, askVersion: 2 }));
+
+    // Assert — the stale closes leave the new question open; one that names the current ask closes it
+    should(staleDone.status).equal(409);
+    should(jsonBody(staleDone)).have.property('code', 'ask_changed');
+    should(staleSkip.status).equal(409);
+    should(current.status).equal(200);
+    should(jsonBody(current).items as readonly unknown[]).be.empty();
+  });
+
+  it('should close the item as it stands on a Done that names no ask, after the ferret replaced it', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    await dispatch(
+      post(
+        { action: 'edit', id, ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'dev' }] } },
+        agentIn('s1'),
+      ),
+    );
+
+    // Act
+    const explicit = await dispatch(post({ action: 'resolve', id }));
+
+    // Assert
+    should(explicit.status).equal(200);
+    should(jsonBody(explicit).items as readonly unknown[]).be.empty();
   });
 
   it('should refuse an agent raise that declares no structured ask', async () => {
@@ -1180,4 +1365,163 @@ describe('agenda route snooze', () => {
     should(items(urgent)[0]).not.have.property('parked');
     should(again.status).equal(429);
   });
+});
+
+describe('attention routes for an older app', () => {
+  it('should leave the channel fields off an answer unless the caller names the channel', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    const resolve = { action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } };
+
+    // Act
+    const answered = await dispatch(post(resolve));
+
+    // Assert
+    const [item] = jsonBody(answered).items as readonly Record<string, unknown>[];
+    should(item).not.have.property('ownerAnswer');
+    should(item).not.have.property('resting');
+    should(item?.parked).containDeep({ reason: 'replied' });
+  });
+});
+
+it('reads stored conversation through the mounted operator route and refuses invalid cursors', async () => {
+  // Arrange
+  const dispatch = fixture();
+  await dispatch(post(raise, agentIn('s1')));
+  await dispatch(post({ action: 'resolve', id: 'A1', response: { kind: 'other', answer: 'Use eu-west, please.' } }));
+
+  // Act
+  const response = await dispatch({ path: '/v1/sessions/s1/agenda/A1/conversation', headers: human });
+  const invalid = await dispatch({
+    path: '/v1/sessions/s1/agenda/A1/conversation',
+    headers: human,
+    query: [['offset', '-1']],
+  });
+
+  // Assert
+  should(response.status).equal(200);
+  should(jsonBody(response)).containDeep({
+    total: 1,
+    index: 0,
+    offset: 0,
+    entry: { by: 'owner', text: 'Use eu-west, please.', via: 'answer' },
+  });
+  should(response.headers.get('cache-control')).equal('no-store');
+  should(invalid.status).equal(400);
+});
+
+it('serves full versions, per-device seen marks and conversation mutations through the real route handlers', async () => {
+  // Arrange
+  const at = '2026-11-03T10:00:00.000Z';
+  const summary = { version: 1, at, by: 'ferret' as const, change: 'created', lifecycle: 'active' as const };
+  const item = {
+    id: 'A1',
+    source: 'agent-raised' as const,
+    sourceRef: null,
+    subject: 'Which region?',
+    why: 'A deploy is ready.',
+    waitingSince: at,
+    howToResolve: 'Choose a region.',
+    ask: { kind: 'open-question' as const },
+    raisedBy: 'agent' as const,
+    raisedBySession: 's1',
+    raisedByName: null,
+  };
+  const service = new AgendaService(
+    new FakeLedgerRepository(),
+    { now: () => at },
+    { has: async id => id === 's1' },
+    { raised: async () => undefined },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      find: async (_session, messageId) => ({
+        ok: true,
+        message: { messageId: messageId ?? 'owner-1', at, text: '    Use eu-west.\n' },
+      }),
+    },
+    {
+      record: async () => undefined,
+      list: async () => [summary],
+      get: async (_session, id, version) => (id === 'A1' && version === 1 ? { ...summary, item } : undefined),
+    },
+    { seen: async () => 1, mark: async (_session, _id, _device, version) => version },
+  );
+  const dispatcher = new ApiDispatcher(
+    new ApiRouter([...agendaRoutes(service, new FakeNotifications(), NO_HELD_REPLIES)]),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
+  const dispatch = (input: Parameters<typeof request>[0]) => dispatcher.dispatch(request(input));
+
+  // Act and assert: version reads and cursor errors.
+  const listed = await dispatch({ path: '/v1/sessions/s1/agenda/A1/versions', headers: human });
+  should(listed.status).equal(200);
+  should(jsonBody(listed)).containDeep({ latest: 1, seen: 1, versions: [summary] });
+  const phone = await dispatch({
+    path: '/v1/sessions/s1/agenda/A1/versions',
+    device: { deviceId: 'phone', appSession: 'app' },
+  });
+  should(phone.status).equal(200);
+  const version = await dispatch({ path: '/v1/sessions/s1/agenda/A1/versions/1', headers: human });
+  should(version.status).equal(200);
+  should(jsonBody(version)).containDeep({ version: 1, item: { subject: item.subject } });
+  for (const [path, status] of [
+    ['/v1/sessions/s1/agenda/A1/versions/nope', 400],
+    ['/v1/sessions/s1/agenda/nope/versions', 400],
+    ['/v1/sessions/s1/agenda/A1/versions/2', 404],
+    ['/v1/sessions/missing/agenda/A1/versions', 404],
+    ['/v1/sessions/missing/agenda/A1/versions/1', 404],
+  ] as const)
+    should((await dispatch({ path, headers: human })).status).equal(status);
+  const marked = await dispatch({
+    method: 'PUT',
+    path: '/v1/sessions/s1/agenda/A1/seen',
+    headers: human,
+    body: '{"version":1}',
+  });
+  should(marked.status).equal(200);
+  should(jsonBody(marked)).deepEqual({ seen: 1 });
+  should(
+    (await dispatch({ method: 'PUT', path: '/v1/sessions/s1/agenda/A1/seen', headers: human, body: '{"version":2}' }))
+      .status,
+  ).equal(400);
+  const emptyList = await fixture()({ path: '/v1/sessions/s1/agenda/A1/versions', headers: human });
+  should(jsonBody(emptyList)).containDeep({ latest: 0, versions: [] });
+
+  // The shipped mutation verbs run through the parsed API boundary, with source text held by the daemon.
+  for (const subject of ['Which region?', 'Which quota?'])
+    should((await dispatch(post({ ...raise, subject }, agentIn('s1')))).status).equal(200);
+  should(
+    (await dispatch(post({ action: 'log', id: 'A1', mode: 'reply', text: 'OK', messageId: 'owner-1' }, agentIn('s1'))))
+      .status,
+  ).equal(200);
+  should((await dispatch(post({ action: 'merge', id: 'A1', from: 'A2' }, agentIn('s1')))).status).equal(200);
+  const split = await dispatch(
+    post(
+      {
+        action: 'split',
+        id: 'A1',
+        item: {
+          subject: 'Which cache?',
+          title: 'Cache',
+          why: 'A cache is needed.',
+          premise: 'A cache is needed.',
+          context: 'Cache rollout has its own schedule.',
+          howToResolve: 'Pick a cache.',
+          ask: { kind: 'open-question' },
+        },
+      },
+      agentIn('s1'),
+    ),
+  );
+  should(split.status).equal(200);
+  should(jsonBody(split).items).containDeep([{ id: 'A3', splitFrom: 'A1' }]);
 });

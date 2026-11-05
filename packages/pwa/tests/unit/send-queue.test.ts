@@ -37,6 +37,66 @@ const row = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
 });
 
 describe('joinQueue', () => {
+  describe('several messages delivered as one turn', () => {
+    const at = '2026-10-30T10:00:05.000Z';
+    const members = [
+      message({
+        id: 'm1',
+        sender: 'agent',
+        fromName: 'rhett',
+        text: 'first',
+        state: 'delivered',
+        stateAt: at,
+        deliveredAs: 'm1',
+      }),
+      message({
+        id: 'm2',
+        sender: 'agent',
+        fromName: 'sada',
+        text: 'second',
+        state: 'delivered',
+        stateAt: at,
+        deliveredAs: 'm1',
+        label: 'fyi',
+      }),
+      message({
+        id: 'm3',
+        sender: 'agent',
+        fromName: 'rhett',
+        text: 'third',
+        state: 'delivered',
+        stateAt: at,
+        deliveredAs: 'm1',
+      }),
+    ];
+    const combined = '[3 messages from ferrets, oldest first — not from the owner]\n\n…';
+    const lead = row({ sendId: 'm1', message: combined, fate: 'delivered' });
+
+    test('the combined ledger row joins its lead alone; the other members keep rows of their own words', () => {
+      const rows = joinQueue([lead], members);
+
+      expect(rows.map(r => [r.sendId, r.message])).toEqual([
+        ['m1', combined],
+        ['m2', 'second'],
+        ['m3', 'third'],
+      ]);
+    });
+
+    test('no member is swallowed or drawn twice, and each carries its own sender and ticks', () => {
+      const rows = joinQueue([lead], members);
+
+      expect(new Set(rows.map(r => r.sendId)).size).toBe(members.length);
+      expect(rows.map(r => r.fromName)).toEqual([undefined, 'sada', 'rhett']);
+      expect(rows.every(r => r.fate === 'delivered' && r.queue?.state === 'delivered')).toBe(true);
+    });
+
+    test('a member says which turn carried it; the lead does not point at itself', () => {
+      const rows = joinQueue([lead], members);
+
+      expect(rows.map(r => r.queue?.deliveredAs)).toEqual([undefined, 'm1', 'm1']);
+    });
+  });
+
   test('an unconfirmed queue message stays unaccounted on its ledger row, alone or joined, until proof arrives', () => {
     const unconfirmed = message({ state: 'unconfirmed' });
     const [alone] = joinQueue([], [unconfirmed]);

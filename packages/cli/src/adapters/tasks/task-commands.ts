@@ -11,8 +11,10 @@ import type {
   TaskEditFlags,
   TaskLinkFlags,
   TaskListShimFlags,
+  TaskPatchFlags,
 } from '../../lib/board/board-controllers';
 import { laneGuide } from '../../lib/board/lane-guide';
+import { TASK_CREATE_RULE } from '../../lib/board/umbrella';
 import { TASK_TITLE_GUIDANCE } from '../../lib/tasks/task-title';
 
 /** Everything the task command group is wired from; the composition root owns the concrete instances. */
@@ -37,6 +39,32 @@ const acting = (command: Command): Command =>
 
 const ID_HELP = 'the task id: &F21 (or F21)';
 
+const STATUS_NOW_HELP =
+  "the card's status, Now: what is happening this moment (markdown); replaces that part, the others stay";
+const STATUS_DONE_HELP =
+  "the card's status, Done so far: what is implemented, one bullet each with its PR link (markdown); replaces that part";
+const STATUS_NEXT_HELP = "the card's status, Next: what comes after, in order (markdown); replaces that part";
+const STATUS_FILE_HELP =
+  "the card's current state, rewritten whole, from YAML or JSON { now, doneSoFar, next } (`-` reads stdin): **Now** / **Done so far** (PR links) / **Next** (markdown)";
+/** `fy task patch --help` (docs/board.md § Patch: a card as one document). */
+const TASK_PATCH_RULE = `READ, THEN WRITE THE WHOLE CARD. \`task show <id> --yaml\` prints every field you may change and
+the card's revision; update every part that is out of date and write it back: \`task patch <id> --file f.yaml\`.
+  JSON Merge Patch (RFC 7386): a key present REPLACES the field, an absent key leaves it, null EMPTIES
+  it (never title or summary). Lists (terms, a point list) are replaced whole; status merges by
+  part (now, doneSoFar, next), "" empties a part.
+  The revision is required: a card changed since you read it is refused and nothing is written —
+  read it again. Values equal to the card's are not sent. Unknown or read-only keys are refused by name.
+  It is the edit action: the same checks and the same rules on who may change which field.
+
+Example:
+  revision: 12
+  summary: Patch-edit agenda items and cards
+  howToTest: |
+    1. Run fy task show F12 --yaml
+  status:
+    now: testing the patch
+  brief: null`;
+
 const HOW_TO_TEST_HELP =
   'how the owner checks it before Done (markdown, a numbered list): where to go, what to do, what they should see';
 
@@ -46,7 +74,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
   const group = program.command('task').description("create and move the cards of a project's board");
 
   acting(group.command('create'))
-    .description('record a task on the project board, preserving the human ask verbatim')
+    .description('record one outcome on the project board, the human ask verbatim — prefer adding to a related card')
     .argument('[title...]', 'the title, if you would rather not repeat --title')
     .requiredOption('-k, --kind <kind>', `one of ${choices(TaskKindSchema.options)}`)
     .option('-t, --title <title>', TASK_TITLE_GUIDANCE)
@@ -72,7 +100,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--how-to-test-file <path>', 'read How to test from a file instead')
     .option('--workflow <workflow>', `one of ${choices(TaskWorkflowSchema.options)}`)
     .option('--depends-on <id>', 'a task this one waits on (repeatable)', collect, [])
-    .option('--parent <id>', 'the task this one is part of')
+    .option('--parent <id>', "the task this one is part of; a sub-card is private, so never for the owner's asks")
     .option(
       '--approval <id>',
       'where the board is off: your answered "Track this on the board?" item (!A12) the owner said Yes to',
@@ -90,6 +118,10 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--doc <path>', 'a document link (repeatable)', collect, [])
     .option('--related <id>', 'a card this belongs to: add it there as a note and create nothing')
     .option('--new', 'create even if a card on the same thing exists')
+    .option('--private', "a ferret's own bookkeeping: off the default board (default for a card an agent asked for)")
+    .option('--public', 'a card the owner sees on the default board (default for a card a person asked for)')
+    .option('--broad <why>', 'create a card that gathers several outcomes, saying why it must be one card')
+    .addHelpText('after', `\n${TASK_CREATE_RULE}`)
     .action(async (titleWords: string[], options: TaskCreateFlags) => {
       await board.create(titleWords, options);
     });
@@ -99,7 +131,8 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       'one task in full: ask, premise, context, terms, brief, How to test, children, dependencies, links, asks, history',
     )
     .argument('<id>', ID_HELP)
-    .action(async (id: string, options: SessionOptions) => {
+    .option('--yaml', 'print the editable document `task patch` takes back, with its revision')
+    .action(async (id: string, options: SessionOptions & { readonly yaml?: boolean }) => {
       await board.show(id, options);
     });
 
@@ -235,6 +268,13 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       await board.assign(id, who, options);
     });
 
+  acting(group.command('claim'))
+    .description('take a card your lead holds, instead of asking the lead to assign it to you')
+    .argument('<id>', ID_HELP)
+    .action(async (id: string, options: SessionOptions) => {
+      await board.claim(id, options);
+    });
+
   acting(group.command('note'))
     .description('append a note to the history')
     .argument('<id>', ID_HELP)
@@ -273,7 +313,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('edit'))
-    .description("change a card's title, summary, premise, context, glossary, brief or How to test")
+    .description("change a card's title, summary, status, premise, context, glossary, brief, How to test or visibility")
     .argument('<id>', ID_HELP)
     .option('--title <title>', TASK_TITLE_GUIDANCE)
     .option('--summary <line>', 'one line for the card face')
@@ -294,8 +334,24 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--brief-file <path>', 'read the brief from a file instead')
     .option('--how-to-test <md>', HOW_TO_TEST_HELP)
     .option('--how-to-test-file <path>', 'read How to test from a file instead')
+    .option('--status-now <md>', STATUS_NOW_HELP)
+    .option('--status-done <md>', STATUS_DONE_HELP)
+    .option('--status-next <md>', STATUS_NEXT_HELP)
+    .option('--status-file <path>', STATUS_FILE_HELP)
+    .option('--visibility <public|private>', "who sees it on the default board; only the owner hides the owner's ask")
     .action(async (id: string, options: TaskEditFlags) => {
       await board.edit(id, options);
+    });
+
+  acting(group.command('patch'))
+    .description(
+      "change a card's words as ONE YAML or JSON document, read first with `task show <id> --yaml` (its revision is required): one atomic edit",
+    )
+    .argument('<id>', ID_HELP)
+    .option('-f, --file <path>', 'the YAML or JSON document; - (the default) reads standard input')
+    .addHelpText('after', `\n${TASK_PATCH_RULE}`)
+    .action(async (id: string, options: TaskPatchFlags) => {
+      await board.patch(id, options);
     });
 
   acting(group.command('refile'))

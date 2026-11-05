@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import type { MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
-import { type PanelGroupId, panelGroup, panelTab } from '../../../../../src/features/fleet/shell/machine-panels.ts';
+import { MACHINE_TABS, type MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
+import {
+  type PanelGroupId,
+  panelGroup,
+  panelsOnTab,
+  panelTab,
+} from '../../../../../src/features/fleet/shell/machine-panels.ts';
 
 describe('panelTab', () => {
   it.each<[string, MachineTabId]>([
@@ -29,5 +34,29 @@ describe('panelGroup', () => {
 
   it('refuses a group id the table does not hold', () => {
     expect(() => panelGroup('nope' as PanelGroupId)).toThrow('Unknown panel group: nope');
+  });
+});
+
+describe('panelsOnTab', () => {
+  it.each<[MachineTabId, number]>([
+    ['machine', 15],
+    ['agents', 3],
+    ['sign-ins', 3],
+    ['runtimes', 0],
+    ['profiles', 0],
+    ['browser', 0],
+  ])('lists the panels of the %s tab (%d)', (tab, count) => {
+    expect(panelsOnTab(tab)).toHaveLength(count);
+  });
+
+  it('lists the panels of a tab in the order its groups draw them', () => {
+    expect(panelsOnTab('agents')).toEqual(['warden', 'learning', 'pack']);
+    expect(panelsOnTab('sign-ins')).toEqual(['accounts', 'secrets', 'secure-copy']);
+  });
+
+  it('puts each panel on exactly one tab, and panelTab agrees', () => {
+    const all = MACHINE_TABS.flatMap(tab => panelsOnTab(tab.id).map(panel => ({ panel, tab: tab.id })));
+    expect(new Set(all.map(entry => entry.panel)).size).toBe(all.length);
+    for (const { panel, tab } of all) expect(panelTab(panel)).toBe(tab);
   });
 });

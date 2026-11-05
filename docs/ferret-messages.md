@@ -19,10 +19,30 @@ multi-line message was refused the direct path — it travelled as a "Read the f
 pointer that cost the receiver an extra model call. With one line a short message is pasted whole
 ([how it is delivered](message-delivery.md#which-messages-are-typed-whole)).
 
-An optional **label** slot sits after the kind: `[message · fyi from ferret tomi …]`, one of
-`blocker`, `action`, `fyi`. The parser reads it into `PeerEnvelope.label`; **nothing writes it yet**
-(`peerEnvelopePreamble` emits a label only when a sender names one, and no sender does), so it is a
-seam for message kinds, not a behaviour. An unknown label is not a banner and the message stays plain text.
+A **label** sits after the kind: `[message · fyi from ferret tomi …]`, one of `blocker`, `action`, `fyi` —
+the sender's word (`fy send --kind`) for how soon the message is needed, and what lets several share one
+turn ([queue rules](message-delivery.md#labels-and-combined-delivery)). The parser reads it into
+`PeerEnvelope.label`; an unknown label is not a banner and the message stays plain text.
+
+### Combined deliveries
+
+Messages delivered together arrive as ONE turn, oldest first. The header counts them, and each part opens
+with its own banner carrying its place:
+
+```text
+[2 messages from ferrets, oldest first — not from the owner]
+
+[1/2 · message · action from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner] To reply: fy send tomi "<reply>"
+PR is green.
+
+[2/2 · question · blocker from ferret avary (session mvie18ro-172c460c) — not from the owner] avary is waiting for your answer. Reply with: fy send avary "<reply>"
+Merge now or wait?
+```
+
+A combined text is read back (`parseCombinedDelivery`) only when the header's count equals the parts found and
+their places run 1..N; anything else — including a body that merely quotes a banner — stays plain text, so
+nobody can forge a sender. The owner's Chat draws a combined turn as one ferret row per part, never as
+"You".
 
 The first word is the message's **kind**:
 
@@ -81,18 +101,39 @@ The tool call that ran `fy send` becomes a **Sent to** card: the recipient as a 
 message (a quoted argument or the `"$(cat <<'EOF' … EOF)"` heredoc; a `--message-file` or any other
 shell expansion is named, never guessed), and its state:
 
-| State     | Read from                                                                    |
-| --------- | ---------------------------------------------------------------------------- |
-| Sending   | No result yet                                                                |
-| Queued    | Any successful result other than a delivery                                  |
-| Delivered | The CLI said `delivered` (or `revived the session`)                          |
-| Replied   | A later message in this Chat came from the recipient — the proof it was read |
-| Failed    | The call failed; the reason is the CLI's own first line                      |
+| State     | Read from                                                                                                                                                                                                                                                              |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sending   | No result yet                                                                                                                                                                                                                                                          |
+| Held      | The CLI said `held` — the line reads just "Held"; `held as an FYI` adds "delivered when Tanna's turn ends" and `held until 10:38:00` (an action batched with others) adds "delivered at 10:38, batched with its other messages", as the tooltip and to a screen reader |
+| Queued    | Any other successful result that is not a delivery                                                                                                                                                                                                                     |
+| Delivered | The CLI said `delivered` (or `revived the session`)                                                                                                                                                                                                                    |
+| Replied   | A later message in this Chat came from the recipient — the proof it was read                                                                                                                                                                                           |
+| Failed    | The call failed; the reason is the CLI's own first line                                                                                                                                                                                                                |
 
 The raw command stays one tap away under **Show command**. Anything the reader does not recognise as a
 send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/peer-delivery.ts`.
 
+The card is compact (&F949): "Sent to :name" is a meta line the size of a chat row's name, and the foot is
+ONE line — the state's mark and its short word, `·` and "Show command" (the separator belongs to the control after it, so a wrap never strands it), then the time at the right. A longer meaning
+("Queued — it reads this when its current turn ends") is the state's tooltip and is read to a screen reader;
+a failure's reason takes the one line of its own under the foot, and is part of the failure's alert, so a screen
+reader hears "Not delivered: <reason>" at once.
+
+Each send is drawn ONCE (&B157). Claude Code (seen on 2.1.317) writes every message it sends the model again
+as an untimed `api-request-blob` record — an earlier tool call, its result, the owner's words, its own system
+reminders. Read as conversation, that drew every `fy send` twice: a copy with no time, and both cards stuck
+on "Sending…" because the copy took the call's result. The daemon's Claude parser
+(`packages/daemon/src/lib/transcript/claude.ts`) drops those records. The one thing only a snapshot ever drew
+was a prompt queued while Claude was busy whose drain is content blocks (its text and a pasted image, as
+Claude 2.1.281 writes it): the parser now reads that drain's blocks itself, so the words draw once as one
+message and each picture once after them.
+
 ## Declared gaps
+
+- **A held send does not follow itself to Delivered** (&B157). "Held — delivered when Tanna's turn ends" (or "Held —
+  delivered at 10:38, batched with its other messages") is what the CLI said when it sent; the delivery is in the RECEIVER's send ledger (`/v1/sessions/:id/sends`), and the
+  sender's Chat does not read another session's ledger. Following it means reading the receiver's ledger from
+  the sender's Chat and matching the send to its row.
 
 - **One machine.** A send is always between two sessions on the same daemon, so no machine is shown.
 - **Live sender state.** The Sent card reads the CLI's answer at send time, then `replied` from the
@@ -140,6 +181,11 @@ feature"). A card's move, block, unblock, drop, reopen or done is never typed in
 or as a batched digest: the ferret that finished tells its lead in its own words (`fy signal done` reaches
 it through `fy wait`), the board shows the state, and the card's history keeps every event.
 
+The one digest the owner has allowed (2026-11-03) is not the board's: it is made of messages a FERRET
+labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers with the receiver's other pending
+ferret messages ([rules](message-delivery.md#labels-and-combined-delivery)). The board's messages are the
+daemon's, carry no label, and are never held or combined.
+
 The board types only what a ferret has to **act on**, each as a plain sentence with no tag in front and no
 footer behind. Who sent it is the queue item's metadata, `by: {kind: 'ferretry', feature: 'Board'}`, which
 the app shows as a "Ferretry · Board" sender chip — never as text in the message:
@@ -154,10 +200,11 @@ the app shows as a "Ferretry · Board" sender chip — never as text in the mess
 | Reopen (`lib/board/reopen-delivery.ts`)      | the card's assignee, else its owner ferret                 | `&F412 was reopened by the owner: <reason>`                                                                        |
 
 **The alert route.** A stale nudge, a red CI and a closed-unmerged PR go to the card's assignee while it is alive, else
-the nearest live lead above it, else the card's owner (its creator) and the owner's leads — and an interactive session
-only when nobody automatic is left. They are never sent to the session that merely made a card another lead is working.
-The route is `noticeRecipient` (`lib/board/notice-route.ts`); [board.md](board.md#who-a-board-alert-is-for) has the
-rules.
+the nearest live lead above it, else the card's owner (its creator) and the owner's leads. They are never sent to the
+session that merely made a card another lead is working. The route is `noticeRecipient` (`lib/board/notice-route.ts`);
+when it can only name an interactive session, the alert is **not typed** there at all: `BoardAlerts`
+(`lib/board/alert-sends.ts`) journals it on that session (`board.alert-withheld`) and the card shows the fact.
+[board.md](board.md#who-a-board-alert-is-for) has the rules.
 
 The stale nudge goes at most once per card per its lane's stale threshold, whoever receives it, and never to a ferret that
 declared `fy signal waiting`. A go-ahead that could not be sent is said again on the next sweep. The
@@ -168,8 +215,8 @@ because each names its card and says what to do, so nothing needs a "not from th
 
 Declared gaps:
 
-- **An interactive session's daemon messages skip the queue**, because the queue never types a daemon message
-  into the owner's own chat. The direct send path carries the sender itself: the ledger record has
+- **An interactive session's daemon messages skip the queue**, and every one but the three alerts above is still
+  typed, by the direct send path. The direct send path carries the sender itself: the ledger record has
   `senderKind: daemon` and the same `by` the queue item would have held (`SendRecord.by`), so the app draws it
   the way it draws a queued one.
 
@@ -184,7 +231,7 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
 "Ferretry · Warden" as the queue item's `by`; the resume turns below are still `[ferretry] ` notices (a GAP).
 
 - **An orphaned card.** A card in an active or review lane whose ferret is finished, with nothing alive
-  under it, is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The
+  under it and no lead above the finished ferret alive to take it back ([board.md](board.md#a-finished-helpers-card-goes-back-to-its-lead)), is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The
   board decides "orphaned"; the Warden reads its word. The card's **owner ferret**, when it is alive and
   is not the finished ferret, gets one queued message naming the card and the three ways out:
   `fy resume <ferret>`, `fy task assign F412 <ferret>` or `fy task drop F412 --reason "<why>"`.
@@ -204,6 +251,12 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
   verified re-submit; if that does not submit it, the ferret's health becomes `stalled` and it is named on the
   `warden:input-stuck` machine item ([agenda.md](agenda.md#the-machine-agenda)). The whole rule is in
   [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message).
+- **A ferret whose inbox is stuck.** A ferret whose oldest undelivered message has waited in Ferretry's own queue
+  far past due is the Warden anomaly `inbox_stuck` (`packages/daemon/src/lib/warden/inbox-stuck.ts`), shown on the
+  Warden page as **inbox stuck**. Facts only — the session's queue and its send ledger — never put to Jev and never in
+  the spawn fingerprint. The Warden re-checks it once per episode, safely; if that does not move it, the ferret is
+  named on the `warden:inbox-stuck` machine item and handed to an investigation whose verdict can only re-check
+  again. The whole rule is in [message-delivery.md](message-delivery.md#b148-a-ferret-whose-inbox-is-stuck).
 - **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
   or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines

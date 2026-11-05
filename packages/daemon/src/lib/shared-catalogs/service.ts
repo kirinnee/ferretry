@@ -131,6 +131,7 @@ import type {
   CatalogBlobStore,
   CatalogDocumentStore,
   CatalogIdentitySource,
+  LinkUsage,
   McpDirectory,
   SkillDirectory,
 } from './ports.ts';
@@ -152,6 +153,8 @@ export interface SharedCatalogDeps {
   readonly exportMaxBytes?: number;
   /** The people a catalog is shared with: told when a catalog is deleted so none keeps a name for it. */
   readonly membership?: CatalogMembership;
+  /** The links that serve a version: a retire of one is refused, and the item list names them. */
+  readonly linkUsage?: LinkUsage;
 }
 
 /** What the member side does when a catalog goes (`CatalogMemberService.forgetCatalog`). */
@@ -501,10 +504,13 @@ export class SharedCatalogService {
   }
 
   /** Whether this machine keeps this version of this item, unretired: what a pending public link needs before it is committed. */
-  async holdsLinkVersion(itemId: string, version: number): Promise<boolean> {
-    const item = (await this.#document()).items.find(candidate => candidate.itemId === itemId);
-    const stored = item?.versions.find(candidate => candidate.version === version);
-    return stored !== undefined && stored.retiredAt === undefined;
+  holdsLinkVersion(itemId: string, version: number): Promise<boolean> {
+    // In the queue, so a retire already in flight finishes before this reads: it then sees the retired version.
+    return this.#serially(async () => {
+      const item = (await this.#writable()).items.find(candidate => candidate.itemId === itemId);
+      const stored = item?.versions.find(candidate => candidate.version === version);
+      return stored !== undefined && stored.retiredAt === undefined;
+    });
   }
 
   // ── Catalogs ───────────────────────────────────────────────────────────────────────────────────
@@ -916,6 +922,7 @@ export class SharedCatalogService {
   setRetired(itemId: string, version: number, retired: boolean): Promise<RetiredVersion> {
     return this.#serially(async () => {
       const document = await this.#writable();
+      if (retired) await this.#refuseLinked(document, itemId, version);
       const next = withRetired(document, itemId, version, retired, instant(this.deps.now()));
       if (next !== document) await this.#commit(next);
       const stored = itemOf(next, itemId).versions.find(candidate => candidate.version === version) as StoredVersion;
@@ -1299,6 +1306,19 @@ export class SharedCatalogService {
     };
   }
 
+  /** A version a link serves is not offered to new installs by retiring it: the owner moves the link or turns it off first. */
+  async #refuseLinked(document: CatalogsDocument, itemId: string, version: number): Promise<void> {
+    const serving = ((await this.deps.linkUsage?.serving()) ?? []).filter(
+      link => link.itemId === itemId && link.version === version,
+    );
+    if (serving.length === 0) return;
+    const item = findItem(document, itemId);
+    throw new CatalogRefusal(
+      'version_linked',
+      `${item.name} version ${version} is served by ${serving.length === 1 ? '1 link' : `${serving.length} links`}. Move or turn ${serving.length === 1 ? 'it' : 'them'} off first.`,
+    );
+  }
+
   async #sharedItem(
     document: CatalogsDocument,
     identity: DaemonIdentity,
@@ -1311,6 +1331,7 @@ export class SharedCatalogService {
       return entry === undefined ? [] : [{ catalogId: catalog.id, entry }];
     });
     const live = listing.filter(({ entry }) => entry.withdrawnAt === undefined).map(({ catalogId }) => catalogId);
+    const serving = (await this.deps.linkUsage?.serving()) ?? [];
     const { state, note } = withState
       ? await this.#sourceState(identity, item, { itemId: item.itemId, addedAt: item.createdAt })
       : {};
@@ -1337,7 +1358,16 @@ export class SharedCatalogService {
         summary: version.summary,
         ...(version.retiredAt === undefined ? {} : { retiredAt: version.retiredAt }),
         ...(version.fileCount === undefined ? {} : { fileCount: version.fileCount }),
-        usedBy: { catalogIds: version.version === item.current ? live : [] },
+        usedBy: {
+          catalogIds: version.version === item.current ? live : [],
+          ...(this.deps.linkUsage === undefined
+            ? {}
+            : {
+                linkIds: serving
+                  .filter(link => link.itemId === item.itemId && link.version === version.version)
+                  .map(link => link.linkId),
+              }),
+        },
       })),
     };
   }

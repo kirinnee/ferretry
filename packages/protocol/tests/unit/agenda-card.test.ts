@@ -7,7 +7,10 @@ import {
   agendaAnswerProblems,
 } from '../../src/lib/agenda.ts';
 import {
+  AGENDA_ANSWER_TEXT_CHARS,
+  AGENDA_ANSWER_TEXT_CHARS_OF_THREE,
   AGENDA_KIND_LABELS,
+  agendaAnswerText,
   agendaCanDiscuss,
   agendaCardAnswers,
   agendaCardKind,
@@ -23,6 +26,8 @@ import {
   isYesNoAsk,
   kindOfAsk,
   unswipedChoices,
+  YES_NO_ORDER,
+  yesNoOrder,
 } from '../../src/lib/agenda-card.ts';
 
 const AT = '2026-10-29T09:00:00.000Z';
@@ -144,6 +149,51 @@ describe('attention card', () => {
       should(layout(agendaCardAnswers(asked))).eql(['left:Monday', 'right:Friday']);
     });
 
+    it('puts No ← and Yes → whichever order the ferret listed them in, on a yes-or-no or a two-way choice', () => {
+      for (const kind of ['yesno', 'choice'] as const) {
+        should(layout(agendaCardAnswers({ ...item, kind, ask: choice('Yes', 'No') }))).eql(['left:No', 'right:Yes']);
+        should(layout(agendaCardAnswers({ ...item, kind, ask: choice('No', 'Yes') }))).eql(['left:No', 'right:Yes']);
+      }
+      // An old item with no kind, its options in either case, and one recommending Yes (kept on ↑ before the rule).
+      should(layout(agendaCardAnswers({ ...item, ask: choice('yes', 'NO') }))).eql(['left:NO', 'right:yes']);
+      const recommended = {
+        ...item,
+        kind: 'choice' as const,
+        ask: choice('No', 'Yes'),
+        recommendation: { decision: 'Yes' },
+      };
+      should(layout(agendaCardAnswers(recommended))).eql(['left:No', 'right:Yes']);
+      // Answers the ferret pointed itself are re-pointed too: the order never depends on how they were written.
+      const pointed = {
+        ...item,
+        ask: choice('Yes', 'No'),
+        answers: [
+          { direction: 'left' as const, does: 'choose' as const, label: 'Yes' },
+          { direction: 'right' as const, does: 'choose' as const, label: 'No' },
+        ],
+      };
+      should(layout(agendaCardAnswers(pointed))).eql(['left:No', 'right:Yes']);
+    });
+
+    it('leaves a row that is not exactly Yes and No to the options list’s order', () => {
+      should(layout(agendaCardAnswers({ ...item, ask: choice('Yes', 'No', 'Later') }))).eql([
+        'left:Yes',
+        'up:No',
+        'right:Later',
+      ]);
+      should(layout(agendaCardAnswers({ ...item, ask: choice('Yes', 'Later') }))).eql(['left:Yes', 'right:Later']);
+    });
+
+    it('orders any list of Yes and No as No, Yes (yesNoOrder), and leaves any other list alone', () => {
+      should(YES_NO_ORDER).eql(['No', 'Yes']);
+      should(yesNoOrder(['Yes', 'No'], label => label)).eql(['No', 'Yes']);
+      should(yesNoOrder(['No', 'Yes'], label => label)).eql(['No', 'Yes']);
+      should(yesNoOrder([' YES ', 'no'], label => label)).eql(['no', ' YES ']);
+      should(yesNoOrder(['Yes', 'Later'], label => label)).eql(['Yes', 'Later']);
+      should(yesNoOrder(['Yes', 'No', 'Maybe'], label => label)).eql(['Yes', 'No', 'Maybe']);
+      should(yesNoOrder([], (label: string) => label)).eql([]);
+    });
+
     it('leaves answers that are not options where the card put them', () => {
       const permission = { ...item, ask: { kind: 'permission' as const } };
       should(layout(agendaCardAnswers(permission))).eql(layout(defaultAgendaAnswers('permission', permission.ask)));
@@ -194,7 +244,7 @@ describe('attention card', () => {
           { direction: 'left', does: 'choose', label: 'No' },
         ],
       });
-      should(layout(agendaCardAnswers(raised))).eql(['left:Yes', 'right:No']);
+      should(layout(agendaCardAnswers(raised))).eql(['left:No', 'right:Yes']);
     });
 
     it('refuses a stored item whose answers do not fit its ask, naming the answer', () => {
@@ -281,6 +331,59 @@ describe('attention card', () => {
   it('clips at a word with an ellipsis', () => {
     should(clipAtWord('one two three four', 10)).equal('one two…');
     should(clipAtWord('short', 10)).equal('short');
+  });
+
+  describe('what an answer’s button says', () => {
+    // The owner's case: options with descriptions once drew "← A | → B" — letters that mean nothing once the ask is
+    // off screen.
+    const described = {
+      ...item,
+      ask: {
+        kind: 'multiple-choice' as const,
+        options: [
+          { label: 'No', description: 'Keep counting every snoozed item, as today' },
+          { label: 'Only blockers', description: 'Count a snoozed item only once a blocker wakes it' },
+        ],
+      },
+    };
+
+    it('is each described option’s short label; the answer it sends is the label, its description kept beside it', () => {
+      const answers = agendaCardAnswers(described);
+      should(layout(answers)).eql(['left:No', 'right:Only blockers']);
+      should(answers.map(each => agendaAnswerText(each.label))).eql(['No', 'Only blockers']);
+      should(answers.map(each => each.description)).eql([
+        'Keep counting every snoozed item, as today',
+        'Count a snoozed item only once a blocker wakes it',
+      ]);
+    });
+
+    it('is cut at a word only when very long, and is never empty', () => {
+      should(agendaAnswerText('Needs a different approach')).equal('Needs a different…');
+      should(agendaAnswerText('Needs a different approach').length).be.belowOrEqual(AGENDA_ANSWER_TEXT_CHARS);
+      should(agendaAnswerText('  Ship   it ')).equal('Ship it');
+      should(agendaAnswerText('Supercalifragilisticexpialidocious')).equal('Supercalifragilisticexp…');
+      should(agendaAnswerText('.'.repeat(40))).not.equal('');
+      should(agendaAnswerText('.'.repeat(40))).not.equal('…');
+    });
+
+    it('is cut sooner on a row of three, where each button has a third of a phone, and at a word all the same', () => {
+      should(agendaAnswerText('Lock the session row', 3)).equal('Lock the session row');
+      should(agendaAnswerText('Lock the whole session row', 3)).equal('Lock the whole…');
+      should(agendaAnswerText('Lock the whole session row', 2)).equal('Lock the whole session…');
+      should(agendaAnswerText('Lock the whole session row', 3).length).be.belowOrEqual(
+        AGENDA_ANSWER_TEXT_CHARS_OF_THREE,
+      );
+      should(agendaAnswerText('Supercalifragilisticexpialidocious', 3)).equal('Supercalifragilisti…');
+    });
+
+    it('reads Markdown in a label as plain words, before it is cut, so every surface says the same words', () => {
+      should(agendaAnswerText('**Ship** it')).equal('Ship it');
+      should(agendaAnswerText('`Wait`', 3)).equal('Wait');
+      should(agendaAnswerText('[Spec](https://example.test/spec)')).equal('Spec');
+      should(agendaAnswerText('**Lock** the whole session row')).equal('Lock the whole session…');
+      should(agendaAnswerText('**Lock** the whole session row', 3)).equal('Lock the whole…');
+      should(agendaAnswerText('****')).equal('****');
+    });
   });
 });
 

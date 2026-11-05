@@ -3,11 +3,11 @@ import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/protoco
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
-  sendRecordView,
   type ComposerClearOutcome,
   type ComposerSubmitOutcome,
   defaultSessionSendSettings,
   type InboundMessage,
+  nextTurnNumber,
   type OutboundMessage,
   type PeerWaitEnder,
   ReviveRefusedForSend,
@@ -37,7 +37,8 @@ import {
   SendUnconfirmed,
   SessionSendService,
   STRANDED_ENTER_LIMIT,
-  nextTurnNumber,
+  sendRecordFor,
+  sendRecordView,
 } from '../../../../src/lib/session/send/index.ts';
 
 /**
@@ -2032,5 +2033,132 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
     should(built.terminal.typed).eql(['ship it']);
     should(built.repository.transitions.map(change => change.turn)).eql([5, 6]);
+  });
+});
+
+describe('labels and combined deliveries', () => {
+  const OTHER = parseSessionId('session-3');
+  const loge = { id: PEER, status: 'waiting', mode: 'auto', turn: 2, teammate: 'loge' } as SendTarget;
+  const avary = { id: OTHER, status: 'waiting', mode: 'auto', turn: 2, teammate: 'avary' } as SendTarget;
+  const both = { [PEER]: loge, [OTHER]: avary };
+  const claudeTarget = (overrides: Partial<SendTarget> = {}) =>
+    target({ harness: 'claude', directSendMaxChars: 4_096, ...overrides });
+  const batch = (overrides: Partial<Parameters<SessionSendService['send']>[0]> = {}) =>
+    request({
+      sendId: 'q-1',
+      message: 'first\n\nsecond',
+      senderReference: PEER,
+      parts: [
+        { queueId: 'q-1', senderReference: PEER, text: 'first', replyExpected: false, label: 'action' },
+        { queueId: 'q-2', senderReference: OTHER, text: 'second', replyExpected: true, label: 'blocker' },
+      ],
+      ...overrides,
+    });
+
+  it('puts the label in a single message’s banner, and none when the sender gave none', async () => {
+    const labelled = parts(target(), [pane({ promptReady: true })], both);
+    await labelled.service.send(request({ senderReference: PEER, label: 'fyi' }));
+    const plain = parts(target(), [pane({ promptReady: true })], both);
+    await plain.service.send(request({ senderReference: PEER }));
+
+    should(labelled.ledger.only().message).startWith('[message · fyi from ferret loge (session session-2)');
+    should(plain.ledger.only().message).startWith('[message from ferret loge (session session-2)');
+  });
+
+  it('delivers several messages as one turn, each part with its own sender, kind and label', async () => {
+    const { service, ledger, terminal } = parts(claudeTarget(), [pane({ promptReady: true })], both);
+    await service.send(batch());
+
+    const text = ledger.only().message;
+    should(text).startWith('[2 messages from ferrets, oldest first — not from the owner]\n\n');
+    should(text).containEql('[1/2 · message · action from ferret loge (session session-2) — not from the owner]');
+    should(text).containEql('[2/2 · question · blocker from ferret avary (session session-3) — not from the owner]');
+    should(text.indexOf('first')).be.below(text.indexOf('second'));
+    should(ledger.records.size).equal(1);
+    should(ledger.only().sendId).equal('q-1');
+    // Every sender is remembered, so a failure of the turn can be handed back to each of them.
+    should(ledger.only().batch).eql([
+      { queueId: 'q-1', from: PEER },
+      { queueId: 'q-2', from: OTHER },
+    ]);
+    // Short enough to paste whole into an idle Claude composer.
+    should(ledger.only().path).equal('direct');
+    should(terminal.typed).have.length(1);
+  });
+
+  it('hands a combined delivery over as a turn file once it is longer than a paste may be', async () => {
+    const long = 'x'.repeat(1_200);
+    const { service, ledger } = parts(claudeTarget(), [pane({ promptReady: true })], both);
+    await service.send(
+      batch({
+        parts: [
+          { queueId: 'q-1', senderReference: PEER, text: long, replyExpected: false, label: 'action' },
+          { queueId: 'q-2', senderReference: OTHER, text: long, replyExpected: false, label: 'action' },
+        ],
+      }),
+    );
+    should(ledger.only().path).equal('turn-file');
+  });
+
+  it('writes one outbox entry per part, each with its own text and sender', async () => {
+    const { service, channel } = parts(claudeTarget(), [pane({ promptReady: true })], both);
+    await service.send(batch());
+
+    should(channel.outbound.map(entry => [entry.from, entry.fromName, entry.message])).eql([
+      [PEER, 'loge', 'first'],
+      [OTHER, 'avary', 'second'],
+    ]);
+  });
+
+  it('ends the wait on the one part whose sender the receiver is parked on, and reads that part as the reply', async () => {
+    const { service, peerWaits, ledger } = parts(
+      claudeTarget({ waiting: { peer: OTHER } }),
+      [pane({ promptReady: true })],
+      both,
+    );
+    await service.send(batch());
+
+    should(peerWaits.ended).eql([{ recipient: ID, sender: OTHER }]);
+    should(ledger.only().message).containEql('[2/2 · reply · blocker from ferret avary');
+    should(ledger.only().message).containEql('[1/2 · message · action from ferret loge');
+  });
+
+  it('treats a one-part delivery as a plain send', async () => {
+    const { service, ledger } = parts(claudeTarget(), [pane({ promptReady: true })], both);
+    await service.send(
+      request({
+        senderReference: PEER,
+        parts: [{ queueId: 'send-1', senderReference: PEER, text: 'ship it', replyExpected: false }],
+      }),
+    );
+    should(ledger.only().message).startWith('[message from ferret loge');
+    should(ledger.only()).not.have.property('batch');
+  });
+});
+
+describe('the ledger row a send id is answered from', () => {
+  const record = (sendId: string): SendRecord => ({
+    sendId,
+    acceptedAt: NOW,
+    acceptedTurn: 3,
+    path: 'direct',
+    message: 'combined turn',
+    attachmentIds: [],
+    fate: 'accepted',
+  });
+
+  it('answers a send with a row of its own from that row', () => {
+    should(sendRecordFor([record('q-1')], [], 'q-1')?.sendId).equal('q-1');
+  });
+
+  it('answers a later member of a combined turn with the turn’s row, as the id asked about', () => {
+    const found = sendRecordFor([record('q-1')], [{ id: 'q-2', deliveredAs: 'q-1' }], 'q-2');
+    should(found).match({ sendId: 'q-2', message: 'combined turn', fate: 'accepted' });
+  });
+
+  it('answers nobody’s id, and a member whose turn has no row, with nothing', () => {
+    should(sendRecordFor([record('q-1')], [{ id: 'q-2', deliveredAs: 'q-1' }], 'q-9')).be.undefined();
+    should(sendRecordFor([], [{ id: 'q-2', deliveredAs: 'q-1' }], 'q-2')).be.undefined();
+    should(sendRecordFor([record('q-1')], [{ id: 'q-2' }], 'q-2')).be.undefined();
   });
 });

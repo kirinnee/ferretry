@@ -7,7 +7,7 @@
  * saves, and every way a document can change that must still be seen.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -15,6 +15,7 @@ import {
   BunSqliteIndexFactory,
   type DaemonStorage,
   DaemonStorageFactory,
+  type DocumentChanges,
   InvalidStateDocumentError,
   KeyedSerialExecutor,
   RuntimeEnvironment,
@@ -64,7 +65,7 @@ class PlainStateFileSystem extends CountingStateFileSystem {
   }
 }
 
-async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem) {
+async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSystem, changes?: DocumentChanges) {
   const home = await mkdtemp(join(tmpdir(), 'fy-document-cache-'));
   homes.push(home);
   let fileSystem: CountingStateFileSystem | undefined;
@@ -81,6 +82,7 @@ async function openStorage(make: (paths: FoundationPaths) => CountingStateFileSy
     new BunSqliteIndexFactory(),
     new SystemClock(),
     () => new KeyedSerialExecutor(),
+    changes,
   );
   const opened = await factory.open();
   stores.push(opened.storage);
@@ -275,6 +277,124 @@ describe('the session document cache', () => {
     should(fileSystem.identifiedReads).deepEqual([]);
     should(surveyed.map(session => session.id)).deepEqual([ID]);
   });
+});
+
+/**
+ * A fleet whose documents outnumber the fixed bound the cache once had: 1,400 sessions, three documents each,
+ * written straight into the home and then indexed by a rebuild — the index is what the daemon walks, and what
+ * the cache's bound follows.
+ */
+async function writeSessions(paths: FoundationPaths, prefix: string, sessions: number) {
+  const ids = Array.from({ length: sessions }, (_, index) =>
+    parseSessionId(`${prefix}-${String(index).padStart(5, '0')}`),
+  );
+  for (const id of ids) {
+    const session = createSessionPaths(paths, id);
+    await mkdir(session.directory, { recursive: true, mode: 0o700 });
+    await writeFile(session.marker, '2\n', { mode: 0o600 });
+    await writeFile(session.config, JSON.stringify({ id, name: id }), { mode: 0o600 });
+    await writeFile(session.state, JSON.stringify({ id, status: 'exited' }), { mode: 0o600 });
+    await writeFile(session.events, '', { mode: 0o600 });
+  }
+  return ids;
+}
+
+async function largeFleet(sessions: number, changes?: DocumentChanges) {
+  const opened = await openStorage(paths => new CountingStateFileSystem(paths), changes);
+  const { paths } = opened;
+  const ids = await writeSessions(paths, 'fleet', sessions);
+  const rebuilt = await opened.storage.rebuildIndex();
+  if (rebuilt.sessionCount !== sessions)
+    throw new Error(`indexed ${String(rebuilt.sessionCount)} of ${String(sessions)} sessions`);
+  return { ...opened, ids };
+}
+
+describe('the session document cache on a large fleet', () => {
+  it('should hold every document of a fleet past 1,365 sessions, so a second walk reads none of them', async () => {
+    // Arrange — 1,400 sessions put 4,200 documents in the cache, past the 4,096 a fixed bound held: every walk
+    // emptied it part-way, and every read after that was a walked read and a parse.
+    const { storage, fileSystem, ids } = await largeFleet(1_400);
+    const walk = async () => {
+      for (const id of ids) await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    };
+    await walk();
+    fileSystem.identifiedReads = [];
+
+    // Act
+    await walk();
+
+    // Assert
+    should(fileSystem.identifiedReads).deepEqual([]);
+  }, 60_000);
+
+  it('should still read a document that changed in a fleet that large', async () => {
+    // Arrange
+    const { storage, paths, ids } = await largeFleet(1_400);
+    for (const id of ids) await storage.readState(id);
+    const changed = ids[0] as (typeof ids)[number];
+
+    // Act
+    await writeFile(createSessionPaths(paths, changed).state, JSON.stringify({ id: changed, status: 'running' }));
+
+    // Assert
+    should(((await storage.readState(changed)) as Record<string, unknown>).status).equal('running');
+  }, 60_000);
+});
+
+/** A watch the test inspects: the paths with an open subscription, and how many were ever closed. */
+const trackedChanges = () => {
+  const open = new Set<string>();
+  let closed = 0;
+  const changes: DocumentChanges = {
+    subscribe: path => {
+      open.add(path);
+      return {
+        live: () => true,
+        close: () => {
+          open.delete(path);
+          closed += 1;
+        },
+      };
+    },
+  };
+  return { changes, open, closed: () => closed };
+};
+
+describe('the session document cache when the fleet shrinks', () => {
+  it('should close watches down to the bound, and still watch a new live session', async () => {
+    // Arrange — 1,400 sessions: 4,200 documents cached and watched under the bound of 5,600 they raised.
+    const watch = trackedChanges();
+    const { storage, paths, ids } = await largeFleet(1_400, watch.changes);
+    const heardWalk = async (walked: typeof ids) => {
+      for (const id of walked) await Promise.all([storage.readConfig(id, 'heard'), storage.readState(id, 'heard')]);
+    };
+    await heardWalk(ids);
+    await heardWalk(ids);
+    const grown = watch.open.size;
+    // The fleet shrinks to one session and the index is rebuilt, so the next count is 4 documents' worth.
+    for (const id of ids.slice(1)) await rm(createSessionPaths(paths, id).directory, { recursive: true });
+    await storage.rebuildIndex();
+    // Fresh sessions, not in the index, fill the cache to the old bound and force the recount.
+    const arrivals = await writeSessions(paths, 'arrival', 1_000);
+
+    // Act
+    await heardWalk(arrivals);
+    await heardWalk(arrivals);
+
+    // Assert — the bound fell to the floor, and the watches are held to it with room to spare.
+    should(grown).be.above(4_096);
+    should(watch.open.size).be.below(4_096);
+    should(watch.closed()).be.above(0);
+
+    // Act — a new live session, after the shrink.
+    const [live] = await writeSessions(paths, 'live', 1);
+    const livePaths = createSessionPaths(paths, live as (typeof ids)[number]);
+    await storage.readConfig(live as (typeof ids)[number], 'heard');
+    await storage.readConfig(live as (typeof ids)[number], 'heard');
+
+    // Assert
+    should(watch.open.has(livePaths.config)).be.true();
+  }, 120_000);
 });
 
 describe('StateFileSystem identities', () => {

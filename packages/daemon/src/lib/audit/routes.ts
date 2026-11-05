@@ -768,7 +768,22 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
       kind: ['link', 'kind'],
       expiresAt: ['link', 'expiresAt'],
       installCap: ['link', 'installCap'],
+      created: ['created'],
     },
+  },
+  {
+    method: 'PUT',
+    path: '/v1/catalog-links/:linkId/version',
+    event: 'catalog.link.moved',
+    subject: 'linkId',
+    responseFields: { from: ['movedFrom'], to: ['version'], sequence: ['sequence'] },
+  },
+  {
+    method: 'PATCH',
+    path: '/v1/catalog-links/:linkId',
+    event: 'catalog.link.changed',
+    subject: 'linkId',
+    responseFields: { expiresAt: ['expiresAt'], installCap: ['installCap'] },
   },
   { method: 'POST', path: '/v1/catalog-links/:linkId/copy', event: 'catalog.link.copied', subject: 'linkId' },
   {

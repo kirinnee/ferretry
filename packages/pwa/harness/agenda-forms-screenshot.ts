@@ -1,14 +1,16 @@
 /**
  * Screenshots and checks for an AGENDA FORM card in the Inbox: radios, checkboxes, a Yes/No and a text field on the
  * card, the ferret's composer under it, and ONE Send. Phone 390 and desktop 1440, light and dark, in four states:
- * empty (the recommendations picked), ask (Send with a required field empty: asked once), filled, sent (the undo toast).
+ * empty (the recommendations picked), partial (Send with a field left empty goes at once: every field is optional,
+ * &F922; then Undo), filled, sent (the undo toast).
  *
  *   bun harness/agenda-forms-screenshot.ts [outDir]   # writes <outDir>/form-<state>-<phone|desktop>-<theme>.png
  *
  * It bundles `inbox-page.tsx` (`?view=form`: the real `AgendaInboxPage`, `AgendaFormFields` and `Composer`, invented
  * data) and FAILS (after writing every picture) when: a page scrolls sideways; the fields are not drawn as radios,
- * checkboxes and Yes/No; the recommendation is not picked; the answer row offers buttons; Send does not ask once; or
- * the sent answer is not the structured one (read after the undo window runs out).
+ * checkboxes and Yes/No; the recommendation is not picked; the answer row offers buttons; a field says it needs an
+ * answer or is optional; Send with a field left empty does not go at once; or the sent answer is not the structured one
+ * (read after the undo window runs out).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -137,19 +139,29 @@ for (const scheme of ['light', 'dark'] as const) {
       (await page.locator('.fy-attn-deck__top [data-agenda-quick-replies] button').count()) === 0,
       `${label}: the form offers answer buttons`,
     );
-    check((await page.locator('.fy-attn-deck__top [data-agenda-dismiss]').count()) === 1, `${label}: no Not needed`);
+    check((await form.locator('[data-agenda-form-needed]').count()) === 0, `${label}: a field says it needs an answer`);
+    check(!(await form.innerText()).includes('optional'), `${label}: a field says it is optional`);
+    // Not needed is behind the head's ⋯ (&F920): the Inbox's own tools say it there.
+    await page.locator('.fy-attn-deck__top [data-agenda-menu-toggle]').click();
+    check(
+      (await page.locator('[data-agenda-menu] [data-inbox-tool="not-needed"]').count()) === 1,
+      `${label}: no Not needed`,
+    );
+    await page.keyboard.press('Escape');
     await shoot(page, 'empty', viewport.name, scheme);
 
-    // ask: Send with the alerts empty asks once, and sends nothing.
+    // partial: Send with the alerts empty goes at once (every field is optional), into the undo window. A fresh load then
+    // brings the form back for the full answer below.
     await page.locator('[data-composer-send]').click();
-    const asked = page.locator('.fy-composer-error');
-    await asked.waitFor({ state: 'visible' });
-    check((await asked.innerText()).includes('Not answered yet: 2. Alerts'), `${label}: the ask names the alerts`);
-    check(
-      (await page.evaluate(() => (window as unknown as { __committed: unknown[] }).__committed.length)) === 0,
-      `${label}: the first Send went out`,
-    );
-    await shoot(page, 'ask', viewport.name, scheme);
+    await page.locator('[data-agenda-undo]').waitFor({ state: 'visible' });
+    check((await page.locator('.fy-composer-error').count()) === 0, `${label}: Send asked before sending`);
+    check((await form.count()) === 0, `${label}: a form answered in part did not go`);
+    await shoot(page, 'partial', viewport.name, scheme);
+    await page.reload();
+    await page.locator('[data-fixture]').waitFor({ state: 'visible' });
+    await form.waitFor({ state: 'visible' });
+    await page.locator('[data-inbox-composer] [data-live-editor]').waitFor({ state: 'visible' });
+    await page.waitForTimeout(300);
 
     // filled: another region, two alerts, words in the composer.
     await form.locator('input[type="radio"][value="Asia"]').check();

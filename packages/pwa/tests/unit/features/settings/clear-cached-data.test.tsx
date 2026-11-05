@@ -66,7 +66,7 @@ describe('ClearCachedDataSetting', () => {
     try {
       // Act
       await interact(() => button(subject.container, 'Clear').click());
-      await interact(() => must(buttons(subject.container, 'Clear')[1], 'the confirming Clear').click());
+      await interact(() => must(buttons(subject.container, 'Clear')[0], 'the confirming Clear').click());
       const during = phase(subject.container);
       const duringDisabled = button(subject.container, 'Clearing…').disabled;
       await interact(() => settle());
@@ -87,7 +87,7 @@ describe('ClearCachedDataSetting', () => {
     try {
       // Act
       await interact(() => button(subject.container, 'Clear').click());
-      await interact(() => must(buttons(subject.container, 'Clear')[1], 'the confirming Clear').click());
+      await interact(() => must(buttons(subject.container, 'Clear')[0], 'the confirming Clear').click());
 
       // Assert
       expect(phase(subject.container)).toBe('failed');

@@ -54,11 +54,11 @@ export interface FinishedTurn {
 }
 
 /**
- * A tool call that raises, edits or notifies: a shell command running `agenda add` / `edit` / `notify`
+ * A tool call that raises, edits, answers or notifies: a shell command running `agenda add` / `edit` / `answer` / `notify`
  * (the CLI, under whatever binary name), a Ferretry `*_ask_owner` tool, or the harness's own question tool,
  * which the daemon raises as an item itself (`harness-prompt.ts`).
  */
-const RAISING_COMMAND = /\b(?:(?:attention|agenda)["',\s]+(?:add|edit)|notify)\b/u;
+const RAISING_COMMAND = /\b(?:(?:attention|agenda)["',\s]+(?:add|edit|answer)|notify)\b/u;
 const RAISING_TOOL = /(?:^|_)ask_owner$|^AskUserQuestion$/u;
 
 export const raisesAgendaItem = (event: TranscriptEvent): boolean => {
@@ -68,10 +68,10 @@ export const raisesAgendaItem = (event: TranscriptEvent): boolean => {
   return RAISING_COMMAND.test(JSON.stringify(event.call.input));
 };
 
-/** A command that edits, closes or surfaces the item: `agenda edit|done|dismiss|surface` naming it. */
+/** A command that answers, rests, edits, closes or surfaces the item: `agenda answer|rest|edit|done|dismiss|surface` naming it. */
 const handles = (event: TranscriptEvent, id: string): boolean =>
   event.kind === 'tool-call' &&
-  new RegExp(`\\b(?:attention|agenda)\\W+(?:edit|done|dismiss|surface)\\b.{0,400}?\\b!?${id}\\b`, 'u').test(
+  new RegExp(`\\b(?:attention|agenda)\\W+(?:answer|rest|edit|done|dismiss|surface)\\b.{0,400}?\\b!?${id}\\b`, 'u').test(
     JSON.stringify(event.call.input),
   );
 
@@ -161,14 +161,14 @@ export function agendaNudgeMessage(
 
 /**
  * The words of the nudge for items the owner replied to and the ferret answered in chat only. Short on purpose.
- * A replied item is parked, off the owner's list, so it is never "your turn": the words say to do the work and close
- * the item, and name `--back` as the one way to ask the owner for something new.
+ * A replied item RESTS, off the owner's list and waiting on the ferret: the words say to answer on it (back to the
+ * owner, in its old place), or to close it when nothing more is expected.
  */
 export function discussionNudgeMessage(ids: readonly string[], binary: string): string {
   const named = ids.map(id => `!${id}`).join(', ');
   const first = ids[0] as string;
-  const off = ids.length === 1 ? 'it is off their list' : 'they are off their list';
-  return `${AGENDA_NUDGE_MARK} Owner replied about ${named}; ${off}. Do the work, then \`${binary} agenda done ${first}\`. Use \`${binary} agenda edit ${first} --back …\` only if you need something NEW from them.`;
+  const off = ids.length === 1 ? 'it rests, waiting on you' : 'they rest, waiting on you';
+  return `${AGENDA_NUDGE_MARK} Owner replied about ${named}; ${off}. Answer on it: \`${binary} agenda answer ${first} "<text>"\` (back on their list), or \`${binary} agenda done ${first}\` when nothing more is expected.`;
 }
 
 /**

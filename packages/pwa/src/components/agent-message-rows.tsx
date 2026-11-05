@@ -16,12 +16,12 @@ import { linkNudgePullRequests } from '../lib/board-nudge.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { useCardPullRequests } from '../lib/card-pull-requests.tsx';
 import { ferretryLine, ferretryRest } from '../lib/ferretry-sender.ts';
+import type { InstructionsUpdate } from '../lib/instructions-update.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
-import type { InstructionsUpdate } from '../lib/instructions-update.ts';
-import { peerPreview } from '../lib/peer-preview.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import type { PeerFrom } from '../lib/peer-message.ts';
+import { peerPreview } from '../lib/peer-preview.ts';
 import type { ResolvedAgent } from '../lib/references.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { Markdown } from './markdown.tsx';
@@ -175,6 +175,11 @@ export function PeerMessageRow({
         {kind === undefined ? null : (
           <span className="fy-peer-kind" data-peer-kind={peer.kind}>
             {kind}
+          </span>
+        )}
+        {peer.label === undefined ? null : (
+          <span className="fy-peer-label" data-peer-label={peer.label}>
+            {peer.label}
           </span>
         )}
       </header>

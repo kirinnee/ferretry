@@ -429,16 +429,34 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Board 817: opt-in first, then the search-first line and the card rules (cap 840); the total keeps the 8,000 - 150 cap.
     // #1197 and #1199 each fit alone but together measured 7,859; Pack's wording was tightened (pack 991 → 971).
     // The agenda's bug-batch and card-formatting rules measured 7,856; its wording was tightened (agenda 1,252 → 1,244).
+    // The agenda-first model (F559) measured 7,725 (agenda 1,237 → 1,285, board 802 → 638: the gate words and the
+    // create syntax went), leaving 125 for the agenda verbs that ship next (answer, rest, log, split, merge).
+    // Review round 1 restored the owner's bug-batch and owner-question rules, tightening the agenda's other lines
+    // (agenda 1,285 → 1,276): 7,716 measured by this test, 134 under the 7,850 cap (120 counting the section separators).
+    // The send-label rule (message labels) took pack to 1,026; the body rule (43) took agenda to 1,319. Together the total is 7,814: 36 under the 7,850 cap.
+    // The pack-status rule (`fy status --subtree`, screenshot review) took pack to 1,166 and the total to 7,954; Pack was tightened (1,166 → 1,046): 7,834 measured, 16 under the cap.
+    // Merging the agenda model tightened the agenda's own wording (agenda 1,319 → 1,230; pack stays 1,046): 7,745 measured, 105 under the 7,850 cap.
+    // Final review restored "on it" in the agenda's chat line (agenda 1,230 → 1,236): 7,751 measured.
+    // PR 3's conversation verbs (`log`, `split`, `merge`) took agenda to 1,266; main's `card` and `board` on the Hypermedia line took it to 1,320. Together: 7,813 measured, 37 under the cap.
+    // Fix rounds of the card-asks PR said "Before it's ready to try:" for "Before To test:", kept "show progress only" and tightened "add to one" (board 638 → 631): 7,806 measured, 44 under the 7,850 cap.
+    // PR 10 added the `done` verb and "say so" to the agenda, paid for by "logs their words verbatim" and "unsure→closest" (agenda 1,266 → 1,269): 7,809 measured, 41 under the 7,850 cap.
+    // F909 taught the body as the live document (`--where`=short status; rewrite the body whole with `edit --body-file`; chat points at it), paid for in part by the old body and `--where` words (agenda 1,269 → 1,289, cap 1,300): 7,829 measured, 21 under the 7,850 cap.
+    // The owner's-asks-are-public-cards rule (board 631 → 757, cap 760; the whole-prompt cap 7,850 → 7,950, as the rest of the wording is pinned by tests) was paid for in part by Pack (1,046 → 1,038) and Tools (1,299 → 1,294): 7,942 measured (7,956 counting the section separators, which the cap has never counted), 8 under the 7,950 cap.
+    // The owner's split-by-content-kind rule (&F946: "tabs by content kind (serial stays one)") took agenda 1,289 → 1,311 (cap 1,320), paid for in part by the open line's placeholders; the rest of the wording is pinned, so the whole-prompt cap went 7,950 → 7,970 (`8_000 - 30`, still under 8 KB): 7,964 measured.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
+    // The owner's board, agenda and explainer rules (&C48: board 757 → 814, agenda 1,311 → 1,380, hypermedia 1,320 → 1,209)
+    // were paid for in words. The cap now counts the blank line between sections, as the composed prompt has it: 7,993
+    // measured, under the 8 KB itself.
+    const separators = 2 * (Object.keys(sizes).length - 1);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + separators + longestRouting).be.below(8_000);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_300);
-    should(sizes.board).be.below(840);
+    should(sizes.board).be.below(820);
     should(sizes.hypermedia).be.below(1_550);
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);
     should(sizes.notify).be.below(450);
-    should(sizes.agenda).be.below(1_300);
+    should(sizes.agenda).be.below(1_390);
   });
 
   it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {

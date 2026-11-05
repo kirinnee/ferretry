@@ -1,6 +1,6 @@
 /**
  * SOLE OWNER of the `fy-board-side-view-v1` browser-storage key: how a ferret's Tasks tab draws its cards,
- * as Cards (one at a time, what needs the owner first), as a Kanban (one column per lane) or as a List (focus,
+ * as a Kanban (one column per lane) or as a List (focus,
  * owned, sub-ferrets).
  *
  * One device-wide choice, not per ferret and not per machine: it is a property of the reader's screen. Its
@@ -11,14 +11,14 @@
 /** The sole browser-storage key for the Tasks tab's view. */
 export const BOARD_SIDE_VIEW_KEY = 'fy-board-side-view-v1';
 
-export type BoardSideView = 'cards' | 'kanban' | 'list';
+export type BoardSideView = 'kanban' | 'list';
 
-/** A device that has never chosen opens on the Cards: the owner's verdicts first. */
-export const DEFAULT_BOARD_SIDE_VIEW: BoardSideView = 'cards';
+/** A device that has never chosen opens on the List; a device that stored the retired Cards view does too. */
+export const DEFAULT_BOARD_SIDE_VIEW: BoardSideView = 'list';
 
-/** Anything but the three known words is the default: a stale or hand-edited value resets cleanly. */
+/** Anything but the two known words is the default: a stale ("cards") or hand-edited value resets cleanly. */
 export const parseBoardSideView = (raw: string | null | undefined): BoardSideView =>
-  raw === 'list' || raw === 'kanban' || raw === 'cards' ? raw : DEFAULT_BOARD_SIDE_VIEW;
+  raw === 'list' || raw === 'kanban' ? raw : DEFAULT_BOARD_SIDE_VIEW;
 
 export interface BoardSideViewStorage {
   getItem(key: string): string | null;

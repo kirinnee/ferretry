@@ -1,9 +1,9 @@
+import { boardPrivate } from '../../../src/lib/board-private-preference.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
-import { boardErr, boardOk } from '@ferretry/protocol';
+import { boardOk } from '@ferretry/protocol';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-import { sendBack, sendBackBox, sendBackField, sendBackSubmit, plainSendBackEditor } from './send-back-support.ts';
 import {
   boardAnswer,
   COUNTS,
@@ -22,12 +22,11 @@ import {
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const LEAD = 'mvuc7tsf-0c3d50df';
 
-plainSendBackEditor();
-
 let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  boardPrivate.set(false);
 });
 
 const OPEN = [
@@ -86,7 +85,7 @@ const open = async (
   };
   const props: BoardPageProps = {
     store,
-    agenda: { respond: async () => undefined },
+    agenda: {},
     machines: extra.machines ?? [{ connection: laptop, name: 'laptop' }],
     callsigns: new Map([[LEAD, 'denisha']]),
     search: '',
@@ -116,25 +115,13 @@ const typeInto = async (input: HTMLInputElement | HTMLTextAreaElement, value: st
   await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
 };
 
-const openMenu = async (root: HTMLElement, task: string) => {
-  const li = must(root.querySelector(`.fy-board-card[data-task="${task}"]`), `card ${task}`);
-  await interact(() => must(li.querySelector<HTMLButtonElement>('.fy-board-card__more'), 'the menu').click());
-  return li;
-};
-const pickLane = (li: Element, name: string) =>
-  interact(() =>
-    must(
-      [...li.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === name),
-      name,
-    ).click(),
-  );
-
 describe('BoardPage — reading', () => {
   it('draws the lanes of the project with every open card, the counts and no closed lane', async () => {
     const { root, reads } = await open();
     expect(root.querySelector('h1')?.textContent).toBe('Board');
     expect(titles(root)).toEqual(['Plan the thing', 'Build the thing', 'Review the thing', 'Try the thing']);
-    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('To test1');
+    expect(root.querySelector('[data-count="to_test"]')).toBeNull();
+    expect(root.querySelector('[data-count="waiting_on_you"]')).toBeNull();
     expect(root.querySelector('[data-count="closed"]')?.textContent).toBe('1 closed hidden');
     expect([...root.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).not.toContain('Closed');
     expect(root.querySelector('.fy-board__reading')).toBeNull();
@@ -158,7 +145,7 @@ describe('BoardPage — reading', () => {
     const held = new DaemonBoardStore(fakePort({ board: () => new Promise(() => undefined) }), fakeEnvironment());
     view = await mount(
       <BoardPage
-        agenda={{ respond: async () => undefined }}
+        agenda={{}}
         callsigns={new Map()}
         machines={[{ connection: laptop, name: 'laptop' }]}
         now={NOW}
@@ -194,7 +181,7 @@ describe('BoardPage — reading', () => {
     const store = new DaemonBoardStore(port, fakeEnvironment());
     view = await mount(
       <BoardPage
-        agenda={{ respond: async () => undefined }}
+        agenda={{}}
         callsigns={new Map()}
         machines={[
           { connection: laptop, name: 'laptop' },
@@ -252,24 +239,21 @@ describe('BoardPage — views', () => {
     expect(second.searches).toEqual(['view=list']);
   });
 
-  it('closes a card from its To test row with Done, without opening it', async () => {
-    const { root, acts, navigated } = await open({ props: { search: 'view=list' } });
-    expect(root.querySelector('[data-task="F2"] .fy-board-done')).toBeNull();
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
-    expect(navigated).toEqual([]);
+  it('draws no Done or Not good on a To test row, and no Done column', async () => {
+    const { root } = await open({ props: { search: 'view=list' } });
+    expect(root.querySelector('[data-task="F4"]')).not.toBeNull();
+    expect(
+      root.querySelector(
+        '.fy-board-done, .fy-board-card__verdict, [data-verdict], [data-col="done"], .fy-board-summary__act',
+      ),
+    ).toBeNull();
   });
 
-  it('reopens a closed card from the Archive, asking why first', async () => {
-    const { root, acts } = await open({ props: { search: 'view=archive' } });
-    const button = must(root.querySelector<HTMLButtonElement>('[data-task="F8"] .fy-board-done'), 'Reopen');
-    expect(button.textContent).toBe('Reopen');
-    await interact(() => button.click());
-    expect(acts).toEqual([]);
-    await sendBack(sendBackBox(root), 'it broke again');
-    expect(acts).toEqual([
-      { daemonId: 'daemon/laptop', id: 'F8', request: { action: 'move', to: 'implement', reason: 'it broke again' } },
-    ]);
+  it('draws no Reopen on a closed card in the Archive', async () => {
+    const { root } = await open({ props: { search: 'view=archive' } });
+    expect(root.querySelector('[data-task="F8"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict], [data-col="done"]')).toBeNull();
+    expect(root.textContent).not.toContain('Reopen');
   });
 
   it('draws the Tree and the Dependencies views', async () => {
@@ -347,6 +331,50 @@ describe('BoardPage — human and agent tasks', () => {
     expect(searches).toEqual(['agents=1']);
   });
 
+  it('remembers the toggle on this device, so a plain Board link opens with private cards shown', async () => {
+    const first = await open({ open: SPLIT });
+    await click(first.root, '[data-filter="agents"]');
+    expect(boardPrivate.snapshot()).toBe(true);
+    await view?.unmount();
+    const later = await open({ open: SPLIT });
+    expect(titles(later.root)).toEqual(['Ask from the owner', 'Made by a ferret']);
+    expect(toggle(later.root)?.checked).toBe(true);
+  });
+
+  it('lets a link that names the choice win over the device, and changes nothing on the device', async () => {
+    boardPrivate.set(true);
+    const hidden = await open({ open: SPLIT, props: { search: 'agents=0' } });
+    expect(titles(hidden.root)).toEqual(['Ask from the owner']);
+    expect(boardPrivate.snapshot()).toBe(true);
+    await view?.unmount();
+    boardPrivate.set(false);
+    const shown = await open({ open: SPLIT, props: { search: 'agents=1' } });
+    expect(titles(shown.root)).toEqual(['Ask from the owner', 'Made by a ferret']);
+    expect(boardPrivate.snapshot()).toBe(false);
+  });
+
+  it('turns the device choice off again, and says so in the link when the link had it on', async () => {
+    boardPrivate.set(true);
+    const { root, searches } = await open({ open: SPLIT });
+    await click(root, '[data-filter="agents"]');
+    expect(boardPrivate.snapshot()).toBe(false);
+    expect(searches).toEqual(['']);
+  });
+
+  it('hides a card the daemon calls private, even one a person asked for, and shows one it calls public', async () => {
+    const told = [
+      originCard('F1', 'human', null, { title: 'Public ask', laneId: 'implement', visibility: 'public' }),
+      originCard('F2', 'human', null, { title: 'Hidden by the owner', laneId: 'implement', visibility: 'private' }),
+      originCard('F3', 'agent', null, { title: 'Published ferret card', laneId: 'implement', visibility: 'public' }),
+    ];
+    const { root } = await open({ open: told });
+    expect(titles(root)).toEqual(['Public ask', 'Published ferret card']);
+    expect(toggle(root)?.checked).toBe(false);
+    await view?.unmount();
+    const all = await open({ open: told, props: { search: 'agents=1' } });
+    expect(titles(all.root)).toEqual(['Public ask', 'Hidden by the owner', 'Published ferret card']);
+  });
+
   it('keeps the toggle when Clear resets the other filters', async () => {
     const { root, searches } = await open({ open: SPLIT, props: { search: 'agents=1&mine=1' } });
     await click(root, '.fy-board-filters__clear');
@@ -407,10 +435,10 @@ describe('BoardPage — filters and counts', () => {
     expect(written.get('activity')).toBe('stale');
   });
 
-  it('turns the To test pill into the activity filter', async () => {
+  it('turns the stale chip into the activity filter', async () => {
     const { root, searches } = await open();
-    await click(root, '[data-count="to_test"]');
-    expect(new URLSearchParams(searches[0]).get('activity')).toBe('to_test');
+    await click(root, '[data-count="stale"]');
+    expect(new URLSearchParams(searches[0]).get('activity')).toBe('stale');
   });
 
   it('starts the filters folded on a narrow screen', async () => {
@@ -486,91 +514,9 @@ describe('BoardPage — opening from a chat', () => {
   });
 });
 
-describe('BoardPage — moving cards', () => {
-  it('sends a forward move from the menu without a reason', async () => {
-    const { root, acts } = await open();
-    const li = await openMenu(root, 'F2');
-    await pickLane(li, 'Review/CI');
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F2', request: { action: 'move', to: 'review' } }]);
-    expect(root.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it('asks for a one-line reason before a move back, and sends nothing until it has one', async () => {
-    const { root, acts } = await open();
-    const li = await openMenu(root, 'F3');
-    await pickLane(li, 'Implement');
-    expect(acts).toEqual([]);
-    const dialog = sendBackBox(root);
-    expect(dialog.textContent).toContain('Move Review the thing back to Implement');
-    expect(sendBackSubmit(dialog).disabled).toBe(true);
-    await sendBack(dialog, 'CI is red again');
-    expect(acts).toEqual([
-      { daemonId: 'daemon/laptop', id: 'F3', request: { action: 'move', to: 'implement', reason: 'CI is red again' } },
-    ]);
-    expect(root.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it('drops the move when the reason box is cancelled', async () => {
-    const { root, acts } = await open();
-    await pickLane(await openMenu(root, 'F3'), 'Todo');
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('.fy-board-reason button[type="button"]'), 'Cancel').click(),
-    );
-    expect(root.querySelector('[role="dialog"]')).toBeNull();
-    expect(acts).toEqual([]);
-  });
-
-  it('keeps the reason box open and shows the refusal when the daemon says no', async () => {
-    const { root, acts } = await open({
-      act: async () => boardErr({ status: 409, message: 'That lane is gated.', boardCode: 'owner-gate' as const }),
-    });
-    await pickLane(await openMenu(root, 'F3'), 'Todo');
-    await sendBack(sendBackBox(root), 'because');
-    expect(acts).toHaveLength(1);
-    expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('That lane is gated.');
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('.fy-board-reason button[type="button"]'), 'Cancel').click(),
-    );
-    expect(root.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it('says on the card itself when a forward move does not go through, and clears it on the next try', async () => {
-    let answer: 'refuse' | 'take' = 'refuse';
-    const { root, acts } = await open({
-      act: async () =>
-        answer === 'refuse'
-          ? boardErr({ status: 500, message: 'boom', boardCode: 'owner-gate' as const })
-          : boardOk(card('F2')),
-    });
-    await pickLane(await openMenu(root, 'F2'), 'Review/CI');
-    expect(root.querySelector('[data-task="F2"] [data-answer-error]')?.textContent).toBe('boom');
-    expect(root.querySelectorAll('[data-answer-error]')).toHaveLength(1);
-    answer = 'take';
-    await pickLane(await openMenu(root, 'F2'), 'Review/CI');
-    expect(acts).toHaveLength(2);
-    expect(root.querySelector('[data-answer-error]')).toBeNull();
-  });
-
-  it('closes a card from To test in one tap with Done', async () => {
-    const { root, acts } = await open();
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('sends "Not good" back to the last active lane, with a reason', async () => {
-    const { root, acts } = await open();
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    expect(root.querySelector('[role="dialog"]')?.textContent).toContain(
-      'Not good: send Try the thing back to Implement',
-    );
-    expect(acts).toEqual([]);
-  });
-
-  it('does not move a card in the Archive', async () => {
-    const { root } = await open({ props: { search: 'view=archive' } });
-    expect(root.querySelector('.fy-board-card__more')).toBeNull();
-  });
-
+describe('BoardPage — read-only', () => {
+  const press = (target: Element) =>
+    interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
   const drag = (type: string) => {
     const event = new Event(type, { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'dataTransfer', {
@@ -578,46 +524,54 @@ describe('BoardPage — moving cards', () => {
     });
     return event;
   };
-  const laneNamed = (root: HTMLElement, name: string) =>
-    must(
+
+  it('draws no Done or Not good on a card in To test, or anywhere on the Kanban', async () => {
+    const { root } = await open();
+    expect(root.querySelector('[data-task="F4"]')).not.toBeNull();
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
+  });
+
+  it('has no hand control on the Kanban: no lane menu, no drag, no drop target, no Add card, no Lanes link', async () => {
+    const { root } = await open();
+    expect(root.querySelector('.fy-board-card__more, [role="menu"], [role="menuitem"]')).toBeNull();
+    expect(root.querySelector('[draggable="true"], [data-dragging], [data-drop], [data-variant="target"]')).toBeNull();
+    expect(root.querySelector('[data-board-add], .fy-board__fab, [aria-label="Add card"], .fy-board__add')).toBeNull();
+    expect(root.querySelector('[data-board-lanes], .fy-board__lanes, .fy-board-project__lanes')).toBeNull();
+    expect(root.textContent).not.toMatch(/Add card|Lanes ✎/u);
+  });
+
+  it('sends nothing to the daemon when a card is dragged and dropped, or pressed', async () => {
+    const { root, acts, navigated } = await open();
+    const f2 = must(root.querySelector('[data-task="F2"]'), 'F2');
+    const review = must(
       [...root.querySelectorAll<HTMLElement>('.fy-board-lane')].find(lane =>
-        lane.getAttribute('aria-label')?.startsWith(name),
+        lane.getAttribute('aria-label')?.startsWith('Review'),
       ),
-      name,
+      'Review',
     );
-
-  it('moves a card forward when it is dropped on a later lane', async () => {
-    const { root, acts } = await open();
-    await interact(() => must(root.querySelector('[data-task="F2"]'), 'F2').dispatchEvent(drag('dragstart')));
-    expect(root.querySelector('[data-task="F2"]')?.hasAttribute('data-dragging')).toBe(true);
-    await interact(() => laneNamed(root, 'Review').dispatchEvent(drag('drop')));
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F2', request: { action: 'move', to: 'review' } }]);
-    expect(root.querySelector('[data-dragging]')).toBeNull();
-  });
-
-  it('asks for a reason when a card is dragged back', async () => {
-    const { root, acts } = await open();
-    await interact(() => must(root.querySelector('[data-task="F3"]'), 'F3').dispatchEvent(drag('dragstart')));
-    await interact(() => laneNamed(root, 'Plan').dispatchEvent(drag('drop')));
+    await interact(() => f2.dispatchEvent(drag('dragstart')));
+    const over = drag('dragover');
+    await interact(() => review.dispatchEvent(over));
+    expect(over.defaultPrevented).toBe(false);
+    await interact(() => review.dispatchEvent(drag('drop')));
+    await press(must(f2.querySelector('a'), 'the card link'));
     expect(acts).toEqual([]);
-    expect(root.querySelector('[role="dialog"]')?.textContent).toContain('Move Review the thing back to Plan/Design');
+    expect(navigated).toEqual([`/d/${encodeURIComponent('daemon/laptop')}/board/F2`]);
   });
 
-  it('closes a card dropped on the "Done" target', async () => {
-    const { root, acts } = await open();
-    await interact(() => must(root.querySelector('[data-task="F4"]'), 'F4').dispatchEvent(drag('dragstart')));
-    await interact(() => must(root.querySelector('[data-variant="target"]'), 'the target').dispatchEvent(drag('drop')));
-    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
+  it('draws no hand control in the Table, the Tree, the Dependencies or the Archive either', async () => {
+    for (const name of ['list', 'tree', 'dependencies', 'archive']) {
+      const { root } = await open({ props: { search: `view=${name}` } });
+      expect(root.querySelector('.fy-board-card__more, [role="menu"], [draggable="true"]')).toBeNull();
+      expect(root.querySelector('[data-board-add], .fy-board__fab, [data-board-lanes]')).toBeNull();
+      await view?.unmount();
+      view = null;
+    }
   });
 
-  it('ignores a drop on the lane the card is already in, and a drag that ends elsewhere', async () => {
-    const { root, acts } = await open();
-    await interact(() => must(root.querySelector('[data-task="F2"]'), 'F2').dispatchEvent(drag('dragstart')));
-    await interact(() => laneNamed(root, 'Implement').dispatchEvent(drag('drop')));
-    await interact(() => must(root.querySelector('[data-task="F2"]'), 'F2').dispatchEvent(drag('dragstart')));
-    await interact(() => must(root.querySelector('[data-task="F2"]'), 'F2').dispatchEvent(drag('dragend')));
-    expect(root.querySelector('[data-dragging]')).toBeNull();
-    expect(acts).toEqual([]);
+  it('draws no Add card on a phone either', async () => {
+    const { root } = await open({ props: { phone: true } });
+    expect(root.querySelector('[data-board-add], .fy-board__fab, [aria-label="Add card"]')).toBeNull();
   });
 });
 
@@ -634,7 +588,7 @@ describe('BoardPage — odd boards', () => {
     });
     view = await mount(
       <BoardPage
-        agenda={{ respond: async () => undefined }}
+        agenda={{}}
         callsigns={new Map()}
         machines={twoMachines}
         now={NOW}
@@ -646,48 +600,12 @@ describe('BoardPage — odd boards', () => {
     );
     await interact(() => flush());
     const heads = [...view.container.querySelectorAll('.fy-board-project__head')].map(node => node.textContent);
-    expect(heads).toEqual([`${PROJECT.slice(0, 8)}laptopLanes ✎`, `${PROJECT.slice(0, 8)}workstationLanes ✎`]);
-  });
-
-  it('refuses a move for a card sitting in a lane the project does not have', async () => {
-    const { root, acts } = await open({ open: [card('F7', { title: 'Lost card', laneId: 'nowhere' })] });
-    const li = await openMenu(root, 'F7');
-    await pickLane(li, 'Review/CI');
-    expect(acts).toEqual([]);
-    expect(root.querySelector('.fy-board__notice')?.textContent).toContain('nowhere');
+    expect(heads).toEqual([`${PROJECT.slice(0, 8)}laptop`, `${PROJECT.slice(0, 8)}workstation`]);
   });
 
   it('keeps its own clock when it is not handed one', async () => {
     const { root } = await open({ props: { now: undefined } });
     expect(titles(root)).toHaveLength(4);
-  });
-});
-
-describe('BoardPage — lane editor entry', () => {
-  it('puts a Lanes ✎ link in the header that opens the lane editor of the one project', async () => {
-    const { root, navigated } = await open();
-    expect(root.querySelector('.fy-board-project__lanes')).toBeNull();
-    await click(root, '[data-board-lanes="header"]');
-    expect(navigated).toEqual([`/d/${encodeURIComponent('daemon/laptop')}/projects/${PROJECT}/lanes`]);
-  });
-
-  it('heads each project with its own Lanes ✎ link when several boards are drawn', async () => {
-    const { root, navigated } = await open({
-      machines: [
-        { connection: laptop, name: 'laptop' },
-        { connection: workstation, name: 'workstation' },
-      ],
-    });
-    expect(root.querySelector('[data-board-lanes="header"]')).toBeNull();
-    const links = [...root.querySelectorAll<HTMLElement>('.fy-board-project__lanes')];
-    expect(links).toHaveLength(2);
-    await interact(() => must(links[1], 'the second link').click());
-    expect(navigated).toEqual([`/d/${encodeURIComponent('daemon/workstation')}/projects/${PROJECT}/lanes`]);
-  });
-
-  it('has no entry while no project has a board', async () => {
-    const { root } = await open({ open: [] });
-    expect(root.querySelector('[data-board-lanes]')).toBeNull();
   });
 });
 
@@ -706,13 +624,13 @@ describe('BoardPage — the phone header', () => {
       projects: async () => [{ id: PROJECT, name: 'ferretry', path: null, laneSet: laneSetFor() }],
     });
 
-  it('drops the in-page title and tools row, and keeps the scope toggle and Lanes in the pill row', async () => {
+  it('drops the in-page title and tools row, and keeps the scope toggle in the pill row', async () => {
     const { root } = await open({ props: { phone: true, origin: FROM } });
     expect(root.querySelector('.fy-board__title')).toBeNull();
     expect(root.querySelector('.fy-board__tools')).toBeNull();
     const bar = must(root.querySelector('.fy-board__phone-bar'), 'the pill row');
     expect(bar.querySelector('[data-board-scope]')).not.toBeNull();
-    expect(bar.querySelector('[data-board-lanes="header"]')).not.toBeNull();
+    expect(bar.querySelector('[data-board-lanes]')).toBeNull();
   });
 
   it('keeps the title and the tools row on a wide screen', async () => {
@@ -720,7 +638,7 @@ describe('BoardPage — the phone header', () => {
     expect(root.querySelector('h1.fy-board__title')?.textContent).toBe('Board');
     const tools = must(root.querySelector('.fy-board__tools'), 'the tools row');
     expect(tools.querySelector('[data-board-scope]')).not.toBeNull();
-    expect(tools.querySelector('[data-board-lanes="header"]')).not.toBeNull();
+    expect(tools.querySelector('[data-board-lanes], [data-board-add]')).toBeNull();
     expect(root.querySelector('.fy-board__phone-bar')).toBeNull();
   });
 
@@ -773,179 +691,5 @@ describe('BoardPage — the phone header', () => {
     await click(root, '.fy-board__retry');
     await interact(() => flush());
     expect(root.querySelector('[data-machine="daemon/workstation"]')?.textContent).toContain('timed out');
-  });
-});
-
-describe('BoardPage — an answer in flight', () => {
-  const hold = () => {
-    let release: (answer: Awaited<ReturnType<DaemonBoardStore['act']>>) => void = () => undefined;
-    const act = () =>
-      new Promise<Awaited<ReturnType<DaemonBoardStore['act']>>>(resolve => {
-        release = resolve;
-      });
-    return { act, release: (answer: Awaited<ReturnType<DaemonBoardStore['act']>>) => release(answer) };
-  };
-
-  it('spins the pressed Done, holds every answer on that card, and sends one move however often it is pressed', async () => {
-    const held = hold();
-    const { root, acts } = await open({ act: held.act });
-    await click(root, '[data-task="F4"] .fy-board-done');
-    const done = must(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-done'), 'Done');
-    expect(done.hasAttribute('data-pending')).toBe(true);
-    expect(done.disabled).toBe(true);
-    expect(done.getAttribute('aria-busy')).toBe('true');
-    expect(done.querySelector('[data-spinner]')).not.toBeNull();
-    expect(done.textContent).toBe('Done');
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] [data-verdict="not-good"]')?.disabled).toBe(true);
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-card__more')?.disabled).toBe(true);
-    expect(root.querySelector('[data-task="F4"]')?.getAttribute('data-settling')).toBe('done');
-    expect(root.querySelector('[data-task="F4"]')?.getAttribute('draggable')).toBe('false');
-    // Other cards are not held.
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F2"] .fy-board-card__more')?.disabled).toBe(false);
-    await interact(() => done.click());
-    expect(acts).toHaveLength(1);
-    held.release(boardOk(card('F4', { laneId: 'closed' })));
-    await interact(() => flush());
-    expect(root.querySelector('[data-settling]')).toBeNull();
-  });
-
-  it('ignores another answer on a card while one is on its way', async () => {
-    const held = hold();
-    const { root, acts } = await open({ act: held.act });
-    await click(root, '[data-task="F4"] .fy-board-done');
-    // The buttons are held; a drop that still arrives must not start a second move either.
-    const dragged = (type: string) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'dataTransfer', {
-        value: { effectAllowed: '', dropEffect: '', setData: () => undefined },
-      });
-      return event;
-    };
-    await interact(() => must(root.querySelector('[data-task="F4"]'), 'F4').dispatchEvent(dragged('dragstart')));
-    const merged = must(
-      [...root.querySelectorAll<HTMLElement>('.fy-board-lane')].find(lane =>
-        lane.getAttribute('aria-label')?.startsWith('Merged'),
-      ),
-      'Merged',
-    );
-    await interact(() => merged.dispatchEvent(dragged('drop')));
-    expect(acts).toHaveLength(1);
-    expect(root.querySelector('[role="dialog"]')).toBeNull();
-    held.release(boardOk(card('F4')));
-    await interact(() => flush());
-  });
-
-  it('says a refused Done on the card, and nowhere else', async () => {
-    const { root } = await open({
-      act: async () => boardErr({ status: 409, message: 'only the owner closes', boardCode: 'owner-gate' as const }),
-    });
-    await click(root, '[data-task="F4"] .fy-board-done');
-    expect(root.querySelector('[data-task="F4"] [data-answer-error][role="alert"]')?.textContent).toBe(
-      'only the owner closes',
-    );
-    expect(root.querySelector('.fy-board__notice')).toBeNull();
-    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-done')?.disabled).toBe(false);
-  });
-
-  it('spins Done on a Table row and says its refusal under the row', async () => {
-    const held = hold();
-    const { root } = await open({ act: held.act, props: { search: 'view=list' } });
-    await click(root, '.fy-board-summary__row[data-task="F4"] .fy-board-done');
-    const row = must(root.querySelector('.fy-board-summary__row[data-task="F4"]'), 'the row');
-    expect(row.getAttribute('data-settling')).toBe('done');
-    expect(row.querySelector('.fy-board-done [data-spinner]')).not.toBeNull();
-    held.release(boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }));
-    await interact(() => flush());
-    expect(row.querySelector('[data-answer-error]')?.textContent).toBe('no');
-    expect(row.hasAttribute('data-settling')).toBe(false);
-  });
-
-  it('words a Reopen from the Archive as one', async () => {
-    const { root } = await open({ props: { search: 'view=archive' } });
-    await click(root, '[data-task="F8"] .fy-board-done');
-    expect(root.querySelector('.fy-board-reason__heading')?.textContent).toBe(
-      'Reopen Old closed thing: back to Implement',
-    );
-    expect(sendBackField(root).getAttribute('placeholder')).toBe('Why is it going back?');
-  });
-});
-
-describe('BoardPage — Not good with pictures', () => {
-  const IMAGE = `att_${'a'.repeat(64)}`;
-  const withFiles = (offered: boolean, uploads: string[] = []): Partial<BoardPageProps> => ({
-    ports: {
-      sendMessage: async () => undefined,
-      startFerret: async () => 'sess',
-      sendBackFiles: async () => offered,
-      uploadAttachment: async (daemon, sessionId, file) => {
-        uploads.push(`${daemon.daemonId}:${sessionId}:${file.name}`);
-        return { id: IMAGE, filename: file.name, mime: file.type, size: 3, sha256: '0'.repeat(64), createdAt: 'x' };
-      },
-    },
-  });
-  const pickFile = async (root: HTMLElement): Promise<void> => {
-    const picker = must(root.querySelector<HTMLInputElement>('input[type="file"]:not([capture])'), 'the picker');
-    Object.defineProperty(picker, 'files', {
-      configurable: true,
-      value: [new File(['png'], 'flicker.png', { type: 'image/png' })],
-    });
-    await interact(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
-    await interact(() => flush());
-  };
-
-  it("uploads to the card's ferret and sends the files with the words, spinning Not good meanwhile", async () => {
-    const uploads: string[] = [];
-    let release: () => void = () => undefined;
-    const { root, acts } = await open({
-      props: withFiles(true, uploads),
-      act: () =>
-        new Promise(resolve => {
-          release = () => resolve(boardOk(card('F4', { laneId: 'implement' })));
-        }),
-    });
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    await interact(() => flush());
-    await pickFile(root);
-    const ferret = card('F4').owner;
-    expect(uploads).toEqual([`${laptop.daemonId}:${ferret}:flicker.png`]);
-    await sendBack(sendBackBox(root), 'still flickers');
-    expect(acts).toEqual([
-      {
-        daemonId: laptop.daemonId,
-        id: 'F4',
-        request: {
-          action: 'move',
-          to: 'implement',
-          reason: 'still flickers',
-          attachments: { from: ferret, ids: [IMAGE] },
-        },
-      },
-    ]);
-    expect(root.querySelector('[data-task="F4"] [data-verdict="not-good"]')?.hasAttribute('data-pending')).toBe(true);
-    expect(root.querySelector('button[data-composer-send]')?.getAttribute('aria-label')).toBe('Sending…');
-    release();
-    await interact(() => flush());
-    expect(root.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it('keeps the composer, and the words, when the daemon refuses', async () => {
-    const { root } = await open({
-      props: withFiles(true),
-      act: async () => boardErr({ status: 409, message: 'not in its session', boardCode: 'owner-gate' as const }),
-    });
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    await sendBack(sendBackBox(root), 'no');
-    expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('not in its session');
-    expect(sendBackField(root).value).toBe('no');
-  });
-
-  it('sends the words alone to a machine too old for pictures', async () => {
-    const { root, acts } = await open({ props: withFiles(false) });
-    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    await interact(() => flush());
-    expect(root.querySelector('[data-composer-attach]')).toBeNull();
-    expect(root.querySelector('[data-send-back-note="update"]')).not.toBeNull();
-    await sendBack(sendBackBox(root), 'broken');
-    expect(acts[0]?.request).toEqual({ action: 'move', to: 'implement', reason: 'broken' });
   });
 });

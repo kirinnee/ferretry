@@ -3,16 +3,19 @@ import {
   type AgendaItem,
   BoardQuerySchema,
   type BoardTask,
+  type BoardTaskId,
   type BoardTaskActionRequestInput,
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
+  boardTaskRevision,
   type PrLink,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
   AgendaCardLinks,
+  AlertSurface,
   actorOf,
   type BoardCaller,
   BoardError,
@@ -52,6 +55,8 @@ const ferret = (sessionId: string): BoardCaller => ({ kind: 'ferret', sessionId 
 const lead = ferret('lead');
 const child = ferret('child');
 const stranger = ferret('stranger');
+const LEAD_HELD = { owner: 'lead', assignee: null } as const;
+const HANDED_DOWN_HELD = { owner: 'owner-lead', assignee: 'lead' } as const;
 
 const create = (input: Partial<BoardTaskCreateRequestInput> = {}) =>
   BoardTaskCreateRequestSchema.parse({
@@ -770,7 +775,7 @@ describe('everything else on a card', () => {
 
     // Assert
     should(blocked).eql({ on: 'external', reason: 'waiting on GitHub', since: NOW });
-    should(view.task.activity).equal('waiting');
+    should(view.task.activity).equal('idle');
     should(stored(ports).blocked).be.null();
     should(lastEvent(ports)).match({ type: 'unblocked', reason: null });
     should(again.code).equal('invalid');
@@ -931,6 +936,88 @@ describe('everything else on a card', () => {
     should(lastEvent(ports)).match({ type: 'field-edited', field: 'howToTest' });
   });
 
+  it('should keep a status from the create, and record each rewrite as one edit that names status, not its text', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const first = { now: 'designing', doneSoFar: '', next: '' };
+    const second = { now: 'writing the route', doneSoFar: '- design', next: '1. CLI' };
+
+    // Act
+    const created = await service.create(create({ status: first }), lead);
+    const kept = stored(ports).status;
+    await service.act(created.task.id, action({ action: 'edit', status: second }), lead);
+
+    // Assert
+    should(kept).eql(first);
+    should(stored(ports).status).eql(second);
+    should(lastEvent(ports)).eql({ ...lastEvent(ports), type: 'field-edited', field: 'status' });
+    should(JSON.stringify(lastEvent(ports))).not.containEql('writing the route');
+  });
+
+  it('should merge the parts an edit names into the card status, so two partial edits never undo each other', async () => {
+    // Arrange — the holder rewrites Now while the lead rewrites Done so far, neither having read the other's edit.
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create({ status: { now: 'a', doneSoFar: 'b', next: 'c' } }), lead);
+
+    // Act
+    await service.act(created.task.id, action({ action: 'edit', status: { now: 'testing' } }), lead);
+    await service.act(created.task.id, action({ action: 'edit', status: { doneSoFar: '- PR 1' } }), lead);
+
+    // Assert
+    should(stored(ports).status).eql({ now: 'testing', doneSoFar: '- PR 1', next: 'c' });
+  });
+
+  it('should start a card with no status from empty parts when an edit names only one', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create(), lead);
+
+    // Act
+    await service.act(created.task.id, action({ action: 'edit', status: { next: '1. CLI' } }), lead);
+
+    // Assert
+    should(stored(ports).status).eql({ now: '', doneSoFar: '', next: '1. CLI' });
+  });
+
+  it('should leave a card made without a status with none, and refuse a status edit that changes nothing', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([]);
+    const status = { now: 'x', doneSoFar: '', next: '' };
+
+    // Act
+    const created = await service.create(create(), lead);
+    const none = stored(ports);
+    await service.act(created.task.id, action({ action: 'edit', status }), lead);
+    const same = await refusal(service.act(created.task.id, action({ action: 'edit', status: { ...status } }), lead));
+
+    // Assert
+    should(none).not.have.property('status');
+    should(same.code).equal('invalid');
+  });
+
+  it('should refuse a patch written against an older revision, and apply one written against the current', async () => {
+    // Arrange: the card's revision is the seq of its newest history event (`boardTaskRevision`)
+    const { ports, service } = serviceWith([]);
+    const created = await service.create(create({}), lead);
+    const read = boardTaskRevision(created.task);
+    await service.act(created.task.id, action({ action: 'edit', summary: 'somebody else wrote first' }), lead);
+
+    // Act
+    const stale = await refusal(
+      service.act(created.task.id, action({ action: 'edit', revision: read, summary: 'an old reading' }), lead),
+    );
+    await service.act(
+      created.task.id,
+      action({ action: 'edit', revision: boardTaskRevision(stored(ports)), summary: 'read, then written' }),
+      lead,
+    );
+
+    // Assert
+    should(stale.code).equal('version-conflict');
+    should(stale.message).match(/changed since you read it: read it again \(task show F\d+ --yaml\)/u);
+    should(stored(ports).summary).equal('read, then written');
+  });
+
   it('should let the assignee write How to test without owner standing', async () => {
     // Arrange
     const { ports, service } = serviceWith([card({ assignee: 'child' })]);
@@ -1033,7 +1120,7 @@ describe('everything else on a card', () => {
 
   describe('re-parenting a card', () => {
     const cards = () => [
-      card({ id: 'F1', owner: 'lead', assignee: 'child' }),
+      card({ id: 'F1', owner: 'lead', assignee: 'child', askedBy: 'agent' }),
       card({ id: 'F2', owner: 'lead' }),
       card({ id: 'F3', owner: 'stranger', assignee: 'stranger' }),
     ];
@@ -1083,7 +1170,10 @@ describe('everything else on a card', () => {
     it('should let the human, the owner and an ancestor re-parent', async () => {
       // Arrange
       const human = serviceWith(cards());
-      const ancestor = serviceWith([card({ id: 'F1', owner: 'child' }), card({ id: 'F2', owner: 'lead' })]);
+      const ancestor = serviceWith([
+        card({ id: 'F1', owner: 'child', askedBy: 'agent' }),
+        card({ id: 'F2', owner: 'lead' }),
+      ]);
 
       // Act
       await human.service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), owner);
@@ -1167,7 +1257,7 @@ describe('handing a card to a sub-ferret', () => {
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', dropped: { at: NOW, reason: 'x' } })]);
 
     // Act
-    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+    const error = await refusal(service.handOver('F1', 'lead', 'child', LEAD_HELD));
 
     // Assert
     should(error.code).equal('invalid');
@@ -1180,7 +1270,7 @@ describe('handing a card to a sub-ferret', () => {
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', laneId: 'closed' })]);
 
     // Act
-    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+    const error = await refusal(service.handOver('F1', 'lead', 'child', LEAD_HELD));
 
     // Assert
     should(error.code).equal('invalid');
@@ -1193,11 +1283,65 @@ describe('handing a card to a sub-ferret', () => {
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead' })], { focus: new FakeFocus(new Set()) });
 
     // Act
-    const handed = await service.handOver('F1', 'lead', 'child');
+    const handed = await service.handOver('F1', 'lead', 'child', LEAD_HELD);
 
     // Assert
     should(handed).match({ id: 'F1', assignee: 'child' });
     should(ports.warnings.some(warning => warning.includes('could not focus child'))).be.true();
+  });
+});
+
+describe('handing a card on after another start changed who holds it', () => {
+  it('should refuse a hand-over when only the assignee changed, the lead still owning the card', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead', 'child-b', LEAD_HELD));
+
+    // Assert
+    should(error.code).equal('version-conflict');
+    should(error.message).equal('&F1 changed hands since you chose it (now held by child-a); nothing was assigned');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should refuse a hand-over when only the owner changed', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead-two', assignee: null })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead-two', 'child', LEAD_HELD));
+
+    // Assert
+    should(error.code).equal('version-conflict');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should refuse the owner’s start when only the assignee changed, though the owner may always assign', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
+
+    // Act
+    const error = await refusal(service.assignForOwner('F1', 'child-b', LEAD_HELD));
+
+    // Assert
+    should(error.code).equal('version-conflict');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should let the second of two sequential hand-overs through only when the card is held as it was judged', async () => {
+    // Arrange
+    const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
+
+    // Act
+    const first = await service.handOver('F1', 'lead', 'child-a', LEAD_HELD);
+    const second = await refusal(service.handOver('F1', 'lead', 'child-b', LEAD_HELD));
+    const again = await service.handOver('F1', 'lead', 'child-b', { owner: 'lead', assignee: 'child-a' });
+
+    // Assert
+    should(first.assignee).equal('child-a');
+    should(second.code).equal('version-conflict');
+    should(again.assignee).equal('child-b');
   });
 });
 
@@ -1207,7 +1351,7 @@ describe('the owner starting a ferret on a card', () => {
     const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
 
     // Act
-    const assigned = await service.assignForOwner('F1', 'child');
+    const assigned = await service.assignForOwner('F1', 'child', LEAD_HELD);
 
     // Assert
     should(assigned).match({ id: 'F1', assignee: 'child' });
@@ -1219,8 +1363,8 @@ describe('the owner starting a ferret on a card', () => {
     const closed = serviceWith([card({ id: 'F1', laneId: 'closed' })]);
 
     // Act
-    const droppedError = await refusal(dropped.service.assignForOwner('F1', 'child'));
-    const closedError = await refusal(closed.service.assignForOwner('F1', 'child'));
+    const droppedError = await refusal(dropped.service.assignForOwner('F1', 'child', LEAD_HELD));
+    const closedError = await refusal(closed.service.assignForOwner('F1', 'child', LEAD_HELD));
 
     // Assert
     should(droppedError.message).equal('&F1 is dropped; reopen it before you start a ferret on it');
@@ -1303,10 +1447,10 @@ describe('an assignee handing its card down', () => {
     });
 
     // Act
-    const sibling = await refusal(service.handOver('F1', 'lead', 'sibling'));
+    const sibling = await refusal(service.handOver('F1', 'lead', 'sibling', HANDED_DOWN_HELD));
     const outsider = await refusal(service.requireHandOver('F1', 'stranger'));
     await should(service.requireHandOver('F1', 'lead')).be.fulfilled();
-    const handedDown = await service.handOver('F1', 'lead', 'child');
+    const handedDown = await service.handOver('F1', 'lead', 'child', HANDED_DOWN_HELD);
 
     // Assert
     should(sibling.code).equal('forbidden');
@@ -1345,8 +1489,32 @@ describe('refiling a card', () => {
     should(stored(ports).laneId).equal('todo');
   });
 
+  it('should let the daemon note a card, as the board alert surface does for a withheld alert', async () => {
+    // Arrange: the real BoardService authority, an open public parent and a private child alerted about.
+    const parent = card({ id: 'F10', askedBy: 'person', owner: 'lead', parent: null });
+    const leaf = card({ id: 'F11', owner: 'lead', assignee: 'child', parent: { id: 'F10' } });
+    const { ports, service } = serviceWith([parent, leaf]);
+    const surface = new AlertSurface({
+      snapshot: async () => await service.snapshot(),
+      note: async (id, text) => {
+        await service.act(id, action({ action: 'note', text }), daemon);
+      },
+      machineId: () => 'machine-1',
+    });
+
+    // Act
+    await surface.surface('F11' as BoardTaskId, '&F11 PR #1 CI is red.');
+
+    // Assert
+    should(lastEvent(ports, 'F10')).match({
+      type: 'note',
+      text: 'sub-card alert, not typed to the interactive lead: &F11 PR #1 CI is red.',
+      actor: { kind: 'daemon' },
+    });
+  });
+
   it('should take a named lane, and let the daemon refile too', async () => {
-    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Gates ask the owner)
+    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Cards show progress)
     const { ports, service } = serviceWith([card({ workflow: 'quick' })]);
 
     // Act
@@ -1455,6 +1623,19 @@ describe('a daemon trigger', () => {
     should(ports.changes.events[0]?.sessionId).equal('child');
   });
 
+  it('should leave the status alone when it moves the card', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([
+      card({ laneId: 'implement', status: { now: 'in review soon', doneSoFar: '', next: '' } }),
+    ]);
+
+    // Act
+    await service.trigger('F1', 'pr.opened', { sessionId: 'child', reason: 'PR #930 opened' });
+
+    // Assert
+    should(stored(ports).status).eql({ now: 'in review soon', doneSoFar: '', next: '' });
+  });
+
   it('should move a blocked card anyway and say so', async () => {
     // Arrange
     const { ports, service } = serviceWith([
@@ -1535,7 +1716,7 @@ describe('reading the board', () => {
     // Assert
     should(response.cards.map(entry => entry.id).sort()).eql(['F1', 'F3']);
     should(response.laneSet?.projectId).equal(PROJECT);
-    should(response.counts).match({ closedHidden: 1, toTest: 1 });
+    should(response.counts).match({ closedHidden: 1, toTest: 0 });
     should(response.quarantined).eql([{ id: 'F9', reason: 'the card file is not valid JSON' }]);
     should(response.nextCursor).be.null();
   });
@@ -1604,7 +1785,7 @@ describe('reading the board', () => {
       {
         open: async sessionId =>
           sessionId === 'stranger'
-            ? ([{ id: 'A1', task: { id: 'F1' }, blockingNow: true }] as unknown as readonly AgendaItem[])
+            ? ([{ id: 'A1', cardAsks: [{ gate: { cardId: 'F1' }, at: NOW }] }] as unknown as readonly AgendaItem[])
             : [],
       },
       () => MACHINE,
@@ -1626,8 +1807,9 @@ describe('reading the board', () => {
 
     // Assert
     should(derived[0]).eql(['F0', 'F1', 'F2']);
-    should(one.task.waitingOnOwner).eql([ask]);
-    should(one.task.activity).equal('waiting');
+    should(one.task.openAsks).eql([ask]);
+    should(one.task.waitingOnOwner).eql([]);
+    should(one.task.activity).equal('idle');
     should(one.task).eql(whole.cards.find(each => each.id === 'F1'));
   });
 
@@ -2014,7 +2196,7 @@ describe('lanes follow PR facts at the write', () => {
   });
 
   it('should keep a card waiting at the Plan gate where it is, whatever its linked PR says', async () => {
-    // Arrange — only the owner passes a gate (docs/board.md § Gates ask the owner)
+    // Arrange — only the owner passes a gate (docs/board.md § Cards show progress)
     const { ports, service } = serviceWith([card({ laneId: 'plan' }), holding(known({ releasedIn: RELEASE }))], {
       runningVersion: () => '4.114.0',
     });

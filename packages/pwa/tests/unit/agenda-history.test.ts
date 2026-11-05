@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { type AgendaItem, agendaAnswerMessage, agendaDismissedMessage, agendaReMessage } from '@ferretry/protocol';
-import { HISTORY_FERRET_CHARS, type HistoryEvent, itemHistory } from '../../src/lib/agenda-history.ts';
+import { type HistoryEvent, itemHistory } from '../../src/lib/agenda-history.ts';
 import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
@@ -157,8 +157,8 @@ describe('the history of one agenda item', () => {
     expect(said(events)).toEqual(['owner: does pause kill a running turn?']);
   });
 
-  test('keeps the cited part of a reply whole-turn-agnostic, cut long, and nothing from other rows', () => {
-    const long = `Re !A47: ${'x'.repeat(HISTORY_FERRET_CHARS + 50)}`;
+  test('keeps the cited part of a reply WHOLE however long it is, and nothing from other rows', () => {
+    const long = `Re !A47: ${'x'.repeat(20_000)}`;
     const events = itemHistory(item(), [
       entry('a0', 'assistant', 'Building the settings page.', 0),
       entry('a1', 'assistant', 'About !A47 — done.', 1),
@@ -169,8 +169,7 @@ describe('the history of one agenda item', () => {
     ]);
     expect(events.map(event => event.kind)).toEqual(['ferret', 'ferret']);
     const second = events[1];
-    expect(second?.kind === 'ferret' ? second.text.length : 0).toBe(HISTORY_FERRET_CHARS + 1);
-    expect(second?.kind === 'ferret' ? second.text.endsWith('…') : false).toBe(true);
+    expect(second?.kind === 'ferret' ? second.text : '').toBe(long);
   });
 
   test('says what each edit changed in plain words, from the item’s own revisions', () => {
@@ -207,7 +206,7 @@ describe('the history of one agenda item', () => {
     expect(summaries[1]).toEqual(['Decided so far: added “Ship it”']);
   });
 
-  test('says a reworded field by name, and folds a long list of changes into "and N more"', () => {
+  test('says a reworded field by name, and lists EVERY change an edit made, each point whole', () => {
     const revisions = [
       { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['why'], previous: { why: 'Old reason' } },
       {
@@ -221,7 +220,7 @@ describe('the history of one agenda item', () => {
       item({
         revisions,
         why: 'New reason',
-        premise: '- one\n- two\n- three\n- four\n- five\n- six\n- seven\n- eight',
+        premise: `- one\n- two\n- three\n- four\n- five\n- six\n- seven\n- ${'a long point '.repeat(30).trim()}`,
       } as Partial<AgendaItem>),
       [],
     );
@@ -234,7 +233,7 @@ describe('the history of one agenda item', () => {
       'Premise: added “five”',
       'Premise: added “six”',
       'Premise: added “seven”',
-      'and 1 more changes',
+      `Premise: added “${'a long point '.repeat(30).trim()}”`,
     ]);
   });
 
@@ -259,5 +258,29 @@ describe('the history of one agenda item', () => {
     ] as unknown as AgendaItem['revisions'];
     const events = itemHistory(item({ revisions, waitingSince: 'soon' }), []);
     expect(events.map(event => event.at)).toEqual([0]);
+  });
+});
+
+describe('how far the owner’s words got, read from the ferret’s transcript', () => {
+  const reachOf = (events: readonly HistoryEvent[]) =>
+    events.flatMap(event => (event.kind === 'owner' ? [event.reached] : []));
+
+  test('a transcript row reached the ferret, answered once the ferret spoke after it about anything', () => {
+    const send = {
+      sendId: 's1',
+      acceptedAt: '2026-08-01T10:00:00.000Z',
+      message: 'x',
+      attachmentIds: [],
+      fate: 'delivered',
+    } as const;
+    const events = itemHistory(item(), [
+      { ...entry('u1', 'user', '!A47 first', 1), send },
+      entry('a1', 'assistant', 'something else entirely', 2),
+      entry('u2', 'user', '!A47 second', 3),
+    ]);
+    expect(reachOf(events)).toEqual([
+      { via: 'transcript', answered: true, send },
+      { via: 'transcript', answered: false },
+    ]);
   });
 });

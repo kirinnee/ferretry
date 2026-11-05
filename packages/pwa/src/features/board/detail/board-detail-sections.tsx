@@ -4,7 +4,7 @@
  * renderer (`ChatProse`), so hypermedia blocks and references behave exactly as in a message or an agenda card.
  */
 
-import { type BoardTaskView, formatTaskRef, type TaskRef } from '@ferretry/protocol';
+import { type BoardTaskView, formatTaskRef } from '@ferretry/protocol';
 import { ExternalLink, GitBranch } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import {
@@ -62,9 +62,9 @@ export function Prose({ text }: { readonly text: string }) {
 }
 
 /**
- * HOW TO TEST: the owner's checklist before Done. A list is drawn as numbered steps (each keeps the number it was
- * written with), each with a box the owner ticks as they go (on this screen only: a tick is a reminder, never a
- * verdict); a heading or label between steps is drawn as a sub-heading above the steps it introduces; anything
+ * HOW TO TEST: the owner's checklist before the answer. A list is drawn as numbered steps (each keeps the number it
+ * was written with), each with a box the owner ticks as they read (on this screen only: a tick is a reminder, never a
+ * verdict, and no button sits under the steps: the owner answers in the agenda); a heading or label between steps is drawn as a sub-heading above the steps it introduces; anything
  * else is drawn whole.
  */
 export function HowToTest({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
@@ -234,11 +234,9 @@ export function ChildrenList({
 export function DependencyChips({
   task,
   onOpen,
-  onUndepend,
 }: {
   readonly task: BoardTaskView;
   readonly onOpen: (id: string) => void;
-  readonly onUndepend: ((ref: TaskRef) => void) | null;
 }) {
   const waiting = new Set(task.blockedBy.map(ref => formatTaskRef(ref)));
   if (task.dependsOn.length === 0 && task.blocks.length === 0) return null;
@@ -246,7 +244,6 @@ export function DependencyChips({
     <div className="fy-board-detail__chips">
       {task.dependsOn.length === 0 ? null : (
         <fieldset aria-label="Depends on" className="fy-board-detail__chiprow">
-          <span className="fy-board-detail__quiet">Depends on</span>
           {task.dependsOn.map(dependency => {
             const label = formatTaskRef(dependency.task);
             return (
@@ -255,16 +252,6 @@ export function DependencyChips({
                   {label} · until {dependency.until}
                   {dependency.override === undefined ? '' : ' · overridden'}
                 </button>
-                {onUndepend === null ? null : (
-                  <button
-                    aria-label={`Stop waiting for ${label}`}
-                    className="fy-board-chip__x"
-                    onClick={() => onUndepend(dependency.task)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                )}
               </span>
             );
           })}
@@ -286,43 +273,15 @@ export function DependencyChips({
   );
 }
 
-/**
- * What the card waits on, or one line saying nothing — with "Add dependency" always there and the form behind
- * it only once it is pressed, so a card that waits on nothing does not carry a form it will not use.
- */
-export function DependsLine({
-  task,
-  adding,
-  form,
-  onOpen,
-  onUndepend,
-  onToggleAdd,
-}: {
-  readonly task: BoardTaskView;
-  readonly adding: boolean;
-  readonly form: ReactNode;
-  readonly onOpen: (id: string) => void;
-  readonly onUndepend: ((ref: TaskRef) => void) | null;
-  readonly onToggleAdd: () => void;
-}) {
+/** What the card waits on and what waits on it, or one line saying nothing. Read-only: the owner edits no dependency. */
+export function DependsLine({ task, onOpen }: { readonly task: BoardTaskView; readonly onOpen: (id: string) => void }) {
   const none = task.dependsOn.length === 0 && task.blocks.length === 0;
-  return (
-    <>
-      <DependencyChips onOpen={onOpen} onUndepend={onUndepend} task={task} />
-      <p className="fy-board-detail__quiet" data-kind="add-dependency">
-        {none ? 'Nothing. ' : null}
-        <button
-          aria-expanded={adding}
-          className="fy-board-detail__link"
-          data-action="add-dependency"
-          onClick={onToggleAdd}
-          type="button"
-        >
-          Add dependency
-        </button>
-      </p>
-      {adding ? form : null}
-    </>
+  return none ? (
+    <p className="fy-board-detail__quiet" data-kind="no-dependencies">
+      Nothing.
+    </p>
+  ) : (
+    <DependencyChips onOpen={onOpen} task={task} />
   );
 }
 

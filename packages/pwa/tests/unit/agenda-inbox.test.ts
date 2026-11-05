@@ -42,6 +42,7 @@ import {
   withFerretCards,
   withFerretSessions,
 } from '../../src/lib/agenda-inbox.ts';
+import { answerAction, type InboxAction, withAskVersion } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -258,10 +259,16 @@ const card = (extra: Partial<AgendaItem> = {}) => ({ subject: 'Rebase the branch
 
 describe('swipes', () => {
   test('a card swipes the answers it has — options in the list’s order — and an up only when it has one there', () => {
-    const yesNo = swipeMap(card({ ask: choice('Yes', 'No') }));
-    expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'Yes' });
-    expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'No' });
-    expect(yesNo.up).toBeUndefined();
+    const twoWay = swipeMap(card({ ask: choice('Ship', 'Hold') }));
+    expect(twoWay.left).toMatchObject({ kind: 'respond', label: 'Ship' });
+    expect(twoWay.right).toMatchObject({ kind: 'respond', label: 'Hold' });
+    expect(twoWay.up).toBeUndefined();
+    // Yes and No have one place, whichever order they were listed in: No ←, Yes →.
+    for (const listed of [choice('Yes', 'No'), choice('No', 'Yes')]) {
+      const yesNo = swipeMap(card({ ask: listed }));
+      expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'No', response: { choice: 'No' } });
+      expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'Yes', response: { choice: 'Yes' } });
+    }
     const task = swipeMap(card({ ask: { kind: 'task' } }));
     expect(task.right).toMatchObject({ kind: 'resolve', label: 'Mark as done' });
     expect(task.left).toBeUndefined();
@@ -486,6 +493,60 @@ describe('the undo window', () => {
     deferred.schedule(card('A2'), DONE_ACTION);
     deferred.flush();
     expect(sent).toEqual(['A1', 'A2']);
+  });
+
+  test('stamps the ask version the card showed, so an answer held through the undo window still names it', async () => {
+    // Arrange — the card shows EU/US as ask version 1; the ferret replaces it with EU/Asia while the answer is held
+    const { timers, advance } = fakeTimers();
+    const posted: InboxAction[] = [];
+    const deferred = new DeferredAgendaActions(async (_target, action) => {
+      posted.push(action);
+    }, timers);
+    const shown = card('A1');
+    const eu = answerAction({ direction: 'left', does: 'choose', label: 'EU' }, '');
+    if (eu === null) throw new Error('a choice is always an action');
+
+    // Act
+    deferred.schedule(shown, eu);
+    deferred.schedule({ ...card('A2'), item: { ...item('A2', 1), askVersion: 3 } }, eu);
+    deferred.schedule(card('A3'), DONE_ACTION);
+    advance(UNDO_WINDOW_MS);
+
+    // Assert — an unreplaced ask is version 1, a replaced one names its own, and a Done given from the ask carries it too
+    expect(posted).toMatchObject([
+      { kind: 'respond', askVersion: 1 },
+      { kind: 'respond', askVersion: 3 },
+      { kind: 'resolve', askVersion: 1 },
+    ]);
+  });
+
+  test('stamps a held Mark as done and Skip with the version shown, so a replaced ask is never closed by it', () => {
+    // Arrange — the to-do shows ask version 2 when the owner taps Done, and Skip on another card
+    const done: InboxAction = { kind: 'resolve', label: 'Mark as done' };
+    const skip: InboxAction = { kind: 'dismiss', label: 'Skip' };
+
+    // Assert — both carry the shown version; one that already names a version keeps it; the rest pass through
+    expect(withAskVersion(done, { askVersion: 2 })).toEqual({ ...done, askVersion: 2 });
+    expect(withAskVersion(skip, { askVersion: undefined })).toEqual({ ...skip, askVersion: 1 });
+    const named: InboxAction = { ...done, askVersion: 4 };
+    expect(withAskVersion(named, { askVersion: 5 })).toBe(named);
+    const needsInfo: InboxAction = { kind: 'needs-info', label: 'More' };
+    expect(withAskVersion(needsInfo, { askVersion: 5 })).toBe(needsInfo);
+  });
+
+  test('keeps the version an action already names, and leaves a gate answer unstamped', () => {
+    // Arrange
+    const named: InboxAction = {
+      kind: 'respond',
+      label: 'EU',
+      response: { kind: 'multiple-choice', choice: 'EU' },
+      askVersion: 2,
+    };
+    const gate: InboxAction = { ...named, gate: true, askVersion: undefined };
+
+    // Assert
+    expect(withAskVersion(named, { askVersion: 5 })).toBe(named);
+    expect(withAskVersion(gate, { askVersion: 5 })).toBe(gate);
   });
 
   test('a refused answer brings the card back with the reason', async () => {

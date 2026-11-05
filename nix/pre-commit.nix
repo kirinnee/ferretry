@@ -136,7 +136,7 @@ pre-commit-lib.run {
       enable = true;
       name = "macOS job relevance";
       entry = validator "scripts/validate/macos-relevance.sh";
-      files = "^(scripts/(ci/(macos-relevance|macos-smoke-verdict|macos-advisory|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/(workflows/(ci|cd|realworld|smoke-darwin|harness-contract-latest)\\.yaml|actions/smoke-darwin/.*)|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
+      files = "^(scripts/(ci/(macos-relevance|macos-smoke-verdict|macos-smoke-skipped|macos-advisory|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/(workflows/(ci|cd|realworld|smoke-darwin|harness-contract-latest)\\.yaml|actions/smoke-darwin/.*)|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
       pass_filenames = false;
       language = "system";
     };

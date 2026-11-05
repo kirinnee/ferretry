@@ -14,6 +14,7 @@ import {
   type LaneSet,
   type PrLink,
   type TaskRef,
+  writtenStatusParts,
 } from '@ferretry/protocol';
 
 /** How a session id reads: its callsign when the directory knows it, else the id itself. */
@@ -49,10 +50,9 @@ export function prLabel(prs: readonly PrLink[]): string {
   return pr.checks === 'failing' ? `${base} open, CI red` : `${base} open`;
 }
 
-/** The one word for how the card is doing: what the owner is waited on for beats the derived activity. */
+/** The one word for how the card is doing: a block beats the derived activity. A card never waits on the owner itself. */
 export function activityLabel(card: BoardTaskView): string {
   if (card.dropped !== null) return 'dropped';
-  if (card.waitingOnOwner.length > 0) return 'waiting on you';
   if (card.blocked !== null) return 'blocked';
   if (card.blockedBy.length > 0) return 'blocked by deps';
   return card.activity;
@@ -72,8 +72,6 @@ const countsLine = (counts: BoardCounts): string =>
     `${String(counts.stale)} stale`,
     `${String(counts.orphaned)} orphaned`,
     `${String(counts.active)} active`,
-    `${String(counts.toTest)} to test`,
-    `${String(counts.waitingOnYou)} waiting on you`,
   ].join(' · ');
 
 interface LaneGroup {
@@ -205,6 +203,20 @@ export const describeEvent = (event: BoardTaskEvent, laneSet: LaneSet | null, na
 
 const section = (title: string, body: string): string[] => ['', title, ...body.split('\n').map(line => `  ${line}`)];
 
+/** The written parts of a status, each label above its text (indented), a blank line between parts. */
+const renderStatusParts = (parts: ReturnType<typeof writtenStatusParts>): string =>
+  parts
+    .map(part =>
+      [
+        part.label,
+        ...part.text
+          .trim()
+          .split('\n')
+          .map(line => `  ${line}`),
+      ].join('\n'),
+    )
+    .join('\n\n');
+
 const agendaList = (refs: readonly AgendaRef[]): string => refs.map(formatAgendaRef).join(', ');
 
 /** The terms table: the term column is as wide as the longest term, the meaning follows. */
@@ -237,6 +249,8 @@ export function renderCard(
   if (card.blocked !== null) lines.push(`blocked   ${card.blocked.reason}`);
   if (card.dropped !== null) lines.push(`dropped   ${card.dropped.reason}`);
 
+  const status = writtenStatusParts(card.status);
+  if (status.length > 0) lines.push(...section('Status', renderStatusParts(status)));
   lines.push(...section('Ask', `${card.ask.text}\n— ${card.ask.source}`));
   for (const clarification of card.clarifications) {
     lines.push(...section('Clarified', `${clarification.text}\n— ${clarification.source}`));
@@ -273,12 +287,8 @@ export function renderCard(
   ];
   if (linkRows.length > 0) lines.push(...section('Links', linkRows.join('\n')));
   if (card.files.length > 0) lines.push(...section('Files', card.files.join('\n')));
-  if (card.openAsks.length > 0) {
-    const blocking = agendaList(card.waitingOnOwner);
-    lines.push(
-      ...section('Asks', `open: ${agendaList(card.openAsks)}${blocking === '' ? '' : `\nwaiting on you: ${blocking}`}`),
-    );
-  }
+  // The agendas that carry the card: its asks ride them (docs/agenda.md § Card asks).
+  if (card.openAsks.length > 0) lines.push(...section('Agenda', agendaList(card.openAsks)));
 
   const history = card.history.map(
     event =>
@@ -303,13 +313,16 @@ export type BoardVerb =
   | 'reopen'
   | 'clarify'
   | 'link'
+  | 'patch'
   | 'assign'
+  | 'claim'
   | 'note'
   | 'order'
   | 'reparent'
   | 'file'
   | 'edit'
-  | 'refile';
+  | 'refile'
+  | 'visibility';
 
 const PAST: Readonly<Record<BoardVerb, string>> = {
   create: 'created',
@@ -325,12 +338,15 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   clarify: 'clarified',
   link: 'linked',
   assign: 'assigned',
+  claim: 'claimed',
   note: 'noted',
   order: 'ranked',
   reparent: 're-parented',
   file: 'file recorded',
   edit: 'edited',
+  patch: 'patched',
   refile: 'refiled',
+  visibility: 'visibility changed',
 };
 
 /** One line that says what the verb did and where the card stands now. */

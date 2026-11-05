@@ -1,7 +1,7 @@
 import {
   InstantSchema,
-  QueuedMessageIdSchema,
   type QueuedMessage,
+  QueuedMessageIdSchema,
   QueuedMessageSchema,
   type QueuedMessageState,
   QueuedMessageStateSchema,
@@ -40,6 +40,11 @@ export const QueueEventSchema = z.discriminatedUnion('kind', [
     id: QueuedMessageIdSchema,
     state: QueuedMessageStateSchema,
     failure: z.string().optional(),
+    /**
+     * Beside a move to `typing`: this message goes out inside the combined turn sent under that id (the
+     * oldest member's own id, so the lead carries its own). Absent: it is sent alone, under its own id.
+     */
+    batch: z.string().min(1).optional(),
   }),
   /** Why it is still waiting changed; no `reason` means nothing but its turn is in its way. */
   z.object({
@@ -87,9 +92,13 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
         : message;
     case 'moved': {
       if (!canMove(message.state, event.state)) return message;
-      const { waitReason: _reason, waitBehind: _behind, failure: _failure, ...rest } = message;
+      const { waitReason: _reason, waitBehind: _behind, failure: _failure, deliveredAs: _batch, ...rest } = message;
+      // `deliveredAs` is set as it starts typing and kept through delivered and read; a typing the pane
+      // refused goes back to `queued` unbatched, since nothing was sent under that id.
+      const deliveredAs = event.state === 'typing' ? event.batch : event.state === 'queued' ? undefined : _batch;
       return {
         ...rest,
+        ...(deliveredAs === undefined ? {} : { deliveredAs }),
         state: event.state,
         stateAt: event.at,
         // Any move ends the wait it had (a typing the pane refuses says why again), and only a failed

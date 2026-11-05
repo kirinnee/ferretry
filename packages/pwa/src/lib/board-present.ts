@@ -108,7 +108,7 @@ const activitySegment = (task: BoardTaskView, category: LaneCategory | null, now
         'Idle for longer than its lane allows. Nudge it or move it.',
       );
     case 'waiting':
-      return task.waitingOnOwner.length > 0
+      return (task.waitingOnOwner ?? []).length > 0
         ? make('waiting on you', 'waiting-on-you', 'warn', 'A ferret is stopped until you answer')
         : make('waiting', 'waiting', 'pend', 'Waiting on something outside the ferret');
     case 'orphaned':

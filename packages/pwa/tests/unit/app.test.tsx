@@ -2570,6 +2570,9 @@ describe('AppShell', () => {
       await interact(() => quick.click());
       await settle();
       for (let turn = 0; turn < 4; turn += 1) await settle();
+      await interact(() =>
+        view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]')?.click(),
+      );
       const shown = Array.from(
         view.container.querySelectorAll('[data-agenda-history] [data-history="ferret"]'),
         node => node.textContent ?? '',

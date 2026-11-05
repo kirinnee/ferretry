@@ -524,6 +524,10 @@ export function AgendaSwipeDeck({
     if (
       top === undefined ||
       !isTouch(event) ||
+      // React carries a touch on a portal (the item's ⋯ sheet, drawn on `document.body`) up to here though it is not on
+      // the card at all: only a touch on the card's own DOM is the deck's.
+      !(event.target instanceof Node) ||
+      !event.currentTarget.contains(event.target) ||
       (startsOnInteractive(event.target) && !own) ||
       startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget)

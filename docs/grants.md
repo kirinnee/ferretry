@@ -123,6 +123,13 @@ which can never step up, can never quiet its own supervision or anyone else's.
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
+
+**A lead's table of its sub-ferrets is `fleet.use`.** `GET /v1/sessions/:sessionId/subtree` (`fy status --subtree`,
+[pack-mode.md](pack-mode.md#checking-on-your-sub-ferrets)) reads the sessions registry, the board's cards and PR
+cache and each descendant's outbox, so a remote caller whose `fleet.use` is narrowed is refused with
+`grant_not_granted` before anything is read. Plain session reads are ungoverned; this one is not, because it
+surfaces card notes, PR state and messages for a whole subtree in one answer rather than one session's own record. Its excerpts pass the same fail-closed secret redactor as an operator transcript read (before the cut to one line; `[excerpt withheld]` if it cannot run), and its per-table outbox work is bounded ([pack-mode.md](pack-mode.md)).
+It writes nothing and takes no lineage from the request: the descendants are the registry's `parent` links.
 Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
 /v1/harnesses/update` is `configure` plus the step-up, and a ferret may never start one.
 
@@ -202,6 +209,15 @@ One consequence: agenda actions are gated by **who acts** (the human or a ferret
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.
 The machine agenda's routes (`GET` and `POST /v1/machine/agenda`, [agenda.md](agenda.md#the-machine-agenda)) sit on
 the same axis: owner-only, `caller: 'person'`, no grant, and a non-human actor is refused with 403.
+The full conversation read (`GET /v1/sessions/:sessionId/agenda/:id/conversation`) requires `operator`,
+`caller: 'any'`, no capability; its session authorization is the item's. Responses are bounded fragments, and
+relayed loopback callers remain remote.
+
+The item's versions follow the same axis ([agenda.md](agenda.md#versions)): `GET /v1/sessions/:sessionId/agenda/:id/versions`
+and `GET …/versions/:version` are `operator`, `caller: 'any'`, no capability; `PUT …/seen` (a device marks the version it
+opened) is `operator`, `caller: 'person'`, no capability, and keys the mark by the credential's device (`host` for the
+local one). `log`, `merge` and `split` are actions of the existing agenda `POST`, gated by who acts: a ferret may touch
+only its own items (and a lead its sub-ferrets'), the owner any.
 The one governed act inside the agenda is an answer that **confirms a held configuration change**
 ([agenda.md](agenda.md#confirming-a-configuration-change)): it asks that file's grant, exactly as
 `POST /v1/config/confirm` does. The answer route therefore declares `consultsGrants` — no demand of its own,
@@ -346,10 +362,11 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) �
    changes none of this: it is minted under the same `sharing.use` and step-up, and the relay adds a
    carrier for the sealed `join` and `member` records, never a route or a grant
    ([catalogs.md](catalogs.md) "A link works on the carriers pairing uses").
-   Download links ([catalogs.md](catalogs.md#the-daemon-3f-4)) are `sharing.use` as well: making one wants a fresh
-   `share-link` passkey from a governed caller (the act `share-catalog` does not buy, and the reverse), Copy needs
+   Download links ([catalogs.md](catalogs.md#the-daemon-3f-4)) are `sharing.use` as well: making one, moving one to
+   another version, and widening one (a later end, a higher or no cap) want a fresh `share-link` passkey from a
+   governed caller (the act `share-catalog` does not buy, and the reverse), Copy and a narrowing change need
    only the unlock, and turning one off asks for nothing. A ferret may list and read links but never preview, make,
-   copy or turn one off (403 `forbidden`). A link's URL and key leave the machine in the make and Copy answers only.
+   copy, move, change or turn one off (403 `forbidden`). A link's URL and key leave the machine in the make and Copy answers only.
 3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
    the host command `fy daemon config set sharing --use`. `sharing` has no "it also stops" note in the
    switch: in phase 1 turning it off stops nothing beyond the catalog routes.
@@ -856,6 +873,12 @@ command says so at the moment somebody might be tempted to do that instead.
   device (`fleet.use` only) therefore still gets alerts. Seeing every device's enrolments, or revoking one
   another device filed, is device management and is decided by `pairing.use`, asked of the same grant
   layer every governed route is decided by. A caller on the host sees all of them.
+
+  **Saying an agenda item was opened is `fleet.use`** (`POST /v1/push/seen`, [notifications.md](notifications.md#when-an-alert-is-cleared)).
+  It takes that item's alerts down on the owner's other devices and answers only the tags it named, never an
+  endpoint or an item's words. It reveals nothing, but it changes what the owner's other phones show, so it is
+  governed rather than open; every default device holds `fleet.use`. The device it skips is the caller's own, read
+  from the credential.
 
   **The honest cost, stated rather than discovered:** switching `pairing` off for remote callers no longer
   stops a paired device enrolling itself for notifications. That is the intended shape — notifications are

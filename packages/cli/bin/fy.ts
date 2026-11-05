@@ -8,14 +8,15 @@ import {
   appOriginChoice,
   CONFIG_DIRECTORY_NAME,
   DAEMON_IDENTITY_PATH,
+  DAEMON_RESTART_PATIENCE_MS,
   type DaemonId,
   DaemonIdentityViewSchema,
-  DAEMON_RESTART_PATIENCE_MS,
   type DaemonRestartPatience,
   type IFyApiClient,
   type IFyHttpTransport,
   readLoopbackFirewallMarker,
   type SessionView,
+  SubtreeViewSchema,
 } from '@ferretry/protocol';
 import { FetchHttpTransport, FyApiClient } from '@ferretry/protocol/client';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
@@ -28,6 +29,7 @@ import root from '../../../package.json' with { type: 'json' };
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
+import { BoardCardTies } from '../src/adapters/agenda/card-ties';
 import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
@@ -92,12 +94,12 @@ import { chooseProgress, processProgressHost } from '../src/adapters/terminal/pr
 import { ProgressAwareIo } from '../src/adapters/terminal/progress-io';
 import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
+import { FyTidyGateway } from '../src/adapters/tidy/fy-tidy-gateway';
 import { HostInstallFacts } from '../src/adapters/update/install-facts';
 import { GitHubLatestRelease } from '../src/adapters/update/latest-release';
 import { CommandPackageManagers } from '../src/adapters/update/package-managers';
 import { StandaloneRelease } from '../src/adapters/update/standalone-release';
 import { ProtocolDaemonUpdateView } from '../src/adapters/update/update-view';
-import { FyTidyGateway } from '../src/adapters/tidy/fy-tidy-gateway';
 import { FyWorkSearchGateway } from '../src/adapters/work-search/fy-work-search-gateway';
 import { registerAgendaCommands } from '../src/lib/agenda/commands';
 import { AgendaController } from '../src/lib/agenda/controller';
@@ -121,8 +123,6 @@ import { CatalogController } from '../src/lib/catalog/controller';
 import { ProtocolCatalogGateway } from '../src/lib/catalog/gateway';
 import { registerCatalogInstallCommands } from '../src/lib/catalog-install/commands';
 import { CatalogInstallController } from '../src/lib/catalog-install/controller';
-import { registerLocalSkillInstallCommands } from '../src/lib/local-skill-install/commands';
-import { LocalSkillInstallController } from '../src/lib/local-skill-install/controller';
 import { registerShareCommands } from '../src/lib/catalog-share/commands';
 import { ShareController } from '../src/lib/catalog-share/controller';
 import { ProtocolSharingGateway } from '../src/lib/catalog-share/gateway';
@@ -185,6 +185,8 @@ import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerLessonCommands } from '../src/lib/lesson/commands';
 import { LessonController } from '../src/lib/lesson/controller';
+import { registerLocalSkillInstallCommands } from '../src/lib/local-skill-install/commands';
+import { LocalSkillInstallController } from '../src/lib/local-skill-install/controller';
 import { McpServer, McpServersController, ProtocolMcpServersGateway, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
@@ -243,11 +245,17 @@ import { registerSecurityCommands } from '../src/lib/security/commands';
 import { SecurityController } from '../src/lib/security/controller';
 import { ProtocolSecurityGateway } from '../src/lib/security/gateway';
 import {
+  ProtocolSessionCompactAtGateway,
+  registerSessionCompactAtCommand,
+  SessionCompactAtController,
+} from '../src/lib/session/compact-at.ts';
+import {
   AnswerQuestionController,
   boardLaneNames,
   type ICellColour,
   InterruptSessionController,
   type ISessionBoard,
+  type ISessionSubtree,
   ListSessionsController,
   RenameSessionController,
   ResumeSessionController,
@@ -257,15 +265,11 @@ import {
   type SessionEnvironment,
   SessionPresenter,
   SessionStatusController,
+  SessionSubtreeController,
   SignalSessionController,
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
-import {
-  ProtocolSessionCompactAtGateway,
-  registerSessionCompactAtCommand,
-  SessionCompactAtController,
-} from '../src/lib/session/compact-at.ts';
 import {
   PinAgentController,
   ProtocolSessionPinGateway,
@@ -285,6 +289,8 @@ import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
 import { TerminalSlotsController } from '../src/lib/terminal-slots/controller';
+import { registerTidyCommands } from '../src/lib/tidy/commands';
+import { TidyController } from '../src/lib/tidy/controller';
 import { registerTunnelCommands } from '../src/lib/tunnel/commands';
 import { TunnelController } from '../src/lib/tunnel/controller';
 import { ProtocolTunnelGateway, ProtocolTunnelStatusReader } from '../src/lib/tunnel/gateway';
@@ -293,8 +299,6 @@ import { DAEMON_RELEASE_KEYS } from '../src/lib/update/release-keys';
 import { DaemonUpdateStatusReader } from '../src/lib/update/status';
 import { DaemonUpdater } from '../src/lib/update/updater';
 import { assertSemver } from '../src/lib/version';
-import { registerTidyCommands } from '../src/lib/tidy/commands';
-import { TidyController } from '../src/lib/tidy/controller';
 import { registerWorkSearchCommands } from '../src/lib/work-search/commands';
 import { WorkSearchController } from '../src/lib/work-search/controller';
 import { RelatedCheck } from '../src/lib/work-search/related';
@@ -1090,6 +1094,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         undefined,
         { interactive: () => world.io.interactive(), ask: async message => await world.prompt.ask(message) },
         relatedCheck(world, client),
+        new BoardCardTies(new FyBoardGateway(client)),
       ),
       async (words, options) => await runNotify(notifyPorts, words, options),
     );
@@ -1774,6 +1779,11 @@ function sessionCommands(
   const board: ISessionBoard = {
     laneNames: async () => boardLaneNames(new FyBoardGateway(await connect())),
   };
+  // The daemon builds the whole table from its own registry, board and outbox: one request, whatever the size.
+  const subtree: ISessionSubtree = {
+    subtree: async id =>
+      await (await connect()).request(`/v1/sessions/${encodeURIComponent(id)}/subtree`, SubtreeViewSchema),
+  };
   // Chalk is the terminal's attention colour; it is the identity when colour is off (NO_COLOR, a
   // non-TTY stdout), which is exactly the deal the renderer measures widths under.
   const colour: ICellColour = { amber: cell => chalk.yellow(cell) };
@@ -1785,6 +1795,7 @@ function sessionCommands(
     start: new StartSessionController(api, files, presenter, environment, BINARY_NAME),
     list: new ListSessionsController(api, presenter, board, colour),
     status: new SessionStatusController(api, presenter),
+    subtree: new SessionSubtreeController(subtree, presenter, environment, new SystemClock(), colour),
     send: new SendMessageController(api, files, presenter, environment, {
       nowMs: () => Date.now(),
       sleep: milliseconds => Bun.sleep(milliseconds),

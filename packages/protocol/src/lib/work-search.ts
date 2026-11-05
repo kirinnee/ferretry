@@ -54,6 +54,7 @@ export const WorkFieldSchema = z.enum([
   'context',
   'brief',
   'howToTest',
+  'status',
   'note',
   'body',
   'history',

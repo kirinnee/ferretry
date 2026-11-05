@@ -9,6 +9,7 @@ import {
   EMPTY_CHAT_SEARCH,
   matchLabel,
   occurrences,
+  rowAnchors,
   rowForOffset,
   stepMatch,
   withResults,
@@ -42,10 +43,13 @@ const highlights = (): { set(name: string, value: unknown): void; delete(name: s
 
 /** The transcript's rows that say where they begin, in order. */
 const placedRows = (root: HTMLElement): { readonly offset: number; readonly row: HTMLElement }[] =>
-  [...root.querySelectorAll<HTMLElement>('[data-transcript-offset]')].map(row => ({
-    offset: Number(row.dataset.transcriptOffset),
-    row,
-  }));
+  rowAnchors(
+    [...root.querySelectorAll<HTMLElement>('[data-transcript-offset]')].map(row => ({
+      offset: Number(row.dataset.transcriptOffset),
+      also: (row.dataset.transcriptAlso ?? '').split(' ').filter(Boolean).map(Number),
+      row,
+    })),
+  );
 
 /**
  * Paints every occurrence of `query` in the transcript, and the current row's more strongly — as ranges

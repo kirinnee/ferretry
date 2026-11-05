@@ -45,6 +45,25 @@ export function sendRecordView(record: SendRecord): SendRecordView {
   };
 }
 
+/**
+ * The ledger row a send id is answered from.
+ *
+ * A message delivered inside a combined turn has no row of its own: the turn is recorded once, under the
+ * oldest member's id, and each other member names that id in `deliveredAs`. Such a member is answered with
+ * the turn's row, as the id that was asked about. `undefined` when the id is nobody's.
+ */
+export function sendRecordFor(
+  records: readonly SendRecord[],
+  queued: ReadonlyArray<{ readonly id: string; readonly deliveredAs?: string | undefined }>,
+  sendId: string,
+): SendRecordView | undefined {
+  const own = records.find(entry => entry.sendId === sendId);
+  if (own !== undefined) return sendRecordView(own);
+  const lead = queued.find(message => message.id === sendId)?.deliveredAs;
+  const row = lead === undefined ? undefined : records.find(entry => entry.sendId === lead);
+  return row === undefined ? undefined : sendRecordView({ ...row, sendId });
+}
+
 function optional<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }

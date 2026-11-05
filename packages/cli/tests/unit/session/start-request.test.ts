@@ -85,6 +85,17 @@ describe('buildStartRequest', () => {
     should(plan.warnings).be.empty();
   });
 
+  it('should name the existing card a start takes over, and nothing otherwise', () => {
+    // Arrange / Act
+    const named = buildStartRequest({ ...auto, card: 'F121' }, HERE);
+    const unset = buildStartRequest(auto, HERE);
+
+    // Assert
+    should(StartSessionRequestSchema.safeParse(named.request).success).be.true();
+    should(named.request).containDeep({ card: 'F121' });
+    should(unset.request).not.have.property('card');
+  });
+
   it('should put a typed fast decision on the wire, either way, and nothing otherwise', () => {
     // Arrange / Act
     const on = buildStartRequest({ ...auto, fast: true }, HERE);

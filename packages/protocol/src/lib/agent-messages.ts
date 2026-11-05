@@ -32,13 +32,19 @@ export type PeerMessageKind = (typeof PEER_MESSAGE_KINDS)[number];
  * An optional label a sender gives a message so its receiver can triage it: `blocker` (the sender cannot
  * go on without an answer), `action` (something for the receiver to do) or `fyi` (no action needed).
  *
- * THE SLOT EXISTS, NOTHING FILLS IT YET. The banner writer can carry a label and the parser reads one,
- * but the daemon does not pass one today; message kinds (the later change that adds labels to `fy send`)
- * only has to start passing it. Parsing it now means a transcript written by that daemon already renders
- * correctly in an app that shipped before it.
+ * `fy send --kind blocker|action|fyi` fills it (default `action`), and it also decides WHEN the message is
+ * delivered: a blocker at once, actions combined for a minute, an FYI held for the receiver's next turn end
+ * (docs/message-delivery.md § Labels and combined delivery). The CLI says `--kind`; the data and the wire
+ * say `label`, because `kind` already means "does it want an answer" (`PeerMessageKind`).
  */
 export const PEER_MESSAGE_LABELS = ['blocker', 'action', 'fyi'] as const;
 export type PeerMessageLabel = (typeof PEER_MESSAGE_LABELS)[number];
+
+/** Which message of a combined delivery this is: 1-based `index` of `total`. */
+export interface PeerEnvelopePart {
+  readonly index: number;
+  readonly total: number;
+}
 
 /** What the daemon needs to say who sent a message. */
 export interface PeerEnvelopeSender {
@@ -46,8 +52,10 @@ export interface PeerEnvelopeSender {
   readonly name: string;
   readonly sessionId: string;
   readonly kind: PeerMessageKind;
-  /** Optional triage label; omitted today (see `PEER_MESSAGE_LABELS`). */
+  /** The sender's triage label; omitted for a message sent before labels existed. */
   readonly label?: PeerMessageLabel | undefined;
+  /** Set when this message is one of several delivered as ONE turn (`combinedDelivery`). */
+  readonly part?: PeerEnvelopePart | undefined;
   /** The command-line binary the receiver answers with (`fy`). */
   readonly clientName: string;
 }
@@ -58,10 +66,11 @@ export interface PeerEnvelopeSender {
  *     [<kind> from ferret <name> (session <id>) — not from the owner] <note>
  *     <message…>
  *
- * With a triage label (not written yet — see `PEER_MESSAGE_LABELS`) the label follows the kind after a
- * middle dot, before `from`:
+ * With a triage label (see `PEER_MESSAGE_LABELS`) the label follows the kind after a middle dot, before
+ * `from`; inside a combined delivery the part's place leads the kind the same way:
  *
  *     [<kind> · <label> from ferret <name> (session <id>) — not from the owner] <note>
+ *     [<i>/<n> · <kind> · <label> from ferret <name> (session <id>) — not from the owner] <note>
  *
  * ONE LINE ON PURPOSE. A composer takes a single-line message verbatim but pastes a multi-line one, and
  * the daemon types a short message straight into an idle agent instead of handing it a file to read
@@ -74,8 +83,9 @@ export interface PeerEnvelopeSender {
  * "send your verdict now" left a lead's sub-ferrets silent for hours (2026-10-31).
  */
 export function peerEnvelopePreamble(sender: PeerEnvelopeSender): string {
-  const { name, sessionId, kind, label, clientName } = sender;
-  const heading = label === undefined ? kind : `${kind} · ${label}`;
+  const { name, sessionId, kind, label, part, clientName } = sender;
+  const place = part === undefined ? '' : `${part.index}/${part.total} · `;
+  const heading = `${place}${label === undefined ? kind : `${kind} · ${label}`}`;
   const attribution = `[${heading} from ferret ${name} (session ${sessionId}) — not from the owner]`;
   const command = `${clientName} send ${name} "<reply>"`;
   const note =
@@ -92,6 +102,8 @@ export interface PeerEnvelope {
   readonly kind: PeerMessageKind;
   /** The triage label, when the banner carries one. */
   readonly label?: PeerMessageLabel;
+  /** Its place in a combined delivery, when the banner carries one. */
+  readonly part?: PeerEnvelopePart;
   /** The sender asked for an answer when it sent this — the same fact as `kind === 'question'`. */
   readonly replyExpected: boolean;
   /** The banner's delivery boilerplate — addressed to the receiving agent, not to a person. */
@@ -103,7 +115,7 @@ export interface PeerEnvelope {
  * starts with a bracket is never half-stripped.
  */
 const PEER_BANNER =
-  /^\[(message|question|reply)(?: · (blocker|action|fyi))? from ferret ([^\s(\]]+)([^\]]*)\] ((?:To reply: |[^\n]+ is waiting for your answer\. Reply with: )[^\n]*)\n/u;
+  /^\[(?:(\d+)\/(\d+) · )?(message|question|reply)(?: · (blocker|action|fyi))? from ferret ([^\s(\]]+)([^\]]*)\] ((?:To reply: |[^\n]+ is waiting for your answer\. Reply with: )[^\n]*)\n/u;
 /** The two-line banner with a blank line after it, written until the one-line form; read, never written. */
 const TWO_LINE_PEER_BANNER = /^\[(message|question|reply) from ferret ([^\s(\]]+)([^\]]*)\]\n(.*?)\n\n/su;
 /** The wording a daemon wrote before peers were called ferrets; read, never written. */
@@ -116,6 +128,7 @@ const envelopeOf = (
   kind: PeerMessageKind,
   note: string,
   label?: PeerMessageLabel,
+  part?: PeerEnvelopePart,
 ): PeerEnvelope => {
   const sessionId = PEER_SESSION.exec(rest)?.[1];
   return {
@@ -123,6 +136,7 @@ const envelopeOf = (
     ...(sessionId === undefined ? {} : { sessionId }),
     kind,
     ...(label === undefined ? {} : { label }),
+    ...(part === undefined ? {} : { part }),
     replyExpected: kind === 'question',
     note,
   };
@@ -132,15 +146,19 @@ const envelopeOf = (
 export function parsePeerEnvelope(text: string): { readonly envelope: PeerEnvelope; readonly body: string } | null {
   const oneLine = PEER_BANNER.exec(text);
   if (oneLine !== null) {
-    const [banner, kind, label, name, rest, note] = oneLine as unknown as [
+    const [banner, index, total, kind, label, name, rest, note] = oneLine as unknown as [
       string,
+      string | undefined,
+      string | undefined,
       PeerMessageKind,
       PeerMessageLabel | undefined,
       string,
       string,
       string,
     ];
-    return { envelope: envelopeOf(name, rest, kind, note, label), body: text.slice(banner.length) };
+    const part =
+      index === undefined || total === undefined ? undefined : { index: Number(index), total: Number(total) };
+    return { envelope: envelopeOf(name, rest, kind, note, label, part), body: text.slice(banner.length) };
   }
   const current = TWO_LINE_PEER_BANNER.exec(text);
   if (current !== null) {
@@ -153,6 +171,67 @@ export function parsePeerEnvelope(text: string): { readonly envelope: PeerEnvelo
   // The older wording said a parked sender was "PARKED"; it had no word for a reply.
   const kind: PeerMessageKind = note.includes('PARKED') ? 'question' : 'message';
   return { envelope: envelopeOf(name, rest, kind, note), body: text.slice(banner.length) };
+}
+
+/** One message of a combined delivery: who sent it and what it says. */
+export interface CombinedPart {
+  readonly sender: Omit<PeerEnvelopeSender, 'part' | 'clientName'>;
+  readonly body: string;
+}
+
+const COMBINED_HEADER = /^\[(\d+) messages from ferrets, oldest first — not from the owner\]\n\n/u;
+const NEXT_PART = /\n\n(?=\[\d+\/\d+ · )/u;
+
+/**
+ * Several ferret messages delivered as ONE turn, oldest first:
+ *
+ *     [3 messages from ferrets, oldest first — not from the owner]
+ *
+ *     [1/3 · message · action from ferret avary (session …) — not from the owner] To reply: fy send avary "<reply>"
+ *     <body 1>
+ *
+ *     [2/3 · …
+ *
+ * Each part opens with its own one-line banner, so the receiver knows who sent which and what each one is.
+ * The header says how many, which is also how the app knows it has read them all. Two or more parts only:
+ * a delivery of one is a plain banner (`peerEnvelopePreamble`).
+ */
+export function combinedDelivery(parts: readonly CombinedPart[], clientName: string): string {
+  const total = parts.length;
+  const rendered = parts.map(
+    ({ sender, body }, position) =>
+      `${peerEnvelopePreamble({ ...sender, part: { index: position + 1, total }, clientName })}${body}`,
+  );
+  return `[${total} messages from ferrets, oldest first — not from the owner]\n\n${rendered.join('\n\n')}`;
+}
+
+/** A combined delivery as read back out of a transcript: one envelope and body per message. */
+export interface ParsedCombinedDelivery {
+  readonly parts: readonly { readonly envelope: PeerEnvelope; readonly body: string }[];
+}
+
+/**
+ * Splits a combined delivery into its messages; `null` when the text is not one.
+ *
+ * Strict, because a body is a ferret's free text: the header's count must equal the parts found, and their
+ * places must run 1..N in order, or the whole text is left as ordinary text. A message that merely QUOTES a
+ * banner can therefore only make a combined turn display as the plain text it is, never re-attribute words.
+ */
+export function parseCombinedDelivery(text: string): ParsedCombinedDelivery | null {
+  const header = COMBINED_HEADER.exec(text);
+  if (header === null) return null;
+  const count = Number(header[1]);
+  if (count < 2) return null;
+  const chunks = text.slice(header[0].length).split(NEXT_PART);
+  if (chunks.length !== count) return null;
+  const parts: { envelope: PeerEnvelope; body: string }[] = [];
+  for (const [position, chunk] of chunks.entries()) {
+    const parsed = parsePeerEnvelope(chunk);
+    if (parsed === null || parsed.envelope.part?.index !== position + 1 || parsed.envelope.part.total !== count)
+      return null;
+    parts.push({ envelope: parsed.envelope, body: parsed.body });
+  }
+  return { parts };
 }
 
 /** How every notice the daemon types into a session on its own account opens. */

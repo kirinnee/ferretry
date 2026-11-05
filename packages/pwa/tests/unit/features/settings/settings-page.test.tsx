@@ -321,11 +321,11 @@ describe('SettingsPage sections', () => {
           ).click(),
         );
       await press(setting, 'Clear');
-      await press(must(setting.querySelector('[data-clear-cached-data]'), 'the confirmation'), 'Clear');
+      await press(setting, 'Clear');
 
       // Assert
       expect(shownSection(view.container)).toBe('device');
-      expect(setting.querySelector('[data-clear-cached-data]')?.getAttribute('data-clear-cached-data')).toBe('cleared');
+      expect(setting.getAttribute('data-clear-cached-data')).toBe('cleared');
       expect(cleared).toBe(1);
     } finally {
       await view.unmount();
@@ -451,7 +451,7 @@ describe('SettingsPage sections', () => {
       node.children.map(child => (typeof child === 'string' ? child : text(child))).join('');
     expect(text(row)).toContain('Open links in');
     expect(text(row)).toContain('Your browser');
-    expect(text(row)).toContain('Side panel');
+    expect(text(row)).toContain('Ferretry side panel');
     expect(text(row)).toContain('Cmd/Ctrl-click always opens a new tab');
     expect(choices().map(radio => [radio.props.value, radio.props.checked])).toEqual([
       ['browser', true],

@@ -464,6 +464,7 @@ describe('the shared catalogs routes', () => {
       version_unknown: 404,
       version_current: 409,
       version_retired: 409,
+      version_linked: 409,
       version_before_join: 409,
       signing_unavailable: 503,
       store_damaged: 500,

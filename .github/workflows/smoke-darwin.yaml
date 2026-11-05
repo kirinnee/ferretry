@@ -11,8 +11,10 @@ name: Smoke darwin-arm64 (reusable)
 #   - a pull request (`advisory: true`) tries ONCE. A smoke that ran and failed is red; a smoke that
 #     could not get a runner is a warning and a summary line, never a red required check;
 #   - `main` and a release tag (`advisory: false`) keep it REQUIRED, and re-queue the job when it
-#     could not start, up to 3 attempts with 2 and 5 minutes of backoff between them. Only when every
-#     attempt is cancelled does the verdict fail, and its message says the runner was unavailable.
+#     could not start, up to 3 attempts with 2 and 5 minutes of backoff between them. "Could not start"
+#     is read from `outputs.started` (empty = no runner), NOT from the attempt's `result`, which GitHub
+#     reports as `abandoned` for a job it never gave a runner. Only when no attempt ran does the verdict
+#     fail, and its message says the runner was unavailable.
 #     A smoke that ran and failed is never retried: a flake there is a bug, fixed at the root.
 #
 # Called from ci.yaml (needs `compile`) and cd.yaml (needs its own `compile`); both leave the
@@ -32,7 +34,8 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-15
-    # Empty when the job was cancelled before it got a runner: the verdict reads that as "not available".
+    # Empty when the job never got a runner (GitHub reports it "cancelled" in the UI and `abandoned` to `needs`):
+    # `started` is the source of truth for "no runner", never `result`. The verdict and the backoffs read it.
     outputs:
       started: ${{ steps.started.outputs.started }}
     steps:
@@ -47,7 +50,7 @@ jobs:
     name: Backoff before attempt 2
     timeout-minutes: 5
     needs: attempt-1
-    if: ${{ !cancelled() && !inputs.advisory && needs.attempt-1.result == 'cancelled' && needs.attempt-1.outputs.started != 'true' }}
+    if: ${{ !cancelled() && !inputs.advisory && needs.attempt-1.result != 'success' && needs.attempt-1.result != 'skipped' && needs.attempt-1.outputs.started != 'true' }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -78,7 +81,7 @@ jobs:
     name: Backoff before attempt 3
     timeout-minutes: 8
     needs: attempt-2
-    if: ${{ !cancelled() && needs.attempt-2.result == 'cancelled' && needs.attempt-2.outputs.started != 'true' }}
+    if: ${{ !cancelled() && needs.attempt-2.result != 'success' && needs.attempt-2.result != 'skipped' && needs.attempt-2.outputs.started != 'true' }}
     permissions:
       contents: read
     runs-on: ubuntu-latest

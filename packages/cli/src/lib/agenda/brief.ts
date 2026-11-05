@@ -4,10 +4,14 @@ import {
   AgendaActionRequestSchema,
   type AgendaAsk,
   type AgendaAskOption,
+  type AgendaCardAnswer,
   type AgendaItem,
+  type AgendaKind,
   type AgendaLink,
   type AgendaOptionDetail,
   type AgendaQuestion,
+  type AgendaStage,
+  AgendaStageSchema,
   type AgendaTerm,
   agendaEditShapeProblems,
   agendaShapeProblems,
@@ -27,6 +31,12 @@ import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 
 /** The flags that describe a new item, beside its one-line summary. */
 export interface BriefFlags extends AskFlags {
+  /** `--stage`: what the item needs from the owner now (explainer, question, plan, tracker, test). */
+  readonly stage?: string;
+  /** `--where`, repeated: the main tab, "Where we are now", as points, one each (`--where-file` gives it whole). */
+  readonly where?: string | readonly string[];
+  /** `--detail`: the context explained from zero, as Markdown (drawn folded away). */
+  readonly detail?: string;
   /** The card's heading and the push's title: what this is about, in a few plain words. Required. */
   readonly title?: string;
   /** The one-line ask, when it is not given as words; `summary` is the older name for it. */
@@ -66,7 +76,7 @@ export interface BriefFlags extends AskFlags {
   readonly link?: readonly string[];
   /** One Markdown step each, in order, repeated. */
   readonly step?: readonly string[];
-  /** The text of `--body-file`: one Markdown document. */
+  /** The text of `--body-file`: the body, the item's live document, as one Markdown document. */
   readonly body?: string;
   /** A configuration file whose held change the owner's Allow puts into effect (`--confirms`). */
   readonly confirms?: string;
@@ -79,7 +89,10 @@ export interface BriefFlags extends AskFlags {
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
 /** Text, or a list of short points that is drawn as bullets. */
 const Prose = z.union([z.string(), z.array(z.string())]);
-const LinkInput = z.union([z.string(), z.object({ label: z.string().optional(), target: z.string() })]);
+const LinkInput = z.union([
+  z.string(),
+  z.object({ label: z.string().optional(), target: z.string(), meaning: z.string().optional() }),
+]);
 
 /**
  * The JSON body `--json-file` reads: the same fields as the flags, in the protocol's own shapes where it
@@ -122,6 +135,9 @@ const BriefFileSchema = z.strictObject({
   willBlock: z.string().optional(),
   neededBy: z.string().optional(),
   confirms: z.string().optional(),
+  stage: z.string().optional(),
+  whereWeAre: Prose.optional(),
+  detail: z.string().optional(),
   optionDetails: z.array(z.object({ label: z.string(), detail: z.string() })).optional(),
   fields: z
     .array(
@@ -207,6 +223,9 @@ export function composeAddRequest(
   const blocking = flags.blocking === true || file.blocking === true;
   const willBlock = text(flags.willBlock) ?? text(file.willBlock);
   const neededBy = text(flags.neededBy) ?? text(file.neededBy);
+  const stage = stageFrom(text(flags.stage) ?? text(file.stage));
+  const whereWeAre = prose(flags.where) ?? prose(file.whereWeAre);
+  const detail = text(flags.detail) ?? text(file.detail);
   const answers = defaultAgendaAnswers(
     card.kind,
     ask,
@@ -246,6 +265,9 @@ export function composeAddRequest(
     ...(blocking ? { blockingNow: true as const } : {}),
     ...(willBlock === undefined ? {} : { willBlock }),
     ...(neededBy === undefined ? {} : { neededBy }),
+    ...(stage === undefined ? {} : { stage }),
+    ...(whereWeAre === undefined ? {} : { whereWeAre }),
+    ...(detail === undefined ? {} : { detail }),
   };
   // ONE ANSWER SHAPE PER KIND: the daemon refuses a mix with the same words, so it is said here first.
   const shape = confirms === undefined ? agendaShapeProblems(request) : [];
@@ -493,9 +515,68 @@ function option(value: string | { label: string; description?: string | undefine
   return { label: value.label.trim(), ...(value.description === undefined ? {} : { description: value.description }) };
 }
 
-function link(value: string | { label?: string | undefined; target: string }): AgendaLink {
-  if (typeof value === 'string') return { target: value.trim() };
-  return { target: value.target.trim(), ...(value.label === undefined ? {} : { label: value.label }) };
+function link(
+  value: string | { label?: string | undefined; target: string; meaning?: string | undefined },
+): AgendaLink {
+  if (typeof value === 'string') return linkFrom(value);
+  const meaning = text(value.meaning);
+  return {
+    target: value.target.trim(),
+    ...(value.label === undefined ? {} : { label: value.label }),
+    ...(meaning === undefined ? {} : { meaning }),
+  };
+}
+
+/**
+ * `--link`: a bare target, `label=target`, or `label=target=meaning` (the meaning is the plain words the item view's
+ * terms-and-references table shows). The label is read only when it looks like one: a word or two, never a URL or a path,
+ * so a bare target that carries an `=` of its own (`https://host/page?a=b`) stays a target. The meaning starts at the
+ * last `=` whose tail is a sentence (an address never holds a space), skipping an `=` inside the meaning when the
+ * target before the first `=` holds none. With no sentence, the first `=` opens the meaning unless it plausibly belongs
+ * to the target: a `?` before it (a query) or an address after it (`docs/a=b.md`). One trailing `=` is an empty meaning.
+ */
+function linkFrom(raw: string): AgendaLink {
+  const value = raw.trim();
+  const first = value.indexOf('=');
+  const label = first < 0 ? '' : value.slice(0, first).trim();
+  if (first < 0 || label === '' || /[/?&\\]/u.test(label)) return { target: value };
+  const rest = value.slice(first + 1).replace(/=\s*$/u, '');
+  const cut = meaningStart(rest);
+  const head = rest.slice(0, cut).trim();
+  // A doubled `==` before a meaning is an empty target-side `=`; a query target may end in one legitimately.
+  const target = cut < rest.length && head.endsWith('=') && !head.includes('?') ? head.slice(0, -1).trim() : head;
+  if (target === '') throw new Error(`--link needs label=target or label=target=meaning, got "${raw}"`);
+  const meaning = text(rest.slice(cut + 1));
+  return { label, target, ...(meaning === undefined ? {} : { meaning }) };
+}
+
+/**
+ * What the person is told when a labelled `--link` keeps an `=` in its target and no meaning was read: the part after
+ * the last `=` may have been a one-word meaning that cannot be told from the address's own `=`, and `--json-file` says it unambiguously.
+ */
+export function linkFlagNotices(flags: readonly string[] | undefined): string[] {
+  return (flags ?? []).flatMap(raw => {
+    const { label, target, meaning } = linkFrom(raw);
+    if (label === undefined || meaning !== undefined || !target.includes('=')) return [];
+    const tail = target.slice(target.lastIndexOf('=') + 1);
+    if (tail === '') return [];
+    return [
+      `read "${target}" as the whole target of "${label}"; if "${tail}" is its meaning, give the link through --json-file`,
+    ];
+  });
+}
+
+/** Where the `=` that opens a link's meaning sits in `target[=meaning]`, or its length when there is none. */
+function meaningStart(rest: string): number {
+  const first = rest.indexOf('=');
+  if (first < 0) return rest.length;
+  const skipSpaced = !/\s/u.test(rest.slice(0, first));
+  for (let at = rest.lastIndexOf('='); at >= 0; at = rest.lastIndexOf('=', at - 1)) {
+    if (/\s/u.test(rest.slice(at + 1).trim()) && !(skipSpaced && /\s/u.test(rest.slice(0, at).trim()))) return at;
+    if (at === 0) break;
+  }
+  const belongs = rest.slice(0, first).includes('?') || /[/?.:&\\]/u.test(rest.slice(first + 1));
+  return belongs ? rest.length : first;
 }
 
 /**
@@ -538,6 +619,19 @@ function describeIssues(error: z.ZodError): string {
 
 /** The fields `fy agenda edit` may change, as flags. */
 export interface EditFlags {
+  /** `--stage`: what the item needs from the owner now. */
+  readonly stage?: string;
+  /** `--where`, repeated: replaces where things stand now. */
+  readonly where?: string | readonly string[];
+  /** `--detail`: replaces the context explained from zero. */
+  readonly detail?: string;
+  /** `--clear-question-answer`: takes a stale answer to the owner's question off the item. */
+  readonly clearQuestionAnswer?: boolean;
+  /**
+   * `--kind`: REPLACES THE ASK with a new one of this kind (`agenda.asks.1`), composed as `add` composes one:
+   * `--option` and `--question` then name its options and questions. The item asks again, fresh.
+   */
+  readonly kind?: string;
   readonly title?: string;
   readonly summary?: string;
   readonly premise?: string | readonly string[];
@@ -574,6 +668,58 @@ export interface EditFlags {
   readonly field?: readonly string[];
 }
 
+/** A typed `--stage`, read as one of the stages, or `undefined` when none was given. */
+function stageFrom(typed: string | undefined): AgendaStage | undefined {
+  if (typed === undefined) return undefined;
+  const parsed = AgendaStageSchema.safeParse(typed.trim().toLowerCase());
+  if (!parsed.success || parsed.data === 'done') {
+    throw new Error(
+      `--stage is one of ${AgendaStageSchema.options.filter(each => each !== 'done').join(', ')} (done is \`agenda done\`), not "${typed}"`,
+    );
+  }
+  return parsed.data;
+}
+
+/** The ask an edit's `--kind` REPLACES the item's with, composed from `--option` and `--question` as `add` does. */
+function replacementOf(flags: EditFlags):
+  | {
+      readonly kind: AgendaKind;
+      readonly ask?: AgendaAsk;
+      readonly answers?: AgendaCardAnswer[];
+      readonly questions?: AgendaQuestion[];
+      readonly optionDetails?: { label: string; detail: string }[];
+    }
+  | undefined {
+  const named = text(flags.kind);
+  if (named === undefined) return undefined;
+  const picked = (flags.option ?? []).map(splitOption);
+  const options = picked.length > 0 ? picked.map(each => each.label) : undefined;
+  const asked: BriefFlags = {
+    ...(flags.question === undefined ? {} : { question: flags.question }),
+    ...(flags.recommend === undefined ? {} : { recommend: flags.recommend }),
+    ...(flags.recommendWhy === undefined ? {} : { recommendWhy: flags.recommendWhy }),
+  };
+  const questions = questionsFrom(asked, {}, options);
+  const card = askFor(named, options, questions, stepsFrom(flags.step) !== undefined);
+  const answers = defaultAgendaAnswers(
+    card.kind,
+    card.ask,
+    recommendedAgendaOption({ ask: card.ask, ...(questions === undefined ? {} : { questions }) }),
+    undefined,
+  );
+  const optionDetails = optionDetailsFrom(
+    picked.flatMap(each => (each.detail === undefined ? [] : [{ label: each.label, detail: each.detail }])),
+    flags.optionDetail,
+  );
+  return {
+    kind: card.kind,
+    ...(card.ask === undefined ? {} : { ask: card.ask }),
+    ...(answers.length === 0 ? {} : { answers }),
+    ...(questions === undefined ? {} : { questions }),
+    ...(optionDetails === undefined ? {} : { optionDetails }),
+  };
+}
+
 /**
  * The edit request one `fy agenda edit <id>` describes, merged onto the item as it stands: only the
  * writing changes. New question words replace the old in order and keep each question's options,
@@ -604,18 +750,28 @@ export function composeEditRequest(
   const fields = fieldsFrom(flags.field, undefined);
   const willBlock = text(flags.willBlock);
   const neededBy = text(flags.neededBy);
-  const optionDetails = optionDetailsFrom(
-    (flags.option ?? []).map(raw => {
-      const picked = splitOption(raw);
-      if (picked.detail === undefined) {
-        throw new Error(
-          `an edit cannot change the options: give --option "Label: detail", or --option-detail, for ${raw.trim()}`,
+  const stage = stageFrom(text(flags.stage));
+  const whereWeAre = prose(flags.where);
+  const detail = text(flags.detail);
+  if (questionAnswer !== undefined && flags.clearQuestionAnswer === true) {
+    throw new Error('--question-answer and --clear-question-answer contradict');
+  }
+  const replaced = replacementOf(flags);
+  const optionDetails =
+    replaced !== undefined
+      ? replaced.optionDetails
+      : optionDetailsFrom(
+          (flags.option ?? []).map(raw => {
+            const picked = splitOption(raw);
+            if (picked.detail === undefined) {
+              throw new Error(
+                `an edit keeps the options unless it replaces the ask: give --option "Label: detail" or --option-detail for ${raw.trim()}, or --kind with the new options`,
+              );
+            }
+            return { label: picked.label, detail: picked.detail };
+          }),
+          flags.optionDetail,
         );
-      }
-      return { label: picked.label, detail: picked.detail };
-    }),
-    flags.optionDetail,
-  );
   if (flags.blocking === true && flags.notBlocking === true)
     throw new Error('--blocking and --not-blocking contradict');
   if (willBlock !== undefined && flags.clearWillBlock === true) {
@@ -626,20 +782,37 @@ export function composeEditRequest(
     ...(flags.notBlocking === true ? ['blockingNow' as const] : []),
     ...(flags.clearWillBlock === true ? ['willBlock' as const] : []),
     ...(flags.clearBy === true ? ['neededBy' as const] : []),
+    ...(flags.clearQuestionAnswer === true ? ['questionAnswer' as const] : []),
   ];
   const words = (flags.question ?? []).map(question => question.trim()).filter(question => question !== '');
-  if (words.length > 0 && current === undefined) throw new Error(`no open agenda item ${id} to reword`);
+  if (replaced === undefined && words.length > 0 && current === undefined) {
+    throw new Error(`no open agenda item ${id} to reword`);
+  }
   const before = current?.questions ?? [];
-  if (words.length > 0 && words.length !== before.length) {
-    throw new Error(`${id} has ${before.length} question(s); give exactly that many --question texts, in order`);
+  if (replaced === undefined && words.length > 0 && words.length !== before.length) {
+    throw new Error(
+      `${id} has ${before.length} question(s); give exactly that many --question texts, in order (or --kind to replace the ask)`,
+    );
   }
   const questions =
-    words.length === 0
-      ? undefined
-      : before.map((each, index) => ({ ...each, question: words[index] ?? each.question }));
+    replaced !== undefined
+      ? replaced.questions
+      : words.length === 0
+        ? undefined
+        : before.map((each, index) => ({ ...each, question: words[index] ?? each.question }));
   const request = {
     action: 'edit' as const,
     id,
+    ...(replaced === undefined
+      ? {}
+      : {
+          kind: replaced.kind,
+          ...(replaced.ask === undefined ? {} : { ask: replaced.ask }),
+          ...(replaced.answers === undefined ? {} : { answers: replaced.answers }),
+        }),
+    ...(stage === undefined ? {} : { stage }),
+    ...(whereWeAre === undefined ? {} : { whereWeAre }),
+    ...(detail === undefined ? {} : { detail }),
     ...(summary === undefined ? {} : { subject: summary }),
     ...(title === undefined ? {} : { title }),
     ...(premise === undefined ? {} : { premise }),

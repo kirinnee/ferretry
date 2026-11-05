@@ -20,7 +20,7 @@ export const plainSendBackEditor = (): void => {
 export const sendBackBox = (root: ParentNode): HTMLElement =>
   must(root.querySelector<HTMLElement>('[data-board-send-back]'), 'the send-back box');
 
-export const sendBackField = (box: ParentNode): HTMLTextAreaElement =>
+const sendBackField = (box: ParentNode): HTMLTextAreaElement =>
   must(box.querySelector<HTMLTextAreaElement>('form textarea'), 'the send-back field');
 
 export const sendBackSubmit = (box: ParentNode): HTMLButtonElement =>

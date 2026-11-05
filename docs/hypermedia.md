@@ -65,26 +65,27 @@ next restart. A ferret should check before telling the owner a section is missin
 Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/fleet/src/lib/account/fixed-layer.ts` (with the binary's
 name for `fy`). It is in every turn's context, so it is kept short: mermaid, svg and html are taught whole, chart keeps
 one line, and every type's full spec is one `fy render guide <type>` away, printed from
-[fy-render.md](fy-render.md). Change it there and here together.
+[fy-render.md](fy-render.md). Its second line is the owner's explainer rule (2026-11-04: _"for explainers, make sure its ADHD Firendly
+(make sure you say that) and user hypermeida to walk user through things"_, _"give example to illustrate your
+points etc"_). Change it there and here together.
 
 ````text
-Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, change over time), show it, not just say it. Do not overdo it: simple answers stay plain.
-Always inline: never publish an artifact, page, gist or link to explain, unless asked.
-Let the reader drive: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
-Write a fenced block whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, a `---` line, then the payload.
-- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
-- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
-- html: a fragment with inline CSS and <script> for interaction (runs isolated); no network loads.
+Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
+Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
+A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.
+- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
+- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.
+- html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
-- map, image, video, audio, pdf: `fy render guide <type>`.
+- card, board (live cards), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
 type: mermaid
-alt: How a request flows
+alt: Request flow
 ---
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.
+Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.
 ````
 
 ## The supported forms
@@ -97,6 +98,13 @@ painted from the same theme tokens; the reader's theme decides what each looks l
 repaints them. A `chart` that names a colour is refused, and a Mermaid `%%{init}%%` that sets `theme`,
 `themeVariables` or `themeCSS` is ignored ([fy-render.md § Charts](fy-render.md#charts)).
 
+**An interactive `html` page looks like the app.** It is transparent — it sits on the chat or agenda
+surface — and gets the app's theme tokens (`var(--fg)`, `var(--accent)`, `var(--viz-1)` …, light and dark,
+following a theme switch live) and a small component kit (`.fy-btn`, `.fy-range`, `.fy-toggle`,
+`.fy-bars`, `.fy-table`, …) inside its sandbox. It grows to its own height and never scrolls inside
+itself inline. Interactive means a visualization the reader changes and it redraws, never a stepper.
+`fy render guide html` teaches it; the contract is [fy-render.md § The interactive `html` frame](fy-render.md#the-interactive-html-frame).
+
 A block renders by itself once it is near the screen — there is no Render button any more
 ([fy-render.md § Inline by default](fy-render.md#inline-by-default--the-owners-decision)).
 
@@ -107,6 +115,8 @@ A block renders by itself once it is near the screen — there is no Render butt
 | `map`     | small JSON/YAML: centre, markers, lines, polygons | an inline interactive map (Leaflet, OpenStreetMap tiles); a coordinates list if it cannot draw   |
 | `svg`     | one `<svg>` document                              | a picture through the measured `<img>` sink — never inline SVG                                   |
 | `html`    | one self-contained fragment                       | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |
+| `card`    | one card reference, `&F12`                        | the board's own card, live: its lane, progress and PRs; a quiet note if it cannot be read        |
+| `board`   | card references, or `parent: &F12`                | a mini board of those cards, or of a card's children, either way grouped by lane, live           |
 | `image`   | `src:` — or `mime:` + base64 inline               | a picture; an https image needs CORS from its host, else a link row                              |
 | `video`   | `src:`                                            | the browser's native player (https plays directly)                                               |
 | `audio`   | `src:`                                            | the browser's native player (https plays directly)                                               |

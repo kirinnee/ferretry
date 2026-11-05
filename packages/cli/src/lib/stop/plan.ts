@@ -1,28 +1,9 @@
-import type { SessionView } from '@ferretry/protocol';
+import { parentOf, SESSION_ENDED_STATUSES, type SessionView, sessionsById, subtreeDepths } from '@ferretry/protocol';
 import type { BulkStopSelector, StopPlan, StopTarget } from './types.ts';
 
-/**
- * The four settled terminal states have no live work left to end. `kill_failed` deliberately stays
- * stoppable because another stop is its recovery path.
- */
-const UNSTOPPABLE = new Set(['completed', 'failed', 'stalled', 'stopped']);
-
+/** `kill_failed` deliberately stays stoppable: another stop is its recovery path. */
 export function isStoppable(view: SessionView): boolean {
-  return !UNSTOPPABLE.has(view.state.status);
-}
-
-function normalizeParent(view: SessionView): string | undefined {
-  const parent = view.config.parent?.trim();
-  return parent ? parent : undefined;
-}
-
-function sessionMap(sessions: readonly SessionView[]): Map<string, SessionView> {
-  const byId = new Map<string, SessionView>();
-  for (const view of sessions) {
-    const id = view.config.id.trim();
-    if (id && !byId.has(id)) byId.set(id, view);
-  }
-  return byId;
+  return !SESSION_ENDED_STATUSES.has(view.state.status);
 }
 
 /**
@@ -33,42 +14,17 @@ export function callerAncestorIds(sessions: readonly SessionView[], callerId?: s
   const ancestors = new Set<string>();
   const normalizedCaller = callerId?.trim();
   if (!normalizedCaller) return ancestors;
-  const byId = sessionMap(sessions);
+  const byId = sessionsById(sessions);
   const seen = new Set<string>([normalizedCaller]);
   const caller = byId.get(normalizedCaller);
-  let current = caller ? normalizeParent(caller) : undefined;
+  let current = caller ? parentOf(caller) : undefined;
   while (current && !seen.has(current)) {
     ancestors.add(current);
     seen.add(current);
     const view = byId.get(current);
-    current = view ? normalizeParent(view) : undefined;
+    current = view ? parentOf(view) : undefined;
   }
   return ancestors;
-}
-
-/** Breadth-first subtree walk. The visited set makes a malformed parent cycle terminate. */
-function subtreeDepths(byId: ReadonlyMap<string, SessionView>, rootId: string): Map<string, number> {
-  const children = new Map<string, string[]>();
-  for (const view of byId.values()) {
-    const parent = normalizeParent(view);
-    const childId = view.config.id.trim();
-    if (!parent || !childId) continue;
-    const existing = children.get(parent);
-    if (existing) existing.push(childId);
-    else children.set(parent, [childId]);
-  }
-
-  const depth = new Map<string, number>();
-  const queue: Array<{ id: string; depth: number }> = [{ id: rootId, depth: 0 }];
-  for (let index = 0; index < queue.length; index += 1) {
-    const next = queue[index]!;
-    if (depth.has(next.id)) continue;
-    depth.set(next.id, next.depth);
-    for (const child of children.get(next.id) ?? []) {
-      if (!depth.has(child)) queue.push({ id: child, depth: next.depth + 1 });
-    }
-  }
-  return depth;
 }
 
 /** How deep a session sits in the whole fleet, used to order label selections sensibly. */
@@ -77,7 +33,7 @@ function lineageDepth(byId: ReadonlyMap<string, SessionView>, id: string): numbe
   let current = byId.get(id);
   const seen = new Set<string>([id]);
   while (current) {
-    const parent = normalizeParent(current);
+    const parent = parentOf(current);
     if (!parent || seen.has(parent)) break;
     seen.add(parent);
     depth += 1;
@@ -93,7 +49,7 @@ function targetFrom(
   ancestors: ReadonlySet<string>,
 ): StopTarget {
   const id = view.config.id.trim();
-  const parent = normalizeParent(view);
+  const parent = parentOf(view);
   const label = view.config.label?.trim();
   return {
     id,
@@ -140,7 +96,7 @@ export function buildStopPlan(
   selector: BulkStopSelector,
   options: { callerId?: string; includeCaller?: boolean } = {},
 ): StopPlan {
-  const byId = sessionMap(sessions);
+  const byId = sessionsById(sessions);
   const ancestors = callerAncestorIds(sessions, options.callerId);
   const selected: StopTarget[] = [];
   const leftRunning: StopTarget[] = [];

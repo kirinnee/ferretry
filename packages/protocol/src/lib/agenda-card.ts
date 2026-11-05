@@ -11,7 +11,7 @@
  * | kind       | ←               | ↑ (optional)      | →             |
  * | ---------- | --------------- | ----------------- | ------------- |
  * | task       |                 | e.g. Skip         | Mark as done  |
- * | yesno      | the first       |                   | the second    |
+ * | yesno      | No              |                   | Yes           |
  * | permission | Deny            | e.g. Always allow | Approve       |
  * | choice (2) | the first       |                   | the second    |
  * | choice (3) | the first       | the second        | the third     |
@@ -30,6 +30,9 @@
  * the third → (two: ← and →; one: ↑) — wherever the recommendation sits, so a swipe means the same in the Inbox
  * deck, on the card, in the item view and in what the CLI prints. The recommended option is the one kept on the
  * row when there are more than three, and is tagged where it lands. Swipe ↓ is never an answer.
+ *
+ * YES AND NO HAVE ONE FIXED PLACE: a row of exactly Yes and No is always No ← · Yes →, whatever order the ferret
+ * listed them in (`yesNoOrder`) — as a gate is Not good ← · Done →, the forward answer on the right.
  */
 import {
   AGENDA_PUSH_TITLE_LENGTH,
@@ -44,10 +47,31 @@ import {
   recommendedAgendaOption,
   singleAgendaQuestion,
 } from './agenda.ts';
+import { plainLabel } from './plain-label.ts';
 
 /** The words a yes-or-no card's two options are. */
 export const YES_LABEL = 'Yes';
 export const NO_LABEL = 'No';
+
+/** Where Yes and No sit, left to right, on every surface: No ←, Yes →. */
+export const YES_NO_ORDER: readonly [typeof NO_LABEL, typeof YES_LABEL] = [NO_LABEL, YES_LABEL];
+
+/** Whether these labels are exactly Yes and No, in either order and case. */
+const isYesNoPair = (labels: readonly string[]): boolean => {
+  if (labels.length !== 2) return false;
+  const sorted = labels.map(label => label.trim().toLowerCase()).sort();
+  return sorted[0] === NO_LABEL.toLowerCase() && sorted[1] === YES_LABEL.toLowerCase();
+};
+
+/**
+ * Yes and No in their one fixed order (`YES_NO_ORDER`: No first), whatever order they came in; anything that is not
+ * exactly Yes and No is returned as it is. The swipe row, the buttons and a form's yes/no field all read it.
+ */
+export const yesNoOrder = <T>(items: readonly T[], labelOf: (item: T) => string): T[] => {
+  if (!isYesNoPair(items.map(labelOf))) return [...items];
+  const no = (item: T): boolean => labelOf(item).trim().toLowerCase() === NO_LABEL.toLowerCase();
+  return [...items].sort((a, b) => Number(no(b)) - Number(no(a)));
+};
 
 /** The default label of each answer a card can give, when the ferret did not word it. */
 export const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AgendaAnswerEffect, 'choose'>, string>> = {
@@ -115,11 +139,8 @@ export interface AgendaCardSource extends AgendaBrief {
 }
 
 /** Whether a choice ask is exactly Yes and No, in either order and case. */
-export const isYesNoAsk = (ask: AgendaAsk | undefined): boolean => {
-  if (ask?.kind !== 'multiple-choice' || ask.options.length !== 2) return false;
-  const labels = ask.options.map(option => option.label.trim().toLowerCase()).sort();
-  return labels[0] === NO_LABEL.toLowerCase() && labels[1] === YES_LABEL.toLowerCase();
-};
+export const isYesNoAsk = (ask: AgendaAsk | undefined): boolean =>
+  ask?.kind === 'multiple-choice' && isYesNoPair(ask.options.map(option => option.label));
 
 /** The kind an ask means, for an item that does not say (raised before cards had kinds). */
 export const kindOfAsk = (ask: AgendaAsk | undefined): AgendaKind => {
@@ -288,12 +309,18 @@ const optionKey = (label: string): string => label.trim().toLowerCase();
 /**
  * A row whose answers are all the item's options, pointed in the options list's order (the first ←, the second ↑,
  * the third →; two: ← →; one: ↑). Answers that are not options (Allow / Deny, Done / Need more info) keep their
- * directions: those mean something on their own.
+ * directions: those mean something on their own. A row of exactly Yes and No is No ← · Yes →, whatever the list's
+ * order (`yesNoOrder`).
  */
 const inOptionOrder = (
   item: Pick<AgendaCardSource, 'ask' | 'questions'>,
   answers: readonly AgendaCardAnswer[],
 ): AgendaCardAnswer[] => {
+  if (answers.every(each => each.does === 'choose') && isYesNoPair(answers.map(each => each.label)))
+    return yesNoOrder(answers, each => each.label).map((each, at) => ({
+      ...each,
+      direction: at === 0 ? 'left' : 'right',
+    }));
   const options = item.ask?.kind === 'multiple-choice' ? item.ask.options : (singleAgendaQuestion(item)?.options ?? []);
   const order = options.map(option => optionKey(option.label));
   const slots = LIST_SLOTS[answers.length];
@@ -422,6 +449,28 @@ export const clipAtWord = (text: string, limit: number): string => {
   const space = room.lastIndexOf(' ');
   const cut = space >= Math.floor(limit / 2) ? room.slice(0, space) : room;
   return `${cut.trimEnd().replace(/[\s,;:.\-–—]+$/u, '')}…`;
+};
+
+/** The most characters an answer's button says on a row of one or two: a longer label is cut at a word. */
+export const AGENDA_ANSWER_TEXT_CHARS = 24;
+
+/**
+ * The most characters each button of a row of THREE says: a phone gives each a third of its width, where a label wraps
+ * onto a second line at a word, and this many always fits in two.
+ */
+export const AGENDA_ANSWER_TEXT_CHARS_OF_THREE = 20;
+
+/**
+ * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a card ask, the deck's arrow keys and the
+ * CLI's answers line alike: the option's own short label ("No", "Only blockers") as plain words (`plainLabel`, so
+ * "**Ship** it" says "Ship it"), cut at a word only when it is very long — past 24 characters, or 20 on a row of three
+ * (`slots`, the buttons drawn on the row). Never its description, never a bare letter, never empty. The answer it sends
+ * is its label, untouched.
+ */
+export const agendaAnswerText = (label: string, slots = 1): string => {
+  const plain = plainLabel(label);
+  const text = clipAtWord(plain, slots >= 3 ? AGENDA_ANSWER_TEXT_CHARS_OF_THREE : AGENDA_ANSWER_TEXT_CHARS);
+  return text.replaceAll('…', '').trim() === '' ? plain : text;
 };
 
 /**

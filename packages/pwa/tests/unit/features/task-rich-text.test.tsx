@@ -125,9 +125,7 @@ describe('task text — one fixture on every surface', () => {
       showMachine: false,
       hrefFor: item => `/d/laptop/board/${item.task.id}`,
       onNavigate: () => undefined,
-      movesFor: () => undefined,
       places: cardPlaces(model),
-      dragging: null,
     };
     view = await mount(<TableView env={env} model={model} onWindow={() => undefined} window="7d" />);
     const cell = must(view.container.querySelector('[data-task="F1"] .fy-board-table__summary-text'), 'the summary');

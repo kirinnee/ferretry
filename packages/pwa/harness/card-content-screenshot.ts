@@ -157,7 +157,7 @@ try {
           await unscroll(detail);
           await shot(detail, `detail-${scheme}-${label}`);
         } else {
-          // A phone page scrolls under its pinned comment box: the top, then How to test with the verdict, then
+          // A phone page scrolls: the top, then How to test with the verdict, then
           // the brief's diagram, each as the owner would see it.
           const content = detail.locator('.fy-board-detail__content');
           await content.evaluate(node => node.scrollTo(0, 0));

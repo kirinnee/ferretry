@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
-import { QueueAuthorSchema, SendSenderKindSchema } from './session.ts';
+import { PeerMessageLabelSchema, QueueAuthorSchema, SendSenderKindSchema } from './session.ts';
 import { QueueWaitReasonSchema } from './session-queue-wait.ts';
 
 /**
@@ -53,6 +53,19 @@ export const QueuedMessageSchema = z.object({
    * submits it, in one step (`fy send --now`).
    */
   interrupt: z.boolean().optional(),
+  /** A ferret's own label for the message (`fy send --kind`); absent is `action`. Never set on a person's or the daemon's. */
+  label: PeerMessageLabelSchema.optional(),
+  /**
+   * The instant the queue stops holding this ferret's message to combine it with others: `enqueuedAt` plus
+   * the action window or the FYI cap, fixed when it was accepted so a settings change never moves a hold.
+   * Absent: never held.
+   */
+  holdUntil: InstantSchema.optional(),
+  /**
+   * Set on every message delivered inside one combined turn: the id of the message the turn was sent under
+   * (the oldest). The send ledger has one record, under that id; this is how the others find it.
+   */
+  deliveredAs: z.string().min(1).optional(),
   enqueuedAt: InstantSchema,
   state: QueuedMessageStateSchema,
   /** When it reached `state`. */

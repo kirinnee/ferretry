@@ -298,6 +298,22 @@ describe('DaemonBoardStore cadence', () => {
     expect(environment.pending()).toBe(0);
   });
 
+  it('stops the whole-board beat when the last beating watcher lets go, though a quiet one stays', async () => {
+    const { store, port, environment } = open(fakePort());
+    const quiet = store.watch(query, [laptop], { beat: false });
+    const beating = store.watch(query, [laptop]);
+    await flush();
+    expect(environment.pending()).toBe(1);
+    beating.release();
+    expect(environment.pending()).toBe(0);
+    const reads = port.calls.filter(call => call.startsWith('board:')).length;
+    environment.advance(BOARD_DERIVE_MS * 3);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(reads);
+    quiet.release();
+  });
+
   it('reads nothing while the page is hidden and the next beat after it is shown', async () => {
     const { store, port, environment } = open(fakePort());
     store.watch(query, [laptop]);
@@ -460,6 +476,47 @@ describe('DaemonBoardStore one card and projects', () => {
     expect(store.taskState(laptop.daemonId, 'F1')).toMatchObject({ missing: true, task: null });
     release();
     expect(environment.pending()).toBe(0);
+    expect(store.taskState(laptop.daemonId, 'F1').status).toBe('idle');
+  });
+
+  it('holds a card watched without a beat by events alone, and a later beat from any watcher arms the timer', async () => {
+    let task = card('F1');
+    const port = fakePort({ task: async () => ({ task, laneSet: lanes }) });
+    const { store, environment } = open(port);
+    const quiet = store.watchTask(laptop, 'F1', { beat: false });
+    await flush();
+    expect(environment.pending()).toBe(0);
+    task = card('F1', { laneId: 'review' });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1').task?.laneId).toBe('review');
+    expect(environment.pending()).toBe(0);
+    const beating = store.watchTask(laptop, 'F1');
+    expect(environment.pending()).toBe(1);
+    beating();
+    quiet();
+    expect(environment.pending()).toBe(0);
+  });
+
+  it('stops the beat on a card when the last beating holder lets go, though a quiet inline holder stays', async () => {
+    const port = fakePort({ task: async () => ({ task: card('F1'), laneSet: lanes }) });
+    const { store, environment } = open(port);
+    const quiet = store.watchTask(laptop, 'F1', { beat: false });
+    const first = store.watchTask(laptop, 'F1');
+    const second = store.watchTask(laptop, 'F1');
+    await flush();
+    expect(environment.pending()).toBe(1);
+    first();
+    expect(environment.pending()).toBe(1);
+    second();
+    expect(environment.pending()).toBe(0);
+    const reads = port.calls.filter(call => call.startsWith('task:')).length;
+    environment.advance(BOARD_DERIVE_MS * 3);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('task:'))).toHaveLength(reads);
+    expect(store.taskState(laptop.daemonId, 'F1').status).toBe('ready');
+    quiet();
     expect(store.taskState(laptop.daemonId, 'F1').status).toBe('idle');
   });
 

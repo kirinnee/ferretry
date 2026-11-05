@@ -271,7 +271,7 @@ describe('the activity state', () => {
     should(activity.get('F2')?.activity).equal('idle');
   });
 
-  it('should wait on an external block, an unfinished blocker or a blocking ask, never a mere open ask', () => {
+  it('should never wait (docs/board.md § Cards show progress): a block, an unfinished blocker or an open card ask leave it idle, never stale', () => {
     // Arrange
     const ask = { sessionId: 'lead', id: 'A9' };
     const cards = [
@@ -282,20 +282,15 @@ describe('the activity state', () => {
       aged(HOUR, { id: 'F5' }),
     ];
     const asks = new Map([
-      ['F3', { open: [ask], blocking: [ask] }],
-      ['F4', { open: [ask], blocking: [] }],
+      ['F3', { open: [ask], asking: [ask] }],
+      ['F4', { open: [ask], asking: [] }],
     ]);
 
     // Act
     const activity = derive(cards, everyoneIdle, asks);
 
     // Assert
-    should(['F1', 'F2', 'F3', 'F4'].map(id => activity.get(id)?.activity)).eql([
-      'waiting',
-      'waiting',
-      'waiting',
-      'stale',
-    ]);
+    should(['F1', 'F2', 'F3', 'F4'].map(id => activity.get(id)?.activity)).eql(['idle', 'idle', 'idle', 'stale']);
   });
 
   it("should go stale past its lane's threshold, never in verify, a release wait, closed or dropped", () => {

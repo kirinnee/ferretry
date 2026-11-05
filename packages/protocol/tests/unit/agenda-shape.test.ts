@@ -195,7 +195,7 @@ describe('the shipped shape wording', () => {
   it('should tell the owner what to do on every shape, under one heading', () => {
     should(AGENDA_NEED_HEADING).equal('What I need from you');
     should(AGENDA_SHAPE_LEADS.reply).equal('Type your answer below.');
-    should(AGENDA_SHAPE_LEADS.answers).equal('Reply with your answers below, numbered.');
+    should(AGENDA_SHAPE_LEADS.answers).equal('Reply with your answers below, numbered. Skip any you like.');
     should(AGENDA_SHAPE_LEADS.todo).containEql('Mark as done');
     should(AGENDA_SHAPE_LEADS.info).containEql('Got it');
     should(AGENDA_SHAPE_LEADS.approval).equal('Approve or deny.');

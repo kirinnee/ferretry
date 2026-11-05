@@ -140,6 +140,9 @@ export class StorageSendRepository implements SendRepository {
       id,
       status,
       mode,
+      // The harness gates both the whole-paste path and the idle stop key; a target without it reads
+      // as "not Claude" and every multi-line send falls back to a turn file.
+      ...(text(config.harness) === undefined ? {} : { harness: text(config.harness) }),
       turn: count(state.turn) ?? count(config.turn) ?? 0,
       ...(text(config.teammate) === undefined ? {} : { teammate: text(config.teammate) }),
       ...(typeof state.promptReady === 'boolean' ? { promptReady: state.promptReady } : {}),

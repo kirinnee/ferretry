@@ -246,39 +246,16 @@ const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[numbe
   } else {
     const title = page.locator('.fy-item-view__title[data-agenda-title]', { hasText: 'Three answers' }).first();
     await title.waitFor({ state: 'visible' });
-    const found = await title.evaluate(node => {
-      const style = getComputedStyle(node);
-      const line = Number.parseFloat(style.lineHeight);
-      const cut = node.querySelector('.fy-item-view__title-cut');
-      const full = node.querySelector('.fy-item-view__title-text')?.textContent ?? '';
-      const cutRect = cut?.getBoundingClientRect();
-      return {
-        wrap: node.getAttribute('data-wrap') !== null,
-        marquee: node.getAttribute('data-marquee') !== null,
-        lines: Math.round(node.getBoundingClientRect().height / line),
-        cut: cut?.textContent ?? null,
-        full,
-        cutWidth: cutRect?.width ?? 0,
-        box: node.clientWidth,
-        moving: node.querySelector('.fy-item-view__title-text')?.getAnimations().length ?? 0,
-      };
-    });
-    check(!found.wrap, `${label}: an ordinary title folds onto two lines`);
-    check(found.marquee, `${label}: a title too long for the row is not set to scroll`);
+    // The open item's title is ONE line (&F920): a marquee when it is too long, cut at a word where motion is reduced,
+    // and never drawn a second time in the body.
+    const found = await title.evaluate(node => ({
+      wrap: node.getAttribute('data-wrap') !== null,
+      lines: Math.round(node.clientHeight / Number.parseFloat(getComputedStyle(node).lineHeight)),
+      twice: document.querySelectorAll('[data-agenda-full-title]').length,
+    }));
+    check(!found.wrap, `${label}: the title wraps`);
     check(found.lines === 1, `${label}: the title takes ${found.lines} lines, wanted one`);
-    if (which === 'longtitle') {
-      check(found.moving > 0, `${label}: the title does not move`);
-      check(found.cut === null, `${label}: a scrolling title is also cut`);
-    } else {
-      check(found.moving === 0, `${label}: the title moves under reduced motion`);
-      const kept = (found.cut ?? '').replace(/…$/u, '');
-      check(found.cut?.endsWith('…') === true, `${label}: the cut title has no "…": ${found.cut}`);
-      check(
-        found.full.startsWith(kept) && found.full.charAt(kept.length) === ' ',
-        `${label}: "${found.cut}" ends inside a word of "${found.full}"`,
-      );
-      check(found.cutWidth <= found.box, `${label}: the cut title is ${found.cutWidth}px in a ${found.box}px box`);
-    }
+    check(found.twice === 0, `${label}: the title is drawn a second time in the body`);
   }
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check(wide <= 0, `${label}: scrolls sideways by ${wide}px`);

@@ -207,7 +207,7 @@ describe('the Board scrolls in one place on a phone', () => {
 
   for (const mode of ['light', 'dark'] as const)
     overlap.it(
-      `fits ten or more whole cards under the sticky strip, with a menu a finger can still hit — ${mode}`,
+      `fits ten or more whole cards under the sticky strip — ${mode}`,
       async () => {
         const { context, tab } = await open('phone', mode);
         try {
@@ -216,10 +216,6 @@ describe('the Board scrolls in one place on a phone', () => {
           expect(dense.wholeCardsUnderStrip).toBeGreaterThanOrEqual(10);
           expect(dense.cardHeight).toBeLessThanOrEqual(64);
           expect(dense.cardStep - dense.cardHeight).toBeLessThanOrEqual(5);
-          expect(dense.moreButton.height).toBeLessThan(40);
-          expect(dense.moreHit.width).toBeGreaterThanOrEqual(40);
-          expect(dense.moreHit.height).toBeGreaterThanOrEqual(40);
-          expect(dense.moreReached).toBe(true);
           await shoot(tab, `board-b62-${mode}-phone-dense.png`);
         } finally {
           await context.close();

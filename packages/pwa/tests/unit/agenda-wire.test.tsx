@@ -258,3 +258,73 @@ describe('whether a machine rolls up every conversation’s items (agenda.open.1
     expect(wires.openOf(A)).toBeUndefined();
   });
 });
+
+describe('whether a machine takes card asks or snoozes (agenda.card-asks.1, agenda.snooze.1)', () => {
+  const featured = (...features: string[]): DaemonHealthRead => ({
+    kind: 'read',
+    health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, ...features]),
+  });
+
+  it('tells listeners when only the card-asks answer changes after a machine is already read', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, featured());
+    const before = heard;
+    wires.note(A, featured());
+    expect(heard).toBe(before);
+    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
+    expect(wires.cardAsksOf(A)).toBe(true);
+    expect(heard).toBe(before + 1);
+    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
+    expect(heard).toBe(before + 1);
+    wires.clearDaemon(A);
+    expect(wires.cardAsksOf(A)).toBeUndefined();
+    expect(heard).toBeGreaterThan(before + 1);
+  });
+
+  it('tells listeners when only the snooze answer changes', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.note(A, featured());
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, featured(DAEMON_FEATURES.agendaSnooze));
+    expect(wires.snoozeOf(A)).toBe(true);
+    expect(heard).toBe(1);
+    wires.note(A, featured(DAEMON_FEATURES.agendaSnooze));
+    expect(heard).toBe(1);
+  });
+});
+
+describe('whether a machine stores the conversation and merges (agenda.conversation.1)', () => {
+  const STORES: DaemonHealthRead = {
+    kind: 'read',
+    health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
+  };
+
+  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    expect(wires.conversationOf(A)).toBeUndefined();
+    wires.note(A, STORES);
+    wires.note(B, NEW);
+    expect(wires.conversationOf(A)).toBe(true);
+    expect(wires.conversationOf(B)).toBe(false);
+    const heardBefore = heard;
+    wires.note(A, STORES);
+    expect(heard).toBe(heardBefore);
+    wires.note(A, NEW);
+    expect(wires.conversationOf(A)).toBe(false);
+    expect(heard).toBe(heardBefore + 1);
+    wires.note(A, STORES);
+    wires.clearDaemon(A);
+    expect(wires.conversationOf(A)).toBeUndefined();
+  });
+});

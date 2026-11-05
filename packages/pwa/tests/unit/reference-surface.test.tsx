@@ -6,6 +6,7 @@ import {
   sessionReferenceSurface,
   useReferenceSurface,
 } from '../../src/components/reference-surface.tsx';
+import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import type { DaemonConnection, DaemonId } from '../../src/lib/daemon-connection.ts';
 import { browserFetch } from '../../src/lib/runtime-models.ts';
 import {
@@ -15,6 +16,7 @@ import {
   sidePaneInstanceTabId,
 } from '../../src/shell/side-pane-tab-model.ts';
 import { render } from '../support/react.ts';
+import { fakeEnvironment, fakePort } from './board-support.ts';
 
 const daemonId = 'daemon-a' as DaemonId;
 const scope = { daemonId, sessionId: 'session-1' };
@@ -277,6 +279,22 @@ describe('sessionReferenceSurface', () => {
 
     // Assert
     should(visited).deepEqual(['/d/daemon-a/board/F412']);
+  });
+
+  test('should lend a block the board to read only where it has one and the machine has a card route', () => {
+    // Arrange
+    const boardStore = new DaemonBoardStore(fakePort(), fakeEnvironment());
+    const base = { connection, scope, fetcher: browserFetch, onNavigate: () => undefined };
+
+    // Act
+    const lent = sessionReferenceSurface({ ...base, boardStore });
+    const noStore = sessionReferenceSurface(base);
+    const noRoute = sessionReferenceSurface({ ...base, boardStore, cardRoute: false });
+
+    // Assert
+    should(lent.cardEmbed).deepEqual({ store: boardStore, connection });
+    should(noStore.cardEmbed).be.undefined();
+    should(noRoute.cardEmbed).be.undefined();
   });
 
   test("should fall back to the host's Tasks destination when the machine has no card route", () => {

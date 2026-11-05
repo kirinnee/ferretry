@@ -37,6 +37,8 @@ export interface InputCardHostProps {
   /** Hands in a client in place of the app store's (the harness and tests). */
   readonly createClient?: (connection: DaemonConnection) => Promise<InputClient>;
   readonly onDone?: () => void;
+  /** Whether the card holds the view it is drawn in: see `InputCardProps.onHold`. */
+  readonly onHold?: (holding: boolean, settled?: string) => void;
 }
 
 type Read =
@@ -53,6 +55,7 @@ export function InputCardHost({
   agentName,
   createClient: injected,
   onDone,
+  onHold,
 }: InputCardHostProps) {
   const routed = useDaemonClient();
   const createClient = injected ?? routed;
@@ -174,6 +177,7 @@ export function InputCardHost({
         void refresh();
         setAccountsTick(tick => tick + 1);
       }}
+      {...(onHold === undefined ? {} : { onHold })}
       request={read.request}
       {...(accounts === undefined ? {} : { accounts })}
       {...(accounts === undefined || requireAddKey === undefined

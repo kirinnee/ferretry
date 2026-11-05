@@ -117,10 +117,31 @@ const entryFor = (record: LogRecord, id: string, at: number | undefined): Transc
  * The id is taken from the record as written, so a row keeps its identity whatever this reading of it
  * decides. A peer or notice row is not labelled "You": who sent it is the row's own chrome, so it
  * carries no label, only the record's instant.
+ *
+ * Several ferret messages the daemon combined into ONE turn are one record but N rows, in order, each
+ * from its own sender: the app draws what was said and by whom, never the combined wrapper.
  */
-const userEntryFor = (record: LogRecord, id: string, at: number | undefined): TranscriptEntry => {
+const userEntriesFor = (record: LogRecord, id: string, at: number | undefined): readonly TranscriptEntry[] => {
   const entry = entryFor(record, id, at);
   const message = readUserMessage(entry.text);
+  if (message.kind !== 'combined') return [userEntryFor(entry, message, at)];
+  const instant = at === undefined ? {} : { at };
+  return message.parts.map(
+    (part, position): TranscriptEntry => ({
+      id: position === 0 ? entry.id : `${entry.id}~${position + 1}`,
+      kind: 'user',
+      text: part.body,
+      peer: part.from,
+      ...instant,
+    }),
+  );
+};
+
+const userEntryFor = (
+  entry: TranscriptEntry,
+  message: Exclude<ReturnType<typeof readUserMessage>, { readonly kind: 'combined' }>,
+  at: number | undefined,
+): TranscriptEntry => {
   const instant = at === undefined ? {} : { at };
   if (message.kind === 'human') {
     // Text the harness typed into the user channel — a background task finishing, an interrupt, a
@@ -215,6 +236,8 @@ const recordInstants = (records: readonly LogRecord[], now: number): readonly (n
 interface ToolRun {
   /** Where the run's first record came from. */
   offset?: number;
+  /** Where every record the run draws came from — its calls, results and their copies (`alsoAt`). */
+  readonly anchors: number[];
   readonly calls: {
     key: string;
     use: ToolUseData;
@@ -231,14 +254,21 @@ interface ToolRun {
  * to pair with is kept as an orphan rather than dropped, because a row that silently vanished would
  * read as a tool that never ran.
  */
-const toolEntry = (run: ToolRun): TranscriptEntry => ({
-  // Named by the call that OPENED the run, so a run that grows is still the row the reader opened.
-  id: `tools:${run.calls[0]?.key ?? ''}`,
-  ...(run.offset === undefined ? {} : { offset: run.offset }),
-  kind: 'tool',
-  text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
-  tools: run.calls,
-});
+/** The places a row stands for besides where it begins, in order, once each. */
+const otherAnchors = (anchors: readonly number[], offset: number | undefined): number[] =>
+  [...new Set(anchors)].filter(anchor => anchor !== offset).sort((left, right) => left - right);
+
+const toolEntry = (run: ToolRun): TranscriptEntry => {
+  const alsoAt = otherAnchors(run.anchors, run.offset);
+  return {
+    // Named by the call that OPENED the run, so a run that grows is still the row the reader opened.
+    id: `tools:${run.calls[0]?.key ?? ''}`,
+    ...(run.offset === undefined ? {} : { offset: run.offset, ...(alsoAt.length === 0 ? {} : { alsoAt }) }),
+    kind: 'tool',
+    text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
+    tools: run.calls,
+  };
+};
 
 /** A slash command as one compact row: `/model opus[1m] → Set model to …`. */
 const commandEntry = (id: string, command: SlashCommand): TranscriptEntry => ({
@@ -269,10 +299,10 @@ const recordIds = (): ((signature: string) => string) => {
 };
 
 /** Whether the next record that shows anything is another picture. */
-const followedByImages = (records: readonly LogRecord[], index: number): boolean => {
+const followedByImages = (records: readonly LogRecord[], index: number, skipped: ReadonlySet<number>): boolean => {
   for (let next = index + 1; next < records.length; next += 1) {
     const record = records[next];
-    if (record === undefined || isHiddenRecord(record)) continue;
+    if (record === undefined || isHiddenRecord(record) || skipped.has(next)) continue;
     return showsImages(record);
   }
   return false;
@@ -292,9 +322,223 @@ const addImageRead = (run: ToolRun, images: readonly TranscriptImageMarker[], ke
   else run.calls[index] = call;
 };
 
+/** Claude's framing around a message it surfaced mid-turn, before and after the message itself. */
+const MID_TURN_LEAD = 'The user sent a new message while you were working:';
+const MID_TURN_TRAILER = 'This is how Claude Code surfaces messages the user sends mid-turn';
+
+/** Whitespace-insensitive, case-sensitive: the same rule the ledger matches a send's words by. */
+const normalized = (value: string): string => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+
+/**
+ * The same words with each picture named only by its type. A marker's handle names the record it was read
+ * from, so a copy's picture and its twin's never share one — which is why this is trusted only for a result
+ * whose CALL was already proved a copy of the twin's call: the same invocation, read twice.
+ */
+const withoutImageHandles = (value: string): string =>
+  normalized(value).replace(/\[fy-image \S+ (\S+)\]/gu, '[fy-image $1]');
+
+/** The words a mid-turn copy carries: the message itself, with Claude's framing lifted off. */
+const framedWords = (record: LogRecord): string | undefined => {
+  if (record.clock !== undefined || record.role !== 'user' || record.kind !== 'message') return undefined;
+  const text = record.lines.join('\n');
+  if (!text.startsWith(MID_TURN_LEAD)) return undefined;
+  const body = text.slice(MID_TURN_LEAD.length);
+  const trailer = body.lastIndexOf(MID_TURN_TRAILER);
+  return normalized(trailer === -1 ? body : body.slice(0, trailer));
+};
+
+const isTurnRecord = (record: LogRecord): boolean => record.role === 'system' && record.kind === 'turn';
+
+/** Where a mid-turn copy's search stops: the agent speaking again, or a turn starting or ending. */
+const endsSegment = (record: LogRecord): boolean =>
+  (record.role === 'assistant' && record.kind === 'message') || isTurnRecord(record);
+
+const wordsOf = (record: LogRecord): string => normalized(record.lines.join('\n'));
+
+/** The next timed record that shows, from `from` on; none past an untimed record or a turn record. */
+const nextReal = (records: readonly LogRecord[], from: number): number | undefined => {
+  for (let index = from; index < records.length; index += 1) {
+    const record = records[index] as LogRecord;
+    if (isTurnRecord(record)) return undefined;
+    if (isHiddenRecord(record)) continue;
+    if (record.clock === undefined) return undefined;
+    return index;
+  }
+  return undefined;
+};
+
+/**
+ * How many calls are still waiting for a result where record `at` sits. The tool run it is in is read
+ * back to where it began, then FORWARD as the chat pairs it: each result answers the oldest waiting call,
+ * and a result with no call waiting (its call fell outside the loaded page) answers nothing. Records
+ * already found to be copies are left out.
+ */
+const pendingCalls = (records: readonly LogRecord[], at: number, copies: ReadonlySet<number>): number => {
+  let start = at;
+  for (let index = at - 1; index >= 0; index -= 1) {
+    const record = records[index] as LogRecord;
+    if (copies.has(index) || isHiddenRecord(record)) continue;
+    if (!isToolRecord(record)) break;
+    start = index;
+  }
+  let waiting = 0;
+  for (let index = start; index < at; index += 1) {
+    const record = records[index] as LogRecord;
+    if (copies.has(index) || isHiddenRecord(record)) continue;
+    if (record.kind === 'tool-call') waiting += 1;
+    else if (waiting > 0) waiting -= 1;
+  }
+  return waiting;
+};
+
+/**
+ * Do a copy and the record it may copy say the same thing? The same words; or, for a tool's result, the
+ * same words with each picture named by its type, when it is provably the same invocation: its call lined
+ * up as a copy too, or exactly ONE call is waiting and no other call sits between the two results — a call
+ * has one result, so a second answer to that one call can only be a copy of the first.
+ */
+const sameWords = (
+  records: readonly LogRecord[],
+  copy: number,
+  twin: number,
+  callLinedUp: boolean,
+  copies: ReadonlySet<number>,
+): boolean => {
+  const copied = records[copy] as LogRecord;
+  const real = records[twin] as LogRecord;
+  if (wordsOf(copied) === wordsOf(real)) return true;
+  if (copied.kind !== 'tool-result') return false;
+  if (withoutImageHandles(copied.lines.join('\n')) !== withoutImageHandles(real.lines.join('\n'))) return false;
+  if (callLinedUp) return true;
+  for (let between = copy + 1; between < twin; between += 1)
+    if ((records[between] as LogRecord).kind === 'tool-call') return false;
+  return pendingCalls(records, copy, copies) === 1;
+};
+
+/** The records that are only copies, and the row a twin's search position starts at when its copy sits right before it. */
+interface Copies {
+  readonly copies: ReadonlySet<number>;
+  readonly startsAt: ReadonlyMap<number, number>;
+  /** Where each twin's copies came from, so a search hit on a copy still finds the row the twin draws. */
+  readonly copiedAt: ReadonlyMap<number, readonly number[]>;
+}
+
+/**
+ * WHICH RECORDS ARE ONLY A COPY OF A LATER ONE, so a message — or a tool's call and result — is drawn once.
+ *
+ * Claude Code (seen on 2.1.317) writes a copy of what it is given — a message, a tool's result, sometimes
+ * the call with it — with NO time, straight before the real records; a message that arrives mid-turn is
+ * copied inside "The user sent a new message while you were working: …" instead. The daemon passes both
+ * on, so the chat drew a bare bubble with no time or ticks above the real, ticked one, and a tool run read
+ * "Bash, result": the copy's result answered the call and the real one was left over.
+ *
+ * A COPY LINES UP WITH WHAT IT COPIES. A run of untimed records copies the timed records straight after
+ * it, IN ORDER: each untimed record is tried against the next timed record not yet matched, and folds into
+ * it only with the same role, kind and words; one that does not match stays, and the next is tried against
+ * the same record. Bookkeeping between them is skipped, but nothing crosses a turn record. A picture in a
+ * tool's result is compared by its type only for the same invocation (`sameWords`).
+ *
+ * A MID-TURN COPY is found by its framing, which only Claude writes: it folds into the next timed message
+ * with the same words before the agent next speaks or the turn changes.
+ *
+ * Every pairing is ONE-TO-ONE. Sending "ok" twice on purpose is two copies and two real records, so each
+ * copy folds into its own real record and both messages stay. A timed record is never folded, and an
+ * untimed one that lines up with nothing is kept: nothing is hidden on the strength of a copy that is not
+ * there. A copy sitting right before its twin hands the twin its position in the file, so a search hit on
+ * either record lands on the one row they draw.
+ */
+const copyRecords = (records: readonly LogRecord[]): Copies => {
+  const copies = new Set<number>();
+  const taken = new Set<number>();
+  const twins = new Map<number, number>();
+  const pair = (copy: number, twin: number): void => {
+    copies.add(copy);
+    taken.add(twin);
+    twins.set(copy, twin);
+  };
+
+  // A run of plain copies against the timed records straight after it.
+  let index = 0;
+  while (index < records.length) {
+    const first = records[index] as LogRecord;
+    if (first.clock !== undefined || isHiddenRecord(first) || framedWords(first) !== undefined) {
+      index += 1;
+      continue;
+    }
+    const run: number[] = [];
+    let next = index;
+    for (; next < records.length; next += 1) {
+      const record = records[next] as LogRecord;
+      if (isTurnRecord(record) || (record.clock !== undefined && !isHiddenRecord(record))) break;
+      if (!isHiddenRecord(record) && framedWords(record) === undefined) run.push(next);
+    }
+    let twin = nextReal(records, next);
+    let previousCallLinedUp = false;
+    for (const member of run) {
+      if (twin === undefined) break;
+      const copy = records[member] as LogRecord;
+      const real = records[twin] as LogRecord;
+      if (
+        copy.role !== real.role ||
+        copy.kind !== real.kind ||
+        !sameWords(records, member, twin, previousCallLinedUp, copies)
+      ) {
+        // Not this record's copy: it stays, and the next copy is tried against the same record.
+        previousCallLinedUp = false;
+        continue;
+      }
+      pair(member, twin);
+      previousCallLinedUp = copy.kind === 'tool-call';
+      twin = nextReal(records, twin + 1);
+    }
+    index = next;
+  }
+
+  // Mid-turn copies, by their framing.
+  records.forEach((record, index) => {
+    const words = framedWords(record);
+    if (words === undefined) return;
+    for (let next = index + 1; next < records.length; next += 1) {
+      const later = records[next] as LogRecord;
+      if (endsSegment(later)) return;
+      if (later.clock === undefined || taken.has(next) || later.role !== 'user' || later.kind !== 'message') continue;
+      if (wordsOf(later) !== words) continue;
+      pair(index, next);
+      return;
+    }
+  });
+
+  const startsAt = new Map<number, number>();
+  for (const [copy, twin] of twins) {
+    const offset = records[copy]?.offset;
+    if (offset === undefined) continue;
+    let adjacent = true;
+    for (let between = copy + 1; between < twin && adjacent; between += 1) {
+      const record = records[between] as LogRecord;
+      adjacent = isHiddenRecord(record) || copies.has(between);
+    }
+    if (adjacent) startsAt.set(twin, Math.min(offset, startsAt.get(twin) ?? offset));
+  }
+  const copiedAt = new Map<number, number[]>();
+  for (const [copy, twin] of twins) {
+    const offset = records[copy]?.offset;
+    if (offset !== undefined) copiedAt.set(twin, [...(copiedAt.get(twin) ?? []), offset]);
+  }
+  return { copies, startsAt, copiedAt };
+};
+
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const instants = recordInstants(records, now);
+  const { copies, startsAt, copiedAt } = copyRecords(records);
   const idFor = recordIds();
+  /** The record being projected: a row it opens starts where its copy did, when one sat right before it. */
+  let current = -1;
+  const offsetOf = (record: LogRecord): number | undefined => startsAt.get(current) ?? record.offset;
+  /** Every place in the file the current record's row stands for: the record itself and its copies. */
+  const anchorsOf = (record: LogRecord): number[] => [
+    ...(record.offset === undefined ? [] : [record.offset]),
+    ...(copiedAt.get(current) ?? []),
+  ];
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
   const flush = (): void => {
@@ -303,17 +547,22 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
   };
   // Every row a record opens carries where the record came from, so a search hit can find its row.
   const push = (entry: TranscriptEntry, record: LogRecord): void => {
-    entries.push(record.offset === undefined ? entry : { ...entry, offset: record.offset });
+    const offset = offsetOf(record);
+    const alsoAt = otherAnchors(anchorsOf(record), offset);
+    entries.push(offset === undefined ? entry : { ...entry, offset, ...(alsoAt.length === 0 ? {} : { alsoAt }) });
   };
-  const open = (record: LogRecord): ToolRun => ({
-    calls: [],
-    ...(record.offset === undefined ? {} : { offset: record.offset }),
-  });
+  const open = (record: LogRecord): ToolRun => {
+    const offset = offsetOf(record);
+    return { calls: [], anchors: [], ...(offset === undefined ? {} : { offset }) };
+  };
   records.forEach((record, index) => {
-    if (isHiddenRecord(record)) return;
+    // A copy is left out like bookkeeping: it is not a row, and it does not end a tool run.
+    if (isHiddenRecord(record) || copies.has(index)) return;
+    current = index;
     const text = record.lines.join('\n');
     if (isToolRecord(record)) {
       run ??= open(record);
+      run.anchors.push(...anchorsOf(record));
       const key = idFor(`${record.clock ?? ''}|${record.kind}|${text}`);
       if (record.kind === 'tool-call') {
         const at = instants[index];
@@ -328,8 +577,9 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     }
     if (showsImages(record)) {
       // Pictures read one after another are ONE `Read N images` call in the tool run, not a card each.
-      if (run !== null || followedByImages(records, index)) {
+      if (run !== null || followedByImages(records, index, copies)) {
         run ??= open(record);
+        run.anchors.push(...anchorsOf(record));
         addImageRead(
           run,
           attachmentImages(record),
@@ -366,7 +616,8 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       return;
     }
     const at = instants[index];
-    push(recordKind(record) === 'user' ? userEntryFor(record, id, at) : entryFor(record, id, at), record);
+    if (recordKind(record) === 'user') for (const entry of userEntriesFor(record, id, at)) push(entry, record);
+    else push(entryFor(record, id, at), record);
   });
   flush();
   return entries;

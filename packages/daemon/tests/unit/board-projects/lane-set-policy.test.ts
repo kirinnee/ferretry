@@ -30,6 +30,7 @@ import {
   mergeReleaseLanes,
   nextLaneSetVersion,
   noLaneSetMessage,
+  progressLaneNames,
   proposeLaneSet,
   RELEASED_TO_TEST_NAME,
   relocationProblems,
@@ -86,7 +87,7 @@ describe('proposeLaneSet', () => {
     should(actual.ok).be.true();
     if (!actual.ok) return;
     should(actual.value).containDeep({ projectId: FERRETRY_ID, version: 1, confirmedBy: null, proposedBy: 'koen' });
-    should(actual.value.lanes.map(lane => lane.name)).deepEqual(['Todo', 'Busy', 'To test', 'Closed']);
+    should(actual.value.lanes.map(lane => lane.name)).deepEqual(['Todo', 'Busy', 'Ready to try', 'Closed']);
   });
 
   it('should raise the version when it replaces an unconfirmed proposal', () => {
@@ -623,7 +624,7 @@ describe('addQuickToTestLane', () => {
     should(next?.lanes.map(lane => `${lane.id}:${lane.name}`)).deepEqual([
       'todo:Todo',
       'doing:Busy',
-      'to-test:To test',
+      'to-test:Ready to try',
       'closed:Closed',
     ]);
     should(next?.lanes[2]).deepEqual(QUICK_TO_TEST_LANE);
@@ -848,5 +849,76 @@ describe('addQuickToTestLane over staged lanes', () => {
     // Assert
     should(next?.lanes[3]?.stage).be.undefined();
     should(LaneSetSchema.safeParse(next).success).be.true();
+  });
+});
+
+describe('progressLaneNames (docs/board.md § Lanes show progress)', () => {
+  /** A set as it was stored before lanes showed progress: the template's waiting names, Plan/Design drawn as action. */
+  const legacy = (): LaneSet => {
+    const set = templateLanes(FERRETRY_ID);
+    return {
+      ...set,
+      version: 7,
+      lanes: set.lanes.map(lane =>
+        lane.id === 'released'
+          ? { ...lane, name: 'Released · to test' }
+          : lane.id === 'plan'
+            ? { ...lane, emphasis: 'action' as const }
+            : lane,
+      ),
+    };
+  };
+
+  it('renames the template’s waiting names and draws Plan/Design as progress, keeping ids, stages and the version', () => {
+    // Arrange
+    const before = legacy();
+
+    // Act
+    const after = progressLaneNames(before);
+
+    // Assert
+    should(after).not.be.null();
+    const byId = (id: string) => after?.lanes.find(lane => lane.id === id);
+    should(byId('released')?.name).equal('Released');
+    should(byId('released')?.emphasis).equal('action');
+    should(byId('plan')?.emphasis).equal('progress');
+    should(after?.lanes.map(lane => lane.id)).deepEqual(before.lanes.map(lane => lane.id));
+    should(after?.lanes.map(lane => lane.stage)).deepEqual(before.lanes.map(lane => lane.stage));
+    should(after?.version).equal(7);
+    should(after?.confirmedBy).equal(before.confirmedBy);
+  });
+
+  it('keeps a name the owner chose, and a quick set’s To test becomes Ready to try', () => {
+    // Arrange
+    const quick = addQuickToTestLane({ ...oldQuickLanes(FERRETRY_ID), version: 2 });
+    if (quick === null) throw new Error('expected the quick set to take its To test lane');
+    const old = {
+      ...quick,
+      lanes: quick.lanes.map(lane => (lane.id === 'to-test' ? { ...lane, name: 'To test' } : lane)),
+    };
+    const custom = {
+      ...legacy(),
+      lanes: legacy().lanes.map(lane => (lane.id === 'released' ? { ...lane, name: 'Shipped, try it' } : lane)),
+    };
+
+    // Act + Assert
+    should(progressLaneNames(old)?.lanes.find(lane => lane.id === 'to-test')?.name).equal('Ready to try');
+    should(progressLaneNames(custom)?.lanes.find(lane => lane.id === 'released')?.name).equal('Shipped, try it');
+  });
+
+  it('brings a waiting proposal along, and is idempotent', () => {
+    // Arrange
+    const withPending = {
+      ...legacy(),
+      pending: { lanes: legacy().lanes, proposedBy: 'lead', version: 8, baseVersion: 7 },
+    } as LaneSet;
+
+    // Act
+    const once = progressLaneNames(withPending);
+
+    // Assert
+    should(once?.pending?.lanes.find(lane => lane.id === 'released')?.name).equal('Released');
+    should(progressLaneNames(once!)).be.null();
+    should(progressLaneNames(templateLanes(FERRETRY_ID))).be.null();
   });
 });

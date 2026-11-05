@@ -43,7 +43,7 @@ import { effectiveAssignee } from './authority.ts';
 import { BoardError } from './errors.ts';
 import { cardCategory } from './graph.ts';
 import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, SessionFocus } from './ports.ts';
-import type { BoardService, SignalDoneOutcome } from './service.ts';
+import type { BoardService, CardHolders, SignalDoneOutcome } from './service.ts';
 import { clip } from './signal-done.ts';
 
 /** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
@@ -110,7 +110,15 @@ export interface Delegation {
   readonly project?: string;
   /** The OWNER started the ferret on this existing card (`ownerDelegation`): no lead hands it down, the owner assigns it. */
   readonly byOwner?: true;
+  /** Who held the existing card when the start judged it: the assignment writes only if it still finds them (`CardHolders`). */
+  readonly held?: CardHolders;
 }
+
+/** Who holds a card now, as a start must still find them when it assigns it. */
+const holdersOf = (card: Pick<BoardTask, 'owner' | 'assignee'>): CardHolders => ({
+  owner: card.owner,
+  assignee: card.assignee,
+});
 
 /** What delegating a card came to: the delegation, or why the start must not go on. */
 export interface DelegationOutcome {
@@ -168,13 +176,14 @@ export const askOf = (text: string, source: string): TaskMessage => ({ text: cli
  * The delegation of a start the owner made on an existing card ("Start a ferret on it"): it is assigned to the new
  * ferret as the owner's act, and the card keeps its owner and its parent.
  */
-export const ownerDelegation = (card: Pick<BoardTask, 'id' | 'owner' | 'parent'>): Delegation => ({
+export const ownerDelegation = (card: Pick<BoardTask, 'id' | 'owner' | 'assignee' | 'parent'>): Delegation => ({
   lead: card.owner,
   brief: '',
   id: card.id,
   existing: true,
   parent: card.parent,
   byOwner: true,
+  held: holdersOf(card),
 });
 
 /** The line a sub-ferret's brief gains (`subFerretFooter`): its card and where it is. */
@@ -245,6 +254,7 @@ export class SessionCards {
             id: twin.id,
             existing: true,
             parent: twin.parent,
+            held: holdersOf(twin),
             ...(project === undefined ? {} : { project }),
           },
           notes: [
@@ -292,6 +302,71 @@ export class SessionCards {
     }
   }
 
+  /**
+   * `fy start --card <id>`, before the session exists: the existing card the new session takes over, judged with the
+   * same authority as `fy new --card`. A ferret's start (`lead`) hands over only a card it may hand down; the owner's
+   * (no lead) needs the card to exist. Either way the card must still be open work: a dropped or closed card is refused
+   * here, before anything is written, and so is a start that is not an ordinary ferret (a miner, a guide builder or a
+   * warden takes no card). `refusal` says why a card cannot be had; the start must not go on. The judgement is early,
+   * not final: {@link takeOver} re-judges inside the write that assigns the card.
+   */
+  async startOn(lead: string | undefined, id: BoardTaskId, ordinary = true): Promise<DelegationOutcome> {
+    if (!ordinary) {
+      return {
+        refusal: `--card is for an ordinary ferret: a worker the daemon starts for itself takes no card`,
+        notes: [],
+      };
+    }
+    try {
+      const outcome = lead === undefined ? await this.ownerStart(id) : await this.existingCard(lead, id);
+      if (outcome.delegation === undefined) return outcome;
+      const unavailable = await this.unavailable(id);
+      return unavailable === undefined ? outcome : { refusal: unavailable, notes: [] };
+    } catch (error) {
+      return { refusal: `the board could not be read: ${said(error)}`, notes: [] };
+    }
+  }
+
+  /**
+   * `fy start --card`, once the session's record exists and before its agent launches: the card is assigned to it, or
+   * the start is refused and `stop` takes the record down, so a session never runs on a card it was not given. The
+   * assignment is one write that re-judges the card (dropped, closed, still the lead's to hand down), so a drop or a
+   * reassignment between {@link startOn} and here loses the race cleanly: nothing is assigned and nothing launches.
+   */
+  async takeOver(
+    delegation: Delegation,
+    sessionId: string,
+    stop: (reason: string) => Promise<void>,
+  ): Promise<{ readonly opened?: OpenedCard; readonly refusal?: string }> {
+    try {
+      return { opened: await this.handOver(delegation, sessionId) };
+    } catch (error) {
+      const refusal = `${formatTaskRef({ id: delegation.id })} could not be handed to the new session: ${said(error)}`;
+      await stop(refusal).catch((stopped: unknown) => {
+        this.ports.diagnostics.warn(`could not stop ${sessionId} after a refused card: ${said(stopped)}`);
+      });
+      return { refusal };
+    }
+  }
+
+  private async ownerStart(id: BoardTaskId): Promise<DelegationOutcome> {
+    const { cards } = await this.ports.board.snapshot();
+    const card = cards.find(each => each.id === id);
+    if (card === undefined) return { refusal: `there is no card ${formatTaskRef({ id })} on this machine`, notes: [] };
+    return { delegation: ownerDelegation(card), notes: [] };
+  }
+
+  /** Why a card cannot take a new session: it is dropped or closed. `undefined` when it is open work. */
+  private async unavailable(id: BoardTaskId): Promise<string | undefined> {
+    const { cards, laneSets } = await this.ports.board.snapshot();
+    const card = cards.find(each => each.id === id);
+    if (card === undefined) return `there is no card ${formatTaskRef({ id })} on this machine`;
+    if (card.dropped !== null) return `${formatTaskRef(card)} is dropped; reopen it before you start a ferret on it`;
+    if (cardCategory(card, laneSets) === 'closed')
+      return `${formatTaskRef(card)} is closed; reopen it before you start a ferret on it`;
+    return undefined;
+  }
+
   /** `--card`: the lead's existing card, handed over; refused (not failed) when it cannot be. */
   private async existingCard(lead: string, id: BoardTaskId): Promise<DelegationOutcome> {
     let card: BoardTask;
@@ -303,7 +378,7 @@ export class SessionCards {
     }
     const project = await this.ports.projects.nameOf(card.projectId);
     return {
-      delegation: { lead, brief: '', id, existing: true, parent: card.parent, project },
+      delegation: { lead, brief: '', id, existing: true, parent: card.parent, project, held: holdersOf(card) },
       notes: [],
     };
   }
@@ -406,13 +481,21 @@ export class SessionCards {
 
   /** The existing card, assigned to the session just started (by the lead, or by the owner); it keeps its owner and its parent. */
   private async handOver(delegation: Delegation, sessionId: string): Promise<OpenedCard> {
+    const held = delegation.held;
+    if (held === undefined)
+      throw new Error(`${formatTaskRef({ id: delegation.id })} was not judged before it was handed over`);
     const card =
       delegation.byOwner === true
-        ? await this.ports.board.assignForOwner(delegation.id, sessionId)
-        : await this.ports.board.handOver(delegation.id, delegation.lead, sessionId);
+        ? await this.ports.board.assignForOwner(delegation.id, sessionId, held)
+        : await this.ports.board.handOver(delegation.id, delegation.lead, sessionId, held);
+    // The card is assigned: nothing after this may undo the start, so the board's name is best effort.
+    const project = await this.ports.projects.nameOf(card.projectId).catch((error: unknown) => {
+      this.ports.diagnostics.warn(`could not name the board of ${formatTaskRef(card)}: ${said(error)}`);
+      return undefined;
+    });
     return {
       card: await this.workStarted(card, sessionId),
-      project: await this.ports.projects.nameOf(card.projectId),
+      ...(project === undefined ? {} : { project }),
       notes: [],
     };
   }

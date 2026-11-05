@@ -13,9 +13,11 @@ import { FyRenderViewport } from '../../src/components/fy-render-viewport.tsx';
 import {
   FY_RENDER_LIMITS,
   type FyRenderWorkspaceReader,
+  isFyRenderEmbedBlock,
   type FyRenderBlock as ParsedBlock,
   parseFyRender,
 } from '../../src/lib/fy-render.ts';
+import { forgetFyRenderHeights } from '../../src/lib/fy-render-height-memory.ts';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
 import { render as mountTree, run, runAsync } from '../support/react.ts';
 
@@ -40,6 +42,7 @@ import { render as mountTree, run, runAsync } from '../support/react.ts';
 const parsed = (...lines: readonly string[]): ParsedBlock => {
   const result = parseFyRender(lines.join('\n'));
   if (!result.ok) throw new Error(`fixture did not parse: ${result.reason}`);
+  if (isFyRenderEmbedBlock(result.block)) throw new Error('fixture is an embed block');
   return result.block;
 };
 
@@ -194,7 +197,10 @@ const wait = async (ms = 10): Promise<void> => {
  */
 class FakeObserver {
   static readonly live: FakeObserver[] = [];
-  constructor(readonly callback: IntersectionObserverCallback) {
+  constructor(
+    readonly callback: IntersectionObserverCallback,
+    readonly options: IntersectionObserverInit = {},
+  ) {
     FakeObserver.live.push(this);
   }
   observe(): void {}
@@ -203,6 +209,14 @@ class FakeObserver {
     if (at !== -1) FakeObserver.live.splice(at, 1);
   }
 }
+
+/** Only the observers with this root margin report: the near edge and the held edge are different lines. */
+const viewportAt = (rootMargin: string, isIntersecting: boolean): void => {
+  run(() => {
+    for (const observer of FakeObserver.live.filter(each => each.options.rootMargin === rootMargin))
+      observer.callback([{ isIntersecting } as IntersectionObserverEntry], observer as unknown as IntersectionObserver);
+  });
+};
 
 const viewport = (isIntersecting: boolean): void => {
   run(() => {
@@ -238,6 +252,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  forgetFyRenderHeights();
   while (mounted.length > 0) {
     const tree = mounted.pop();
     try {
@@ -913,6 +928,43 @@ describe('FyRenderBlock interactive html', () => {
     should(htmlProps(tree).ready).be.false();
   });
 
+  test('should keep a page running a little past the near edge, so scrolling back does not rerun it', () => {
+    // Arrange
+    const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+    viewport(true);
+    run(() => htmlProps(tree).onRendered());
+
+    // Act — past the near edge (one screen), still inside the held edge (three).
+    viewportAt('800px 0px', false);
+
+    // Assert — the same frame, still drawn: its state survives.
+    should(count(tree, 'iframe')).equal(1);
+    should(htmlProps(tree).ready).be.true();
+
+    // Act — past the held edge too.
+    viewportAt('2400px 0px', false);
+
+    // Assert — now parked.
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  test('should reserve the height a block drew at the last time it was mounted', () => {
+    // Arrange — drawn once at 288px, then unmounted (a tab switch, a chat left and revisited).
+    const first = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+    viewport(true);
+    run(() => htmlProps(first).onHeight?.(288));
+    run(() => first.unmount());
+
+    // Act — the same block mounts again, before it is near.
+    const again = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+
+    // Assert — an invisible plane of that height holds its place, and the frame starts at it.
+    const plane = again.root.findByProps({ className: 'fy-render-placeholder' });
+    should(plane.props.style).eql({ height: '288px' });
+    viewport(true);
+    should(htmlProps(again)).have.property('initialHeight', 288);
+  });
+
   test('should hold a parked page’s plane at the default before it ever reported a height', () => {
     // Arrange
     const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
@@ -982,13 +1034,16 @@ describe('FyRenderBlock interactive html', () => {
     should(count(tree, 'iframe')).equal(0);
   });
 
-  test('should paint a page with the first painted background and the column colour and font, and follow the theme', async () => {
-    // Arrange — the message column sits on a painted surface; the block's own host is unpainted.
+  test('should paint a page with the theme tokens and the column ink and font, in both themes, live', async () => {
+    // Arrange — the column carries the dark theme's tokens; the page gets them by their app names.
     const surface = document.createElement('div');
     surface.style.backgroundColor = 'rgb(1, 2, 3)';
     const host = document.createElement('div');
     host.style.color = 'rgb(4, 5, 6)';
     host.style.fontFamily = 'Inter';
+    host.style.setProperty('--fg', 'rgb(230, 230, 235)');
+    host.style.setProperty('--accent', 'rgb(120, 160, 255)');
+    host.style.setProperty('--radius-sm', '6px');
     surface.appendChild(host);
     document.body.appendChild(surface);
     const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />, host);
@@ -996,20 +1051,28 @@ describe('FyRenderBlock interactive html', () => {
     // Act
     viewport(true);
 
-    // Assert
-    should(htmlProps(tree).paint).eql({
-      background: 'rgb(1, 2, 3)',
-      color: 'rgb(4, 5, 6)',
-      font: 'Inter',
-      scheme: 'dark',
+    // Assert — tokens and the column's ink and font; NO background, because the page is transparent.
+    const dark = htmlProps(tree).paint;
+    should(dark.scheme).equal('dark');
+    should(dark.tokens).containEql({
+      accent: 'rgb(120, 160, 255)',
+      fg: 'rgb(230, 230, 235)',
+      'page-fg': 'rgb(4, 5, 6)',
+      'page-font': 'Inter',
+      'radius-sm': '6px',
     });
+    should(Object.keys(dark)).eql(['scheme', 'tokens']);
 
-    // Act — the reader switches to a light theme while the page runs.
+    // Act — the reader switches to a light theme while the page runs, and the tokens change with it.
+    host.style.setProperty('--fg', 'rgb(20, 20, 24)');
+    host.style.setProperty('--accent', 'rgb(40, 80, 200)');
     run(() => document.documentElement.setAttribute('data-theme', 'studio-light'));
     await wait();
 
-    // Assert — repainted, not remounted.
-    should(htmlProps(tree).paint.scheme).equal('light');
+    // Assert — repainted with the light values, not remounted.
+    const light = htmlProps(tree).paint;
+    should(light.scheme).equal('light');
+    should(light.tokens).containEql({ accent: 'rgb(40, 80, 200)', fg: 'rgb(20, 20, 24)' });
     should(count(tree, 'iframe')).equal(1);
     surface.remove();
   });
@@ -1022,7 +1085,7 @@ describe('FyRenderBlock interactive html', () => {
     viewport(true);
 
     // Assert
-    should(htmlProps(tree).paint).eql({ background: '', color: '', font: '', scheme: 'dark' });
+    should(htmlProps(tree).paint).eql({ scheme: 'dark', tokens: {} });
   });
 });
 

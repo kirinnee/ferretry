@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SendResult } from '@ferretry/protocol';
+import type { SendResult, SubtreeView } from '@ferretry/protocol';
 import { Command, CommanderError } from 'commander';
 import should from 'should';
 import { AnswerQuestionController } from '../../../src/lib/session/answer-controller.ts';
@@ -13,6 +13,7 @@ import { SendMessageController } from '../../../src/lib/session/send-controller.
 import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
 import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
 import { SessionStatusController } from '../../../src/lib/session/status-controller.ts';
+import { type ISessionSubtree, SessionSubtreeController } from '../../../src/lib/session/subtree-controller.ts';
 import {
   attachmentView,
   type CapturedIo,
@@ -27,10 +28,29 @@ import { sessionView } from './session-fixtures.ts';
 const view = sessionView({ teammate: 'Hayden' });
 const sendResult = (disposition: SendResult['disposition'] = 'delivered'): SendResult => ({ ...view, disposition });
 
+const subtreeView: SubtreeView = {
+  root: { id: 'ses-lead', callsign: 'rhett' },
+  at: '2026-11-03T12:00:00.000Z',
+  endedWindowMs: 7_200_000,
+  rows: [
+    {
+      id: 'c1',
+      callsign: 'ada',
+      depth: 1,
+      model: 'sonnet',
+      state: 'running',
+      status: 'running',
+      card: { ref: '&F7', lane: 'Implement' },
+    },
+  ],
+};
+
 interface Harness {
   readonly run: (argv: readonly string[]) => Promise<void>;
   readonly api: RecordingApi;
   readonly io: CapturedIo;
+  /** The ids `status --subtree` asked the daemon about. */
+  readonly subtreeAsked: string[];
   readonly files: FakeFiles;
   /** What commander itself printed, such as `--help`. */
   readonly printed: string[];
@@ -55,6 +75,13 @@ function harness(
     upload: attachmentView,
     ...responses,
   });
+  const subtreeAsked: string[] = [];
+  const subtree: ISessionSubtree = {
+    subtree: async id => {
+      subtreeAsked.push(id);
+      return subtreeView;
+    },
+  };
   const { io, presenter } = capturedPresenter();
   // Not the shipped name, so a help line that spells the binary instead of deriving it fails here.
   const program = new Command().name('foo').exitOverride();
@@ -65,6 +92,13 @@ function harness(
     start: new StartSessionController(api, files, presenter, environment, 'fy'),
     list: new ListSessionsController(api, presenter, new RecordingBoard(), { amber: cell => cell }),
     status: new SessionStatusController(api, presenter),
+    subtree: new SessionSubtreeController(
+      subtree,
+      presenter,
+      environment,
+      { nowMs: () => Date.parse('2026-11-03T12:00:00.000Z') },
+      { amber: cell => cell },
+    ),
     send: new SendMessageController(api, files, presenter, environment, WAIT_CLOCK),
     answer: new AnswerQuestionController(api, presenter),
     names: new SuggestNamesController(api, presenter),
@@ -75,6 +109,7 @@ function harness(
   });
   return {
     api,
+    subtreeAsked,
     io,
     files,
     printed,
@@ -243,6 +278,17 @@ describe('registerSessionCommands · start', () => {
     should(subject.api.calls[0]?.args[0]).containDeep({ parent: 'ses-lead' });
   });
 
+  it('should pass an existing card to take over, by its bare id', async () => {
+    // Arrange
+    const subject = harness({}, { cwd: '/work/repo' });
+
+    // Act
+    await subject.run(['start', 'go', '--agent', 'claude-alpha', '--card', '&F121']);
+
+    // Assert
+    should(subject.api.calls[0]?.args[0]).containDeep({ card: 'F121' });
+  });
+
   it('should reject an unknown --mode at parse time', async () => {
     // Arrange
     const subject = harness();
@@ -325,6 +371,58 @@ describe('registerSessionCommands · the rest of the group', () => {
     should(subject.api.calls).deepEqual([{ method: 'get', args: ['ses-1'] }]);
   });
 
+  it("should show the calling session's sub-ferrets as one table with --subtree, asking only the subtree route", async () => {
+    // Arrange
+    const subject = harness({}, { cwd: '/work/repo', callerSessionId: 'ses-lead' });
+
+    // Act
+    await subject.run(['status', '--subtree']);
+
+    // Assert
+    should(subject.subtreeAsked).deepEqual(['ses-lead']);
+    should(subject.api.calls).be.empty();
+    should(subject.io.reported[0]).match(/^rhett \(ses-lead\): 1 descendant$/);
+    should(subject.io.reported.join('\n')).match(/ada\s+sonnet\s+running\s+&F7 Implement/);
+  });
+
+  it("should show the named session's subtree, and print the same rows as JSON with --json", async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.run(['status', '--subtree', 'ses-boss', '--json']);
+
+    // Assert
+    should(subject.subtreeAsked).deepEqual(['ses-boss']);
+    should(JSON.parse(subject.io.out.join('\n'))).deepEqual(subtreeView);
+  });
+
+  it('should ask the owner outside a pane for an id instead of guessing one', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.run(['status', '--subtree']);
+
+    // Assert
+    should(subject.subtreeAsked).be.empty();
+    should(subject.io.err.join('\n')).match(/name the session whose descendants to show/);
+    should(subject.io.exitCode).equal(2);
+  });
+
+  it('should still require an id for a plain status', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.run(['status']);
+
+    // Assert
+    should(subject.api.calls).be.empty();
+    should(subject.io.err.join('\n')).match(/missing the session id/);
+    should(subject.io.exitCode).equal(2);
+  });
+
   it('should send a message with its attachments and flags', async () => {
     // Arrange
     const subject = harness({}, { cwd: '/work/repo', callerSessionId: 'ses-caller' });
@@ -348,6 +446,7 @@ describe('registerSessionCommands · the rest of the group', () => {
       message: 'heads up\n\nfrom the file',
       attachmentIds: ['att-1'],
       now: true,
+      label: 'blocker',
     });
   });
 
@@ -372,7 +471,26 @@ describe('registerSessionCommands · the rest of the group', () => {
 
     // Assert
     should(subject.api.methods()).deepEqual(['send']);
-    should(subject.api.calls[0]?.args[1]).deepEqual({ message: 'yes go ahead', attachmentIds: [], now: false });
+    should(subject.api.calls[0]?.args[1]).deepEqual({
+      message: 'yes go ahead',
+      attachmentIds: [],
+      now: false,
+      label: 'action',
+    });
+  });
+
+  it('should carry --kind on send and on reply', async () => {
+    // Arrange
+    const send = harness();
+    const reply = harness();
+
+    // Act
+    await send.run(['send', 'ses-1', 'fyi only', '--kind', 'fyi']);
+    await reply.run(['reply', 'ses-1', 'done', '--kind', 'blocker']);
+
+    // Assert
+    should(send.api.calls[0]?.args[1]).containDeep({ label: 'fyi' });
+    should(reply.api.calls[0]?.args[1]).containDeep({ label: 'blocker' });
   });
 
   it('should answer a pending question with labels, other and responses', async () => {
