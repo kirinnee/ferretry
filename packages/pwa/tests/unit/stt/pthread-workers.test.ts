@@ -44,6 +44,20 @@ describe('vetThreadUrl', () => {
       should(vetThreadUrl(other, scope, trust)).equal(other);
   });
 
+  it('hands a URL it cannot read, or one the policy refuses, on unchanged', () => {
+    const unreadable = {
+      toString: (): string => {
+        throw new Error('no string form');
+      },
+    };
+    should(vetThreadUrl(unreadable, scope, trust)).equal(unreadable);
+    const refusing = (): string => {
+      throw new TypeError('policy says no');
+    };
+    const mine = `${ORIGIN}/assets/parakeet-worker-Ab12_-x.js`;
+    should(vetThreadUrl(mine, scope, refusing)).equal(mine);
+  });
+
   it('never throws, whatever it is handed', () => {
     for (const odd of [undefined, null, 5, {}, Symbol.iterator.description])
       should(() => vetThreadUrl(odd, scope, trust)).not.throw();
