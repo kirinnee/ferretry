@@ -2,7 +2,8 @@
  * Review captures of Insights › Analytics — the Overview and the Query page — inside the real app
  * chrome, at desktop 1440 and phone 390, in light and dark, for the neo and studio theme families.
  *
- *   bun harness/analytics-screenshots.ts [outDir]     # default harness/out/analytics
+ *   bun harness/analytics-screenshots.ts [outDir] [page-prefix]   # default harness/out/analytics, every page
+ *   ANALYTICS_DESKTOP_WIDTH=1280 bun harness/analytics-screenshots.ts …   # desktop width other than 1440
  *
  * Each capture also MEASURES the page: any element whose right edge passes the viewport, any leaf whose
  * text is clipped by its own box, and the document's scroll width, written to `facts.json` beside the
@@ -48,7 +49,7 @@ const server = Bun.serve({
 const PHONE_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 const VIEWPORTS = [
-  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'desktop', width: Number(process.env.ANALYTICS_DESKTOP_WIDTH ?? 1440), height: 900 },
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 const FAMILIES = ['neo', 'studio'] as const;
@@ -59,7 +60,20 @@ const PAGES = [
     name: 'query',
     search: `?app-chrome=analytics&analytics-view=query&q=${encodeURIComponent('sum(cost_usd) by (model) [7d]')}`,
   },
+  // B149: the owner's exact query across two machines, one of them on an older Ferretry — every machine
+  // refuses, each named with what to do.
+  {
+    name: 'query-every-machine-failed',
+    search: `?app-chrome=analytics&analytics-view=query&analytics-older-machine&q=${encodeURIComponent('sum(cost_usd) by (id)')}`,
+  },
+  // …and a query the current machine answers while the older one misses it.
+  {
+    name: 'query-older-machine-missing',
+    search: `?app-chrome=analytics&analytics-view=query&analytics-older-machine&q=${encodeURIComponent('sum(cost_usd) by (model) [7d]')}`,
+  },
 ] as const;
+/** Only the pages whose name starts with this, when given (`bun harness/analytics-screenshots.ts out query-`). */
+const pagePrefix = process.argv[3] ?? '';
 
 /** A reader's saved queries, so the Query page's saved list is not empty in review. */
 const SAVED_KEY = 'fy-analytics-saved-queries-v1';
@@ -101,7 +115,7 @@ try {
           },
           [family, scheme, SAVED_KEY, JSON.stringify(SAVED_QUERIES)] as const,
         );
-        for (const target of PAGES) {
+        for (const target of PAGES.filter(candidate => candidate.name.startsWith(pagePrefix))) {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await page.goto(`${server.url.href}${target.search}`);
           await page.locator('#harness-app-chrome').waitFor();

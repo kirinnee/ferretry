@@ -41,6 +41,8 @@ export class DaemonResponseError extends Error {
     readonly status: number,
     message: string,
     readonly code?: string,
+    /** The Ferretry version the answering daemon said it runs (`x-fy-version`), when the caller read it. */
+    readonly daemonVersion?: string,
   ) {
     super(message);
     this.name = 'DaemonResponseError';

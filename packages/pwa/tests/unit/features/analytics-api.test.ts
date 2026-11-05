@@ -61,6 +61,22 @@ describe('analytics transport', () => {
       message: 'HTTP 500',
     });
   });
+
+  it('keeps the version a refusing daemon says it runs', async () => {
+    // A machine on an older build answers a bare 500 where a current one refuses readably (B149), so the
+    // version is what lets the page say which Ferretry that machine is on.
+    await expect(
+      fetchAnalytics(
+        daemon,
+        'sum(cost_usd) by (id)',
+        async () =>
+          new Response(JSON.stringify({ error: 'the daemon failed to handle this request', code: 'internal_error' }), {
+            status: 500,
+            headers: { 'x-fy-version': '4.270.0' },
+          }),
+      ),
+    ).rejects.toMatchObject({ status: 500, code: 'internal_error', daemonVersion: '4.270.0' });
+  });
 });
 
 describe('session analytics transport', () => {

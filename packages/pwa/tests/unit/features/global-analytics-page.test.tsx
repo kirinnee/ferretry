@@ -628,8 +628,66 @@ describe('GlobalAnalyticsPage', () => {
       await Promise.resolve();
     });
     await settle();
-    expect(text(renderer)).toContain('studio-mac did not answer: asleep Its sessions are not in this result.');
+    expect(text(renderer)).toContain('studio-mac did not answer: asleep. Its sessions are not in this result.');
     window.history.replaceState({}, '', '/');
+  });
+
+  it('names each machine and what to do when the owner’s too-wide query fails everywhere (B149)', async () => {
+    // THE BUG the owner hit on a phone: `sum(cost_usd) by (id)` across two machines. The machine on the
+    // fixed build refused it with the readable too_many_groups 400, the OLDER machine answered its bare
+    // 500, and the page showed only the first machine's reason — "the daemon failed to handle this
+    // request" — with no machine named and nothing to do about it.
+    const older = new DaemonResponseError(500, 'the daemon failed to handle this request', 'internal_error');
+    const wide = new DaemonResponseError(
+      400,
+      'analytics query produces more than 100 groups; add a matcher',
+      'too_many_groups',
+    );
+    const renderer = mount(
+      <GlobalAnalyticsPage
+        connection={daemonA}
+        machines={MACHINES}
+        view="query"
+        onNavigate={() => {}}
+        onQueryChange={() => {}}
+        now={NOW}
+        initialQuery="sum(cost_usd) by (id)"
+        requestAnalytics={async daemon => {
+          throw daemon.daemonId === 'daemon-a' ? older : wide;
+        }}
+      />,
+    );
+    await settle();
+    const shown = text(renderer);
+    expect(shown).not.toContain('failed to handle this request');
+    expect(shown).toContain('The query failed on every machine');
+    expect(shown).toContain('studio-mac: the daemon hit an unexpected error on this query.');
+    expect(shown).toContain('update it: run “fy daemon update”');
+    expect(shown).toContain('kirin-box: analytics query produces more than 100 groups; add a matcher.');
+  });
+
+  it('says what to do about an older machine that misses a run the others answered (B149)', async () => {
+    const renderer = mount(
+      <GlobalAnalyticsPage
+        connection={daemonA}
+        machines={MACHINES}
+        view="query"
+        onNavigate={() => {}}
+        onQueryChange={() => {}}
+        now={NOW}
+        initialQuery="{}"
+        requestAnalytics={async (daemon, query) => {
+          if (daemon.daemonId === 'daemon-a')
+            throw new DaemonResponseError(500, 'the daemon failed to handle this request', 'internal_error');
+          return rawResponse(FLEET_B, query);
+        }}
+      />,
+    );
+    await settle();
+    const shown = text(renderer);
+    expect(shown).not.toContain('failed to handle this request');
+    expect(shown).toContain('studio-mac did not answer: the daemon hit an unexpected error on this query.');
+    expect(shown).toContain('Its sessions are not in this result.');
   });
 
   it('reads the query a link brought', () => {

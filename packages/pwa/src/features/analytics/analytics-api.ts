@@ -4,7 +4,7 @@
  * Analytics data is never read from the page origin or a module singleton: the
  * paired connection is an explicit input to every request.
  */
-import { AnalyticsResponseSchema, type AnalyticsResponse } from '@ferretry/protocol';
+import { AnalyticsResponseSchema, type AnalyticsResponse, FY_VERSION_HEADER } from '@ferretry/protocol';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -21,6 +21,9 @@ const responseError = async (response: Response): Promise<DaemonResponseError> =
     response.status,
     typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
     typeof body.code === 'string' ? body.code : undefined,
+    // Kept so a refusal can say which Ferretry the machine runs: an older one is the usual reason a
+    // query the others answer readably comes back as a bare 500.
+    response.headers.get(FY_VERSION_HEADER) ?? undefined,
   );
 };
 

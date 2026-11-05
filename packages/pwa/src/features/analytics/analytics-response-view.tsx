@@ -13,6 +13,7 @@ import {
   analyticsRawMetricValue,
 } from '@ferretry/protocol';
 
+import { UPDATE_MACHINE_WHERE } from '../../lib/machine-update-words.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import { DaemonResponseError } from '../../lib/runtime-models.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -24,12 +25,27 @@ import {
   formatUsdMicros,
 } from './analytics-result-table.tsx';
 
-/** Gives the temporarily unavailable analytics index an actionable explanation. */
+/** The code a daemon's dispatcher answers a route that threw something it did not name. */
+const INTERNAL_ERROR_CODE = 'internal_error';
+
+/**
+ * What one machine's refusal means, in words a person can act on.
+ *
+ * A BARE 500 IS NEVER SHOWN AS ITS OWN TEXT. "the daemon failed to handle this request" names no cause
+ * and no remedy, and on a fleet the usual cause is a machine on an older Ferretry that throws where the
+ * current build refuses readably (B149: a too-wide query is a typed 400 from 4.278.0 on, a bare 500
+ * before it). So it is said as an unexpected error, with the version the machine reported when it did,
+ * and the update that most likely fixes it.
+ */
 export const analyticsErrorMessage = (error: unknown): string => {
   if (error instanceof DaemonResponseError && error.status === 503)
     return 'Analytics index is unavailable while the daemon catches up (503).';
   if (error instanceof DaemonResponseError && error.code === ANALYTICS_TOO_MANY_GROUPS_CODE)
     return `${error.message}. Narrow it with a matcher such as {model=…} or {project=…}, a shorter range, or fewer \`by\` labels.`;
+  if (error instanceof DaemonResponseError && error.status >= 500 && error.code === INTERNAL_ERROR_CODE) {
+    const runs = error.daemonVersion === undefined ? '' : ` (it runs Ferretry ${error.daemonVersion})`;
+    return `the daemon hit an unexpected error on this query${runs}. If that machine is on an older Ferretry, update it: ${UPDATE_MACHINE_WHERE}, then run the query again.`;
+  }
   return error instanceof Error ? error.message : String(error);
 };
 
