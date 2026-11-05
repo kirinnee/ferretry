@@ -14,7 +14,7 @@ const memory = () => {
   };
 };
 
-const setup = (overrides: Partial<ThemeState> = {}) => {
+const setup = (overrides: Partial<ThemeState> = {}, googleMapsAvailable = false) => {
   const controls = new DaemonControlsStore(memory());
   const calls: string[] = [];
   const theme: ThemeState = {
@@ -41,6 +41,7 @@ const setup = (overrides: Partial<ThemeState> = {}) => {
         device={controls.snapshot().device}
         computerAvailable={false}
         controls={controls}
+        googleMapsAvailable={googleMapsAvailable}
       />
     </ul>,
   ).root;
@@ -99,6 +100,30 @@ describe('AppearanceGroups', () => {
     expect(calls).toEqual(['mode:dark', 'scale:large', 'density:minimal']);
     expect(controls.snapshot().device.motion).toBe('reduced');
     expect(controls.snapshot().device.chatWidth).toBe('full');
+  });
+
+  it('offers Map style only in a build that carries the Google Maps key, and says what Google sees', () => {
+    const without = setup().root;
+    expect(rowNames(groupNamed(without, 'Layout'))).not.toContain('Map style');
+
+    const { root, controls } = setup({}, true);
+    expect(rowNames(groupNamed(root, 'Layout'))).toEqual([
+      'Density',
+      'Conversation width',
+      'Group Needs you at the top',
+      'Open links in',
+      'Map style',
+      'Message marks',
+    ]);
+    const row = root.find(node => node.props['data-setting-row'] === 'Map style');
+    expect(textOf(row)).toContain('Google sees which places you open');
+    const group = root.find(node => node.props['aria-label'] === 'Map style' && node.props.role === 'radiogroup');
+    const labels = group.findAllByType('label').map(label => textOf(label));
+    expect(labels.join('|')).toContain('OpenStreetMap');
+    expect(labels.join('|')).toContain('Google Maps');
+    expect(controls.snapshot().device.mapStyle).toBe('osm');
+    run(() => group.findAllByType('input')[1]?.props.onChange());
+    expect(controls.snapshot().device.mapStyle).toBe('google');
   });
 
   it('offers a link target the computer only when there is one', () => {

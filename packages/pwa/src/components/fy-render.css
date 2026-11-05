@@ -690,6 +690,20 @@
   color: var(--fg-soft);
 }
 
+/* Google's Embed frame stands where the Leaflet canvas does: same box, no border of its own. Its own
+   controls and attribution are inside the frame, so the zoom buttons and the OSM credit are not drawn. */
+.fy-render-map-frame {
+  display: block;
+  border: 0;
+}
+
+/* One muted line under a map: why it is OpenStreetMap when Google was asked for, or the lone pin's label. */
+.fy-render-map-note {
+  margin: 0.3em 0 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
 /* A map that could not be drawn: one muted line, then the coordinates it could read. */
 .fy-render-map-listing > ul {
   margin: 0.3em 0 0;

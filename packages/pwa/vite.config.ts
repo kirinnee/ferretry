@@ -43,6 +43,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
+import { readEmbedKey } from './src/lib/map-style.ts';
 import { textScalePostcss } from './src/lib/text-scale-postcss.ts';
 import tailwindConfig from './tailwind.config.ts';
 
@@ -82,6 +83,26 @@ const SHERPA_ALIASES = [
  * importing the shared default, which is the fact it pins.
  */
 const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
+
+/**
+ * THE FERRETRY GOOGLE MAPS EMBED KEY, baked in at build time — or nothing.
+ *
+ * Settings › Appearance › Map style offers Google Maps only in a build that carries this key
+ * (`src/lib/map-style.ts`, `docs/fy-render.md` › Maps). It is a PUBLIC, referrer-restricted browser key —
+ * anyone reading the page can read it, which is exactly why it is restricted to the app's addresses and to
+ * the one API — so it is set as a GitHub *variable*, not a secret (`pwa-pages.yaml` passes
+ * `vars.FY_GOOGLE_MAPS_EMBED_KEY`). A build, fork or Nix profile without it ships no Google option, and
+ * that is a working app, not an error. A value that is not shaped like a key is dropped with a warning
+ * here rather than shipped, for the same reason: a frame that only says "invalid key" helps nobody.
+ */
+const googleEmbedKey = ((): string | null => {
+  const raw = process.env.FY_GOOGLE_MAPS_EMBED_KEY?.trim() ?? '';
+  if (raw === '') return null;
+  const key = readEmbedKey(raw);
+  if (key === null)
+    console.warn('FY_GOOGLE_MAPS_EMBED_KEY is not shaped like a Google API key; building without Google Maps.');
+  return key;
+})();
 
 /**
  * THE APP'S OWN RELEASE VERSION, stamped from the repository's `VERSION` — the release semantic-release
@@ -339,6 +360,7 @@ export default defineConfig({
   define: {
     __FY_APP_VERSION__: JSON.stringify(appVersion),
     __FY_CHANGELOG__: JSON.stringify(recentChangelog),
+    __FY_GOOGLE_MAPS_EMBED_KEY__: JSON.stringify(googleEmbedKey),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
     ),
