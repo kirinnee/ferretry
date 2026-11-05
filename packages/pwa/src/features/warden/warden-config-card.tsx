@@ -60,8 +60,8 @@ export interface WardenConfigCardProps {
   readonly error?: string | null;
   readonly saved?: boolean;
   readonly onSave: (patch: WardenConfigPatch) => void;
-  /** The page has its own one primary (setup's footer): Save is an ordinary button. */
-  readonly quiet?: boolean;
+  /** The page saves it (setup's footer `Save and continue`): the card draws no Save of its own. */
+  readonly saveInFooter?: boolean;
 }
 
 export function WardenConfigCard({
@@ -78,7 +78,7 @@ export function WardenConfigCard({
   error = null,
   saved = false,
   onSave,
-  quiet = false,
+  saveInFooter = false,
 }: WardenConfigCardProps) {
   const errors = wardenFormErrors(draft);
   const patch = wardenConfigPatchFrom(view.config, draft);
@@ -99,15 +99,17 @@ export function WardenConfigCard({
         {...(onNavigate === undefined ? {} : { onNavigate })}
       />
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className="kt-btn min-h-[44px]"
-          {...(quiet ? {} : { 'data-variant': 'primary' })}
-          disabled={!dirty || saving || hasWardenFormErrors(errors)}
-          onClick={() => onSave(patch)}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        {saveInFooter ? null : (
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            data-variant="primary"
+            disabled={!dirty || saving || hasWardenFormErrors(errors)}
+            onClick={() => onSave(patch)}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
         {dirty && !saving && (
           <button
             type="button"

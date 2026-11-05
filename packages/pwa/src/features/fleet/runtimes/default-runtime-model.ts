@@ -39,9 +39,14 @@ export const runtimeStateWords = (runtime: FleetRuntimeView, machine: FleetMachi
   return LOGIN_WORDS[runtime.credential.status ?? 'checking'];
 };
 
-/** An option of the select: "claude-default · ready". */
-export const defaultOptionLabel = (runtime: FleetRuntimeView, machine: FleetMachineView | null): string =>
-  `${runtime.name} · ${runtimeStateWords(runtime, machine)}`;
+/**
+ * An option of the select: "claude-default · ready". A login whose state is not known yet adds nothing:
+ * the option is not being checked, so "checking" would only be noise.
+ */
+export const defaultOptionLabel = (runtime: FleetRuntimeView, machine: FleetMachineView | null): string => {
+  const words = runtimeStateWords(runtime, machine);
+  return words === LOGIN_WORDS.checking ? runtime.name : `${runtime.name} · ${words}`;
+};
 
 /** Whether this runtime is the machine's default for new agents. */
 export const isDefaultRuntime = (machine: FleetMachineView | null, runtime: FleetRuntimeView): boolean =>

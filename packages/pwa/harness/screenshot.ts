@@ -3645,10 +3645,9 @@ try {
             await setupScreen.locator('[data-harness-name="claude"]').fill('claude-main');
             await setupShot('claude-name', 'Claude Code, its runtime named in place');
             await setupPrimary.click();
-            // The import moves on by itself: the next page is Codex, carrying what Claude Code did.
-            await setupScreen.locator('[data-setup-note="import-carry"]').waitFor({ state: 'visible' });
+            // The import moves on by itself: the next page is Codex.
             await setupStep('codex');
-            await setupShot('codex', 'Codex, carrying the Claude Code import, not signed in');
+            await setupShot('codex', 'Codex, not signed in');
             await setupPrimary.click();
             await setupStep('speedups');
             for (const [step, label] of [

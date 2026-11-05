@@ -20,13 +20,20 @@ import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import { Button } from '../../../shell/primitives.tsx';
+import { readConfigFile } from '../../config-files/config-files-api.ts';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
 import { wardenMachineDefaultLogin, wardenSummary } from '../../warden/warden-settings-model.ts';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { FooterQuietContext, FooterSlotContext, useFooterQuietState } from './footer-slot.tsx';
+import {
+  FooterQuietContext,
+  FooterSaveContext,
+  FooterSlotContext,
+  useFooterQuietState,
+  usePendingSavesState,
+} from './footer-slot.tsx';
 import { type HarnessReport, OnboardingHarnessStep } from './harness-step.tsx';
 import {
   answerOnboardingHarness,
@@ -64,6 +71,7 @@ import { machineItemHash } from './settings-route.ts';
 import type { MachineSetupProgressPort } from './setup-progress.ts';
 import { SetupNote } from './setup-ui.tsx';
 import { OnboardingSpeedupsStep } from './speedups-step.tsx';
+import { machineVoiceEngine, VOICE_FILE } from './voice-default.ts';
 
 export interface MachineOnboardingProps extends MachineTabProps {
   /** Every OTHER machine this browser has paired, for Start from › Clone. */
@@ -92,24 +100,18 @@ export interface MachineOnboardingProps extends MachineTabProps {
 const ownsPrimary = (step: MachineSetupStepId, start: MachineSetupProgress['start']): boolean =>
   step === 'claude' || step === 'codex' || step === 'speedups' || (step === 'start' && start === 'clone');
 
-/** What the last import said, carried to the page it moved to. */
+/** The last import left something to do: worth saying on the page it moved to. A good import says nothing here. */
+const carriesNote = (report: HarnessReport): boolean => report.conversationsFailed || report.signIn.length > 0;
+
+/**
+ * What the last import left to do, carried to the page it moved to: conversations that were not brought
+ * in, or a runtime that still needs a sign-in. The rail's tick already says the step is set.
+ */
 function ImportCarryNote({ report, machineName }: { readonly report: HarnessReport; readonly machineName: string }) {
   const name = report.harness === 'claude' ? 'Claude Code' : 'Codex';
   return (
-    <SetupNote
-      live
-      tone={report.summary === null && report.conversationsFailed ? 'warn' : 'ok'}
-      name="import-carry"
-      title={
-        report.runtime !== null
-          ? `${report.runtime} is ready`
-          : report.summary === null
-            ? `${name} is already set up`
-            : `${name} imported`
-      }
-    >
-      {report.summary === null ? null : <span>{report.summary}</span>}
-      {report.conversations === null ? null : <span>{report.conversations}</span>}
+    <SetupNote live tone="warn" name="import-carry" title={`Still to do from ${name}`}>
+      {report.conversationsFailed && report.conversations !== null ? <span>{report.conversations}</span> : null}
       {report.signIn.map(item => (
         <a
           key={item.credential}
@@ -134,11 +136,12 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
     void (async () => {
       const client = await createClient(connection).catch(() => null);
       if (client === null) return;
-      const [speedups, warden, learning, runtimes] = await Promise.all([
+      const [speedups, warden, learning, runtimes, voice] = await Promise.all([
         readSpeedups(client).catch(() => null),
         client.request('/v1/warden/config', WardenConfigViewSchema).catch(() => null),
         client.request('/v1/learning/config', LearningConfigSchema).catch(() => null),
         readFleetRuntimes(client).catch(() => null),
+        readConfigFile(client, VOICE_FILE).catch(() => null),
       ]);
       if (!live) return;
       const jev = jevKeyStatus(speedups).state === 'set';
@@ -148,6 +151,7 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
           : { keys: Object.fromEntries(speedups.providers.map(provider => [provider.label, provider.set])) }),
         ...(warden === null ? {} : { warden: wardenSummary(warden.config, jev, wardenMachineDefaultLogin(warden)) }),
         ...(learning === null ? {} : { passiveDefault: learning.passiveDefault }),
+        ...(voice === null ? {} : { voiceEngine: machineVoiceEngine(voice.text) }),
         ...(runtimes === null
           ? {}
           : {
@@ -194,6 +198,8 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
   );
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const footerQuiet = useFooterQuietState();
+  const pending = usePendingSavesState();
+  const [saving, setSaving] = useState(false);
   const at = progress.at;
   const titleRef = useRef<HTMLHeadingElement>(null);
 
@@ -226,6 +232,17 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
       .filter(item => facts.needsSignIn === undefined || facts.needsSignIn.includes(item.runtime))
       .map(item => `${item.runtime} still needs a sign-in (Settings › Sign-ins).`),
   ]);
+
+  /** Continue on a page with an edit not saved yet: save it, and move on only when every save went through. */
+  const saveAndContinue = async (): Promise<void> => {
+    setSaving(true);
+    try {
+      for (const edit of pending.saves) if (!(await edit.save())) return;
+      move(continueOnboarding);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const finish = (): void => {
     save?.(null);
@@ -286,6 +303,7 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
           <OnboardingVoiceStep
             tab={tab}
             {...(voice === undefined ? {} : { voice })}
+            onSet={() => move(current => markOnboardingStep(current, 'voice'))}
             {...(voiceCleanup === undefined ? {} : { cleanup: voiceCleanup })}
           />
         );
@@ -322,7 +340,8 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
       className={cn(
         layout === 'column'
           ? 'hidden min-h-0 flex-col gap-0.5 overflow-y-auto border-r border-border-strong px-3 py-5 md:flex'
-          : 'scroll-thin relative flex shrink-0 gap-1 overflow-x-auto border-b border-border-strong px-panel py-2 md:hidden',
+          : // No scrollbar on the phone strip: its thumb read as a stray underline under the bar.
+            'relative flex shrink-0 gap-1 overflow-x-auto border-b border-border-strong px-panel py-2 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden',
       )}
     >
       <p
@@ -402,12 +421,14 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             >
               {at === 'done' ? `${machineName} is set up` : onboardingStepLabel(at)}
             </h1>
-            {carried !== null && carried.on === at ? (
+            {carried !== null && carried.on === at && carriesNote(carried.report) ? (
               <ImportCarryNote report={carried.report} machineName={machineName} />
             ) : null}
             <FooterSlotContext.Provider value={slot}>
               <FooterQuietContext.Provider value={footerQuiet}>
-                <div className="min-w-0">{body(at)}</div>
+                <FooterSaveContext.Provider value={pending.report}>
+                  <div className="min-w-0">{body(at)}</div>
+                </FooterSaveContext.Provider>
               </FooterQuietContext.Provider>
             </FooterSlotContext.Provider>
           </div>
@@ -433,18 +454,24 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
               )}
               <span className="contents" ref={setSlot} data-onboarding-slot="" />
               {at === 'done' ? (
-                <Button
-                  type="button"
-                  variant={footerQuiet.quiet ? 'outline' : 'primary'}
-                  data-onboarding-finish=""
-                  onClick={finish}
-                >
+                <Button type="button" variant="primary" data-onboarding-finish="" onClick={finish}>
                   Finish setup
                 </Button>
-              ) : ownsPrimary(at, progress.start) ? null : (
+              ) : ownsPrimary(at, progress.start) || footerQuiet.quiet ? null : pending.saves.length > 0 ? (
+                // An edit on this page is not saved yet: Continue saves it first, so nothing is dropped quietly.
                 <Button
                   type="button"
-                  variant={footerQuiet.quiet ? 'outline' : 'primary'}
+                  variant="primary"
+                  data-onboarding-next="save"
+                  disabled={saving || pending.saves.some(edit => !edit.ready)}
+                  onClick={() => void saveAndContinue()}
+                >
+                  {saving ? 'Saving…' : 'Save and continue'}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="primary"
                   data-onboarding-next=""
                   onClick={() => move(continueOnboarding)}
                 >

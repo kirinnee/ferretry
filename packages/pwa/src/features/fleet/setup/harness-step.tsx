@@ -5,7 +5,7 @@
  * import moves on by itself. The body shows, top to bottom:
  *
  * 1. **What was found** — ticked lines, with the full list behind Details. A login that is not signed in
- *    says so in one line and offers `Sign in first` (`first-run-sign-in.tsx`); it never blocks the import.
+ *    says so in one line and offers `Sign in now` (`first-run-sign-in.tsx`); it never blocks the import.
  * 2. **Also bring my conversations** — a tick before Import; they follow the runtime, from the last 7 days.
  * 3. **Runtime name** — shown as text with Change; the daemon's suggestion (`claude-default`) unless typed.
  * 4. **What changed** — Import again only: updates offered, none ticked (O6).
@@ -145,7 +145,8 @@ export function OnboardingHarnessStep({
     const now = listed.kind === 'done' ? listed.value.runtimes : [];
     setRuntimes(now);
     setScan(scanned.value);
-    if (runtimesOf(now, harness).length > 0) latest.current.onReady();
+    // Set only when the CLI is here to run it: a runtime left over for a CLI that is not installed runs nothing.
+    if (scanHasHarness(scanned.value, harness) && runtimesOf(now, harness).length > 0) latest.current.onReady();
   }, [harness]);
 
   useEffect(() => {
@@ -325,7 +326,7 @@ export function OnboardingHarnessStep({
                   data-harness-sign-in=""
                   onClick={() => setSigningIn(true)}
                 >
-                  Sign in first
+                  Sign in now
                 </button>
               </div>
             )}
@@ -793,6 +794,7 @@ function ProviderRuntime({
         refusal={changes.refusal}
         submitLabel={`Create ${name || 'runtime'}`}
         quiet={!leads}
+        lead={leads}
         disabled={problem !== null || !online}
         onSubmit={() => void create()}
       />

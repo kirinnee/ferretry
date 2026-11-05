@@ -119,6 +119,7 @@ export function FirstRunSignIn({
           refusal={changes.refusal}
           submitLabel={`Sign in to ${name}`}
           quiet={!leads}
+          lead={leads}
           onSubmit={() => void begin()}
         >
           <Button type="button" data-first-run-sign-in-close="" onClick={onClose}>

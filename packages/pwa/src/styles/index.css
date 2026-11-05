@@ -1454,10 +1454,14 @@ body {
   background: transparent;
   box-shadow: none;
 }
-.kt-btn[data-variant='ghost']:hover {
-  background: var(--surface-2);
-  border-color: transparent;
-  color: var(--fg);
+/* Only where a pointer can hover: on a touch screen :hover sticks to the last button tapped (a "‹ Back"
+   left filled grey on the page it opened). */
+@media (hover: hover) {
+  .kt-btn[data-variant='ghost']:hover {
+    background: var(--surface-2);
+    border-color: transparent;
+    color: var(--fg);
+  }
 }
 
 /* A ghost "‹ Back" that STARTS A ROW: its glyph sits on the content edge, as the approved prototype draws

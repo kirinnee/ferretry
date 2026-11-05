@@ -9,11 +9,12 @@
  */
 
 import type { FleetAccountChange, FleetAccountChangeView } from '@ferretry/protocol';
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { grantGuidance } from '../../../lib/grants.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
+import { FooterSlotContext, PrimaryAction } from '../setup/footer-slot.tsx';
 import {
   applyAccountChange,
   applyStagedChange,
@@ -125,6 +126,11 @@ export interface ChangeApplyPanelProps {
   readonly submitClassName?: string;
   /** The caller draws the submit button itself (in a pinned footer); the sentences here still show. */
   readonly hideSubmit?: boolean;
+  /**
+   * This form leads a setup page: its submit is the pinned footer's one primary. Outside setup (no footer)
+   * it changes nothing.
+   */
+  readonly lead?: boolean;
 }
 
 /** Whether the change may be sent now: the authority is read and allows it, and nothing is in flight. */
@@ -145,8 +151,12 @@ export function ChangeApplyPanel({
   children,
   submitClassName,
   hideSubmit = false,
+  lead = false,
 }: ChangeApplyPanelProps) {
   const ready = changeReady(authority, disabled, busy);
+  const slot = useContext(FooterSlotContext);
+  const inFooter = lead && !hideSubmit && slot !== null;
+  const bodySubmit = !hideSubmit && !inFooter;
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -170,9 +180,12 @@ export function ChangeApplyPanel({
           {refusal}
         </p>
       )}
-      {hideSubmit && children === undefined ? null : (
+      {inFooter ? (
+        <PrimaryAction lead label={busy ? busyLabel : submitLabel} disabled={!ready} onClick={onSubmit} name="change" />
+      ) : null}
+      {!bodySubmit && children === undefined ? null : (
         <div className="flex flex-wrap gap-2">
-          {hideSubmit ? null : (
+          {!bodySubmit ? null : (
             <Button
               type="submit"
               variant={quiet && variant === 'primary' ? 'outline' : variant}

@@ -7,7 +7,7 @@
  */
 
 import type { SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
-import { ExternalLink } from 'lucide-react';
+import { ChevronRight, ExternalLink } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { putSecret } from '../../secrets/secrets-api.ts';
 import { readSpeedups, testSpeedup } from '../../speedups/speedups-api.ts';
@@ -218,13 +218,19 @@ export function OnboardingSpeedupsStep({
           {jev === undefined ? null : <div className="kt-panel p-panel">{field(jev)}</div>}
           {dictation.length === 0 ? null : (
             <details
-              className="kt-panel p-panel"
+              className="group kt-panel p-panel"
               data-speedups-dictation=""
               // A short key typed in here must not stay out of sight behind a closed heading.
               open={dictationOpen || unfinished.some(status => status.provider !== 'jev')}
               onToggle={event => setDictationOpen(event.currentTarget.open)}
             >
-              <summary className="cursor-pointer text-cell font-semibold text-fg">
+              {/* The same chevron as every other disclosure in setup, not the browser's own triangle. */}
+              <summary className="flex min-h-control cursor-pointer list-none items-center gap-1 text-cell font-semibold text-fg [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  size={14}
+                  aria-hidden="true"
+                  className="shrink-0 transition-transform group-open:rotate-90"
+                />
                 Dictation clean-up keys ({dictation.map(status => status.label).join(', ')})
               </summary>
               <div className="mt-3 flex min-w-0 flex-col gap-4">{dictation.map(field)}</div>

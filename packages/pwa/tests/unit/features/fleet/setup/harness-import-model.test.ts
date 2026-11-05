@@ -473,7 +473,7 @@ describe('foundLines', () => {
 
   it('says a login that is not signed in can be signed in after importing (E4)', () => {
     const [line] = foundLines(foundRows(scan(), 'codex', false));
-    expect(line).toEqual({ ok: false, text: 'Not signed in — you can sign in after importing' });
+    expect(line).toEqual({ ok: false, text: 'Not signed in — sign in now, or after importing' });
   });
 
   it('says a due refresh renews itself', () => {
@@ -498,7 +498,7 @@ describe('foundLines', () => {
   it('says any other login that is not ready can be signed in after importing', () => {
     expect(line({ key: 'account', title: 'Login expired', status: 'needs_sign_in' })).toEqual({
       ok: false,
-      text: 'Login expired — you can sign in after importing',
+      text: 'Login expired — sign in now, or after importing',
     });
   });
 

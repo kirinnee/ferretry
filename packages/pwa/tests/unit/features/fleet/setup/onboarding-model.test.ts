@@ -83,8 +83,8 @@ describe('moving through the rail', () => {
   });
 
   it('turns a skipped step into a set one when Continue is pressed on it', () => {
-    const next = continueOnboarding(progress({ at: 'voice', states: { voice: 'skipped' } }));
-    expect(next.states.voice).toBe('done');
+    const next = continueOnboarding(progress({ at: 'learning', states: { learning: 'skipped' } }));
+    expect(next.states.learning).toBe('done');
   });
 
   it.each(['claude', 'codex'] as const)(
@@ -95,6 +95,13 @@ describe('moving through the rail', () => {
       expect(next.states).toEqual({ pair: 'done', [harness]: 'skipped' });
     },
   );
+
+  it('counts Continue on Voice with no engine named as skipped, and keeps it set once one is', () => {
+    expect(continueOnboarding(progress({ at: 'voice' })).states).toEqual({ pair: 'done', voice: 'skipped' });
+    const named = continueOnboarding(progress({ at: 'voice', states: { voice: 'done' } }));
+    expect(named.at).toBe('warden');
+    expect(named.states.voice).toBe('done');
+  });
 
   it.each(['claude', 'codex'] as const)('keeps a %s step set when Continue is pressed after its import', harness => {
     const next = continueOnboarding(progress({ at: harness, states: { pair: 'done', [harness]: 'done' } }));

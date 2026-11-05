@@ -104,17 +104,27 @@ export interface SetupRowProps {
 }
 
 export function SetupRow({ title, detail, label, status, statusLabel, children, name }: SetupRowProps) {
+  const dot =
+    status === undefined ? null : (
+      <AccountStatus
+        word={status}
+        {...(statusLabel === undefined ? {} : { label: statusLabel })}
+        className="shrink-0 pt-0.5"
+      />
+    );
   return (
-    <div className="kt-panel flex min-w-0 items-start gap-3 p-panel" data-setup-row={name}>
-      {status === undefined ? null : (
-        <AccountStatus
-          word={status}
-          {...(statusLabel === undefined ? {} : { label: statusLabel })}
-          className="pt-0.5"
-        />
+    // Wraps: on a phone the value takes a line of its own, so an address breaks at its edge, not mid-word.
+    <div className="kt-panel flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1 p-panel" data-setup-row={name}>
+      {label === undefined ? (
+        dot
+      ) : (
+        // The status sits inside the label's column, so every row's value starts at the same place.
+        <span className="flex w-24 shrink-0 items-start gap-1.5 text-meta text-muted">
+          {dot}
+          {label}
+        </span>
       )}
-      {label === undefined ? null : <span className="w-24 shrink-0 text-meta text-muted">{label}</span>}
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
         <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{title}</span>
         {detail === undefined ? null : <span className="[overflow-wrap:anywhere] text-cell text-muted">{detail}</span>}
       </span>

@@ -21,7 +21,14 @@ import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-pan
 import { type EnvironmentDraft, environmentChange, environmentDraftProblem, presetScope } from './environment-model.ts';
 import { LocalModelsPanel } from './local-models-panel.tsx';
 import { LoginScopeChip } from './login-scope-chip.tsx';
-import { blankRequiredValues, oneClickDraft, type Prefill, type SecretField, secretFields } from './provider-model.ts';
+import {
+  blankRequiredValues,
+  oneClickDraft,
+  type Prefill,
+  type SecretField,
+  secretFieldLabel,
+  secretFields,
+} from './provider-model.ts';
 import { SecretPill } from './secret-pill.tsx';
 import type { LocalModelsControl } from './use-local-models.ts';
 
@@ -45,8 +52,7 @@ export function PresetFacts({ preset }: { readonly preset: FleetProviderPresetVi
         >
           {preset.label} docs
           <ExternalLink size={12} aria-hidden="true" />
-        </a>{' '}
-        · facts checked against them <span className="whitespace-nowrap">{preset.verified}</span>
+        </a>
       </p>
       {preset.unverified.length === 0 ? null : (
         <ul className="m-0 flex list-none flex-col gap-1 p-0 text-warn" data-env-preset-unverified="">
@@ -118,7 +124,7 @@ export function OneClickLogin({
   const asked = new Set(blankRequiredValues(preset));
   const filled = Object.entries(pending).filter(([, value]) => value.trim() !== '');
   const ready = new Set([...stored, ...filled.map(([name]) => name)]);
-  const problem = environmentDraftProblem(preset, draft, ready);
+  const problem = environmentDraftProblem(preset, draft, ready, secret => `your ${secretFieldLabel(preset, secret)}`);
   const setValue = (name: string, value: string): void =>
     setDraft({ ...draft, values: { ...draft.values, [name]: value } });
 
@@ -150,10 +156,12 @@ export function OneClickLogin({
 
   const secretRow = (field: SecretField) => {
     const input = `${ids}-secret-${field.secret}`;
+    // Plain words: the variable it fills is a detail of the login, not something to read before pasting.
+    const label = secretFieldLabel(preset, field.secret);
     return (
       <div key={field.secret} className="flex min-w-0 flex-col gap-1" data-one-click-secret={field.secret}>
-        <label htmlFor={input} className="break-all font-mono text-cell font-semibold text-fg">
-          {field.secret}
+        <label htmlFor={input} className="text-cell font-semibold text-fg">
+          {label}
           {field.required ? '' : ' (optional)'}
         </label>
         {stored.has(field.secret) ? (
@@ -183,7 +191,7 @@ export function OneClickLogin({
             className="kt-input min-w-0 font-mono"
             autoComplete="off"
             spellCheck={false}
-            placeholder={`paste ${field.secret}`}
+            placeholder={`Paste your ${label}`}
             value={pending[field.secret] ?? ''}
             data-env-secret-input={field.secret}
             onChange={event => setPending({ ...pending, [field.secret]: event.target.value })}
@@ -192,8 +200,7 @@ export function OneClickLogin({
         <span className="text-meta leading-base text-muted">
           {stored.has(field.secret)
             ? `Already in ${machineName}’s secret store.`
-            : `Kept in ${machineName}’s secret store as ${field.secret}; never shown again.`}
-          {field.variables.length > 1 ? ` Used as ${field.variables.join(' and ')}.` : ''}
+            : `Kept in ${machineName}’s secret store; never shown again.`}
         </span>
       </div>
     );
@@ -330,6 +337,7 @@ export function OneClickLogin({
         refusal={changes.refusal}
         submitLabel={submitLabel}
         quiet={quiet}
+        lead={!quiet}
         disabled={problem !== null || !preset.offered.available}
         onSubmit={() => void add()}
       />

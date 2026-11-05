@@ -414,6 +414,40 @@ describe('MachineOnboarding · Done', () => {
     expect(screen.went).toEqual(['/d/studio/settings#machines/studio-mac/runtimes']);
   });
 
+  describe('Voice', () => {
+    let railState: string | null | undefined;
+    const voiceDone = async (text: string) => {
+      const screen = await render({ routes: { ...SET_UP_READS, '/v1/config/file?path=voice.yaml': voiceFile(text) } });
+      await screen.rail('voice');
+      await screen.click('[data-onboarding-next]');
+      railState = screen
+        .all('[data-onboarding-rail="column"] [data-onboarding-go="voice"]')[0]
+        ?.getAttribute('data-state');
+      await finished(screen);
+      return must(screen.q('[data-onboarding-summary-row="voice"]'), 'the Voice row');
+    };
+
+    it('does not claim Voice set when Continue passed it with no engine picked', async () => {
+      const row = await voiceDone('');
+      expect(railState).toBe('skipped');
+      expect(row.getAttribute('data-state')).toBe('skipped');
+      expect(row.textContent).toContain('no speech engine picked');
+      expect(row.querySelector('[data-onboarding-later="voice"]')).not.toBeNull();
+    });
+
+    it('says which engine the machine defaults to when one is picked', async () => {
+      const parakeet = await voiceDone('defaultEngine: parakeet\n');
+      expect(railState).toBe('done');
+      expect(parakeet.getAttribute('data-state')).toBe('set');
+      expect(parakeet.textContent).toContain('Parakeet, on each device');
+    });
+
+    it('names phone/browser voice too', async () => {
+      const browser = await voiceDone('defaultEngine: browser\n');
+      expect(browser.textContent).toContain('phone/browser voice');
+    });
+  });
+
   it('says nothing of the runtimes when the machine will not list them', async () => {
     const screen = await render({ routes: { ...SET_UP_READS, 'GET /v1/fleet/runtimes': new Error('unreachable') } });
     await finished(screen);
@@ -474,36 +508,81 @@ describe('MachineOnboarding · Done', () => {
 // ── Steps that save on their own ─────────────────────────────────────────────────────────────────
 
 describe('MachineOnboarding · steps that save through their own surface', () => {
-  it('marks Warden set when its Save lands, without moving', async () => {
-    const patched: Call[] = [];
-    const screen = await render({
-      routes: {
+  describe('Warden', () => {
+    /** A Warden that keeps what was PATCHed, so Done reads back what was saved. */
+    const wardenRoutes = (patch: Route = undefined) => {
+      const patched: Call[] = [];
+      let config = wardenConfig();
+      const routes: Routes = {
         ...SET_UP_READS,
+        'GET /v1/warden/config': () => ({ config, accounts: config.accounts, warnings: [] }),
         'PATCH /v1/warden/config': (call: Call) => {
           patched.push(call);
-          return {
-            config: wardenConfig({ layers: { jev: true, llm: true } }),
-            accounts: wardenConfig().accounts,
-            warnings: [],
-          };
+          if (patch instanceof Error) return patch;
+          const body = call.body as Partial<typeof config>;
+          config = { ...config, ...body, layers: { ...config.layers, ...body.layers } };
+          return { config, accounts: config.accounts, warnings: [] };
         },
-      },
+      };
+      return { routes, patched };
+    };
+    const wardenState = (screen: Screen) =>
+      screen.all('[data-onboarding-rail="column"] [data-onboarding-go="warden"]')[0]?.getAttribute('data-state');
+
+    it('opens with Jev switched on, unsaved: the one primary is Save and continue, and the card has no Save', async () => {
+      const { routes } = wardenRoutes();
+      const screen = await render({ routes });
+      await screen.rail('warden');
+      expect(screen.text('[data-onboarding-step-body="warden"]')).toContain('A Jev key is set');
+      expect(primaries(screen)).toEqual(['Save and continue']);
+      const inBody = screen.all('[data-onboarding-step-body="warden"] button').map(button => button.textContent);
+      expect(inBody).not.toContain('Save');
+      expect(screen.text('[data-onboarding-warden-unsaved]')).toContain('Save and continue puts these in effect');
     });
-    await screen.rail('warden');
-    expect(screen.text('[data-onboarding-step-body="warden"]')).toContain('A Jev key is set');
-    const save = must(
-      screen.all('[data-onboarding-step-body="warden"] button').find(button => button.textContent === 'Save') ?? null,
-      'Save',
-    ) as HTMLButtonElement;
-    expect(save.disabled).toBe(false);
-    await interact(() => save.click());
-    await settle();
-    expect(patched).toHaveLength(1);
-    expect(screen.at()).toBe('warden');
-    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
-    expect(
-      screen.all('[data-onboarding-rail="column"] [data-onboarding-go="warden"]')[0]?.getAttribute('data-state'),
-    ).toBe('done');
+
+    it('Save and continue saves what is on screen, sets the step, moves on, and Done says Jev is on', async () => {
+      const { routes, patched } = wardenRoutes();
+      const screen = await render({ routes });
+      await screen.rail('warden');
+      await screen.click('[data-onboarding-next="save"]');
+      expect(patched).toHaveLength(1);
+      expect(patched[0]?.body).toMatchObject({ layers: { jev: true } });
+      expect(wardenState(screen)).toBe('done');
+      expect(screen.at()).toBe('learning');
+      await finished(screen);
+      expect(screen.q('[data-onboarding-summary-row="warden"]')?.textContent).not.toContain('No AI runs');
+    });
+
+    it('stays on Warden and says why when the save is refused: nothing is claimed', async () => {
+      const { routes, patched } = wardenRoutes(new Error('The Warden said no.'));
+      const screen = await render({ routes });
+      await screen.rail('warden');
+      await screen.click('[data-onboarding-next="save"]');
+      expect(patched).toHaveLength(1);
+      expect(screen.at()).toBe('warden');
+      expect(wardenState(screen)).toBe('todo');
+      expect(screen.q('[data-onboarding-step-body="warden"] [role="alert"]')).not.toBeNull();
+      expect(primaries(screen)).toEqual(['Save and continue']);
+    });
+
+    it('keeps a plain Continue, and sends nothing, when nothing on the card changed', async () => {
+      const { routes, patched } = wardenRoutes();
+      const screen = await render({ routes: { ...routes, '/v1/speedups': speedups(false) } });
+      await screen.rail('warden');
+      expect(primaries(screen)).toEqual(['Continue']);
+      await screen.click('[data-onboarding-next]');
+      expect(patched).toHaveLength(0);
+      expect(screen.at()).toBe('learning');
+    });
+
+    it('Skip leaves the machine as it is', async () => {
+      const { routes, patched } = wardenRoutes();
+      const screen = await render({ routes });
+      await screen.rail('warden');
+      await screen.click('[data-onboarding-skip]');
+      expect(patched).toHaveLength(0);
+      expect(screen.at()).toBe('learning');
+    });
   });
 
   it('marks Learning set when a choice lands, without moving', async () => {
@@ -618,7 +697,7 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
   });
 
-  it('moves on by itself when its import succeeds, sets the step, and carries what it did to the next page', async () => {
+  it('moves on by itself when its import succeeds and sets the step, with no “ready” banner on the next page', async () => {
     let imported = false;
     const screen = await fresh(
       () => (imported ? CLAUDE_RUNTIME : NO_RUNTIMES),
@@ -635,15 +714,11 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     expect(proposed?.body).toMatchObject({ change: { kind: 'setup.import', include: ['claude'] } });
     expect(stateOf(screen, 'claude')).toBe('done');
     expect(screen.at()).toBe('codex');
-    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
-    expect(note.textContent).toContain('claude-default is ready');
-    expect(note.textContent).toContain('Imported');
-    // The note belongs to the page it moved to: it is gone when the person goes on.
-    await screen.click('[data-onboarding-skip]');
+    // The rail's tick says it; a good import leaves nothing to do, so the next page carries nothing.
     expect(screen.q('[data-setup-note="import-carry"]')).toBeNull();
   });
 
-  it('carries the conversations result and a sign-in link for a login that still needs one', async () => {
+  it('carries only what is left to do: a sign-in link for a login that still needs one, not the counts', async () => {
     let imported = false;
     const signedOut = runtimes([
       runtimeView('claude-default', { credential: { id: 'claude-work', store: 'ferretry', status: 'needs_sign_in' } }),
@@ -672,13 +747,18 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     imported = true;
     await screen.click('[data-onboarding-primary="import"]');
     const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
-    expect(note.textContent).toContain('Brought in 1 conversation.');
+    expect(note.getAttribute('data-tone')).toBe('warn');
+    expect(note.textContent).toContain('Still to do from Claude Code');
+    // The conversations went in: said once, on Done, never twice on this page.
+    expect(note.textContent).not.toContain('conversation');
     const link = must(note.querySelector('[data-carry-sign-in]'), 'the sign-in link');
     expect(link.textContent).toBe('Sign in claude-default later');
     expect(link.getAttribute('data-carry-sign-in')).toBe('claude-work');
+    await finished(screen);
+    expect(screen.text('[data-onboarding-notes]')).toContain('Brought in 1 conversation.');
   });
 
-  it('an import that makes no runtime is carried as “imported”, with what it brought in', async () => {
+  it('an import that makes no runtime moves on with nothing carried', async () => {
     const screen = await render({
       routes: {
         ...freshRoutes(NO_RUNTIMES),
@@ -693,12 +773,11 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     });
     await screen.rail('claude');
     await screen.click('[data-onboarding-primary="import"]');
-    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
-    expect(note.textContent).toContain('Claude Code imported');
-    expect(note.textContent).toContain('Imported 1 login, 2 skills, 3 MCP servers');
+    expect(screen.at()).toBe('codex');
+    expect(screen.q('[data-setup-note="import-carry"]')).toBeNull();
   });
 
-  it('a revisit that brings in only conversations says nothing was re-imported', async () => {
+  it('a revisit that brings in only conversations re-imports nothing, and Done says what came in', async () => {
     const recent = {
       id: 'a',
       harness: 'claude',
@@ -725,11 +804,11 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     await screen.rail('claude');
     await screen.click('[data-harness-conversations]');
     await screen.click('[data-onboarding-primary="import"]');
-    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
-    expect(note.textContent).toContain('Claude Code is already set up');
-    expect(note.textContent).toContain('Brought in 1 conversation.');
-    expect(note.textContent).not.toContain('imported');
+    expect(screen.at()).toBe('codex');
+    expect(screen.q('[data-setup-note="import-carry"]')).toBeNull();
     expect(screen.calls.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
+    await finished(screen);
+    expect(screen.text('[data-onboarding-notes]')).toBe('Brought in 1 conversation.');
   });
 
   it('a revisit whose conversations import was refused is carried as a warning, not “already set up” in green', async () => {
@@ -1049,7 +1128,7 @@ describe('MachineOnboarding · an import that finishes after the person has move
     expect(stateOf(screen, 'codex')).not.toBe('skipped');
   });
 
-  it('still counts the import it did as Claude Code set, and keeps its note for the page after', async () => {
+  it('still counts the import it did as Claude Code set, and carries nothing to the page after', async () => {
     const pending = held();
     const screen = await render({ machine: FRESH_MACHINE, createClient: async () => pending.client });
     await screen.rail('claude');
@@ -1058,8 +1137,7 @@ describe('MachineOnboarding · an import that finishes after the person has move
     pending.release();
     await settle();
     expect(stateOf(screen, 'claude')).toBe('done');
-    // The note was meant for the page after Claude Code, and that is the page the person is on.
-    expect(screen.text('[data-setup-note="import-carry"]')).toContain('claude-default is ready');
+    expect(screen.q('[data-setup-note="import-carry"]')).toBeNull();
   });
 
   it('does not move a person who went Back, or jumped by the rail, to a page they did not choose', async () => {
@@ -1104,17 +1182,49 @@ describe('MachineOnboarding · the page’s one primary', () => {
     expect(screen.q('[data-onboarding-foot] button[data-variant="primary"]')).not.toBeNull();
   });
 
-  it('gives the primary to Save what agents may control when a switch is flipped, and quiets Continue', async () => {
+  it('turns Continue into Save and continue when a switch is flipped: no Save of its own in the body', async () => {
     const screen = await render();
     await screen.rail('controls');
     await screen.click('[data-agent-control] [role=switch]');
-    const saves = screen.all('button[data-variant="primary"]');
-    expect(saves).toHaveLength(1);
-    expect(saves[0]?.textContent).toContain('Save what agents may control');
-    // The reviewed change keeps its own button, and the footer can still move on without it.
-    expect(saves[0]?.closest('[data-onboarding-foot]')).toBeNull();
-    const next = must(screen.q('[data-onboarding-foot] [data-onboarding-next]'), 'Continue');
-    expect(next.getAttribute('data-variant')).not.toBe('primary');
+    expect(primaries(screen)).toEqual(['Save and continue']);
+    expect(screen.q('[data-onboarding-foot] [data-onboarding-next="save"]')).not.toBeNull();
+    expect(screen.q('[data-onboarding-step-body="controls"] [data-change-submit]')).toBeNull();
+    expect(screen.q('[data-agent-control-undo]')).not.toBeNull();
+  });
+
+  it('Save and continue sends the change, reads the machine again and moves on', async () => {
+    const screen = await render({
+      routes: {
+        ...SET_UP_READS,
+        '/v1/fleet/machine': machineAnswer(),
+        '/v1/fleet/proposals': STAGED,
+        [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Saved' },
+      },
+    });
+    await screen.rail('controls');
+    await screen.click('[data-agent-control] [role=switch]');
+    await screen.click('[data-onboarding-next="save"]');
+    const proposed = screen.calls.find(call => call.path === '/v1/fleet/proposals');
+    expect(proposed?.body).toMatchObject({ change: { kind: 'machine.settings' } });
+    expect(screen.left.retried).toBe(1);
+    expect(screen.at()).toBe('done');
+  });
+
+  it('stays on Agent controls and says why when the save is refused', async () => {
+    const screen = await render({
+      routes: {
+        ...SET_UP_READS,
+        '/v1/fleet/machine': machineAnswer(),
+        '/v1/fleet/proposals': STAGED,
+        [APPLY_PATH]: new Error('The machine said no.'),
+      },
+    });
+    await screen.rail('controls');
+    await screen.click('[data-agent-control] [role=switch]');
+    await screen.click('[data-onboarding-next="save"]');
+    expect(screen.at()).toBe('controls');
+    expect(screen.q('[data-change-refusal]')).not.toBeNull();
+    expect(screen.left.retried).toBe(0);
   });
 
   it('gives Continue its primary back when the switch is put back', async () => {
@@ -1147,22 +1257,27 @@ describe('MachineOnboarding · the page’s one primary', () => {
       return screen;
     };
 
-    it('shows exactly one primary: the form opened first keeps it', async () => {
+    it('shows exactly one primary, Save and continue, and says the passkey line once', async () => {
       const screen = await bothPending();
-      expect(primaries(screen)).toEqual(['Save what agents may control']);
+      expect(primaries(screen)).toEqual(['Save and continue']);
+      expect(screen.all('form [data-change-submit]')).toHaveLength(0);
+      expect(screen.all('[data-change-step-up]')).toHaveLength(1);
     });
 
-    it('keeps both reviewed changes saveable, each on its own button with the passkey line', async () => {
+    it('saves both edits as ONE change, so neither undoes the other', async () => {
       const screen = await bothPending();
-      const labels = screen.all('form [data-change-submit]').map(button => button.textContent?.trim());
-      expect(labels).toEqual(['Save what agents may control', 'Save default runtime']);
-      expect(screen.all('form [data-change-step-up]')).toHaveLength(2);
+      await screen.click('[data-onboarding-next="save"]');
+      const proposed = screen.calls.filter(call => call.path === '/v1/fleet/proposals');
+      expect(proposed).toHaveLength(1);
+      expect(proposed[0]?.body).toMatchObject({
+        change: { kind: 'machine.settings', defaultRuntime: 'claude-default', agentControl: { terminals: false } },
+      });
     });
 
-    it('hands the primary to the form left open when the first one is undone', async () => {
+    it('keeps Save and continue while one edit is left, after the other is undone', async () => {
       const screen = await bothPending();
       await screen.click('[data-agent-control-undo]');
-      expect(primaries(screen)).toEqual(['Save default runtime']);
+      expect(primaries(screen)).toEqual(['Save and continue']);
     });
 
     it('gives the footer its primary back once both are undone', async () => {
@@ -1206,17 +1321,17 @@ describe('MachineOnboarding · an open provider-key form', () => {
     expect(primaries(screen)).toEqual(['Import']);
   });
 
-  it('quiets the footer’s Import while a provider’s form is open, and gives it back when the form closes', async () => {
+  it('puts a provider form’s Add in the footer in place of Import, and gives Import back when the form closes', async () => {
     const screen = await providerScreen();
     await screen.rail('claude');
     await screen.click('[data-harness-provider-toggle]');
     await screen.click('[data-provider-tile="deepseek"]');
     expect(screen.q('[data-env-login="form"]')).not.toBeNull();
-    // Only the form's own Add carries the reviewed change; Import steps back but stays pressable.
-    expect(primaries(screen)).toHaveLength(1);
-    expect(screen.q('[data-env-login="form"] [data-change-submit]')?.getAttribute('data-variant')).toBe('primary');
-    expect(footerImport(screen).getAttribute('data-variant')).not.toBe('primary');
-    expect((footerImport(screen) as HTMLButtonElement).disabled).toBe(false);
+    // One main action: the form's Add, in the footer. Import is not shown beside it.
+    expect(primaries(screen)).toEqual(['Add']);
+    expect(screen.q('[data-onboarding-foot] [data-onboarding-primary="change"]')?.textContent).toBe('Add');
+    expect(screen.q('[data-env-login="form"] [data-change-submit]')).toBeNull();
+    expect(screen.q('[data-onboarding-primary="import"]')).toBeNull();
     await screen.click('[data-harness-provider-toggle]');
     expect(screen.q('[data-env-login="form"]')).toBeNull();
     expect(footerImport(screen).getAttribute('data-variant')).toBe('primary');

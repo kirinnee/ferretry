@@ -85,7 +85,7 @@ const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label
       detail: 'Relaunches a dead or frozen process with its conversation intact.',
     },
     { id: 'failover', label: 'Fail over', detail: 'Moves to the next login in the failover order when quota is out.' },
-    { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: a KILL verdict asks you first.' },
+    { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: you are asked before a ferret is stopped.' },
     {
       id: 'closeLeftovers',
       label: 'Close leftover browsers',
@@ -533,7 +533,7 @@ export function WardenSettingsForm({
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-warden-form="">
-      <section className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel">
+      <section className="kt-panel flex min-w-0 items-start justify-between gap-3 p-panel">
         <div className="min-w-0">
           <h3 className="m-0 text-row font-semibold text-fg">The Warden</h3>
           <p className="m-0 text-meta leading-base text-muted">

@@ -26,7 +26,7 @@
 
 import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight, Code, Copy, FolderInput, Rocket, Sparkles, Upload } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useContext, useEffect, useLayoutEffect, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useConfigChangeCounter, useConnectionSnapshot } from '../../../lib/store.tsx';
@@ -35,7 +35,6 @@ import { readConfigFile, writeConfigFile } from '../../config-files/config-files
 import { Segmented } from '../conversations/conversation-picker.tsx';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
-import { useQuietFooter } from '../setup/footer-slot.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
 import { type SettingsFlow, useSettingsFlow } from '../setup/settings-route.ts';
 import type { SetupAccess } from '../setup/setup-access.ts';
@@ -45,7 +44,7 @@ import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { type PanelGroupId, panelGroup } from '../shell/machine-panels.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
-import { machineSettings } from './machine-settings.ts';
+import { MachineEditContext, machineSettings } from './machine-settings.ts';
 import { SwitchList, SwitchRow } from './switch-row.tsx';
 
 type AgentPermissions = FleetMachineView['agentPermissions'];
@@ -242,7 +241,18 @@ export function AgentControlSection({
   const current = machine.agentControl;
   const [draft, setDraft] = useState<FleetAgentControl>(current);
   const pending = AGENT_CONTROL_KINDS.some(kind => draft[kind] !== current[kind]);
-  const leads = useQuietFooter(pending);
+  // In setup the page saves every section at once; this one only says what it changed.
+  const report = useContext(MachineEditContext);
+  useLayoutEffect(() => {
+    if (report === null || !pending) return undefined;
+    report('agentControl', { agentControl: draft });
+    return () => report('agentControl', null);
+  }, [report, pending, draft]);
+  const undo = (
+    <Button type="button" data-agent-control-undo="" onClick={() => setDraft(current)}>
+      Undo
+    </Button>
+  );
   const save = (): void => {
     void changes.apply(machineSettings(machine, { agentControl: draft })).then(result => {
       if (result.kind === 'refused') return;
@@ -269,21 +279,20 @@ export function AgentControlSection({
       <p className="m-0 text-meta leading-base text-muted" data-agent-control-hint="">
         Applies to an agent’s next action on {machineName}; nothing already running is interrupted.
       </p>
-      {pending ? (
+      {!pending ? null : report !== null ? (
+        <div>{undo}</div>
+      ) : (
         <ChangeApplyPanel
           machineName={machineName}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
           submitLabel="Save what agents may control"
-          quiet={!leads}
           onSubmit={save}
         >
-          <Button type="button" data-agent-control-undo="" onClick={() => setDraft(current)}>
-            Undo
-          </Button>
+          {undo}
         </ChangeApplyPanel>
-      ) : null}
+      )}
     </SetupSection>
   );
 }

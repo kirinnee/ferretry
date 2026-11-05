@@ -423,7 +423,7 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
       ),
     );
     try {
-      expect(s.text('[data-found-line="attention"]')).toContain('Not signed in — you can sign in after importing');
+      expect(s.text('[data-found-line="attention"]')).toContain('Not signed in — sign in now, or after importing');
       expect(s.text('[data-onboarding-primary]')).toBe('Import');
       await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(s.text('[data-setup-note="import-ready"]')).toContain(
@@ -683,8 +683,8 @@ describe('OnboardingHarnessStep: Codex', () => {
       expect(codex).toContain('Same as your CLAUDE.md · one shared copy');
       expect(codex).not.toContain('share this login');
       expect(s.text('[data-setup-note="problem"]')).toBe('Couldn’t read config.toml: it is not valid TOML.');
-      expect(s.text('[data-found-line="attention"]')).toContain('Not signed in — you can sign in after importing');
-      expect(s.text('[data-harness-sign-in]')).toBe('Sign in first');
+      expect(s.text('[data-found-line="attention"]')).toContain('Not signed in — sign in now, or after importing');
+      expect(s.text('[data-harness-sign-in]')).toBe('Sign in now');
       expect(s.text('[data-onboarding-primary]')).toBe('Import');
       // Claude's runtime does not make Codex's step set.
       expect(s.q('[data-harness-has]')).toBeNull();

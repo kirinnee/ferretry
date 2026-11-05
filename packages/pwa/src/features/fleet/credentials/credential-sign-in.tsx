@@ -241,6 +241,7 @@ export function CredentialSignIn({
           busyLabel="Starting sign-in…"
           refusal={refusal ?? changes.refusal}
           quiet={quiet}
+          lead={!quiet}
           submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
           onSubmit={() => void start(restartNext)}
         />

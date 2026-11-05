@@ -9,11 +9,10 @@
  */
 
 import type { FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
-import { useEffect, useId, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
-import { machineSettings } from '../machine/machine-settings.ts';
-import { useQuietFooter } from '../setup/footer-slot.tsx';
+import { MachineEditContext, machineSettings } from '../machine/machine-settings.ts';
 import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupSection } from '../setup/setup-ui.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -52,7 +51,13 @@ export function DefaultRuntimeControl({
   const current = machine.defaultRuntime;
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
-  const leads = useQuietFooter(pending);
+  // In setup the page saves every section at once; this one only says what it changed.
+  const report = useContext(MachineEditContext);
+  useLayoutEffect(() => {
+    if (report === null || !pending) return undefined;
+    report('defaultRuntime', { defaultRuntime: picked });
+    return () => report('defaultRuntime', null);
+  }, [report, pending, picked]);
   const save = (): void => {
     if (picked === null) return;
     void changes.apply(machineSettings(machine, { defaultRuntime: picked })).then(result => {
@@ -61,6 +66,19 @@ export function DefaultRuntimeControl({
       onSaved();
     });
   };
+
+  const keep = (
+    <Button
+      type="button"
+      data-default-runtime-undo=""
+      onClick={() => {
+        changes.clear();
+        onPick(null);
+      }}
+    >
+      {keepDefaultLabel(current)}
+    </Button>
+  );
 
   if (candidates.length === 0)
     return (
@@ -102,28 +120,20 @@ export function DefaultRuntimeControl({
           {DEFAULT_RUNTIME_HINT}
         </p>
       </div>
-      {pending ? (
+      {!pending ? null : report !== null ? (
+        <div>{keep}</div>
+      ) : (
         <ChangeApplyPanel
           machineName={machineName}
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
           submitLabel="Save default runtime"
-          quiet={!leads}
           onSubmit={save}
         >
-          <Button
-            type="button"
-            data-default-runtime-undo=""
-            onClick={() => {
-              changes.clear();
-              onPick(null);
-            }}
-          >
-            {keepDefaultLabel(current)}
-          </Button>
+          {keep}
         </ChangeApplyPanel>
-      ) : null}
+      )}
     </div>
   );
 }

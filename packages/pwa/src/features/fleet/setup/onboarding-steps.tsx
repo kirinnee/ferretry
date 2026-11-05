@@ -26,7 +26,7 @@ import {
   WardenConfigViewSchema,
 } from '@ferretry/protocol';
 import { QrCode } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLayoutMode } from '../../../hooks/use-layout-mode.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useParakeetVoice } from '../../../lib/store.tsx';
@@ -40,12 +40,15 @@ import { PairPhoneSheet } from '../../settings/pair-phone.tsx';
 import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
-import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
+import { hasWardenFormErrors, wardenConfigPatchFrom, wardenFormErrors } from '../../warden/warden-settings-model.ts';
+import { MachineEditContext, type MachineSettingsEdit, machineSettings } from '../machine/machine-settings.ts';
 import { AgentControlSection } from '../machine/settings-tab.tsx';
 import { DefaultRuntimeSection } from '../runtimes/default-runtime.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
+import { ChangeApplyPanel, changeReady } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { CloneMachine } from './clone.tsx';
+import { usePendingSave } from './footer-slot.tsx';
 import type { MachineSetupStart, OnboardingDoneRow } from './onboarding-model.ts';
 import { wardenStartingDraft } from './onboarding-model.ts';
 import { useSetupAccess } from './setup-access.ts';
@@ -163,6 +166,7 @@ export function OnboardingVoiceStep({
   cleanup,
   voice,
   browserSupport,
+  onSet,
 }: {
   readonly tab: MachineTabProps;
   /** This device's clean-up choice; without it the step points at Settings › Dictation. */
@@ -171,6 +175,8 @@ export function OnboardingVoiceStep({
   readonly voice?: ParakeetVoice | null;
   /** Whether the phone/browser engine works on this page; production reads the page. */
   readonly browserSupport?: BrowserRecognitionSupport;
+  /** The machine names a default engine (read, or just chosen): the step is set. */
+  readonly onSet?: () => void;
 }) {
   const { connection, createClient, machineName } = tab;
   const contextVoice = useParakeetVoice();
@@ -180,6 +186,8 @@ export function OnboardingVoiceStep({
   /** The machine default as `voice.yaml` names it: `undefined` while reading. */
   const [engine, setEngine] = useState<VoiceEngine | null | undefined>(undefined);
   const [problem, setProblem] = useState<string | null>(null);
+  const latestSet = useRef(onSet);
+  latestSet.current = onSet;
 
   useEffect(() => {
     let live = true;
@@ -187,7 +195,9 @@ export function OnboardingVoiceStep({
       .then(async client => machineVoiceEngine((await readConfigFile(client, VOICE_FILE)).text))
       .then(
         found => {
-          if (live) setEngine(found);
+          if (!live) return;
+          setEngine(found);
+          if (found !== null) latestSet.current?.();
         },
         (cause: unknown) => {
           if (live) {
@@ -210,6 +220,7 @@ export function OnboardingVoiceStep({
         const client = await createClient(connection);
         const file = await readConfigFile(client, VOICE_FILE);
         await writeConfigFile(client, VOICE_FILE, withMachineVoiceEngine(file.text, next), file.etag);
+        latestSet.current?.();
       } catch (cause) {
         setProblem(changeRefusalSentence(cause));
       }
@@ -279,7 +290,9 @@ interface WardenLoaded {
 
 /**
  * Settings › Warden's card on this step. It opens on {@link wardenStartingDraft} — Jev switched on when a
- * Jev key is set and the machine is still on the free default — and nothing changes until Save.
+ * Jev key is set and the machine is still on the free default — and nothing changes until it is saved.
+ * The card has no Save of its own here: an unsaved edit turns the footer's Continue into
+ * `Save and continue`, so moving on never drops what is on screen.
  */
 export function OnboardingWardenStep({
   tab,
@@ -315,7 +328,7 @@ export function OnboardingWardenStep({
     };
   }, [connection, createClient]);
 
-  const save = async (state: WardenLoaded, patch: WardenConfigPatch): Promise<void> => {
+  const save = async (state: WardenLoaded, patch: WardenConfigPatch): Promise<boolean> => {
     setSaving(true);
     setError(null);
     try {
@@ -328,12 +341,22 @@ export function OnboardingWardenStep({
       setLoaded({ ...state, view, draft: view.config });
       setSaved(true);
       onSaved();
+      return true;
     } catch (cause) {
       setError(changeRefusalSentence(cause));
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const patch = loaded === null ? {} : wardenConfigPatchFrom(loaded.view.config, loaded.draft);
+  const dirty = Object.keys(patch).length > 0;
+  const invalid = loaded !== null && hasWardenFormErrors(wardenFormErrors(loaded.draft));
+  // In setup the footer saves it; mounted alone, the card keeps its own Save.
+  const footerSaves = usePendingSave(dirty, !saving && !invalid, async () =>
+    loaded === null ? false : await save(loaded, patch),
+  );
 
   if (failure !== null)
     return (
@@ -347,7 +370,6 @@ export function OnboardingWardenStep({
         Reading the Warden’s settings…
       </p>
     );
-  const dirty = Object.keys(wardenConfigPatchFrom(loaded.view.config, loaded.draft)).length > 0;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="warden">
       <Lead>The Warden watches your ferrets and flags the stuck ones. {jevLead(loaded)}</Lead>
@@ -362,12 +384,14 @@ export function OnboardingWardenStep({
         saving={saving}
         error={error}
         saved={saved}
-        onSave={patch => void save(loaded, patch)}
-        quiet
+        onSave={edit => void save(loaded, edit)}
+        saveInFooter={footerSaves}
       />
       {dirty ? (
         <p className="m-0 text-meta text-muted" data-onboarding-warden-unsaved="">
-          Not saved yet. Save puts these in effect; Continue without saving keeps the machine as it is.
+          {footerSaves
+            ? 'Not saved yet. Save and continue puts these in effect; Skip keeps the machine as it is.'
+            : 'Not saved yet. Save puts these in effect.'}
         </p>
       ) : null}
     </div>
@@ -435,8 +459,7 @@ export function OnboardingLearningStep({
   return (
     <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="learning">
       <Lead>
-        Passive learning instructs NEW ferrets to file a lesson when you correct them (
-        <span className="font-mono">fy lesson suggest "…" --scope global|repo</span>). You review every lesson in the
+        Passive learning teaches new ferrets to suggest a lesson when you correct them. You review every lesson in the
         Learning hub; nothing is applied on its own.
       </Lead>
       {passive === null && problem === null ? (
@@ -469,9 +492,32 @@ export function OnboardingLearningStep({
 
 // ── Agent controls ───────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The Machine tab's own sections, with their Save buttons folded into the footer: what each section
+ * changed is reported here and sent as ONE `machine.settings` change by `Save and continue`, so two
+ * edits never race each other and the page has one main action.
+ */
 export function OnboardingControlsStep({ tab }: { readonly tab: MachineTabProps }) {
   const { machine, machineName, connection, createClient, onRetry, checking } = tab;
   const access = useSetupAccess({ connection, createClient });
+  const { changes } = access;
+  const [edits, setEdits] = useState<Readonly<Record<string, MachineSettingsEdit>>>({});
+  const report = useCallback((key: string, edit: MachineSettingsEdit | null) => {
+    setEdits(current => {
+      const { [key]: _gone, ...rest } = current;
+      return edit === null ? rest : { ...rest, [key]: edit };
+    });
+  }, []);
+  const pending = Object.keys(edits).length > 0;
+  // In setup the footer saves both sections at once; mounted alone, each keeps its own Save.
+  const footerSaves = usePendingSave(pending, changeReady(changes.authority, false, changes.busy), async () => {
+    if (machine === null) return false;
+    const merged = Object.values(edits).reduce<MachineSettingsEdit>((all, edit) => ({ ...all, ...edit }), {});
+    const result = await changes.apply(machineSettings(machine, merged));
+    if (result.kind === 'refused') return false;
+    onRetry();
+    return true;
+  });
   if (machine === null)
     return (
       <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="controls">
@@ -481,20 +527,34 @@ export function OnboardingControlsStep({ tab }: { readonly tab: MachineTabProps 
   return (
     <div className="flex min-w-0 flex-col gap-5" data-onboarding-step-body="controls">
       <Lead>What ferrets on {machineName} may control, and the runtime a new ferret uses.</Lead>
-      <AgentControlSection
-        key={Object.values(machine.agentControl).join(',')}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onRetry}
-      />
-      <DefaultRuntimeSection
-        key={machine.defaultRuntime}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onRetry}
-      />
+      <MachineEditContext.Provider value={footerSaves ? report : null}>
+        <AgentControlSection
+          key={Object.values(machine.agentControl).join(',')}
+          machine={machine}
+          machineName={machineName}
+          access={access}
+          onSaved={onRetry}
+        />
+        <DefaultRuntimeSection
+          key={machine.defaultRuntime}
+          machine={machine}
+          machineName={machineName}
+          access={access}
+          onSaved={onRetry}
+        />
+      </MachineEditContext.Provider>
+      {footerSaves && pending ? (
+        // The change's passkey line and any refusal, said once for both sections.
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Save and continue"
+          hideSubmit
+          onSubmit={() => undefined}
+        />
+      ) : null}
     </div>
   );
 }

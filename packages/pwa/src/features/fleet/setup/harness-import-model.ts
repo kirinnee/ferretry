@@ -194,8 +194,8 @@ export const foundLines = (rows: readonly FoundRow[]): readonly FoundLine[] =>
           ok: false,
           text:
             row.title === 'Not signed in'
-              ? 'Not signed in — you can sign in after importing'
-              : `${row.title} — you can sign in after importing`,
+              ? 'Not signed in — sign in now, or after importing'
+              : `${row.title} — sign in now, or after importing`,
         };
       case 'mcp':
         return { ok: true, text: `${row.title} MCP ${row.title === '1' ? 'server' : 'servers'}` };

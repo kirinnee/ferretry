@@ -97,6 +97,8 @@ export const environmentDraftProblem = (
   preset: FleetProviderPresetView,
   draft: EnvironmentDraft,
   ready: ReadonlySet<string>,
+  /** How a secret is named to the person; its NAME unless the form has plain words for it. */
+  secretWords: (secret: string) => string = secret => secret,
 ): string | null => {
   if (!/^[a-z0-9][a-z0-9-]*$/u.test(draft.name)) return 'Name it with lowercase letters, digits and dashes.';
   for (const variable of preset.variables) {
@@ -106,7 +108,7 @@ export const environmentDraftProblem = (
       continue;
     }
     const secret = draft.secrets[variable.name] ?? '';
-    if (variable.required && !ready.has(secret)) return `Paste ${secret}.`;
+    if (variable.required && !ready.has(secret)) return `Paste ${secretWords(secret)}.`;
   }
   if (preset.cloudCredential !== undefined && draft.cloudCredential.trim() === '')
     return 'Fill in the cloud credential reference.';

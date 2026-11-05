@@ -1,8 +1,8 @@
 /**
  * New machine setup, one action per page: every step at 390 and 1440, light and dark, from the real
  * `MachineOnboarding` in the shell harness (`?machine-setup=<daemon>`) with no real daemon. Walks it the way
- * a person does — Back · Skip · ONE primary — and fails if a page shows a second primary, scrolls sideways at
- * 390px, or the footer's primary does not move the page on.
+ * a person does — Back · Skip · ONE primary — and fails if a page shows a second primary, a primary anywhere but
+ * the pinned footer, scrolls sideways at 390px, or the footer's primary does not move the page on.
  *
  *   bun harness/machine-setup-simple-screenshot.tsx [outDir]
  *
@@ -97,6 +97,8 @@ try {
           '[data-onboarding-foot] [data-onboarding-primary], [data-onboarding-foot] [data-onboarding-next], [data-onboarding-foot] [data-onboarding-finish]',
         );
         const shot = async (name: string): Promise<void> => {
+          // A pointer left over the last button clicked would draw its hover, which no reader sees.
+          await page.mouse.move(0, 0);
           await page.waitForTimeout(500);
           await page.evaluate(() => document.fonts.ready);
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -104,6 +106,9 @@ try {
           const primaries = await screen.locator('button[data-variant="primary"]:visible').allInnerTexts();
           if (primaries.length > 1)
             fail(`${name} ${theme} ${vp} shows ${primaries.length} primaries: ${primaries.join(' / ')}`);
+          const inFoot = await screen.locator('[data-onboarding-foot] button[data-variant="primary"]:visible').count();
+          if (inFoot !== primaries.length)
+            fail(`${name} ${theme} ${vp} has its primary in the body, not the footer: ${primaries.join(' / ')}`);
           const inner = screen.locator('.scroll-thin.overflow-y-auto:has([data-onboarding-step-body])').first();
           const base = `machine-${name}-${theme}-${vp}`;
           await inner.evaluate(el => {
@@ -129,10 +134,12 @@ try {
         await screen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
         await page.waitForTimeout(400);
         await shot('claude');
-        // A provider's key form is open: its own Add owns the page, and the footer's Import goes quiet.
+        // A provider's key form is open: its Add is the footer's one primary, in place of Import.
         await screen.locator('[data-harness-provider-toggle]').click();
         await screen.locator('[data-provider-tile="deepseek"]').click();
         await screen.locator('[data-env-login="form"]').waitFor({ state: 'visible' });
+        if ((await screen.locator('[data-onboarding-primary="import"]').count()) > 0)
+          fail('Import still shows beside the provider form’s Add');
         await shot('claude-provider-form');
         await screen.locator('[data-harness-provider-toggle]').click();
         await screen.locator('[data-env-login="form"]').waitFor({ state: 'detached' });
@@ -141,13 +148,14 @@ try {
         await screen.locator('[data-harness-conversations]').check();
         await screen.locator('[data-harness-name-change]').click();
         await shot('claude-name-conversations');
-        // Import moves on by itself, carrying what it did to the next page.
+        // Import moves on by itself; a good import leaves no banner on the next page.
         await primary.click();
-        await screen.locator('[data-setup-note="import-carry"]').waitFor({ state: 'visible' });
         await stepBody('codex');
+        if ((await screen.locator('[data-setup-note="import-carry"]').count()) > 0)
+          fail('Codex carries a banner about Claude Code that asks nothing of the reader');
         await shot('codex');
-        // A key form is open, then Sign in first is opened too: the form that came first keeps the one
-        // primary, the sign-in's button goes quiet, and nothing typed is lost.
+        // A key form is open, then Sign in now is opened too: the form that came first keeps the one
+        // primary, in the footer; the sign-in's button is a plain one, and nothing typed is lost.
         await screen.locator('[data-harness-provider-toggle]').click();
         await screen.locator('[data-provider-tile="deepseek"]').click();
         await screen.locator('[data-env-secret-input="DEEPSEEK_API_KEY"]').fill('sk-demo-not-a-real-key');
@@ -155,7 +163,7 @@ try {
         await screen.locator('[data-first-run-sign-in="codex"]').waitFor({ state: 'visible' });
         await shot('codex-sign-in-and-key');
         const kept = await screen.locator('[data-env-secret-input="DEEPSEEK_API_KEY"]').inputValue();
-        if (kept !== 'sk-demo-not-a-real-key') fail('the typed key was lost when Sign in first opened');
+        if (kept !== 'sk-demo-not-a-real-key') fail('the typed key was lost when Sign in now opened');
         await screen.locator('[data-first-run-sign-in-close]').click();
         await screen.locator('[data-harness-provider-toggle]').click();
         await screen.locator('[data-env-login="form"]').waitFor({ state: 'detached' });
@@ -182,14 +190,15 @@ try {
         for (const id of ['voice', 'warden', 'learning', 'controls'] as const) {
           await stepBody(id);
           await shot(id);
+          if (id === 'warden') {
+            // Jev is switched on and not saved yet: Continue is Save and continue, so nothing is dropped.
+            await screen.locator('[data-onboarding-next="save"]').waitFor({ state: 'visible' });
+          }
           if (id === 'controls') {
-            // A switch flipped: Save what agents may control is the primary; Continue goes quiet.
+            // A switch flipped: Continue becomes Save and continue; the section has no Save of its own.
             const flip = screen.locator('[data-agent-control] [role="switch"]').first();
             await flip.click();
-            await screen
-              .locator('[data-change-submit]:not([data-onboarding-primary])')
-              .first()
-              .waitFor({ state: 'visible' });
+            await screen.locator('[data-onboarding-next="save"]').waitFor({ state: 'visible' });
             await shot('controls-changed');
             // And a different default runtime picked too: two reviewed changes pending, still ONE primary.
             const pick = screen.locator('[data-default-runtime-select]');
@@ -201,9 +210,9 @@ try {
               );
             const chosen = options[0] ?? fail('Agent controls has no runtime to pick as the default');
             await pick.selectOption(chosen);
-            await screen.locator('[data-default-runtime] [data-change-submit]').waitFor({ state: 'visible' });
+            await screen.locator('[data-default-runtime-undo]').waitFor({ state: 'visible' });
             const saves = await screen.locator('form [data-change-submit]:visible').allInnerTexts();
-            if (saves.length !== 2) fail(`both reviewed changes should keep a save button, saw: ${saves.join(' / ')}`);
+            if (saves.length !== 0) fail(`the sections still draw their own Save: ${saves.join(' / ')}`);
             await shot('controls-both-changed');
             await screen.locator('[data-default-runtime-undo]').click();
             await flip.click();
@@ -211,6 +220,9 @@ try {
           await screen.locator('[data-onboarding-next]').click();
         }
         await stepBody('done');
+        // Jev was switched on and saved on the way: Done must not say the Warden is rules only.
+        const warden = screen.locator('[data-onboarding-summary-row="warden"]');
+        await warden.filter({ hasText: 'Jev' }).waitFor({ state: 'visible' });
         await shot('done');
         if ((await screen.locator('[data-onboarding-restart]').count()) > 0) fail('Done still offers Start again');
 

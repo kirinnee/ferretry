@@ -193,7 +193,11 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
         references: [],
       };
     case '/v1/warden/config':
-      if (method === 'PATCH') state.warden = { ...state.warden, ...(body(init) as Partial<WardenConfig>) };
+      if (method === 'PATCH') {
+        // A patch names only what changed, layer by layer: keep the layers it does not name.
+        const patch = body(init) as Partial<WardenConfig>;
+        state.warden = { ...state.warden, ...patch, layers: { ...state.warden.layers, ...patch.layers } };
+      }
       return { config: state.warden, accounts: state.warden.accounts, warnings: [] };
     case '/v1/learning/config':
       if (method === 'PATCH') state.passiveDefault = body(init).passiveDefault === true;

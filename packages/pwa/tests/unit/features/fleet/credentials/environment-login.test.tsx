@@ -308,8 +308,14 @@ describe('EnvironmentLogin · providers', () => {
     expect(form(c)?.getAttribute('data-one-click')).toBe('deepseek');
     expect(c.querySelectorAll('[data-env-secret-input]').length).toBe(1);
     const field = must(c.querySelector('[data-one-click-secret="DEEPSEEK_API_KEY"]'), 'the key field');
-    expect(field.textContent).toContain('Used as ANTHROPIC_AUTH_TOKEN and DEEPSEEK_API_KEY.');
-    expect(c.querySelector('[data-env-problem]')?.textContent).toBe('Paste DEEPSEEK_API_KEY.');
+    // Plain words: the key by its provider, never by the variables it fills.
+    expect(field.querySelector('label')?.textContent).toBe('DeepSeek key');
+    expect(field.textContent).toContain('Kept in studio-mac’s secret store; never shown again.');
+    expect(field.textContent).not.toContain('ANTHROPIC_AUTH_TOKEN');
+    expect(c.querySelector<HTMLInputElement>('[data-env-secret-input="DEEPSEEK_API_KEY"]')?.placeholder).toBe(
+      'Paste your DeepSeek key',
+    );
+    expect(c.querySelector('[data-env-problem]')?.textContent).toBe('Paste your DeepSeek key.');
     expect(c.querySelector('[data-env-preset-facts="deepseek"] [data-login-scope]')?.textContent).toBe(
       'Claude + Codex',
     );
@@ -359,7 +365,7 @@ describe('EnvironmentLogin · providers', () => {
     expect(c.querySelector('[data-env-name]')).toBeNull();
     expect(c.textContent).toContain('Not confirmed: The quota endpoint is community-documented.');
     expect(c.querySelector('[data-env-preset-docs]')?.getAttribute('href')).toBe('https://docs.example.com/claude');
-    expect(c.querySelector('[data-env-preset-facts]')?.textContent).toContain('facts checked against them 2026-10-16');
+    expect(c.querySelector('[data-env-preset-facts]')?.textContent).not.toContain('2026-10-16');
     const more = must(c.querySelector('[data-one-click-more]'), 'More options');
     await click(more, 'More options');
     expect(more.getAttribute('aria-expanded')).toBe('true');
@@ -370,7 +376,7 @@ describe('EnvironmentLogin · providers', () => {
     );
     expect((timeout as HTMLInputElement).placeholder).toBe('a timeout');
     await type(timeout, '600');
-    expect(c.querySelector('[data-one-click-secret="EXTRA_KEY"]')?.textContent).toContain('EXTRA_KEY (optional)');
+    expect(c.querySelector('[data-one-click-secret="EXTRA_KEY"]')?.textContent).toContain('Extra key (optional)');
     await type(c.querySelector('[data-env-variable="ANTHROPIC_BASE_URL"] input'), '');
     expect(c.querySelector('[data-env-problem]')?.textContent).toBe('Fill in ANTHROPIC_BASE_URL.');
     await type(c.querySelector('[data-env-variable="ANTHROPIC_BASE_URL"] input'), 'https://api.z.ai/api/anthropic');
@@ -581,7 +587,7 @@ describe('EnvironmentLogin · Paste variables', () => {
     );
     await click(c.querySelector('[data-one-click-replace="GATEWAY_API_KEY"]'), 'Paste another');
     expect(c.querySelector('[data-one-click-pasted]')).toBeNull();
-    expect(c.querySelector('[data-env-problem]')?.textContent).toBe('Paste GATEWAY_API_KEY.');
+    expect(c.querySelector('[data-env-problem]')?.textContent).toBe('Paste your Custom gateway key.');
     await type(c.querySelector('[data-env-secret-input="GATEWAY_API_KEY"]'), 'typed-instead');
     await click(c.querySelector('[data-change-submit]'), 'Add');
     await until(() => c.querySelector('[data-env-login="added"]') !== null, 'the added screen');
