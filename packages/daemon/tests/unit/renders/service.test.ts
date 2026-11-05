@@ -325,6 +325,52 @@ describe('RenderService quotas', () => {
   });
 });
 
+describe('RenderService when a write commits and then rejects', () => {
+  it('should rebuild its index from the files, so the committed render is found and counted once', async () => {
+    const repository = new MemoryRenderRepository();
+    const service = renderService(repository);
+    repository.failAfterWrite = true;
+    const error = await service.save(svg(), 's1').then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    should(error).be.an.Error();
+    should((error as Error).message).match(/directory could not be synced/u);
+    should(repository.metas.size).equal(1);
+    repository.failAfterWrite = false;
+    const retry = await service.save(svg(), 's1');
+
+    should(retry.created).be.false();
+    should(retry.id).equal([...repository.metas.keys()][0]);
+    should(repository.listings).equal(2);
+    should(repository.metas.size).equal(1);
+  });
+
+  it('should count the committed render in the quota totals the next save sees', async () => {
+    const repository = new MemoryRenderRepository();
+    const held = (n: number): StoredRenderMeta => ({
+      v: 1,
+      id: `b${n.toString().padStart(5, 'z')}`,
+      kind: 'svg',
+      alt: 'held',
+      bytes: 1,
+      sha256: n.toString(16).padStart(64, '0'),
+      createdAt: '2026-11-05T00:00:00.000Z',
+      author: { sessionId: 's1' },
+    });
+    for (let n = 0; n < RENDER_QUOTAS.perSessionCount - 1; n += 1) repository.metas.set(held(n).id, held(n));
+    const service = renderService(repository);
+    repository.failAfterWrite = true;
+    await service.save(svg(), 's1').catch(() => undefined);
+    repository.failAfterWrite = false;
+
+    const error = await refusal(service.save(svg('Another picture'), 's1'));
+
+    should(error.code).equal('quota_exceeded');
+  });
+});
+
 describe('RenderService supersededBy', () => {
   it('should walk a long chain to its last render', async () => {
     const service = renderService();

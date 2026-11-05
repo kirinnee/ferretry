@@ -176,7 +176,9 @@ request is ignored: an immutable render's lineage is not rewritten by a later sa
 The store is the files. On first use the daemon lists them once and keeps what it needs — each meta, the
 `supersedes` links and the quota totals — in memory, updated by every save under a single queue, so the
 collision check and the quotas never read a store another save has not finished changing. A failed listing is
-retried by the next request and is never remembered as an empty store. A restart rebuilds it from the files.
+retried by the next request and is never remembered as an empty store. A write that fails is treated the same way,
+because it may have committed the render before it failed: the index is dropped and rebuilt from the files, so a
+render that is on disk is never missing from the collision check or the quota totals. A restart rebuilds it too.
 
 ## Garbage collection: not yet
 

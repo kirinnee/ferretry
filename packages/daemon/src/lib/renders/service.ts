@@ -158,7 +158,15 @@ export class RenderService {
         author: authorSessionId === undefined ? {} : { sessionId: authorSessionId },
         ...(request.supersedes === undefined ? {} : { supersedes: request.supersedes }),
       };
-      await this.repository.write(meta, request.payload);
+      try {
+        await this.repository.write(meta, request.payload);
+      } catch (error) {
+        // A write can commit the meta and still reject (after the rename, in chmod or the directory sync). The
+        // cached index would then miss a render that is on disk, so it is dropped and the next request rebuilds
+        // it from the files, the way a failed listing is retried.
+        this.#index = undefined;
+        throw error;
+      }
       index.add(meta);
       return this.#answer(index, meta, true);
     });

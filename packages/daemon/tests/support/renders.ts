@@ -10,6 +10,8 @@ export class MemoryRenderRepository implements RenderRepository {
   failListing = false;
   failRead = false;
   failWrite = false;
+  /** A write that commits the render and then rejects, as a failure after the atomic rename would. */
+  failAfterWrite = false;
   #gate: Promise<void> | undefined;
 
   /** Holds every `write` open until the returned function is called, so a test can keep saves in flight. */
@@ -37,6 +39,7 @@ export class MemoryRenderRepository implements RenderRepository {
     if (this.failWrite) throw new Error('the disk is full: /secret/path');
     this.payloads.set(meta.id, payload);
     this.metas.set(meta.id, meta);
+    if (this.failAfterWrite) throw new Error('the directory could not be synced: /secret/path');
   }
 }
 
