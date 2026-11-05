@@ -140,10 +140,13 @@ export interface FileFleetSetupOptions {
   readonly daemonId: () => string | undefined;
   /** The secret store's management side. */
   readonly secrets: {
-    list(): Promise<readonly { readonly name: string; readonly updatedAt: string }[]>;
+    list(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<unknown>;
   };
 }
+
+/** How many times an update of the clone record starts over from what a concurrent apply left. */
+const CLONE_BASE_ATTEMPTS = 3;
 
 const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
@@ -154,6 +157,25 @@ const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog } = options;
   const keyWriter = new AtomicFileWriter();
+  // The update of the clone record in progress; the next one waits for it, whether it succeeded or not.
+  let cloneBaseTurn: Promise<unknown> = Promise.resolve();
+  // One attempt: the record as it was read, handed to `change`, and written only if the file is STILL that
+  // record. A fleet apply writes the same file (checking the revision it planned against); when it lands between
+  // this read and this write the attempt is made again from what it left, so neither update is lost.
+  const compareAndSwap = async (
+    path: string,
+    change: (current: string | undefined) => string | undefined,
+  ): Promise<boolean> => {
+    for (let attempt = 0; attempt < CLONE_BASE_ATTEMPTS; attempt += 1) {
+      const seen = await catalog.documentRevision(path);
+      const next = change((await keyWriter.read(path)) ?? undefined);
+      if (next === undefined) return false;
+      if ((await catalog.documentRevision(path)) !== seen) continue;
+      await keyWriter.write(path, next);
+      return true;
+    }
+    throw new Error('the record of what was last copied kept changing under this update; try again');
+  };
   const layout = catalog.layout;
   const scanner = new HostHarnessScanner({
     userHome: layout.userHome,
@@ -174,7 +196,8 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     tools: options.tools,
     secrets: {
       names: async () => (await options.secrets.list()).map(secret => secret.name),
-      held: async () => (await options.secrets.list()).map(({ name, updatedAt }) => ({ name, updatedAt })),
+      held: async () =>
+        (await options.secrets.list()).map(({ name, createdAt, updatedAt }) => ({ name, createdAt, updatedAt })),
       put: async (name, value) => {
         await options.secrets.put(name, value);
       },
@@ -192,8 +215,14 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     },
     cloneBase: {
       read: async path => (await keyWriter.read(path)) ?? undefined,
-      write: async (path, text) => {
-        await keyWriter.write(path, text);
+      // One of these at a time, each a compare-and-swap against what a fleet apply may write meanwhile.
+      update: async (path, change) => {
+        const run = cloneBaseTurn.then(
+          async () => await compareAndSwap(path, change),
+          async () => await compareAndSwap(path, change),
+        );
+        cloneBaseTurn = run.catch(() => undefined);
+        return await run;
       },
     },
   };

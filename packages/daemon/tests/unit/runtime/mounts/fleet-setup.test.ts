@@ -234,6 +234,7 @@ describe('the fleet setup mount', () => {
     });
     const body = {
       source: { daemonId: 'daemon-source' },
+      filedAt: '2026-10-12T08:00:00.000Z',
       keys: [{ name: 'GLM_API_KEY', sourceUpdatedAt: '2026-10-10T08:00:00.000Z' }],
     };
     const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
@@ -260,6 +261,12 @@ describe('the fleet setup mount', () => {
     should(seen).have.length(1);
     should(refused.status).equal(400);
     should(extra.status).equal(400);
+    // The instant the copy filed them is what the record is anchored on: a report without it is refused.
+    const { filedAt: _omitted, ...withoutInstant } = body;
+    const unanchored = await dispatcher(subsystem).dispatch(
+      post('/v1/fleet/clone/keys', JSON.stringify(withoutInstant)),
+    );
+    should(unanchored.status).equal(400);
   });
 
   it('should hand a tool install its request and the caller governance, and never cache the answer', async () => {

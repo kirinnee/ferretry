@@ -120,10 +120,8 @@ import {
   controlsChange,
   filedKeyStamps,
   keysToCopy,
-  keysToSeal,
   type NewerKey,
   newerKeys,
-  startingNewerPicks,
   needsAfterCopy,
   signInLink,
   type SourceSettingsFile,
@@ -219,9 +217,8 @@ export function CloneMachine(props: CloneMachineProps) {
   const [sourceSecrets, setSourceSecrets] = useState<readonly string[] | null>(null);
   // When the SOURCE last changed each key it holds (its own list's `updatedAt`; instants, never values).
   const [sourceStamps, setSourceStamps] = useState<ReadonlyMap<string, string>>(new Map());
-  // The keys the source changed since the last copy (this machine decides from timestamps), and which are ticked.
+  // The keys the source changed since the last copy (this machine decides from timestamps): reported, never copied.
   const [offeredKeys, setOfferedKeys] = useState<readonly NewerKey[]>([]);
-  const [newerPicks, setNewerPicks] = useState<readonly string[]>([]);
   const [copyKeys, setCopyKeys] = useState(true);
   const [chosen, setChosen] = useState<readonly CloneItemId[]>(ALL_CLONE_ITEMS);
   const [sourceIssue, setSourceIssue] = useState<string | null>(null);
@@ -439,7 +436,6 @@ export function CloneMachine(props: CloneMachineProps) {
       // read (or a source list too long to send) offers none: the keys the logins need still copy as they always did.
       const offered = await offeredFor(exported.value, stamps);
       setOfferedKeys(offered);
-      setNewerPicks(startingNewerPicks(offered));
       setCopyKeys(true);
       setFiles(read);
       setBundle(exported.value);
@@ -470,22 +466,20 @@ export function CloneMachine(props: CloneMachineProps) {
   };
 
   /** The sealed copy of the keys: the source asks for the passkey, this browser carries ciphertext. */
-  const sealKeys = async (names: readonly string[], replace: readonly string[]): Promise<CloneItemOutcome> => {
+  const sealKeys = async (names: readonly string[]): Promise<CloneItemOutcome> => {
     if (pickedRecord === undefined) return { kind: 'refused', reason: 'No source machine is picked.' };
     try {
-      const landed = await sealSecretsAcross(
-        await createClient(pickedRecord),
-        await createClient(connection),
-        names,
-        replace,
-      );
-      // Remember when the source last changed each key that was just filed, so the next copy can tell "newer
-      // there" from "same". Bookkeeping: a refusal here costs only that, never the copy that already landed.
-      const stamps = filedKeyStamps(landed.filed, sourceStamps);
-      if (stamps.length > 0)
+      const landed = await sealSecretsAcross(await createClient(pickedRecord), await createClient(connection), names);
+      // Remember when the source last changed each key that was just filed (a key this machine already held was
+      // kept, not filed, and is not remembered), so the next copy can tell "newer there" from "same". Bookkeeping:
+      // a refusal here costs only that, never the copy that already landed.
+      const stamps = filedKeyStamps(landed.imported, sourceStamps);
+      if (landed.filedAt !== undefined && stamps.length > 0) {
+        const { filedAt } = landed;
         await target.read(client =>
-          recordCloneKeys(client, { source: { daemonId: String(pickedRecord.daemonId) }, keys: stamps }),
+          recordCloneKeys(client, { source: { daemonId: String(pickedRecord.daemonId) }, filedAt, keys: stamps }),
         );
+      }
       return { kind: 'copied' };
     } catch (error) {
       return { kind: 'refused', reason: `${copyRefusalSentence(error)} Copy them from the list below.` };
@@ -565,9 +559,8 @@ export function CloneMachine(props: CloneMachineProps) {
       }
       // The keys the copied setup needs follow, sealed, for ONE passkey on the source. After the fleet, so a
       // refused copy has not already moved a key; before the credentials are read, so a login shows ready.
-      const seal = keysToSeal(keyNames, offeredKeys, newerPicks);
-      if (seal.names.length > 0) {
-        outcomes.push({ item: CLONE_KEYS_ITEM, outcome: await sealKeys(seal.names, seal.replace) });
+      if (keyNames.length > 0) {
+        outcomes.push({ item: CLONE_KEYS_ITEM, outcome: await sealKeys(keyNames) });
         await readHeld();
       }
       const credentials = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
@@ -826,12 +819,6 @@ export function CloneMachine(props: CloneMachineProps) {
             copyKeys={copyKeys}
             onCopyKeys={setCopyKeys}
             newer={offeredKeys}
-            newerPicks={newerPicks}
-            onToggleNewer={(name, on) =>
-              setNewerPicks(current =>
-                on ? [...current.filter(entry => entry !== name), name] : current.filter(entry => entry !== name),
-              )
-            }
           />
           <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
           <SetupSection title="Doesn’t copy" name="not-copied">

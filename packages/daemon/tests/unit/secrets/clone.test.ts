@@ -167,8 +167,7 @@ describe('copying secrets between machines', () => {
       importId: offer.importId,
       sourceDaemonId: sourceIdentity.daemonId,
       imported: ['API_KEY'],
-      filed: ['API_KEY'],
-      replaced: [],
+      filedAt: new Date(START).toISOString(),
       kept: [],
     });
     should((await target.directory.list()).map(secret => secret.name)).deepEqual(['API_KEY']);
@@ -177,24 +176,7 @@ describe('copying secrets between machines', () => {
     );
   });
 
-  it('should say which copied secrets replaced one the target already held, when the request named them', async () => {
-    // Arrange
-    const { source, target } = await pair();
-    await target.directory.put('API_KEY', 'old-value-here');
-    const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'DB_PASSWORD') });
-
-    // Act
-    const result = await target.imports.complete(offer.importId, bundle, named('API_KEY'));
-
-    // Assert
-    should(result.imported).deepEqual(['API_KEY', 'DB_PASSWORD']);
-    should(result.filed).deepEqual(['API_KEY', 'DB_PASSWORD']);
-    should(result.replaced).deepEqual(['API_KEY']);
-    should(result.kept).deepEqual([]);
-  });
-
-  describe('replacing a key this machine already holds', () => {
+  describe('a key this machine already holds', () => {
     const OLD_API = 'old-api-value-here';
     const OLD_DB = 'old-db-value-here';
     const OLD_OTHER = 'untouched-other-value';
@@ -213,59 +195,107 @@ describe('copying secrets between machines', () => {
       return { target, offer, bundle, values, clock };
     }
 
-    it('should leave every held key exactly as it was when the request names none', async () => {
+    it('should never write it: every held entry stays byte for byte as it was, and the answer says they were kept', async () => {
       // Arrange
       const { target, offer, bundle, values } = await held();
+      const document = JSON.stringify(await target.documents.read());
       const before = [...(await values())];
       const listed = await target.directory.list();
 
       // Act
       const result = await target.imports.complete(offer.importId, bundle);
 
-      // Assert — nothing was written: not a value, not an `updatedAt`.
+      // Assert — nothing was written: not a value, not a timestamp, not one byte of the sealed document.
+      should(JSON.stringify(await target.documents.read())).equal(document);
       should([...(await values())]).deepEqual(before);
       should(await target.directory.list()).deepEqual(listed);
       should(result.kept).deepEqual(['API_KEY', 'DB_PASSWORD']);
-      should(result.filed).deepEqual([]);
-      should(result.replaced).deepEqual([]);
+      should(result.imported).deepEqual([]);
+      should(result.filedAt).be.undefined();
+      should(Object.keys(result)).not.containEql('replaced');
     });
 
-    it('should overwrite the named keys and nothing else', async () => {
+    it('should file a name that is new beside it, and leave the held ones untouched', async () => {
       // Arrange
-      const { target, offer, bundle, values } = await held();
-      const before = await target.directory.list();
-
-      // Act
-      const result = await target.imports.complete(offer.importId, bundle, named('API_KEY'));
-
-      // Assert
-      const after = await values();
-      should(after.get('API_KEY')).equal(VALUE);
-      should(after.get('DB_PASSWORD')).equal(OLD_DB);
-      should(after.get('OTHER_KEY')).equal(OLD_OTHER);
-      should(result.replaced).deepEqual(['API_KEY']);
-      should(result.kept).deepEqual(['DB_PASSWORD']);
-      should(result.filed).deepEqual(['API_KEY']);
-      const stamp = (name: string, list: typeof before) => list.find(secret => secret.name === name)?.updatedAt;
-      const now = await target.directory.list();
-      should(stamp('DB_PASSWORD', now)).equal(stamp('DB_PASSWORD', before));
-      should(stamp('OTHER_KEY', now)).equal(stamp('OTHER_KEY', before));
-      should(stamp('API_KEY', now)).not.equal(stamp('API_KEY', before));
-    });
-
-    it('should file a name that is new here whether or not it is listed, and ignore a listed name it does not carry', async () => {
-      // Arrange
-      const { source, target } = await pair();
+      const clock = new Clock();
+      const { source, target } = await pair(clock);
+      await target.directory.put('API_KEY', OLD_API);
+      await source.directory.put('NEW_KEY', 'a-brand-new-value');
+      const heldEntry = (await target.documents.read())?.entries.API_KEY;
+      clock.ms += 60_000;
       const offer = await target.imports.open();
-      const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
+      const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'NEW_KEY') });
 
       // Act
-      const result = await target.imports.complete(offer.importId, bundle, named('API_KEY', 'DB_PASSWORD'));
+      const result = await target.imports.complete(offer.importId, bundle);
 
       // Assert
-      should(result.filed).deepEqual(['API_KEY']);
-      should(result.replaced).deepEqual([]);
-      should((await target.directory.list()).map(secret => secret.name)).deepEqual(['API_KEY']);
+      should(result.imported).deepEqual(['NEW_KEY']);
+      should(result.kept).deepEqual(['API_KEY']);
+      should(result.filedAt).equal(new Date(clock.ms).toISOString());
+      const document = await target.documents.read();
+      should(document?.entries.API_KEY).deepEqual(heldEntry);
+      should(document?.entries.NEW_KEY?.createdAt).equal(result.filedAt);
+      should((await new SecretVault(target.documents, new FakeSecretCipher()).values()).get('API_KEY')).equal(OLD_API);
+    });
+
+    it('should keep a name that is created after the copy began and before it was filed, and not say it was filed', async () => {
+      // Arrange — the key does not exist when the copy is opened; somebody sets it just before the filing turn
+      const clock = new Clock();
+      const { source, target } = await pair(clock);
+      const racing = Object.create(target.directory, {
+        putMissing: {
+          value: async (entries: Parameters<SecretDirectory['putMissing']>[0]) => {
+            await target.directory.put('API_KEY', 'raced-in-by-the-person');
+            return await target.directory.putMissing(entries);
+          },
+        },
+      }) as SecretDirectory;
+      const imports = new SecretImportService({
+        crypto: crypto_,
+        identity: { load: async () => targetIdentity },
+        directory: racing,
+        clock,
+      });
+      const offer = await imports.open();
+      const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'DB_PASSWORD') });
+      clock.ms += 60_000;
+
+      // Act
+      const result = await imports.complete(offer.importId, bundle);
+
+      // Assert
+      should(result.kept).deepEqual(['API_KEY']);
+      should(result.imported).deepEqual(['DB_PASSWORD']);
+      const values = await new SecretVault(target.documents, new FakeSecretCipher()).values();
+      should(values.get('API_KEY')).equal('raced-in-by-the-person');
+      should(values.get('DB_PASSWORD')).equal('correct-horse-battery');
+    });
+
+    it('should let only one of two imports of the same previously absent name file it', async () => {
+      // Arrange — two sources, two values, two imports into one target at once
+      const clock = new Clock();
+      const { source, target } = await pair(clock);
+      const other = machine(strangerIdentity, clock);
+      await other.directory.put('API_KEY', 'the-other-sources-value');
+      const first = await target.imports.open();
+      const second = await target.imports.open();
+      const firstBundle = await source.exports.seal(first.importId, { offer: first, names: named('API_KEY') });
+      const secondBundle = await other.exports.seal(second.importId, { offer: second, names: named('API_KEY') });
+
+      // Act
+      const results = await Promise.all([
+        target.imports.complete(first.importId, firstBundle.bundle),
+        target.imports.complete(second.importId, secondBundle.bundle),
+      ]);
+
+      // Assert — exactly one filed it, the other kept what the first filed, and the value is the winner's
+      const winner = results.findIndex(result => result.imported.length === 1);
+      should(results.flatMap(result => result.imported)).deepEqual(['API_KEY']);
+      should(results.flatMap(result => result.kept)).deepEqual(['API_KEY']);
+      should((await new SecretVault(target.documents, new FakeSecretCipher()).values()).get('API_KEY')).equal(
+        [VALUE, 'the-other-sources-value'][winner],
+      );
     });
   });
 

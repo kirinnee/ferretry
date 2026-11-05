@@ -393,33 +393,19 @@ export interface NewerKey {
 }
 
 /**
- * The keys to offer again, from the review's outcomes (decided on this machine from `updatedAt` timestamps
- * alone — no value is compared). `missing` keys are not here: they are copied with the logins, as always.
+ * The keys to REPORT again, from the review's outcomes (decided on this machine from `updatedAt` timestamps
+ * alone — no value is compared). `missing` keys are not here: they are copied with the logins, as always. A
+ * reported key is never copied over the one held here, ticked or not: there is nothing to tick.
  */
 export const newerKeys = (keys: readonly { readonly name: string; readonly outcome: string }[]): readonly NewerKey[] =>
   keys.flatMap(key =>
     key.outcome === 'newer' || key.outcome === 'both' ? [{ name: key.name, outcome: key.outcome }] : [],
   );
 
-/** Which offered keys start ticked: the ones only the source changed. A key changed here too starts unticked. */
-export const startingNewerPicks = (offered: readonly NewerKey[]): readonly string[] =>
-  offered.filter(key => key.outcome === 'newer').map(key => key.name);
-
 /**
- * What the sealed copy carries: the keys the logins need (`missing` here) and the newer ones the person ticked.
- * `replace` is ONLY the newer ones ticked — the one list of names the copy may overwrite on this machine; a held
- * key the person did not tick is never in it. A name that was not offered is never in either.
+ * The instants to remember for the keys a sealed copy filed: the source's `updatedAt` for each, when it listed one.
+ * Only a key the copy really filed (the import's `imported`) is here; a key this machine already held is not.
  */
-export const keysToSeal = (
-  missing: readonly string[],
-  offered: readonly NewerKey[],
-  picked: readonly string[],
-): { readonly names: readonly string[]; readonly replace: readonly string[] } => {
-  const replace = offered.filter(key => picked.includes(key.name)).map(key => key.name);
-  return { names: [...new Set([...missing, ...replace])], replace };
-};
-
-/** The instants to remember for the keys a sealed copy filed: the source's `updatedAt` for each, when it listed one. */
 export const filedKeyStamps = (
   filed: readonly string[],
   stamps: ReadonlyMap<string, string>,
@@ -428,6 +414,9 @@ export const filedKeyStamps = (
     const sourceUpdatedAt = stamps.get(name);
     return sourceUpdatedAt === undefined ? [] : [{ name, sourceUpdatedAt }];
   });
+
+/** What a person types on THIS machine to replace a key themselves: Clone never does (docs/secrets.md). */
+export const replaceKeyCommand = (name: string): string => `fy secret set ${name}`;
 
 /** "JEV_API_KEY, GROQ_API_KEY, Claude Code login (claude-work)" — what is not held yet, or `null`. */
 export const needsSentence = (needs: readonly CloneNeed[]): string | null => {

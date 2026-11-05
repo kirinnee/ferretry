@@ -12,15 +12,14 @@ import {
   controlsChange,
   filedKeyStamps,
   keysToCopy,
-  keysToSeal,
   type MatchableLogin,
   needsAfterCopy,
   needsSentence,
   newerKeys,
   outcomeSentence,
   providersNeededBy,
+  replaceKeyCommand,
   signInLink,
-  startingNewerPicks,
   type SourceSettingsFile,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
@@ -626,26 +625,16 @@ describe('keys that are newer on the source', () => {
     { name: 'D_KEY', outcome: 'same' },
   ];
 
-  it('should offer only the newer and the changed-on-both-sides, not the missing or the same', () => {
+  it('should report only the newer and the changed-on-both-sides, not the missing or the same', () => {
     expect(newerKeys(outcomes)).toEqual([
       { name: 'B_KEY', outcome: 'newer' },
       { name: 'C_KEY', outcome: 'both' },
     ]);
   });
 
-  it('should start the newer one ticked and the one changed here too unticked', () => {
-    expect(startingNewerPicks(newerKeys(outcomes))).toEqual(['B_KEY']);
-  });
-
-  it('should seal the missing keys and the newer ones ticked, and let only the ticked ones overwrite', () => {
-    const offered = newerKeys(outcomes);
-    expect(keysToSeal(['A_KEY'], offered, ['B_KEY'])).toEqual({ names: ['A_KEY', 'B_KEY'], replace: ['B_KEY'] });
-    expect(keysToSeal([], offered, [])).toEqual({ names: [], replace: [] });
-  });
-
-  it('should never let a name that was not offered overwrite anything', () => {
-    const offered = newerKeys(outcomes);
-    expect(keysToSeal(['A_KEY'], offered, ['A_KEY', 'D_KEY', 'ANYTHING'])).toEqual({ names: ['A_KEY'], replace: [] });
+  it('should have nothing that selects a reported key for copying: it is a report, with a command to run by hand', () => {
+    expect(replaceKeyCommand('B_KEY')).toBe('fy secret set B_KEY');
+    expect(Object.keys(newerKeys(outcomes)[0] ?? {}).toSorted()).toEqual(['name', 'outcome']);
   });
 
   it('should remember the source’s instant for each key that was filed, and for no other', () => {

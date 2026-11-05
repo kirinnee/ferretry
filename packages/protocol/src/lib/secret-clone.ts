@@ -128,31 +128,25 @@ export const SecretExportResponseSchema = z.strictObject({
 export type SecretExportResponse = z.infer<typeof SecretExportResponseSchema>;
 
 /**
- * Completing an import on the target.
- *
- * `replace` is the ONLY way a copy overwrites a secret this machine already holds: the names listed there,
- * and no others. A name held here and not listed is left exactly as it is (it comes back in `kept`), so a
- * bundle can never overwrite what the person did not name. It is made of {@link CloneableSecretNameSchema},
- * so a sign-in's name is refused when the request is parsed. Absent means none.
+ * Completing an import on the target. The bundle is all it takes: a copy can only ADD a key. There is no
+ * way to ask it to overwrite one this machine already holds (docs/secrets.md, "A key that is newer on the
+ * source") — replacing a held key is the person's own act, `fy secret set NAME`.
  */
-export const SecretImportCompleteRequestSchema = z.strictObject({
-  bundle: SealedSecretBundleSchema,
-  replace: SecretCloneNamesSchema.optional(),
-});
+export const SecretImportCompleteRequestSchema = z.strictObject({ bundle: SealedSecretBundleSchema });
 export type SecretImportCompleteRequest = z.infer<typeof SecretImportCompleteRequestSchema>;
 
 /**
- * What arrived: every name the bundle carried; `replaced` — the ones that overwrote a secret this machine
- * held, because the request named them in `replace`; `kept` — the ones this machine already held that the
- * request did not name, so they were left as they were. A name in neither was new here and was filed.
+ * What arrived: `imported` — the names that were new here and are now filed; `kept` — the names this machine
+ * already held (including one created while the copy ran), which were left exactly as they were: not
+ * written, not even their `updatedAt`. Every name the bundle carried is in one or the other.
  */
 export const SecretImportResultSchema = z.strictObject({
   importId: SecretImportIdSchema,
   sourceDaemonId: DaemonIdSchema,
-  imported: SecretCloneNamesSchema,
-  /** Every name that was written here: new, or named in `replace`. What the security log records. */
-  filed: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
-  replaced: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
+  // Either may be empty: a copy of keys this machine all holds files none, and says so in `kept`.
+  imported: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
+  /** The instant this machine filed `imported` (each entry's `createdAt`); absent when nothing was filed. */
+  filedAt: InstantSchema.optional(),
   kept: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
 });
 export type SecretImportResult = z.infer<typeof SecretImportResultSchema>;

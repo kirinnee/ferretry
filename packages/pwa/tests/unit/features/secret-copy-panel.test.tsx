@@ -80,13 +80,15 @@ const BUNDLE: SealedSecretBundle = {
   ciphertext: 'Y2lwaGVy',
 };
 
-const RESULT = (imported: readonly string[], replaced: readonly string[] = []): SecretImportResult => ({
+const FILED_AT = '2026-11-01T10:00:00.000Z';
+
+/** What an import answers: `imported` was filed (at `FILED_AT`), `kept` was already held and left as it was. */
+const RESULT = (imported: readonly string[], kept: readonly string[] = []): SecretImportResult => ({
   importId: IMPORT_ID,
   sourceDaemonId: SOURCE_ID,
   imported: named(...imported),
-  filed: named(...imported),
-  kept: [],
-  replaced: named(...replaced),
+  ...(imported.length === 0 ? {} : { filedAt: FILED_AT }),
+  kept: named(...kept),
 });
 
 interface Call {
@@ -209,11 +211,14 @@ describe('the secret copy wording', () => {
     expect(copyButtonLabel(1)).toBe('Copy 1 secret');
     expect(copyButtonLabel(12)).toBe('Copy 12 secrets');
     expect(copiedSentence(RESULT(['A', 'B']), 'laptop')).toBe('2 secrets copied to laptop.');
-    expect(copiedSentence(RESULT(['A', 'B'], ['A']), 'laptop')).toBe(
-      '2 secrets copied to laptop. 1 of them replaced the one already there.',
+    expect(copiedSentence(RESULT(['A', 'B'], ['C']), 'laptop')).toBe(
+      '2 secrets copied to laptop. C was already on laptop and was left as it is. To replace one, run `fy secret set NAME` on laptop.',
     );
-    expect(copiedSentence(RESULT(['A', 'B'], ['A', 'B']), 'laptop')).toBe(
-      '2 secrets copied to laptop. 2 of them replaced the ones already there.',
+    expect(copiedSentence(RESULT(['A'], ['B', 'C']), 'laptop')).toBe(
+      '1 secret copied to laptop. 2 were already on laptop and were left as they are: B, C. To replace one, run `fy secret set NAME` on laptop.',
+    );
+    expect(copiedSentence(RESULT([], ['B']), 'laptop')).toBe(
+      'Nothing was copied. B was already on laptop and was left as it is. To replace one, run `fy secret set NAME` on laptop.',
     );
   });
 
@@ -298,9 +303,9 @@ describe('the secret copy panel', () => {
     expect(calls.find(call => call.path.startsWith('/v1/secrets/exports'))?.body).toMatchObject({ names: ['API_KEY'] });
   });
 
-  it('should copy TO a machine the person picks, marking what it replaces', async () => {
+  it('should copy TO a machine the person picks, saying what it keeps and never asking it to replace', async () => {
     // Arrange
-    const { calls, createClient } = pair(['API_KEY'], ['API_KEY'], RESULT(['API_KEY'], ['API_KEY']));
+    const { calls, createClient } = pair(['API_KEY'], ['API_KEY'], RESULT([], ['API_KEY']));
     const renderer = render(
       <SecretCopyPanel
         direction="to"
@@ -323,14 +328,12 @@ describe('the secret copy panel', () => {
     await settle();
 
     // Assert
-    expect(picking).toContain('replaces laptop’s');
-    expect(text(renderer)).toContain('1 of them replaced the one already there.');
+    expect(picking).toContain('already on laptop: kept');
+    expect(picking).toContain('fy secret set API_KEY');
+    expect(text(renderer)).toContain('API_KEY was already on laptop and was left as it is.');
     expect(calls.filter(call => call.machine === 'laptop').map(call => call.path)).toContain('/v1/secrets/imports');
-    // The row said "replaces", so the person's tick is the word that lets the copy overwrite — that name, only.
-    expect(calls.find(call => call.path === `/v1/secrets/imports/${IMPORT_ID}`)?.body).toEqual({
-      bundle: BUNDLE,
-      replace: ['API_KEY'],
-    });
+    // Ticking a key the target holds never lets the copy overwrite it: the request carries the bundle and nothing else.
+    expect(calls.find(call => call.path === `/v1/secrets/imports/${IMPORT_ID}`)?.body).toEqual({ bundle: BUNDLE });
   });
 
   it('should keep the picks and say why when the copy is refused', async () => {

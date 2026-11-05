@@ -78,7 +78,7 @@ export function SecretCopyPanel(props: SecretCopyPanelProps) {
     void (async () => {
       try {
         const sourceList = await listSecrets(await createClient(source));
-        // The receiving machine's names only mark replacements; a list it cannot answer marks none.
+        // The receiving machine's names only mark the keys it will keep; a list it cannot answer marks none.
         const targetNames = await createClient(target)
           .then(listSecrets)
           .then(list => (list.health === 'ready' ? new Set(list.secrets.map(secret => secret.name)) : null))
@@ -100,12 +100,7 @@ export function SecretCopyPanel(props: SecretCopyPanelProps) {
     if (source === null || target === null || picks.length === 0) return;
     setPhase({ kind: 'copying' });
     try {
-      // The rows say "replaces" for a key the target holds; ticking it is the person's word, so those names — and
-      // only those — are sent as the ones the copy may overwrite.
-      const replace = picks.filter(
-        name => lists.kind === 'ready' && lists.rows.some(row => row.name === name && row.onTarget),
-      );
-      const result = await copySecrets(await createClient(source), await createClient(target), picks, replace);
+      const result = await copySecrets(await createClient(source), await createClient(target), picks);
       setPhase({ kind: 'done', result });
       onCopied?.(result);
     } catch (error) {
@@ -262,16 +257,18 @@ function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, 
                   <span className="mono min-w-0 truncate text-ui font-medium text-fg">{row.name}</span>
                   {row.onTarget && (
                     <span className="rounded-control bg-warn/10 px-1.5 text-meta font-medium text-warn">
-                      replaces {targetName}’s
+                      already on {targetName}: kept
                     </span>
                   )}
                 </span>
                 <span className="text-meta leading-base text-muted">
                   {row.signIn
                     ? `A sign-in isn’t copied. Sign in again on ${targetName}.`
-                    : row.uses.length === 0
-                      ? 'No setting names it'
-                      : `Used by ${row.uses.join(', ')}`}
+                    : row.onTarget
+                      ? `A copy never replaces it. To change it, run fy secret set ${row.name} on ${targetName}.`
+                      : row.uses.length === 0
+                        ? 'No setting names it'
+                        : `Used by ${row.uses.join(', ')}`}
                 </span>
               </span>
             </label>

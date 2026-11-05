@@ -615,7 +615,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     path: '/v1/secrets/imports/:importId',
     event: 'secrets.changed',
     subject: 'importId',
-    responseNames: 'filed',
+    responseNames: 'imported',
     detail: { action: 'clone-import' },
   },
   // Catalogs this machine publishes (docs/catalogs.md): ids, names and digests only — never what an item holds.

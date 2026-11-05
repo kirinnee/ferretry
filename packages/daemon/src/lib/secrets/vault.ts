@@ -109,6 +109,47 @@ export class SecretDirectory {
     });
   }
 
+  /**
+   * Stores each value whose name the store does NOT hold, and leaves every name it does hold exactly as it is
+   * — value, `createdAt` and `updatedAt` all untouched. Checked and written in ONE turn and ONE document
+   * write, so a name that arrives between a caller's own `list()` and this call is kept rather than
+   * overwritten, and the batch is all or nothing: when the names that are missing would take the store past
+   * its limit, it raises `full` and writes nothing. Answers which names it stored, which it kept, and the instant it
+   * stored them at (each stored entry's `createdAt` and `updatedAt`).
+   *
+   * What a copy from another machine needs (docs/secrets.md): it can add a key, never replace one.
+   */
+  async putMissing<Name extends SecretName>(
+    entries: readonly (readonly [Name, string])[],
+  ): Promise<{ readonly stored: readonly Name[]; readonly kept: readonly Name[]; readonly at: string }> {
+    // A name given twice is stored once, with the first value.
+    const wanted = new Map<Name, string>();
+    for (const [name, value] of entries) if (!wanted.has(name)) wanted.set(name, value);
+    return await this.inTurn(async () => {
+      const document = await this.document();
+      const missing = [...wanted].filter(([name]) => document.entries[name] === undefined);
+      if (Object.keys(document.entries).length + missing.length > MAX_SECRETS_PER_DAEMON)
+        throw new SecretStoreError('full', `this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
+      const at = this.clock.now();
+      const sealed = await Promise.all(
+        missing.map(
+          async ([name, value]): Promise<readonly [Name, SealedSecret]> => [
+            name,
+            { ...(await this.cipher.seal(name, value)), createdAt: at, updatedAt: at },
+          ],
+        ),
+      );
+      if (sealed.length > 0)
+        await this.store.write({ ...document, entries: { ...document.entries, ...Object.fromEntries(sealed) } });
+      const stored = new Set(sealed.map(([name]) => name));
+      return {
+        at,
+        stored: [...wanted.keys()].filter(name => stored.has(name)),
+        kept: [...wanted.keys()].filter(name => !stored.has(name)),
+      };
+    });
+  }
+
   private async write(document: SecretVaultDocument, name: SecretName, value: string): Promise<SecretSummary> {
     const existing = document.entries[name];
     if (existing === undefined && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON)

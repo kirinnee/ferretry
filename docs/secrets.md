@@ -898,7 +898,8 @@ Setting up a new machine no longer means pasting every key again. On the new mac
 from another machine** offers **Copy secrets from <machine>…**; on any machine, **Settings → Secrets →
 Copy to another machine…** does the same from the other end. Either way a person picks the secrets by
 name — each row says where that machine's configuration uses it, and whether the receiving machine
-already holds one (it is replaced) — and the sending machine asks for a **passkey for that copy**.
+already holds one (it is **kept**: a copy only adds, never replaces) — and the sending machine asks for a
+**passkey for that copy**.
 Secrets never travel as a side effect of copying configuration. The one exception is the keys of the **API-key
 logins** being cloned, which are named in the preview and follow in the same sealed copy — see
 [Sign-ins are not copied; API keys are](#sign-ins-are-not-copied-api-keys-are).
@@ -937,23 +938,30 @@ Copy applies the clone and then runs ONE sealed copy for those keys — **one pa
 all of them** — so the cloned runtime works on arrival. Unticking the box copies the login without its key; the
 preview's needs list still offers a field for each. If the passkey is declined the clone is kept, the Done page
 says the keys were not copied, and the _Copy secrets from…_ list offers them again. Only keys the sending machine
-actually holds and the receiving one does not are asked for; a key already on the receiving machine is never
-replaced by Clone **unless the person ticks it as newer on the source** — below.
+actually holds and the receiving one does not are asked for. **A key already on the receiving machine is never
+written by Clone, in any mode, for any reason** — when the source has a newer one, Clone only says so — below.
 
-#### A key that is newer on the source
+#### A key that is newer on the source (reported, never copied)
 
-A copy from a machine you copied from before offers a key again only when the sending machine has changed it
-since. Each key a copy filed is remembered by two instants in the receiving machine's `clone-base.json` (the
-record of what was last copied, `docs/design/account-model.md` §3.8): when the **source** last changed it and when
-**this** machine did, both read from the secrets lists' `updatedAt`, the second taken right after the sealed copy
-landed. A later copy compares those two with what each list says now:
+**Owner decision (Option A, design §14.4): a copy never writes or overwrites a secret-store entry or a
+`${secret:NAME}` value, in Update, Add alongside, Start over (`--replace`), linking old copies or "Gone from the other
+machine".** A key this machine already holds is reused as it is. When the source has changed that key since the last
+copy, Clone **reports** it and tells the person how to take the newer one by hand: **`fy secret set NAME`** on the
+receiving machine. There is no ticked row, no replacement, no second passkey, and nothing in any request that could
+ask for one.
 
-| The source…                     | This machine…            | Outcome   | In the Clone preview                                                    |
-| ------------------------------- | ------------------------ | --------- | ----------------------------------------------------------------------- |
-| holds it, this machine does not | —                        | `missing` | Copied with its login, as always                                        |
-| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_; copy it?** — ticked                   |
-| changed it since the copy       | changed it too           | `both`    | The same row, **unticked**, saying _You changed it on this machine too_ |
-| has not changed it              | (anything)               | `same`    | Nothing is offered                                                      |
+A copy from a machine you copied from before reports a key again only when the sending machine has changed it since.
+Each key a copy filed is remembered by two instants in the receiving machine's `clone-base.json` (the record of what
+was last copied, `docs/design/account-model.md` §3.8): when the **source** last changed it (its secrets list's
+`updatedAt`) and the instant **this** machine's copy filed it. A later review compares those two with what each list
+says now:
+
+| The source…                     | This machine…            | Outcome   | In the Clone preview                                                                      |
+| ------------------------------- | ------------------------ | --------- | ----------------------------------------------------------------------------------------- |
+| holds it, this machine does not | —                        | `missing` | Copied with its login, as always                                                          |
+| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_.** Clone does not replace it: run `fy secret set X` here |
+| changed it since the copy       | changed it too           | `both`    | The same, plus _You changed it on this machine too_                                       |
+| has not changed it              | (anything)               | `same`    | Nothing is said                                                                           |
 
 A key both machines hold that no earlier copy recorded is `same`: nothing says the source moved on.
 
@@ -961,29 +969,27 @@ A key both machines hold that no earlier copy recorded is `same`: nothing says t
 returned** — not by the review route (`POST /v1/fleet/clone/review`, which answers key _names_ and an outcome), not by the
 record, not in a log. The browser sends the sending machine's list of names and instants and nothing else; the receiving
 machine reads its own list for its half. A browser that lied about an instant could only make a key look `same` (nothing
-offered) or `newer` (offered, and still needing the passkey): it cannot make a value move.
+said) or `newer` (said, and still needing the person to act by hand): it cannot make a value move.
 
-**Replacing a key needs all three of:**
+**The import can only add.** `POST /v1/secrets/imports/:importId` takes `{ bundle }` and nothing else — a `replace` list
+(or any other field) is refused when the request is parsed. The receiving machine files the bundle with one
+**atomic, add-only write** (`SecretDirectory.putMissing`): in a single turn of the store's writer and a single document
+write it stores every name that is missing and leaves every name it already holds exactly as it is — value, `createdAt`
+and `updatedAt` untouched. Because the check and the write are one step, a name that is created between the start of the
+copy and its filing (another tab, `fy secret set`, a paste, a second import) is **kept**, never overwritten, and is
+reported in `kept`, not `imported`. If the names that are missing would take the store past its limit the whole batch
+is refused and nothing is written. Filing is still the `configure` axis of the `secrets` capability, so a governed
+device without it is refused, and one with it steps up (`docs/grants.md`). A saved login's stored credential, the account
+defaults and the 2FA factors live in other stores a bundle cannot name, and a login's own configuration (including which
+`${secret:NAME}` it references) is never touched by a key copy.
 
-1. **the passkey on the source** — the same sealed copy as above, one passkey for all of its keys;
-2. **the import naming the key in its `replace` list** — `POST /v1/secrets/imports/:importId` takes `{ bundle, replace? }`.
-   The receiving machine's filing step overwrites **only the names in `replace`**. A name it already holds that is not
-   listed is left exactly as it is, byte for byte (it comes back as `kept`, and is not written, not even its
-   `updatedAt`); a name in `replace` that the bundle does not carry or this machine does not hold changes nothing. An
-   absent `replace` replaces nothing. `replace` is made of `CloneableSecretName`, so a sign-in token's name is refused
-   when the request is parsed, before anything is filed. The Clone preview puts a key in `replace` only if the person
-   ticked its row; the **Copy secrets** panel puts in the names its rows mark _replaces_, which the person ticked;
-3. **`secrets.configure` on the receiving machine** — filing is the `configure` axis of the `secrets` capability like
-   every other write to the store, so a governed device without it is refused before the filing step runs, and one with it
-   steps up (`docs/grants.md`).
-
-Only names in `replace` can be overwritten, and only keys of the secret store can be named there. A sign-in token
-is unrepresentable; a saved login's stored credential, the account defaults and the 2FA factors live in other stores a
-bundle cannot name, so no `replace` list reaches them; and a login's own configuration (including which
-`${secret:NAME}` it references) is never touched by a key copy. A key that is not named is not touched — including every
-other key an API-key login uses. After the sealed copy lands, the browser reports the keys it filed
-(`POST /v1/fleet/clone/keys`, `fleet.configure`) with the sending machine's instant for each; the receiving machine
-adds its own instant from its own list, and only for a key it holds and a source it already has a record of.
+**Remembering what was filed.** After the sealed copy lands, the browser reports the keys the import `imported`
+(`POST /v1/fleet/clone/keys`, `fleet.configure`) with the sending machine's instant for each and `filedAt`, the instant
+the import answered it filed them. The receiving machine records `filedAt` as the baseline for a key **only if its own
+store entry was created at that instant** — the one thing that proves it is the entry that copy made. A key deleted and
+made again since is left unrecorded; a key the person edited after the copy is still recorded at the copy's instant, so
+the next review says `both`. The update of `clone-base.json` is a compare-and-swap that starts over from what a
+concurrent fleet apply wrote, one writer at a time, so neither a report nor an apply loses the other's data.
 
 ### How it works
 
@@ -1002,13 +1008,13 @@ structurally unable to read what it carries.
 3. **The receiving machine opens it once** (`POST /v1/secrets/imports/:importId`) and files the values in
    its own store. The import is spent by the first attempt, success or not, so a replayed, tampered,
    re-pointed or late bundle is refused and no bundle can be tried twice against the same key. It checks
-   that every value fits before writing any: a half-copied set is worse than none. A name it already holds is
-   overwritten **only if the request's `replace` list names it**; every other held name is kept untouched, and the
-   answer says which names were `filed`, `replaced` and `kept`.
+   that every value fits before writing any: a half-copied set is worse than none. **A copy only adds**: a name it
+   already holds is never written, and the answer says which names were `imported` (new here, filed at `filedAt`) and
+   which were `kept`.
 
 Both ends write the **same import id** to their security log — `secrets.used` (`clone-export`) on the
 sending machine and `secrets.changed` (`clone-import`) on the receiving one — with the names, never a
-value. The receiving one records the names it actually `filed`, not the ones it kept. The three wire shapes are `packages/protocol/src/lib/secret-clone.ts`; the two halves are
+value. The receiving one records the names it actually `imported`, not the ones it kept. The three wire shapes are `packages/protocol/src/lib/secret-clone.ts`; the two halves are
 `SecretImportService` and `SecretExportService` in `packages/daemon/src/lib/secrets/clone.ts`.
 
 **The export is the sixth vault holder**, and it keeps the rule the other five keep: it returns nothing

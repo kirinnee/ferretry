@@ -71,11 +71,16 @@ export const reviewFleetClone = async (
     body: JSON.stringify(FleetCloneReviewRequestSchema.parse(request)),
   });
 
-/** After a sealed copy has landed here: remember when the source last changed each key it filed. Timestamps only. */
+/**
+ * After a sealed copy has landed here: remember when the source last changed each key it filed. `filedAt` is the
+ * instant this machine says it filed them (the import's own answer); a key it cannot prove it made then is not
+ * remembered. Timestamps only.
+ */
 export const recordCloneKeys = async (
   client: FleetClient,
   request: {
     readonly source: FleetCloneKeysRecordRequest['source'];
+    readonly filedAt: string;
     readonly keys: readonly { readonly name: string; readonly sourceUpdatedAt: string }[];
   },
 ): Promise<FleetCloneKeysRecordResult> =>

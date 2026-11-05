@@ -286,8 +286,7 @@ describe('the secret clone routes', () => {
       importId: offer.importId,
       sourceDaemonId: sourceIdentity.daemonId,
       imported: ['API_KEY'],
-      filed: ['API_KEY'],
-      replaced: [],
+      filedAt: new Date(NOW).toISOString(),
       kept: [],
     });
     should(replay.status).equal(409);
@@ -336,12 +335,12 @@ async function sealedMissing(source: SecretSubsystem, target: SecretSubsystem): 
   return await drive(source, `/v1/secrets/exports/${offer.importId}`, { offer, names: ['MISSING'] }, FRESH_DEVICE);
 }
 
-describe('replacing a key through the import route', () => {
+describe('a key this machine already holds, through the import route', () => {
   const OLD = 'old-api-value-here';
   const OTHER = 'a-key-the-copy-does-not-name';
   const PASSWORD = 'hunter2-UNIQUE-pw';
 
-  /** A target holding two keys and a saved login with a password; a source holding new values for one of them. */
+  /** A target holding two keys and a saved login with a password; a source holding a new value for one of them. */
   async function world() {
     const clock = new Clock();
     const sourceDocuments = new MemorySecretDocuments();
@@ -369,43 +368,19 @@ describe('replacing a key through the import route', () => {
       }),
     );
     const values = async () => [...(await new SecretVault(targetDocuments, new FakeSecretCipher()).values())];
+    /** The secret store as the disk holds it, timestamps included. */
+    const store = async () => JSON.stringify(await targetDocuments.read());
     /** Everything a login keeps: its index and its sealed document, as the stores hold them. */
     const logins = async () => JSON.stringify([loginIndex.document, await loginSealed.read()]);
-    return { clock, source, target, values, logins };
+    return { clock, source, target, values, store, logins };
   }
 
-  it('should overwrite only the named key, and leave every other secret and every login byte-identical', async () => {
+  it('should keep it, and every other secret and every login, byte-identical, and say it was kept', async () => {
     // Arrange
-    const { source, target, values, logins } = await world();
-    const { offer, bundle } = await sealed(source, target);
-    const others = (await values()).filter(([name]) => name !== 'API_KEY');
-    const loginsBefore = await logins();
-
-    // Act
-    const answer = await drive(
-      target,
-      `/v1/secrets/imports/${offer.importId}`,
-      { bundle, replace: ['API_KEY'] },
-      DEVICE,
-    );
-
-    // Assert
-    should(answer.status).equal(200);
-    should(answer.body.replaced).deepEqual(['API_KEY']);
-    should(answer.body.kept).deepEqual([]);
-    const after = await values();
-    should(after.find(([name]) => name === 'API_KEY')?.[1]).equal(VALUE);
-    should(after.filter(([name]) => name !== 'API_KEY')).deepEqual(others);
-    should(await logins()).equal(loginsBefore);
-    should(answer.raw).not.containEql(VALUE);
-    should(answer.raw).not.containEql(OLD);
-  });
-
-  it('should keep a held key the request does not name, and every login, byte-identical', async () => {
-    // Arrange
-    const { source, target, values, logins } = await world();
+    const { source, target, values, store, logins } = await world();
     const { offer, bundle } = await sealed(source, target);
     const before = await values();
+    const storeBefore = await store();
     const loginsBefore = await logins();
 
     // Act
@@ -413,37 +388,40 @@ describe('replacing a key through the import route', () => {
 
     // Assert
     should(answer.status).equal(200);
-    should(answer.body.replaced).deepEqual([]);
     should(answer.body.kept).deepEqual(['API_KEY']);
-    should(answer.body.filed).deepEqual([]);
+    should(answer.body.imported).deepEqual([]);
+    should(answer.body).not.have.property('replaced');
     should(await values()).deepEqual(before);
+    should(await store()).equal(storeBefore);
     should(await logins()).equal(loginsBefore);
+    should(answer.raw).not.containEql(VALUE);
+    should(answer.raw).not.containEql(OLD);
   });
 
-  it('should refuse a replace list that names a sign-in token, before anything is filed', async () => {
+  it('should refuse a request that asks to replace one, whoever it names, before anything is filed', async () => {
     // Arrange
-    const { source, target, values } = await world();
+    const { source, target, store } = await world();
     const { offer, bundle } = await sealed(source, target);
-    const before = await values();
+    const storeBefore = await store();
     const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
 
     // Act
-    const answer = await drive(target, `/v1/secrets/imports/${offer.importId}`, { bundle, replace: [signIn] }, DEVICE);
+    const answers = [
+      await drive(target, `/v1/secrets/imports/${offer.importId}`, { bundle, replace: ['API_KEY'] }, DEVICE),
+      await drive(target, `/v1/secrets/imports/${offer.importId}`, { bundle, replace: [signIn] }, DEVICE),
+    ];
 
     // Assert
-    should(answer.status).equal(400);
-    should(await values()).deepEqual(before);
-    // The import was not spent by a request that never parsed: the same bundle still files.
-    const again = await drive(
-      target,
-      `/v1/secrets/imports/${offer.importId}`,
-      { bundle, replace: ['API_KEY'] },
-      DEVICE,
-    );
+    should(answers.map(answer => answer.status)).deepEqual([400, 400]);
+    should(await store()).equal(storeBefore);
+    // The import was not spent by a request that never parsed: the same bundle still files, and still keeps.
+    const again = await drive(target, `/v1/secrets/imports/${offer.importId}`, { bundle }, DEVICE);
     should(again.status).equal(200);
+    should(again.body.kept).deepEqual(['API_KEY']);
+    should(await store()).equal(storeBefore);
   });
 
-  it('should refuse a governed caller who may not configure secrets, whatever it names to replace', async () => {
+  it('should refuse a governed caller who may not configure secrets', async () => {
     // Arrange — the real boundary in front of the real routes, a guard that refuses secrets.configure only.
     const { source, target, values } = await world();
     const { offer, bundle } = await sealed(source, target);
@@ -468,7 +446,7 @@ describe('replacing a key through the import route', () => {
         method: 'POST',
         path: `/v1/secrets/imports/${offer.importId}`,
         headers: { authorization: 'Bearer admin-secret', 'content-type': 'application/json' },
-        body: JSON.stringify({ bundle, replace: ['API_KEY'] }),
+        body: JSON.stringify({ bundle }),
       }),
     );
 

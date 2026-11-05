@@ -7,6 +7,7 @@
  * so no real harness setup, login or fleet is read. Every credential is a placeholder.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,7 @@ import {
   readTextFolder,
   skillItemsIn,
 } from '../../../src/adapters/fleet/setup-files.ts';
+import { documentRevision } from '../../../src/adapters/fleet/account-model-files.ts';
 import type { SetupCatalogDeps } from '../../../src/lib/fleet/setup-service.ts';
 
 const NOW = 1_800_000_000_000;
@@ -209,6 +211,7 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
   const catalog = {
     layout,
     locate: (name: string) => (name === 'claude' ? '/fake/bin/claude' : undefined),
+    documentRevision,
     now: () => NOW,
     ...(options.codexHome === false ? {} : { hostCodexHome: path.join(userHome, '.codex') }),
   } as unknown as SetupCatalogDeps;
@@ -227,7 +230,12 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
     credentials,
     tools: { plans: () => [], install: async () => [] },
     secrets: {
-      list: async () => [...secrets.keys()].map(name => ({ name, updatedAt: '2026-11-01T00:00:00.000Z' })),
+      list: async () =>
+        [...secrets.keys()].map(name => ({
+          name,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+        })),
       put: async (name, value) => {
         secrets.set(name, value);
       },
@@ -289,10 +297,125 @@ describe('the setup service collaborators over a temporary machine', () => {
     // Act
     await deps.secrets.put('NOTES_TOKEN', 'placeholder-two');
     const names = await deps.secrets.names();
+    const held = await deps.secrets.held();
 
     // Assert
     should(names).deepEqual(['OPENAI_API_KEY', 'NOTES_TOKEN']);
+    should(held).deepEqual([
+      { name: 'OPENAI_API_KEY', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z' },
+      { name: 'NOTES_TOKEN', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z' },
+    ]);
     should(secrets.get('NOTES_TOKEN')).equal('placeholder-two');
+  });
+
+  describe('the record of what was last copied', () => {
+    const recordPath = (layout: FleetLayout): string => path.join(layout.fleetDirectory, 'setup', 'clone-base.json');
+
+    it('should read an absent record as nothing and write what an update answers, once', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+
+      // Act
+      const before = await deps.cloneBase.read(recordPath(layout));
+      const wrote = await deps.cloneBase.update(recordPath(layout), current => `${current ?? 'none'}+one`);
+      const after = await deps.cloneBase.read(recordPath(layout));
+
+      // Assert
+      should(before).be.undefined();
+      should(wrote).be.true();
+      should(after).equal('none+one');
+    });
+
+    it('should leave the record as it is, and say so, when the update answers nothing', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      await deps.cloneBase.update(recordPath(layout), () => 'kept');
+
+      // Act
+      const wrote = await deps.cloneBase.update(recordPath(layout), () => undefined);
+
+      // Assert
+      should(wrote).be.false();
+      should(await deps.cloneBase.read(recordPath(layout))).equal('kept');
+    });
+
+    it('should give each of two updates started together the record the other left, so neither is lost', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      const add = async (name: string): Promise<boolean> =>
+        await deps.cloneBase.update(recordPath(layout), current => `${current ?? ''}${name};`);
+
+      // Act
+      const wrote = await Promise.all([add('A_KEY'), add('B_KEY')]);
+
+      // Assert
+      should(wrote).deepEqual([true, true]);
+      should(await deps.cloneBase.read(recordPath(layout))).equal('A_KEY;B_KEY;');
+    });
+
+    it('should run the next update after one whose change raised', async () => {
+      // Arrange
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      const failed = deps.cloneBase
+        .update(recordPath(layout), () => {
+          throw new Error('cannot change');
+        })
+        .catch((error: unknown) => error);
+
+      // Act
+      const wrote = await deps.cloneBase.update(recordPath(layout), () => 'after');
+
+      // Assert
+      should(await failed).be.instanceOf(Error);
+      should(wrote).be.true();
+      should(await deps.cloneBase.read(recordPath(layout))).equal('after');
+    });
+
+    it('should start over from what a fleet apply wrote meanwhile, and never write the older record over it', async () => {
+      // Arrange — an apply lands its record between this update's read and its write, once
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      await writeFile(recordPath(layout), 'first;');
+      let seen = 0;
+
+      // Act
+      const wrote = await deps.cloneBase.update(recordPath(layout), current => {
+        seen += 1;
+        if (seen === 1) writeFileSync(recordPath(layout), 'first;applied;');
+        return `${current ?? ''}recorded;`;
+      });
+
+      // Assert
+      should(wrote).be.true();
+      should(seen).equal(2);
+      should(await deps.cloneBase.read(recordPath(layout))).equal('first;applied;recorded;');
+    });
+
+    it('should give up, writing nothing, when the record keeps changing under it', async () => {
+      // Arrange — an apply lands its record every time, so no attempt can be written
+      const { deps, layout } = await machine();
+      await mkdir(path.dirname(recordPath(layout)), { recursive: true });
+      await writeFile(recordPath(layout), 'v0;');
+      let version = 0;
+
+      // Act
+      const failed = await deps.cloneBase
+        .update(recordPath(layout), current => {
+          version += 1;
+          writeFileSync(recordPath(layout), `v${String(version)};`);
+          return `${current ?? ''}recorded;`;
+        })
+        .catch((error: unknown) => error);
+
+      // Assert
+      should(failed).be.instanceOf(Error);
+      should(String((failed as Error).message)).match(/kept changing/u);
+      should(await deps.cloneBase.read(recordPath(layout))).equal('v3;');
+    });
   });
 
   it('should read the skill items from the asset tree and the folders it is asked for', async () => {

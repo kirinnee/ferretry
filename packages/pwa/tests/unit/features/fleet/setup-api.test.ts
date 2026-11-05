@@ -139,11 +139,14 @@ describe('the clone keys wire client', () => {
     const { client, calls } = clientFor({ recorded: 1 });
     const keys = [{ name: 'GLM_API_KEY', sourceUpdatedAt: '2026-10-20T08:00:00.000Z' }];
 
-    expect(await recordCloneKeys(client, { source: { daemonId: 'studio' }, keys })).toEqual({ recorded: 1 });
-    expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({ source: { daemonId: 'studio' }, keys });
+    const filedAt = '2026-10-21T08:00:00.000Z';
+
+    expect(await recordCloneKeys(client, { source: { daemonId: 'studio' }, filedAt, keys })).toEqual({ recorded: 1 });
+    expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({ source: { daemonId: 'studio' }, filedAt, keys });
 
     const refused = recordCloneKeys(client, {
       source: { daemonId: 'studio' },
+      filedAt,
       keys: [
         {
           name: mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access,
