@@ -102,7 +102,10 @@ import {
   type CatalogInstallState,
   type CatalogInstallStore,
   CatalogInstallStateError,
+  installStateProblems,
   linkSequenceKey,
+  PROJECT_MCP_FILE,
+  withoutTrailingSlash,
 } from './store.ts';
 
 export interface CatalogInstallServiceDeps {
@@ -128,7 +131,6 @@ export interface CatalogInstallServiceDeps {
 
 const SECRET_PLACEHOLDER = /^\$\{secret:([A-Za-z0-9_.-]+)\}$/u;
 const ENV_VARIABLE = /^[A-Z_][A-Z0-9_]*$/u;
-const PROJECT_MCP_FILE = '.mcp.json';
 
 /** How long past its signed end a link's copy is still accepted here. The fetcher checks strictly; this only bounds a very stale copy. */
 const LINK_INSTALL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -173,8 +175,6 @@ const sameTarget = (left: CatalogInstallTarget, right: CatalogInstallTarget): bo
   left.scope === 'project'
     ? right.scope === 'project' && left.projectRoot === right.projectRoot && left.harness === right.harness
     : right.scope === 'runtime' && left.runtime === right.runtime && left.profile === right.profile;
-
-const withoutTrailingSlash = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
 
 /** Where an item lands: a stable key (two installs sharing it would overwrite each other) and the words for it. */
 interface Destination {
@@ -429,22 +429,36 @@ export class CatalogInstallService {
           'catalog_install_edited',
           `Edited on this machine after the changes were reviewed: ${editedWords(editedView(edited, this.#editedPrefix(held.item, resolved), held.item.name))}. Nothing was replaced. Preview it again to see what is there now.`,
         );
-      const written =
-        held.target.scope === 'project'
-          ? await this.#writeProject(held, resolved, request.secretBindings, replaces, reading, entrySeen)
-          : await this.#writeRuntime(held, held.target, request.secretBindings, replaces, reading, governance);
+      // What this install would leave behind must be a document the reader accepts, and that is settled BEFORE
+      // anything is written: otherwise a first link install could land its item and then leave a file that no
+      // later list, preview or remove can read.
+      const installId = this.deps.mint('cin') as CatalogInstallRecord['installId'];
       const installedAt = new Date(this.deps.now()).toISOString();
-      const record: CatalogInstallRecord = {
-        installId: this.deps.mint('cin') as CatalogInstallRecord['installId'],
+      const base = {
+        installId,
         installedAt,
         provenance: held.provenance,
         target: held.target,
         destination: resolved.destination.words,
         key: resolved.destination.key,
-        files: written.files,
         secretBindings: request.secretBindings,
         ...(resolved.root === undefined ? {} : { root: resolved.root }),
         ...(resolved.destination.folder === undefined ? {} : { folder: resolved.destination.folder }),
+      };
+      this.#assertReadableAfter(
+        state,
+        { ...base, files: this.#plannedFiles(held) },
+        held,
+        replaces?.installId,
+        installedAt,
+      );
+      const written =
+        held.target.scope === 'project'
+          ? await this.#writeProject(held, resolved, request.secretBindings, replaces, reading, entrySeen)
+          : await this.#writeRuntime(held, held.target, request.secretBindings, replaces, reading, governance);
+      const record: CatalogInstallRecord = {
+        ...base,
+        files: written.files,
         ...(written.componentSha256 === undefined ? {} : { componentSha256: written.componentSha256 }),
       };
       await this.deps.store.write(this.#stateAfter(state, record, held, replaces?.installId, installedAt));
@@ -741,6 +755,35 @@ export class CatalogInstallService {
         install.provenance.itemId === provenance.itemId &&
         sameTarget(install.target, target),
     );
+  }
+
+  /** The files an install will record, as far as they say WHERE it lands (a project server's entry); the hashes come from the write. */
+  #plannedFiles(held: HeldPreview): CatalogInstalledFile[] {
+    return held.target.scope === 'project' && held.item.kind === 'mcp'
+      ? [{ path: PROJECT_MCP_FILE, sha256: '0'.repeat(64), entry: held.item.name }]
+      : [];
+  }
+
+  /**
+   * Refuse, with nothing written and the old file untouched, when the state this install would leave behind
+   * contradicts itself (an old version 1 file with two records of one id or place, upgraded by a first link install,
+   * is the case). The reader would refuse that document, and with it the removal of what was just installed.
+   */
+  #assertReadableAfter(
+    state: CatalogInstallState,
+    planned: CatalogInstallRecord,
+    held: HeldPreview,
+    replacedId: string | undefined,
+    installedAt: string,
+  ): void {
+    const after = this.#stateAfter(state, planned, held, replacedId, installedAt);
+    if (after.schemaVersion !== CATALOG_INSTALLS_SCHEMA_VERSION_LINKS) return;
+    const problems = installStateProblems({ installs: after.installs, linkSequences: after.linkSequences ?? {} });
+    if (problems.length > 0)
+      refuse(
+        'catalog_install_conflict',
+        `This machine's list of installs has records that contradict each other (${problems.join('; ')}), and installing from a link would write a list it could no longer read. Nothing was installed and the list was not changed.`,
+      );
   }
 
   /**

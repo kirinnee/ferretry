@@ -9,6 +9,7 @@ import {
   CatalogInstallStateV1Schema,
   CatalogInstallStateV2Schema,
   CATALOG_INSTALLS_DUPLICATE_INSTALL,
+  CATALOG_INSTALLS_MISPLACED,
   CATALOG_INSTALLS_UNPINNED_LINK,
   EMPTY_CATALOG_INSTALL_STATE,
   linkSequenceKey,
@@ -40,7 +41,9 @@ const record = {
   },
   target: { scope: 'project', projectRoot: '/srv/app', harness: 'claude' },
   destination: '/srv/app/.claude/skills/pdf-tools',
-  key: 'project:/srv/app:claude:skill:pdf-tools',
+  key: 'project:/srv/app/.claude/skills/pdf-tools',
+  root: '/srv/app',
+  folder: '.claude/skills/pdf-tools',
   files: [{ path: 'SKILL.md', sha256: SHA }],
   secretBindings: {},
 };
@@ -152,10 +155,12 @@ describe('the file of installs', () => {
   });
 
   describe('a version 2 document that contradicts itself', () => {
-    const linkRecord = (installId: string, key: string, sequence: number, linkId = `lnk_${'a'.repeat(22)}`) => ({
+    /** A link install of the skill `place`, filed where it was written: the key IS its place. */
+    const linkRecord = (installId: string, place: string, sequence: number, linkId = `lnk_${'a'.repeat(22)}`) => ({
       ...record,
       installId,
-      key,
+      key: `project:/srv/app/.claude/skills/${place}`,
+      folder: `.claude/skills/${place}`,
       provenance: {
         publisher: DAEMON,
         publisherName: 'kirin-box',
@@ -223,8 +228,81 @@ describe('the file of installs', () => {
       should(reasons(document)).deepEqual([CATALOG_INSTALLS_DUPLICATE_INSTALL, CATALOG_INSTALLS_UNPINNED_LINK]);
     });
 
+    describe('an install filed under a place other than the one it wrote to', () => {
+      const projectSkill = linkRecord(idOf('a'), 'pdf-tools', 1);
+      const refused = (install: unknown) => reasons(v2([install], { [pinKey]: 1 }));
+
+      it('takes a record whose key is the place its root and folder say', () => {
+        should(refused(projectSkill)).deepEqual([]);
+      });
+
+      it('refuses a clone of one project install under a fresh id with only its key respelled (/./)', () => {
+        const clone = { ...projectSkill, installId: idOf('b'), key: 'project:/srv/app/./.claude/skills/pdf-tools' };
+        should(reasons(v2([projectSkill, clone], { [pinKey]: 1 }))).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        should(refused(clone)).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+      });
+
+      it('refuses the same physical place filed twice even when only the root and folder are respelled', () => {
+        const clone = {
+          ...projectSkill,
+          installId: idOf('b'),
+          root: '/srv/./app/',
+          folder: '.claude/./skills/pdf-tools',
+        };
+        should(reasons(v2([projectSkill, clone], { [pinKey]: 1 }))).deepEqual([CATALOG_INSTALLS_DUPLICATE_INSTALL]);
+      });
+
+      it('refuses a key that names some other place, and a project install that does not say where it is', () => {
+        should(refused({ ...projectSkill, key: 'project:/srv/other/.claude/skills/pdf-tools' })).deepEqual([
+          CATALOG_INSTALLS_MISPLACED,
+        ]);
+        const { root: _root, ...noRoot } = projectSkill;
+        const { folder: _folder, ...noFolder } = projectSkill;
+        should(refused(noRoot)).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        should(refused(noFolder)).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+      });
+
+      it('knows a project server by its entry in the root’s .mcp.json', () => {
+        const { folder: _folder, ...base } = projectSkill;
+        const server = {
+          ...base,
+          provenance: { ...projectSkill.provenance, kind: 'mcp', name: 'docs' },
+          key: 'project:/srv/app/.mcp.json#docs',
+          files: [{ path: '.mcp.json', sha256: SHA, entry: 'docs' }],
+        };
+        should(refused(server)).deepEqual([]);
+        should(refused({ ...server, key: 'project:/srv/app/./.mcp.json#docs' })).deepEqual([
+          CATALOG_INSTALLS_MISPLACED,
+        ]);
+        should(refused({ ...server, files: [{ path: '.mcp.json', sha256: SHA, entry: 'other' }] })).deepEqual([
+          CATALOG_INSTALLS_MISPLACED,
+        ]);
+      });
+
+      it('knows a runtime item by its kind and name, wherever the key is spelled', () => {
+        const runtime = {
+          ...projectSkill,
+          target: { scope: 'runtime', runtime: 'claude-main', profile: 'main' },
+          key: 'fleet:skills/pdf-tools',
+        };
+        const { root: _root, folder: _folder, ...bare } = runtime;
+        should(refused(bare)).deepEqual([]);
+        should(refused({ ...bare, key: 'fleet:skills/pdf-tools/' })).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+        const server = {
+          ...bare,
+          provenance: { ...projectSkill.provenance, kind: 'mcp', name: 'docs' },
+          key: 'fleet:mcp/docs',
+        };
+        should(refused(server)).deepEqual([]);
+        should(refused({ ...server, key: 'fleet:skills/docs' })).deepEqual([CATALOG_INSTALLS_MISPLACED]);
+      });
+    });
+
     it('does not hold a version 1 file to either rule: it has no pins and is upgraded, not refused', () => {
-      const v1 = { ...EMPTY_CATALOG_INSTALL_STATE, installs: [record, { ...record, key: 'other' }] };
+      const v1 = {
+        ...EMPTY_CATALOG_INSTALL_STATE,
+        installs: [record, { ...record, key: 'other' }, { ...record, installId: idOf('z') }],
+      };
       should(CatalogInstallStateV1Schema.safeParse(v1).success).be.true();
       should(CatalogInstallStateSchema.safeParse(v1).success).be.true();
     });

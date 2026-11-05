@@ -11,6 +11,7 @@ import type { FileSystemPort } from '../../../src/lib/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 import {
   CATALOG_INSTALLS_DUPLICATE_INSTALL,
+  CATALOG_INSTALLS_MISPLACED,
   CATALOG_INSTALLS_UNPINNED_LINK,
   CatalogInstallStateError,
   type CatalogInstallState,
@@ -138,6 +139,29 @@ describe('a reopened file of installs that contradicts itself', () => {
     should(await failure(damaged.read())).be.instanceOf(CatalogInstallStateError);
   });
 
+  it('should refuse a clone of one project install whose key is respelled, since both would remove the same files', async () => {
+    const r = rig();
+    await installLink(r, { sequence: 1 });
+    const damaged = await reopenWith(r.store.state, document => {
+      const installs = document.installs as { installId: string; key: string }[];
+      document.installs = [
+        ...installs,
+        {
+          ...installs[0]!,
+          installId: `cin_${'z'.repeat(22)}`,
+          key: installs[0]!.key.replace('/.claude', '/./.claude'),
+        },
+      ];
+    });
+
+    const error = await failure(damaged.read());
+
+    should(error).be.instanceOf(CatalogInstallStateError);
+    should((error as Error).message).equal(
+      `${CATALOG_INSTALLS_DOCUMENT} contradicts itself (${CATALOG_INSTALLS_MISPLACED}), so no install was changed`,
+    );
+  });
+
   it('should keep the generic words for a file that is simply not a record of installs', async () => {
     const r = rig();
     await installLink(r, { sequence: 1 });
@@ -171,7 +195,9 @@ const catalogInstall = {
   },
   target: { scope: 'project', projectRoot: '/srv/app', harness: 'claude' },
   destination: '/srv/app/.claude/skills/other-tools',
-  key: 'project:/srv/app:claude:skill:other-tools',
+  key: 'project:/srv/app/.claude/skills/other-tools',
+  root: '/srv/app',
+  folder: '.claude/skills/other-tools',
   files: [{ path: 'SKILL.md', sha256: SHA }],
   secretBindings: {},
 };
@@ -231,5 +257,122 @@ describe('the file of installs, when what is on disk is not JSON', () => {
 
     should(files.has(BACKUP)).be.false();
     should(JSON.parse(files.get(DOCUMENT) ?? '').schemaVersion).equal(2);
+  });
+});
+
+describe('the writer never emits a document its own reader would refuse', () => {
+  const v1Text = `${JSON.stringify({
+    schemaVersion: 1,
+    installs: [catalogInstall],
+    publishers: {},
+    pins: {},
+    revisions: {},
+  })}\n`;
+
+  it('should refuse a version 2 state that contradicts itself, keeping the version 1 text and making no backup', async () => {
+    files.clear();
+    files.set(DOCUMENT, v1Text);
+    const state: CatalogInstallState = {
+      ...EMPTY_CATALOG_INSTALL_STATE,
+      schemaVersion: 2,
+      installs: [catalogInstall, { ...catalogInstall, installId: `cin_${'j'.repeat(22)}` }] as never,
+      linkSequences: {},
+    };
+
+    const error = await failure(open().write(state));
+
+    should(error).be.instanceOf(CatalogInstallStateError);
+    should((error as Error).message).equal(
+      `${CATALOG_INSTALLS_DOCUMENT} would not be readable (${CATALOG_INSTALLS_DUPLICATE_INSTALL}), so nothing was written`,
+    );
+    should(files.get(DOCUMENT)).equal(v1Text);
+    should(files.has(BACKUP)).be.false();
+  });
+
+  it('should say so in generic words when the state is not a record of installs at all', async () => {
+    files.clear();
+    const state = { ...EMPTY_CATALOG_INSTALL_STATE, schemaVersion: 2, linkSequences: {}, extra: 1 } as never;
+
+    const error = await failure(open().write(state));
+
+    should((error as Error).message).containEql('it is not a record of installs this daemon writes');
+    should(files.size).equal(0);
+  });
+});
+
+describe('the first link install over a version 1 file that already repeats an id or a place', () => {
+  const second = {
+    ...catalogInstall,
+    installId: `cin_${'s'.repeat(22)}`,
+    destination: '/srv/app/.claude/skills/second',
+    key: 'project:/srv/app/.claude/skills/second',
+    folder: '.claude/skills/second',
+  };
+  const v1With = (installs: unknown[]): string =>
+    `${JSON.stringify({ schemaVersion: 1, installs, publishers: {}, pins: {}, revisions: {} })}\n`;
+
+  const attempt = async (old: string, target = runtimeTarget()) => {
+    const r = rig();
+    files.clear();
+    files.set(DOCUMENT, old);
+    const store = open();
+    r.store.read = () => store.read();
+    r.store.write = state => store.write(state);
+    const preview = await r.service.preview(target.scope, await linkPreviewRequest(alice, target));
+    const before = JSON.stringify([...r.fleet.components]);
+    const refusal = await failure(
+      r.service.apply(target.scope, { previewId: preview.previewId, secretBindings: {} }, GOVERNANCE, STEP_UP),
+    );
+    return { r, refusal, before };
+  };
+
+  for (const [name, installs, target] of [
+    [
+      'one install id at two places',
+      [catalogInstall, { ...second, installId: catalogInstall.installId }],
+      runtimeTarget(),
+    ],
+    ['two install ids at one place', [catalogInstall, { ...second, key: catalogInstall.key }], runtimeTarget()],
+    [
+      'one install id at two places, the link going to a project',
+      [catalogInstall, { ...second, installId: catalogInstall.installId }],
+      projectTarget(),
+    ],
+  ] as const)
+    it(`should refuse cleanly, before writing anything, with ${name}`, async () => {
+      // Arrange: a version 1 file the version 2 reader would refuse once upgraded
+      const old = v1With([...installs]);
+
+      // Act
+      const { r, refusal, before } = await attempt(old, target);
+
+      // Assert: a clear refusal; no item, no component, no pin; the version 1 file is byte-identical and not upgraded
+      should(refusal).be.instanceOf(CatalogInstallRefusalError);
+      should((refusal as CatalogInstallRefusalError).code).equal('catalog_install_conflict');
+      should((refusal as Error).message).containEql('Nothing was installed and the list was not changed');
+      should(r.folders.folders.size).equal(0);
+      should(JSON.stringify([...r.fleet.components])).equal(before);
+      should(files.get(DOCUMENT)).equal(old);
+      should(files.has(BACKUP)).be.false();
+      should(r.store.writes).equal(0);
+      should((await open().read()).schemaVersion).equal(1);
+    });
+
+  it('should still upgrade a version 1 file whose records are distinct and filed where they wrote', async () => {
+    const old = v1With([catalogInstall, second]);
+    const r = rig();
+    files.clear();
+    files.set(DOCUMENT, old);
+    const store = open();
+    r.store.read = () => store.read();
+    r.store.write = state => store.write(state);
+
+    const linked = await installLink(r, { sequence: 1 }, runtimeTarget());
+
+    const upgraded = await open().read();
+    should(upgraded.schemaVersion).equal(2);
+    should(upgraded.installs).have.length(3);
+    should(upgraded.installs.map(install => install.installId)).containEql(linked.install.installId);
+    should(files.get(BACKUP)).equal(old);
   });
 });
