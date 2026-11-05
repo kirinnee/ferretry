@@ -182,7 +182,7 @@ function Supported({
         <div className="flex flex-wrap items-stretch gap-2">
           <select
             id="auto-read-voice"
-            className="kt-input min-h-[44px] min-w-0 flex-1"
+            className="kt-input min-h-[44px] min-w-full sm:min-w-0 sm:flex-1"
             value={chosen === null ? BEST_VOICE : chosen.id}
             onChange={event => update({ voiceId: event.target.value === BEST_VOICE ? null : event.target.value })}
           >
