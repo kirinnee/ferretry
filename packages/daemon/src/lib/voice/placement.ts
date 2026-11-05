@@ -31,7 +31,7 @@ export async function planVoiceLaunch(input: {
       command: agentScopeCommand({
         scope: voiceScopeName(input.nonce),
         slice: VOICE_SLICE,
-        limits: voiceUnitLimits(input.recognizers),
+        limits: voiceUnitLimits(input.host.cpus, input.recognizers),
         command: input.command,
       }),
     };

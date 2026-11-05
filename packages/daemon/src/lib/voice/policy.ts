@@ -18,8 +18,16 @@ export function voiceMemoryLimit(descriptions: VoiceRecognizerSet): number {
     Math.ceil(descriptions.reduce((total, model) => total + model.peakResidentBytes, 0) * VOICE_MEMORY_PEAK_FACTOR),
   );
 }
-export function voiceUnitLimits(descriptions: VoiceRecognizerSet): { cpuQuota: string; memoryMax: string } {
-  return absoluteUnitLimits(Math.max(...descriptions.map(model => model.threads)), voiceMemoryLimit(descriptions));
+/** The scope quota is always C whole cores from the host; a recognizer's declared threads are only a wish. */
+export function voiceUnitLimits(
+  cores: number,
+  descriptions: VoiceRecognizerSet,
+): { cpuQuota: string; memoryMax: string } {
+  return absoluteUnitLimits(voiceCores(cores), voiceMemoryLimit(descriptions));
+}
+/** Threads handed to the worker: the largest wish, never above the host budget C. */
+export function voiceWorkerThreads(cores: number, descriptions: VoiceRecognizerSet): number {
+  return Math.min(voiceCores(cores), Math.max(...descriptions.map(model => model.threads)));
 }
 export function voiceMemoryAdmission(available: number, descriptions: VoiceRecognizerSet): VoiceOutcome<void> {
   return available < descriptions.reduce((total, model) => total + model.modelBytes, 0) + VOICE_MEMORY_HEADROOM_BYTES

@@ -35,6 +35,7 @@ function fixture(options: { memory?: number; failMemory?: boolean; failSpawn?: b
   const workers: { handlers: Parameters<VoiceWorkerSpawner['start']>[0]; stopped: number }[] = [];
   let throwSend = false;
   let holdStop: Promise<void> | undefined;
+  let holdStart: Promise<void> | undefined;
   const subject = new VoiceWorkerHost({
     clock,
     recognizers: [{ threads: 2, modelId: 'fake', modelBytes: 100, peakResidentBytes: 100, streaming: false }],
@@ -45,6 +46,7 @@ function fixture(options: { memory?: number; failMemory?: boolean; failSpawn?: b
     spawner: {
       start: async handlers => {
         if (options.failSpawn) throw new Error('spawn refused');
+        await holdStart;
         const worker = { handlers, stopped: 0 };
         workers.push(worker);
         return {
@@ -98,6 +100,9 @@ function fixture(options: { memory?: number; failMemory?: boolean; failSpawn?: b
     },
     holdStop: (promise: Promise<void>) => {
       holdStop = promise;
+    },
+    holdStart: (promise: Promise<void>) => {
+      holdStart = promise;
     },
   };
 }
@@ -235,6 +240,48 @@ describe('VoiceWorkerHost', () => {
     expect(f.subject.status().state).toBe('idle');
     await f.open('three');
     expect(f.workers).toHaveLength(2);
+    await f.subject.close();
+  });
+  test('last stream cancelled during a delayed spawn still gets the ten minute idle exit', async () => {
+    // Arrange
+    const f = fixture();
+    const start = Promise.withResolvers<void>();
+    f.holdStart(start.promise);
+    const opening = f.subject.open('one', 'one', e => f.errors.push(e));
+    await turns();
+    // Act
+    f.subject.cancel('one');
+    start.resolve();
+    await turns();
+    f.reply();
+    // Assert
+    expect(await opening).toMatchObject({ code: 'voice_cancelled' });
+    f.clock.advance(VOICE_IDLE_MS - 1);
+    expect(f.workers[0]?.stopped).toBe(0);
+    f.clock.advance(1);
+    expect(f.workers[0]?.stopped).toBe(1);
+    expect(f.subject.status().state).toBe('idle');
+    await f.subject.close();
+  });
+  test('a stream that arrives during that delayed spawn keeps the worker alive', async () => {
+    // Arrange
+    const f = fixture();
+    const start = Promise.withResolvers<void>();
+    f.holdStart(start.promise);
+    const first = f.subject.open('one', 'one', e => f.errors.push(e));
+    await turns();
+    f.subject.cancel('one');
+    const second = f.subject.open('two', 'two', e => f.errors.push(e));
+    // Act
+    start.resolve();
+    await turns();
+    f.reply();
+    await first;
+    f.clock.advance(VOICE_IDLE_MS * 2);
+    // Assert
+    expect(await second).toMatchObject({ ok: true });
+    expect(f.workers[0]?.stopped).toBe(0);
+    expect(f.subject.status().state).toBe('loaded');
     await f.subject.close();
   });
   test('crash fails streams, stale replies are ignored, replacement waits for the old child to exit', async () => {

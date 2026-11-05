@@ -2,7 +2,7 @@ import type { CgroupCommandPort, CgroupHostFacts } from '../cgroups/ports.ts';
 import { VoiceWorkerResponseSchema } from './ipc.ts';
 import type { VoiceRecognizerSet, VoiceWorkerRequest } from './ipc.ts';
 import { launchPlacedVoiceWorker, planVoiceLaunch } from './placement.ts';
-import { voiceWorkerCommand } from './policy.ts';
+import { voiceWorkerCommand, voiceWorkerThreads } from './policy.ts';
 import type { VoiceClock, VoicePlacement, VoiceWorkerHandle, VoiceWorkerSpawner } from './ports.ts';
 import { VoiceRssWatchdog } from './watchdog.ts';
 
@@ -54,7 +54,7 @@ export class VoiceProcessSpawner implements VoiceWorkerSpawner {
     const ready = Promise.withResolvers<void>();
     let started = false;
     let stopping: Promise<void> | undefined;
-    const child = this.options.processes.spawn(command, Math.max(...recognizers.map(model => model.threads)), {
+    const child = this.options.processes.spawn(command, voiceWorkerThreads(this.options.host.cpus, recognizers), {
       message: raw => {
         const parsed = VoiceWorkerResponseSchema.safeParse(raw);
         if (!started && parsed.success && parsed.data.type === 'health' && parsed.data.state === 'ready')

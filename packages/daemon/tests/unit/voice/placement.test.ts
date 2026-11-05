@@ -7,7 +7,9 @@ import {
   voiceCores,
   voiceMemoryLimit,
   voicePlacementSupport,
+  voiceUnitLimits,
   voiceWorkerCommand,
+  voiceWorkerThreads,
 } from '../../../src/lib/voice/policy.ts';
 import { answerArguments, daemonUsageText } from '../../../src/lib/runtime/arguments.ts';
 
@@ -67,6 +69,37 @@ describe('voice placement', () => {
     });
     expect(actual.command.some(arg => arg.includes('CPUWeight'))).toBe(false);
     expect(voiceScopeName('once !')).toMatch(/-voice-once.scope$/u);
+  });
+  test('scope quota is C x 100% from the host cores whatever the recognizer declares', async () => {
+    // Arrange
+    const quotaFor = async (cpus: number, threads: number) => {
+      const plan = await planVoiceLaunch({
+        host: { ...host, cpus },
+        recognizers: [{ ...recognizer, threads }],
+        command,
+        nonce: 'n',
+        commands: { execute: async () => ({ code: 0, stdout: '', stderr: '' }) },
+      });
+      return plan.command.find(arg => arg.startsWith('--property=CPUQuota='));
+    };
+    // Act / Assert
+    expect(await quotaFor(8, 4)).toBe('--property=CPUQuota=200%');
+    expect(await quotaFor(4, 4)).toBe('--property=CPUQuota=100%');
+    expect(await quotaFor(2, 4)).toBe('--property=CPUQuota=100%');
+    expect(await quotaFor(16, 1)).toBe('--property=CPUQuota=400%');
+    expect(await quotaFor(64, 4)).toBe('--property=CPUQuota=400%');
+    expect([8, 4, 64].map(cores => voiceUnitLimits(cores, [{ ...recognizer, threads: 4 }]).cpuQuota)).toEqual([
+      '200%',
+      '100%',
+      '400%',
+    ]);
+  });
+  test('worker threads never exceed the host budget C', () => {
+    // Arrange / Act / Assert
+    expect(voiceWorkerThreads(8, [{ ...recognizer, threads: 4 }])).toBe(2);
+    expect(voiceWorkerThreads(4, [{ ...recognizer, threads: 4 }])).toBe(1);
+    expect(voiceWorkerThreads(64, [{ ...recognizer, threads: 4 }])).toBe(4);
+    expect(voiceWorkerThreads(64, [{ ...recognizer, threads: 1 }])).toBe(1);
   });
   test('unsupported hosts keep daemon priority, run directly and disclose why', async () => {
     // Arrange / Act
@@ -177,7 +210,7 @@ test('a refused systemd-run is reaped before direct fallback, and fallback failu
 
 test('two active models share one summed memory ceiling and one GiB headroom', async () => {
   // Arrange
-  const { voiceMemoryAdmission, voiceUnitLimits } = await import('../../../src/lib/voice/policy.ts');
+  const { voiceMemoryAdmission } = await import('../../../src/lib/voice/policy.ts');
   const { VoiceRecognizerSetSchema } = await import('../../../src/lib/voice/ipc.ts');
   const streaming = {
     ...recognizer,
@@ -192,7 +225,7 @@ test('two active models share one summed memory ceiling and one GiB headroom', a
   expect(voiceMemoryLimit(selected)).toBe(
     Math.ceil((recognizer.peakResidentBytes + streaming.peakResidentBytes) * 1.25),
   );
-  expect(voiceUnitLimits(selected).memoryMax).toBe(String(voiceMemoryLimit(selected)));
+  expect(voiceUnitLimits(host.cpus, selected).memoryMax).toBe(String(voiceMemoryLimit(selected)));
   expect(voiceMemoryAdmission(needed - 1, selected)).toMatchObject({ code: 'voice_no_memory' });
   expect(voiceMemoryAdmission(needed, selected)).toMatchObject({ ok: true });
   expect(VoiceRecognizerSetSchema.safeParse(selected).success).toBe(true);

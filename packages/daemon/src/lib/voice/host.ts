@@ -180,6 +180,8 @@ export class VoiceWorkerHost {
       );
       this.loaded = outcome.ok;
       if (!outcome.ok) this.abort(outcome);
+      // Every stream may have been cancelled while the child was starting: nothing else would reap it then.
+      else this.scheduleIdle();
       return outcome.ok ? { ok: true, value: undefined } : outcome;
     } catch {
       const failure = fail('worker_crashed', 'Could not start the speech worker or read available memory.');

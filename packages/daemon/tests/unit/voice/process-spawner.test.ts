@@ -28,7 +28,7 @@ class Clock implements VoiceClock {
       }
   }
 }
-function fixture(capped = false) {
+function fixture(capped = false, cpus = 8, wished = 2) {
   const clock = new Clock();
   const children: {
     argv: readonly string[];
@@ -47,7 +47,7 @@ function fixture(capped = false) {
     runtime: '/bin/bun',
     entry: '/repo/fyd.ts',
     nonce: () => 'one',
-    host: { platform: capped ? 'linux' : 'darwin', cpus: 8, memoryBytes: 8 * 1024 ** 3, unifiedHierarchy: capped },
+    host: { platform: capped ? 'linux' : 'darwin', cpus, memoryBytes: 8 * 1024 ** 3, unifiedHierarchy: capped },
     commands: { execute: async () => ({ code: 0, stdout: '', stderr: '' }) },
     processes: {
       spawn: (argv, threads, handlers) => {
@@ -70,7 +70,9 @@ function fixture(capped = false) {
     },
   });
   const start = () =>
-    subject.start({ message: m => messages.push(m), exited: r => exits.push(r) }, [notInstalledVoiceDescription(2)]);
+    subject.start({ message: m => messages.push(m), exited: r => exits.push(r) }, [
+      notInstalledVoiceDescription(wished),
+    ]);
   const ready = () =>
     children.at(-1)?.handlers.message({ version: 1, type: 'health', requestId: 'startup', state: 'ready' });
   return {
@@ -176,4 +178,36 @@ test('the watchdog stops a running worker over its cap and an unreadable fallbac
   failed.clock.advance(1_000);
   await expect(starting).rejects.toThrow('RSS watchdog could not read memory');
   expect(failed.children[0]?.kills).toBe(1);
+});
+test('worker threads are the wish clamped to the host budget C, on the capped path and the fallback', async () => {
+  // Arrange / Act / Assert
+  for (const [cpus, wished, expected] of [
+    [8, 4, 2],
+    [4, 4, 1],
+    [3, 4, 1],
+    [16, 4, 4],
+    [64, 4, 4],
+    [32, 1, 1],
+  ] as const) {
+    const capped = fixture(true, cpus, wished);
+    const starting = capped.start();
+    await turns();
+    capped.ready();
+    await (await starting).stop();
+    expect(capped.children[0]?.threads).toBe(expected);
+    const direct = fixture(false, cpus, wished);
+    const fallback = direct.start();
+    await turns();
+    direct.ready();
+    await (await fallback).stop();
+    expect(direct.children[0]?.threads).toBe(expected);
+  }
+  const refused = fixture(true, 8, 4);
+  const pending = refused.start();
+  await turns();
+  refused.children[0]?.handlers.exited('systemd-run refused');
+  await turns();
+  refused.ready();
+  await (await pending).stop();
+  expect(refused.children.map(child => child.threads)).toEqual([2, 2]);
 });
