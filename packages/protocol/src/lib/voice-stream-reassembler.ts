@@ -48,8 +48,9 @@ function feed<Unit>(
     units.push(decoded.value);
     offset += unitBytes;
   }
-  // A copy, so the state never keeps the caller's (possibly much larger, possibly reused) buffer alive.
-  return voiceOk({ reassembly: { pending: whole.slice(offset) }, units });
+  // A plain owned copy: `Buffer#slice` is a VIEW, so slicing would alias the caller's memory (which it may
+  // overwrite) and keep its whole backing store alive. `Uint8Array.from` always allocates a fresh buffer.
+  return voiceOk({ reassembly: { pending: Uint8Array.from(whole.subarray(offset)) }, units });
 }
 
 /** Feeds the daemon's receiving side: a run of the browser's bytes, answering the uplink units it completed. */

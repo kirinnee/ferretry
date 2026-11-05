@@ -118,6 +118,35 @@ describe('may a countdown send', () => {
     should(ask({ now: 10_500, ledger: echoed(A, 10_500) })).eql({ allowed: true });
   });
 
+  it('fails closed on a nonce issued in the future (a negative age)', () => {
+    const future = echoed(A, 2_000);
+    should(ask({ now: 1_500, shown: { ...shown, receivedAt: 0 }, ledger: future })).eql({
+      allowed: false,
+      reason: 'echo_stale',
+    });
+    should(ask({ now: 10_500, ledger: echoed(A, 10_501) })).eql({ allowed: false, reason: 'echo_stale' });
+  });
+
+  it('fails closed on a shown time in the future', () => {
+    should(ask({ now: 10_500, shown: { ...shown, receivedAt: 20_000 } })).eql({
+      allowed: false,
+      reason: 'shown_too_recent',
+    });
+  });
+
+  it('fails closed on a non-finite time or age', () => {
+    should(ask({ now: Number.NaN })).eql({ allowed: false, reason: 'shown_too_recent' });
+    should(ask({ now: Number.POSITIVE_INFINITY })).eql({ allowed: false, reason: 'shown_too_recent' });
+    should(ask({ shown: { ...shown, receivedAt: Number.NaN } })).eql({ allowed: false, reason: 'shown_too_recent' });
+    should(ask({ shown: { ...shown, receivedAt: Number.NEGATIVE_INFINITY } })).eql({
+      allowed: false,
+      reason: 'shown_too_recent',
+    });
+    should(ask({ ledger: echoed(A, Number.NaN) })).eql({ allowed: false, reason: 'echo_stale' });
+    should(ask({ ledger: echoed(A, Number.POSITIVE_INFINITY) })).eql({ allowed: false, reason: 'echo_stale' });
+    should(ask({ ledger: echoed(A, Number.NEGATIVE_INFINITY) })).eql({ allowed: false, reason: 'echo_stale' });
+  });
+
   it('judges the age of the nonce, not of the echo: a silent phone goes stale though it echoed once', () => {
     const ledger = echoed(A, 10_000);
     // The daemon keeps issuing nonces (B at 10_800), but the phone has echoed only A.

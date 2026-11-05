@@ -115,6 +115,22 @@ describe('uplink reassembly', () => {
     should(seen(rest.units)).eql(expected.slice(0, 1));
   });
 
+  it("copies pending bytes out of a Node Buffer: overwriting the caller's Buffer changes nothing", () => {
+    const first = Buffer.from(stream.subarray(0, 100));
+    const step = mustOk(feedUplink(EMPTY_VOICE_REASSEMBLY, first));
+    first.fill(0xaa);
+    const rest = mustOk(feedUplink(step.reassembly, stream.subarray(100, 1344)));
+    should(seen(rest.units)).eql(expected.slice(0, 1));
+  });
+
+  it("does not retain the caller's backing buffer through a small view", () => {
+    const large = Buffer.alloc(1024 * 1024, 7);
+    const step = mustOk(feedUplink(EMPTY_VOICE_REASSEMBLY, large.subarray(0, 1)));
+    should(step.reassembly.pending.byteLength).equal(1);
+    should(step.reassembly.pending.buffer.byteLength).equal(1);
+    should(step.reassembly.pending.buffer).not.equal(large.buffer);
+  });
+
   it('is a value: feeding an old state again gives the same answer', () => {
     const step = mustOk(feedUplink(EMPTY_VOICE_REASSEMBLY, stream.subarray(0, 700)));
     const a = mustOk(feedUplink(step.reassembly, stream.subarray(700, 1344)));
@@ -177,6 +193,22 @@ describe('downlink reassembly', () => {
     should(run(feedDownlink, [stream]).units).eql(units);
     const { reassembly } = run(feedDownlink, [stream.subarray(0, 1024 + 500)]);
     should(code(finishVoiceReassembly(reassembly))).equal('stream_ended_mid_unit');
+  });
+
+  it("copies pending bytes out of a Node Buffer: overwriting the caller's Buffer changes nothing", () => {
+    const first = Buffer.from(stream.subarray(0, 100));
+    const step = mustOk(feedDownlink(EMPTY_VOICE_REASSEMBLY, first));
+    first.fill(0xaa);
+    const rest = mustOk(feedDownlink(step.reassembly, stream.subarray(100, 1024)));
+    should(rest.units).eql(units.slice(0, 1));
+  });
+
+  it("does not retain the caller's backing buffer through a small view", () => {
+    const large = Buffer.alloc(1024 * 1024, 7);
+    const step = mustOk(feedDownlink(EMPTY_VOICE_REASSEMBLY, large.subarray(0, 1)));
+    should(step.reassembly.pending.byteLength).equal(1);
+    should(step.reassembly.pending.buffer.byteLength).equal(1);
+    should(step.reassembly.pending.buffer).not.equal(large.buffer);
   });
 
   it('fails on a malformed unit', () => {

@@ -135,8 +135,9 @@ offset   size   field
 The length is big-endian (network order, like the browser stream's `FYBC` header); only the PCM
 samples are little-endian, because that is the format recognisers take.
 
-**Every unit is complete and parseable on its own** — a browser that lost the last unit loses nothing it
-cannot read from this one. The JSON object:
+**Every unit is complete and parseable on its own**, but the transcript is assembled from every unit in
+order: fragments are sent once (§6.1) and a gap is refused, so losing any unit is fatal for the stream —
+there is no recovery from a later unit. The JSON object:
 
 | Key | Type                                              | Required | Meaning                                                                                |
 | --- | ------------------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
@@ -265,7 +266,10 @@ the browser).
 
 ## 8. The two rules the daemon must apply
 
-Both are pure functions of values and a time the caller passes in; the codec reads no clock.
+Both are pure functions of values and a time the caller passes in; the codec reads no clock. **Every time
+the caller passes — `now`, the shown receipt times, the nonce issue times and the rate arrivals — must come
+from ONE monotonic clock domain**, separate from the wire's unix timestamps (the countdown's `at` and
+`now`, which are the daemon's wall clock). An age is a difference inside that domain.
 
 ### 8.1 May a countdown send? — `mayAutoSend`
 
@@ -282,7 +286,9 @@ Plan §1.5. The daemon may send an automatic message only if **all** of:
 `VoiceNonceLedger` keeps what rule 3 needs: the nonces issued in the last second (bounded, 16 at most) and the
 issue time of the newest echoed one. An echo of a nonce the ledger does not hold — unknown, or forgotten — changes
 nothing; one it still holds but that is old is recorded and simply can never allow a send. `mayAutoSend` answers `{allowed: true}` or `{allowed: false, reason}`
-with the first failing rule: `cancelled`, `not_shown`, `shown_too_recent`, `no_echo`, `echo_stale`.
+with the first failing rule: `cancelled`, `not_shown`, `shown_too_recent`, `no_echo`, `echo_stale`. **It fails
+closed on a bad age**: a shown time or a nonce issue time in the future (a negative age), or any age that is not a
+finite number, is `shown_too_recent` / `echo_stale` respectively — never "fresh enough".
 
 ### 8.2 Is the browser sending too fast? — `recordUplinkUnits`
 

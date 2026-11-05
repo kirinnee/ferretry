@@ -84,15 +84,26 @@ export interface VoiceSendQuestion {
  * Plan §1.5. A send is allowed only when it is not cancelled; a `shown` for this exact turn and revision
  * was received at least 500 ms ago (inclusive); and the newest echoed nonce was issued no more than 1 s
  * ago (inclusive). The first rule that fails is named.
+ *
+ * Every time the rule reads — `now`, the shown time, the nonce issue times and the rate guard's arrivals — must
+ * come from ONE monotonic clock domain, separate from the wire's unix timestamps (the countdown's `at`/`now`).
+ * Ages are differences within that domain; a negative or non-finite age fails closed (`shown_too_recent` for
+ * the shown time, `echo_stale` for the echoed nonce) rather than passing as "not stale".
  */
 export function mayAutoSend(question: VoiceSendQuestion): VoiceSendVerdict {
   const { now, turnId, revision, shown, ledger } = question;
   if (question.cancelled) return { allowed: false, reason: 'cancelled' };
   if (shown === undefined || shown.turnId !== turnId || shown.revision !== revision)
     return { allowed: false, reason: 'not_shown' };
-  if (now - shown.receivedAt < VOICE_SHOWN_MIN_AGE_MS) return { allowed: false, reason: 'shown_too_recent' };
+  // Fail closed: an age that is negative (a time from the future, a clock that went backwards) or not a
+  // finite number proves nothing, so it is never old enough and never fresh enough.
+  const shownAge = now - shown.receivedAt;
+  if (!Number.isFinite(shownAge) || shownAge < VOICE_SHOWN_MIN_AGE_MS)
+    return { allowed: false, reason: 'shown_too_recent' };
   if (ledger.echoedIssuedAt === undefined) return { allowed: false, reason: 'no_echo' };
-  if (now - ledger.echoedIssuedAt > VOICE_ECHO_MAX_AGE_MS) return { allowed: false, reason: 'echo_stale' };
+  const echoAge = now - ledger.echoedIssuedAt;
+  if (!Number.isFinite(echoAge) || echoAge < 0 || echoAge > VOICE_ECHO_MAX_AGE_MS)
+    return { allowed: false, reason: 'echo_stale' };
   return { allowed: true };
 }
 
