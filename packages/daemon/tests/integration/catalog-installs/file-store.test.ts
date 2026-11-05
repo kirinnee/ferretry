@@ -11,6 +11,7 @@ import {
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
   type CatalogInstallState,
+  CATALOG_INSTALLS_UNPINNED_LINK,
   CatalogInstallStateError,
   CatalogInstallStateV1Schema,
   EMPTY_CATALOG_INSTALL_STATE,
@@ -125,6 +126,50 @@ describe('FileCatalogInstallStore', () => {
     should(error).be.instanceOf(CatalogInstallStateError);
     should((error as Error).message).equal(
       `${CATALOG_INSTALLS_DOCUMENT} is not a record of installs this daemon writes, so no install was changed`,
+    );
+  });
+
+  it('should refuse a version 2 file that contradicts itself, in the daemon’s own words and nothing of the file’s', async () => {
+    // Arrange: a link install whose sequence pin is missing
+    const { store, file } = await fixture();
+    const publisher = `fy_daemon_${'A'.repeat(43)}`;
+    const sha256 = 'a'.repeat(64);
+    const install = {
+      installId: `cin_${'i'.repeat(22)}`,
+      installedAt: '2026-10-31T09:00:00.000Z',
+      provenance: {
+        publisher,
+        publisherName: 'kirin-box',
+        link: { linkId: `lnk_${'a'.repeat(22)}`, kind: 'public', sequence: 3 },
+        itemId: `itm_${'s'.repeat(22)}`,
+        kind: 'skill',
+        name: 'pdf-tools',
+        version: 1,
+        digest: `sha256:${sha256}`,
+      },
+      target: { scope: 'project', projectRoot: '/srv/app', harness: 'claude' },
+      destination: '/srv/app/.claude/skills/pdf-tools',
+      key: 'project:/srv/app:claude:skill:pdf-tools',
+      files: [{ path: 'SKILL.md', sha256 }],
+      secretBindings: {},
+    };
+    await store.write(EMPTY_CATALOG_INSTALL_STATE);
+    await writeFile(
+      file,
+      JSON.stringify({ ...EMPTY_CATALOG_INSTALL_STATE, schemaVersion: 2, installs: [install], linkSequences: {} }),
+      'utf8',
+    );
+
+    // Act
+    const error = await store.read().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(error).be.instanceOf(CatalogInstallStateError);
+    should((error as Error).message).equal(
+      `${CATALOG_INSTALLS_DOCUMENT} contradicts itself (${CATALOG_INSTALLS_UNPINNED_LINK}), so no install was changed`,
     );
   });
 
