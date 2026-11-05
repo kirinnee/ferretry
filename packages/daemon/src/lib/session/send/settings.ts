@@ -30,6 +30,15 @@ export interface SessionSendSettings {
    * this travels as a turn file the receiver reads, which costs it one more model call.
    */
   readonly directPasteMaxChars: number;
+  /**
+   * How long releasing held sends waits for Codex to end a startup park before leaving them held.
+   *
+   * Codex ends the park itself within about fifteen seconds (its account round trip times out) or exits, so
+   * this is forty times that, not a tuned figure: a pane still parked after it is wedged, and its sends stay held for the revive that replaces it (the release is journalled as deferred).
+   */
+  readonly startupParkWaitMs: number;
+  /** How often that wait looks at the pane again. */
+  readonly startupParkPollMs: number;
   /** The CLI a receiving agent is told to answer with. The daemon is not a command anyone types. */
   readonly clientName: string;
 }
@@ -39,6 +48,8 @@ export const SessionSendSettingsSchema = z.object({
   nativeQueueInlineMaxChars: z.number().int().positive(),
   directSendMaxChars: z.number().int().nonnegative(),
   directPasteMaxChars: z.number().int().positive(),
+  startupParkWaitMs: z.number().int().positive(),
+  startupParkPollMs: z.number().int().positive(),
   clientName: z.string().min(1),
 });
 
@@ -47,6 +58,8 @@ export const defaultSessionSendSettings: SessionSendSettings = {
   nativeQueueInlineMaxChars: 1_000,
   directSendMaxChars: 500,
   directPasteMaxChars: 2_000,
+  startupParkWaitMs: 600_000,
+  startupParkPollMs: 2_000,
   clientName: 'fy',
 };
 

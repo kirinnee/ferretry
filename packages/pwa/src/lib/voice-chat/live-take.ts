@@ -84,6 +84,8 @@ class LiveTake implements TakeHandle {
   #early: TentativeTake | null = null;
   #abort: AbortController | null = null;
   #cancelled = false;
+  /** `stopRecording` closed the microphone: the take can answer `endTurn` but never record on. */
+  #stopped = false;
 
   constructor(deps: LiveTakeDeps, listener: TakeListener) {
     this.#deps = deps;
@@ -173,7 +175,7 @@ class LiveTake implements TakeHandle {
   }
 
   async resume(): Promise<boolean> {
-    if (this.#cancelled) return false;
+    if (this.#cancelled || this.#stopped) return false;
     this.#abort?.abort();
     this.#abort = null;
     this.#early?.discard();
@@ -200,6 +202,13 @@ class LiveTake implements TakeHandle {
       });
     }
     return this.#open();
+  }
+
+  stopRecording(): void {
+    if (this.#cancelled || this.#stopped) return;
+    this.#stopped = true;
+    // Told to `finish`, a session has stopped recording already; the others close their capture here.
+    this.#session?.closeCapture?.();
   }
 
   cancel(): void {

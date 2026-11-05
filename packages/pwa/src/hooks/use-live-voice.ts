@@ -32,7 +32,7 @@ import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
 import { type AudioContextConstructor, navigatorHaptics, webAudioEarcons } from '../lib/voice-chat/earcons.ts';
 import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '../lib/voice-chat/live-assembly.ts';
 import { INITIAL_LIVE_STATE } from '../lib/voice-chat/live-machine.ts';
-import { createLiveReader, type LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
+import { createLiveReader, type LiveReadingSource, pageVoice } from '../lib/voice-chat/live-reader.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
 import { DEFAULT_LIVE_VOICE_SETTINGS } from '../lib/voice-chat/live-settings.ts';
 import { LiveTurnLog } from '../lib/voice-chat/live-turn-log.ts';
@@ -97,8 +97,6 @@ export interface LiveVoiceHandle {
   end(): void;
   skip(): void;
   repeat(): void;
-  /** A message was sent by hand (not by Live): a reading in progress belongs to an older turn. */
-  outsideSend(): void;
 }
 
 const NO_LEVELS: readonly number[] = [];
@@ -106,6 +104,12 @@ const OFF_VIEW: LiveView = liveView(INITIAL_LIVE_STATE, 0);
 const REPAINT_MS = 100;
 /** A refusal (blocked microphone, another tab…) stays on the bar this long, then the bar goes away. */
 export const NOTICE_MS = 10_000;
+
+/** The runner, only while Live is on. */
+const activeRunner = (ref: { readonly current: LiveRunner | null }): LiveRunner | null => {
+  const live = ref.current;
+  return live !== null && live.state.phase !== 'off' ? live : null;
+};
 
 export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   const contextVoice = useParakeetVoice();
@@ -178,6 +182,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     const assembled = assembleFromPage(read, {
       composer: current.composer,
       reply: current.reply,
+      voice: pageVoice(spoken.current.reader),
       reader:
         current.reading === undefined
           ? null
@@ -231,13 +236,27 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   const runner = runnerRef.current;
   const phase = runner?.state.phase ?? 'off';
 
-  // A change to the composer's text that Live did not make is the person typing: auto-send pauses.
+  // A change to the composer's text that Live did not make is the person typing: auto-send pauses — at the
+  // input event itself (a send Live queued but the composer has not started is taken back), not a render later.
+  // The person's own Send is the other thing the composer tells Live: it retires whatever Live was doing.
   const { draft, composer, enabled } = options;
+  useEffect(
+    () =>
+      composer.observe({
+        edited: text => {
+          if (text !== (composer.lastShown() ?? '')) activeRunner(runnerRef)?.typing();
+        },
+        sending: outcome => activeRunner(runnerRef)?.personSent(outcome),
+      }),
+    [composer],
+  );
+  // The same check after the render, for a draft that changed without an input event.
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a changed draft is a keystroke
   useEffect(() => {
-    const live = runnerRef.current;
-    if (live === null || live.state.phase === 'off') return;
-    if (draft !== composer.lastShown()) live.typing();
+    const live = activeRunner(runnerRef);
+    if (live === null) return;
+    // Nothing shown (or the box emptied by a send) expects an empty box: only a different text is a keystroke.
+    if (draft !== (composer.lastShown() ?? '')) live.typing();
   }, [draft]);
 
   // Live ends when it can no longer be offered (the composer was disabled, the session went), and with the page.
@@ -283,6 +302,5 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     end: () => runnerRef.current?.end(),
     skip: () => runnerRef.current?.skip(),
     repeat: () => runnerRef.current?.repeat(),
-    outsideSend: () => runnerRef.current?.outsideSend(),
   };
 }

@@ -286,6 +286,120 @@ describe('screenWakeLock', () => {
     should(await asked).be.false();
     should(released).deepEqual([1]);
   });
+
+  /** A wake lock API whose grants are decided by hand; `held` is what has been granted and not released. */
+  const manual = () => {
+    const held = new Set<number>();
+    const grants: (() => void)[] = [];
+    let requests = 0;
+    return {
+      held,
+      requests: () => requests,
+      grantAll: async () => {
+        for (const grant of grants.splice(0)) grant();
+        for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      },
+      api: {
+        request: async () => {
+          requests += 1;
+          const id = requests;
+          await new Promise<void>(resolve => grants.push(resolve));
+          held.add(id);
+          return {
+            release: async () => {
+              held.delete(id);
+            },
+          };
+        },
+      },
+    };
+  };
+
+  it('shares one request when the page hides, shows and Live resumes while the first is still pending, and End releases it', async () => {
+    const view = visibility();
+    const wake = manual();
+    const lock = screenWakeLock(wake.api, view.port);
+    const first = lock.acquire();
+    view.emit(false);
+    view.emit(true);
+    const second = lock.acquire();
+    view.emit(true);
+    await wake.grantAll();
+    should(await first).be.true();
+    should(await second).be.true();
+    should(wake.requests()).equal(1);
+    should([...wake.held]).deepEqual([1]);
+    lock.release();
+    await Promise.resolve();
+    should(wake.held.size).equal(0);
+  });
+
+  it('hands a stale grant straight back when Live ended and began again while it was pending', async () => {
+    const view = visibility();
+    const wake = manual();
+    const lock = screenWakeLock(wake.api, view.port);
+    const first = lock.acquire();
+    lock.release();
+    const second = lock.acquire();
+    should(wake.requests()).equal(2);
+    await wake.grantAll();
+    should(await first).be.false();
+    should(await second).be.true();
+    // Only the newest grant is held; the stale one went back.
+    should([...wake.held]).deepEqual([2]);
+    lock.release();
+    await Promise.resolve();
+    should(wake.held.size).equal(0);
+  });
+
+  it('a new sentinel after the page returns replaces the one the browser dropped, and the old one is released', async () => {
+    const view = visibility();
+    const wake = manual();
+    const lock = screenWakeLock(wake.api, view.port);
+    const first = lock.acquire();
+    await wake.grantAll();
+    await first;
+    view.emit(false);
+    view.emit(true);
+    await wake.grantAll();
+    should(wake.requests()).equal(2);
+    should([...wake.held]).deepEqual([2]);
+    lock.release();
+    await Promise.resolve();
+    should(wake.held.size).equal(0);
+  });
+
+  it('a refused request does not block the next one', async () => {
+    const view = visibility();
+    let calls = 0;
+    const lock = screenWakeLock(
+      {
+        request: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error('battery saver');
+          return { release: async () => undefined };
+        },
+      },
+      view.port,
+    );
+    should(await lock.acquire()).be.false();
+    should(await lock.acquire()).be.true();
+    should(calls).equal(2);
+    lock.release();
+  });
+
+  it('does not mind a replaced sentinel that cannot be released', async () => {
+    const view = visibility();
+    const lock = screenWakeLock(
+      { request: async () => ({ release: () => Promise.reject(new Error('gone')) }) },
+      view.port,
+    );
+    await lock.acquire();
+    view.emit(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    lock.release();
+  });
 });
 
 describe('meterLevelFrames', () => {

@@ -211,3 +211,34 @@ describe('TentativeTranscriber.reuse', () => {
     should(await second).equal(null);
   });
 });
+
+describe('TentativeTranscriber.snapshotTaken', () => {
+  it('is settled at once when there is no attempt', async () => {
+    const w = world(samples(16_000, 0.1));
+    await w.transcriber.snapshotTaken();
+    should(w.peeks()).equal(0);
+  });
+
+  it('settles when the recording was read, long before a slow decode is done', async () => {
+    const w = world(samples(16_000, 0.1), () => new Promise(() => undefined));
+    w.transcriber.begin();
+    await w.transcriber.snapshotTaken();
+    should(w.peeks()).equal(1);
+    should(w.transcribed.length).equal(1);
+  });
+
+  it('settles (never rejects) when the recording could not be read', async () => {
+    const outer = new AbortController();
+    const transcriber = new TentativeTranscriber(
+      {
+        peek: async () => {
+          throw new Error('recording gone');
+        },
+        transcribe: async () => 'x',
+      },
+      outer.signal,
+    );
+    transcriber.begin();
+    await transcriber.snapshotTaken();
+  });
+});

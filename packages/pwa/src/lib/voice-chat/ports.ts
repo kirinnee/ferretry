@@ -51,6 +51,12 @@ export interface TakeHandle {
   endTurn(): Promise<TakeOutcome>;
   /** The speaker is back: record on. Resolves once recording is open again (false: it could not be). */
   resume(): Promise<boolean>;
+  /**
+   * Close the microphone NOW and keep what was already asked for: the early finish's snapshot and its pending
+   * decode still answer `endTurn`. A decode that stalls can no longer leave the person's microphone open.
+   * Idempotent; after it the take cannot record on (`resume` answers false).
+   */
+  stopRecording(): void;
   /** Stop and forget everything, microphone included. Idempotent. */
   cancel(): void;
 }
@@ -78,18 +84,40 @@ export type SendOutcome =
   | { readonly kind: 'failed'; readonly reason: string };
 
 /**
+ * One approved send: the exact words Live put on screen and a way to take the approval back. It is the ONLY
+ * thing that lets Live send, and it is revocable until the composer starts the send: Hold, typing, a hidden tab
+ * and End all revoke it, so nothing is sent that was not on screen exactly as sent, and never after a stop.
+ */
+export interface SendTicket {
+  /** The words on screen when the send was approved: the composer sends exactly these or nothing. */
+  readonly text: string;
+  /** The approval was taken back (Hold, typing, a hidden tab, End, the page leaving). */
+  readonly revoked: boolean;
+  /**
+   * Called by the composer IMMEDIATELY before it starts the send, once it holds exactly `text`. True: go — from here
+   * the send is on its way and a stop can no longer take it back. False: revoked (or the page is hidden) — send nothing.
+   */
+  commit(): boolean;
+}
+
+/**
  * The composer, seen from Live. `show` puts the turn's words in the box where the person can see and
- * edit them; `send` sends exactly what the box holds, through the composer's own send (same route,
+ * edit them; `send` sends exactly what the ticket approved, through the composer's own send (same route,
  * grants, ledger and audit as a typed message). Live has no other way to send.
  */
 export interface SendPort {
-  /** Replace this turn's words in the box (the text typed before Live stays in front of them). */
+  /** Replace this turn's words in the box (the text typed before Live, and earlier takes' words, stay in front). */
   show(words: string): void;
   /** Take this turn's words out of the box again (a take that came to nothing). */
   clear(): void;
+  /** What is in the box now is final for this take: the next take's words go AFTER it, never over it. */
+  seal(): void;
   /** What the box holds right now: what `send` will send. */
   shown(): string;
-  send(): Promise<SendOutcome>;
+  /** The text in the box that is NOT Live's words: whatever a person typed, '' when there is none. */
+  typed(): string;
+  /** Send exactly `ticket.text` — or nothing, when the ticket is revoked or the box no longer holds it. */
+  send(ticket: SendTicket): Promise<SendOutcome>;
 }
 
 /** The ferret's side of the turn, from the session the page already holds. No new route. */
@@ -116,8 +144,11 @@ export interface ReplyFeedPort {
   arm(): ReplyWatch;
 }
 
-/** How one reading of a reply ended. `stopped` is a stop (the person's, or another reading replacing this one). */
-export type ReadEnd = 'finished' | 'stopped' | 'failed' | 'unavailable';
+/**
+ * How one reading of a reply ended. `stopped` is a stop (the person's, or the voice going quiet under it).
+ * `taken` is NOT an end of speech: another message took the page's one voice and is speaking now.
+ */
+export type ReadEnd = 'finished' | 'stopped' | 'failed' | 'unavailable' | 'taken';
 
 /** What Live reads when a turn ends: the ferret's reply, or the question it is waiting on. */
 export type ReadWhat = 'reply' | 'question';
@@ -134,10 +165,24 @@ export interface ReaderPort {
   unlock(): void;
   /** A message is about to be sent: remember what the page holds, so the reply is the first thing after it. */
   mark(): void;
-  /** Read the turn's reply or question. Replaces a reading still going (which is told `stopped`). */
+  /** Read the turn's reply or question. Replaces a reading still going (which is told `stopped`). Another message taking the voice mid-reading is told `taken`. */
   read(what: ReadWhat, onEnd: (end: ReadEnd) => void): void;
   /** Stop at once. The reading in progress hears `stopped`; with none, nothing happens. */
   stop(): void;
+}
+
+/**
+ * The page's ONE voice, as Live must respect it: a device speaks with one voice, and Live's microphone never opens while
+ * anything — a reading Live started, a Read aloud tap on an older message, the settings preview — is speaking, or it
+ * would hear the speaker and send the ferret's own words back to the ferret.
+ */
+export interface VoicePort {
+  /** Something is speaking now. Never throws. */
+  busy(): boolean;
+  /** Told whenever `busy()` may have changed; returns its cancel. */
+  watch(onChange: () => void): () => void;
+  /** Silence the voice at once, whoever holds it. */
+  silence(): void;
 }
 
 export interface WakeLockPort {

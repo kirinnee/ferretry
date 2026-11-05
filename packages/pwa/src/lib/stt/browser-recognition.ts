@@ -328,6 +328,12 @@ export interface BrowserRecognitionSessionLike {
    * if speech resumes, or calls `finish()`, which reuses the work when only quiet followed.
    */
   beginFinish?(): TentativeTake | null;
+  /**
+   * Close the microphone NOW without ending the session: an early finish already started keeps its snapshot and
+   * its pending decode. Optional: only the sessions that offer `beginFinish` keep recording while they decode —
+   * every other engine stops recording when it is told to `finish`.
+   */
+  closeCapture?(): void;
 }
 
 type SessionState = 'active' | 'finishing' | 'finished' | 'failed' | 'cancelled';

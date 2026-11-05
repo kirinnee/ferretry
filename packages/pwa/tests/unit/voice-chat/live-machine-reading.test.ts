@@ -116,10 +116,39 @@ describe('Live reading — the interrupt, Repeat and End', () => {
     should(types(off.effects)).containEql('releaseLocks');
   });
 
-  it('typing, Hold, Send now and the voice are ignored while reading: only a tap or a key stops it', () => {
+  it("typing and Hold stop the speech at once and stand until Resume: no mic, no send, the draft is the person's", () => {
+    for (const [event, reason] of [
+      [{ type: 'typing' }, 'typing'],
+      [{ type: 'hold' }, 'user'],
+    ] as const) {
+      const next = run([event], READING.state);
+      should(next.state.phase).equal('hold');
+      should(next.state.holdReason).equal(reason);
+      should(next.state.readKind).equal(null);
+      should(types(next.effects)).deepEqual(['stopSpeaking']);
+      should(micIsOpen(next.state)).be.false();
+      // The reading answering late (it was stopped) reopens nothing; the room's noise sends nothing.
+      const after = run(
+        [
+          { type: 'speak-done', id: 1, end: 'stopped' },
+          { type: 'speak-done', id: 1, end: 'finished' },
+          { type: 'speech-start' },
+          { type: 'turn-end', atMs: 1, speechEndedAtMs: 1, reason: 'pause' },
+          { type: 'countdown-done', atMs: 2 },
+        ],
+        next.state,
+      );
+      should(after.state).equal(next.state);
+      should(after.all).deepEqual([]);
+      // Resume is the one thing that listens again.
+      const resumed = run([{ type: 'resume' }], next.state);
+      should(resumed.state.phase).equal('starting');
+      should(types(resumed.effects)).deepEqual(['openMic']);
+    }
+  });
+
+  it('Send now and the voice are ignored while reading: only a tap, a key, typing or Hold stops it', () => {
     for (const event of [
-      { type: 'typing' },
-      { type: 'hold' },
       { type: 'send-now', atMs: 1 },
       { type: 'speech-start' },
       { type: 'resume' },
@@ -133,22 +162,48 @@ describe('Live reading — the interrupt, Repeat and End', () => {
 });
 
 describe('Live reading — races', () => {
-  it('a message sent by hand while reading stops the old reading and follows the new turn', () => {
-    const next = run([{ type: 'outside-send', atMs: 9_000 }], READING.state);
-    should(next.state.phase).equal('working');
-    should(next.state.sentAtMs).equal(9_000);
-    should(types(next.effects)).deepEqual(['stopSpeaking', 'watchReply']);
-    // The stopped reading answers late: nothing happens.
-    const late = run([{ type: 'speak-done', id: 1, end: 'stopped' }], next.state);
-    should(late.state).equal(next.state);
+  it('a message sent by hand while reading stops the old reading and WAITS for the send: it is in flight, not sent', () => {
+    const begun = run([{ type: 'person-send', atMs: 9_000 }], READING.state);
+    should(begun.state.phase).equal('sending');
+    should(begun.state.sendInFlight).be.true();
+    should(begun.state.outside).be.true();
+    should(micIsOpen(begun.state)).be.false();
+    // The runner arms the feed as the press begins (a fast turn can finish while the send is acknowledged).
+    should(types(begun.effects)).deepEqual(['stopSpeaking']);
+    // The stopped reading answers late, the room is noisy: nothing happens.
+    const noise = run(
+      [{ type: 'speak-done', id: 1, end: 'stopped' }, { type: 'speech-start' }, { type: 'reply', signal: 'done' }],
+      begun.state,
+    );
+    should(noise.state).equal(begun.state);
+    // Accepted: Live follows the new turn and records nothing about it.
+    const sent = run([{ type: 'sent', atMs: 9_400 }], begun.state);
+    should(sent.state.phase).equal('working');
+    should(sent.state.sentAtMs).equal(9_400);
+    should(sent.state.turn).equal(READING.state.turn + 1);
+    should(sent.state.outside).be.false();
+    should(types(sent.effects)).deepEqual(['watchReply']);
     // ...and the new turn is read in its turn, under a fresh id.
-    const reply = run([{ type: 'reply', signal: 'done' }], next.state);
+    const reply = run([{ type: 'reply', signal: 'done' }], sent.state);
     should(reply.effects).deepEqual([{ type: 'stopWatchReply' }, { type: 'speak', what: 'reply', id: 2 }]);
   });
 
-  it('a message sent by hand does nothing in any other phase', () => {
-    for (const state of [WORKING, run(LISTENING).state, INITIAL_LIVE_STATE]) {
-      should(run([{ type: 'outside-send', atMs: 1 }], state).state).equal(state);
+  it('a message sent by hand that FAILS lands On hold: Live never watches a turn that did not begin', () => {
+    const begun = run([{ type: 'person-send', atMs: 9_000 }], READING.state);
+    const failed = run([{ type: 'send-failed' }], begun.state);
+    should(failed.state.phase).equal('hold');
+    should(failed.state.holdReason).equal('send-failed');
+    should(failed.state.sendInFlight).be.false();
+    should(failed.state.outside).be.false();
+    should(micIsOpen(failed.state)).be.false();
+    should(failed.effects).deepEqual([]);
+    // A stale answer after the failure is ignored.
+    should(run([{ type: 'sent', atMs: 1 }, { type: 'send-failed' }], failed.state).state).equal(failed.state);
+  });
+
+  it('a message sent by hand while Live works, or is off, changes nothing (a separate message)', () => {
+    for (const state of [WORKING, INITIAL_LIVE_STATE]) {
+      should(run([{ type: 'person-send', atMs: 1 }], state).state).equal(state);
     }
   });
 
@@ -348,7 +403,7 @@ describe('Live reading — totality', () => {
     { type: 'speak-done', id: 1, end: 'unavailable' },
     { type: 'skip' },
     { type: 'repeat' },
-    { type: 'outside-send', atMs: 5 },
+    { type: 'person-send', atMs: 5 },
     { type: 'resume' },
     { type: 'end' },
     { type: 'visibility', visible: false },

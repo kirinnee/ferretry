@@ -16,7 +16,7 @@ import {
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
-import type { LiveComposerBridge } from '../../src/lib/voice-chat/live-assembly.ts';
+import type { LiveComposerBridge, LiveComposerObserver } from '../../src/lib/voice-chat/live-assembly.ts';
 import { type LiveVoiceSettingsPatch, LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
 import { interact, mount } from '../support/dom.ts';
 import { type FakeLive, fakeLive } from '../support/live-ports.ts';
@@ -26,7 +26,10 @@ const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'http://127.0.0
 const bridge = (lastShown: string | null = null): LiveComposerBridge => ({
   show: () => undefined,
   clear: () => undefined,
+  seal: () => undefined,
+  observe: () => () => undefined,
   draft: () => '',
+  typed: () => '',
   lastShown: () => lastShown,
   submit: async () => true,
 });
@@ -141,6 +144,41 @@ describe('useLiveVoice', () => {
     expect(get().view.stateWord).toBe('On hold');
     expect(get().view.detail).toContain('Paused while you type');
     await view.unmount();
+  });
+
+  it('hears the composer the moment it is written, not a render later, and lets go when the page leaves', async () => {
+    const fake = fakeLive();
+    const held: { observer: LiveComposerObserver | null } = { observer: null };
+    const composer: LiveComposerBridge = {
+      ...bridge('Fix the bug.'),
+      observe: next => {
+        held.observer = next;
+        return () => {
+          held.observer = null;
+        };
+      },
+    };
+    const { view, get } = await rig(fake, { composer });
+    // Live off: a write or a press is nobody's business.
+    held.observer?.edited('typing before Live');
+    held.observer?.sending(Promise.resolve(true));
+    await interact(() => get().start());
+    await flush();
+    expect(get().view.stateWord).toBe('Listening');
+    // Live's own words are not typing.
+    await interact(() => held.observer?.edited('Fix the bug.'));
+    expect(get().view.stateWord).toBe('Listening');
+    // Anything else, at the event itself, pauses at once.
+    await interact(() => held.observer?.edited('Fix the bug. And'));
+    expect(get().view.stateWord).toBe('On hold');
+    await interact(() => get().resume());
+    await flush();
+    // The person's own Send retires what Live was doing and puts it on the ferret's side of the turn.
+    await interact(() => held.observer?.sending(Promise.resolve(true)));
+    await flush();
+    expect(get().view.stateWord).toStartWith('Working');
+    await view.unmount();
+    expect(held.observer).toBeNull();
   });
 
   it('ignores a changed draft when Live is off', async () => {

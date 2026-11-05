@@ -15,12 +15,13 @@
  * {@link MAX_WAIT_MS}) before it picks. Stopping during that wait ends it at once, silently.
  *
  * ONE END. `read` calls `onEnd` exactly once: when speech finished, failed, found no voice that stays on
- * the device, or was stopped (by `stop()`, a newer `read`, or another reading taking the voice).
+ * the device, or was stopped (by `stop()`, a newer `read`, or the voice going quiet) — or `taken`: another reading
+ * took the voice and is still speaking. A takeover never stops the thief: the voice is the page's, not Live's.
  * Total: nothing here throws.
  */
 
 import { type LiveVoiceSettings, readOptionsOf } from './live-settings.ts';
-import type { ClockPort, ReadEnd, ReaderPort, ReadWhat } from './ports.ts';
+import type { ClockPort, ReadEnd, ReaderPort, ReadWhat, VoicePort } from './ports.ts';
 import type { ReadAloudController, ReadAloudState } from './read-aloud.ts';
 import { type PickerRow, pickQuestion, pickReply, type QuestionLike } from './reply-picker.ts';
 
@@ -58,7 +59,9 @@ const signatureOf = (source: LiveReadingSource): string => {
 };
 
 const endOf = (state: ReadAloudState, key: string): ReadEnd | null => {
-  if (state.key !== key) return 'stopped';
+  // Another message holds the voice. If it is speaking, this is NOT the end of speech but a takeover (`taken`): the
+  // microphone must stay shut. A key gone quiet (dismissed, or a reading that ended at once) is a plain stop.
+  if (state.key !== key) return state.status === 'reading' ? 'taken' : 'stopped';
   switch (state.status) {
     case 'reading':
       return null;
@@ -152,5 +155,18 @@ export function createLiveReader(deps: LiveReaderDeps): ReaderPort {
       stopWaiting = clock.after(POLL_MS, poll);
     },
     stop: () => cancel?.('stopped'),
+  };
+}
+
+/**
+ * The page's one voice, as the loop's {@link VoicePort}: busy while the shared read-aloud controller is reading
+ * ANYTHING (a Read aloud tap, the settings preview, Live's own reading). Live's own reading is told apart by the
+ * machine, not here: the microphone is closed for all of it, and this port only has to say when it may open.
+ */
+export function pageVoice(controller: ReadAloudController): VoicePort {
+  return {
+    busy: () => controller.getState().status === 'reading',
+    watch: onChange => controller.subscribe(onChange),
+    silence: () => controller.stop(),
   };
 }

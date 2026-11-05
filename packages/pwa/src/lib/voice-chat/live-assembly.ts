@@ -34,23 +34,42 @@ import type {
   ReplyFeedPort,
   SendPort,
   ReaderPort,
+  SendTicket,
   VisibilityPort,
+  VoicePort,
   WakeLockPort,
 } from './ports.ts';
 import { type ReplySource, sessionReplyFeed } from './reply-feed.ts';
 
+/** What the composer tells Live about the person, the moment it happens (never later, in an effect). */
+export interface LiveComposerObserver {
+  /** The draft was written by anything but Live's own `show`/`clear` (a keystroke, a paste, another device). */
+  edited(text: string): void;
+  /** The person pressed the composer's own Send; `outcome` is that press (true: it went). */
+  sending(outcome: Promise<boolean>): void;
+}
+
 /** The composer, as Live drives it. `composer.tsx` implements it; nothing else sends from voice. */
 export interface LiveComposerBridge {
-  /** Replace this turn's words in the box (text typed before them stays in front). */
+  /** Replace this turn's words in the box (text typed before them, and earlier takes' words, stay in front). */
   show(words: string): void;
   /** Take this turn's words out of the box again. */
   clear(): void;
+  /** What is in the box is final for this take: the next take's words go after it, never over it. */
+  seal(): void;
+  /** Hear the person synchronously. One observer at a time; returns the stop. */
+  observe(observer: LiveComposerObserver): () => void;
   /** What the box holds now. */
   draft(): string;
+  /** The text in the box that is not Live's words (typed by a person, before or during Live); '' when none. */
+  typed(): string;
   /** What `show` last put in the box; null before the first. A draft that is not this was edited by a person. */
   lastShown(): string | null;
-  /** The composer's own send, on exactly what the box holds: true once it is on its way. */
-  submit(): Promise<boolean>;
+  /**
+   * The composer's own send of exactly `ticket.text`: true once it is on its way. Before it starts, the composer
+   * checks that the box still holds those words and calls `ticket.commit()`; a revoked ticket sends nothing (false).
+   */
+  submit(ticket: SendTicket): Promise<boolean>;
 }
 
 export interface LiveEngineDeps {
@@ -87,6 +106,8 @@ export interface LiveAssemblyDeps {
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
   readonly reader: ReaderPort | null;
+  /** The page's one voice: the microphone never opens while anything speaks. */
+  readonly voice?: VoicePort | null;
   readonly earcons?: EarconPort | null;
   readonly haptics?: HapticsPort | null;
   readonly clock: ClockPort;
@@ -100,9 +121,11 @@ export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
   const send: SendPort = {
     show: words => deps.composer.show(words),
     clear: () => deps.composer.clear(),
+    seal: () => deps.composer.seal(),
     shown: () => deps.composer.draft(),
-    send: async () => {
-      const sent = await deps.composer.submit();
+    typed: () => deps.composer.typed(),
+    send: async ticket => {
+      const sent = await deps.composer.submit(ticket);
       return sent ? { kind: 'sent', sentAtMs: deps.clock.now() } : { kind: 'failed', reason: 'not-sent' };
     },
   };
@@ -116,6 +139,7 @@ export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
     send,
     reply,
     reader: deps.reader,
+    voice: deps.voice ?? null,
     earcons: deps.earcons ?? null,
     haptics: deps.haptics ?? null,
     wakeLock: deps.wakeLock,
@@ -143,6 +167,8 @@ export interface LiveEnvironment {
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
   readonly reader: ReaderPort | null;
+  /** The page's one voice: the microphone never opens while anything speaks. */
+  readonly voice?: VoicePort | null;
   readonly earcons?: EarconPort | null;
   readonly haptics?: HapticsPort | null;
   readonly clock: ClockPort;
