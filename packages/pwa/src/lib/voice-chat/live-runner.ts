@@ -194,41 +194,59 @@ export class LiveRunner {
   #perform(effect: LiveEffect): void {
     switch (effect.type) {
       case 'acquireLocks':
-        return this.#acquireLocks();
+        this.#acquireLocks();
+        break;
       case 'releaseLocks':
-        return this.#releaseLocks();
+        this.#releaseLocks();
+        break;
       case 'openMic':
-        return this.#openMic();
+        this.#openMic();
+        break;
       case 'closeMic':
-        return this.#closeMic();
+        this.#closeMic();
+        break;
       case 'beginTurnWords':
-        return this.#beginTurnWords(effect.attempt);
+        this.#beginTurnWords(effect.attempt);
+        break;
       case 'resumeListening':
-        return this.#resumeListening();
+        this.#resumeListening();
+        break;
       case 'startCountdown':
-        return this.#startCountdown(effect.ms);
+        this.#startCountdown(effect.ms);
+        break;
       case 'cancelCountdown':
-        return this.#clearCountdown();
+        this.#clearCountdown();
+        break;
       case 'startTimer':
-        return this.#startTimer(effect.kind, effect.ms);
+        this.#startTimer(effect.kind, effect.ms);
+        break;
       case 'cancelTimers':
-        return this.#clearTimers();
+        this.#clearTimers();
+        break;
       case 'showWords':
-        return this.#ports.send.show(effect.text);
+        this.#ports.send.show(effect.text);
+        break;
       case 'clearWords':
-        return this.#ports.send.clear();
+        this.#ports.send.clear();
+        break;
       case 'send':
-        return this.#send();
+        this.#send();
+        break;
       case 'watchReply':
-        return this.#watchReply();
+        this.#watchReply();
+        break;
       case 'stopWatchReply':
-        return this.#stopReply();
+        this.#stopReply();
+        break;
       case 'speak':
-        return this.#speak();
+        this.#speak();
+        break;
       case 'stopSpeaking':
-        return this.#ports.speaker?.stop();
+        this.#ports.speaker?.stop();
+        break;
       case 'recordTurn':
-        return this.#options.onTurn?.(effect.numbers);
+        this.#options.onTurn?.(effect.numbers);
+        break;
     }
   }
 

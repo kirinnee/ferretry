@@ -10,7 +10,9 @@ describe('live voice command', () => {
   it('reaches the control that listens, until it stops listening', () => {
     const target = new EventTarget();
     let toggles = 0;
-    const stop = onLiveToggle(target, () => void (toggles += 1));
+    const stop = onLiveToggle(target, () => {
+      toggles += 1;
+    });
     requestLiveToggle(target);
     requestLiveToggle(target);
     should(toggles).equal(2);

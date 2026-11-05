@@ -321,7 +321,9 @@ describe('LiveRunner — one whole turn', () => {
   it('tells subscribers after every event, and not after they leave', async () => {
     const r = rig();
     let calls = 0;
-    const off = r.runner.subscribe(() => void (calls += 1));
+    const off = r.runner.subscribe(() => {
+      calls += 1;
+    });
     r.runner.start();
     await r.settle();
     should(calls).be.above(1);
@@ -358,7 +360,9 @@ describe('LiveRunner — races', () => {
     const r = await listening();
     let answer: (outcome: TakeOutcome) => void = () => undefined;
     const take = r.takes[0] as FakeTake;
-    take.outcome = new Promise(resolve => void (answer = resolve));
+    take.outcome = new Promise(resolve => {
+      answer = resolve;
+    });
     await speakTurn(r);
     r.talk(LOUD, 300);
     await r.settle();
@@ -384,7 +388,9 @@ describe('LiveRunner — races', () => {
     const r = await listening();
     const take = r.takes[0] as FakeTake;
     let answer: (outcome: TakeOutcome) => void = () => undefined;
-    take.outcome = new Promise(resolve => void (answer = resolve));
+    take.outcome = new Promise(resolve => {
+      answer = resolve;
+    });
     await speakTurn(r);
     r.runner.typing();
     answer({ kind: 'words', text: 'Fix the bug.', raw: 'fix', cleaned: false });
@@ -455,7 +461,9 @@ describe('LiveRunner — time', () => {
   it('waits for slow words after the ring, shows them for the settle time, then sends', async () => {
     const r = await listening();
     let answer: (outcome: TakeOutcome) => void = () => undefined;
-    (r.takes[0] as FakeTake).outcome = new Promise(resolve => void (answer = resolve));
+    (r.takes[0] as FakeTake).outcome = new Promise(resolve => {
+      answer = resolve;
+    });
     await speakTurn(r);
     r.clock.advance(2_000);
     await r.settle();

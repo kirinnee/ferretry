@@ -155,7 +155,12 @@ describe('a take over an engine with an early finish', () => {
     const take = port.start(listener);
     const session = sessions[0] as FakeSession;
     let answer: (text: string) => void = () => undefined;
-    session.early = () => earlyTake(new Promise<string>(resolve => void (answer = resolve)));
+    session.early = () =>
+      earlyTake(
+        new Promise<string>(resolve => {
+          answer = resolve;
+        }),
+      );
     const pending = take.endTurn();
     await take.resume();
     answer('stale');
@@ -253,7 +258,13 @@ describe('cleaning', () => {
 
   it('drops the cleaned words if the voice came back while cleaning', async () => {
     let done: (value: { text: string; kept: 'cleaned' }) => void = () => undefined;
-    const { port, listener } = rig({ plain: true, clean: () => new Promise(resolve => void (done = resolve)) });
+    const { port, listener } = rig({
+      plain: true,
+      clean: () =>
+        new Promise(resolve => {
+          done = resolve;
+        }),
+    });
     const take = port.start(listener);
     const pending = take.endTurn();
     await Promise.resolve();
@@ -344,7 +355,9 @@ describe('failing to start, and cancelling', () => {
     const { port, sessions, listener } = rig({ plain: true });
     const take = port.start(listener);
     let finish: (text: string) => void = () => undefined;
-    (sessions[0] as PlainSession).finishResult = new Promise(resolve => void (finish = resolve));
+    (sessions[0] as PlainSession).finishResult = new Promise(resolve => {
+      finish = resolve;
+    });
     const pending = take.endTurn();
     take.cancel();
     finish('late');

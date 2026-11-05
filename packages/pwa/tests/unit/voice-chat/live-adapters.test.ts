@@ -30,7 +30,9 @@ describe('browserClock', () => {
     });
     should(clock.now()).equal(1234);
     let ran = 0;
-    clock.after(50, () => void (ran += 1));
+    clock.after(50, () => {
+      ran += 1;
+    });
     timers.get(1)?.();
     should(ran).equal(1);
     const cancel = clock.after(-5, () => undefined);
@@ -91,7 +93,9 @@ describe('webMicLock', () => {
     should(await lock.acquire()).be.true();
     should(fake.calls.length).equal(1);
     let settled = false;
-    void fake.released?.then(() => void (settled = true));
+    void fake.released?.then(() => {
+      settled = true;
+    });
     await Promise.resolve();
     should(settled).be.false();
     lock.release();
@@ -126,7 +130,13 @@ describe('screenWakeLock', () => {
         return () => void listeners.delete(listener);
       },
     };
-    return { port, listeners, emit: (visible: boolean) => listeners.forEach(listener => listener(visible)) };
+    return {
+      port,
+      listeners,
+      emit: (visible: boolean) => {
+        for (const listener of listeners) listener(visible);
+      },
+    };
   };
   const sentinels = () => {
     const made: { released: number }[] = [];
@@ -136,7 +146,11 @@ describe('screenWakeLock', () => {
         request: async () => {
           const sentinel = { released: 0 };
           made.push(sentinel);
-          return { release: async () => void (sentinel.released += 1) };
+          return {
+            release: async () => {
+              sentinel.released += 1;
+            },
+          };
         },
       },
     };
@@ -192,7 +206,15 @@ describe('screenWakeLock', () => {
     const view = visibility();
     let finish: (sentinel: { release(): Promise<void> }) => void = () => undefined;
     const released: number[] = [];
-    const lock = screenWakeLock({ request: () => new Promise(resolve => void (finish = resolve)) }, view.port);
+    const lock = screenWakeLock(
+      {
+        request: () =>
+          new Promise(resolve => {
+            finish = resolve;
+          }),
+      },
+      view.port,
+    );
     const asked = lock.acquire();
     lock.release();
     finish({
@@ -367,6 +389,9 @@ describe('sessionReplyFeed', () => {
     const seen: ReplySignal['kind'][] = [];
     sessionReplyFeed(quiet.api).watch(signal => void seen.push(signal.kind));
     quiet.set(snap(undefined, undefined));
+    should(seen).deepEqual([]);
+    // A state that changed but names no turn state (an older daemon) still says nothing.
+    quiet.set(snap(undefined, 't9'));
     should(seen).deepEqual([]);
     quiet.set(snap('your-turn', 't1', 'completed'));
     should(seen).deepEqual(['ended']);

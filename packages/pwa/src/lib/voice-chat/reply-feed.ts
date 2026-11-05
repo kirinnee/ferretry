@@ -45,17 +45,23 @@ export function sessionReplyFeed(source: ReplySource): ReplyFeedPort {
         last = signal.kind;
         onSignal(signal);
       };
-      const evaluate = (): void => {
+      /** What the session is saying now, or null while nothing is yet to say (a state left over from before). */
+      const read = (): ReplySignal | null => {
         const now = source.current();
-        if (now === null || FINISHED.has(now.status)) return emit({ kind: 'ended' });
+        if (now === null || FINISHED.has(now.status)) return { kind: 'ended' };
         if (now.turnState === 'working') {
           seenWorking = true;
-          return emit({ kind: 'working' });
+          return { kind: 'working' };
         }
         const moved = seenWorking || now.turnStateAt !== baselineAt;
-        if (!moved) return;
-        if (now.turnState === 'your-turn') return emit({ kind: 'done' });
-        if (now.turnState === 'needs-input') return emit({ kind: 'needs-input' });
+        if (!moved) return null;
+        if (now.turnState === 'your-turn') return { kind: 'done' };
+        if (now.turnState === 'needs-input') return { kind: 'needs-input' };
+        return null;
+      };
+      const evaluate = (): void => {
+        const signal = read();
+        if (signal !== null) emit(signal);
       };
       const unsubscribe = source.subscribe(evaluate);
       evaluate();
