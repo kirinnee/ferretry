@@ -629,17 +629,46 @@ no file holds and no route returns.
 
 - **Copy settings from another machine** (Settings › a machine › Machine › Setup, and New machine setup's
   _Start from_ step) runs in the browser, which holds both pairings. It reads `warden.yaml`, `learning.yaml`
-  and `voice.yaml` from the source with `GET /v1/config/file` and writes each here with `PUT /v1/config/file`
-  against this machine's current etag, so the loosening rule applies exactly as to any other editor: a copied
-  file that loosens (a Warden that turns on the Jev guard) is written and **held** until the owner confirms
-  it. Profiles, components, runtimes and logins travel as the reviewed `clone.import` change, and agent
-  controls and the default runtime as one `machine.settings` change — `machine.yaml` is not copied whole,
-  because its `advanced` block names this machine's own paths. Before anything is written the preview lists
+  and `voice.yaml` from the source with `GET /v1/config/file`. **A first copy writes each here with
+  `PUT /v1/config/file`** against this machine's current etag; **a repeat copy merges them key by key**
+  (below). Either way the loosening rule applies exactly as to any other editor: a copied file that loosens (a
+  Warden that turns on the Jev guard) is written and **held** until the owner confirms it. Profiles,
+  components, runtimes and logins travel as the reviewed `clone.import` change, and agent controls and the
+  default runtime as one `machine.settings` change — `machine.yaml` is not copied whole, because its
+  `advanced` block names this machine's own paths. Before anything is written the preview lists
   every secret and sign-in the copied settings need (`${secret:NAME}` references, the Jev, Groq or Cerebras key
   a copied Warden or voice setting spends, a login that arrives empty), each marked when this machine already
   holds it, with a field to store it through `POST /v1/secrets`. The keys of the copied API-key logins and
   settings are not left to that field: they travel sealed, for one passkey on the source, in the same Copy
   ([secrets.md](secrets.md#sign-ins-are-not-copied-api-keys-are)); a sign-in never does.
+- **A repeat copy merges settings per key, never whole-file.** `POST /v1/fleet/clone/review` and
+  `clone.import` in `update` mode take the source's `warden.yaml`, `learning.yaml`, `voice.yaml` (as text; a file
+  the source has none of is the empty text) and its **controls** (`agentPermissions`, `agentControl.*`,
+  `defaultRuntime`, as JSON) and compare them with this machine's own, key by key, against what the source held
+  at the last copy (a record of digests: [design §3.8](design/account-model.md#the-last-copied-record)).
+  - A **key** is a dotted path down to a scalar. A list (`accounts`) is **one value**: a reordered or edited
+    list is one change. Keys both sides agree on are not shown.
+  - The same table as for items: changed only on the source → **take** by default; changed only here →
+    **keep**; changed on **both** → **no default, the person chooses each one** and the apply is refused until
+    every one has a choice; new on the source → take; dropped by the source → keep (taking it removes the key);
+    removed here since the last copy → stays removed (taking it adds it back).
+  - The merged text is **this machine's own file with only the taken keys changed** (`editConfigText`), so its
+    comments and key order survive. A key nobody took is never touched; a file with nothing taken is not written.
+    A file this machine has none of is added as the source wrote it.
+  - It is written through the **same door as `PUT /v1/config/file`** — validated, refused if the file moved
+    since it was read, and **held if it loosens** — and each carried file passes the **same per-file grant
+    check** (`warden` for `warden.yaml`, `fleet` for the rest) as writing it directly, so cloning cannot write
+    `warden.yaml` for a device that could not. A relayed browser is a governed device for all of it. Review rows
+    carry `loosens`, judged per key against what is in effect now. A loosening write is put into effect only
+    when the caller is at the machine; from any other device it is **written and held** and confirmed as any held
+    edit is. The controls are a smaller `machine.settings` change with only the taken fields, in the copy's own
+    batch; turning something agents may control back **on** from a remote device still needs a passkey proved for
+    that act, and a ferret never can.
+  - The record then holds the **digest of every key the source's document holds** (digests only, never a value;
+    a `${secret:NAME}` stays a reference), once each write has landed or been held. A held change turned down
+    later shows next time as _changed here_ — correct.
+  - It never reads, writes or re-points a credential, a secret-store entry or the target of a
+    `${secret:NAME}` reference (design §14.4).
 - **Export settings** zips every file `GET /v1/config/status` lists, read one by one, under `config/`. A file
   the daemon refused is **left out and named**: a pasted key is exactly what makes a file invalid, and an
   invalid file is still on disk as typed.

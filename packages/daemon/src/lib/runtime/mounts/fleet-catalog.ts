@@ -145,7 +145,14 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
         const request = await parseBody(context.request, FleetAccountChangeRequestSchema, {
           maxBytes: MAX_CHANGE_BODY_BYTES,
         });
-        return await answer(FleetAccountChangeViewSchema, () => subsystem.propose(request.change));
+        // Staging a clone describes it for THIS caller: a settings document the caller may not write is refused now.
+        const caller = {
+          governance: context.governance,
+          freshStepUp: false,
+          agent: isAgentCaller(context),
+          spend: () => undefined,
+        };
+        return await answer(FleetAccountChangeViewSchema, () => subsystem.propose(request.change, caller));
       },
     },
     {

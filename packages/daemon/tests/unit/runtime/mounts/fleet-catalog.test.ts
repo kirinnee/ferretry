@@ -19,6 +19,7 @@ import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
+  type ExecutorCaller,
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   FleetCatalogService,
@@ -84,10 +85,11 @@ interface Calls {
   read: string[];
   machines: (CallerGovernance | undefined)[];
   applied: { id: string; governance: CallerGovernance | undefined }[];
+  callers: (ExecutorCaller | undefined)[];
 }
 
 function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: FleetCatalogSubsystem; calls: Calls } {
-  const calls: Calls = { proposed: [], previewed: [], read: [], machines: [], applied: [] };
+  const calls: Calls = { proposed: [], previewed: [], read: [], machines: [], applied: [], callers: [] };
   return {
     calls,
     subsystem: {
@@ -102,8 +104,9 @@ function stub(overrides: Partial<FleetCatalogSubsystem> = {}): { subsystem: Flee
         return DRAFT;
       },
       runtimes: async () => ({ format: 'version-2', runtimes: [] }),
-      propose: async change => {
+      propose: async (change, caller) => {
         calls.proposed.push(change);
+        calls.callers.push(caller);
         return VIEW;
       },
       read: async id => {
@@ -192,7 +195,7 @@ describe('the fleet catalogue mount', () => {
 
     // Assert
     should(responses.map(response => response.status)).deepEqual([404, 404, 404, 404, 404]);
-    should(calls).deepEqual({ proposed: [], previewed: [], read: [], machines: [], applied: [] });
+    should(calls).deepEqual({ proposed: [], previewed: [], read: [], machines: [], applied: [], callers: [] });
   });
 
   it('should resolve a draft profile as a read: the body to the service, never cached, a bad body refused first', async () => {
@@ -234,6 +237,18 @@ describe('the fleet catalogue mount', () => {
     should(calls.proposed).deepEqual([change]);
     should(read.status).equal(200);
     should(calls.read).deepEqual([ID]);
+  });
+
+  it('should describe a staged change for THIS caller: its governance, no proof, and not a ferret', async () => {
+    // A clone writes settings files the grants govern one by one, so staging is told who is asking.
+    const { subsystem, calls } = stub();
+    const change = { kind: 'setup.import' };
+
+    await dispatcher(subsystem).dispatch(post('/v1/fleet/proposals', JSON.stringify({ change })));
+
+    should(calls.callers).have.length(1);
+    should(calls.callers[0]).containDeep({ freshStepUp: false, agent: false });
+    should(calls.callers[0]?.governance).containDeep({ governed: false });
   });
 
   it('should hand an apply the caller governance, and take an empty body', async () => {

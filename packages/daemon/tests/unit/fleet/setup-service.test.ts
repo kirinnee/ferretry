@@ -11,6 +11,7 @@ import {
   type AccountModel,
   buildCloneBundle,
   builtInModelCatalogs,
+  checkConfigFile,
   builtInPresets,
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
@@ -29,18 +30,30 @@ import {
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
+  DEFAULT_LEARNING_CONFIG,
+  DEFAULT_VOICE_CONFIG,
+  DEFAULT_WARDEN_CONFIG,
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
+  type GrantRefusal,
   ORIGIN_KEY_PATTERN,
+  sha256Hex,
   FleetSetupScanSchema,
   FleetToolInstallResultSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import { type AccountDocumentReading, FleetCatalogRefusal } from '../../../src/lib/fleet/catalog-service.ts';
+import { ConfigFileConflictError } from '../../../src/lib/config-files/index.ts';
+import {
+  type AccountDocumentReading,
+  type ExecutorCaller,
+  FleetCatalogFreshStepUpRequired,
+  FleetCatalogRefusal,
+} from '../../../src/lib/fleet/catalog-service.ts';
 import {
   CLONE_BUNDLE_MAX_BYTES,
+  type CloneConfigFiles,
   createFleetSetupSubsystem,
   FleetSetupRefusal,
   FleetSetupService,
@@ -1902,6 +1915,503 @@ describe('parseImportRecord', () => {
       version: 1,
       components: {},
     });
+  });
+});
+
+describe('the clone.import executor merging settings key by key', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+  const WARDEN = `# yaml-language-server: $schema=../schema/warden.json
+# Mine: Jev stays off until I have read the bill.
+enabled: true # keep on
+layers:
+  jev: false # off on purpose
+  llm: false
+intervalMinutes: 5
+`;
+  const withInterval = (text: string, minutes: number): string =>
+    text.replace('intervalMinutes: 5', `intervalMinutes: ${String(minutes)}`);
+
+  const asking = (
+    verdicts: Partial<Record<'fleet' | 'warden', GrantRefusal>> = {},
+    governed = true,
+  ): CallerGovernance =>
+    ({
+      governed,
+      decide: demand => {
+        const refusal = verdicts[demand.capability as 'fleet' | 'warden'] ?? 'granted';
+        return { allowed: refusal === 'granted', refusal };
+      },
+    }) as CallerGovernance;
+  const AT_THE_MACHINE = asking({}, false);
+  const REMOTE = asking({}, true);
+  const WITHOUT_WARDEN = asking({ warden: 'not-granted' }, true);
+
+  interface Spent {
+    count: number;
+  }
+  const callerFor = (
+    governance: CallerGovernance | undefined,
+    extra: { freshStepUp?: boolean; agent?: boolean } = {},
+    spent: Spent = { count: 0 },
+  ): ExecutorCaller => ({
+    governance,
+    freshStepUp: extra.freshStepUp === true,
+    agent: extra.agent === true,
+    spend: () => {
+      spent.count += 1;
+    },
+  });
+
+  /** This machine's configuration files, in memory: what `PUT /v1/config/file` would read and write. */
+  function files(initial: Record<string, string>) {
+    const held = new Map(Object.entries(initial));
+    const writes: { path: string; text: string; ifMatch: string; mayLoosen: boolean }[] = [];
+    const etag = (path: string): string => (held.has(path) ? `etag:${Bun.hash(held.get(path) as string)}` : 'absent');
+    const state = { pending: false, invalid: false };
+    const port: CloneConfigFiles = {
+      file: async path => ({ exists: held.has(path), text: held.get(path) ?? '', etag: etag(path) }),
+      effective: async () => ({
+        warden: DEFAULT_WARDEN_CONFIG,
+        learning: DEFAULT_LEARNING_CONFIG,
+        voice: DEFAULT_VOICE_CONFIG,
+      }),
+      validate: async () =>
+        state.invalid ? [{ severity: 'error' as const, message: 'caps.jevUsdPerDay: must be a number', line: 3 }] : [],
+      write: async (path, text, ifMatch, mayLoosen) => {
+        writes.push({ path, text, ifMatch, mayLoosen });
+        if (ifMatch !== etag(path)) throw new ConfigFileConflictError(path);
+        held.set(path, text);
+        return { outcome: state.pending && !mayLoosen ? 'pending' : 'applied' };
+      },
+    };
+    return { held, writes, port, state };
+  }
+  type Files = ReturnType<typeof files>;
+
+  const sourceAt = async (content = 'Main.\n'): Promise<Record<string, unknown>> => {
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(SET_UP_MODEL(), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+
+  /** A target that already took its first copy from the source, with these configuration files. */
+  const copied = async (own: Files): Promise<World> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const alongside = { kind: 'clone.import', mode: 'alongside', bundle: await sourceAt() } as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+    await first.service.executors.clone.describe(alongside);
+    await first.service.executors.clone.execute(alongside);
+    const documents = first.applied[0]?.documents ?? [];
+    const target = world({ overrides: { daemonId: () => 'daemon-target', configFiles: own.port } });
+    target.state.reading = configReading(modelOfWrites(documents), 'r');
+    for (const document of documents) target.state.assets[document.path] = document.content;
+    target.state.emails = async () => [];
+    return target;
+  };
+
+  const request = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+  /** Review with the given settings, then apply with these decisions, as the catalogue's flow does. */
+  async function apply(
+    w: World,
+    bundle: unknown,
+    settings: { path: 'warden.yaml' | 'learning.yaml' | 'voice.yaml' | 'controls'; text: string }[],
+    settingsDecisions: Record<string, Record<string, 'take' | 'keep'>> | undefined,
+    caller: ExecutorCaller | undefined,
+  ): Promise<string> {
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, caller?.governance);
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      ...(settingsDecisions === undefined ? {} : { settingsDecisions }),
+    });
+    await w.service.executors.clone.describe(change, caller);
+    return await w.service.executors.clone.execute(change, caller);
+  }
+
+  /** The machine settings as the batch's `machine.yaml` says them. */
+  const machineOf = (documents: readonly FleetDocumentWrite[]) => {
+    const document = documents.find(candidate => candidate.path.endsWith('/machine.yaml'));
+    const checked = checkConfigFile('machine.yaml', document?.content ?? '');
+    if (!checked.ok) throw new Error('machine.yaml does not check');
+    return (checked.value as { machine: AccountModel['machine'] }).machine;
+  };
+
+  const recordOf = (w: World) =>
+    parseCloneBase((w.applied.at(-1)?.documents ?? []).find(document => document.path === BASE_PATH)?.content);
+  const settingsOf = (w: World, doc: string): Record<string, string> =>
+    Object.values(recordOf(w).sources)[0]?.settings?.[doc as 'warden.yaml'] ?? {};
+
+  it('should list the keys that differ, per file, and bind the review to them', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const items = await w.service.reviewClone({ bundle: bundle as never });
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(review.settings).deepEqual([
+      {
+        path: 'warden.yaml',
+        keys: [{ key: 'intervalMinutes', outcome: 'both', mine: '5', theirs: '10' }],
+      },
+    ]);
+    // Bound: the same items with other settings is another review.
+    should(review.fingerprint).not.equal(items.fingerprint);
+    const other = await w.service.reviewClone(
+      { bundle: bundle as never, settings: [{ path: 'warden.yaml', text: withInterval(WARDEN, 12) }] },
+      REMOTE,
+    );
+    should(other.fingerprint).not.equal(review.fingerprint);
+  });
+
+  it('should refuse a both-changed key until it has a choice, writing nothing', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const refusal = await catalogRefusal(
+      apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('warden.yaml: intervalMinutes');
+    should(own.writes).deepEqual([]);
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should write the merged file against the version it compared with, held for a remote caller and live at the machine', async () => {
+    for (const [governance, mayLoosen] of [
+      [REMOTE, false],
+      [AT_THE_MACHINE, true],
+    ] as const) {
+      const own = files({ 'warden.yaml': WARDEN });
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+      await apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'take' } }, callerFor(governance));
+      should(own.writes).have.length(1);
+      const [write] = own.writes;
+      should(write?.mayLoosen).equal(mayLoosen);
+      should(write?.ifMatch).equal(`etag:${String(Bun.hash(WARDEN))}`);
+      // Exactly this machine's file with the one value changed: its comments and key order survive.
+      should(write?.text).equal(withInterval(WARDEN, 10));
+      // The record moves on in the copy's own batch: digests only, B := theirs.
+      const digests = settingsOf(w, 'warden.yaml');
+      should(Object.keys(digests).toSorted()).deepEqual(['enabled', 'intervalMinutes', 'layers.jev', 'layers.llm']);
+      should(JSON.stringify(recordOf(w))).not.containEql('Jev stays off');
+    }
+  });
+
+  it('should keep a key the person keeps, write nothing for it, and still file the source’s value as the base', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    await apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'keep' } }, callerFor(REMOTE));
+    should(own.writes).deepEqual([]);
+    should(own.held.get('warden.yaml')).equal(WARDEN);
+    should(settingsOf(w, 'warden.yaml').intervalMinutes).equal(sha256Hex('10'));
+    // Next time it is "changed here (kept)", not a conflict again.
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    const again = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(again.settings[0]?.keys.map(key => [key.key, key.outcome])).deepEqual([['intervalMinutes', 'mine']]);
+  });
+
+  it('should take a key changed only on the source by default, with nothing for the person to decide', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    // First copy: the person keeps theirs, which files the source's 5 as the base.
+    await apply(w, bundle, [{ path: 'warden.yaml', text: WARDEN }], undefined, callerFor(REMOTE));
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    w.applied.length = 0;
+    // The source then changes the value.
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 20) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(review.settings[0]?.keys).deepEqual([
+      { key: 'intervalMinutes', outcome: 'theirs', choice: 'take', mine: '5', theirs: '20' },
+    ]);
+    await apply(w, bundle, settings, undefined, callerFor(REMOTE));
+    should(own.writes.at(-1)?.text).equal(withInterval(WARDEN, 20));
+  });
+
+  it('should refuse a settings file the caller may not write, at review, at staging and at apply', async () => {
+    const own = files({ 'warden.yaml': WARDEN, 'learning.yaml': 'enabled: true\n' });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) },
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+    ];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, WITHOUT_WARDEN);
+    should(review.settings.map(entry => [entry.path, entry.refused !== undefined, entry.keys.length])).deepEqual([
+      ['warden.yaml', true, 0],
+      ['learning.yaml', false, 1],
+    ]);
+    should(review.settings[0]?.refused).containEql('may not change warden.yaml');
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' }, 'learning.yaml': { enabled: 'take' } },
+    });
+    const staged = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(WITHOUT_WARDEN)),
+      'fleet_change_refused',
+    );
+    should(staged.message).containEql('may not change warden.yaml');
+    await catalogRefusal(w.service.executors.clone.execute(change, callerFor(WITHOUT_WARDEN)), 'fleet_change_refused');
+    // Not one file was written, not even the one this caller may write.
+    should(own.writes).deepEqual([]);
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should refuse settings carried on a copy that is not a repeat copy, rather than ignore them', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const change = {
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle,
+      settings: [{ path: 'warden.yaml', text: withInterval(WARDEN, 10) }],
+    } as unknown as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('only when a copy is repeated');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should refuse every settings file when the daemon cannot say what the caller may do', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, undefined);
+    should(review.settings[0]?.refused).containEql('daemon bug');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {}, settings });
+    await catalogRefusal(w.service.executors.clone.describe(change), 'fleet_change_refused');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should let a device that needs a passkey stage the copy, and refuse the apply until it has one', async () => {
+    const needsPasskey = asking({ warden: 'step-up-required' }, true);
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, needsPasskey);
+    should(review.settings[0]?.refused).be.undefined();
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' } },
+    });
+    await w.service.executors.clone.describe(change, callerFor(needsPasskey));
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.execute(change, callerFor(needsPasskey)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('needs a passkey');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should refuse an apply whose file moved after the review', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    own.held.set('warden.yaml', withInterval(WARDEN, 7));
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' } },
+    });
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should refuse a merged file that would not check, before anything is written', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    own.state.invalid = true;
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const refusal = await catalogRefusal(
+      apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'take' } }, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('line 3: caps.jevUsdPerDay: must be a number');
+    should(own.writes).deepEqual([]);
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should say a held write was held, and still record it', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    own.state.pending = true;
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const summary = await apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'take' } }, callerFor(REMOTE));
+    should(summary).containEql('1 settings file held until you confirm it');
+    should(settingsOf(w, 'warden.yaml').intervalMinutes).equal(sha256Hex('10'));
+  });
+
+  it('should add a file this machine does not have as the source wrote it', async () => {
+    const own = files({});
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(review.settings[0]).containEql({ path: 'voice.yaml', isNew: true });
+    await apply(w, bundle, settings, undefined, callerFor(REMOTE));
+    should(own.writes).have.length(1);
+    should(own.writes[0]).containEql({ path: 'voice.yaml', ifMatch: 'absent', text: settings[0]?.text });
+  });
+
+  it('should refuse a settings file when this machine cannot merge settings, naming the file', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    const bundle = await sourceAt();
+    const refusal = await setupRefusal(
+      w.service.reviewClone({ bundle: bundle as never, settings: [{ path: 'warden.yaml', text: WARDEN }] }),
+      'fleet_setup_refused',
+    );
+    should(refusal.message).containEql('warden.yaml');
+  });
+
+  describe('the controls', () => {
+    const controls = (patch: object) => [
+      {
+        path: 'controls' as const,
+        text: JSON.stringify({ agentPermissions: 'auto', agentControl: { files: true }, ...patch }),
+      },
+    ];
+
+    it('should apply only the fields taken, in the copy’s own batch', async () => {
+      const own = files({});
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = controls({ agentPermissions: 'skip', agentControl: { files: false, browsers: false } });
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+      const keys = Object.fromEntries(review.settings[0]?.keys.map(key => [key.key, key.outcome]) ?? []);
+      should(keys).deepEqual({
+        agentPermissions: 'both',
+        'agentControl.browsers': 'both',
+        'agentControl.files': 'both',
+      });
+      await apply(
+        w,
+        bundle,
+        settings,
+        { controls: { 'agentControl.files': 'take', 'agentControl.browsers': 'keep', agentPermissions: 'keep' } },
+        callerFor(REMOTE),
+      );
+      const machine = machineOf(w.applied[0]?.documents ?? []);
+      should(machine.agentControl.files).equal(false);
+      should(machine.agentControl.browsers).equal(true);
+      should(machine.agentPermissions).equal('auto');
+      should(own.writes).deepEqual([]);
+      should(Object.keys(settingsOf(w, 'controls')).toSorted()).containEql('agentControl.files');
+    });
+
+    it('should need a passkey to turn what agents may control back on from a remote device, and keep the change to retry', async () => {
+      const own = files({});
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = controls({ agentControl: { pageScripts: true } });
+      const decisions = { controls: { 'agentControl.pageScripts': 'take' as const } };
+      const spent: Spent = { count: 0 };
+      const thrownError = await thrown(apply(w, bundle, settings, decisions, callerFor(REMOTE, {}, spent)));
+      should(thrownError).be.instanceOf(FleetCatalogFreshStepUpRequired);
+      should(w.applied).deepEqual([]);
+      // With a passkey proved for the act it goes through, and the proof is spent once.
+      await apply(w, bundle, settings, decisions, callerFor(REMOTE, { freshStepUp: true }, spent));
+      should(spent.count).equal(1);
+      should(machineOf(w.applied[0]?.documents ?? []).agentControl.pageScripts).equal(true);
+    });
+
+    it('should not ask at the machine, and never let a ferret widen', async () => {
+      const own = files({});
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = controls({ agentControl: { pageScripts: true } });
+      const decisions = { controls: { 'agentControl.pageScripts': 'take' as const } };
+      await apply(w, bundle, settings, decisions, callerFor(AT_THE_MACHINE));
+      should(w.applied).have.length(1);
+      const ferret = await copied(files({}));
+      const refused = await thrown(
+        apply(ferret, bundle, settings, decisions, callerFor(AT_THE_MACHINE, { agent: true })),
+      );
+      should((refused as { status?: number }).status).equal(403);
+      should(ferret.applied).deepEqual([]);
+    });
+  });
+
+  it('should leave every login, sign-in and secret byte-identical, taking a setting or keeping it (account-model §14.4)', async () => {
+    for (const choice of ['take', 'keep'] as const) {
+      // Arrange: a signed-in login and a stored secret, and a warden file that names that secret.
+      const text = `${WARDEN}investigation:\n  note: \${secret:JEV_API_KEY}\n`;
+      const own = files({ 'warden.yaml': text });
+      const w = await copied(own);
+      w.secrets.set('JEV_API_KEY', 'sk-do-not-touch');
+      const loginsBefore = JSON.stringify(w.state.reading.model.credentials);
+      const bundle = await sourceAt();
+      const settings = [
+        { path: 'warden.yaml' as const, text: withInterval(text, 10) },
+        { path: 'controls' as const, text: JSON.stringify({ agentControl: { files: false } }) },
+      ];
+
+      // Act
+      await apply(
+        w,
+        bundle,
+        settings,
+        { 'warden.yaml': { intervalMinutes: choice }, controls: { 'agentControl.files': choice } },
+        callerFor(AT_THE_MACHINE),
+      );
+
+      // Assert: the secret store, the logins and every credential document are exactly as they were.
+      should([...w.secrets]).deepEqual([['JEV_API_KEY', 'sk-do-not-touch']]);
+      const written = w.applied[0]?.documents ?? [];
+      should(JSON.stringify(w.state.reading.model.credentials)).equal(loginsBefore);
+      should(written.map(document => document.path).filter(path => /credential|\/logins\//u.test(path))).deepEqual([]);
+      for (const write of own.writes) should(write.text).containEql('${secret:JEV_API_KEY}');
+      should(configTextOf(written)).not.containEql('sk-do-not-touch');
+    }
+  });
+
+  it('should not touch the clone’s own items when only settings are decided', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    await apply(
+      w,
+      bundle,
+      [{ path: 'warden.yaml', text: withInterval(WARDEN, 10) }],
+      { 'warden.yaml': { intervalMinutes: 'take' } },
+      callerFor(REMOTE),
+    );
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
   });
 });
 

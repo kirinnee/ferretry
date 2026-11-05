@@ -99,7 +99,7 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, FleetCloneReviewRequestSchema);
-        return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request));
+        return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request, context.governance));
       },
     },
     {

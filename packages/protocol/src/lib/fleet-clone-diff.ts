@@ -16,6 +16,7 @@
  */
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';
+import { CONFIG_FILE_MAX_BYTES } from './config-files.ts';
 
 /** What an item is, for the screen: a component kind, a profile or a runtime. A login is listed apart. */
 export const CLONE_REVIEW_KINDS = [
@@ -118,19 +119,66 @@ export const CloneReviewLoginSchema = z.strictObject({
 });
 export type CloneReviewLogin = z.infer<typeof CloneReviewLoginSchema>;
 
-/** One settings document's keys. Filled by the per-key merge; empty until then. */
+/**
+ * The settings documents a copy merges key by key: three configuration files, and the machine's
+ * `controls` (`agentPermissions`, `agentControl.*`, `defaultRuntime`) as one keyed document.
+ */
+export const CLONE_SETTINGS_DOCS = ['warden.yaml', 'learning.yaml', 'voice.yaml', 'controls'] as const;
+export const CloneSettingsDocSchema = z.enum(CLONE_SETTINGS_DOCS);
+export type CloneSettingsDoc = z.infer<typeof CloneSettingsDocSchema>;
+
+/** The most keys one settings document lists: a configuration file is far smaller than this. */
+export const CLONE_SETTINGS_KEYS_LIMIT = 2048;
+
+/** What to do with one settings key. `take` writes the source's value (or removes the key it no longer has). */
+export const CloneKeyChoiceSchema = z.enum(['take', 'keep']);
+export type CloneKeyChoice = z.infer<typeof CloneKeyChoiceSchema>;
+
+/**
+ * One settings document's differing keys (design §5). A key is a dotted path down to a scalar, and a list is
+ * one value. `mine` and `theirs` are the values as configuration text, which never holds a secret value;
+ * a `${secret:NAME}` stays a reference. A key both sides agree on is not listed.
+ */
 export const CloneReviewSettingsSchema = z.strictObject({
-  path: NonEmptyStringSchema,
-  keys: z.array(
-    z.strictObject({
-      key: NonEmptyStringSchema,
-      outcome: CloneOutcomeSchema,
-      mine: z.string().optional(),
-      theirs: z.string().optional(),
-      loosens: z.boolean().optional(),
-    }),
-  ),
+  path: CloneSettingsDocSchema,
+  /** The document is not on this machine yet: a copy would create it. */
+  isNew: z.boolean().optional(),
+  /** Why this document cannot be copied here, in words: no key of it can be applied until it is left out. */
+  refused: z.string().optional(),
+  keys: z
+    .array(
+      z.strictObject({
+        key: NonEmptyStringSchema,
+        outcome: CloneOutcomeSchema,
+        /** What is chosen by default. ABSENT for `both`: the person decides each one. */
+        choice: CloneKeyChoiceSchema.optional(),
+        mine: z.string().optional(),
+        theirs: z.string().optional(),
+        /** Taking this key would loosen what this machine may spend or what its agents may do. */
+        loosens: z.boolean().optional(),
+      }),
+    )
+    .max(CLONE_SETTINGS_KEYS_LIMIT),
 });
+export type CloneReviewSettings = z.infer<typeof CloneReviewSettingsSchema>;
+
+/** One settings document as the source holds it: its text (a missing file is the empty text), or the controls as JSON. */
+export const CloneSettingsTextSchema = z.strictObject({
+  path: CloneSettingsDocSchema,
+  text: z.string().refine(text => new TextEncoder().encode(text).length <= CONFIG_FILE_MAX_BYTES, {
+    message: `a settings document is at most ${String(CONFIG_FILE_MAX_BYTES / 1024)} KiB`,
+  }),
+});
+export type CloneSettingsText = z.infer<typeof CloneSettingsTextSchema>;
+
+/** `clone.import`'s per-key decisions: for each document, for each key the review listed, take or keep. */
+export const CloneSettingsDecisionsSchema = z.partialRecord(
+  CloneSettingsDocSchema,
+  z
+    .record(NonEmptyStringSchema, CloneKeyChoiceSchema)
+    .refine(keys => Object.keys(keys).length <= CLONE_SETTINGS_KEYS_LIMIT, { message: 'too many keys decided' }),
+);
+export type CloneSettingsDecisions = z.infer<typeof CloneSettingsDecisionsSchema>;
 
 /** One API key's name and how it stands. Names only. Filled with the newer-key copy; empty until then. */
 export const CloneReviewKeySchema = z.strictObject({
@@ -161,10 +209,7 @@ export const FleetCloneReviewRequestSchema = z.strictObject({
   bundle: z.record(z.string(), z.unknown()),
   source: z.strictObject({ daemonId: NonEmptyStringSchema }).optional(),
   names: z.strictObject({ source: NonEmptyStringSchema.max(120), target: NonEmptyStringSchema.max(120) }).optional(),
-  settings: z
-    .array(z.strictObject({ path: NonEmptyStringSchema, text: z.string() }))
-    .max(8)
-    .optional(),
+  settings: z.array(CloneSettingsTextSchema).max(CLONE_SETTINGS_DOCS.length).optional(),
   sourceSecrets: z
     .array(z.strictObject({ name: NonEmptyStringSchema, updatedAt: InstantSchema }))
     .max(1024)
