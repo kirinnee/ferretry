@@ -293,8 +293,8 @@ user@UID.service
 ├── app.slice/…                         the daemon — never capped
 ├── <product>-fleet.slice               agents (I36)
 │   └── <product>-agent-<id>-<n>.scope
-└── <product>-voice.slice               the speech worker
-    └── <product>-voice-<n>.scope       CPUQuota = C × 100 %, MemoryMax = 1.5 GB, CPUWeight per D3
+└── <product>-voice.slice               the speech worker; CPUWeight per D3 (against fleet.slice)
+    └── <product>-voice-<n>.scope       CPUQuota = C × 100 %, MemoryMax = 1.5 GB
 ```
 
 **One number, C, the voice cores:** `min(4, max(1, floor(cores / 4)))` — 2 on an 8-core laptop, 4 on the
@@ -312,8 +312,12 @@ count alone does not bound the process: idle pools may spin. Two things do:
 2. **On Linux, the kernel enforces it.** When `cgroupsSupported` (Linux and the unified hierarchy; that
    function does not check that a user manager answers, so the launch itself is the test), the scope
    gets a hard `CPUQuota` of C cores — whatever threads exist, the worker gets at most C cores of CPU
-   time — a `MemoryMax` of 1.5 GB, and a `CPUWeight` that decides who wins under contention (D3). A
-   worker over its memory is killed by the kernel; the daemon sees the exit, says so on the stream, and
+   time — and a `MemoryMax` of 1.5 GB. **Who wins under contention (D3) is a weight on the slice, not the
+   scope**: siblings share CPU by their own weights, and the scope is the only child of
+   `<product>-voice.slice`, so a weight on it would decide nothing. D3 (a) sets `<product>-voice.slice`
+   to `CPUWeight=50` against the fleet slice's default 100; (b) sets it to 200. The fleet slice and
+   `app.slice` keep their weights, so the daemon's share is unchanged. B2's contention test runs
+   against these real units. A worker over its memory is killed by the kernel; the daemon sees the exit, says so on the stream, and
    the next stream starts a fresh worker.
 
 **Where cgroups cannot be used** (macOS; Linux without cgroup v2; a user manager that refuses
@@ -355,12 +359,19 @@ and never relies on record boundaries:
   short control (`shown {turnId, revision}`, `hold`, `send-now`, `muted`, `unmuted`, `end`), zero-padded.
   **Constant rate for as long as the stream is open**: silence and muted time are zero samples, so the
   shape never changes with speech. The browser writes one whole unit per record.
-- **Downlink: one 1,024-byte unit every 200 ms** — a length-prefixed UTF-8 JSON snapshot (state, the
-  turn's words and revision, countdown, `sent`, `error`, the next nonce), zero-padded. Changes wait for
-  the next tick (≤ 200 ms added to interim words); a final transcript longer than one unit continues in
-  the following ticks. ~5 KB/s.
-- **Malformed is fatal:** a control slot or snapshot that does not parse, a length past the unit, or a
-  stream that ends mid-unit closes the stream with a protocol error.
+- **Downlink: one 1,024-byte unit every 200 ms** — a 2-byte length, then UTF-8 JSON of at most 1,022
+  bytes, zero-padded. Every unit is **complete and parseable on its own** and always carries the state,
+  countdown, `sent` / `error`, and a fresh nonce. The turn's words travel in a **bounded fragment** in
+  the same unit: `{turnId, revision, offset, total, text}`, with `text` capped so the unit fits (about
+  700 bytes). A transcript longer than that — 240 words is already ~1.3 KB, and a turn may run 120 s —
+  arrives over consecutive ticks at increasing offsets; the browser reassembles by `(turnId, revision)`,
+  drops a revision once a newer one starts, and refuses one whose `total` is over 16 KB (far above 120 s
+  of speech). **`shown {turnId, revision}` is sent only after the whole revision is on screen**, so a
+  long turn's countdown waits for its last fragment. Changes wait for the next tick (≤ 200 ms added to
+  interim words). ~5 KB/s.
+- **Malformed is fatal:** a control slot or unit that does not parse, a length past the unit, a fragment
+  whose offset or total is inconsistent, or a stream that ends mid-unit closes the stream with a protocol
+  error.
 - **B3 tests the shape at the right layer**: the sealed frame sizes and gaps on the wire, both
   directions, not the plaintext.
 
@@ -578,10 +589,10 @@ says so in `docs/voice.md` rather than claiming more.
 Only for **dictation on this device**. Two independent parts, each shown only when this device can use
 it:
 
-| Part              | What it needs                                                                                                                                                                    | What it breaks                                                                                                                                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Several cores** | cross-origin isolation for **this device** (§6.2), more than 4 GB of memory (`speed-plan.ts` already refuses threads at or below 4 GB)                                           | **Outside videos and audio in chat stop loading** (a host that sends no `Cross-Origin-Resource-Policy`), and the sandboxed blocks (Mermaid, Lottie, interactive `html`) until they are re-proved under isolation. |
-| **GPU**           | WebGPU with an adapter; the WebGPU engine file (27,084,114 bytes) **fetched from the model CDN** on opt-in (it is over Cloudflare Pages' 25 MiB limit); fp16 or fp32 model files | **Nothing in the page.** WebGPU needs no isolation. The cost is the download: Parakeet's fp32 encoder is about 2.5 GB (`docs/voice.md`); an fp16 export would be about half, and must be found or made.           |
+| Part              | What it needs                                                                                                                                                                               | What it breaks                                                                                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Several cores** | cross-origin isolation for **this device** (§6.2), and enough memory (`speed-plan.ts` refuses threads at a known ≤ 4 GB; an unknown figure on a touch-first device is refused too, from C2) | **Outside videos and audio in chat stop loading** (a host that sends no `Cross-Origin-Resource-Policy`), and the sandboxed blocks (Mermaid, Lottie, interactive `html`) until they are re-proved under isolation. |
+| **GPU**           | WebGPU with an adapter; the WebGPU engine file (27,084,114 bytes) **fetched from the model CDN** on opt-in (it is over Cloudflare Pages' 25 MiB limit); fp16 or fp32 model files            | **Nothing in the page.** WebGPU needs no isolation. The cost is the download: Parakeet's fp32 encoder is about 2.5 GB (`docs/voice.md`); an fp16 export would be about half, and must be found or made.           |
 
 The switch's own words, before it is turned on: _"Several cores makes on-device dictation about 2–3×
 faster on a desktop we tested. While it is on, videos and audio from other websites won't play in
@@ -615,8 +626,12 @@ beside the signed one. Option (a) is the same idea done inside the worker that a
 (`docs/voice.md`), so on Safari the "outside videos and audio" warning is fully true. Whether Safari
 honours COOP/COEP on a navigation response **its service worker constructed** is **not proved**; C2's
 Safari harness run decides it, and if Safari does not, "Several cores" is simply not offered there.
-Most iPhones have at most 4 GB of memory for the page's purposes, which `speed-plan.ts` already treats
-as "no threads", so on an iPhone the realistic speed-ups are **the GPU part** (WebGPU, if the Safari in
+**Memory on Safari is unknown, not small.** Safari does not expose `navigator.deviceMemory`;
+`speed-signals.ts` reads that as `null`, and `speed-plan.ts` refuses threads only for a KNOWN value at
+or below 4 GB — so today an isolated iPhone would be planned at 2–4 threads. Parakeet 0.6B already takes
+about 1 GB on one thread, and threads add buffers, so C2 adds a conservative rule: **unknown memory on a
+touch-first device gets no threads** unless the harness measures that model at that thread count on a
+real iPhone. On an iPhone the realistic speed-ups are therefore **the GPU part** (WebGPU, if the Safari in
 use offers an adapter — unmeasured here) or **dictation on my machine**, which needs neither.
 
 ---
@@ -714,7 +729,7 @@ Short. Each has a recommendation; none is decided by this plan.
 
 **D3 — When the machine is busy, who gets the CPU?**
 
-- (a) **Your ferrets.** Voice yields under load, so voice chat may lag during heavy builds; it is limited to C cores (2 on a laptop, 4 on the big box) either way. ← **recommended**: matches "don't affect the main agent".
+- (a) **Your ferrets.** Voice gets a smaller share under load (a weight on its slice), so voice chat may lag during heavy builds; it is limited to C cores (2 on a laptop, 4 on the big box) either way. ← **recommended**: matches "don't affect the main agent".
 - (b) Your voice. Builds slow slightly while you talk.
 
 **D4 — What do ferrets write for the spoken part?**
