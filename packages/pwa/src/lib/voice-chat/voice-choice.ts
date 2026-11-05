@@ -9,8 +9,8 @@
 
 import type { SpeakerVoice } from './ports.ts';
 
-export const MIN_SPEECH_RATE = 0.8;
-export const MAX_SPEECH_RATE = 2;
+const MIN_SPEECH_RATE = 0.8;
+const MAX_SPEECH_RATE = 2;
 export const DEFAULT_SPEECH_RATE = 1.1;
 
 export const clampSpeechRate = (rate: number): number =>

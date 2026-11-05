@@ -167,3 +167,19 @@ describe('createReadAloud', () => {
     expect(createReadAloud({ speaker: scripted(true).port }).supported).toBe(true);
   });
 });
+
+describe('createReadAloud.dismiss', () => {
+  test('stops the voice and forgets the message, so no other conversation can inherit it', () => {
+    const scripts = scripted();
+    const controller = createReadAloud({ speaker: scripts.port });
+    controller.read('a1', 'Alpha. Beta.');
+    const hear = scripts.listeners[0] as (event: SpeakerEvent) => void;
+    controller.dismiss();
+    expect(scripts.stops()).toBe(1);
+    expect(controller.getState()).toMatchObject({ status: 'idle', key: null, segments: [] });
+    hear({ type: 'end' });
+    expect(controller.getState().status).toBe('idle');
+    controller.dismiss();
+    expect(controller.getState().status).toBe('idle');
+  });
+});

@@ -18,7 +18,7 @@ import { chooseVoice, clampSpeechRate, DEFAULT_SPEECH_RATE, voiceNote } from './
  * `idle`: nothing has been read here. `reading`: the voice is on. `stopped`: the person stopped it.
  * `finished`: it read to the end. `failed`: the device could not speak.
  */
-export type ReadAloudStatus = 'idle' | 'reading' | 'stopped' | 'finished' | 'failed';
+type ReadAloudStatus = 'idle' | 'reading' | 'stopped' | 'finished' | 'failed';
 
 export interface ReadAloudState {
   readonly status: ReadAloudStatus;
@@ -50,6 +50,8 @@ export interface ReadAloudController {
   read(key: string, markdown: string): void;
   /** Stop whatever is being read. */
   stop(): void;
+  /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
+  dismiss(): void;
 }
 
 export const IDLE: ReadAloudState = {
@@ -118,6 +120,14 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         });
       } catch {
         if (live()) set({ ...state, status: 'failed' });
+      }
+    },
+    dismiss: () => {
+      token += 1;
+      try {
+        speaker.stop();
+      } finally {
+        if (state !== IDLE) set(IDLE);
       }
     },
     stop: () => {

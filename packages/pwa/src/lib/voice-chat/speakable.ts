@@ -38,9 +38,9 @@
 import { parseFyRender } from '../fy-render.ts';
 import { findReferences, parseReferenceToken, type Reference } from '../references.ts';
 
-export type SpeakableKind = 'text' | 'heading' | 'list' | 'quote' | 'code' | 'table' | 'diagram' | 'image' | 'more';
+type SpeakableKind = 'text' | 'heading' | 'list' | 'quote' | 'code' | 'table' | 'diagram' | 'image' | 'more';
 
-export interface SpeakableSegment {
+interface SpeakableSegment {
   /** What is said — plain words, ending in punctuation so the voice pauses. */
   readonly text: string;
   /** Where in the original markdown this came from: `[start, end)` character offsets. */

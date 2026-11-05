@@ -60,5 +60,5 @@ export function useReadAloud(key: string): RowReadAloud {
 export function useStopReadingOnLeave(scope: string): void {
   const controller = useContext(ReadAloudContext) ?? browserReadAloud();
   // biome-ignore lint/correctness/useExhaustiveDependencies: `scope` is the cleanup's trigger: leaving one conversation silences it.
-  useEffect(() => () => controller.stop(), [controller, scope]);
+  useEffect(() => () => controller.dismiss(), [controller, scope]);
 }
