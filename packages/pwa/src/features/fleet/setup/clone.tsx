@@ -26,6 +26,7 @@
  * now, and **Copy secrets from <source>…** for anything else, picked by name.
  */
 
+import { isSignInSecretName } from '@ferretry/protocol';
 import type {
   CloneLoginTarget,
   CloneSettingsDoc,
@@ -58,7 +59,7 @@ import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { readFleetMachine, readFleetProfiles } from '../catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
-import { readFleetExport, reviewFleetClone } from '../setup-api.ts';
+import { readFleetExport, recordCloneKeys, reviewFleetClone } from '../setup-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { type MachineReach, readMachineReach } from '../shell/machine-reach.ts';
@@ -117,7 +118,10 @@ import {
   cloneLoginTargets,
   cloneNeeds,
   controlsChange,
+  filedKeyStamps,
   keysToCopy,
+  type NewerKey,
+  newerKeys,
   needsAfterCopy,
   signInLink,
   type SourceSettingsFile,
@@ -211,6 +215,10 @@ export function CloneMachine(props: CloneMachineProps) {
   const [held, setHeld] = useState<readonly string[]>([]);
   // The names the SOURCE holds (never values), so only a key it really has is asked for; `null` when unread.
   const [sourceSecrets, setSourceSecrets] = useState<readonly string[] | null>(null);
+  // When the SOURCE last changed each key it holds (its own list's `updatedAt`; instants, never values).
+  const [sourceStamps, setSourceStamps] = useState<ReadonlyMap<string, string>>(new Map());
+  // The keys the source changed since the last copy (this machine decides from timestamps): reported, never copied.
+  const [offeredKeys, setOfferedKeys] = useState<readonly NewerKey[]>([]);
   const [copyKeys, setCopyKeys] = useState(true);
   const [chosen, setChosen] = useState<readonly CloneItemId[]>(ALL_CLONE_ITEMS);
   const [sourceIssue, setSourceIssue] = useState<string | null>(null);
@@ -373,6 +381,23 @@ export function CloneMachine(props: CloneMachineProps) {
     });
   };
 
+  const offeredFor = async (
+    exported: FleetCloneBundle,
+    stamps: readonly { readonly name: string; readonly updatedAt: string }[] | null,
+  ): Promise<readonly NewerKey[]> => {
+    if (stamps === null || stamps.length === 0 || pickedRecord === undefined) return [];
+    // `read` turns any failure (a review that is refused, a list too long to send) into a refusal: none offered.
+    const reviewed = await target.read(client =>
+      reviewFleetClone(client, {
+        bundle: { ...exported },
+        source: { daemonId: String(pickedRecord.daemonId) },
+        names: { source: sourceName, target: machineName },
+        sourceSecrets: [...stamps],
+      }),
+    );
+    return reviewed.kind === 'done' ? newerKeys(reviewed.value.keys) : [];
+  };
+
   const readSource = (): void => {
     setSourceIssue(null);
     setReading(true);
@@ -400,6 +425,17 @@ export function CloneMachine(props: CloneMachineProps) {
           ? sourceList.value.secrets.map(secret => secret.name)
           : null,
       );
+      const stamps =
+        sourceList.kind === 'done' && sourceList.value.health === 'ready'
+          ? sourceList.value.secrets
+              .filter(secret => !isSignInSecretName(secret.name))
+              .map(({ name, updatedAt }) => ({ name, updatedAt }))
+          : null;
+      setSourceStamps(new Map((stamps ?? []).map(({ name, updatedAt }) => [name, updatedAt])));
+      // Which keys are newer on the source is this machine's call, from timestamps alone. A review that cannot be
+      // read (or a source list too long to send) offers none: the keys the logins need still copy as they always did.
+      const offered = await offeredFor(exported.value, stamps);
+      setOfferedKeys(offered);
       setCopyKeys(true);
       setFiles(read);
       setBundle(exported.value);
@@ -433,7 +469,17 @@ export function CloneMachine(props: CloneMachineProps) {
   const sealKeys = async (names: readonly string[]): Promise<CloneItemOutcome> => {
     if (pickedRecord === undefined) return { kind: 'refused', reason: 'No source machine is picked.' };
     try {
-      await sealSecretsAcross(await createClient(pickedRecord), await createClient(connection), names);
+      const landed = await sealSecretsAcross(await createClient(pickedRecord), await createClient(connection), names);
+      // Remember when the source last changed each key that was just filed (a key this machine already held was
+      // kept, not filed, and is not remembered), so the next copy can tell "newer there" from "same". Bookkeeping:
+      // a refusal here costs only that, never the copy that already landed.
+      const stamps = filedKeyStamps(landed.imported, sourceStamps);
+      if (landed.filedAt !== undefined && stamps.length > 0) {
+        const { filedAt } = landed;
+        await target.read(client =>
+          recordCloneKeys(client, { source: { daemonId: String(pickedRecord.daemonId) }, filedAt, keys: stamps }),
+        );
+      }
       return { kind: 'copied' };
     } catch (error) {
       return { kind: 'refused', reason: `${copyRefusalSentence(error)} Copy them from the list below.` };
@@ -772,6 +818,7 @@ export function CloneMachine(props: CloneMachineProps) {
             keys={keysToCopy(needs, sourceSecrets)}
             copyKeys={copyKeys}
             onCopyKeys={setCopyKeys}
+            newer={offeredKeys}
           />
           <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
           <SetupSection title="Doesn’t copy" name="not-copied">

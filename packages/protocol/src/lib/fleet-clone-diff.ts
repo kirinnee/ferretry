@@ -17,6 +17,8 @@
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';
 import { CONFIG_FILE_MAX_BYTES } from './config-files.ts';
+import { CloneableSecretNameSchema } from './secret-clone.ts';
+import { MAX_SECRETS_PER_DAEMON } from './secrets.ts';
 
 /** What an item is, for the screen: a component kind, a profile or a runtime. A login is listed apart. */
 export const CLONE_REVIEW_KINDS = [
@@ -180,11 +182,26 @@ export const CloneSettingsDecisionsSchema = z.partialRecord(
 );
 export type CloneSettingsDecisions = z.infer<typeof CloneSettingsDecisionsSchema>;
 
-/** One API key's name and how it stands. Names only. Filled with the newer-key copy; empty until then. */
+/**
+ * How one API key stands against the source's copy of it, from `updatedAt` timestamps alone — no value and
+ * no digest of one is ever compared (docs/secrets.md):
+ *
+ * - `missing` — the source holds it, this machine does not: it is copied, as it always was;
+ * - `newer` — the source changed it since the last copy and nothing changed it here: REPORTED only;
+ * - `both` — the source changed it AND it was changed here since the last copy: REPORTED only, saying so;
+ * - `same` — nothing newer on the source, or no earlier copy to compare with: nothing is said.
+ *
+ * A copy NEVER writes a key this machine holds, whatever the outcome (docs/secrets.md): `newer` and `both` are
+ * reports that tell the person to replace the key themselves, `fy secret set NAME`.
+ */
+export const CLONE_KEY_OUTCOMES = ['missing', 'newer', 'both', 'same'] as const;
+
+/** One API key's name and how it stands. Names only: a sign-in's name is not a name a copy can carry. */
 export const CloneReviewKeySchema = z.strictObject({
-  name: NonEmptyStringSchema,
-  outcome: z.enum(['missing', 'newer', 'both', 'same']),
+  name: CloneableSecretNameSchema,
+  outcome: z.enum(CLONE_KEY_OUTCOMES),
 });
+export type CloneReviewKey = z.infer<typeof CloneReviewKeySchema>;
 
 export const FleetCloneReviewSchema = z.strictObject({
   mode: z.enum(['first', 'update']),
@@ -250,3 +267,29 @@ export type FleetCloneForgetRequest = z.infer<typeof FleetCloneForgetRequestSche
 /** Whether there was a record to forget. Nothing copied, no login and no secret is touched either way. */
 export const FleetCloneForgetResultSchema = z.strictObject({ forgotten: z.boolean() });
 export type FleetCloneForgetResult = z.infer<typeof FleetCloneForgetResultSchema>;
+
+/** `POST /v1/fleet/clone/keys`: the keys a sealed copy has just filed here, and when the source last changed each. */
+export const FLEET_CLONE_KEYS_PATH = '/v1/fleet/clone/keys' as const;
+
+/**
+ * What the browser reports once a sealed copy has landed: the source it copied from, the instant this machine
+ * says it filed them (`filedAt`, from the import's own answer) and, for each key it filed, the `updatedAt` the
+ * SOURCE listed for it. The target records `filedAt` as the key's baseline ONLY for a key whose own store entry
+ * was created at that instant: a key deleted and made again since is not the one the copy filed, so it is left
+ * unrecorded, and a key the person edited since is still recorded at the copy's instant, so the next review
+ * sees that it changed here. Timestamps only. A sign-in's name is refused at parse.
+ */
+export const FleetCloneKeysRecordRequestSchema = z.strictObject({
+  source: z.strictObject({ daemonId: NonEmptyStringSchema }),
+  filedAt: InstantSchema,
+  keys: z
+    .array(z.strictObject({ name: CloneableSecretNameSchema, sourceUpdatedAt: InstantSchema }))
+    .min(1)
+    .max(MAX_SECRETS_PER_DAEMON)
+    .refine(keys => new Set(keys.map(key => key.name)).size === keys.length, 'each key is named once'),
+});
+export type FleetCloneKeysRecordRequest = z.infer<typeof FleetCloneKeysRecordRequestSchema>;
+
+/** How many of those keys the record now holds (none when this machine has no record of that source). */
+export const FleetCloneKeysRecordResultSchema = z.strictObject({ recorded: z.number().int().nonnegative() });
+export type FleetCloneKeysRecordResult = z.infer<typeof FleetCloneKeysRecordResultSchema>;

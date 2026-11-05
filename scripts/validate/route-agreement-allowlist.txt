@@ -135,4 +135,3 @@ unreached POST /v1/catalog-links/:linkId/copy # CORRECT: daemon-first slice (cat
 unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
 unreached PUT /v1/catalog-links/:linkId/version # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
-

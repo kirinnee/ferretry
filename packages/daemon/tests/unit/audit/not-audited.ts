@@ -16,6 +16,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/fleet/profiles/preview': 'a read with a body: previews a draft and writes nothing',
   'POST /v1/fleet/clone/review':
     'a read with a body: compares a bundle with this machine and writes nothing; the apply it feeds is audited as a change',
+  'POST /v1/fleet/clone/keys':
+    'bookkeeping: remembers two timestamps per API key in the last-copied record and reads no secret; the sealed copy it follows is audited as secrets.changed',
   'POST /v1/sessions/:sessionId/conversion-preview':
     'a read with a body: previews a cross-harness conversion and writes nothing; the migrate it precedes is audited',
   'POST /v1/catalog-items/:itemId/versions/preview':

@@ -473,6 +473,99 @@ describe('SecretDirectory, changes taking turns', () => {
     should(outcomes).deepEqual(['stored', 'changed']);
   });
 
+  describe('storing only the names that are missing', () => {
+    it('should store the missing names and leave a held one exactly as it was, timestamps included', async () => {
+      // Arrange
+      const documents = new MemorySecretDocuments();
+      const secrets = directory(documents);
+      await secrets.put('HELD', 'held-value');
+      const held = (await documents.read())?.entries.HELD;
+      const later = directory(documents, LATER);
+
+      // Act
+      const answer = await later.putMissing([
+        ['HELD', 'a-different-value'],
+        ['NEW', 'new-value'],
+      ]);
+
+      // Assert
+      should(answer).deepEqual({ at: LATER.now(), stored: ['NEW'], kept: ['HELD'] });
+      const document = await documents.read();
+      should(document?.entries.HELD).deepEqual(held);
+      should(document?.entries.NEW).containDeep({ createdAt: LATER.now(), updatedAt: LATER.now() });
+      should((await new SecretVault(documents, new FakeSecretCipher()).values()).get('NEW')).equal('new-value');
+    });
+
+    it('should write nothing at all when every name is held', async () => {
+      // Arrange
+      const documents = new MemorySecretDocuments();
+      const secrets = directory(documents);
+      await secrets.put('HELD', 'held-value');
+      const before = JSON.stringify(await documents.read());
+
+      // Act
+      const answer = await secrets.putMissing([['HELD', 'a-different-value']]);
+
+      // Assert
+      should(answer.stored).deepEqual([]);
+      should(answer.kept).deepEqual(['HELD']);
+      should(JSON.stringify(await documents.read())).equal(before);
+    });
+
+    it('should store a name given twice once, with its first value', async () => {
+      // Arrange
+      const documents = new MemorySecretDocuments();
+      const secrets = directory(documents);
+
+      // Act
+      const answer = await secrets.putMissing([
+        ['TWICE', 'first'],
+        ['TWICE', 'second'],
+      ]);
+
+      // Assert
+      should(answer.stored).deepEqual(['TWICE']);
+      should((await new SecretVault(documents, new FakeSecretCipher()).values()).get('TWICE')).equal('first');
+    });
+
+    it('should keep a name written in the turn before it, even when that write was started after the call', async () => {
+      // Arrange
+      const secrets = directory();
+
+      // Act — the paste is queued first; the batch checks the store only when its own turn comes
+      const [stored, batch] = await Promise.all([
+        secrets.put('RACED', 'the-persons-value'),
+        secrets.putMissing([['RACED', 'copied-value']]),
+      ]);
+
+      // Assert
+      should(stored.name).equal('RACED');
+      should(batch.kept).deepEqual(['RACED']);
+      should(batch.stored).deepEqual([]);
+    });
+
+    it('should refuse the whole batch, writing nothing, when the missing names would pass the limit', async () => {
+      // Arrange
+      const documents = new MemorySecretDocuments();
+      const full = directory(documents);
+      for (let index = 0; index < MAX_SECRETS_PER_DAEMON - 1; index += 1) await full.put(`K${String(index)}`, TOKEN);
+      const before = JSON.stringify(await documents.read());
+
+      // Act
+      const refused = await full
+        .putMissing([
+          ['K0', 'held already'],
+          ['ONE', TOKEN],
+          ['TWO', TOKEN],
+        ])
+        .catch((error: unknown) => error);
+
+      // Assert
+      should(refused).be.instanceOf(SecretStoreError);
+      should(JSON.stringify(await documents.read())).equal(before);
+    });
+  });
+
   it('should refuse before writing when the store is full or cannot be read, and run the next change after a failure', async () => {
     // Arrange
     const full = directory();
