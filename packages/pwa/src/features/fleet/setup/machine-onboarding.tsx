@@ -98,7 +98,7 @@ function ImportCarryNote({ report, machineName }: { readonly report: HarnessRepo
   return (
     <SetupNote
       live
-      tone="ok"
+      tone={report.summary === null && report.conversationsFailed ? 'warn' : 'ok'}
       name="import-carry"
       title={
         report.runtime !== null

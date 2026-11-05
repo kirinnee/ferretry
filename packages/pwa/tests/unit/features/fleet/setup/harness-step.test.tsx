@@ -369,6 +369,7 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
           runtime: 'claude-default',
           summary: 'Imported 1 login, 2 skills, 3 MCP servers',
           conversations: null,
+          conversationsFailed: false,
           signIn: [],
         },
       ]);
@@ -1473,6 +1474,8 @@ describe('OnboardingHarnessStep — also bring my conversations', () => {
       await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(s.finished).toHaveLength(1);
       expect(s.finished[0]?.conversations).toContain('Couldn’t bring in your Claude Code conversations');
+      // The setup did import, so the headline stays the import's own and green.
+      expect(s.q('[data-setup-note="import-ready"]')?.getAttribute('data-tone')).toBe('ok');
       expect(s.q('[data-harness-imported]')).not.toBeNull();
     } finally {
       await s.view.unmount();
@@ -1523,12 +1526,71 @@ describe('OnboardingHarnessStep — also bring my conversations', () => {
             runtime: null,
             summary: null,
             conversations: 'Brought in 1 conversation.',
+            conversationsFailed: false,
             signIn: [],
           },
         ]);
         // The result claims what happened — conversations — and no setup it did not re-import.
         expect(s.text('[data-setup-note="import-ready"] > p')).toBe('Brought in 1 conversation.');
         expect(s.q('[data-setup-note="import-note"]')).toBeNull();
+      } finally {
+        await s.view.unmount();
+      }
+    });
+
+    it('a refused conversations import is a warning headline, not a green one', async () => {
+      const s = await start(daemon({ ...REVISIT, [LISTING_PATH]: new Error('offline') }), {
+        answers: { conversations: true },
+      });
+      try {
+        await clickOn(s.q('[data-onboarding-primary]'), 'import');
+        const note = must(s.q('[data-setup-note="import-ready"]'), 'the result note');
+        expect(note.getAttribute('data-tone')).toBe('warn');
+        expect(s.text('[data-setup-note="import-ready"] > p')).toContain(
+          'Couldn’t bring in your Claude Code conversations',
+        );
+        expect(s.finished[0]?.conversationsFailed).toBe(true);
+      } finally {
+        await s.view.unmount();
+      }
+    });
+
+    it('an adoption refused before anything came in is a warning too', async () => {
+      const s = await start(
+        daemon({
+          ...REVISIT,
+          [LISTING_PATH]: listing([row('a', 0.5)]),
+          [ADOPT_PATH]: new FyHttpError('nope', 403, 'forbidden'),
+        }),
+        { answers: { conversations: true } },
+      );
+      try {
+        await clickOn(s.q('[data-onboarding-primary]'), 'import');
+        expect(s.q('[data-setup-note="import-ready"]')?.getAttribute('data-tone')).toBe('warn');
+      } finally {
+        await s.view.unmount();
+      }
+    });
+
+    it('brought in some and then refused is still a green headline', async () => {
+      let batch = 0;
+      const rows = Array.from({ length: 201 }, (_, index) => row(`c${index}`, 1 + index / 1000));
+      const s = await start(
+        daemon({
+          ...REVISIT,
+          [LISTING_PATH]: listing(rows),
+          [ADOPT_PATH]: (call: Call) => {
+            batch += 1;
+            if (batch > 1) return new FyHttpError('nope', 403, 'forbidden');
+            return adopted((call.body as { conversations: { id: string }[] }).conversations.map(item => item.id));
+          },
+        }),
+        { answers: { conversations: true } },
+      );
+      try {
+        await clickOn(s.q('[data-onboarding-primary]'), 'import');
+        expect(s.q('[data-setup-note="import-ready"]')?.getAttribute('data-tone')).toBe('ok');
+        expect(s.finished[0]?.conversationsFailed).toBe(false);
       } finally {
         await s.view.unmount();
       }

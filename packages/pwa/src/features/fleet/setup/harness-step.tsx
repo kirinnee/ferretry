@@ -73,6 +73,8 @@ export interface HarnessReport {
   readonly summary: string | null;
   /** What the conversations import said, when it was asked for. */
   readonly conversations: string | null;
+  /** The conversations import brought nothing in because it was refused or had no runtime, not for lack of any. */
+  readonly conversationsFailed: boolean;
   /** The runtimes that still need a sign-in, each with the sign-in to open. */
   readonly signIn: readonly { readonly runtime: string; readonly credential: string }[];
 }
@@ -207,6 +209,8 @@ export function OnboardingHarnessStep({
           notes: importsSetup ? importNotes(scan, [harness]) : [],
           counts,
           title: importsSetup || kept === null ? importSummary(counts) : kept.sentence,
+          // A refusal is not a green headline: only a conversations-only visit shows it as the title.
+          tone: !importsSetup && kept !== null && kept.failed ? 'warn' : 'ok',
         });
         onAnswers({});
         await read();
@@ -216,6 +220,7 @@ export function OnboardingHarnessStep({
             runtime: importsSetup && makes ? typed : null,
             summary: importsSetup ? importSummary(counts) : null,
             conversations: kept === null ? null : kept.sentence,
+            conversationsFailed: kept?.failed === true,
             signIn: now
               .filter(runtime => runtime.credential.status === 'needs_sign_in')
               .map(runtime => ({ runtime: runtime.name, credential: runtime.credential.id })),
@@ -467,6 +472,8 @@ export function OnboardingHarnessStep({
 interface ConversationsOutcome {
   readonly adopted: number;
   readonly sentence: string;
+  /** Nothing was brought in because it was refused or had nowhere to go, not because there was nothing to bring. */
+  readonly failed: boolean;
 }
 
 /**
@@ -483,13 +490,17 @@ async function bringConversations(
   const name = SETUP_HARNESS_NAMES[harness];
   const target = mine.find(runtime => runtime.name === runtimeNamed) ?? mine[0];
   if (target === undefined)
-    return { adopted: 0, sentence: `Couldn’t bring in your ${name} conversations: no runtime to put them in.` };
+    return {
+      adopted: 0,
+      sentence: `Couldn’t bring in your ${name} conversations: no runtime to put them in.`,
+      failed: true,
+    };
   const found = await access.read(client => readImportableConversations(client, { harness, limit: 5_000 }));
   if (found.kind === 'refused')
-    return { adopted: 0, sentence: `Couldn’t bring in your ${name} conversations: ${found.sentence}` };
+    return { adopted: 0, sentence: `Couldn’t bring in your ${name} conversations: ${found.sentence}`, failed: true };
   const ids = conversationsToImport(found.value.conversations, CONVERSATION_DAYS, Date.now());
   if (ids.length === 0)
-    return { adopted: 0, sentence: `No ${name} conversations from the last ${CONVERSATION_DAYS} days.` };
+    return { adopted: 0, sentence: `No ${name} conversations from the last ${CONVERSATION_DAYS} days.`, failed: false };
   let adopted = 0;
   let refused = 0;
   for (const batch of adoptionBatches(ids)) {
@@ -501,13 +512,18 @@ async function bringConversations(
       }),
     );
     if (answer.kind === 'refused')
-      return { adopted, sentence: `Brought in ${countWords(adopted, 'conversation')}, then: ${answer.sentence}` };
+      return {
+        adopted,
+        sentence: `Brought in ${countWords(adopted, 'conversation')}, then: ${answer.sentence}`,
+        failed: adopted === 0,
+      };
     adopted += answer.value.adopted.length;
     refused += answer.value.refused.length;
   }
   return {
     adopted,
     sentence: `Brought in ${countWords(adopted, 'conversation')}${refused === 0 ? '' : `; ${countWords(refused, 'conversation')} couldn’t be imported`}.`,
+    failed: false,
   };
 }
 
@@ -517,6 +533,7 @@ interface ImportedResult {
   readonly counts: ImportCounts;
   /** The result line: the import's summary, or what the conversations import said when nothing else ran. */
   readonly title: string;
+  readonly tone: 'ok' | 'warn';
 }
 
 /** "What changed since the last import": one line, one tick to take it, and the names behind a disclosure. */
@@ -576,7 +593,7 @@ function ImportedNote({
         ];
   return (
     <div className="flex min-w-0 flex-col gap-2" data-harness-imported={harness}>
-      <SetupNote live tone="ok" name="import-ready" title={result.title}>
+      <SetupNote live tone={result.tone} name="import-ready" title={result.title}>
         <SetupDisclosure label="Details" name="import-details">
           {ready.map(line => (
             <p key={line} className="m-0">

@@ -171,11 +171,17 @@ export function OnboardingSpeedupsStep({
   }, [connection, createClient, typed, view]);
 
   /**
-   * Keys already stored, none being typed and no failed test to answer: the page's forward action is
-   * Continue, as on a CLI already imported. After a failed test it stays Save keys, so a key that did not
-   * work is never walked past.
+   * Keys already stored and every one of them proven (its last test passed, on this very key), none being
+   * typed and no failed test to answer: the page's forward action is Continue, as on a CLI already imported.
+   * A stored key whose test failed or is stale keeps the page on Save keys, so a key that did not work is
+   * never walked past.
    */
-  const revisit = typed.length === 0 && problem === null && (view?.providers ?? []).some(status => status.set);
+  const stored = (view?.providers ?? []).filter(status => status.set);
+  const revisit =
+    typed.length === 0 &&
+    problem === null &&
+    stored.length > 0 &&
+    stored.every(status => status.lastTest?.ok === true && !status.testStale);
   const jev = view?.providers.find(status => status.provider === 'jev');
   const dictation = view?.providers.filter(status => status.provider !== 'jev') ?? [];
   const field = (status: SpeedupStatus) => (

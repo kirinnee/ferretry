@@ -732,6 +732,26 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     expect(screen.calls.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
   });
 
+  it('a revisit whose conversations import was refused is carried as a warning, not “already set up” in green', async () => {
+    const screen = await render({
+      routes: {
+        ...freshRoutes(CLAUDE_RUNTIME),
+        '/v1/fleet/setup/scan': scan({
+          runtimes: [],
+          duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
+        }),
+        '/v1/imports/conversations?harness=claude&limit=5000': new Error('offline'),
+      },
+      machine: FRESH_MACHINE,
+    });
+    await screen.rail('claude');
+    await screen.click('[data-harness-conversations]');
+    await screen.click('[data-onboarding-primary="import"]');
+    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
+    expect(note.getAttribute('data-tone')).toBe('warn');
+    expect(note.textContent).toContain('Couldn’t bring in your Claude Code conversations');
+  });
+
   describe('Done’s “still needs a sign-in” notes', () => {
     const stateOfLogin = (status: 'needs_sign_in' | 'ready') =>
       runtimes([runtimeView('claude-default', { credential: { id: 'claude-work', store: 'ferretry', status } })]);

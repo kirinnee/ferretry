@@ -19,7 +19,11 @@ const SECRETS: Readonly<Record<SpeedupProvider, string>> = {
   cerebras: 'CEREBRAS_API_KEY',
 };
 
-const view = (set: readonly SpeedupProvider[] = [], vault: SpeedupsView['vault'] = 'ok'): SpeedupsView => ({
+const view = (
+  set: readonly SpeedupProvider[] = [],
+  vault: SpeedupsView['vault'] = 'ok',
+  tests: Partial<Record<SpeedupProvider, { readonly ok: boolean; readonly stale?: boolean }>> = {},
+): SpeedupsView => ({
   vault,
   providers: (['jev', 'groq', 'cerebras'] as const).map(provider => ({
     provider,
@@ -31,18 +35,22 @@ const view = (set: readonly SpeedupProvider[] = [], vault: SpeedupsView['vault']
     testNote: 'One call.',
     secretName: SECRETS[provider],
     set: set.includes(provider),
-    testStale: false,
+    // A stored key has been tested and passed, unless the case says otherwise.
+    ...(set.includes(provider) ? { lastTest: result(provider, tests[provider]?.ok ?? true) } : {}),
+    testStale: tests[provider]?.stale ?? false,
   })),
 });
 
-const result = (provider: SpeedupProvider, ok: boolean, message = 'The key works.'): SpeedupTestResult => ({
-  provider,
-  secretName: SECRETS[provider],
-  ok,
-  code: ok ? 'ok' : 'rejected',
-  message,
-  at: '2026-01-01T00:00:00.000Z',
-});
+function result(provider: SpeedupProvider, ok: boolean, message = 'The key works.'): SpeedupTestResult {
+  return {
+    provider,
+    secretName: SECRETS[provider],
+    ok,
+    code: ok ? 'ok' : 'rejected',
+    message,
+    at: '2026-01-01T00:00:00.000Z',
+  };
+}
 
 const summary = (name: string) => ({
   name,
@@ -280,6 +288,24 @@ describe('OnboardingSpeedupsStep · a revisit with keys already stored', () => {
     await typeInto('groq', KEY);
     expect(forward()).toBeNull();
     expect(save()?.disabled).toBe(false);
+  });
+
+  it('has no Continue when a stored key’s last test failed, and stays on Save keys', async () => {
+    await start({ [SPEEDUPS_PATH]: view(['jev'], 'ok', { jev: { ok: false } }) });
+    expect(forward()).toBeNull();
+    expect(save()?.textContent).toBe('Save keys');
+    expect(mounted?.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+  });
+
+  it('has no Continue when a stored key was changed after its last test', async () => {
+    await start({ [SPEEDUPS_PATH]: view(['jev'], 'ok', { jev: { ok: true, stale: true } }) });
+    expect(forward()).toBeNull();
+    expect(save()).not.toBeNull();
+  });
+
+  it('has no Continue when one of two stored keys failed its test', async () => {
+    await start({ [SPEEDUPS_PATH]: view(['jev', 'groq'], 'ok', { groq: { ok: false } }) });
+    expect(forward()).toBeNull();
   });
 
   it('has no Continue when no key is stored', async () => {
