@@ -384,7 +384,9 @@ describe('CloneMachine · Preview', () => {
     try {
       await toPreview(screen);
       const preview = screen.text('[data-clone-step="preview"]');
-      expect(preview).toContain('This is a one-time copy. Later changes on work-linux don’t follow.');
+      expect(preview).toContain(
+        'This copies work-linux’s setup now. Later changes on it don’t follow by themselves: copy again to see just what changed.',
+      );
 
       const copies = screen.text('[data-setup-section="copies"]');
       expect(copies).toContain('2 components');
@@ -515,6 +517,9 @@ describe('CloneMachine · Preview', () => {
       const signIn = must(screen.q('[data-clone-sign-in]'), 'sign in');
       expect(signIn.getAttribute('data-clone-sign-in')).toBe('claude-work');
       expect(signIn.textContent).toBe('Sign in once for 2 runtimes');
+      expect(signIn.className).toContain('min-h-[44px]');
+      expect(screen.q('[data-clone-finish]')?.className).toContain('min-h-[44px]');
+      expect(screen.q('[data-clone-slot]')?.className).toContain('min-h-[44px]');
 
       await click(screen.q('[data-clone-finish]'), 'Go to Runtimes');
       expect(finished).toBe(1);
@@ -1044,7 +1049,8 @@ describe('CloneMachine · what the copy needs here', () => {
       expect(row('secret:JEV_API_KEY')?.textContent).toContain('for the Warden’s Jev guard');
       expect(row('secret:LESSON_TOKEN')?.textContent).toContain('for Learning defaults');
       expect(row('secret:GROQ_API_KEY')?.getAttribute('data-held')).toBe('yes');
-      expect(row('secret:GROQ_API_KEY')?.textContent).toContain('set ✓');
+      expect(row('secret:GROQ_API_KEY')?.textContent).toContain('set');
+      expect(row('secret:GROQ_API_KEY')?.textContent).not.toContain('✓');
       expect(row('secret:GROQ_API_KEY')?.querySelector('input')).toBeNull();
       expect(row('sign-in:claude-work')?.textContent).toContain('Sign in after copying');
     } finally {
@@ -1111,7 +1117,8 @@ describe('CloneMachine · what the copy needs here', () => {
       expect(calls.work.some(call => call.path === '/v1/secrets' && call.body !== undefined)).toBe(false);
       const row = must(screen.q('[data-clone-need="secret:JEV_API_KEY"]'), 'row');
       expect(row.getAttribute('data-held')).toBe('yes');
-      expect(row.textContent).toContain('set ✓');
+      expect(row.textContent).toContain('set');
+      expect(row.textContent).not.toContain('✓');
       expect(screen.q('[data-clone-need-value="JEV_API_KEY"]')).toBeNull();
       expect(screen.view.container.textContent).not.toContain('test-value-not-a-key');
       expect(screen.text('[data-setup-section="clone-needs"]')).toContain(
@@ -1808,7 +1815,7 @@ describe('CloneMachine · API keys and sign-ins', () => {
       secrets: names.map(name => ({ name, createdAt: OLDER, updatedAt })),
     });
     const review = (outcome: 'missing' | 'newer' | 'both' | 'same') => ({
-      mode: 'update',
+      mode: 'first',
       source: { name: 'work', verified: 'browser' },
       items: [],
       settings: [],
@@ -1857,11 +1864,10 @@ describe('CloneMachine · API keys and sign-ins', () => {
       const screen = await render({ createClient });
       try {
         await toPreview(screen);
-        // The settings review (key by key, PR 7) is a separate question; exactly one review asks about the keys.
-        const asking = w.reviews.filter(call => 'sourceSecrets' in (call.body as object));
-        expect(asking).toHaveLength(1);
-        expect(asking[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
-        expect(asking[0]?.body).not.toHaveProperty('settings');
+        // The one review of the settings (key by key, PR 7) carries the keys too: no second question about them.
+        expect(w.reviews).toHaveLength(1);
+        expect(w.reviews[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(w.reviews[0]?.body).toHaveProperty('settings');
       } finally {
         await screen.view.unmount();
       }
@@ -1894,6 +1900,29 @@ describe('CloneMachine · API keys and sign-ins', () => {
         }
       });
     }
+
+    it('asks a review of just the keys when the settings review cannot be made, and still reports the newer one', async () => {
+      const w = setup('newer');
+      const { createClient } = daemons({
+        work: sourceFiles(w.work),
+        target: {
+          ...w.target,
+          '/v1/fleet/clone/review': (call: Call) => {
+            w.reviews.push(call);
+            return 'settings' in (call.body as object) ? new Error('network down') : review('newer');
+          },
+        },
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(w.reviews.map(call => 'settings' in (call.body as object))).toEqual([true, false]);
+        expect(w.reviews[1]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(screen.text('[data-clone-newer-key]')).toContain('A newer ZAI_API_KEY exists on');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
 
     it('says nothing about a key that is the same', async () => {
       const w = setup('same');
@@ -2164,7 +2193,7 @@ describe('CloneMachine · settings merged key by key', () => {
     (call: Call): unknown => {
       const sent = (call.body as { settings: { path: string }[] }).settings.map(document => document.path);
       return {
-        mode: 'update',
+        mode: 'first',
         source: { name: 'work-linux', verified: 'browser' },
         items: [],
         settings: sent.map(path =>

@@ -39,6 +39,7 @@ import {
   type SendSubmit,
 } from './ledger-message.tsx';
 import { PackCallRow } from './pack-call.tsx';
+import { ReadAloudControl } from './read-aloud.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
 import { type SendDismiss, type SendExpand, SettledSendNote } from './settled-send-note.tsx';
@@ -480,6 +481,9 @@ export function TranscriptTextRow({
           speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
         />
       )}
+      {body === undefined && entry.kind === 'assistant' ? (
+        <ReadAloudControl entryId={entry.id} text={entry.text} />
+      ) : null}
       {run === undefined || run.end ? footer : <div className="fy-run-time">{footer}</div>}
     </article>
   );

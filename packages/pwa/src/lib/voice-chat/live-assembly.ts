@@ -9,12 +9,12 @@
  * is not chosen, not installed or not available is a refusal with words (`LiveBlock`).
  */
 
+import type { DaemonConnection } from '../daemon-connection.ts';
 import {
-  BrowserRecognitionSession,
   type BrowserRecognitionProvider,
+  BrowserRecognitionSession,
   browserRecognitionErrorFrom,
 } from '../stt/browser-recognition.ts';
-import type { DaemonConnection } from '../daemon-connection.ts';
 import type { MicMeterPort } from '../stt/level-monitor.ts';
 import type { OnDeviceVoice } from '../stt/on-device-voice.ts';
 import type { RemoteEnhancementFetch } from '../stt/remote-enhancement.ts';
@@ -28,11 +28,11 @@ import { blockOf, type LiveSession, type LiveSessionCallbacks, liveTakePort } fr
 import type {
   ClockPort,
   LiveBlock,
+  LiveSpeakerPort,
   MicLockPort,
   ReplyFeedPort,
   SendPort,
   SendTicket,
-  SpeakerPort,
   VisibilityPort,
   WakeLockPort,
 } from './ports.ts';
@@ -107,7 +107,7 @@ export interface LiveAssemblyDeps {
   readonly meter: MicMeterPort | null;
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
-  readonly speaker: SpeakerPort | null;
+  readonly speaker: LiveSpeakerPort | null;
   readonly clock: ClockPort;
   readonly visibility: VisibilityPort;
   readonly micLock: MicLockPort;
@@ -161,7 +161,7 @@ export interface LivePageInputs {
 export interface LiveEnvironment {
   readonly composer: LiveComposerBridge;
   readonly reply: ReplySource;
-  readonly speaker: SpeakerPort | null;
+  readonly speaker: LiveSpeakerPort | null;
   readonly clock: ClockPort;
   readonly visibility: VisibilityPort;
   readonly micLock: MicLockPort;

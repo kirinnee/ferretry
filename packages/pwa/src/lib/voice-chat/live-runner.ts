@@ -47,12 +47,12 @@ import type {
   ClockPort,
   LevelFramesPort,
   LevelMeterHandle,
+  LiveSpeakerPort,
   MicLockPort,
   ReplyFeedPort,
   ReplyWatch,
   SendPort,
   SendTicket,
-  SpeakerPort,
   TakeHandle,
   TakePort,
   VisibilityPort,
@@ -66,7 +66,7 @@ export interface LiveRunnerPorts {
   readonly send: SendPort;
   readonly reply: ReplyFeedPort;
   /** Null until slice 5 wires reading aloud. */
-  readonly speaker: SpeakerPort | null;
+  readonly speaker: LiveSpeakerPort | null;
   readonly wakeLock: WakeLockPort;
   readonly visibility: VisibilityPort;
   readonly micLock: MicLockPort;
