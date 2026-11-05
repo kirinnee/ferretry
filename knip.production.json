@@ -33,7 +33,8 @@
         "src/hooks/use-board.ts",
         "src/lib/board-actions.ts",
         "src/lib/voice-chat/turn-endpointer.ts",
-        "src/lib/voice-chat/turn-endpointer-scoring.ts"
+        "src/lib/voice-chat/turn-endpointer-scoring.ts",
+        "src/lib/stt/speed-bench-report.ts"
       ]
     }
   },

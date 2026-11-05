@@ -338,3 +338,93 @@ describe('ParakeetEngine model load time', () => {
     should(engine.consumeLoadMs()).be.undefined();
   });
 });
+
+describe('ParakeetEngine — threads', () => {
+  const threaded = (threads: number): { engine: ParakeetEngine; workers: FakeWorker[]; failed: () => number } => {
+    const workers: FakeWorker[] = [];
+    let failed = 0;
+    const engine = new ParakeetEngine(
+      () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      undefined,
+      { threads: () => threads, onThreadsFailed: () => (failed += 1) },
+    );
+    return { engine, workers, failed: () => failed };
+  };
+
+  it('asks for no threads by default: the messages are exactly what they were', () => {
+    const { engine, workers } = setup();
+    engine.preload();
+    void engine.transcribe(new Float32Array(4));
+    should(workers[0]?.posts.map(post => post.message)).eql([
+      { type: 'load' },
+      { type: 'transcribe', id: 1, samples: new Float32Array(4) },
+    ]);
+  });
+
+  it('puts the requested threads on load and on transcribe', () => {
+    const { engine, workers } = threaded(4);
+    engine.preload();
+    void engine.transcribe(new Float32Array(4));
+    should(workers[0]?.posts.map(post => post.message.type === 'load' && post.message.threads)).eql([4, false]);
+    const transcribe = workers[0]?.posts[1]?.message;
+    should(transcribe?.type === 'transcribe' && transcribe.threads).equal(4);
+  });
+
+  it('treats a nonsense thread count as one', () => {
+    for (const bad of [0, -3, 1, 2.5, Number.NaN]) {
+      const { engine, workers } = threaded(bad);
+      engine.preload();
+      should(workers[0]?.posts[0]?.message).eql({ type: 'load' });
+    }
+  });
+
+  it('on threads-failed: tells the page once, replaces the worker, and repeats the waiting audio on one thread', async () => {
+    const { engine, workers, failed } = threaded(4);
+    engine.preload();
+    const outcome = settle(engine.transcribe(new Float32Array([0.1, 0.2, 0.3])));
+    const first = workers[0] as FakeWorker;
+    first.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'no sub-workers' });
+    should(failed()).equal(1);
+    should(first.terminated).equal(1);
+    should(workers.length).equal(2);
+    const second = workers[1] as FakeWorker;
+    should(second.posts[0]?.message).eql({ type: 'load' });
+    const repeat = second.posts[1]?.message;
+    should(repeat?.type).equal('transcribe');
+    should(repeat?.type === 'transcribe' && [...repeat.samples]).eql([
+      Math.fround(0.1),
+      Math.fround(0.2),
+      Math.fround(0.3),
+    ]);
+    should(repeat?.type === 'transcribe' && repeat.threads).equal(undefined);
+    second.emit({ type: 'result', id: idOf(second, 1), text: 'hi' });
+    await tick();
+    should(outcome.value).equal('hi');
+  });
+
+  it('asks for one thread from then on, and does not tell the page twice', () => {
+    const { engine, workers, failed } = threaded(4);
+    engine.preload();
+    workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+    workers[1]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+    should(failed()).equal(1);
+    void engine.transcribe(new Float32Array(4));
+    const next = workers[1]?.posts.at(-1)?.message;
+    should(next?.type === 'transcribe' && next.threads).equal(undefined);
+  });
+
+  it('keeps no copy of the audio for a single-thread request, and none after it is answered', async () => {
+    const { engine, workers } = threaded(4);
+    const outcome = settle(engine.transcribe(new Float32Array(4)));
+    workers[0]?.emit({ type: 'result', id: idOf(workers[0] as FakeWorker), text: 'ok' });
+    await tick();
+    should(outcome.value).equal('ok');
+    // A later failure has nothing stale to repeat.
+    workers[0]?.emit({ type: 'failed', id: null, code: 'threads-failed', message: 'x' });
+    should(workers[1]?.posts.length).equal(1);
+  });
+});
