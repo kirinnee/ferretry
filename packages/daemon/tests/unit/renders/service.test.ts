@@ -214,6 +214,39 @@ describe('RenderService saves in flight', () => {
   });
 });
 
+describe('RenderService.admit', () => {
+  it('should reserve places up to the bound, refuse the next, and give a place back once however often it is released', () => {
+    const service = renderService();
+    const slots = Array.from({ length: RENDER_MAX_PENDING_SAVES }, () => service.admit());
+
+    should(service.saturated()).be.true();
+    should(() => service.admit()).throw(/retry/u);
+    slots[0]?.release();
+    slots[0]?.release();
+    should(service.saturated()).be.false();
+    should(() => {
+      service.admit();
+      service.admit();
+    }).throw(/retry/u);
+  });
+
+  it('should release the slot it was handed when the save is refused or ends', async () => {
+    const service = renderService();
+    const invalid = service.admit();
+    should((await refusal(service.save({ kind: 'svg', alt: 'x', payload: '<div/>' }, undefined, invalid))).code).equal(
+      'invalid',
+    );
+    const fine = service.admit();
+    await service.save(svg(), undefined, fine);
+    for (let n = 0; n < RENDER_MAX_PENDING_SAVES * 2; n += 1) {
+      const slot = service.admit();
+      await service.save(svg(), undefined, slot);
+    }
+
+    should(service.saturated()).be.false();
+  });
+});
+
 describe('RenderService quotas', () => {
   /** A distinct, well-formed id for each number: base 6 spelled with the digits 2 to 7, padded with `a`. */
   const idOf = (n: number): string =>
@@ -289,6 +322,39 @@ describe('RenderService quotas', () => {
     const again = renderService(repository);
 
     should((await again.save(svg(), 's1')).created).be.false();
+  });
+});
+
+describe('RenderService supersededBy', () => {
+  it('should walk a long chain to its last render', async () => {
+    const service = renderService();
+    const first = await service.save(svg('Version 0'));
+    let last = first;
+    for (let n = 1; n < 70; n += 1) last = await service.save({ ...svg(`Version ${n}`), supersedes: last.id });
+
+    should((await service.meta(first.id)).supersededBy).equal(last.id);
+    should((await service.meta(last.id)).supersededBy).be.undefined();
+  });
+
+  it('should stop on a chain of damaged metas that loops', async () => {
+    const repository = new MemoryRenderRepository();
+    const meta = (id: string, supersedes: string, createdAt: string): StoredRenderMeta => ({
+      v: 1,
+      id,
+      kind: 'svg',
+      alt: 'loop',
+      bytes: 1,
+      sha256: id.padEnd(64, '0'),
+      createdAt,
+      author: {},
+      supersedes,
+    });
+    repository.metas.set('aaaaaa', meta('aaaaaa', 'bbbbbb', '2026-11-05T00:00:01.000Z'));
+    repository.metas.set('bbbbbb', meta('bbbbbb', 'aaaaaa', '2026-11-05T00:00:02.000Z'));
+    const service = renderService(repository);
+
+    should((await service.meta('aaaaaa')).supersededBy).equal('bbbbbb');
+    should((await service.meta('bbbbbb')).supersededBy).equal('aaaaaa');
   });
 });
 

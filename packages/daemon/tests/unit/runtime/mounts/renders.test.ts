@@ -7,7 +7,7 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
+import { ApiDispatcher, type ApiRequest, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { renderRoutes } from '../../../../src/lib/runtime/mounts/renders.ts';
 import { HTML, MemoryRenderRepository, renderService, SVG } from '../../../support/renders.ts';
 import { jsonBody, request } from '../../api/support.ts';
@@ -26,8 +26,32 @@ function fixture(repository = new MemoryRenderRepository()) {
     routes,
     dispatch: async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
       await dispatcher.dispatch(request(overrides)),
+    dispatchRequest: async (built: ApiRequest): Promise<ApiResponse> => await dispatcher.dispatch(built),
   };
 }
+
+/** A request whose body is not delivered until `deliver()`: an upload that has been admitted and is still arriving. */
+function slowUpload(overrides: Parameters<typeof request>[0]) {
+  const inner = request(overrides);
+  let deliver = (): void => undefined;
+  const gate = new Promise<void>(resolve => {
+    deliver = resolve;
+  });
+  const reading = { started: 0 };
+  const built: ApiRequest = {
+    ...inner,
+    text: async limit => {
+      reading.started += 1;
+      await gate;
+      return await inner.text(limit);
+    },
+  };
+  return { built, deliver, reading };
+}
+
+const settled = async (until: () => boolean): Promise<void> => {
+  for (let turns = 0; turns < 100 && !until(); turns += 1) await new Promise(resolve => setTimeout(resolve, 0));
+};
 
 const save = (body: unknown, overrides: Omit<Parameters<typeof request>[0], 'method' | 'path' | 'body'> = {}) => ({
   method: 'POST',
@@ -161,6 +185,54 @@ describe('POST /v1/renders', () => {
     should((await dispatch(save(circle))).status).equal(201);
   });
 
+  it('should refuse the next save while the bound of uploads are still being read, without reading its body, and take saves again after', async () => {
+    const { dispatchRequest, dispatch, renders } = fixture();
+    const uploads = Array.from({ length: RENDER_MAX_PENDING_SAVES }, (_, n) =>
+      slowUpload(save({ ...circle, alt: `Circle ${n}` })),
+    );
+    const pending = uploads.map(async upload => await dispatchRequest(upload.built));
+    await settled(() => renders.saturated());
+    const reads = { limits: [] as (number | undefined)[], consumed: false, discarded: false };
+
+    const refused = await dispatch(save(circle, { reads }));
+
+    should(refused.status).equal(429);
+    should(jsonBody(refused).code).equal('render_busy');
+    should(reads.limits).deepEqual([]);
+    should(reads.consumed).be.false();
+    shouldBeData(refused);
+    for (const upload of uploads) upload.deliver();
+    should((await Promise.all(pending)).map(response => response.status)).deepEqual(
+      Array.from({ length: RENDER_MAX_PENDING_SAVES }, () => 201),
+    );
+    should(renders.saturated()).be.false();
+    should((await dispatch(save(circle))).status).equal(201);
+  });
+
+  it('should give its place back after a body that does not parse, an invalid picture, a quota refusal and a failed write', async () => {
+    const repository = new MemoryRenderRepository();
+    const { dispatch, renders } = fixture(repository);
+    const attempts: [string, () => Promise<ApiResponse>][] = [
+      ['an unparseable body', async () => await dispatch({ ...save(circle), body: 'not json' })],
+      ['a body past the schema', async () => await dispatch(save({ ...circle, extra: 1 }))],
+      ['an invalid picture', async () => await dispatch(save({ kind: 'svg', alt: 'x', payload: '<div>no</div>' }))],
+      ['a missing picture to replace', async () => await dispatch(save({ ...circle, supersedes: 'aaaaaa' }))],
+    ];
+    for (const [, attempt] of attempts)
+      for (let n = 0; n <= RENDER_MAX_PENDING_SAVES; n += 1) {
+        await attempt();
+        should(renders.saturated()).be.false();
+      }
+    repository.failWrite = true;
+    for (let n = 0; n <= RENDER_MAX_PENDING_SAVES; n += 1) {
+      should((await dispatch(save(circle))).status).equal(500);
+      should(renders.saturated()).be.false();
+    }
+    repository.failWrite = false;
+
+    should((await dispatch(save(circle))).status).equal(201);
+  });
+
   it('should still refuse a caller who may not save with 403 when the bound is in flight', async () => {
     const repository = new MemoryRenderRepository();
     const release = repository.hold();
@@ -234,15 +306,57 @@ describe('POST /v1/renders', () => {
 });
 
 describe('a failure that is not the store’s refusal', () => {
-  it('should stay a server error instead of being reported as the caller’s fault', async () => {
+  it('should answer the dispatcher’s fixed 500 as data, without the error’s text, for a listing, a read and a write that fail', async () => {
+    const repository = new MemoryRenderRepository();
+    const { dispatch } = fixture(repository);
+    const saved = jsonBody(await dispatch(save(circle))) as unknown as RenderSaveResponse;
+    const failures: [string, () => Promise<ApiResponse>][] = [
+      [
+        'failListing',
+        async () => {
+          const unlisted = new MemoryRenderRepository();
+          unlisted.failListing = true;
+          return await fixture(unlisted).dispatch(save(circle));
+        },
+      ],
+      [
+        'failRead',
+        async () => {
+          repository.failRead = true;
+          return await dispatch({ path: `/v1/renders/${saved.id}`, headers: human });
+        },
+      ],
+      [
+        'failWrite',
+        async () => {
+          repository.failWrite = true;
+          return await dispatch(save({ ...circle, alt: 'Another circle' }));
+        },
+      ],
+    ];
+
+    for (const [, failure] of failures) {
+      const response = await failure();
+      should(response.status).equal(500);
+      shouldBeData(response);
+      should(jsonBody(response)).deepEqual({
+        error: 'the daemon failed to handle this request',
+        code: 'internal_error',
+      });
+      should(response.body).not.match(/disk|unreadable|secret|full/u);
+      repository.failRead = false;
+      repository.failWrite = false;
+    }
+  });
+
+  it('should answer a listing failure on the meta route the same way', async () => {
     const repository = new MemoryRenderRepository();
     repository.failListing = true;
-    const routes = renderRoutes(renderService(repository));
-    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
-
-    const response = await dispatcher.dispatch(request(save(circle)));
+    const response = await fixture(repository).dispatch({ path: '/v1/renders/aaaaaa/meta', headers: human });
 
     should(response.status).equal(500);
+    shouldBeData(response);
+    should(response.body).not.match(/disk|unreadable/u);
   });
 });
 

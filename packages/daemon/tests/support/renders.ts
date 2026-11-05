@@ -8,6 +8,8 @@ export class MemoryRenderRepository implements RenderRepository {
   readonly payloads = new Map<string, string>();
   listings = 0;
   failListing = false;
+  failRead = false;
+  failWrite = false;
   #gate: Promise<void> | undefined;
 
   /** Holds every `write` open until the returned function is called, so a test can keep saves in flight. */
@@ -26,11 +28,13 @@ export class MemoryRenderRepository implements RenderRepository {
   }
 
   async readPayload(id: string): Promise<string | undefined> {
+    if (this.failRead) throw new Error('the payload file is unreadable: /secret/path');
     return this.payloads.get(id);
   }
 
   async write(meta: StoredRenderMeta, payload: string): Promise<void> {
     await this.#gate;
+    if (this.failWrite) throw new Error('the disk is full: /secret/path');
     this.payloads.set(meta.id, payload);
     this.metas.set(meta.id, meta);
   }

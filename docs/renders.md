@@ -101,13 +101,15 @@ Answers `201` for a new render and `200` for one already saved, with
 `{ id, token, created, meta }` (`meta` may carry `supersededBy`). The picture is attributed to the session
 credential's session, or to the session an older `fy` names in `x-ferretry-session-id`, or to nobody (`{}`).
 
-**Saves in flight are bounded.** Saves write one at a time, so every one waiting holds its whole payload in
-memory. The service counts the saves in flight (admitted and not yet finished); once
-`RENDER_MAX_PENDING_SAVES` (8, `packages/protocol/src/lib/renders.ts`) are, a further save is refused at once
-with `429 render_busy` ("too many pictures are being saved at once; retry") and is never queued. The mount
-checks this after the caller check and **before the body is read**, so an excess request's body is never
-read; the service enforces it too, since other callers can reach it. A slot is released when its save ends,
-however it ends.
+**Saves in flight are bounded, and admission is a reservation.** Saves write one at a time, and an upload being
+read holds its whole payload too. So the mount takes a slot (`RenderService.admit()`) synchronously, right after
+the caller check and **before the body is read**; once `RENDER_MAX_PENDING_SAVES` (8,
+`packages/protocol/src/lib/renders.ts`) slots are taken — whether their bodies are still arriving, queued or
+being written — a further save is refused at once with `429 render_busy` ("too many pictures are being saved at
+once; retry"), never queued, and its body is never read. The slot is released in a `finally` on every path
+(unparseable body, schema or validation refusal, quota refusal, write failure, success) and releasing it twice
+is harmless, so the count cannot leak. `RenderService.save` called without a slot admits itself the same way,
+since other callers can reach it.
 
 Refusals: `400` (a body that does not fit the schema, including an unknown kind or field), `403`, `404
 render_supersedes_not_found`, `422 render_invalid`, `429 render_busy`, `507 render_quota_exceeded`.
@@ -131,8 +133,10 @@ never a picture.
 
 **Both reads answer `application/json; charset=utf-8` with `X-Content-Type-Options: nosniff`, whatever the
 request's `Accept` says, and so does every answer a handler produces — errors included** (one wrapper renders a
-refused id, caller, body or store as the dispatcher's usual envelope, status and code, plus the header; the `304`
-keeps `application/json` too). The one thing it cannot reach is an answer the dispatcher gives **before** a
+refused id, caller, body or store as the dispatcher's usual envelope, status and code, plus the header; an
+unexpected failure — a repository that rejects on a listing, a read or a write — is the dispatcher's own fixed
+`500 internal_error` ("the daemon failed to handle this request", never the error's text) plus the header; the
+`304` keeps `application/json` too). The one thing it cannot reach is an answer the dispatcher gives **before** a
 handler runs — the boundary's `401` and `403` — and those are JSON error envelopes with no payload in them. A stored `html` picture opened directly in a browser tab is therefore JSON text and
 cannot run on the daemon's origin; the only way it runs is the opaque sandbox frame the app puts it in
 ([fy-render.md](fy-render.md)). This is the security invariant of the feature and it is pinned by tests that
@@ -160,7 +164,9 @@ guesses to tune, not doctrine. The size cap of one picture is the `fy-render` ca
 `supersedes` names the render this one replaces. It is checked (`404` if that render is not saved) and stored
 **once, in the new render's meta**. The old render is not touched. `supersededBy` on the meta route is derived:
 the daemon follows the links from the old id to the newest render, so an old message can show a "newer version"
-link (the app's side of that is slice 4). Links only ever point at an older render, so a chain cannot loop.
+link (the app's side of that is slice 4). The walk goes to the **end** of the chain, however long: it is bounded by
+the store itself, and a visited set stops it on a chain that loops (only damaged metas can make one), so
+`supersededBy` is always the newest render, never an intermediate one.
 
 If the content being saved is already stored, the answer is the existing render and a `supersedes` in the
 request is ignored: an immutable render's lineage is not rewritten by a later save.

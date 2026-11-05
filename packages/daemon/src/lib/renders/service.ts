@@ -16,9 +16,6 @@ import type { SerialExecutor } from '../ports.ts';
 import { renderDigest, renderIdPrefix } from './digest.ts';
 import { busyError, type RenderClock, RenderError, type RenderRepository } from './types.ts';
 
-/** How far a "newer version" chain is followed. Links only ever point at an older render, so it ends; this is the bound anyway. */
-const CHAIN_LIMIT = 64;
-
 /** The quota bucket of a save: its session, or the machine's own for a save with none. Prefixed, so no session id can be mistaken for the machine bucket. */
 const authorKey = (sessionId: string | undefined): string =>
   sessionId === undefined ? RENDER_HOST_AUTHOR : `session:${sessionId}`;
@@ -54,18 +51,28 @@ class RenderIndex {
     if (current === undefined || current.createdAt <= meta.createdAt) this.successor.set(older, meta);
   }
 
-  /** The newest render in the chain after `id`, or `undefined` when nothing replaced it. */
+  /**
+   * The newest render in the chain after `id`, or `undefined` when nothing replaced it. The walk goes to the END
+   * of the chain, however long: it is bounded by the store itself, and a visited set stops it on a chain that
+   * loops (only damaged metas can make one).
+   */
   newest(id: string): string | undefined {
+    const seen = new Set([id]);
     let latest: string | undefined;
     let cursor = id;
-    for (let hops = 0; hops < CHAIN_LIMIT; hops += 1) {
+    for (;;) {
       const next = this.successor.get(cursor);
-      if (next === undefined || next.id === id) break;
+      if (next === undefined || seen.has(next.id)) return latest;
+      seen.add(next.id);
       latest = next.id;
       cursor = next.id;
     }
-    return latest;
   }
+}
+
+/** A place reserved for one save in flight. Releasing it more than once is the same as releasing it once. */
+export interface RenderSlot {
+  release(): void;
 }
 
 /**
@@ -91,15 +98,32 @@ export class RenderService {
     return this.#inFlight >= RENDER_MAX_PENDING_SAVES;
   }
 
-  async save(request: RenderSaveRequest, authorSessionId?: string): Promise<RenderSaveResponse> {
+  /**
+   * Reserves one of the `RENDER_MAX_PENDING_SAVES` places, synchronously, or refuses with `busy`. A caller takes it
+   * BEFORE it reads the picture it will save, so the bound counts the uploads being read as well as the writes.
+   */
+  admit(): RenderSlot {
     if (this.saturated()) throw busyError();
-    const refusal = renderSaveRefusal(request);
-    if (refusal !== null) throw new RenderError('invalid', refusal);
     this.#inFlight += 1;
+    let released = false;
+    return {
+      release: () => {
+        if (released) return;
+        released = true;
+        this.#inFlight -= 1;
+      },
+    };
+  }
+
+  /** Saves a picture. With no `slot` it admits itself; either way the slot is released when the save ends, however it ends. */
+  async save(request: RenderSaveRequest, authorSessionId?: string, slot?: RenderSlot): Promise<RenderSaveResponse> {
+    const held = slot ?? this.admit();
     try {
+      const refusal = renderSaveRefusal(request);
+      if (refusal !== null) throw new RenderError('invalid', refusal);
       return await this.#saveExclusive(request, authorSessionId);
     } finally {
-      this.#inFlight -= 1;
+      held.release();
     }
   }
 
