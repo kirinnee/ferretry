@@ -278,9 +278,9 @@ const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobil
  * Resolved view, Edit as YAML and a new profile — plus the phone's Add picker: one more in all. The provider
  * tiles added four: the grid and a provider's key form, at each viewport. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
- * edits this, and the pull request says which frames the gate covers.
+ * edits this, and the pull request says which frames the gate covers. Shortening machine setup to five pages (PR 1420) removed three frames in each viewport, so 65 became 62.
  */
-const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 65, desktop: 65 };
+const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 62, desktop: 62 };
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
