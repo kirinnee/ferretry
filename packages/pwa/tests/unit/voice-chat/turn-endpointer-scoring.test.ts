@@ -5,7 +5,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { judge, NEAR_MISS_MS, realGapMs, type Word } from '../../../harness/turn-endpointer-scoring.ts';
+import { judge, NEAR_MISS_MS, realGapMs, type Word } from '../../../src/lib/voice-chat/turn-endpointer-scoring.ts';
 
 const LOUD = 0.1;
 const QUIET = 0.001;
@@ -97,5 +97,44 @@ describe('judge scores against the configured pause', () => {
     should(outcome.cutOff).be.false();
     should(outcome.late).be.false();
     should(outcome.lateByMs).equal(0);
+  });
+
+  it('noise that makes a turn before anyone speaks is a false turn, and listening starts again', () => {
+    const outcome = judge(
+      levelsOf([
+        [LOUD, 1_000],
+        [QUIET, 4_000],
+        [LOUD, 1_000],
+        [QUIET, 2_000],
+      ]),
+      [{ startMs: 5_000, endMs: 6_000 }],
+      0,
+      'normal',
+    );
+    should(outcome.falseTurns).equal(1);
+    should(outcome.falseSend).be.false();
+    should(outcome.missed).be.false();
+    should(outcome.lateByMs).equal(0);
+  });
+
+  it('a turn that never ends is missed', () => {
+    const outcome = judge(levelsOf([[LOUD, 2_000]]), [{ startMs: 0, endMs: 2_000 }], 0, 'normal');
+    should(outcome.missed).be.true();
+    should(outcome.lateByMs).be.null();
+  });
+
+  it('a turn that ends more than a second past last word + pause is late, by exactly how much', () => {
+    // The last word ends at 1 s but something loud (babble) goes on to 2.5 s.
+    const outcome = judge(
+      levelsOf([
+        [LOUD, 2_500],
+        [QUIET, 2_000],
+      ]),
+      [{ startMs: 0, endMs: 1_000 }],
+      0,
+      'normal',
+    );
+    should(outcome.lateByMs).equal(1_500);
+    should(outcome.late).be.true();
   });
 });

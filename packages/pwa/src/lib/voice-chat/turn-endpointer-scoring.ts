@@ -16,7 +16,7 @@
  * every near miss; the tolerant rate is the strict rate minus them. Both are published.
  */
 
-import { FRAME_MS } from '../src/lib/stt/energy.ts';
+import { FRAME_MS } from '../stt/energy.ts';
 import {
   ENDPOINTER_MAX_QUIET_RMS,
   type EndpointerState,
@@ -24,7 +24,7 @@ import {
   endpointerStart,
   PAUSE_PRESETS,
   type PausePreset,
-} from '../src/lib/voice-chat/turn-endpointer.ts';
+} from './turn-endpointer.ts';
 
 /** Ended after the last word more than this past (last word + pause) counts as LATE. */
 const LATE_MS = 1_000;

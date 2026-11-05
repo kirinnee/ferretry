@@ -29,7 +29,12 @@
       "entry": ["src/main.tsx", "src/lib/index.ts"],
       "project": ["src/**/*.{ts,tsx}"],
       "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
-      "ignore": ["src/hooks/use-board.ts", "src/lib/board-actions.ts", "src/lib/voice-chat/turn-endpointer.ts"]
+      "ignore": [
+        "src/hooks/use-board.ts",
+        "src/lib/board-actions.ts",
+        "src/lib/voice-chat/turn-endpointer.ts",
+        "src/lib/voice-chat/turn-endpointer-scoring.ts"
+      ]
     }
   },
   "bun": false,

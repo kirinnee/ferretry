@@ -20,7 +20,7 @@
  *   - FALSE SENDS (noise): the turn ended although the person had been quiet for LESS than the
  *     pause — speech lost under the noise threshold, or a floor that rose. This is the endpointer's
  *     own error and the number the 2 % target is about. Scored STRICTLY against the configured
- *     pause (see turn-endpointer-scoring.ts); a second column forgives gaps within 150 ms of it
+ *     pause (see src/lib/voice-chat/turn-endpointer-scoring.ts); a second column forgives gaps within 150 ms of it
  *     (word onsets and tails under the threshold), so both rates are published.
  *   - CUT-OFFS (by design): the turn ended after the person really was quiet for at least the
  *     pause, and then said more. Nothing is wrong with the endpointer; it is what a setting costs a
@@ -42,7 +42,7 @@ import {
   PAUSE_PRESETS,
   type PausePreset,
 } from '../src/lib/voice-chat/turn-endpointer.ts';
-import { judge, NEAR_MISS_MS, type Word } from './turn-endpointer-scoring.ts';
+import { judge, NEAR_MISS_MS, type Word } from '../src/lib/voice-chat/turn-endpointer-scoring.ts';
 
 const RATE = 16_000;
 const FRAME_SAMPLES = (RATE * FRAME_MS) / 1_000;

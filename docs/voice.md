@@ -435,7 +435,7 @@ audio, so there is nothing to download and no recording of any person anywhere:
 ```sh
 cd packages/pwa && bun harness/turn-endpointer-noise.ts --turns 200 --seed 7 --explain
 # options: --max-quiet <rms>  --beds room,fan  --noise-minutes <n>  --no-fixtures
-# the judging rules live in harness/turn-endpointer-scoring.ts and are unit-tested
+# the judging rules live in src/lib/voice-chat/turn-endpointer-scoring.ts and are unit-tested
 ```
 
 - **Speech** is synthetic: harmonic voices with vowel formants, syllable envelopes with shallow valleys,
