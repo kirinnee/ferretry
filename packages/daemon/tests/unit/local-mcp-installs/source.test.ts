@@ -356,6 +356,96 @@ describe('a command whose arguments hold a credential is refused, never copied',
       'Its argument 1',
     ],
   ];
+  const hidden: [string, string, string[], string][] = [
+    [
+      'a mixed-case scheme with a key in the query',
+      'node',
+      [`HTTPS://mcp.example.com/?api_key=${OPAQUE}`],
+      'Its argument 1',
+    ],
+    ['a mixed-case scheme with a short key', 'node', ['x', 'HtTp://mcp.example.com/?api_key=dummy1'], 'Its argument 2'],
+    [
+      'a mixed-case scheme with a password',
+      'node',
+      ['x', 'HTTPS://dummy:hunter2dummy@mcp.example.com'],
+      'Its argument 2',
+    ],
+    ['an escaped-quote X-Api-Key header', 'npx', ['--headers', `{\\"X-Api-Key\\":\\"${OPAQUE}\\"}`], 'Its argument 2'],
+    [
+      'a doubly escaped X-Api-Key header',
+      'npx',
+      ['--headers', `{\\\\"X-Api-Key\\\\":\\\\"${OPAQUE}\\\\"}`],
+      'Its argument 2',
+    ],
+    ['a single-quoted X-Api-Key header', 'npx', ['--headers', `{'X-Api-Key':'${OPAQUE}'}`], 'Its argument 2'],
+    ['a mixed-case X-API-KEY header', 'npx', ['--headers', `{"x-API-key":"${OPAQUE}"}`], 'Its argument 2'],
+    [
+      'a Proxy-Authorization header',
+      'npx',
+      ['--headers', '{"Proxy-Authorization":"Basic Zm9vOmJhcg=="}'],
+      'Its argument 2',
+    ],
+    [
+      'an Authorization header with a Unicode-escaped name',
+      'npx',
+      ['--headers', '{"Author\\u0069zation":"Basic Zm9vOmJhcg=="}'],
+      'Its argument 2',
+    ],
+    ['a Unicode-escaped key name', 'npx', ['--headers', `{"X-Api-\\u004bey":"${OPAQUE}"}`], 'Its argument 2'],
+    [
+      'a JSON-encoded header string',
+      'npx',
+      ['--headers', JSON.stringify(`{"X-Api-Key":"${OPAQUE}"}`)],
+      'Its argument 2',
+    ],
+    ['headers after a flag, as JSON', 'npx', [`--headers={"X-Api-Key":"${OPAQUE}"}`], 'Its argument 1'],
+    [
+      'a Unicode-escaped query name in an address',
+      'node',
+      [`https://mcp.example.com/?\\u0061pi_key=${OPAQUE}`],
+      'Its argument 1',
+    ],
+    ['a percent-encoded header name', 'npx', [`--header=%58-Api-Key:${OPAQUE}`], 'Its argument 1'],
+  ];
+  for (const [title, command, args, where] of hidden) {
+    it(`should refuse ${title}, in either scope, naming the place and not the value`, () => {
+      for (const result of [refused(command, args), refused(command, args, true)]) {
+        should(result.ok).be.false();
+        if (result.ok) return;
+        should(result.reason).startWith(where);
+        should(result.reason).not.match(/dummy0123|hunter2dummy|dummy1|Zm9vOmJhcg/u);
+      }
+    });
+  }
+
+  it('should clean a direct address whatever the case of its scheme', () => {
+    const copied = copiableMcp(http(`HTTPS://u:p@mcp.example.com/mcp?api_key=${OPAQUE}&q=1`));
+    should(copied.ok && copied.setup).containEql({ url: 'https://mcp.example.com/mcp?q=1' });
+    const component = copiableMcp(
+      stdioServer({
+        scope: 'component',
+        declaration: null,
+        component: { url: `HtTpS://mcp.example.com/?api_key=${OPAQUE}` },
+      }),
+    );
+    should(component.ok && JSON.stringify(component.setup)).not.match(/dummy0123/u);
+  });
+
+  it('should copy plain quoted arguments that hold no credential, and not read a reference as one', () => {
+    for (const args of [
+      ['{"mode":"fast","retries":3}'],
+      ['{"broken":'],
+      ['"quoted"', '%ZZ', '\\u00zz'],
+      ['HTTPS://mcp.example.com/mcp?q=1'],
+    ])
+      should(refused('node', args).ok).be.true();
+    for (const args of [[`{\\"X-Api-Key\\":\\"${REF}\\"}`], [`{"X-Api-Key":"${REF}"}`]]) {
+      // The catalog contract refuses a placeholder in an argument on its own; what is checked is that it is not read as a credential.
+      const result = refused('node', args);
+      should(!result.ok && result.reason.startsWith('Its argument')).be.false();
+    }
+  });
+
   for (const [title, command, args, where] of encoded) {
     it(`should refuse ${title}, naming the place and not the value`, () => {
       for (const result of [refused(command, args), refused(command, args, true)]) {

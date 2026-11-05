@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { firstArgumentCredential, firstCredentialLine } from '../../../src/lib/local-skill-installs/credentials.ts';
+import {
+  firstArgumentCredential,
+  firstCredentialLine,
+  readableViews,
+} from '../../../src/lib/local-skill-installs/credentials.ts';
 
 const LONG = 'abcdef0123456789abcdef';
 
@@ -210,6 +214,35 @@ describe('the credential test on a command line', () => {
     should(firstArgumentCredential(['--headers', `{"Authorization":"Bearer ${REF}"}`])).be.undefined();
     should(firstArgumentCredential(['--headers', `{\\"Authorization\\":\\"${REF}\\"}`])).be.undefined();
     should(firstArgumentCredential(['--headers', '{"Authorization"}'])).be.undefined();
+  });
+
+  it('should read a credential hidden behind escaped quotes, JSON or Unicode escapes', () => {
+    for (const piece of [
+      `{\\"X-Api-Key\\":\\"${LONG}\\"}`,
+      `{\\\\"X-Api-Key\\\\":\\\\"${LONG}\\\\"}`,
+      `{"X-Api-\\u004bey":"${LONG}"}`,
+      `{"x-API-KEY":"${LONG}"}`,
+      '{"Proxy-Authorization":"Basic Zm9vOmJhcg=="}',
+      '{"Author\\u0069zation":"Basic Zm9vOmJhcg=="}',
+      JSON.stringify(`{"X-Api-Key":"${LONG}"}`),
+      `--headers={"X-Api-Key":"${LONG}"}`,
+      `--header=%58-Api-Key:${LONG}`,
+    ])
+      should(firstArgumentCredential(['--headers', piece])).equal(2);
+    for (const piece of [`{\\"X-Api-Key\\":\\"${REF}\\"}`, '{"a":1}', '{"open":', '%ZZ', '\\u00zz'])
+      should(firstArgumentCredential(['--headers', piece])).be.undefined();
+  });
+
+  it('should list every form of an argument it reads, and stop at the bounds', () => {
+    should(readableViews('plain')).deepEqual(['plain']);
+    should(readableViews('{\\"a\\":\\"b\\"}')).deepEqual(['{\\"a\\":\\"b\\"}', '{"a":"b"}']);
+    should(readableViews('"x\\u0041"')).deepEqual(['"x\\u0041"', 'xA']);
+    should(readableViews('{"a": [1, 2]} tail')).deepEqual(['{"a": [1, 2]} tail', ' {"a":[1,2]}  tail']);
+    should(readableViews('a%20b')).deepEqual(['a%20b', 'a b']);
+    const nested = '{\\\\\\\\\\\\\\\\"a\\\\\\\\\\\\\\\\":1}';
+    should(readableViews(nested).length).be.belowOrEqual(5);
+    const big = `{"k":"${'x'.repeat(9_000)}\\u0041"}`;
+    should(readableViews(big).length).be.belowOrEqual(2);
   });
 
   it('should read an authorization header in a piece in one pass, however many are in it', () => {

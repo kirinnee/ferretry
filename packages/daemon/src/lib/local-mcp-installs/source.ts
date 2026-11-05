@@ -26,7 +26,7 @@ import {
   SecretNameSchema,
   SessionMcpEnvNameSchema,
 } from '@ferretry/protocol';
-import { firstArgumentCredential } from '../local-skill-installs/credentials.ts';
+import { firstArgumentCredential, readableViews } from '../local-skill-installs/credentials.ts';
 import { type McpComponentRecord, type McpSourceServer, mcpSetupOf } from '../shared-catalogs/mcp-source.ts';
 
 /** A server the inventory lists, with where it was found. */
@@ -102,9 +102,10 @@ function cleanAddress(url: string): {
   /** Whether a query piece or the fragment was left out as a key: the credential kinds, not a user name. */
   readonly holdsKey: boolean;
 } {
-  const match = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/u.exec(url);
+  const match = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/iu.exec(url);
   if (match === null) return { url, problems: [], holdsKey: false };
-  const [, scheme = '', authority = '', rest = ''] = match;
+  const [, written = '', authority = '', rest = ''] = match;
+  const scheme = written.toLowerCase();
   const problems: CatalogSourceProblem[] = [];
   const at = authority.lastIndexOf('@');
   if (at !== -1)
@@ -214,10 +215,16 @@ function commandLines(server: LocalMcpInventoryServer): readonly (readonly strin
 
 const ADDRESS_IN_TEXT = /https?:\/\/\S*/giu;
 
-/** The 1-based place of the first piece with an address in it whose query or fragment holds a key, read as a direct address is. */
+/**
+ * The 1-based place of the first piece with an address in it whose query or fragment holds a key, read as a direct
+ * address is: in the piece as written and with its quoting taken off, so a scheme in capitals, an escaped quote or
+ * a `\uXXXX` escape hides nothing.
+ */
 function firstAddressKey(pieces: readonly string[]): number | undefined {
   const at = pieces.findIndex(piece =>
-    [...piece.matchAll(ADDRESS_IN_TEXT)].some(address => cleanAddress(address[0]).holdsKey),
+    readableViews(piece).some(view =>
+      [...view.matchAll(ADDRESS_IN_TEXT)].some(address => cleanAddress(address[0]).holdsKey),
+    ),
   );
   return at === -1 ? undefined : at + 1;
 }

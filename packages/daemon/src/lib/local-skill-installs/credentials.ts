@@ -189,14 +189,34 @@ function earliest(offsets: readonly number[]): number {
   return found.length === 0 ? -1 : Math.min(...found);
 }
 
+/** A word and where it starts in the text. */
+interface Word {
+  readonly text: string;
+  readonly at: number;
+}
+
+const FLAG_VALUE = /^--?[A-Za-z][A-Za-z0-9-]*=(?=.)/u;
+
+/** `--header={"k":"v"}` is two words to read, the flag and what it is given, so the value is read as a word of its own. */
+function splitAtFlagValue(match: RegExpMatchArray): Word[] {
+  const text = match[0];
+  const at = match.index ?? 0;
+  const flag = FLAG_VALUE.exec(text);
+  if (flag === null) return [{ text, at }];
+  return [
+    { text: flag[0], at },
+    { text: text.slice(flag[0].length), at: at + flag[0].length },
+  ];
+}
+
 /** Where in `text` the first credential starts, or -1. */
 function credentialOffset(text: string, lineStarts: ReadonlySet<number> = new Set()): number {
-  const found = [...text.matchAll(WORD)];
-  const words = found.map(match => match[0]);
+  const found = [...text.matchAll(WORD)].flatMap(splitAtFlagValue);
+  const words = found.map(match => match.text);
   const curlAt = words.findIndex(word => bare(word).toLowerCase().endsWith('curl'));
   let hit = -1;
   for (let index = 0; index < words.length && hit === -1; index += 1) {
-    hit = wordCredential(words, index, curlAt, found[index]?.index ?? 0, lineStarts);
+    hit = wordCredential(words, index, curlAt, found[index]?.at ?? 0, lineStarts);
   }
   return earliest([hit, addressWithPassword(text), text.search(PEM_HEADER)]);
 }
@@ -323,12 +343,73 @@ function attachedCurlUser(piece: string): boolean {
   return login.includes(':') && password !== '' && !isReference(bare(password));
 }
 
+/** The most layers of encoding read through (a string inside a string, `\\"` inside `\"`): enough for a doubly escaped argument, bounded for a hostile one. */
+const MAX_VIEW_LAYERS = 4;
+/** The longest argument decoded: the contract holds far less, and a longer one is read as written, never parsed. */
+const MAX_DECODED_CHARS = 8192;
+const UNICODE_ESCAPE = /\\u([0-9A-Fa-f]{4})/gu;
+const QUOTE_ESCAPE = /\\(["'\\])/gu;
+
+/** The JSON a text IS, or that sits inside it (`--headers={…}`), written plainly again; undefined when there is none. Never throws. */
+function plainJson(text: string): string | undefined {
+  const tryParse = (candidate: string): unknown => {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
+  };
+  const whole = tryParse(text);
+  if (typeof whole === 'string') return whole;
+  if (whole !== null && typeof whole === 'object') return JSON.stringify(whole);
+  const open = text.search(/[{[]/u);
+  const close = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+  if (open === -1 || close <= open) return undefined;
+  const inner = tryParse(text.slice(open, close + 1));
+  if (inner === null || typeof inner !== 'object') return undefined;
+  const plain = JSON.stringify(inner);
+  return plain === text.slice(open, close + 1) ? undefined : `${text.slice(0, open)} ${plain} ${text.slice(close + 1)}`;
+}
+
+/** One layer of encoding off `text`: JSON read as JSON, else `\uXXXX` made real and an escaped quote or backslash made plain, else percent-decoded. */
+function oneLayerOff(text: string): string {
+  const json = plainJson(text);
+  if (json !== undefined) return json;
+  const unescaped = text
+    .replace(UNICODE_ESCAPE, (_all, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(QUOTE_ESCAPE, '$1');
+  if (unescaped !== text) return unescaped;
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /**
- * The 1-based place, among the pieces of a command line, of the first one that holds a password or key: any of the
- * shapes above read across pieces (`curl`, `--user`, `name:pass` in three arguments), or an `Authorization` header
- * given any value. The pieces are read one to a line, so the place is never a guess. Undefined when none does.
+ * Every form of an argument a program could read it as: as written, then with one layer of encoding off, up to
+ * {@link MAX_VIEW_LAYERS} times (JSON decoded so `\uXXXX` names are real characters, escaped quotes made plain). The
+ * scanners run on each, so a credential that only shows once the quoting is gone is still found. Bounded (a long
+ * argument is read as written) and total (never throws).
  */
-export function firstArgumentCredential(pieces: readonly string[]): number | undefined {
+export function readableViews(piece: string): readonly string[] {
+  const views = [piece];
+  let current = piece;
+  for (let layer = 0; layer < MAX_VIEW_LAYERS && current.length <= MAX_DECODED_CHARS; layer += 1) {
+    const next = oneLayerOff(current);
+    if (next === current) break;
+    views.push(next);
+    current = next;
+  }
+  return views;
+}
+
+/**
+ * The 1-based place, among the pieces of a command line read as written, of the first one that holds a password or
+ * key: any of the shapes above read across pieces (`curl`, `--user`, `name:pass` in three arguments), or an
+ * `Authorization` header given any value. The pieces are read one to a line, so the place is never a guess.
+ */
+function firstCredentialIn(pieces: readonly string[]): number | undefined {
   const single = pieces.map(piece => foldedForScan(piece).replace(/\r\n|[\r\n]/gu, ' '));
   const curlAt = single.findIndex(piece => bare(piece).toLowerCase().endsWith('curl'));
   const header = single.findIndex(
@@ -337,4 +418,21 @@ export function firstArgumentCredential(pieces: readonly string[]): number | und
   const line = firstCredentialLine(single.join('\n'));
   if (header === -1) return line;
   return line === undefined ? header + 1 : Math.min(line, header + 1);
+}
+
+/**
+ * The 1-based place, among the pieces of a command line, of the first one that holds a password or key, or undefined.
+ * Every piece is read as written AND with its quoting taken off ({@link readableViews}), layer by layer, so a name
+ * or a value hidden behind escaped quotes, a JSON string or `\uXXXX` escapes is found like a plain one; the
+ * `${secret:NAME}` references stay exempt in every view.
+ */
+export function firstArgumentCredential(pieces: readonly string[]): number | undefined {
+  const views = pieces.map(readableViews);
+  const layers = Math.max(1, ...views.map(forms => forms.length));
+  const places: number[] = [];
+  for (let layer = 0; layer < layers; layer += 1) {
+    const place = firstCredentialIn(views.map(forms => forms[layer] ?? forms.at(-1) ?? ''));
+    if (place !== undefined) places.push(place);
+  }
+  return places.length === 0 ? undefined : Math.min(...places);
 }
