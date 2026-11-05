@@ -186,10 +186,10 @@ export const sameEmailLogin = (
         other => other.id !== credential.id && other.harness === credential.harness && other.email === credential.email,
       );
 
-/** Whether the two labels of the E26 step can be saved: both given, and different. */
+/** Whether the two labels of the E26 step can be saved: both given, and different (trimmed, any case — as the daemon compares). */
 export const labelsError = (older: string, newer: string): string | null => {
   if (older.trim() === '' || newer.trim() === '') return 'Give each login a label.';
-  return older.trim() === newer.trim() ? 'Use two different labels.' : null;
+  return older.trim().toLowerCase() === newer.trim().toLowerCase() ? 'Use two different labels.' : null;
 };
 
 // ── Budgets (docs/budgets.md) ─────────────────────────────────────────────────────────────────────

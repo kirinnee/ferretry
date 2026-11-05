@@ -120,6 +120,8 @@ interface World {
   readonly refuse?: (change: { kind: string; id?: string; name?: string }) => Error | undefined;
   /** A `runtime.put` waits for this before it is answered. */
   readonly hold?: Promise<void>;
+  /** A sign-in restart waits this many milliseconds before it is answered. */
+  readonly restartDelayMs?: number;
 }
 
 interface Opened {
@@ -173,6 +175,10 @@ const open = async (world: World = {}, props: Opened = {}) => {
           ? (JSON.parse(init.body) as { change?: { kind?: string } }).change?.kind
           : undefined;
       if (world.hold !== undefined && path === '/v1/fleet/proposals' && kind === 'runtime.put') await world.hold;
+      if (world.restartDelayMs !== undefined && path === '/v1/fleet/login' && typeof init?.body === 'string') {
+        if ((JSON.parse(init.body) as { restart?: boolean }).restart === true)
+          await new Promise(resolve => setTimeout(resolve, world.restartDelayMs));
+      }
       return base.request(path, schema, init);
     },
   };
@@ -642,6 +648,45 @@ describe('AddLogin · the same account twice (E26)', () => {
     expect(tip.textContent).toContain('Open the link in a private window');
     expect(tip.className).toContain('font-semibold');
     expect(c.querySelector('[data-add-login-same-account]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows the new link and finishes the NEW flow when the restart answers late', async () => {
+    const second = {
+      ...claudeFlow('awaiting-code', 'claude'),
+      flowId: 'flow-2',
+      verificationUrl: 'https://claude.ai/oauth/authorize?code=true&second=1',
+    };
+    const { view, calls } = await open({
+      ...SAME,
+      restartDelayMs: 150,
+      routes: {
+        [LOGIN]: (call: Call) =>
+          (call.body as { restart?: boolean }).restart === true ? second : claudeFlow('awaiting-code', 'claude'),
+        [`POST ${FLOW}`]: { outcome: 'accepted', flow: claudeFlow('complete', 'claude') },
+        'POST /v1/fleet/login/flow-2': {
+          outcome: 'accepted',
+          flow: { ...second, state: 'complete', verificationUrl: undefined },
+        },
+      },
+    });
+    const c = view.container;
+    await signInToClaude(c);
+    await click(c.querySelector('[data-add-login-different-account]'), 'Sign in with a different account');
+    await until(() => c.querySelector('[data-add-login-restarting]') !== null, 'the restart pending');
+    // While the restart is in flight the old, completed flow's link is not on screen.
+    expect(c.querySelector('[data-open-sign-in]')).toBeNull();
+    await until(() => c.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the new Claude link');
+    expect(c.querySelector('[data-open-sign-in]')?.getAttribute('href')).toBe(
+      'https://claude.ai/oauth/authorize?code=true&second=1',
+    );
+    await type(c.querySelector('textarea'), 'code-from-second-page');
+    await click(
+      Array.from(c.querySelectorAll('button')).find(button => button.textContent === 'Finish sign-in') ?? null,
+      'Finish sign-in',
+    );
+    await until(() => only(calls, 'POST /v1/fleet/login/flow-2').length === 1, 'finish posted to flow-2');
+    expect(only(calls, `POST ${FLOW}`)).toHaveLength(1);
     await view.unmount();
   });
 

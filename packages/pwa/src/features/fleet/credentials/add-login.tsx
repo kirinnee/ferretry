@@ -308,16 +308,16 @@ export function AddLogin({
       changes.clear();
       setSignedIn(false);
       setRetryTip(true);
-      setRun(count => count + 1);
+      // The panel is remounted only once the new flow is in hand: it keeps the flow it started with, so a
+      // remount before the restart answers would show (and finish) the old, completed one.
       try {
         const client = await createClient(connection);
-        setStarted({
-          flow: await restartCredentialSignIn(client, { credentialId: credential.id }, undefined),
-          refusal: null,
-        });
+        const flow = await restartCredentialSignIn(client, { credentialId: credential.id }, undefined);
+        setStarted({ flow, refusal: null });
       } catch (error) {
         setStarted({ flow: null, refusal: changeRefusalSentence(error) });
       }
+      setRun(count => count + 1);
       await reload();
     } finally {
       setRestarting(false);
@@ -655,20 +655,26 @@ export function AddLogin({
               {started.refusal}
             </p>
           )}
-          <CredentialSignIn
-            key={run}
-            credential={credential}
-            machineName={machineName}
-            connection={connection}
-            createClient={createClient}
-            changes={changes}
-            {...(started.flow === null ? {} : { initialFlow: started.flow })}
-            {...(pollMs === undefined ? {} : { pollMs })}
-            onSignedIn={() => {
-              setSignedIn(true);
-              void reload();
-            }}
-          />
+          {restarting ? (
+            <p role="status" className="m-0 text-cell text-muted" data-add-login-restarting="">
+              Starting the sign-in again…
+            </p>
+          ) : (
+            <CredentialSignIn
+              key={run}
+              credential={credential}
+              machineName={machineName}
+              connection={connection}
+              createClient={createClient}
+              changes={changes}
+              {...(started.flow === null ? {} : { initialFlow: started.flow })}
+              {...(pollMs === undefined ? {} : { pollMs })}
+              onSignedIn={() => {
+                setSignedIn(true);
+                void reload();
+              }}
+            />
+          )}
         </div>
       );
     const trimmed = typed.trim();

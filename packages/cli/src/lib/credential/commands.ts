@@ -265,6 +265,10 @@ async function addToolLogin(
   await reportRuntimeHint(deps, harness, id);
 }
 
+/** A word for a pasted shell line: bare when it is plain, else single-quoted with `'` escaped (POSIX). */
+const shellWord = (value: string): string =>
+  /^[A-Za-z0-9._-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+
 /**
  * The runtime the Add a login page would have made for this login, as a copy-paste line. The CLI does not
  * make it silently — a CLI write stays explicit — and leaves the line out when no runtime of this CLI
@@ -276,7 +280,7 @@ async function reportRuntimeHint(deps: AccountCommandDeps, harness: AccountHarne
   if (profile === undefined) return;
   const name = runtimeNameFor(harness, id, new Set(runtimes.map(runtime => runtime.name)));
   deps.out.report(
-    `To run ${HARNESS_LABEL[harness]} on it: ${deps.binaryName} runtime add ${name} --credential ${id} --profile ${profile}`,
+    `To run ${HARNESS_LABEL[harness]} on it: ${deps.binaryName} runtime add ${shellWord(name)} --credential ${shellWord(id)} --profile ${shellWord(profile)}`,
   );
 }
 

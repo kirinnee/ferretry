@@ -293,6 +293,8 @@ describe('labelsError', () => {
     expect(labelsError('', 'work')).toBe('Give each login a label.');
     expect(labelsError('home', '   ')).toBe('Give each login a label.');
     expect(labelsError(' work ', 'work')).toBe('Use two different labels.');
+    expect(labelsError('side', 'SIDE')).toBe('Use two different labels.');
+    expect(labelsError(' Side ', 'sIDE')).toBe('Use two different labels.');
     expect(labelsError('home', 'work')).toBeNull();
   });
 });

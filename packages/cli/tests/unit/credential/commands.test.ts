@@ -248,6 +248,32 @@ describe('registerCredentialCommands', () => {
     );
   });
 
+  for (const [profile, quoted] of [
+    ['My Profile', "'My Profile'"],
+    ["My Profile's", "'My Profile'\\''s'"],
+  ] as const) {
+    it(`should single-quote the profile ${profile} in the printed runtime line`, async () => {
+      const world = fakeWorld({
+        gateway: {
+          runtimes: () => ({ format: 'version-2', runtimes: [runtime({ name: 'claude-default', profile })] }),
+        },
+      });
+
+      await runCommand(registerCredentialCommands, world, [
+        'credential',
+        'add',
+        'claude',
+        '--label',
+        'work',
+        '--no-sign-in',
+      ]);
+
+      should(world.out.text('report')).containEql(
+        `runtime add claude-work --credential claude-work --profile ${quoted}`,
+      );
+    });
+  }
+
   it('should print no runtime line when no runtime of that tool exists', async () => {
     const world = fakeWorld({ gateway: { runtimes: () => ({ format: 'version-2', runtimes: [] }) } });
 
