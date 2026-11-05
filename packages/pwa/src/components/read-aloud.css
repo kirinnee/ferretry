@@ -218,8 +218,8 @@
 }
 .fy-ar-track {
   background: var(--surface);
-  border: 2px solid var(--border-strong);
-  border-radius: 999px;
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-pill);
   flex: none;
   height: 28px;
   position: relative;
@@ -227,7 +227,7 @@
 }
 .fy-ar-thumb {
   background: var(--fg-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   height: 20px;
   left: 2px;
   position: absolute;
@@ -324,7 +324,7 @@
 }
 .fy-ar-row {
   align-items: center;
-  border-top: 1px solid var(--border-soft, var(--border));
+  border-top: var(--stroke-control) solid var(--border-soft, var(--border));
   cursor: pointer;
   display: flex;
   gap: var(--gap-md);
@@ -362,30 +362,29 @@
 }
 .fy-ar-range::-webkit-slider-runnable-track {
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   height: 8px;
 }
 .fy-ar-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   background: var(--accent);
-  border: 3px solid var(--bg);
+  border: var(--stroke-panel) solid var(--accent-strong);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--accent-strong);
+  box-sizing: border-box;
   height: 32px;
   margin-top: -12px;
   width: 32px;
 }
 .fy-ar-range::-moz-range-track {
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   height: 8px;
 }
 .fy-ar-range::-moz-range-thumb {
   background: var(--accent);
-  border: 3px solid var(--bg);
+  border: var(--stroke-panel) solid var(--accent-strong);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--accent-strong);
   box-sizing: border-box;
   height: 32px;
   width: 32px;
