@@ -51,7 +51,7 @@ function KeyRow({
         <span className="[overflow-wrap:anywhere] font-mono text-row font-semibold text-fg">{row.key}</span>
         <Badge tone={row.outcome === 'both' ? 'warn' : 'pend'}>{outcomeWords(row.outcome, source)}</Badge>
         {row.loosens === true ? (
-          <Badge tone="warn" data-clone-key-loosens="">
+          <Badge tone="warn" className="max-w-full !whitespace-normal" data-clone-key-loosens="">
             Loosens what {machineName} may spend or do
           </Badge>
         ) : null}
