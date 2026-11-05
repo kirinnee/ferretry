@@ -12,6 +12,7 @@ import {
 } from '../../src/components/markdown.tsx';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { parseFyRender } from '../../src/lib/fy-render.ts';
 import {
   type ResolvedReference,
   type ResolvedSurfaceReference,
@@ -208,6 +209,43 @@ describe('Markdown card and board blocks', () => {
     const tree = render(<Markdown enableFyRender cardEmbed={host} text={badCardFence} />);
     should(tree.root.findAllByProps({ 'data-fy-card-embed': 'card' })).be.empty();
     should(textOf(tree.root.findByType('code'))).containEql('nope');
+  });
+});
+
+describe('Markdown fy-render fences authored with noise (B162)', () => {
+  // The body the renderer would hand the grammar for a fence authored as `text`, parsed.
+  const drawn = (text: string): number => {
+    const inner = text.replace(/^```fy-render\r?\n/u, '').replace(/\r?\n```$/u, '');
+    const node = {
+      children: [
+        {
+          type: 'element',
+          tagName: 'code',
+          properties: { 'data-fy-render-fence': 'true' },
+          children: [{ type: 'text', value: `${inner}\n` }],
+        },
+      ],
+    };
+    const body = fyRenderFenceBody(node);
+    return body !== null && parseFyRender(body).ok ? 1 : 0;
+  };
+
+  test('should draw a block whose lines end in CRLF', () => {
+    should(drawn(squareFence().replace(/\n/gu, '\r\n'))).equal(1);
+  });
+
+  test('should draw a block with trailing spaces on the boundary or a header', () => {
+    should(drawn(squareFence().replace('---', '---  '))).equal(1);
+    should(drawn(squareFence().replace('type: svg', 'type: svg \t'))).equal(1);
+  });
+
+  test('should draw a block with blank lines before the first header', () => {
+    should(drawn(squareFence().replace('type: svg', '\n\ntype: svg'))).equal(1);
+  });
+
+  test('should still refuse what the contract refuses', () => {
+    should(drawn(squareFence().replace('---', '----'))).equal(0);
+    should(drawn(squareFence().replace('type: svg', 'Type: svg'))).equal(0);
   });
 });
 

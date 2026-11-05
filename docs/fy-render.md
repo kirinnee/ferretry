@@ -87,7 +87,7 @@ session-relative, `./`-relative or absolute-inside-the-folder forms
 parser; `http:` (a downgrade), `data:` (a second inline grammar), `blob:` (a page-local handle) and any
 URL carrying `user:pass@` (a credential written into a transcript) are refused.
 
-**Boundary line** — a line that is exactly `---`. It makes header parsing unambiguous, so a payload
+**Boundary line** — a line that is exactly `---` (trailing whitespace and CRLF line endings are forgiven, as are blank lines before the first header; case and the dash count are not). It makes header parsing unambiguous, so a payload
 may begin with anything, including a line that looks like `key: value`.
 
 **Payload** — every byte from the line after `---` to the fence close, verbatim. The one exception is

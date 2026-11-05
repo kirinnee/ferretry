@@ -160,7 +160,23 @@ export function fyRenderFenceBody(node: MarkdownAstFenceNode | null | undefined)
   const body = code.children?.[0];
   if (body?.type !== 'text' || typeof body.value !== 'string') return null;
   // mdast-to-hast terminates a fence body with a newline the author did not type.
-  return body.value.replace(/\n$/u, '');
+  return tolerateAuthoringNoise(body.value.replace(/\n$/u, ''));
+}
+
+/**
+ * Forgives the three accidents that made a well-meant block draw as code: Windows line endings (the `---`
+ * boundary then reads `---\r`), trailing spaces on a header or the boundary line, and blank lines before the
+ * first header. Only the header half is touched; the payload stays verbatim apart from its line endings.
+ * Still strict where the contract is: the boundary must be exactly `---` once the line's own trailing
+ * whitespace is gone, and the language and keys stay lowercase.
+ */
+export function tolerateAuthoringNoise(source: string): string {
+  const lines = source.replace(/\r\n?/gu, '\n').split('\n');
+  const boundary = lines.findIndex(line => line.trimEnd() === '---');
+  if (boundary === -1) return lines.join('\n');
+  const head = lines.slice(0, boundary + 1).map(line => line.trimEnd());
+  while (head.length > 1 && head[0] === '') head.shift();
+  return [...head, ...lines.slice(boundary + 1)].join('\n');
 }
 
 /**
