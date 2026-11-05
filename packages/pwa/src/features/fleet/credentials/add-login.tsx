@@ -338,9 +338,7 @@ export function AddLogin({
           <p className="mb-0 mt-1 text-cell leading-base text-muted">
             {made === null
               ? 'No new login is added.'
-              : choice?.kind === 'signin'
-                ? `The login ${loginWords(made)} is kept as Needs sign-in. Sign it in later from its own page, or remove it there.`
-                : 'The login you added is kept, and can be signed in from its own page.'}
+              : `The login ${loginWords(made)} is kept as Needs sign-in. Sign it in later from its own page, or remove it there.`}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button type="button" variant="danger" data-add-login-stop="" onClick={onLeave}>

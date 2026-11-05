@@ -700,6 +700,119 @@ describe('AddLogin · the same account twice (E26)', () => {
     await view.unmount();
   });
 
+  it('Keep both asks for both labels when neither login has one, and saves both', async () => {
+    let added = false;
+    const codexOnly = CREDENTIALS.credentials.filter(item => item.harness === 'codex');
+    const { view, calls, events } = await open({
+      fresh: credential({ id: 'claude-login' }),
+      runtimes: RUNTIMES,
+      routes: {
+        ...CLAUDE_SIGNS_IN,
+        'GET /v1/fleet/credentials': () =>
+          listOf(
+            added
+              ? [...codexOnly, credential({ id: 'claude-personal' }), credential({ id: 'claude-login' })]
+              : codexOnly,
+          ),
+      },
+      refuse: change => {
+        if (change.kind === 'credential.add') added = true;
+        return undefined;
+      },
+    });
+    const c = view.container;
+    // A first Claude Code login needs no Name, so none is given.
+    await signInToClaude(c, '');
+    await click(c.querySelector('[data-add-login-keep-both]'), 'Keep both');
+    expect(text(c, '[data-add-login-label] > p')).toBe(
+      'You already have a Claude Code login for you@example.com. Label both so you can tell them apart.',
+    );
+    await type(c.querySelector('#add-login-label-old'), 'personal');
+    await type(c.querySelector('#add-login-label-new'), 'work');
+    expect(c.querySelector('[data-add-login-label-error]')).toBeNull();
+    await click(submit(c), 'Save labels');
+    await until(() => events.length > 0, 'added');
+    expect(changeBodies(calls).slice(-2)).toEqual([
+      { kind: 'credential.label', id: 'claude-personal', label: 'personal' },
+      { kind: 'credential.label', id: 'claude-login', label: 'work' },
+    ]);
+    await view.unmount();
+  });
+
+  it('Keep both asks only for the new login’s label when the older one has a label', async () => {
+    let added = false;
+    const codexOnly = CREDENTIALS.credentials.filter(item => item.harness === 'codex');
+    const { view, calls, events } = await open({
+      fresh: credential({ id: 'claude-login' }),
+      runtimes: RUNTIMES,
+      routes: {
+        ...CLAUDE_SIGNS_IN,
+        'GET /v1/fleet/credentials': () =>
+          listOf(
+            added
+              ? [
+                  ...codexOnly,
+                  credential({ id: 'claude-personal', label: 'personal' }),
+                  credential({ id: 'claude-login' }),
+                ]
+              : codexOnly,
+          ),
+      },
+      refuse: change => {
+        if (change.kind === 'credential.add') added = true;
+        return undefined;
+      },
+    });
+    const c = view.container;
+    await signInToClaude(c, '');
+    await click(c.querySelector('[data-add-login-keep-both]'), 'Keep both');
+    expect(c.querySelector('#add-login-label-old')).toBeNull();
+    await type(c.querySelector('#add-login-label-new'), 'work');
+    await click(submit(c), 'Save labels');
+    await until(() => events.length > 0, 'added');
+    expect(changeBodies(calls).at(-1)).toEqual({ kind: 'credential.label', id: 'claude-login', label: 'work' });
+    await view.unmount();
+  });
+
+  it('says why a different-account sign-in will not start, and why the sign-out was refused', async () => {
+    let logins = 0;
+    const next = (): number => {
+      logins += 1;
+      return logins;
+    };
+    const started = await open({
+      ...SAME,
+      routes: {
+        'POST /v1/fleet/login': () =>
+          next() === 1
+            ? claudeFlow('awaiting-code', 'claude')
+            : new FyHttpError('Claude Code is not installed on studio-mac.', 409, 'fleet_login_unavailable'),
+        [`POST ${FLOW}`]: { outcome: 'accepted', flow: claudeFlow('complete', 'claude') },
+      },
+    });
+    const c = started.view.container;
+    await signInToClaude(c);
+    await click(c.querySelector('[data-add-login-different-account]'), 'Sign in with a different account');
+    await until(() => c.querySelector('[data-add-login-start-refused]') !== null, 'the refusal');
+    expect(text(c, '[data-add-login-start-refused]')).toBe('Claude Code is not installed on studio-mac.');
+    await started.view.unmount();
+
+    const refused = await open({
+      ...SAME,
+      refuse: change =>
+        change.kind === 'credential.signout'
+          ? new FyHttpError('Signing out is switched off on studio-mac.', 409, 'fleet_change_refused')
+          : undefined,
+    });
+    const d = refused.view.container;
+    await signInToClaude(d);
+    await click(d.querySelector('[data-add-login-different-account]'), 'Sign in with a different account');
+    await until(() => d.querySelector('[data-add-login-same-account] [role="alert"]') !== null, 'the refusal');
+    expect(text(d, '[data-add-login-same-account] [role="alert"]')).toBe('Signing out is switched off on studio-mac.');
+    expect(d.querySelector('[data-add-login-same-account]')).not.toBeNull();
+    await refused.view.unmount();
+  });
+
   it('Keep both asks only for the older login’s label when it has none, and a refusal stays with its refusal', async () => {
     let refuse = true;
     const { view, calls, events } = await open({
