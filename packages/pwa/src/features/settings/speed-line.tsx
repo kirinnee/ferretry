@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useReducer } from 'react';
 import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
-import { SPEED_CONSEQUENCE_TEXT, SPEED_REASON_TEXT, SPEED_TEST_PATH, speedLine } from '../../lib/stt/speed-plan.ts';
+import { SPEED_CONSEQUENCE_TEXT, SPEED_REASON_TEXT, speedLine, speedTestHref } from '../../lib/stt/speed-plan.ts';
 import { type SpeedPlanner, speedPlannerFor } from '../../lib/stt/speed-planner.ts';
 import type { SpeedGlobalLike } from '../../lib/stt/speed-signals.ts';
 
@@ -45,7 +45,7 @@ export function SpeedLine({ engine, planner }: SpeedLineProps) {
       {/* A separate page (it leaves the app), so a new tab keeps this one where the person left it. At least
           44 px tall on every screen: a thumb-sized target, keyboard-focusable like any link. */}
       <a
-        href={SPEED_TEST_PATH}
+        href={speedTestHref(globalThis.location?.pathname ?? '')}
         target="_blank"
         rel="noopener noreferrer"
         data-speed-test-link=""

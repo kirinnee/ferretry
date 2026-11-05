@@ -232,3 +232,11 @@ export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
 
 /** Where the site serves the one-click speed test page (`speed-bench/index.html`, built with the app). */
 export const SPEED_TEST_PATH = '/speed-bench/';
+
+/**
+ * The speed test page's address when opened from `settingsPath` (the page Settings is on). The path rides in the
+ * query so the page's "Back to Settings" link can return to THIS machine's Settings; it is a path on this site
+ * and nothing else (the page re-checks it with {@link backToSettingsPath}).
+ */
+export const speedTestHref = (settingsPath: string): string =>
+  `${SPEED_TEST_PATH}?back=${encodeURIComponent(settingsPath)}`;

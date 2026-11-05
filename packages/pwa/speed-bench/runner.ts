@@ -1,14 +1,15 @@
 /**
  * THE SPEED BENCHMARK RUNNER — browser-side, shared by the one-click dev page (`speed-bench/main.ts`) and the
- * headless driver (`harness/stt-speed-bench.ts`). Manual; never part of the shipped bundle, never in CI.
+ * headless driver (`harness/stt-speed-bench.ts`). The page ships in the production build; the driver is manual and never in CI.
  *
  * For each engine and each path it starts a FRESH worker (so the load is a real cold load: read the
  * installed bytes, re-hash them, build the model), then decodes the same fixed 5 s clip several times,
  * then measures what an early finish leaves of the wait after a 1.5 s pause. What it returns is plain
  * timings (`lib/stt/speed-bench-report.ts`): no transcript text ever leaves this function.
  *
- * It installs a model through the shipped store ONLY when `install` is true — that is a download the
- * person asked for by pressing the benchmark's button.
+ * It installs a model through the shipped store ONLY when `install` is true — a download the person asked for by
+ * ticking "Download the speech models first". Unticked (the page's default) it makes no request beyond the site's own
+ * files: a model that is not installed is a `not-installed` row, and nothing is fetched for it.
  */
 
 import { mixToMono } from '../src/lib/stt/audio-capture.ts';
@@ -53,7 +54,7 @@ export interface BenchOptions {
   /** Warm decodes per run. */
   readonly warmRuns: number;
   readonly pauseMs: number;
-  /** Download a model that is not installed (the person pressed the button). */
+  /** Download a model that is not installed. Only ever true because the person ticked the box that names the download. */
   readonly install: boolean;
   readonly clipUrl: string;
   progress?(line: string): void;
@@ -205,7 +206,10 @@ async function prepare(
   else return null;
   await voice.refresh();
   if (voice.getSnapshot().phase !== 'installed') {
-    if (!install) return null;
+    if (!install) {
+      say(`${id}: not installed — skipped (nothing is downloaded unless you tick the box)`);
+      return null;
+    }
     say(`${id}: installing (a download you asked for)…`);
     await voice.install();
     const after = voice.getSnapshot();

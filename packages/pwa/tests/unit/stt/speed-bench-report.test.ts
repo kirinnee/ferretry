@@ -6,6 +6,12 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   afterPause,
+  type BenchRun,
+  type SpeedBenchReport,
+  backToSettingsPath,
+  SPEED_BENCH_ENGINES,
+  speedBenchDownloadSize,
+  speedBenchSummary,
   isSoftwareAdapter,
   median,
   parseSpeedBenchReport,
@@ -116,5 +122,66 @@ describe('syntheticClip', () => {
     should(syntheticClip(5)).deepEqual(clip);
     should(Math.max(...clip.slice(-1_000).map(Math.abs))).equal(0);
     should(Math.max(...clip.map(Math.abs))).be.above(0.05);
+  });
+});
+
+describe('the one-click page plain words', () => {
+  const report = (runs: BenchRun[]): SpeedBenchReport => ({ ...(REPORT as SpeedBenchReport), runs });
+  const r = (over: Partial<BenchRun>): BenchRun => ({ ...(RUN as BenchRun), ...over });
+  const missing = r({
+    engine: 'whisper-base-en',
+    loadMs: null,
+    decodeMs: [],
+    lastAudioToTextMs: null,
+    failure: 'not-installed',
+  });
+
+  it('names the download in megabytes for the four models it times, and times exactly those', () => {
+    should(SPEED_BENCH_ENGINES).deepEqual(['parakeet', 'parakeet-tdt-110m', 'whisper-base-en', 'vosk-small-en']);
+    should(speedBenchDownloadSize()).match(/^\d+ MB$/u);
+  });
+
+  it('goes back to the Settings path it was given, and to the app front door for anything that is not a plain site path', () => {
+    should(backToSettingsPath('?back=%2Fapp%2Fd%2Fabc%2Fsettings')).equal('/app/d/abc/settings');
+    for (const bad of [
+      '',
+      '?back=',
+      '?back=https%3A%2F%2Fevil.example%2F',
+      '?back=%2F%2Fevil.example',
+      '?back=%2Fa%2F..%2Fb',
+      '?back=javascript%3Aalert(1)',
+      '?back=%2Fspeed-bench%2F',
+      `?back=%2F${'a'.repeat(300)}`,
+    ])
+      should(backToSettingsPath(bad)).equal('/app/');
+  });
+
+  it('says what was timed, which was quickest, and what to do about a voice that is not installed', () => {
+    const text = speedBenchSummary(report([r({}), r({ lastAudioToTextMs: 900, engine: 'vosk-small-en' }), missing]));
+    should(text).equal(
+      'Timed 2 of 3 voices. Quickest to finish after you stop talking: Vosk, about 0.9\u00a0s. 1 voice is not installed. Install the voice in Settings › Voice first, then run again.',
+    );
+  });
+
+  it('says plainly when nothing was timed, counts several missing voices, and counts runs that could not run', () => {
+    const text = speedBenchSummary(
+      report([
+        missing,
+        { ...missing, engine: 'parakeet' },
+        r({ engine: 'vosk-small-en', lastAudioToTextMs: null, failure: 'load-timeout' }),
+        r({ engine: 'vosk-small-en', path: 'wasm-threads', lastAudioToTextMs: null, failure: 'not-isolated' }),
+      ]),
+    );
+    should(text).equal(
+      'Nothing was timed. 2 voices are not installed. Install the voice in Settings › Voice first, then run again. 1 test could not run on this device.',
+    );
+    should(
+      speedBenchSummary(
+        report([
+          r({ failure: 'load-failed', lastAudioToTextMs: null }),
+          r({ lastAudioToTextMs: null, failure: 'x-y' }),
+        ]),
+      ),
+    ).match(/2 tests could not run/u);
   });
 });

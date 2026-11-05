@@ -425,7 +425,13 @@ is always a candidate, so there is no input for which nothing is chosen.
   screen, a real link a keyboard reaches, opening in a new tab (`rel="noopener noreferrer"`) so Settings stays
   where it was. The page is part of the production build (`vite.config.ts` lists it beside `index.html`, `app/`
   and `get-started/`), so the link never points at nothing; the page is self-contained — timings only, nothing
-  sent anywhere, models only from the app's own model files — and runs under the site's own page policy.
+  sent anywhere — and runs under the site's own page policy. **By default it makes no request beyond the site's own
+  files**: it times the models already installed on the device, and a model that is not installed is a "not installed"
+  row with the line "Install the voice in Settings › Voice first, then run again." The one way to a download is the
+  person ticking "Download the speech models first (from huggingface.co, about N MB)", which starts unticked;
+  `tests/e2e/speed-bench-offline.e2e.test.ts` proves both halves against the built page under `wrangler pages dev` and the
+  real policy. Above the JSON the page says in a plain sentence what was timed and which was quickest, and its
+  "Back to Settings" link returns to the Settings page the link was opened from.
 
 ### Starting to transcribe during the send countdown
 

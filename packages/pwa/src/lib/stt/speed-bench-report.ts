@@ -24,7 +24,8 @@
  */
 
 import { z } from 'zod';
-import { ON_DEVICE_MODEL_IDS } from './model-catalog.ts';
+import { modelDownloadBytes, ON_DEVICE_MODEL_IDS, type OnDeviceModelId, onDeviceModel } from './model-catalog.ts';
+import { formatMegabytes } from './model-store.ts';
 
 export const SPEED_BENCH_VERSION = 1;
 
@@ -143,4 +144,61 @@ export const syntheticClip = (seconds: number, sampleRate = 16_000): Float32Arra
     samples[index] = 0.25 * envelope * voiced;
   }
   return samples;
+};
+
+/** The models the one-click page times, in the order it times them. The download label and the run read this one list. */
+export const SPEED_BENCH_ENGINES: readonly OnDeviceModelId[] = [
+  'parakeet',
+  'parakeet-tdt-110m',
+  'whisper-base-en',
+  'vosk-small-en',
+];
+
+/** What ticking "download the speech models first" would fetch at most (those not installed yet), in the words of storage settings. */
+export const speedBenchDownloadSize = (): string =>
+  formatMegabytes(
+    SPEED_BENCH_ENGINES.reduce((total, id) => {
+      const model = onDeviceModel(id);
+      return total + (model === null ? 0 : modelDownloadBytes(model));
+    }, 0),
+  );
+
+/**
+ * Where "Back to Settings" goes: the `back` path the Settings link passed, only when it is a plain path on this
+ * site (one leading slash, no scheme, no `//`, no backslash, no dots-only segments), otherwise the app's front door.
+ */
+export const backToSettingsPath = (search: string): string => {
+  const back = new URLSearchParams(search).get('back') ?? '';
+  const plain = /^\/[A-Za-z0-9._~%/-]{0,198}$/u.test(back) && !back.startsWith('//') && !back.includes('/../');
+  return plain && !back.startsWith('/speed-bench') ? back : '/app/';
+};
+
+const secondsOf = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
+
+/**
+ * One plain sentence or two above the JSON: what was timed, which was quickest to finish after the person stops
+ * talking, and what to do about models that were not installed. No figures a person has to decode.
+ */
+export const speedBenchSummary = (report: SpeedBenchReport): string => {
+  const timed = report.runs.filter(run => run.failure === null && run.lastAudioToTextMs !== null);
+  const missing = new Set(report.runs.filter(run => run.failure === 'not-installed').map(run => run.engine));
+  const other = report.runs.filter(
+    run =>
+      run.failure !== null && run.failure !== 'not-installed' && !['not-isolated', 'single-only'].includes(run.failure),
+  ).length;
+  const parts: string[] = [];
+  const quickest = timed.toSorted((a, b) => (a.lastAudioToTextMs as number) - (b.lastAudioToTextMs as number))[0];
+  if (quickest === undefined) parts.push('Nothing was timed.');
+  else {
+    const name = onDeviceModel(quickest.engine)?.shortName ?? quickest.engine;
+    parts.push(
+      `Timed ${new Set(timed.map(run => run.engine)).size} of ${new Set(report.runs.map(run => run.engine)).size} voices. Quickest to finish after you stop talking: ${name}, about ${secondsOf(quickest.lastAudioToTextMs as number)}.`,
+    );
+  }
+  if (missing.size > 0)
+    parts.push(
+      `${missing.size} ${missing.size === 1 ? 'voice is' : 'voices are'} not installed. Install the voice in Settings › Voice first, then run again.`,
+    );
+  if (other > 0) parts.push(`${other} ${other === 1 ? 'test' : 'tests'} could not run on this device.`);
+  return parts.join(' ');
 };

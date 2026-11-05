@@ -18,6 +18,7 @@ import {
   SPEED_PATH_ORDER,
   SPEED_REASON_TEXT,
   SPEED_TEST_PATH,
+  speedTestHref,
   type SpeedPath,
   type SpeedSignals,
   speedLine,
@@ -200,6 +201,10 @@ describe('the words', () => {
 
   it('names the speed test page the production build serves', () => {
     should(SPEED_TEST_PATH).equal('/speed-bench/');
+  });
+
+  it('opens the speed test page with the Settings path it came from, encoded', () => {
+    should(speedTestHref('/app/d/abc/settings')).equal('/speed-bench/?back=%2Fapp%2Fd%2Fabc%2Fsettings');
   });
 
   it('says the speed gain without naming the desktop it was measured on', () => {

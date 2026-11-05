@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { SpeedLine } from '../../../../src/features/settings/speed-line.tsx';
 import { SpeedMemoryStore } from '../../../../src/lib/stt/speed-memory.ts';
-import { NO_SIGNALS, SPEED_TEST_PATH } from '../../../../src/lib/stt/speed-plan.ts';
+import { NO_SIGNALS, SPEED_TEST_PATH, speedTestHref } from '../../../../src/lib/stt/speed-plan.ts';
 import { flatSpeedPlanner, SpeedPlanner } from '../../../../src/lib/stt/speed-planner.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -57,7 +57,8 @@ describe('<SpeedLine> speed test link', () => {
     const view = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} />);
     const link = view.container.querySelector('section[aria-label="Speed"] a');
     expect(link?.textContent).toContain('Test speed on this device');
-    expect(link?.getAttribute('href')).toBe(SPEED_TEST_PATH);
+    expect(link?.getAttribute('href')).toBe(speedTestHref(globalThis.location.pathname));
+    expect(link?.getAttribute('href')?.startsWith(SPEED_TEST_PATH)).toBe(true);
     expect(SPEED_TEST_PATH).toBe('/speed-bench/');
     expect(link?.getAttribute('target')).toBe('_blank');
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
@@ -67,7 +68,7 @@ describe('<SpeedLine> speed test link', () => {
 
   it('has the link for every engine that has a block', async () => {
     const view = await mount(<SpeedLine engine="vosk-small-en" planner={flatSpeedPlanner()} />);
-    expect(view.container.querySelector('a')?.getAttribute('href')).toBe('/speed-bench/');
+    expect(view.container.querySelector('a')?.getAttribute('href')?.startsWith('/speed-bench/')).toBe(true);
   });
 });
 
