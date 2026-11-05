@@ -2,7 +2,7 @@ import { describe, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
-import { readMap } from '../../src/lib/fy-render-map.ts';
+import { MAP_DEFAULT_ZOOM, readMap } from '../../src/lib/fy-render-map.ts';
 import {
   chooseMapDrawing,
   GOOGLE_EMBED_FRAME_SOURCE,
@@ -75,11 +75,24 @@ describe('chooseMapDrawing', () => {
     should(drawing.credentialless).be.true();
   });
 
-  test('should give a lone marker with no zoom the engine fit ceiling', () => {
+  test('should give a lone marker with no centre the engine fit ceiling, as it is fitted', () => {
     const drawing = google(spec('markers:\n  - {at: [10, 20]}'));
 
     should(drawing.via === 'google' && new URL(drawing.src).searchParams.get('zoom')).equal('15');
     should(drawing.via === 'google' && drawing.caption).equal(null);
+  });
+
+  test('should give a lone marker with a centre and no fit or zoom the default zoom', () => {
+    const drawing = google(spec('center: [10, 20]\nmarkers:\n  - {at: [10, 20]}'));
+
+    should(drawing.via === 'google' && new URL(drawing.src).searchParams.get('zoom')).equal(String(MAP_DEFAULT_ZOOM));
+    should(MAP_DEFAULT_ZOOM).equal(13);
+  });
+
+  test('should give a lone marker with a centre and fit the fit ceiling', () => {
+    const drawing = google(spec('center: [10, 20]\nfit: true\nmarkers:\n  - {at: [10, 20]}'));
+
+    should(drawing.via === 'google' && new URL(drawing.src).searchParams.get('zoom')).equal('15');
   });
 
   test('should frame a plain centred map in view mode', () => {

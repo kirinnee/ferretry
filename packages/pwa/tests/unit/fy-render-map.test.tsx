@@ -399,4 +399,88 @@ describe('FyRenderMap in the Google Maps style', () => {
     should(view.container.querySelector('iframe')).equal(null);
     should(view.container.querySelector('.fy-render-map-note')).equal(null);
   });
+
+  describe('when the loader resolves immediately and the style or payload changes', () => {
+    const element = (style: 'osm' | 'google', payload: string, fake: Recorder) => (
+      <MapStyleProvider embedKey={KEY} style={style}>
+        <FyRenderMap
+          alt="London"
+          environment={CHROMIUM}
+          fullscreen={false}
+          load={async () => fake.modules}
+          mode="dark"
+          onListing={noop}
+          payload={payload}
+        />
+      </MapStyleProvider>
+    );
+
+    test('should mount OpenStreetMap after Google was shown, then the frame again', async () => {
+      // Arrange
+      const fake = recorder();
+      const view = await show(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the frame');
+      const host = view.container.querySelector('.fy-render-map-canvas:not(iframe)');
+
+      // Act: Google -> OpenStreetMap
+      await view.render(element('osm', PIN, fake));
+      await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+      // Assert
+      should(view.container.querySelector('iframe')).equal(null);
+      should(fake.hosts).have.length(1);
+      should(fake.hosts[0]).equal(view.container.querySelector('.fy-render-map-canvas'));
+      should(fake.hosts[0]).equal(host);
+      should((fake.hosts[0] as HTMLElement).hidden).be.false();
+      should(view.container.querySelector('[data-fy-render-map]')?.getAttribute('data-fy-render-map')).equal('drawn');
+      should(view.container.querySelector('.fy-render-map-note')).equal(null);
+
+      // Act: OpenStreetMap -> Google
+      await view.render(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the frame again');
+
+      // Assert
+      should(fake.calls.filter(call => call === 'destroy')).have.length(1);
+      should(view.container.querySelector('[data-fy-render-map]')?.getAttribute('data-fy-render-map')).equal('google');
+      should(view.container.querySelectorAll('button')).have.length(0);
+    });
+
+    test('should re-frame the new place when a Google payload changes', async () => {
+      // Arrange
+      const fake = recorder();
+      const view = await show(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the first frame');
+      const first = view.container.querySelector('iframe')?.getAttribute('src');
+
+      // Act
+      await view.render(element('google', 'markers:\n  - {at: [48.8584, 2.2945], label: Eiffel Tower}', fake));
+      await settle(
+        () => view.container.querySelector('iframe')?.getAttribute('src') !== first,
+        'the frame to move to the new place',
+      );
+
+      // Assert
+      const second = new URL(must(view.container.querySelector('iframe'), 'the frame').getAttribute('src') ?? '');
+      should(second.searchParams.get('q')).equal('48.858400,2.294500');
+      should(view.container.querySelectorAll('iframe')).have.length(1);
+      should(view.container.querySelector('.fy-render-map-note')?.textContent).equal('Eiffel Tower');
+      should(fake.calls).eql([]);
+    });
+
+    test('should drop a Google frame and caption for a payload Google cannot draw', async () => {
+      // Arrange
+      const fake = recorder();
+      const view = await show(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the frame');
+
+      // Act
+      await view.render(element('google', 'markers:\n  - {at: [1, 2]}\n  - {at: [3, 4]}', fake));
+      await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+      // Assert
+      should(view.container.querySelector('iframe')).equal(null);
+      should(view.container.querySelectorAll('.fy-render-map-note')).have.length(1);
+      should(view.container.querySelector('.fy-render-map-note')?.textContent).containEql('more than one marker');
+    });
+  });
 });

@@ -126,25 +126,37 @@ export function FyRenderMap({
     if (state.kind === 'drawn') handle.current?.roomy(fullscreen);
   }, [fullscreen, state.kind]);
 
-  if (state.kind === 'listing')
-    return (
-      <div className="fy-render-map-listing" data-fy-render-map="listing">
-        <p className="fy-render-stopped">{state.note}.</p>
-        {state.lines.length === 0 ? null : (
-          <ul aria-label={`Coordinates: ${alt}`}>
-            {state.lines.map((line, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a static, ordered, never-reordered list
-              <li key={index}>{line}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-
-  if (state.kind === 'google')
-    return (
-      <>
-        <div className="fy-render-map" data-fy-render-map="google" data-fy-render-map-mode={mode}>
+  // ONE STABLE TREE. The map's host (`<section ref>`) is rendered in every state — hidden when the block shows
+  // a Google frame or a listing — and sits at the same position in the same parent each time, so React never
+  // unmounts it. The load effect reads `hostRef` when its promise resolves, which can be before the render
+  // that follows `setState(loading)` has committed; a host that only existed in some states would be null
+  // then (a blank map forever, or a Google → OpenStreetMap switch that never drew).
+  const showsMap = state.kind === 'loading' || state.kind === 'drawn';
+  return (
+    <>
+      {state.kind === 'listing' ? (
+        <div className="fy-render-map-listing" data-fy-render-map="listing">
+          <p className="fy-render-stopped">{state.note}.</p>
+          {state.lines.length === 0 ? null : (
+            <ul aria-label={`Coordinates: ${alt}`}>
+              {state.lines.map((line, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a static, ordered, never-reordered list
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+      <div
+        className="fy-render-map"
+        data-fy-render-map={state.kind === 'listing' ? undefined : state.kind}
+        data-fy-render-map-mode={mode}
+        hidden={state.kind === 'listing'}
+        // Inline, because the fullscreen rule gives `.fy-render-map` a `display` that would beat `hidden`.
+        style={state.kind === 'listing' ? { display: 'none' } : undefined}
+      >
+        <section aria-label={`Map: ${alt}`} className="fy-render-map-canvas" hidden={!showsMap} ref={hostRef} />
+        {state.kind === 'google' ? (
           <iframe
             className="fy-render-map-canvas fy-render-map-frame"
             // The Embed key is restricted by Referer and the page sends none (`no-referrer`): this frame alone
@@ -156,39 +168,35 @@ export function FyRenderMap({
             src={state.src}
             title={`Map: ${alt} (Google Maps)`}
           />
-        </div>
-        {state.caption === null ? null : <p className="fy-render-map-note">{state.caption}</p>}
-      </>
-    );
-
-  return (
-    <>
-      <div className="fy-render-map" data-fy-render-map={state.kind} data-fy-render-map-mode={mode}>
-        <section aria-label={`Map: ${alt}`} className="fy-render-map-canvas" ref={hostRef} />
-        <div className="fy-render-map-zoom">
-          <button
-            aria-label="Zoom in"
-            className="fy-render-tool"
-            disabled={state.kind !== 'drawn'}
-            onClick={() => handle.current?.zoomIn()}
-            type="button"
-          >
-            <Plus aria-hidden="true" size={14} />
-          </button>
-          <button
-            aria-label="Zoom out"
-            className="fy-render-tool"
-            disabled={state.kind !== 'drawn'}
-            onClick={() => handle.current?.zoomOut()}
-            type="button"
-          >
-            <Minus aria-hidden="true" size={14} />
-          </button>
-        </div>
-        <ExternalLink className="fy-render-map-attribution" href={MAP_ATTRIBUTION.href}>
-          {MAP_ATTRIBUTION.text}
-        </ExternalLink>
+        ) : showsMap ? (
+          <>
+            <div className="fy-render-map-zoom">
+              <button
+                aria-label="Zoom in"
+                className="fy-render-tool"
+                disabled={state.kind !== 'drawn'}
+                onClick={() => handle.current?.zoomIn()}
+                type="button"
+              >
+                <Plus aria-hidden="true" size={14} />
+              </button>
+              <button
+                aria-label="Zoom out"
+                className="fy-render-tool"
+                disabled={state.kind !== 'drawn'}
+                onClick={() => handle.current?.zoomOut()}
+                type="button"
+              >
+                <Minus aria-hidden="true" size={14} />
+              </button>
+            </div>
+            <ExternalLink className="fy-render-map-attribution" href={MAP_ATTRIBUTION.href}>
+              {MAP_ATTRIBUTION.text}
+            </ExternalLink>
+          </>
+        ) : null}
       </div>
+      {state.kind === 'google' && state.caption !== null ? <p className="fy-render-map-note">{state.caption}</p> : null}
       {state.kind === 'drawn' && state.note !== null ? <p className="fy-render-map-note">{state.note}</p> : null}
     </>
   );

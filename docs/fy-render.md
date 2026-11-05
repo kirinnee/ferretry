@@ -317,7 +317,8 @@ charge; it is **not** the paid Maps JavaScript API, and nothing here calls that.
 - **The frame is locked down as far as an iframe can be.** `credentialless` (no cookies reach Google; see below),
   `referrerpolicy="origin"` (the page itself sends no Referer, but the key is restricted by it, so this frame alone
   sends the origin and no path), `sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"`
-  (no top navigation, no forms, no downloads) and no `allow=` features. The address is built only from validated
+  (no top navigation, no forms, no downloads) and no `allow=` features. `allow-popups-to-escape-sandbox` is there so
+  a link the map opens is a normal window: **a window the frame opens is not sandboxed**. The address is built only from validated
   numbers and the key; nothing the author wrote reaches it except a coordinate.
 - **Cross-origin isolation** (the opt-in "Several cores" mode, [voice-modes](design/voice-modes.md) §6): an isolated
   page may only embed a frame that opts in, which Google's embed is not known to do. A **`credentialless`** iframe is
@@ -330,8 +331,10 @@ charge; it is **not** the paid Maps JavaScript API, and nothing here calls that.
 **The one loosening of the page's CSP.** `public/_headers` gains `frame-src 'self' https://www.google.com/maps/embed/v1/`.
 Before it the page had no `frame-src`, so `default-src 'self'` let it frame only itself (the `fy-render` sandbox shells
 and card embeds). `'self'` is kept, and the single added source is the Embed API's **origin plus the `/maps/embed/v1/`
-path prefix** — CSP path matching treats a path ending in `/` as a prefix, so nothing else on `www.google.com`, and no
-other host, can be framed. It does not touch `script-src`, `connect-src`, `img-src` or `frame-ancestors`; a framed
+path prefix** — CSP path matching treats a path ending in `/` as a prefix, so **every endpoint beneath
+`/maps/embed/v1/`** is framable (not only `place` and `view`), but nothing else on `www.google.com` and no other host is,
+**for the initial URL**. CSP ignores paths after a redirect, so a redirect from the embed may land anywhere on an
+allowed scheme and host; only the scheme and host stay constrained. It does not touch `script-src`, `connect-src`, `img-src` or `frame-ancestors`; a framed
 Google page runs under Google's own policy, in an `allow-scripts` sandbox with no access to this page. The string is
 written once, in `src/lib/map-style.ts` (`GOOGLE_EMBED_FRAME_SOURCE`), and `scripts/validate/pages-config.sh` and
 `tests/unit/map-style.test.ts` hold `_headers` to it, refusing a bare `https:`, a wildcard or the whole origin.

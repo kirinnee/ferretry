@@ -25,7 +25,7 @@
  * pinned to {@link GOOGLE_EMBED_FRAME_SOURCE} by a unit test and `scripts/validate/pages-config.sh`.
  */
 
-import type { MapPoint, MapSpec } from './fy-render-map.ts';
+import { MAP_DEFAULT_ZOOM, type MapPoint, type MapSpec } from './fy-render-map.ts';
 
 /** The reader's choice, stored per device (`DeviceControls.mapStyle`). */
 export type MapStyle = 'osm' | 'google';
@@ -37,8 +37,11 @@ export const GOOGLE_MAPS_PRIVACY_NOTE = 'Google sees which places you open';
 
 /**
  * THE EMBED'S ADDRESS, split so the CSP source is derived and not retyped. `frame-src` names the origin
- * plus the path prefix: a source with a path ending in `/` matches everything beneath it, so nothing else
- * on `www.google.com` (and nothing on the rest of `/maps/`) is framable.
+ * plus the path prefix: a source with a path ending in `/` matches everything beneath it, so every endpoint
+ * under `/maps/embed/v1/` is framable (not only `place` and `view`) and nothing else on `www.google.com`
+ * (nor the rest of `/maps/`) is — for the INITIAL URL only: CSP ignores paths after a redirect, so a
+ * redirect from the embed can land anywhere on an allowed scheme and host, though the scheme and host stay
+ * constrained. The frame's sandbox includes `allow-popups-to-escape-sandbox`, so a window it opens is NOT sandboxed.
  */
 const GOOGLE_EMBED_ORIGIN = 'https://www.google.com';
 const GOOGLE_EMBED_PATH = '/maps/embed/v1/';
@@ -96,8 +99,13 @@ const coordinate = (point: MapPoint): string => `${point.lat.toFixed(6)},${point
 
 const sameSpot = (a: MapPoint, b: MapPoint): boolean => coordinate(a) === coordinate(b);
 
-/** The closest zoom a lone pin is given when none was asked for: the engine's own fit ceiling, so the two styles agree. */
-const LONE_PIN_ZOOM = 15;
+/**
+ * The zoom a lone pin gets when none was asked for, matching what the OpenStreetMap engine does: a FITTED
+ * map (`fit`, which is also the default when there is no centre) frames the pin up to its fit ceiling of 15
+ * (`FIT_MAX_ZOOM` in the engine); a map with a centre and no `fit` uses `MAP_DEFAULT_ZOOM`.
+ */
+const FITTED_PIN_ZOOM = 15;
+const lonePinZoom = (spec: MapSpec): number => (spec.fit ? FITTED_PIN_ZOOM : MAP_DEFAULT_ZOOM);
 
 const embedAddress = (mode: 'place' | 'view', params: Readonly<Record<string, string>>): string => {
   const query = new URLSearchParams(params);
@@ -133,7 +141,12 @@ export const chooseMapDrawing = (
     return {
       caption: caption === '' ? null : caption,
       credentialless,
-      src: embedAddress('place', { key, maptype: 'roadmap', q: coordinate(pin), zoom: zoom ?? String(LONE_PIN_ZOOM) }),
+      src: embedAddress('place', {
+        key,
+        maptype: 'roadmap',
+        q: coordinate(pin),
+        zoom: zoom ?? String(lonePinZoom(spec)),
+      }),
       via: 'google',
     };
   }
