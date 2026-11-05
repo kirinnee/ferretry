@@ -133,7 +133,7 @@ export function FyRenderMap({
   // then (a blank map forever, or a Google → OpenStreetMap switch that never drew).
   const showsMap = state.kind === 'loading' || state.kind === 'drawn';
   return (
-    <>
+    <div className="fy-render-map-block">
       {state.kind === 'listing' ? (
         <div className="fy-render-map-listing" data-fy-render-map="listing">
           <p className="fy-render-stopped">{state.note}.</p>
@@ -198,6 +198,6 @@ export function FyRenderMap({
       </div>
       {state.kind === 'google' && state.caption !== null ? <p className="fy-render-map-note">{state.caption}</p> : null}
       {state.kind === 'drawn' && state.note !== null ? <p className="fy-render-map-note">{state.note}</p> : null}
-    </>
+    </div>
   );
 }

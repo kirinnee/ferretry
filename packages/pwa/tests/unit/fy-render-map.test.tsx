@@ -368,6 +368,19 @@ describe('FyRenderMap in the Google Maps style', () => {
     should([...view.container.querySelectorAll('button')]).have.length(0);
   });
 
+  test('should keep the map and its note inside one wrapper, not as siblings of the stage', async () => {
+    // Act
+    const { view } = await showGoogle(PIN, CHROMIUM);
+    await settle(() => view.container.querySelector('.fy-render-map-note') !== null, 'the note');
+
+    // Assert
+    const block = must(view.container.querySelector('.fy-render-map-block'), 'the wrapper');
+    const note = must(view.container.querySelector('.fy-render-map-note'), 'the note');
+    should(view.container.firstElementChild).equal(block);
+    should(note.parentElement).equal(block);
+    should(must(view.container.querySelector('.fy-render-map'), 'the map').parentElement).equal(block);
+  });
+
   test('should say so, and mount OpenStreetMap, for a map Google cannot draw', async () => {
     // Act
     const { fake, view } = await showGoogle('markers:\n  - {at: [1, 2]}\n  - {at: [3, 4]}', CHROMIUM);
