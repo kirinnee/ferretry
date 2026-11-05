@@ -7,8 +7,7 @@
  * every credential is a placeholder, so no real harness setup, login or fleet is read or written.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, readdir, readFile, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   type AccountModel,
@@ -21,20 +20,12 @@ import {
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
 import { CloneableSecretNameSchema, configSchemaModeline, FleetCloneBundleSchema } from '@ferretry/protocol';
-import type { DaemonIdentity } from '@ferretry/relay';
-import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
-import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
-import { cloneConfigFilesOver, fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
-import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
-import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
 import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
 import { fleetSetupRoutes } from '../../../src/lib/runtime/mounts/fleet-setup.ts';
 import {
-  SecretDirectory,
   SecretExportService,
   SecretImportService,
   SecretVault,
@@ -46,143 +37,36 @@ import {
   FakeSecretCipher,
   GRANTED,
   human,
-  MemorySecretDocuments,
   NARROWED,
 } from '../../unit/runtime/mounts/support.ts';
-import { type ConfigHome, configHome } from './config-files-fixture.ts';
+import {
+  applyChange,
+  credentialBytes,
+  crypto_,
+  declared,
+  exportedBundle,
+  FAKE_CODEX_LOGIN,
+  FAKE_LOGIN,
+  FAKE_SECRET,
+  filesUnder,
+  HELD,
+  heldBytes,
+  identity,
+  importHost,
+  keysTheCopyNeeds,
+  type Machine,
+  MISSING,
+  machine,
+  OTHER_HELD,
+  removeTemporary,
+  signedInMachine,
+  sourceMachine,
+  unchanged,
+  type Vault,
+} from './clone-world.ts';
 
-const directories: string[] = [];
 
-async function temporary(): Promise<string> {
-  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'fy-setup-journey-')));
-  directories.push(directory);
-  return directory;
-}
-
-afterEach(async () => {
-  await Promise.all(
-    directories.splice(0).map(async directory => await rm(directory, { recursive: true, force: true })),
-  );
-});
-
-/** A placeholder Claude login: shaped like one, worth nothing. */
-const FAKE_LOGIN = JSON.stringify({
-  claudeAiOauth: {
-    accessToken: 'placeholder-access',
-    refreshToken: 'placeholder-refresh',
-    expiresAt: 4_102_444_800_000,
-  },
-});
-const FAKE_SECRET = 'ghp_placeholderplaceholderplaceholder0000';
-/** A placeholder Codex login: shaped like one, worth nothing. */
-const FAKE_CODEX_LOGIN = JSON.stringify({ tokens: { access_token: 'placeholder-codex-access' } });
-
-interface Machine {
-  readonly home: ConfigHome;
-  readonly fleet: string;
-  readonly userHome: string;
-  readonly setup: FleetSetupService;
-  readonly catalog: FleetCatalogService;
-  readonly secrets: Map<string, string>;
-}
-
-async function machine(
-  name: string,
-  options: {
-    readonly claude: boolean;
-    readonly emails?: Readonly<Record<string, string>>;
-    /** A real secret directory (names, timestamps and all) in place of the plain map, when a test needs one. */
-    readonly vault?: SecretDirectory;
-  },
-): Promise<Machine> {
-  const root = await temporary();
-  const home = await configHome(path.join(root, 'state'));
-  const fleet = home.paths.fleet;
-  const userHome = path.join(root, 'person');
-  await mkdir(userHome, { recursive: true });
-  if (options.claude) {
-    const claude = path.join(userHome, '.claude');
-    await mkdir(path.join(claude, 'skills', 'review'), { recursive: true });
-    await writeFile(path.join(claude, 'CLAUDE.md'), 'Be kind.\n');
-    await writeFile(path.join(claude, 'settings.json'), JSON.stringify({ env: { GITHUB_TOKEN: FAKE_SECRET } }));
-    await writeFile(path.join(claude, 'skills', 'review', 'SKILL.md'), '---\nname: review\n---\nReview it.\n');
-    await writeFile(path.join(claude, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
-  }
-  const secrets = new Map<string, string>();
-  const credentials = {
-    list: async () => ({
-      format: 2 as const,
-      machine: name,
-      credentials: Object.entries(options.emails ?? {}).map(([id, email]) => ({ id, email })) as never,
-    }),
-    signOut: async () => {
-      throw new Error('not exercised');
-    },
-  };
-  const catalogDeps = fileFleetCatalogDeps({
-    paths: home.paths,
-    userHome,
-    config: home.service,
-    configDirectory: home.paths.config,
-    sessionStatuses: async () => [],
-    credentials,
-    locate: harness => (harness === 'claude' && options.claude ? '/bin/sh' : undefined),
-    machineName: () => name,
-    clientName: 'fy',
-    publication: new FleetPublication(),
-  });
-  const setup = createFleetSetupSubsystem(
-    fileFleetSetupDeps({
-      catalog: catalogDeps,
-      configFiles: cloneConfigFilesOver(home.service),
-      daemonId: () => 'daemon-source',
-      credentials: {
-        material: async () => ({ outcome: 'missing' }),
-        storedMaterial: async () => (options.claude ? { outcome: 'found', blob: FAKE_LOGIN } : { outcome: 'missing' }),
-      } as never,
-      tools: { plans: () => [], install: async () => [] },
-      secrets: {
-        list: async () =>
-          options.vault === undefined
-            ? [...secrets.keys()].map(secret => ({ name: secret }))
-            : await options.vault.list(),
-        put: async (secret, value) => {
-          if (options.vault === undefined) secrets.set(secret, value);
-          else await options.vault.put(secret as never, value);
-        },
-      },
-    }),
-  );
-  const catalog = new FleetCatalogService({ ...catalogDeps, executors: setup.executors });
-  return { home, fleet, userHome, setup, catalog, secrets };
-}
-
-/** The import a person chooses, staged and applied through the catalogue the way the app and `fy daemon import` do it. */
-async function importHost(on: Awaited<ReturnType<typeof machine>>): Promise<unknown> {
-  const staged = await on.catalog.propose({ kind: 'setup.import' });
-  return await on.catalog.apply(staged.id, { governed: false } as never);
-}
-
-/** The model the machine's configuration files declare now. */
-async function declared(on: Machine) {
-  const model = await readDeclaredAccountModel(on.home.service, {
-    configDirectory: on.home.paths.config,
-    fleetDirectory: on.fleet,
-  });
-  should(model).not.be.undefined();
-  return model as NonNullable<typeof model>;
-}
-
-/** Every file under a directory, relative to it. */
-async function filesUnder(root: string, relative = ''): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
-    const next = relative === '' ? entry.name : `${relative}/${entry.name}`;
-    if (entry.isDirectory()) found.push(...(await filesUnder(root, next)));
-    else if (entry.isFile()) found.push(next);
-  }
-  return found;
-}
+afterEach(removeTemporary);
 
 describe('the first run and Clone over real files', () => {
   it('should import the host setup when asked, sharing the login in place and copying no credential', async () => {
@@ -389,29 +273,6 @@ describe('Clone and the default runtime for new agents over real files', () => {
     should(model.machine.defaultRuntime).equal('claude-default');
   });
 });
-
-/**
- * Everything a signed-in login and its secrets are, as raw bytes: every sign-in file, every secret value,
- * and every login declaration (one holds a `${secret:NAME}` reference). Nothing is parsed,
- * so a re-rendered file counts as a change.
- */
-async function credentialBytes(on: Machine): Promise<Record<string, string>> {
-  const bytes: Record<string, string> = {};
-  const sign = path.join(on.fleet, 'credentials');
-  for (const file of await filesUnder(sign))
-    bytes[`credentials/${file}`] = (await readFile(path.join(sign, file))).toString('hex');
-  for (const [name, value] of on.secrets) bytes[`secret:${name}`] = value;
-  const config = on.home.paths.config;
-  for (const file of await filesUnder(config)) {
-    const raw = (await readFile(path.join(config, file))).toString('hex');
-    if (file.startsWith('logins/')) bytes[`config/${file}`] = raw;
-  }
-  return bytes;
-}
-
-/** The files that were there before must read back the same; a copy may ADD files, never change one. */
-const unchanged = (before: Record<string, string>, after: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(Object.keys(before).map(key => [key, after[key] as string]));
 
 describe('the last-copied record over real files', () => {
   /**
@@ -1578,143 +1439,13 @@ describe('a repeat copy (update) over real files', () => {
  * passkey. Each step runs here through the same code the daemon runs: the real provisioner on real files, the real
  * configuration service, and the real secret import and export over a real secret directory (a fake cipher and an
  * in-memory document, so its timestamps and sealed entries are the daemon's own). A sign-in is a file a person
- * signed in with; a factor is a file beside it; neither is ever read by the copy, so each is compared as bytes.
+ * signed in with; the account, its sign-in, its 2FA keys, their sealed seeds and a registered passkey are the
+ * daemon's own account index, sealed document and passkey document, seeded with fake data and read back through the
+ * daemon's own readers (`account-stores-fixture.ts`). The copy never reads any of them, so each is compared as bytes.
  */
 describe('the whole app copy leaves a signed-in login, its secrets, its factors and the defaults byte-identical', () => {
-  const crypto_ = new WebCryptoRelayCrypto();
-  const HELD = 'HELD_KEY';
-  const OTHER_HELD = 'OTHER_HELD_KEY';
-  const MISSING = 'MISSING_KEY';
-  const FACTORS = JSON.stringify({ passkeys: ['credential-id-1'], totp: 'enrolled' });
-  const DEFAULTS = 'sites:\n  app.clickup.com: CLICKUP_A\n';
   const LEARNING = 'enabled: false\n';
-  const EMAIL = 'kirin@example.test';
-
-  interface Vault {
-    readonly documents: MemorySecretDocuments;
-    readonly directory: SecretDirectory;
-  }
-
-  /** A secret directory whose clock moves a minute with every write, so a rewrite shows in `updatedAt`. */
-  const vaultAt = (start: string): Vault => {
-    let at = Date.parse(start);
-    const documents = new MemorySecretDocuments();
-    return {
-      documents,
-      directory: new SecretDirectory(documents, new FakeSecretCipher(), {
-        now: () => {
-          at += 60_000;
-          return new Date(at).toISOString();
-        },
-      }),
-    };
-  };
-
-  async function identity(): Promise<DaemonIdentity> {
-    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
-      'sign',
-      'verify',
-    ])) as unknown as CryptoKeyPair;
-    const der = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
-    return await crypto_.importDaemonIdentity(
-      ['-----BEGIN PRIVATE KEY-----', ...(base64.match(/.{1,64}/gu) ?? []), '-----END PRIVATE KEY-----', ''].join('\n'),
-    );
-  }
-
-  const apply = async (on: Machine, change: unknown) => {
-    const staged = await on.catalog.propose(change as never);
-    return await on.catalog.apply(staged.id, { governed: false } as never);
-  };
-
-  /** A source that is signed in as `kirin@example.test`, with a second runtime when asked, and its secrets. */
-  async function sourceMachine(extraRuntime: boolean): Promise<{ source: Machine; vault: Vault }> {
-    const vault = vaultAt('2026-09-01T09:00:00.000Z');
-    const source = await machine('studio', { claude: true, emails: { 'claude-you': EMAIL } });
-    await importHost(source);
-    if (extraRuntime) {
-      // A second runtime needs a profile of its own: the catalog refuses one more on the same login and profile.
-      const layers = (await declared(source)).profiles['claude-default']?.layers;
-      if (layers === undefined) throw new Error('expected the imported profile');
-      await apply(source, { kind: 'profile.put', name: 'claude-extra', layers: [...layers], create: true });
-      await apply(source, {
-        kind: 'runtime.put',
-        name: 'claude-extra',
-        credential: 'claude-you',
-        profile: 'claude-extra',
-        agent: true,
-        create: true,
-      });
-    }
-    // The source holds the held key under ANOTHER value, and a key the target lacks.
-    await vault.directory.put(HELD as never, 'source-value-for-the-held-key');
-    await vault.directory.put(MISSING as never, 'source-value-for-the-missing-key');
-    return { source, vault };
-  }
-
-  /**
-   * A target that is signed in as the same account (twice, when asked), holds secrets, an environment login that
-   * refers to one by `${secret:NAME}`, factors, a host sign-in and an account default.
-   */
-  async function signedInMachine(name: string, twoLogins: boolean): Promise<{ target: Machine; vault: Vault }> {
-    const vault = vaultAt('2026-10-01T09:00:00.000Z');
-    await vault.directory.put(HELD as never, 'target-value-for-the-held-key');
-    await vault.directory.put(OTHER_HELD as never, 'target-value-for-the-other-key');
-    const logins = ['claude-kirin', ...(twoLogins ? ['claude-kirin-2'] : [])];
-    const target = await machine(name, {
-      claude: false,
-      emails: { ...Object.fromEntries(logins.map(id => [id, EMAIL])), 'codex-kirin': 'codex@example.test' },
-      vault: vault.directory,
-    });
-    const steps = [
-      ...logins.map(id => ({ kind: 'credential.add', id, harness: 'claude' })),
-      { kind: 'credential.add', id: 'codex-kirin', harness: 'codex' },
-      {
-        kind: 'component.put',
-        name: 'house',
-        component: { kind: 'instructions' },
-        content: 'Be kind.\n',
-        create: true,
-      },
-      { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
-      { kind: 'runtime.put', name: 'mine', credential: 'claude-kirin', profile: 'plain', agent: true, create: true },
-      {
-        kind: 'credential.add',
-        id: 'keyed',
-        harness: 'claude',
-        store: 'environment',
-        env: { ANTHROPIC_API_KEY: `\${secret:${HELD}}` },
-      },
-    ];
-    for (const step of steps) await apply(target, step);
-    for (const [id, file, token] of [
-      ...logins.map(id => [id, '.credentials.json', FAKE_LOGIN] as const),
-      ['codex-kirin', 'auth.json', FAKE_CODEX_LOGIN] as const,
-    ]) {
-      const store = path.join(target.fleet, 'credentials', id);
-      await mkdir(store, { recursive: true });
-      await writeFile(path.join(store, file), token, { mode: 0o600 });
-      await writeFile(path.join(store, 'factors.json'), FACTORS, { mode: 0o600 });
-    }
-    const claude = path.join(target.userHome, '.claude');
-    await mkdir(claude, { recursive: true });
-    await writeFile(path.join(claude, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
-    await writeFile(path.join(target.home.paths.config, 'account-defaults.yaml'), DEFAULTS, { mode: 0o600 });
-    return { target, vault };
-  }
-
-  /** Every byte a sign-in, a factor, a secret entry (value, timestamps) and an account default is. */
-  async function heldBytes(on: Machine, vault: Vault): Promise<Record<string, string>> {
-    const bytes = await credentialBytes(on);
-    const hex = async (file: string): Promise<string> => (await readFile(file)).toString('hex');
-    bytes['host/.claude/.credentials.json'] = await hex(path.join(on.userHome, '.claude', '.credentials.json'));
-    bytes['config/account-defaults.yaml'] = await hex(path.join(on.home.paths.config, 'account-defaults.yaml'));
-    const document = await vault.documents.read();
-    for (const name of [HELD, OTHER_HELD]) bytes[`vault/${name}`] = JSON.stringify(document?.entries[name]);
-    return bytes;
-  }
-
-  const exportedBundle = async (source: Machine) => FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+  const apply = applyChange;
 
   /** What a copy made before keys existed looks like: the same bundle as version 1. */
   const legacyBundle = async (source: Machine) => {
@@ -1770,10 +1501,12 @@ describe('the whole app copy leaves a signed-in login, its secrets, its factors 
       defaultRuntime: (await declared(target)).machine.defaultRuntime ?? null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
     });
-    // 4. The keys the copied setup names that this machine does not hold, sealed for one passkey on the source.
-    const held = new Set((await vault.directory.list()).map(secret => secret.name));
-    const offered = (await from.vault.directory.list()).map(secret => secret.name);
-    const names = offered.filter(name => !held.has(name)).map(name => CloneableSecretNameSchema.parse(name));
+    // 4. The keys the copied setup names that the source holds and this machine does not, sealed for one passkey.
+    const names = keysTheCopyNeeds(
+      bundle,
+      (await from.vault.directory.list()).map(secret => secret.name),
+      (await vault.directory.list()).map(secret => secret.name),
+    ).map(name => CloneableSecretNameSchema.parse(name));
     const here = await identity();
     const there = await identity();
     const clock = { now: () => '2026-10-20T10:00:00.000Z' };
@@ -1803,7 +1536,9 @@ describe('the whole app copy leaves a signed-in login, its secrets, its factors 
   ): Promise<void> => {
     for (const key of [
       'credentials/claude-kirin/.credentials.json',
-      'credentials/claude-kirin/factors.json',
+      'state/login-entries.json',
+      'state/login-secrets.json',
+      'state/passkeys.json',
       'credentials/codex-kirin/auth.json',
       'config/logins/claude-kirin.yaml',
       'config/logins/keyed.yaml',
