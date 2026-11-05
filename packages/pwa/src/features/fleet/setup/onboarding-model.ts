@@ -230,6 +230,8 @@ export interface OnboardingDoneFacts {
   readonly passiveDefault?: boolean;
   /** The runtimes each CLI has on the machine now, by name. */
   readonly runtimes?: Readonly<Partial<Record<SetupHarness, readonly string[]>>>;
+  /** The runtimes whose login still needs a sign-in, by name, as the machine reads now. */
+  readonly needsSignIn?: readonly string[];
 }
 
 const detailOf = (

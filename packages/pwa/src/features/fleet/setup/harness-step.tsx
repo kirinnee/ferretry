@@ -69,8 +69,8 @@ export interface HarnessReport {
   readonly harness: SetupHarness;
   /** The runtime the import made, when it made one. */
   readonly runtime: string | null;
-  /** "Imported 1 login, 3 skills, 3 MCP servers". */
-  readonly summary: string;
+  /** "Imported 1 login, 3 skills, 3 MCP servers"; null when only conversations were brought in. */
+  readonly summary: string | null;
   /** What the conversations import said, when it was asked for. */
   readonly conversations: string | null;
   /** The runtimes that still need a sign-in, each with the sign-in to open. */
@@ -182,33 +182,39 @@ export function OnboardingHarnessStep({
   const problem = makes ? runtimeNameProblem(typed, runtimes, machineName) : null;
   const set = (patch: Partial<HarnessAnswers>): void => onAnswers({ ...answers, ...patch });
   const installed = scanHasHarness(scan, harness);
-  /** A first import, or an import again the person asked for: otherwise this page has nothing to send. */
-  const willImport =
-    imported === null &&
-    (have.length === 0 ||
-      (answers.accepted?.length ?? 0) > 0 ||
-      answers.addAnother === true ||
-      answers.conversations === true);
+  /** A first import, or a setup import again the person asked for: otherwise nothing is re-imported. */
+  const importsSetup = have.length === 0 || (answers.accepted?.length ?? 0) > 0 || answers.addAnother === true;
+  /** Ticking only "Also bring my conversations" on a revisit adopts them and re-imports nothing. */
+  const willImport = imported === null && (importsSetup || answers.conversations === true);
 
   const send = (): void => {
     if (sending) return;
     setSending(true);
     void (async () => {
       try {
-        const applied = await changes.apply(harnessImportChange(harness, plan, answers));
-        if (applied.kind === 'refused') return;
-        const listed = await access.read(client => readFleetRuntimes(client));
-        const now = listed.kind === 'done' ? runtimesOf(listed.value.runtimes, harness) : [];
+        let now = have;
+        if (importsSetup) {
+          const applied = await changes.apply(harnessImportChange(harness, plan, answers));
+          if (applied.kind === 'refused') return;
+          const listed = await access.read(client => readFleetRuntimes(client));
+          now = listed.kind === 'done' ? runtimesOf(listed.value.runtimes, harness) : [];
+        }
         const kept = answers.conversations === true ? await bringConversations(access, harness, now, typed) : null;
-        const counts = importCounts(scan, harness, kept?.adopted ?? 0);
-        setImported({ notes: importNotes(scan, [harness]), counts });
+        const counts = importsSetup
+          ? importCounts(scan, harness, kept?.adopted ?? 0)
+          : { logins: 0, skills: 0, mcpServers: 0, conversations: kept?.adopted ?? 0 };
+        setImported({
+          notes: importsSetup ? importNotes(scan, [harness]) : [],
+          counts,
+          title: importsSetup || kept === null ? importSummary(counts) : kept.sentence,
+        });
         onAnswers({});
         await read();
         onFinished(
           {
             harness,
-            runtime: makes ? typed : null,
-            summary: importSummary(counts),
+            runtime: importsSetup && makes ? typed : null,
+            summary: importsSetup ? importSummary(counts) : null,
             conversations: kept === null ? null : kept.sentence,
             signIn: now
               .filter(runtime => runtime.credential.status === 'needs_sign_in')
@@ -509,6 +515,8 @@ async function bringConversations(
 interface ImportedResult {
   readonly notes: readonly string[];
   readonly counts: ImportCounts;
+  /** The result line: the import's summary, or what the conversations import said when nothing else ran. */
+  readonly title: string;
 }
 
 /** "What changed since the last import": one line, one tick to take it, and the names behind a disclosure. */
@@ -568,7 +576,7 @@ function ImportedNote({
         ];
   return (
     <div className="flex min-w-0 flex-col gap-2" data-harness-imported={harness}>
-      <SetupNote live tone="ok" name="import-ready" title={importSummary(result.counts)}>
+      <SetupNote live tone="ok" name="import-ready" title={result.title}>
         <SetupDisclosure label="Details" name="import-details">
           {ready.map(line => (
             <p key={line} className="m-0">

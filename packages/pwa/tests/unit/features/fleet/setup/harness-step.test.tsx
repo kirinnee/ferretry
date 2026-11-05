@@ -1247,6 +1247,43 @@ describe('OnboardingHarnessStep — auto-advance', () => {
     }
   });
 
+  it('on a machine that wants a passkey, the passkey line stays in the body and the footer Import still sends', async () => {
+    const calls: Call[] = [];
+    const s = await start(
+      daemon({ '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }) }, calls),
+    );
+    try {
+      expect(s.q('[data-onboarding-step-body] [data-change-step-up]')?.textContent).toContain('passkey');
+      expect(s.q('[data-change-apply] button')).toBeNull();
+      const primary = must(s.q('[data-onboarding-primary]') as HTMLButtonElement | null, 'the footer Import');
+      expect(primary.textContent).toBe('Import');
+      expect(primary.disabled).toBe(false);
+      await clickOn(primary, 'import');
+      expect(changeBodies(calls)).toHaveLength(1);
+      expect(s.finished).toHaveLength(1);
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('on a machine that refuses this device, the grant sentence stays in the body and the footer Import is held', async () => {
+    const calls: Call[] = [];
+    const s = await start(
+      daemon({ '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'not-granted' }) }, calls),
+    );
+    try {
+      expect(s.text('[data-onboarding-step-body] [data-change-grant-refused]').length).toBeGreaterThan(0);
+      const primary = must(s.q('[data-onboarding-primary]') as HTMLButtonElement | null, 'the footer Import');
+      expect(primary.textContent).toBe('Import');
+      expect(primary.disabled).toBe(true);
+      await clickOn(primary, 'import');
+      expect(changeBodies(calls)).toEqual([]);
+      expect(s.finished).toHaveLength(0);
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
   it('does not move on, or import conversations, when the apply is refused', async () => {
     const calls: Call[] = [];
     const s = await start(daemon({ [CHANGES_PATH]: new FyHttpError('Not now.', 409, 'fleet_change_refused') }, calls), {
@@ -1457,5 +1494,72 @@ describe('OnboardingHarnessStep — also bring my conversations', () => {
     } finally {
       await s.view.unmount();
     }
+  });
+
+  describe('on a revisit, with only conversations ticked', () => {
+    const REVISIT = {
+      [SCAN_PATH]: scan({
+        runtimes: [{ harness: 'codex', name: 'codex-default', profile: 'default' }],
+        duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
+      }),
+      [RUNTIMES_PATH]: runtimes([runtimeView('claude-default')]),
+    };
+
+    it('adopts them into the existing runtime and applies no setup.import', async () => {
+      const calls: Call[] = [];
+      const s = await start(
+        daemon({ ...REVISIT, [LISTING_PATH]: listing([row('a', 0.5)]), [ADOPT_PATH]: adopted(['a']) }, calls),
+        { answers: { conversations: true } },
+      );
+      try {
+        expect(s.text('[data-onboarding-primary]')).toBe('Import');
+        await clickOn(s.q('[data-onboarding-primary]'), 'import');
+        expect(changeBodies(calls)).toEqual([]);
+        expect(calls.some(call => call.path === APPLY_PATH)).toBe(false);
+        expect(adoptCalls(calls).map(call => (call.body as { runtime: string }).runtime)).toEqual(['claude-default']);
+        expect(s.finished).toEqual([
+          {
+            harness: 'claude',
+            runtime: null,
+            summary: null,
+            conversations: 'Brought in 1 conversation.',
+            signIn: [],
+          },
+        ]);
+        // The result claims what happened — conversations — and no setup it did not re-import.
+        expect(s.text('[data-setup-note="import-ready"] > p')).toBe('Brought in 1 conversation.');
+        expect(s.q('[data-setup-note="import-note"]')).toBeNull();
+      } finally {
+        await s.view.unmount();
+      }
+    });
+
+    it('with nothing to bring in it says so rather than “Imported”', async () => {
+      const s = await start(daemon({ ...REVISIT, [LISTING_PATH]: listing([]) }), {
+        answers: { conversations: true },
+      });
+      try {
+        await clickOn(s.q('[data-onboarding-primary]'), 'import');
+        expect(s.text('[data-setup-note="import-ready"] > p')).toBe(
+          'No Claude Code conversations from the last 7 days.',
+        );
+      } finally {
+        await s.view.unmount();
+      }
+    });
+
+    it('still applies the setup import when an update is also taken', async () => {
+      const calls: Call[] = [];
+      const s = await start(daemon({ ...REVISIT, [LISTING_PATH]: listing([]) }, calls), {
+        answers: { conversations: true, accepted: ['mcp/slack'] },
+      });
+      try {
+        await clickOn(s.q('[data-onboarding-primary]'), 'import');
+        expect(changeBodies(calls)).toHaveLength(1);
+        expect(s.finished[0]?.summary).toBe('Imported 1 login, 2 skills, 3 MCP servers');
+      } finally {
+        await s.view.unmount();
+      }
+    });
   });
 });

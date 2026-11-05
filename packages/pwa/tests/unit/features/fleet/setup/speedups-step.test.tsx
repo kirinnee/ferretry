@@ -177,12 +177,12 @@ describe('OnboardingSpeedupsStep', () => {
     expect(posted(run.calls, testPath('jev'))).toHaveLength(1);
     expect(posted(run.calls, testPath('groq'))).toHaveLength(1);
     expect(posted(run.calls, testPath('cerebras'))).toHaveLength(0);
-    // “saved” is told once the keys are stored, before the tests; “finished” only after they all pass.
+    // The step is told it is set, and then that it is finished, only once every test has passed.
     expect(run.saved).toHaveLength(1);
     expect(run.finished).toHaveLength(1);
-    const firstTest = run.calls.findIndex(call => call.path === testPath('jev'));
-    expect(run.saved[0]).toBeLessThanOrEqual(firstTest);
-    expect(run.finished[0]).toBeGreaterThan(firstTest);
+    const lastTest = run.calls.findLastIndex(call => call.path === testPath('groq'));
+    expect(run.saved[0]).toBeGreaterThan(lastTest);
+    expect(run.finished[0]).toBeGreaterThanOrEqual(run.saved[0] as number);
     expect(q('[data-speedups-problem]')).toBeNull();
     // The value never comes back onto the page.
     expect(mounted?.container.innerHTML).not.toContain(KEY);
@@ -197,11 +197,13 @@ describe('OnboardingSpeedupsStep', () => {
     });
     await typeInto('jev', KEY);
     await clickOn(save(), 'Save keys');
-    expect(run.saved).toHaveLength(1);
+    // A key that failed its test does not mark the step done, and does not offer a way past it either.
+    expect(run.saved).toHaveLength(0);
     expect(run.finished).toHaveLength(0);
     expect(text('[data-speedups-problem]')).toBe(
       'Saved, but the test didn’t pass. Jev: Jev did not accept that key. Paste a corrected key, or skip.',
     );
+    expect(q('[data-onboarding-primary="continue"]')).toBeNull();
     expect(save()?.textContent).toBe('Save keys');
     expect(save()?.disabled).toBe(true);
     // A corrected key can be pasted straight away.
@@ -244,6 +246,46 @@ describe('OnboardingSpeedupsStep', () => {
   it('warns before a key is pasted over a secret store that cannot be read', async () => {
     await start({ [SPEEDUPS_PATH]: view([], 'damaged') });
     expect(text('[data-setup-note="speedups-vault"]')).toContain('The secret store can’t be read');
+  });
+});
+
+describe('OnboardingSpeedupsStep · each provider says what it costs and what leaves the machine', () => {
+  it('shows the purpose, the cost and the privacy note beside where the key is pasted', async () => {
+    await start({ [SPEEDUPS_PATH]: view() });
+    for (const provider of ['jev', 'groq', 'cerebras'] as const) {
+      const field = must(q(`[data-speedup-field="${provider}"]`), `the ${provider} field`);
+      expect(field.textContent).toContain(`${LABELS[provider]} purpose.`);
+      expect(field.querySelector('[data-speedup-cost]')?.textContent).toBe('Well under a cent.');
+      expect(field.querySelector('[data-speedup-privacy]')?.textContent).toBe('Text goes to the vendor.');
+    }
+  });
+});
+
+describe('OnboardingSpeedupsStep · a revisit with keys already stored', () => {
+  const forward = () => q('[data-onboarding-primary="continue"]') as HTMLButtonElement | null;
+
+  it('has a Continue as its one primary that moves on without sending anything', async () => {
+    const run = await start({ [SPEEDUPS_PATH]: view(['jev']) });
+    expect(mounted?.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+    expect(forward()?.textContent).toBe('Continue');
+    expect(forward()?.disabled).toBe(false);
+    expect(save()).toBeNull();
+    await clickOn(forward(), 'Continue');
+    expect(run.finished).toHaveLength(1);
+    expect(run.calls.some(call => call.path === SECRETS_PATH || call.path.endsWith('/test'))).toBe(false);
+  });
+
+  it('turns back into Save keys once a new key is typed', async () => {
+    await start({ [SPEEDUPS_PATH]: view(['jev']) });
+    await typeInto('groq', KEY);
+    expect(forward()).toBeNull();
+    expect(save()?.disabled).toBe(false);
+  });
+
+  it('has no Continue when no key is stored', async () => {
+    await start({ [SPEEDUPS_PATH]: view() });
+    expect(forward()).toBeNull();
+    expect(save()?.disabled).toBe(true);
   });
 });
 

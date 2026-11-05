@@ -100,9 +100,15 @@ function ImportCarryNote({ report, machineName }: { readonly report: HarnessRepo
       live
       tone="ok"
       name="import-carry"
-      title={report.runtime === null ? `${name} imported` : `${report.runtime} is ready`}
+      title={
+        report.runtime !== null
+          ? `${report.runtime} is ready`
+          : report.summary === null
+            ? `${name} is already set up`
+            : `${name} imported`
+      }
     >
-      <span>{report.summary}</span>
+      {report.summary === null ? null : <span>{report.summary}</span>}
       {report.conversations === null ? null : <span>{report.conversations}</span>}
       {report.signIn.map(item => (
         <a
@@ -149,6 +155,9 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
                 claude: runtimes.runtimes.filter(runtime => runtime.harness === 'claude').map(runtime => runtime.name),
                 codex: runtimes.runtimes.filter(runtime => runtime.harness === 'codex').map(runtime => runtime.name),
               },
+              needsSignIn: runtimes.runtimes
+                .filter(runtime => runtime.credential.status === 'needs_sign_in')
+                .map(runtime => runtime.name),
             }),
       });
     })();
@@ -212,7 +221,10 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
 
   const doneNotes = Object.values(reports).flatMap(report => [
     ...(report.conversations === null ? [] : [report.conversations]),
-    ...report.signIn.map(item => `${item.runtime} still needs a sign-in (Settings › Sign-ins).`),
+    // Frozen at import time, so only the ones the machine still reports (read when Done opened) are said.
+    ...report.signIn
+      .filter(item => facts.needsSignIn === undefined || facts.needsSignIn.includes(item.runtime))
+      .map(item => `${item.runtime} still needs a sign-in (Settings › Sign-ins).`),
   ]);
 
   const finish = (): void => {

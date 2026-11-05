@@ -48,6 +48,12 @@ function KeyField({
         ) : null}
       </label>
       <p className="m-0 text-meta leading-base text-muted">{status.purpose}</p>
+      <p className="m-0 text-meta leading-base text-muted" data-speedup-cost="">
+        {status.costNote}
+      </p>
+      <p className="m-0 text-meta leading-base text-muted" data-speedup-privacy="">
+        {status.privacyNote}
+      </p>
       <input
         id={id}
         // `password` so it is not read over a shoulder; `new-password` so no password manager keeps a
@@ -141,7 +147,6 @@ export function OnboardingSpeedupsStep({
         if (status !== undefined) await putSecret(client, status.secretName, value);
       }
       setDrafts({});
-      latest.current.onSaved();
       setBusy('testing');
       const failed: string[] = [];
       for (const [provider] of typed) {
@@ -153,8 +158,11 @@ export function OnboardingSpeedupsStep({
         if (!result.ok) failed.push(`${status?.label ?? provider}: ${result.message}`);
       }
       setView(await readSpeedups(client));
-      if (failed.length === 0) latest.current.onFinished(here.current);
-      else setProblem(`Saved, but the test didn’t pass. ${failed.join(' ')} Paste a corrected key, or skip.`);
+      if (failed.length === 0) {
+        // Only a key that worked sets the step: a saved key that failed its test leaves it open.
+        latest.current.onSaved();
+        latest.current.onFinished(here.current);
+      } else setProblem(`Saved, but the test didn’t pass. ${failed.join(' ')} Paste a corrected key, or skip.`);
     } catch (cause) {
       setProblem(changeRefusalSentence(cause));
     } finally {
@@ -162,6 +170,12 @@ export function OnboardingSpeedupsStep({
     }
   }, [connection, createClient, typed, view]);
 
+  /**
+   * Keys already stored, none being typed and no failed test to answer: the page's forward action is
+   * Continue, as on a CLI already imported. After a failed test it stays Save keys, so a key that did not
+   * work is never walked past.
+   */
+  const revisit = typed.length === 0 && problem === null && (view?.providers ?? []).some(status => status.set);
   const jev = view?.providers.find(status => status.provider === 'jev');
   const dictation = view?.providers.filter(status => status.provider !== 'jev') ?? [];
   const field = (status: SpeedupStatus) => (
@@ -223,12 +237,16 @@ export function OnboardingSpeedupsStep({
           {problem}
         </p>
       )}
-      <PrimaryAction
-        label={busy === 'saving' ? 'Saving…' : busy === 'testing' ? 'Testing…' : 'Save keys'}
-        disabled={!idle || typed.length === 0 || unfinished.length > 0 || view === null}
-        onClick={() => void save()}
-        name="save-keys"
-      />
+      {revisit && idle ? (
+        <PrimaryAction label="Continue" onClick={() => latest.current.onFinished(true)} name="continue" />
+      ) : (
+        <PrimaryAction
+          label={busy === 'saving' ? 'Saving…' : busy === 'testing' ? 'Testing…' : 'Save keys'}
+          disabled={!idle || typed.length === 0 || unfinished.length > 0 || view === null}
+          onClick={() => void save()}
+          name="save-keys"
+        />
+      )}
     </div>
   );
 }

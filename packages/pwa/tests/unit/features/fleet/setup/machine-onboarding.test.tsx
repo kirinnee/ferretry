@@ -678,6 +678,98 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     expect(link.getAttribute('data-carry-sign-in')).toBe('claude-work');
   });
 
+  it('an import that makes no runtime is carried as “imported”, with what it brought in', async () => {
+    const screen = await render({
+      routes: {
+        ...freshRoutes(NO_RUNTIMES),
+        '/v1/fleet/setup/scan': scan({
+          runtimes: [],
+          duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
+        }),
+        '/v1/fleet/proposals': STAGED,
+        [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Imported' },
+      },
+      machine: FRESH_MACHINE,
+    });
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-primary="import"]');
+    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
+    expect(note.textContent).toContain('Claude Code imported');
+    expect(note.textContent).toContain('Imported 1 login, 2 skills, 3 MCP servers');
+  });
+
+  it('a revisit that brings in only conversations says nothing was re-imported', async () => {
+    const recent = {
+      id: 'a',
+      harness: 'claude',
+      project: '/work/shop',
+      preview: 'conversation a',
+      lastActivityAt: new Date(Date.now() - 3_600_000).toISOString(),
+      turns: 3,
+    };
+    const screen = await render({
+      routes: {
+        ...freshRoutes(CLAUDE_RUNTIME),
+        '/v1/fleet/setup/scan': scan({
+          runtimes: [],
+          duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
+        }),
+        '/v1/imports/conversations?harness=claude&limit=5000': { conversations: [recent], matched: 1, skipped: 0 },
+        '/v1/imports/conversations/adopt': {
+          adopted: [{ id: 'a', session: 's-a', name: 'ferret-a', status: 'stopped' }],
+          refused: [],
+        },
+      },
+      machine: FRESH_MACHINE,
+    });
+    await screen.rail('claude');
+    await screen.click('[data-harness-conversations]');
+    await screen.click('[data-onboarding-primary="import"]');
+    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
+    expect(note.textContent).toContain('Claude Code is already set up');
+    expect(note.textContent).toContain('Brought in 1 conversation.');
+    expect(note.textContent).not.toContain('imported');
+    expect(screen.calls.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
+  });
+
+  describe('Done’s “still needs a sign-in” notes', () => {
+    const stateOfLogin = (status: 'needs_sign_in' | 'ready') =>
+      runtimes([runtimeView('claude-default', { credential: { id: 'claude-work', store: 'ferretry', status } })]);
+
+    /** Imports Claude Code while its login needs a sign-in, then Done reads the machine as `later` says. */
+    const importThenDone = async (later: 'needs_sign_in' | 'ready') => {
+      let phase: 'before' | 'imported' | 'later' = 'before';
+      const screen = await fresh(
+        () => (phase === 'before' ? NO_RUNTIMES : stateOfLogin(phase === 'imported' ? 'needs_sign_in' : later)),
+        {},
+        {
+          '/v1/fleet/proposals': STAGED,
+          [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Imported' },
+        },
+      );
+      await screen.rail('claude');
+      phase = 'imported';
+      await screen.click('[data-onboarding-primary="import"]');
+      expect(screen.q('[data-carry-sign-in]')).not.toBeNull();
+      phase = 'later';
+      await finished(screen);
+      return screen;
+    };
+
+    it('are said while the machine still reports the login as needing one', async () => {
+      const screen = await importThenDone('needs_sign_in');
+      expect(screen.view.container.textContent).toContain(
+        'claude-default still needs a sign-in (Settings › Sign-ins).',
+      );
+    });
+
+    it('go away once the login was signed in later, read from the machine when Done opens', async () => {
+      const screen = await importThenDone('ready');
+      expect(screen.q('[data-onboarding-summary]')).not.toBeNull();
+      expect(screen.view.container.textContent).not.toContain('still needs a sign-in');
+    });
+  });
+
   it('stays on the page, and does not set the step, when the import is refused', async () => {
     const screen = await fresh(
       NO_RUNTIMES,
