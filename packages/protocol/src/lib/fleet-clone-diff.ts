@@ -221,6 +221,9 @@ export const FleetCloneReviewSchema = z.strictObject({
 });
 export type FleetCloneReview = z.infer<typeof FleetCloneReviewSchema>;
 
+/** The most keys a review's `sourceSecrets` can list; a source holding more is reviewed without them. */
+export const CLONE_SOURCE_SECRETS_LIMIT = 1024;
+
 /** `POST /v1/fleet/clone/review`: the same inputs `clone.import` takes, less the decisions. */
 export const FleetCloneReviewRequestSchema = z.strictObject({
   bundle: z.record(z.string(), z.unknown()),
@@ -229,7 +232,7 @@ export const FleetCloneReviewRequestSchema = z.strictObject({
   settings: z.array(CloneSettingsTextSchema).max(CLONE_SETTINGS_DOCS.length).optional(),
   sourceSecrets: z
     .array(z.strictObject({ name: NonEmptyStringSchema, updatedAt: InstantSchema }))
-    .max(1024)
+    .max(CLONE_SOURCE_SECRETS_LIMIT)
     .optional(),
 });
 export type FleetCloneReviewRequest = z.infer<typeof FleetCloneReviewRequestSchema>;

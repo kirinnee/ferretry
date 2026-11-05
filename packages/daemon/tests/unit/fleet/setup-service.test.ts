@@ -10,11 +10,12 @@ import { describe, it } from 'bun:test';
 import {
   type AccountModel,
   accountModelFiles,
+  assembleAccountModel,
   buildCloneBundle,
   builtInModelCatalogs,
-  checkConfigFile,
   builtInPresets,
   CLONE_BASE_FILE,
+  checkConfigFile,
   EXPORT_KEYS_FILE,
   parseCloneBase,
   serializeCloneBase,
@@ -28,6 +29,7 @@ import {
   parseAccountModel,
   RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
+  renderConfigFile,
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
@@ -2684,6 +2686,219 @@ intervalMinutes: 5
 describe('createFleetSetupSubsystem', () => {
   it('should build the service the composition root mounts', () => {
     should(world().service).be.instanceOf(FleetSetupService);
+  });
+});
+
+// ── Re-copy never touches a login, a secret or a default (account-model §14.4) ───────────────────
+
+describe('a re-copy leaves a signed-in login, its secrets, its factors and the defaults byte-identical', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+  const AUTH = '/state/fleet/homes/claude-you/.credentials.json';
+  const FACTORS = '/state/fleet/homes/claude-you/factors.json';
+  const SIGNED_IN_ROW = credentialRow('claude-you', 'you@example.com');
+  const SECRETS: readonly (readonly [string, string])[] = [
+    ['NOTES_TOKEN', 'ghp_do_not_touch'],
+    ['SECOND_KEY', 'sk_do_not_touch_either'],
+  ];
+  /** The account model as JSON, to patch: every section is a table of tables. */
+  interface ModelJson {
+    machine: Record<string, unknown>;
+    credentials: Record<string, Record<string, unknown>>;
+    components: Record<string, Record<string, Record<string, unknown>>>;
+    profiles: Record<string, Record<string, unknown>>;
+    runtimes: Record<string, Record<string, unknown>>;
+  }
+  const clone = (bundle: unknown, extra: Record<string, unknown>) =>
+    ({ kind: 'clone.import', bundle, ...extra }) as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+
+  /** What another machine exports: the set-up model, `content` as its main instructions, plus any model patch. */
+  const exported = async (patch: (json: ModelJson) => void = () => undefined, content = 'Main.\n') => {
+    const json = JSON.parse(JSON.stringify(SET_UP_MODEL())) as ModelJson;
+    patch(json);
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(parseAccountModel(json), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+
+  const run = async (w: World, change: Extract<FleetAccountChange, { kind: 'clone.import' }>) => {
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    return w.applied.flatMap(applied => applied.documents);
+  };
+
+  /** A machine that took a first copy, then signed in, kept two secrets and set its defaults. */
+  const signedIn = async (
+    options: { legacy?: boolean; extraLogin?: boolean; first?: Record<string, unknown> } = {},
+  ): Promise<{ w: World; before: AccountModel }> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const documents = await run(first, clone(options.first ?? (await exported()), { mode: 'alongside' }));
+    const json = JSON.parse(JSON.stringify(modelOfWrites(documents))) as ModelJson;
+    json.machine = { ...json.machine, defaultRuntime: 'claude-default' };
+    if (options.extraLogin === true) {
+      json.credentials['claude-two'] = { harness: 'claude', store: 'host', label: 'second' };
+    }
+    if (options.legacy === true) {
+      // A copy made before origin links existed: it says where it came from by name, with no key and no record.
+      for (const section of [...Object.values(json.components), json.profiles, json.credentials, json.runtimes]) {
+        for (const entry of Object.values(section)) {
+          delete entry.clonedFromKey;
+          delete entry.clonedFromDaemon;
+        }
+      }
+    }
+    const before = parseAccountModel(json);
+    const w = world({ overrides: { daemonId: () => 'daemon-target' } });
+    w.state.reading = configReading(before, 'r');
+    for (const document of documents)
+      if (document.path.startsWith('/state/fleet/')) w.state.assets[document.path] = document.content;
+    if (options.legacy === true) delete w.state.assets[BASE_PATH];
+    w.state.emails = async () => [
+      SIGNED_IN_ROW,
+      ...(options.extraLogin === true ? [credentialRow('claude-two', 'you@example.com')] : []),
+    ];
+    for (const [name, value] of SECRETS) w.secrets.set(name, value);
+    w.state.assets[AUTH] = 'sealed-refresh-token-bytes';
+    w.state.assets[FACTORS] = '{"passkeys":["credential-id-1"],"totp":"enrolled"}';
+    return { w, before };
+  };
+
+  /** The model after a set of writes: the files the model is held in, with each write or removal replayed on them. */
+  const replay = (before: AccountModel, documents: readonly FleetDocumentWrite[]): AccountModel => {
+    const files = new Map<string, string>();
+    for (const [path, { address, value }] of accountModelFiles(before)) {
+      const text = renderConfigFile(path, address, value, undefined);
+      if (text !== undefined) files.set(`/state/config/${path}`, text);
+    }
+    for (const document of documents) {
+      if (!document.path.startsWith('/state/config/')) continue;
+      if (document.remove === true) files.delete(document.path);
+      else files.set(document.path, document.content);
+    }
+    return assembleAccountModel(
+      [...files].map(([path, text]) => {
+        const checked = checkConfigFile(path.slice('/state/config/'.length), text);
+        if (!checked.ok) throw new Error(`${path} does not check`);
+        return { address: checked.address, value: checked.value };
+      }),
+    );
+  };
+
+  /** Everything a login holds that this service could have reached, and nothing it should: before against after. */
+  const proveUntouched = (w: World, before: AccountModel, documents: readonly FleetDocumentWrite[]): void => {
+    const loginFiles = [...accountModelFiles(before)]
+      .filter(([, file]) => file.address.kind === 'login')
+      .map(([path]) => `/state/config/${path}`);
+    should(loginFiles.length).be.above(0);
+    // No write or removal names a login's file, its sign-in, or its factors.
+    should(documents.map(document => document.path).filter(path => loginFiles.includes(path))).eql([]);
+    should(documents.map(document => document.path).filter(path => path.startsWith('/state/fleet/homes/'))).eql([]);
+    // The stores read back the same, byte for byte.
+    should([...w.secrets]).deepEqual([...SECRETS]);
+    should(w.state.assets[AUTH]).equal('sealed-refresh-token-bytes');
+    should(w.state.assets[FACTORS]).equal('{"passkeys":["credential-id-1"],"totp":"enrolled"}');
+    // Replayed, every login the machine had is the same login, and its default is the same default.
+    const after = replay(before, documents);
+    for (const [id, login] of Object.entries(before.credentials)) should(after.credentials[id]).deepEqual(login);
+    should(after.machine.defaultRuntime).equal(before.machine.defaultRuntime);
+  };
+
+  it('should leave every login, secret and default alone in an Update, whatever the person chose', async () => {
+    const { w, before } = await signedIn();
+    const bundle = await exported(() => undefined, 'Main, changed on the source.\n');
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'instructions/main')?.outcome).equal('theirs');
+    const documents = await run(w, clone(bundle, { mode: 'update', reviewed: review.fingerprint, decisions: {} }));
+    should(documents.find(document => document.path === MAIN_COPY)?.content).equal('Main, changed on the source.\n');
+    proveUntouched(w, before, documents);
+  });
+
+  it('should leave them alone when the person names which existing login a sign-in uses', async () => {
+    const { w, before } = await signedIn({ extraLogin: true, legacy: true });
+    const bundle = await exported();
+    const review = await w.service.reviewClone({ bundle });
+    const ask = review.logins.find(login => login.sourceId === 'claude-you');
+    should(ask?.outcome).equal('ask');
+    should(ask?.candidates).deepEqual(['claude-two', 'claude-you']);
+    const change = clone(bundle, {
+      mode: 'update',
+      reviewed: review.fingerprint,
+      decisions: {},
+      logins: { 'claude-you': 'claude-two' },
+    });
+    proveUntouched(w, before, await run(w, change));
+  });
+
+  it('should leave them alone in Add alongside, which renames what clashes rather than replacing it', async () => {
+    const { w, before } = await signedIn();
+    const documents = await run(w, clone(await exported(), { mode: 'alongside' }));
+    should(documents.some(document => document.path.startsWith('/state/config/'))).be.true();
+    proveUntouched(w, before, documents);
+  });
+
+  it('should leave them alone in Start over: Replace clears the setup, never a login, a secret or a factor', async () => {
+    const { w, before } = await signedIn();
+    const documents = await run(w, clone(await exported(), { mode: 'replace' }));
+    proveUntouched(w, before, documents);
+  });
+
+  it('should leave them alone when the person removes an item the source no longer has', async () => {
+    // The first copy brought a runtime the source has since dropped.
+    const withExtra = await exported(json => {
+      json.runtimes['claude-extra'] = { credential: 'claude-you', profile: 'default' };
+    });
+    const { w, before } = await signedIn({ first: withExtra });
+    const bundle = await exported();
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'runtime/claude-extra')?.outcome).equal('gone');
+    const documents = await run(
+      w,
+      clone(bundle, { mode: 'update', reviewed: review.fingerprint, decisions: { 'runtime/claude-extra': 'remove' } }),
+    );
+    should(documents.some(document => document.remove === true && document.path.includes('claude-extra'))).be.true();
+    proveUntouched(w, before, documents);
+  });
+
+  it('should link an identical old copy by name without writing a document, so the next source edit is theirs, not both', async () => {
+    // Arrange: an old copy, identical to the source, with nothing recording where it came from.
+    const { w, before } = await signedIn({ legacy: true });
+    const bundle = await exported();
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items).deepEqual([]);
+    should(review.same.probable).be.above(0);
+
+    // Act: finish, as the sheet does: the reviewed fingerprint and no decision.
+    const documents = await run(w, clone(bundle, { mode: 'update', reviewed: review.fingerprint, decisions: {} }));
+
+    // Assert: only the links and the record of the copy are written; no asset document, no login, no secret.
+    should(documents.filter(document => document.path.startsWith('/state/fleet/assets/'))).eql([]);
+    should(documents.some(document => document.path === BASE_PATH)).be.true();
+    proveUntouched(w, before, documents);
+
+    // Next: the source edits a document, and this machine is shown a source-only change.
+    const linked = world({ overrides: { daemonId: () => 'daemon-target' } });
+    linked.state.reading = configReading(replay(before, documents), 'r');
+    linked.state.assets = { ...w.state.assets };
+    for (const document of documents)
+      if (document.path.startsWith('/state/fleet/')) linked.state.assets[document.path] = document.content;
+    linked.state.emails = w.state.emails;
+    const edited = await linked.service.reviewClone({
+      bundle: await exported(() => undefined, 'Main, edited on the source.\n'),
+    });
+    const main = edited.items.find(row => row.ref === 'instructions/main');
+    should(main?.outcome).equal('theirs');
+    should(main?.choice).equal('take');
+  });
+
+  it('should have called that edit a conflict had the link never been written', async () => {
+    const { w } = await signedIn({ legacy: true });
+    const edited = await w.service.reviewClone({
+      bundle: await exported(() => undefined, 'Main, edited on the source.\n'),
+    });
+    should(edited.items.find(row => row.ref === 'instructions/main')?.outcome).equal('both');
   });
 });
 

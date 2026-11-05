@@ -101,8 +101,8 @@ export function CloneSettingsKeys({
   return (
     <SetupSection title="Settings that differ" name="clone-setting-keys">
       <p className="m-0 text-cell leading-base text-muted">
-        Only the settings that differ are listed. A setting you changed here and {source} did not stays as you have it.
-        For a setting changed on both, you choose.
+        Only the settings that differ are listed. A setting you changed here that {source} did not change stays as you
+        have it. For a setting changed on both, you choose.
       </p>
       {shown.map(document => (
         <div key={document.path} className="flex min-w-0 flex-col gap-2" data-clone-setting-document={document.path}>
