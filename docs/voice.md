@@ -699,7 +699,7 @@ speakable rules above), and one reading stops at the **longest reading** setting
 
 **It works only on the daemon's own word.** Every date it uses is the daemon's `turnStateAt`, on the daemon's clock; nothing is ever compared
 with the browser's clock. A machine that sends no `turnState` gives it nothing to work with, so **nothing is auto-read there** — the settings
-row says so in plain words ("Auto-read needs a newer Ferretry daemon on this machine"), and **Read aloud** on a message still works. There is
+row says so in plain words ("Auto-read needs a newer Ferretry on your computer") — **only when it applies**: the connected machine has live ferrets and none of them carries a turn (`machineIsOlder` in `hooks/use-machine-dates-turns.ts`); a machine that does date its turns shows no note — and **Read aloud** on a message still works. There is
 deliberately no guess for an old daemon: a guess timed by "3 seconds of quiet" read history three reviews in a row.
 
 0. **Only the daemon's live word counts.** The page draws this device's cached copy first (the fleet's seeded view, a transcript from the
@@ -756,21 +756,29 @@ refused storage keeps the choice in memory and says so. Nothing in it is a secre
 | Longest reading   | 30 seconds · 1 · 2 · 5 minutes · No limit            | 1 minute                 |
 | What to read      | Last message of the turn · Every message             | Last message of the turn |
 
-The voice list groups voices **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as Chrome's
-"Google …" ones), and a remote voice is labelled in words with who it sends text to ("(sends text to Google)") and warns in words when chosen. **Preview voice** speaks one sentence
-with the chosen voice and speed. Free voices built into the device only: no paid or cloud voice and no new secret.
+The voice is chosen from a **picker** (`features/settings/voice-picker.tsx`), not a native `<select>`: a closed select shows one line and cuts what
+does not fit, and the words that matter most are the voice's name and who gets the text. The button shows the voice in use — its name, then a
+second line saying where it speaks ("Speaks on this device" / "Sends text to Google", with a warning icon and bold words for a remote one). It
+opens a list of radio rows grouped **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as
+Chrome's "Google …" ones); a row carries the name and the vendor line separately, **both wrap, neither is ever clipped**, and the chosen row
+says **Selected**. A remote voice also warns in a full sentence when chosen. **Preview voice** speaks one sentence with the chosen voice and
+speed (a remote voice shows its warning while it is previewed).
+
+**Auto-read replies** is a real switch (`role="switch"`, `aria-checked`) in a full-width row: the name, the state **in words**, and a track
+with a thumb that moves. Every control — the switch row, the voice button and its rows, Preview, the speed slider (a 48 px hit area around a
+32 px thumb), the Longest-reading select and the What-to-read rows — is at least 44 px tall, and 48 px on a phone or any touch screen. Free voices built into the device only: no paid or cloud voice and no new secret.
 
 ### Accessibility
 
 State is always in words: the switch says **On**/**Off**, the chip says **Reading the reply** and how to stop, and a polite live region
-says only "Reading the reply" — never the reply itself, which the voice already says. Targets are 44 px; nothing moves (there is no
+says only "Reading the reply" — never the reply itself, which the voice already says. Targets are 44 px (48 px on a phone); nothing moves (there is no
 animation to turn off); the settings carry no autofocus.
 
 ### Where it lives
 
 `lib/voice-chat/` — `reply-picker.ts`, `auto-read.ts`, `live-settings.ts`. `hooks/use-auto-read.ts` is the composition point (one timer and a few
 document events), used by the chat page, which hands its `beginSend` / `sent` / `failed` to the composer's `onSending` / `onSent` / `onSendFailed` and the daemon's send ledger (`sends`, never the browser's outbox) as the source of each send's accepted time; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
-`features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice.
+`features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice, `voice-picker.tsx` its voice list, and the styles are in `components/read-aloud.css` (`.fy-auto-read*`, `.fy-ar*`).
 
 ## Pause detection (the end of a spoken turn)
 
