@@ -414,14 +414,19 @@ is always a candidate, so there is no input for which nothing is chosen.
 - **Settings › Voice** shows a read-only block under the engine list, in plain words (no technical names on
   screen): **"Speech speed: standard (one core)"** or **"Speech speed: fast (several cores)"**, one sentence
   of what that means ("Your words appear a moment after you stop talking." — or, for the fast mode, "sooner…
-  about 2–3 times faster than standard on a desktop we tested", the only number, from the table above), and one
+  about 2–3 times faster than standard", the only number, from the table above, measured on a desktop), and one
   sentence of why. When a faster mode was left out the sentence names it and says which it is: "A faster mode
   (several cores) is not available on this site yet: it needs a browser setting the site has not switched
   on." (this page is not isolated) or "…is available on this device but turned off for now, because it did
   not work here last time." (a failure is remembered). The words live in `SPEED_PATH_LABEL`,
   `SPEED_CONSEQUENCE_TEXT` and `SPEED_REASON_TEXT`; a test keeps WebAssembly, WebGPU and thread talk out of
-  them. There is nothing to press and no link to the speed test page. There is no manual override: with one
-  path available it would be a switch that does nothing.
+  them. There is nothing to press to change the mode: with one path available an override would be a switch
+  that does nothing, so there is none. **On the dev server only** the block ends with a link, **"Test speed on
+  this device"**, to the speed test page (`/speed-bench/`, below): at least 44 px tall on every screen, a real
+  link a keyboard reaches, opening in a new tab (`rel="noopener noreferrer"`) so Settings stays where it was.
+  The page is dev tooling and is not in the production build (`vite.config.ts` builds `index.html`, `app/` and
+  `get-started/` only), so the deployed site shows no link rather than one to a page that is not there
+  (`speedTestHref`, keyed on `import.meta.env.DEV`).
 
 ### Starting to transcribe during the send countdown
 

@@ -44,12 +44,12 @@ export const SPEED_PATH_LABEL: Readonly<Record<SpeedPath, string>> = {
 /**
  * What the speed means for the person, in one plain sentence. The only number is the one that was
  * measured (docs/voice.md › Measured): several cores finished 2.5–2.8× sooner than one on a desktop; a
- * phone and a graphics chip were not measured, so those say no number.
+ * phone and a graphics chip were not measured, so those say no number. The sentence does not name the
+ * desktop: the table is evidence, not a promise about this device.
  */
 export const SPEED_CONSEQUENCE_TEXT: Readonly<Record<SpeedPath, string>> = {
   webgpu: 'Your words appear sooner after you stop talking.',
-  'wasm-threads':
-    'Your words appear sooner after you stop talking: about 2–3 times faster than standard on a desktop we tested.',
+  'wasm-threads': 'Your words appear sooner after you stop talking: about 2–3 times faster than standard.',
   'wasm-single': 'Your words appear a moment after you stop talking.',
 };
 
@@ -229,3 +229,14 @@ export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
   'failed-before':
     'A faster mode (several cores) is available on this device but turned off for now, because it did not work here last time.',
 };
+
+/** Where the dev server serves the one-click speed test page (`speed-bench/index.html`). */
+export const SPEED_TEST_PATH = '/speed-bench/';
+
+/**
+ * The speed test page's address, or `null` when this build does not serve one. The page is dev tooling:
+ * `vite.config.ts` builds only `index.html`, `app/` and `get-started/`, so the deployed site answers
+ * `/speed-bench/` with its fallback page, not a test. The link is therefore offered only where Vite's dev
+ * server is running (`import.meta.env.DEV`), never in a production build.
+ */
+export const speedTestHref = (dev: boolean | undefined): string | null => (dev === true ? SPEED_TEST_PATH : null);

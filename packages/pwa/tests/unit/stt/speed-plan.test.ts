@@ -17,9 +17,11 @@ import {
   SPEED_PATH_LABEL,
   SPEED_PATH_ORDER,
   SPEED_REASON_TEXT,
+  SPEED_TEST_PATH,
   type SpeedPath,
   type SpeedSignals,
   speedLine,
+  speedTestHref,
   threadsFor,
 } from '../../../src/lib/stt/speed-plan.ts';
 
@@ -195,6 +197,16 @@ describe('the words', () => {
       ...Object.values(SPEED_REASON_TEXT),
     ].join('\n');
     should(visible).not.match(/webassembly|webgpu|thread|worker|wasm|gpu\b/i);
+  });
+
+  it('offers the speed test page only on the dev server, never in a production build', () => {
+    should(speedTestHref(true)).equal(SPEED_TEST_PATH);
+    should(speedTestHref(false)).equal(null);
+    should(speedTestHref(undefined)).equal(null);
+  });
+
+  it('says the speed gain without naming the desktop it was measured on', () => {
+    should(SPEED_CONSEQUENCE_TEXT['wasm-threads']).not.containEql('desktop');
   });
 
   it('says what each speed means, with a number only for the one that was measured', () => {
