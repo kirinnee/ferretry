@@ -3,6 +3,9 @@ import should from 'should';
 import { copiableMcp, type LocalMcpInventoryServer } from '../../../src/lib/local-mcp-installs/source.ts';
 import { FAKE_VALUE, stdioServer } from './support.ts';
 
+/** A whole secret reference, written so it is not a template placeholder. */
+const REF = ['$', '{secret:TOKEN}'].join('');
+
 const http = (url: string, extra: Partial<LocalMcpInventoryServer> = {}): LocalMcpInventoryServer =>
   stdioServer({
     name: 'remote',
@@ -252,6 +255,70 @@ describe('a command whose arguments hold a credential is refused, never copied',
       }
     });
   }
+
+  it('should refuse a credential in either representation a row carries, whichever one is copied', () => {
+    const leaking = 'https://dummy:hunter2dummy@mcp.example.com';
+    const clean = { command: 'node', args: [] as string[], env: {} };
+    const rows = [
+      // The component is copied, and holds the address; the declaration is empty.
+      stdioServer({
+        scope: 'component',
+        declaration: { name: 'search', transport: 'stdio', command: 'node', args: [], env: {} },
+        component: { ...clean, args: [leaking] },
+      }),
+      // The declaration is copied, and holds the address; the component is clean.
+      stdioServer({
+        declaration: { name: 'search', transport: 'stdio', command: 'node', args: [leaking], env: {} },
+        component: clean,
+      }),
+    ];
+    for (const row of rows) {
+      const result = copiableMcp(row);
+      should(result.ok).be.false();
+      if (result.ok) return;
+      should(result.reason).startWith('Its argument 1');
+      should(result.reason).not.match(/hunter2dummy/u);
+    }
+  });
+
+  it('should still copy a row whose two representations are both clean, and say too long of either', () => {
+    const both = stdioServer({
+      scope: 'component',
+      declaration: { name: 'search', transport: 'stdio', command: 'node', args: ['old.js'], env: {} },
+      component: { command: 'node', args: ['new.js'], env: {} },
+    });
+    const copied = copiableMcp(both);
+    should(copied.ok && copied.setup).containEql({ args: ['new.js'] });
+    const long = stdioServer({
+      scope: 'component',
+      declaration: { name: 'search', transport: 'stdio', command: 'node', args: ['x'.repeat(100_000)], env: {} },
+      component: { command: 'node', args: [], env: {} },
+    });
+    should(copiableMcp(long).ok).be.false();
+  });
+
+  it('should refuse a short authorization value in a JSON header argument, and not read a reference as one', () => {
+    for (const header of [
+      '{"Authorization":"Basic Zm9vOmJhcg=="}',
+      '{"Authorization": "Bearer short"}',
+      "{'Authorization':'Basic Zm9vOmJhcg=='}",
+      '{\\"Authorization\\":\\"Basic Zm9vOmJhcg==\\"}',
+    ]) {
+      for (const result of [
+        refused('npx', ['mcp-remote', '--headers', header]),
+        refused('npx', ['--headers', header], true),
+      ]) {
+        should(result.ok).be.false();
+        if (result.ok) return;
+        should(result.reason).not.match(/Zm9vOmJhcg|short/u);
+      }
+    }
+    for (const header of [`{"Authorization":"Bearer ${REF}"}`, `{"Authorization":"${REF}"}`]) {
+      // The catalog contract refuses a placeholder in an argument on its own; what is checked is that it is not read as a credential.
+      const result = refused('npx', ['--headers', header]);
+      should(!result.ok && result.reason.startsWith('Its argument')).be.false();
+    }
+  });
 
   const OPAQUE = 'dummy0123456789abcdefghij';
   const encoded: [string, string, string[], string][] = [

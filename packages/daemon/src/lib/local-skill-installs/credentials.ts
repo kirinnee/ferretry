@@ -286,15 +286,21 @@ function givesAuthorization(part: string): boolean {
     while (at < size && isSpace(folded.charAt(at))) at += 1;
     return at;
   };
+  const skipQuotes = (from: number): number => {
+    let at = from;
+    while (at < size && (VALUE_START.has(folded.charAt(at)) || folded.charAt(at) === '\\')) at += 1;
+    return at;
+  };
   for (const found of folded.matchAll(AUTHORIZATION)) {
-    const separator = skipSpaces(found.index + HEADER_NAME.length);
+    // A quoted name (`{"Authorization":"Basic …"}`, or the same escaped inside a string) closes its quote before the `:`.
+    const separator = skipSpaces(skipQuotes(found.index + HEADER_NAME.length));
     if (folded.charAt(separator) !== ':' && folded.charAt(separator) !== '=') continue;
     let at = skipSpaces(separator + 1);
     let afterScheme = false;
     while (at < size) {
       const wordEnd = ends[at] ?? size;
       let from = at;
-      while (from < wordEnd && VALUE_START.has(folded.charAt(from))) from += 1;
+      while (from < wordEnd && (VALUE_START.has(folded.charAt(from)) || folded.charAt(from) === '\\')) from += 1;
       const to = Math.max(kept[wordEnd] ?? 0, from);
       at = skipSpaces(wordEnd);
       if (to === from) continue;

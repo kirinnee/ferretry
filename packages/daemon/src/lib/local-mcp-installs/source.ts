@@ -198,13 +198,18 @@ const originOf = (server: LocalMcpInventoryServer): LocalMcpOrigin => ({
   id: server.id,
 });
 
-/** The command and its arguments as the server launches them, or none for an address. */
-function commandLine(server: LocalMcpInventoryServer): readonly string[] {
+/**
+ * Every command line the server holds, as it launches them: the declaration's and the component record's. A row
+ * can carry both and they can differ (a stale materialization, an edited account config), and `mcpSetupOf` copies
+ * only one of them by scope, so each is read and a credential in either refuses the copy: none can leak.
+ */
+function commandLines(server: LocalMcpInventoryServer): readonly (readonly string[])[] {
   const { declaration, component } = server;
-  if (declaration?.transport === 'stdio') return [declaration.command, ...declaration.args];
+  const lines: (readonly string[])[] = [];
+  if (declaration?.transport === 'stdio') lines.push([declaration.command, ...declaration.args]);
   if (component?.url === undefined && component?.command !== undefined)
-    return [component.command, ...(component.args ?? [])];
-  return [];
+    lines.push([component.command, ...(component.args ?? [])]);
+  return lines;
 }
 
 const ADDRESS_IN_TEXT = /https?:\/\/\S*/giu;
@@ -232,14 +237,14 @@ const exceedsContract = (pieces: readonly string[]): boolean =>
 
 /** What can be copied of `server`, or the sentence for why none of it can. */
 export function copiableMcp(server: LocalMcpInventoryServer): CopiableMcp {
-  const line = commandLine(server);
-  if (exceedsContract(line))
+  const lines = commandLines(server);
+  if (lines.some(exceedsContract))
     return {
       ok: false,
       reason:
         'Its command or an argument is longer, or it has more arguments, than a server here holds. Shorten that server, then copy it.',
     };
-  const credential = firstCommandCredential(line);
+  const credential = lines.map(firstCommandCredential).find(place => place !== undefined);
   if (credential !== undefined)
     return {
       ok: false,

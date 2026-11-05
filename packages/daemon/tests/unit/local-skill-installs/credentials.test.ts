@@ -4,6 +4,9 @@ import { firstArgumentCredential, firstCredentialLine } from '../../../src/lib/l
 
 const LONG = 'abcdef0123456789abcdef';
 
+/** A whole secret reference, written so it is not a template placeholder. */
+const REF = ['$', '{secret:TOKEN}'].join('');
+
 describe('the credential test that refuses a copy', () => {
   it('should refuse an address with a password in it, and name its line', () => {
     should(firstCredentialLine('git clone https://me:s3cretvalue@example.com/repo.git')).equal(1);
@@ -197,6 +200,16 @@ describe('the credential test on a command line', () => {
     should(firstArgumentCredential(['x', `api_key=${LONG}`, 'Authorization: Bearer dummy1'])).equal(2);
     should(firstArgumentCredential(['Authorization: Bearer dummy1', `api_key=${LONG}`])).equal(1);
     should(firstArgumentCredential(['Authorization: Bearer dummy1'])).equal(1);
+  });
+
+  it('should read a quoted authorization header name, short values included', () => {
+    should(firstArgumentCredential(['--headers', '{"Authorization":"Basic Zm9vOmJhcg=="}'])).equal(2);
+    should(firstArgumentCredential(['--headers', '{"Authorization" : "Bearer short"}'])).equal(2);
+    should(firstArgumentCredential(['--headers', "{'Authorization':'Basic Zm9vOmJhcg=='}"])).equal(2);
+    should(firstArgumentCredential(['--headers', '{\\"Authorization\\":\\"Basic Zm9vOmJhcg==\\"}'])).equal(2);
+    should(firstArgumentCredential(['--headers', `{"Authorization":"Bearer ${REF}"}`])).be.undefined();
+    should(firstArgumentCredential(['--headers', `{\\"Authorization\\":\\"${REF}\\"}`])).be.undefined();
+    should(firstArgumentCredential(['--headers', '{"Authorization"}'])).be.undefined();
   });
 
   it('should read an authorization header in a piece in one pass, however many are in it', () => {
