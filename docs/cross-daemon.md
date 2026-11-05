@@ -81,6 +81,12 @@ summary is [security.md](security.md).
   source; a Replace rewrites it. A record file that cannot be read never blocks a copy: the copy is made
   without it, the review says so, and the file is left alone. Editing a copied item keeps its link. A copy
   never touches a login's sign-in or any secret (account-model.md K10–K18).
+- **3c″. The CLI reads the same review.** `fy machine clone <file>` asks `POST /v1/fleet/clone/review` first
+  and updates only when it says `update`; `--dry-run` prints the groups and writes nothing, and `--json` is
+  the review itself. A both-changed item is never chosen for the person (an error naming each, or a question
+  at a terminal), a login that could be several asks for `--login`, and the apply names the review's
+  fingerprint. `fy machine clone --forget <source>` calls `POST /v1/fleet/clone/forget` (`fleet.configure`,
+  a person), which rewrites the record file and nothing else (account-model.md L17).
 - **3c′. A repeat copy lists only what differs — and why that is safe.** The review
   (`POST /v1/fleet/clone/review`, `fleet.configure`) compares every item with its copy here and hides the
   ones that are **byte-identical** (every runnable field and every carried file, by `cloneItemDigest`

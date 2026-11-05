@@ -188,3 +188,20 @@ export type CloneLoginChoices = z.infer<typeof CloneLoginChoicesSchema>;
 
 /** The sentence a stale or incomplete apply is refused with. */
 export const CLONE_REVIEW_STALE = 'Something changed since you reviewed. Review again.';
+
+/** The most characters a source may be named by when it is forgotten: an id, a name or a machine name. */
+export const CLONE_FORGET_SOURCE_LIMIT = 200;
+
+/**
+ * `POST /v1/fleet/clone/forget`: drop the "last copied" record for one source, so the next copy from it
+ * starts as if there had been none. `source` is how the machine knows the source — its id, as `self:<id>`
+ * or the bare id the export carries — or the name it was copied under.
+ */
+export const FleetCloneForgetRequestSchema = z.strictObject({
+  source: NonEmptyStringSchema.max(CLONE_FORGET_SOURCE_LIMIT),
+});
+export type FleetCloneForgetRequest = z.infer<typeof FleetCloneForgetRequestSchema>;
+
+/** Whether there was a record to forget. Nothing copied, no login and no secret is touched either way. */
+export const FleetCloneForgetResultSchema = z.strictObject({ forgotten: z.boolean() });
+export type FleetCloneForgetResult = z.infer<typeof FleetCloneForgetResultSchema>;

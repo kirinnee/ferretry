@@ -15,6 +15,7 @@ import {
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
   parseCloneBase,
+  serializeCloneBase,
   originKeyOfId,
   parseExportKeys,
   FleetApplyFailureError,
@@ -1832,6 +1833,34 @@ describe('the clone-base record', () => {
     should(await w.service.forgetCloneSource('self:daemon-source')).equal(true);
     should(parseCloneBase(w.state.baseWrites[0]).sources).deepEqual({});
     should(w.applied).have.length(1);
+  });
+
+  it('should forget a source named by its bare id or its machine name, and refuse a name that fits two', async () => {
+    const w = target();
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    const recorded = parseCloneBase(batchRecord(w)?.content);
+    const filed = recorded.sources['self:daemon-source'];
+    should(filed).not.be.undefined();
+
+    // By the bare id the export carries, and by the machine name the source gave itself.
+    w.state.assets[BASE_PATH] = batchRecord(w)?.content ?? '';
+    should(await w.service.forgetCloneSource('daemon-source')).equal(true);
+    should(Object.keys(parseCloneBase(w.state.baseWrites[0]).sources)).deepEqual([]);
+
+    // Two sources under one name: nothing is forgotten, and the answer names both ids.
+    const twice = serializeCloneBase({
+      version: 1,
+      sources: { 'self:one': filed as never, 'self:two': filed as never },
+    });
+    w.state.assets[BASE_PATH] = twice;
+    w.state.baseWrites.length = 0;
+    const name = (filed as { name: string }).name;
+    await should(w.service.forgetCloneSource(name)).be.rejectedWith(
+      `More than one source is called ${name}: self:one, self:two. Name one by its id.`,
+    );
+    should(w.state.baseWrites).deepEqual([]);
   });
 });
 

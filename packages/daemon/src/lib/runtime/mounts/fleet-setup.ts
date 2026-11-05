@@ -17,6 +17,8 @@
  */
 import {
   FleetCloneBundleSchema,
+  FleetCloneForgetRequestSchema,
+  FleetCloneForgetResultSchema,
   FleetCloneReviewRequestSchema,
   FleetCloneReviewSchema,
   FleetSetupScanSchema,
@@ -34,7 +36,7 @@ import { FleetSetupRefusal, type FleetSetupService } from '../../fleet/setup-ser
 /** First-run scan, tool install, the clone export and the clone review. */
 export type FleetSetupSubsystem = Pick<
   FleetSetupService,
-  'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'executors'
+  'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'executors'
 >;
 
 /** `403` for a caller the grants refuse; `409` for every other refusal, as the fleet's own answer. */
@@ -98,6 +100,22 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       handle: async context => {
         const request = await parseBody(context.request, FleetCloneReviewRequestSchema);
         return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request));
+      },
+    },
+    {
+      // Forgetting writes the "last copied" record and nothing else: no copied item, no login, no secret.
+      // `person` for the same reason the review is: it changes what a copy will do next.
+      method: 'POST',
+      path: '/v1/fleet/clone/forget',
+      minimum: 'operator',
+      caller: 'person',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetCloneForgetRequestSchema);
+        return await answer(FleetCloneForgetResultSchema, async () => ({
+          forgotten: await subsystem.forgetCloneSource(request.source),
+        }));
       },
     },
   ];
