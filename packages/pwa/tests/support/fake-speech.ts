@@ -22,7 +22,8 @@ export class FakeSynth implements SynthLike {
   /** What is queued right now: cleared by `cancel`. */
   queue: FakeUtterance[] = [];
   cancels = 0;
-  constructor(public voices: readonly BrowserVoiceLike[] = []) {}
+  /** Defaults to one local English voice: a speaker refuses to guess when the device lists none. */
+  constructor(public voices: readonly BrowserVoiceLike[] = [voice('Test Voice', 'en-US', { isDefault: true })]) {}
 
   speak(utterance: UtteranceLike): void {
     const fake = utterance as FakeUtterance;

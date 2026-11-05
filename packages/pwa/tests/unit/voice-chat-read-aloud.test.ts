@@ -183,3 +183,61 @@ describe('createReadAloud.dismiss', () => {
     expect(controller.getState().status).toBe('idle');
   });
 });
+
+describe('createReadAloud: which voice, and what the person is told', () => {
+  test('a language with no voice reads with a LOCAL one, not the remote default, and says nothing alarming', () => {
+    const synth = new FakeSynth([
+      voice('Google US English', 'en-US', { local: false, isDefault: true }),
+      voice('Samantha', 'en-US'),
+    ]);
+    const controller = createReadAloud({ speaker: over(synth), language: () => 'de-DE' });
+    controller.read('m1', 'Hello.');
+    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Samantha', localService: true });
+    expect(controller.getState().voiceNote).toBeNull();
+  });
+
+  test('with only remote voices the one it uses is named in the note before it is trusted', () => {
+    const synth = new FakeSynth([voice('Google US English', 'en-US', { local: false, isDefault: true })]);
+    const controller = createReadAloud({ speaker: over(synth), language: () => 'de-DE' });
+    controller.read('m1', 'Hello.');
+    expect(controller.getState().voiceNote).toBe('Google US English sends this text to its maker to be spoken.');
+    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Google US English' });
+  });
+
+  test('hands the speaker the language, so a speaker that must choose can', () => {
+    const scripts = scripted();
+    const controller = createReadAloud({ speaker: scripts.port, language: () => 'fr-CA' });
+    controller.read('m1', 'Bonjour.');
+    expect(scripts.requests[0]).toMatchObject({ language: 'fr-CA', voice: null });
+  });
+
+  test('a language getter that throws falls back to English instead of throwing', () => {
+    const scripts = scripted();
+    const controller = createReadAloud({
+      speaker: scripts.port,
+      language: () => {
+        throw new Error('no navigator');
+      },
+    });
+    expect(() => controller.read('m1', 'Hello.')).not.toThrow();
+    expect(scripts.requests[0]).toMatchObject({ language: 'en-US' });
+  });
+
+  test('a device that lists no voices yet fails out loud, in words, and speaks nothing', () => {
+    const synth = new FakeSynth([]);
+    const controller = createReadAloud({ speaker: over(synth), language: () => 'en-US' });
+    controller.read('m1', 'Hello.');
+    expect(controller.getState().status).toBe('failed');
+    expect(synth.spoken).toEqual([]);
+  });
+
+  test('the engine cancelled from outside while reading ends the reading as stopped, not "reading" forever', () => {
+    const synth = new FakeSynth();
+    const controller = createReadAloud({ speaker: over(synth), language: () => 'en-US' });
+    controller.read('m1', 'One. Two.');
+    synth.start();
+    expect(controller.getState().status).toBe('reading');
+    synth.cancel();
+    expect(controller.getState().status).toBe('stopped');
+  });
+});

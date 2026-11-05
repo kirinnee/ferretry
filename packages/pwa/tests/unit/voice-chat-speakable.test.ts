@@ -337,5 +337,267 @@ describe('speakableSegments: total', () => {
     expect(speakInline('ab')).toBe('a b');
     expect(speakInline('')).toBe('');
     expect(speakInline('&amp; &lt;3 &#x41;')).toBe('& <3 A');
+    // Whatever it is handed, it answers with words or nothing, never an exception.
+    const hostile = {
+      get value(): string {
+        throw new Error('boom');
+      },
+    };
+    expect(speakInline(hostile as unknown as string)).toBe('');
+  });
+});
+
+describe('speakableSegments: hostile input stays cheap (review round 1, finding 1)', () => {
+  // The first call pays for building the parser; time the rest.
+  speakableSegments('warm up');
+  const quick = (name: string, markdown: string): void => {
+    test(`${name} is read in well under 100 ms`, () => {
+      const started = performance.now();
+      const reading = speakableSegments(markdown);
+      expect(performance.now() - started).toBeLessThan(100);
+      expect(Array.isArray(reading.segments)).toBe(true);
+    });
+  };
+
+  quick('3,200 unmatched backticks after text', `Some text ${'`'.repeat(3200)}`);
+  quick('6,400 unmatched backticks after text', `Some text ${'`'.repeat(6400)}`);
+  quick('50,000 backticks', '`'.repeat(50_000));
+  quick('alternating backtick runs', '` ``'.repeat(10_000));
+  quick(
+    'backtick runs of every length',
+    Array.from({ length: 4000 }, (_, i) => `${'`'.repeat((i % 9) + 1)}a`).join(' '),
+  );
+  quick('50,000 open brackets', '['.repeat(50_000));
+  quick('open brackets and spaces', '[ '.repeat(20_000));
+  quick('link openers', '[a]('.repeat(10_000));
+  quick('image openers', '!['.repeat(20_000));
+  quick('50,000 tildes', '~'.repeat(50_000));
+  quick('tilde pairs', 'a ~~ '.repeat(8000));
+  quick('a long run of stars around a word', `${'*'.repeat(20_000)}a${'*'.repeat(20_000)}`);
+  quick('a long run of underscores', `a${'_'.repeat(30_000)}b`);
+  quick('a long run of dots', `a${'.'.repeat(30_000)}b`);
+  quick('unclosed tags', '<a '.repeat(10_000));
+  quick('unclosed comments', '<!-- '.repeat(6000));
+  quick('a line of 5,000 nested list markers', `${'- '.repeat(5000)}x`);
+  quick('a line of 5,000 nested quote markers', `${'> '.repeat(5000)}x`);
+  quick('thousands of list lines', '- a\n'.repeat(20_000));
+  quick('thousands of table rows', `| a | b |\n|---|---|\n${'| 1 | 2 |\n'.repeat(5000)}`);
+  quick('a hash-like word 30,000 long', 'a'.repeat(30_000));
+  quick('a path-like code span 30,000 long', `\`${'/'.repeat(30_000)}\``);
+  quick('sentence-ending marks with no space after', `a${'.!?'.repeat(10_000)}b`);
+  quick('thousands of tiny sentences', 'A. '.repeat(30_000));
+
+  test('sentencesOf is linear on a long run of marks and on a long unspaced word', () => {
+    const started = performance.now();
+    expect(sentencesOf(`a${'.'.repeat(50_000)}b`)).toEqual([`a${'.'.repeat(50_000)}b`]);
+    expect(sentencesOf(`${'a'.repeat(50_000)}. Next one.`)).toHaveLength(2);
+    expect(sentencesOf('A. '.repeat(20_000))).toHaveLength(20_000);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  test('the excess of a run is blanked, one for one, so offsets still slice the original', () => {
+    const source = `Before.\n\n${'*'.repeat(100)}\n\nAfter ${'.'.repeat(60)} here.\n\nLast.`;
+    const reading = speakableSegments(source);
+    const last = reading.segments.at(-1);
+    expect(source.slice(last?.sourceRange.start, last?.sourceRange.end)).toBe('Last.');
+    expect(reading.segments.map(s => s.text)[0]).toBe('Before.');
+  });
+
+  test('nested markers past eight on a line are plain text; the line keeps its length', () => {
+    const source = `${'- '.repeat(12)}deep text`;
+    const reading = speakableSegments(source);
+    expect(reading.segments.map(s => s.text)).toEqual(['x x x x deep text.']);
+    const only = reading.segments[0];
+    expect(source.slice(only?.sourceRange.start, only?.sourceRange.end)).toBe('- - - - deep text');
+    expect(said(`${'1. '.repeat(11)}x`)).toEqual(['x. x. x. x.']);
+    expect(said(`${'> '.repeat(11)}q`)).toEqual(['Quote: x x x q.']);
+  });
+
+  test('a hard line break is a space, not a joined word', () => {
+    expect(said('First line\\\nsecond line.')).toEqual(['First line second line.']);
+    expect(said('Trailing  \nbreak.')).toEqual(['Trailing break.']);
+  });
+
+  test('a number that is not a list marker is left alone', () => {
+    expect(said('12345678901. not a list\n\n1.x\n\n2024 was fine.')).toEqual([
+      '12345678901. not a list.',
+      '1.x.',
+      '2024 was fine.',
+    ]);
+  });
+
+  test('a reply of more than 400 lines is read from its first 400 and says there is more', () => {
+    const reading = speakableSegments('- a\n'.repeat(500));
+    expect(reading.truncated).toBe(true);
+    expect(reading.segments.map(s => s.text)).toEqual(['a.', 'a.', 'a.', 'a.', 'a.', 'and 395 more.', MORE_ON_SCREEN]);
+  });
+
+  test('containers nested deeper than the walk allows are on screen, not read, and nothing throws', () => {
+    const nest = (depth: number): string =>
+      Array.from({ length: depth }, (_, level) => `${'  '.repeat(level)}- level ${level}`).join('\n');
+    const shallow = said(nest(5));
+    expect(shallow).toEqual(['level 0.', 'level 1.', 'level 2.', 'level 3.', 'level 4.']);
+    const deep = said(nest(40));
+    expect(deep.length).toBeGreaterThan(5);
+    expect(deep.length).toBeLessThan(40);
+    expect(deep[0]).toBe('level 0.');
+  });
+
+  test('emphasis nested deeper than the walk allows still gives the words it can', () => {
+    const marks = ['*', '_'];
+    const levels = 60;
+    const open = Array.from({ length: levels }, (_, i) => `${marks[i % 2]}w${i} `).join('');
+    const close = Array.from({ length: levels }, (_, i) => ` ${marks[(levels - 1 - i) % 2]}`).join('');
+    const reading = speakableSegments(`${open}core${close}`);
+    expect(reading.segments.length).toBeGreaterThan(0);
+    expect(reading.segments[0]?.text.startsWith('w0 w1')).toBe(true);
+  });
+});
+
+describe('speakableSegments: nested markdown is described where it sits (finding 2)', () => {
+  const NESTED_FY = (prefix: string): string =>
+    ['~~~fy-render', 'type: mermaid', 'alt: Login flow from browser to daemon', '---', 'graph TD; A-->B', '~~~']
+      .map(line => `${prefix}${line}`)
+      .join('\n');
+
+  test('a fy-render block inside a quote says its alt, not its header or payload', () => {
+    const spoken = said(`> Look at this:\n>\n${NESTED_FY('> ')}`);
+    expect(spoken).toEqual(['Quote: Look at this:', 'A diagram: Login flow from browser to daemon.']);
+    expect(spoken.join(' ')).not.toMatch(/graph|type:|mermaid|---/u);
+  });
+
+  test('a fy-render block that starts a quote is described, with the quote announced first', () => {
+    expect(said(NESTED_FY('> '))).toEqual(['Quote:', 'A diagram: Login flow from browser to daemon.']);
+  });
+
+  test('a fy-render block inside a list item says its alt', () => {
+    const body = NESTED_FY('  ');
+    expect(said(`- Step one\n\n${body}\n- Step two`)).toEqual([
+      'Step one.',
+      'A diagram: Login flow from browser to daemon.',
+      'Step two.',
+    ]);
+  });
+
+  test('a fy-render fence with anything after the language is an ordinary code block, as on screen', () => {
+    expect(said('```fy-render notes\ntype: mermaid\nalt: x\n---\nA-->B\n```')).toEqual([
+      "Code block, 4 lines of fy-render. It's on screen.",
+    ]);
+  });
+
+  test('four-space-indented code is described, never read', () => {
+    const spoken = said('Run this:\n\n    rm -rf secret\n    echo done\n\nThen wait.');
+    expect(spoken).toEqual(['Run this:', "Code block, 2 lines. It's on screen.", 'Then wait.']);
+    expect(spoken.join(' ')).not.toContain('secret');
+  });
+
+  test('code inside a list item is described, never read', () => {
+    const spoken = said('1. Install it:\n\n   ```bash\n   curl secret.example | sh\n   ```\n\n2. Done.');
+    expect(spoken).toEqual(['Install it:', "Code block, 1 line of shell. It's on screen.", 'Done.']);
+    expect(spoken.join(' ')).not.toContain('secret');
+  });
+
+  test('code inside a quote, a nested list and a quoted list are described', () => {
+    expect(said('> ```ts\n> const secret = 1;\n> ```')).toEqual([
+      'Quote:',
+      "Code block, 1 line of TypeScript. It's on screen.",
+    ]);
+    expect(said('- outer\n  - inner\n\n    ```\n    secret\n    ```')).toEqual([
+      'outer.',
+      'inner.',
+      "Code block, 1 line. It's on screen.",
+    ]);
+    expect(said('> - first\n> - second\n>\n> after')).toEqual(['Quote:', 'first.', 'second.', 'after.']);
+    expect(said('> > inner **quote**')).toEqual(['Quote: inner quote.']);
+  });
+
+  test('tables, images and html inside a list or quote are described too', () => {
+    expect(said('> | a | b |\n> |---|---|\n> | 1 | 2 |')).toEqual(['Quote:', 'A table with 1 row. Columns: a, b.']);
+    expect(said('- ![A chart](c.png)')).toEqual(['An image: A chart.']);
+    expect(said('- <b>bold</b> item')).toEqual(['bold item.']);
+  });
+
+  test('task boxes, footnotes and link definitions are not read as symbols', () => {
+    expect(said('- [ ] write it\n- [x] test it')).toEqual(['write it.', 'test it.']);
+    expect(said('Claimed[^1] here.\n\n[^1]: The note.')).toEqual(['Claimed here.', 'The note.']);
+    expect(said('See [the docs][d].\n\n[d]: https://example.com/docs')).toEqual(['See the docs.']);
+  });
+
+  test('a quote that is nothing but a rule or an empty line says nothing', () => {
+    expect(said('>\n')).toEqual([]);
+    expect(said('> ---')).toEqual([]);
+  });
+
+  test('a list longer than eight still reads five and counts the rest, nested items included', () => {
+    const items = Array.from({ length: 9 }, (_, i) => `- item ${i}\n  - child ${i}`).join('\n');
+    expect(said(items)).toEqual([
+      'item 0.',
+      'child 0.',
+      'item 1.',
+      'child 1.',
+      'item 2.',
+      'child 2.',
+      'item 3.',
+      'child 3.',
+      'item 4.',
+      'child 4.',
+      'and 4 more.',
+    ]);
+  });
+});
+
+describe('speakableSegments: source ranges are UTF-16 offsets of the original (finding 5)', () => {
+  const slices = (source: string): string[] =>
+    speakableSegments(source).segments.map(s => source.slice(s.sourceRange.start, s.sourceRange.end));
+
+  test('a comment holding a non-BMP character does not shift what follows', () => {
+    expect(slices('Before.\n\n<!-- 😀 -->\n\nAfter.')).toEqual(['Before.', 'After.']);
+  });
+
+  test('astral characters in a comment, inline html, a code span and prose all keep their offsets', () => {
+    expect(slices('A.\n\n<!-- 🎉🚀 multi\nline 𝒳 -->\n\nB 𝒳 text.\n\n<b>𝒴</b> C.\n\n`😀` D.')).toEqual([
+      'A.',
+      'B 𝒳 text.',
+      '<b>𝒴</b> C.',
+      '`😀` D.',
+    ]);
+  });
+
+  test('an unterminated comment hides the rest, and the ranges before it stay right', () => {
+    expect(slices('Before.\n\n<!-- 😀 never closed\n\nAfter.')).toEqual(['Before.']);
+  });
+
+  test('ranges also hold with CRLF line endings', () => {
+    const source = 'One.\r\n\r\n<!-- 😀 -->\r\n\r\nTwo.';
+    const reading = speakableSegments(source);
+    expect(reading.segments.map(s => s.text)).toEqual(['One.', 'Two.']);
+    expect(source.slice(reading.segments[1]?.sourceRange.start, reading.segments[1]?.sourceRange.end)).toBe('Two.');
+  });
+});
+
+describe('speakableSegments: identifiers in code spans are named, not read (finding 6)', () => {
+  test('a commit hash in backticks is "a commit"', () => {
+    expect(said('Fixed in `3f2a9c1b4d`.')).toEqual(['Fixed in a commit.']);
+    expect(said('Fixed in `3f2a9c1b4d`.').join(' ')).not.toContain('3f2a');
+  });
+
+  test('a UUID or a long hash in backticks is "an ID", however long it is', () => {
+    expect(said('Run `0a1b2c3d-1111-2222-3333-444455556666` now.')).toEqual(['Run an ID now.']);
+    expect(said(`Hash \`${'a1'.repeat(30)}\` here.`)).toEqual(['Hash an ID here.']);
+    expect(said(`Hash \`${'a1'.repeat(30)}\` and \`${'b2'.repeat(20)}\`.`)).toEqual(['Hash an ID and a commit.']);
+  });
+
+  test('an identifier inside a short word-like span is named too, and a path keeps its file name', () => {
+    expect(said('Use `git show 3f2a9c1b4d`.')).toEqual(['Use git show a commit.']);
+    expect(said('See `src/3f2a9c1b4d.ts`.')).toEqual(['See 3f2a9c1b4d.ts.']);
+  });
+
+  test('an upper-case hash and a number that merely looks like one', () => {
+    expect(said('Fixed in `3F2A9C1B4D`.')).toEqual(['Fixed in a commit.']);
+    expect(said('Count `1234567` and `deadbeef`.')).toEqual(['Count 1234567 and deadbeef.']);
+  });
+
+  test('a code span too long to be an identifier or a path is still a snippet', () => {
+    expect(said(`Odd \`${'a1'.repeat(70)}\` span.`)).toEqual(['Odd a code snippet span.']);
   });
 });

@@ -409,24 +409,36 @@ involved.
 `lib/voice-chat/speakable.ts` is pure and total (any text in, a list of sentences out, never an exception). Prose is read; things that
 are for the eyes are **described** and left on screen.
 
-| In the reply                          | Said as                                                                                              |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Paragraphs, headings                  | Read a sentence at a time; a heading ends with a stop                                                |
-| Lists                                 | Each item; more than 8 items reads the first 5, then "and 6 more"                                    |
-| **Bold**, _italic_, links `[text](u)` | The plain words, and the link text                                                                   |
-| A bare URL                            | "a link to github.com"                                                                               |
-| Inline code                           | Short word-like code is read ("use dictation"); a path as its file name; otherwise "a code snippet"  |
-| Code block                            | "Code block, 14 lines of TypeScript. It's on screen." — never the code                               |
-| Table                                 | "A table with 4 rows. Columns: name, status, cost."                                                  |
-| `fy-render` block                     | Its required `alt`: "A diagram: login flow from browser to daemon." (a broken block is a code block) |
-| Image                                 | "An image: {alt}"                                                                                    |
-| `@file`, `:agent`, `&F12`, `!A3`      | "file.ts", "ferret dev", "task F12", "agenda item A3" — the one reference grammar, not a second one  |
-| Commit hashes, UUIDs                  | "a commit", "an ID"; numbers and versions ("4.277.0") are read as they are                           |
-| Emoji, HTML                           | Dropped, stripped                                                                                    |
-| Blockquote                            | "Quote:" then the words                                                                              |
+**It walks the screen's own tree.** The reply is parsed by `remark-parse` + `remark-gfm` — the same pair `components/markdown.tsx`
+draws from — so what the screen shows as code, a table, a quote or a diagram is what the voice describes, **at every depth**: a
+`~~~fy-render` block inside a quote says its `alt`, and four-space-indented code, or a fence inside a list item, is "Code block, N
+lines" — never read. A fence is a diagram exactly when the renderer says so (`fy-render` and nothing after the language).
+
+| In the reply                          | Said as                                                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Paragraphs, headings                  | Read a sentence at a time; a heading ends with a stop                                                                                       |
+| Lists                                 | Each item; more than 8 items reads the first 5, then "and 6 more"                                                                           |
+| **Bold**, _italic_, links `[text](u)` | The plain words, and the link text                                                                                                          |
+| A bare URL                            | "a link to github.com"                                                                                                                      |
+| Inline code                           | Short word-like code is read ("use dictation"); a path as its file name; a hash or UUID as "a commit" / "an ID"; otherwise "a code snippet" |
+| Code block (fenced or indented)       | "Code block, 14 lines of TypeScript. It's on screen." — never the code                                                                      |
+| Table                                 | "A table with 4 rows. Columns: name, status, cost."                                                                                         |
+| `fy-render` block                     | Its required `alt`: "A diagram: login flow from browser to daemon." (a broken block is a code block)                                        |
+| Image                                 | "An image: {alt}"                                                                                                                           |
+| `@file`, `:agent`, `&F12`, `!A3`      | "file.ts", "ferret dev", "task F12", "agenda item A3" — the one reference grammar, not a second one                                         |
+| Commit hashes, UUIDs                  | "a commit", "an ID"; numbers and versions ("4.277.0") are read as they are                                                                  |
+| Emoji, HTML, comments                 | Dropped; tags stripped; `<!-- … -->` is silent                                                                                              |
+| Blockquote                            | "Quote:" then the words                                                                                                                     |
 
 **One reading is capped at about a minute** (≈ 900 characters at normal speed, scaled with the rate), then it says "There's more on
 screen." and stops. Code, tables and pictures count toward the minute, so a code-heavy reply is not a lecture either.
+
+**Hostile text stays cheap.** A reading looks only at the first 12,000 characters and 400 lines of a reply (past that it says there is
+more on screen), and before parsing overwrites — one character for one, so every `sourceRange` offset still slices the original — runs of
+more than 24 identical `*`, `_`, `.` or `~` and list or quote markers nested past 8 on one line. The parser is linear on prose but not on
+those, and no real reply has them. Tens of thousands of unmatched backticks, brackets or tildes are read in tens of milliseconds
+(`tests/unit/voice-chat-speakable.test.ts` pins under 100 ms). `sourceRange` is in UTF-16 units, so text after an emoji in a hidden
+comment still slices correctly.
 
 ### Which voice
 
@@ -435,6 +447,15 @@ Free voices **built into the device** (`speechSynthesis`): no paid or cloud voic
 - **Local voices first.** The browser says which voices are `localService`; one in the reply's language wins. A voice that sends text to
   its maker (Chrome's "Google …" voices) is used only when the device has no local voice in that language, and then the row **says so**
   in words ("… sends this text to its maker to be spoken.").
+- **A voice is always named, never the browser's unset default** (which can be a remote voice, and would send the reply away with no
+  warning). With no voice in the reply's language (a `de-DE` browser with only English voices), the device's own pick among its **local**
+  voices reads it, with an accent. Only when the device has no local voice at all is a remote one used — named, with the note above. If
+  the device lists no voices yet (browsers load them late; the speaker asks as soon as the page makes it, so by a tap they are there), or
+  only remote ones that the controller has not announced, the reading **fails in words** ("Couldn't read this aloud") instead of
+  guessing; pressing Read aloud again works once they have loaded.
+- **Something else cancelling the speech** (another tab of the page, a browser extension) ends the reading as **Stopped** — the button
+  does not stay on Stop forever. A cancel Ferretry itself caused (Stop, or a newer reading replacing this one) is told apart by a
+  generation number and never reported twice.
 - **Rate** is 1.1 by default and always kept between 0.8 and 2.0 (a rate and voice picker arrive with the settings slice).
 - **Chrome stops long speech** after about fifteen seconds, so each sentence is spoken as short pieces, one at a time
   (`speech-chunks.ts`); the captions still move one sentence at a time.

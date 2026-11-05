@@ -92,16 +92,18 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         set({ ...IDLE, key });
         return;
       }
+      let language = 'en-US';
       let voice: SpeakerVoice | null = null;
       try {
-        voice = chooseVoice(speaker.voices(), deps.language?.() ?? 'en-US');
+        language = deps.language?.() ?? language;
+        voice = chooseVoice(speaker.voices(), language);
       } catch {
         voice = null;
       }
       set({ status: 'reading', key, segments, current: 0, truncated: reading.truncated, voiceNote: voiceNote(voice) });
       const live = (): boolean => mine === token;
       try {
-        speaker.speak({ segments, rate, voice }, event => {
+        speaker.speak({ segments, rate, voice, language }, event => {
           if (!live()) return;
           switch (event.type) {
             case 'segment':

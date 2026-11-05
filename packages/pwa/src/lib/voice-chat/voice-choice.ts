@@ -4,7 +4,7 @@
  * Ferretry reads with the voices already built into the device. The browser says which of them keep the
  * text on the device (`localService`), and those win: a voice that sends the text to its maker (Chrome's
  * "Google …" voices) is only used when the device has no local voice in the language, and then the row
- * says so in words (`voiceNote`).
+ * says so in words (`voiceNote`). A voice is always NAMED: the browser's own unset default can be a remote one.
  */
 
 import type { SpeakerVoice } from './ports.ts';
@@ -28,9 +28,16 @@ const rank = (voice: SpeakerVoice, language: string): number => {
   return (voice.local ? 0 : 4) + closeness * 2 + (voice.isDefault ? 0 : 1);
 };
 
+/** Used only when no voice speaks the language: a voice that stays on the device, the device's own pick first. */
+const fallbackRank = (voice: SpeakerVoice): number => (voice.local ? 0 : 2) + (voice.isDefault ? 0 : 1);
+
 /**
- * The voice to speak `language` with, or null when the device offers none in that language (the speaker
- * then uses the device's own default). The `preferred` voice wins when it is still there and local.
+ * The voice to speak `language` with. Never "whatever the browser would pick" — an unset voice can be a
+ * remote one (Chrome's "Google …" default) and would send the reply away unannounced, so a voice is always
+ * named: the best one in the language (the `preferred` one wins when it is still there and local); else
+ * the device's own pick among the voices that stay on the device (it reads with a foreign accent, but it
+ * reads in private); else, only when nothing local exists at all, the best remote one — which `voiceNote`
+ * then says out loud. Null only when the device lists no voices (yet): the speaker then refuses to guess.
  */
 export const chooseVoice = (
   voices: readonly SpeakerVoice[],
@@ -44,6 +51,14 @@ export const chooseVoice = (
   for (const voice of voices) {
     if (primary(voice.lang) !== primary(language)) continue;
     const score = rank(voice, language);
+    if (score < bestRank) {
+      best = voice;
+      bestRank = score;
+    }
+  }
+  if (best !== null) return best;
+  for (const voice of voices) {
+    const score = fallbackRank(voice);
     if (score < bestRank) {
       best = voice;
       bestRank = score;

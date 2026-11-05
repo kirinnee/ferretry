@@ -7,8 +7,15 @@
  *     utterances (`chunkForSpeech`), one at a time, each started when the last one ends.
  *   - iOS lets speech start only from a tap. `unlock()` is called inside one and speaks a silent,
  *     zero-volume space once; after that, speech started later (the Live loop's reply) is allowed.
- *   - An utterance cancelled by `cancel()` reports `interrupted` or `canceled`: that is us stopping, not
- *     a failure, so it is never reported as one.
+ *   - An utterance cancelled by `cancel()` reports `interrupted` or `canceled`: that is a stop, not a
+ *     failure, so it is never reported as one. When it belongs to the live reading (something else on the
+ *     page cancelled the shared engine) the reading ends as `stopped`; ours are told apart by the
+ *     generation number, already bumped by the time the browser reports them.
+ *   - THE VOICE IS ALWAYS NAMED. An utterance with no voice set is spoken by the browser's default, which
+ *     can be a remote one (Chrome's "Google …" voices) and would send the reply away unannounced. So the
+ *     voice comes from the request (vetted by the caller, who says in words if it is remote) or is chosen
+ *     here from the voices that stay on the device — and if there is none, or the list is still empty (the
+ *     browser loads voices late), the reading is refused with `failed` instead of guessed at.
  *   - A reading that was replaced or stopped must go quiet at once: every callback checks it still
  *     belongs to the live reading (a generation number) before it does anything.
  *
@@ -18,7 +25,7 @@
 
 import type { SpeakerEvent, SpeakerPort, SpeakerVoice, SpeakRequest } from './ports.ts';
 import { chunkForSpeech } from './speech-chunks.ts';
-import { clampSpeechRate } from './voice-choice.ts';
+import { chooseVoice, clampSpeechRate } from './voice-choice.ts';
 
 /** The slice of `SpeechSynthesisUtterance` this adapter sets and listens to. */
 export interface UtteranceLike {
@@ -62,6 +69,25 @@ const asVoice = (voice: BrowserVoiceLike): SpeakerVoice => ({
   local: voice.localService,
   isDefault: voice.default,
 });
+
+/**
+ * The browser voice to speak `request` with, or null when none may be used: the voice the caller named if
+ * it is still there; else the best voice that stays on the device for the request's language.
+ */
+const voiceFor = (synth: SynthLike, request: SpeakRequest): BrowserVoiceLike | null => {
+  let all: readonly BrowserVoiceLike[];
+  try {
+    all = synth.getVoices();
+  } catch {
+    return null;
+  }
+  const wanted = request.voice ?? null;
+  const named = wanted === null ? undefined : all.find(candidate => candidate.voiceURI === wanted.id);
+  if (named !== undefined) return named;
+  const chosen = chooseVoice(all.map(asVoice), request.language ?? 'en-US');
+  if (chosen === null || !chosen.local) return null;
+  return all.find(candidate => candidate.voiceURI === chosen.id) ?? null;
+};
 
 interface Piece {
   readonly segment: number;
@@ -126,8 +152,11 @@ export function createSpeechSynthesisSpeaker(deps: SpeechSynthesisDeps): Speaker
         tell({ type: 'end' });
         return;
       }
-      const wanted = request.voice ?? null;
-      const voice = wanted === null ? undefined : synth.getVoices().find(candidate => candidate.voiceURI === wanted.id);
+      const voice = voiceFor(synth, request);
+      if (voice === null) {
+        tell({ type: 'error', reason: 'failed' });
+        return;
+      }
       const rate = clampSpeechRate(request.rate);
       let announced = -1;
       const announce = (segment: number): void => {
@@ -147,18 +176,21 @@ export function createSpeechSynthesisSpeaker(deps: SpeechSynthesisDeps): Speaker
         try {
           utterance = deps.createUtterance(piece.text);
           utterance.rate = rate;
-          if (voice !== undefined) {
-            utterance.voice = voice;
-            utterance.lang = voice.lang;
-          }
+          utterance.voice = voice;
+          utterance.lang = voice.lang;
           utterance.onstart = () => announce(piece.segment);
           utterance.onend = () => {
             announce(piece.segment);
             say(at + 1);
           };
           utterance.onerror = event => {
-            if (event.error !== undefined && CANCELLED.has(event.error)) return;
-            tell({ type: 'error', reason: 'failed' });
+            // A cancellation of a stale reading never gets here (`tell` ignores it); one of the live reading
+            // means the shared engine was cancelled from outside, so the reading is over.
+            tell(
+              event.error !== undefined && CANCELLED.has(event.error)
+                ? { type: 'stopped' }
+                : { type: 'error', reason: 'failed' },
+            );
           };
           synth.speak(utterance);
         } catch {
@@ -182,8 +214,15 @@ export function createSpeechSynthesisSpeaker(deps: SpeechSynthesisDeps): Speaker
 /** The speaker for this browser: the real `speechSynthesis`, or an unsupported one where there is none. */
 export function browserSpeaker(): SpeakerPort {
   const present = typeof globalThis.speechSynthesis !== 'undefined' && typeof SpeechSynthesisUtterance !== 'undefined';
+  const synth = present ? (globalThis.speechSynthesis as unknown as SynthLike) : null;
+  try {
+    // Browsers load their voice list on the first ask; asking now means it is there by the time of a tap.
+    synth?.getVoices();
+  } catch {
+    // No list yet; a reading will say so.
+  }
   return createSpeechSynthesisSpeaker({
-    synth: present ? (globalThis.speechSynthesis as unknown as SynthLike) : null,
+    synth,
     createUtterance: text => new SpeechSynthesisUtterance(text) as unknown as UtteranceLike,
   });
 }

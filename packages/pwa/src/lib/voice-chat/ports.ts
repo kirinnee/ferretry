@@ -36,8 +36,14 @@ export interface SpeakRequest {
   readonly segments: readonly string[];
   /** Speech rate, 0.8 – 2.0 (the speaker clamps). */
   readonly rate: number;
-  /** The voice to use; absent means the device's default. */
+  /**
+   * The voice to use, already vetted by the caller (who says in words if it sends text away). Absent or no
+   * longer there: the speaker picks a voice that stays on the device for `language` itself — and when it
+   * cannot, it refuses (`error`) rather than hand the text to the browser's unset default, which may be remote.
+   */
   readonly voice?: SpeakerVoice | null;
+  /** BCP 47 language of the text, for a speaker that has to choose its own voice. */
+  readonly language?: string;
 }
 
 export interface SpeakerPort {

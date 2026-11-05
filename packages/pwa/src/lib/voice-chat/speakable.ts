@@ -6,13 +6,22 @@
  * sentence, list item or description each — that a speaker reads in order, and that the chat highlights
  * as captions while they are read.
  *
+ * ONE PARSER, THE SCREEN'S. The markdown is parsed by `remark-parse` + `remark-gfm` — the very pair the
+ * chat's renderer (`components/markdown.tsx`) draws from — and the segments are made by walking that tree.
+ * So what the screen shows as code, a table, a quote or a diagram is what the voice describes, at every
+ * depth: a `~~~fy-render` block inside a quote, four-space-indented code and a fence inside a list item
+ * are all described, never read. Hand-written line scanning and backtracking regexes over untrusted text
+ * are what this replaced: every scan left here is linear, so a reply made of a hundred thousand backticks
+ * is as cheap to read as one made of words.
+ *
  * WHAT IS READ, WHAT IS DESCRIBED
  *
  *   paragraphs, headings, list items   read, a sentence at a time (a list of more than 8 reads 5, then "and N more")
  *   bold, italic, strikethrough        the plain words
  *   `inline code`                      read when short and word-like ("use dictation"), a file path as its
- *                                      file name, otherwise "a code snippet" — never a symbol soup
- *   code fence                         "Code block, 14 lines of TypeScript. It's on screen." — never the code
+ *                                      file name, a hash or UUID as "a commit" / "an ID", otherwise
+ *                                      "a code snippet" — never a symbol soup
+ *   code fence · indented code         "Code block, 14 lines of TypeScript. It's on screen." — never the code
  *   table                              "A table with 4 rows. Columns: name, status, cost."
  *   fy-render block                    its required `alt`: "A diagram: login flow from browser to daemon."
  *   image                              "An image: {alt}"
@@ -20,7 +29,7 @@
  *   @file · :agent · &F12 · !A3 · …    "file.ts" · "ferret dev" · "task F12" · "agenda item A3" (the one
  *                                      reference grammar, `lib/references.ts`, so nothing is parsed twice)
  *   commit hashes · UUIDs              "a commit" · "an ID"
- *   emoji · HTML                       dropped · stripped
+ *   emoji · HTML · comments            dropped · tags stripped · dropped
  *   quote                              "Quote:" then the words
  *
  * ONE READING IS CAPPED at about a minute (≈ 900 characters at normal speed): past that it says
@@ -30,12 +39,15 @@
  * throws; a failure inside returns a single "on screen" segment rather than silence or a crash. Pure:
  * no DOM, no clock, no storage, and nothing here logs or keeps the text it is given.
  *
- * `sourceRange` is the span of the ORIGINAL markdown the segment came from (the whole block for a
- * sentence in it): a caption highlights by segment, and the range is what a future surface uses to
- * point back at the source.
+ * `sourceRange` is the span of the ORIGINAL markdown (UTF-16 offsets, as `String.slice` counts them) the
+ * segment came from (the whole block for a sentence in it): a caption highlights by segment, and the range
+ * is what a future surface uses to point back at the source.
  */
 
-import { parseFyRender } from '../fy-render.ts';
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
+import { FY_RENDER_FENCE_LANGUAGE, parseFyRender } from '../fy-render.ts';
 import { findReferences, parseReferenceToken, type Reference } from '../references.ts';
 
 type SpeakableKind = 'text' | 'heading' | 'list' | 'quote' | 'code' | 'table' | 'diagram' | 'image' | 'more';
@@ -66,22 +78,25 @@ export const MORE_ON_SCREEN = "There's more on screen.";
 const LIST_READ_ALL_UP_TO = 8;
 const LIST_READ_FIRST = 5;
 const TABLE_COLUMNS_NAMED = 6;
-/** Nothing past this is scanned: a reading never needs it, and a megabyte of markdown is not a reply. */
-const SCAN_LIMIT = 100_000;
+/**
+ * Nothing past this is scanned. A reading says about a minute of words (≈ 900–1800 characters), so a dozen
+ * thousand characters of markdown is far more than it can use — and the parser, linear on prose, is not on
+ * every hostile input, so the scan is kept small enough that the worst of them stays cheap.
+ */
+const SCAN_LIMIT = 12_000;
+/** …and no more than this many lines: the parser pays per list item and table row, not per character. */
+const SCAN_LINES = 400;
 const DESCRIPTION_LIMIT = 200;
 const CODE_SPAN_SPOKEN_LIMIT = 24;
+const CODE_SPAN_PATH_LIMIT = 120;
+/** Containers nested deeper than this are on screen but not read: it bounds the walk, not the reading. */
+const MAX_DEPTH = 24;
 
 /** How much one reading may say at a given speed: faster speech fits more words into the same minute. */
 export const readingCapCharacters = (rate: number): number => {
   const bounded = Number.isFinite(rate) ? Math.min(2, Math.max(0.8, rate)) : 1;
   return Math.round(READING_CHARACTERS_PER_MINUTE * bounded);
 };
-
-interface Line {
-  readonly text: string;
-  readonly start: number;
-  readonly end: number;
-}
 
 interface Block {
   readonly kind: SpeakableKind;
@@ -90,22 +105,101 @@ interface Block {
   readonly end: number;
 }
 
-const toLines = (source: string): Line[] => {
-  const lines: Line[] = [];
-  let start = 0;
-  while (start <= source.length) {
-    const newline = source.indexOf('\n', start);
-    const end = newline === -1 ? source.length : newline;
-    lines.push({ text: source.slice(start, end).replace(/\r$/u, ''), start, end });
+// ---------------------------------------------------------------------------------------------------
+// The tree
+// ---------------------------------------------------------------------------------------------------
+
+/** The part of an mdast node this file reads — structural, like `lib/remark-table-labels.ts`. */
+interface MdNode {
+  readonly type: string;
+  readonly value?: string;
+  readonly lang?: string | null;
+  readonly meta?: string | null;
+  readonly alt?: string | null;
+  readonly url?: string;
+  readonly children?: readonly MdNode[];
+  readonly position?: {
+    readonly start?: { readonly offset?: number };
+    readonly end?: { readonly offset?: number };
+  };
+}
+
+const processor = unified().use(remarkParse).use(remarkGfm);
+const parse = (source: string): MdNode => processor.parse(source) as unknown as MdNode;
+
+const rangeOf = (node: MdNode): { start: number; end: number } => ({
+  start: node.position?.start?.offset ?? 0,
+  end: node.position?.end?.offset ?? 0,
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Taming hostile input
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * The parser is linear on prose but not on everything: a run of ten thousand `*`, `_` or `.`, and a line
+ * of two thousand nested `- - - -`, each cost it seconds. No reply a person reads has either, so before
+ * parsing the excess is overwritten one-for-one — runs with spaces, container markers with an `x` — which
+ * keeps every offset (every UTF-16 unit) where it was, so `sourceRange` still slices the original.
+ * Two linear passes; nothing is parsed twice.
+ */
+const MAX_MARK_RUN = 24;
+const MAX_CONTAINER_DEPTH = 8;
+const MARK_RUN = /([*_.~])\1{24,}/gu;
+
+const isDigit = (char: string | undefined): boolean => char !== undefined && char >= '0' && char <= '9';
+const isBlank = (char: string | undefined): boolean => char === ' ' || char === '\t';
+
+/** Where the list and quote markers at the start of the line `[start, end)` sit, in order. */
+const containerMarkers = (source: string, start: number, end: number): number[] => {
+  const markers: number[] = [];
+  let at = start;
+  while (at < end) {
+    while (isBlank(source[at])) at += 1;
+    const char = source[at];
+    if (char === '>') {
+      markers.push(at);
+      at += 1;
+      continue;
+    }
+    if ((char === '-' || char === '+' || char === '*') && isBlank(source[at + 1])) {
+      markers.push(at);
+      at += 1;
+      continue;
+    }
+    let digits = at;
+    while (isDigit(source[digits])) digits += 1;
+    if (
+      digits > at &&
+      digits - at <= 9 &&
+      (source[digits] === '.' || source[digits] === ')') &&
+      isBlank(source[digits + 1])
+    ) {
+      markers.push(at);
+      at = digits + 1;
+      continue;
+    }
+    break;
+  }
+  return markers;
+};
+
+const tame = (source: string): string => {
+  const runs = source.replace(MARK_RUN, run => `${run.slice(0, MAX_MARK_RUN)}${' '.repeat(run.length - MAX_MARK_RUN)}`);
+  let out = '';
+  let copied = 0;
+  for (let start = 0; start <= runs.length; ) {
+    const newline = runs.indexOf('\n', start);
+    const end = newline === -1 ? runs.length : newline;
+    for (const marker of containerMarkers(runs, start, end).slice(MAX_CONTAINER_DEPTH)) {
+      out += `${runs.slice(copied, marker)}x`;
+      copied = marker + 1;
+    }
     if (newline === -1) break;
     start = newline + 1;
   }
-  return lines;
+  return out + runs.slice(copied);
 };
-
-/** Blank out `<!-- … -->` while keeping every offset and newline where they were. */
-const maskComments = (source: string): string =>
-  source.replace(/<!--[\s\S]*?(?:-->|$)/gu, comment => comment.replace(/[^\n]/gu, ' '));
 
 // ---------------------------------------------------------------------------------------------------
 // Inline text → words
@@ -142,13 +236,21 @@ const LANGUAGE_NAMES: Readonly<Record<string, string>> = {
 
 const EMOJI =
   /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\u{FE0E}|\u{FE0F}|\u{200D}|\u{20E3}|[\u{1F3FB}-\u{1F3FF}]|[\u{E0020}-\u{E007F}])/gu;
-const ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/giu;
-const COMMIT = /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/giu;
-const LONG_HEX = /\b[0-9a-f]{41,128}\b/giu;
-const BARE_URL = /\bhttps?:\/\/[^\s<>"'`]+/giu;
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}]+$/u;
-const PLACEHOLDER = /\uE000(\d+)\uE000/gu;
+const UUID_SOURCE = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const COMMIT_SOURCE = '(?=[0-9a-f]*\\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}';
+const LONG_HEX_SOURCE = '[0-9a-f]{41,128}';
+const UUID = new RegExp(`\\b${UUID_SOURCE}\\b`, 'giu');
+const COMMIT = new RegExp(`\\b${COMMIT_SOURCE}\\b`, 'giu');
+const LONG_HEX = new RegExp(`\\b${LONG_HEX_SOURCE}\\b`, 'giu');
+/** A whole code span that is nothing but an identifier. */
+const WHOLE_UUID = new RegExp(`^${UUID_SOURCE}$`, 'iu');
+const WHOLE_LONG_HEX = new RegExp(`^${LONG_HEX_SOURCE}$`, 'iu');
+const WHOLE_COMMIT = new RegExp(`^${COMMIT_SOURCE}$`, 'iu');
+const PLACEHOLDER = /(\d+)/gu;
+/** A tag stops at the next `<`, so a thousand unclosed `<a` cost one pass, not a thousand. */
+const HTML_TAG = /<\/?[A-Za-z][^<>]*>/gu;
+const HTML_COMMENT = /<!--[\s\S]*?(?:-->|$)/gu;
+const WEB_LABEL = /^(?:https?:\/\/|www\.)/iu;
 
 const hostOf = (url: string): string => {
   const host = url.replace(/^https?:\/\//iu, '').split(/[/?#]/u)[0] ?? '';
@@ -191,27 +293,23 @@ const wordsOf = (token: string): string =>
 const WORD_LIKE = /^[\p{L}\p{N}][\p{L}\p{N} _.-]*$/u;
 const PATH_LIKE = /^[^\s`]*[/][^\s`]*[\p{L}\p{N}_+@#-]$/u;
 
+/** Hashes and UUIDs inside prose or a code span: "a commit", "an ID". Order matters: longest first. */
+const nameIdentifiers = (text: string): string =>
+  text.replace(UUID, 'an ID').replace(LONG_HEX, 'an ID').replace(COMMIT, 'a commit');
+
 const spokenCodeSpan = (code: string): string => {
   const content = code.trim();
   if (content === '') return '';
-  const reference = parseReferenceToken(content);
+  // An identifier on its own is an identifier however long it is — before any length rule can call it a snippet.
+  if (WHOLE_UUID.test(content) || WHOLE_LONG_HEX.test(content)) return 'an ID';
+  if (WHOLE_COMMIT.test(content)) return 'a commit';
+  const reference = content.length <= CODE_SPAN_PATH_LIMIT ? parseReferenceToken(content) : null;
   if (reference !== null) return spokenReference(reference);
   const path = content.replace(/^\.?\/*/u, '').replace(/:\d+(?:-\d+)?$/u, '');
-  if (PATH_LIKE.test(path) && content.length <= 120) return basename(path);
-  if (content.length <= CODE_SPAN_SPOKEN_LIMIT && WORD_LIKE.test(content)) return wordsOf(content);
+  if (content.length <= CODE_SPAN_PATH_LIMIT && PATH_LIKE.test(path)) return basename(path);
+  if (content.length <= CODE_SPAN_SPOKEN_LIMIT && WORD_LIKE.test(content)) return wordsOf(nameIdentifiers(content));
   return 'a code snippet';
 };
-
-const decodeEntities = (value: string): string =>
-  value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (whole, body: string) => {
-    if (body.startsWith('#')) {
-      const code = body[1] === 'x' || body[1] === 'X' ? Number.parseInt(body.slice(2), 16) : Number(body.slice(1));
-      return Number.isInteger(code) && code > 31 && code < 0x110000 && !(code >= 0xd800 && code < 0xe000)
-        ? String.fromCodePoint(code)
-        : ' ';
-    }
-    return ENTITIES[body.toLowerCase()] ?? whole;
-  });
 
 const replaceReferences = (text: string): string => {
   const found = findReferences(text);
@@ -224,48 +322,104 @@ const replaceReferences = (text: string): string => {
   return out;
 };
 
-/** One run of inline markdown as the words a person would say. Never throws; may return ''. */
-export const speakInline = (raw: string): string => {
-  const protectedWords: string[] = [];
-  const protect = (words: string): string => {
-    protectedWords.push(words);
-    return `\uE000${protectedWords.length - 1}\uE000`;
-  };
-  let text = raw.replace(/\uE000/gu, ' ');
-  // Code spans first, and set aside: nothing below may read inside them.
-  text = text.replace(/(`+)([\s\S]*?[^`])\1(?!`)/gu, (_whole, _ticks: string, code: string) =>
-    protect(spokenCodeSpan(code)),
-  );
-  text = text.replace(/<(https?:\/\/[^>\s]+)>/giu, (_whole, url: string) => protect(`a link to ${hostOf(url)}`));
-  text = text.replace(/<\/?[A-Za-z][^>]*>/gu, ' ').replace(/<!--[\s\S]*?-->/gu, ' ');
-  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/gu, (_whole, alt: string) => {
-    const described = speakInline(alt);
-    return protect(described === '' ? 'an image' : `an image: ${described}`);
+/**
+ * What marks are left in plain text after the parser has taken the real emphasis: a doubled marker is
+ * dropped anywhere, and a lone `*` or `_` is dropped when it hugs a word (an unmatched `*word`), but kept
+ * when it stands alone ("a * b"). One pass over each run, so a run of ten thousand is one match.
+ */
+const dropStrayMarks = (text: string): string =>
+  text.replace(/\*\*|__|~~/gu, '').replace(/[*_]+/gu, (run, at: number) => {
+    const before = text[at - 1];
+    const after = text[at + run.length];
+    const opens = (before === undefined || /[\s(]/u.test(before)) && after !== undefined && !/\s/u.test(after);
+    const closes = before !== undefined && !/\s/u.test(before) && (after === undefined || /[\s).,;:!?]/u.test(after));
+    return opens || closes ? '' : run;
   });
-  text = text.replace(/\[\^[^\]]*\]/gu, '');
-  text = text.replace(/\[([^\]]+)\]\(([^)\s]*)(?:\s+"[^"]*")?\)/gu, (_whole, label: string, url: string) =>
-    /^https?:\/\//iu.test(label.trim()) ? protect(`a link to ${hostOf(label.trim())}`) : label || hostOf(url),
-  );
-  text = text.replace(/\[([^\]]+)\]\[[^\]]*\]/gu, '$1');
-  text = text.replace(BARE_URL, (url: string) => {
-    const tail = url.match(TRAILING_PUNCTUATION)?.[0] ?? '';
-    return `${protect(`a link to ${hostOf(url.slice(0, url.length - tail.length))}`)}${tail}`;
-  });
-  text = replaceReferences(text);
-  text = text
-    .replace(UUID, 'an ID')
-    .replace(LONG_HEX, 'an ID')
-    .replace(COMMIT, 'a commit')
-    .replace(/\\([\\`*_{}[\]()#+\-.!|>~<&])/gu, '$1')
-    .replace(/(\*\*|__|~~)/gu, '')
-    .replace(/(^|[\s(])[*_]+(?=\S)/gu, '$1')
-    .replace(/(?<=\S)[*_]+(?=[\s).,;:!?]|$)/gu, '');
-  text = decodeEntities(text).replace(EMOJI, '');
-  text = text
+
+/** Words from text whose markdown is already resolved: identifiers named, strays dropped, spaces tidied. */
+const finish = (text: string, kept: readonly string[]): string => {
+  const named = nameIdentifiers(replaceReferences(text));
+  const tidy = dropStrayMarks(named)
+    .replace(EMOJI, '')
     .replace(/\s+/gu, ' ')
     .replace(/\s+([.,;:!?])/gu, '$1')
     .trim();
-  return text.replace(PLACEHOLDER, (_whole, index: string) => protectedWords[Number(index)] ?? '');
+  return tidy.replace(PLACEHOLDER, (_whole, index: string) => kept[Number(index)] ?? '');
+};
+
+/** Plain text (an image's alt, a table cell already flattened) as words. */
+const plainWords = (text: string): string => finish(text.replace(//gu, ' '), []);
+
+const stripHtml = (html: string): string => html.replace(HTML_COMMENT, ' ').replace(HTML_TAG, ' ');
+
+/** The text an inline subtree shows, with no speaking rules: used to tell what a link's label says. */
+const labelText = (nodes: readonly MdNode[]): string =>
+  nodes.length === 1 && nodes[0]?.type === 'text' ? (nodes[0].value ?? '') : '';
+
+interface Inline {
+  readonly protect: (words: string) => string;
+}
+
+const inlineText = (nodes: readonly MdNode[], inline: Inline, depth: number): string => {
+  if (depth > MAX_DEPTH) return '';
+  let out = '';
+  for (const node of nodes) {
+    switch (node.type) {
+      case 'text':
+        out += (node.value ?? '').replace(//gu, ' ');
+        break;
+      case 'inlineCode':
+        // Set aside: nothing after this may read inside a code span.
+        out += inline.protect(spokenCodeSpan(node.value ?? ''));
+        break;
+      case 'link': {
+        const label = labelText(node.children ?? []).trim();
+        out +=
+          WEB_LABEL.test(label) && !label.includes(' ')
+            ? inline.protect(`a link to ${hostOf(label)}`)
+            : inlineText(node.children ?? [], inline, depth + 1) || hostOf(node.url ?? '');
+        break;
+      }
+      case 'image':
+      case 'imageReference': {
+        const described = plainWords(node.alt ?? '');
+        out += inline.protect(described === '' ? 'an image' : `an image: ${described}`);
+        break;
+      }
+      case 'html':
+        out += stripHtml(node.value ?? '');
+        break;
+      case 'break':
+        out += ' ';
+        break;
+      case 'footnoteReference':
+        break;
+      default:
+        out += inlineText(node.children ?? [], inline, depth + 1);
+    }
+  }
+  return out;
+};
+
+/** A run of inline nodes as the words a person would say. May be ''. */
+const speakNodes = (nodes: readonly MdNode[]): string => {
+  const kept: string[] = [];
+  const protect = (words: string): string => {
+    kept.push(words);
+    return `${kept.length - 1}`;
+  };
+  return finish(inlineText(nodes, { protect }, 0), kept);
+};
+
+/** One run of inline markdown as the words a person would say. Never throws; may return ''. */
+export const speakInline = (raw: string): string => {
+  try {
+    const root = parse(raw);
+    const words = (root.children ?? []).map(node => speakNodes([node])).filter(piece => piece !== '');
+    return words.join(' ');
+  } catch {
+    return '';
+  }
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -287,18 +441,29 @@ const ABBREVIATIONS = new Set([
   'fig',
   'approx',
 ]);
-const SENTENCE_END = /[.!?…]+["')\]]*(?=\s)/gu;
+/** The longest abbreviation above plus its quote or bracket: any word longer than this is no abbreviation. */
+const ABBREVIATION_WINDOW = 12;
+/** A sentence ends at a run of marks — and the run must START here, or a long run would be rescanned from every mark. */
+const SENTENCE_END = /(?<![.!?…])[.!?…]+["')\]]*(?=\s)/gu;
+
+/** The first character at or after `from` that is not whitespace. */
+const nextVisible = (text: string, from: number): string | undefined => {
+  let at = from;
+  while (at < text.length && /\s/u.test(text[at] as string)) at += 1;
+  return text[at];
+};
 
 /** Split one run of spoken words into sentences, not splitting on "e.g." or before a lowercase word. */
 export const sentencesOf = (text: string): string[] => {
   const out: string[] = [];
   let from = 0;
   for (const match of text.matchAll(SENTENCE_END)) {
-    const end = (match.index ?? 0) + match[0].length;
-    const before = text.slice(from, match.index ?? 0);
-    const lastWord = (before.match(/(\S+)$/u)?.[1] ?? '').toLowerCase().replace(/^[("']+/u, '');
+    const at = match.index ?? 0;
+    const end = at + match[0].length;
+    const window = text.slice(Math.max(from, at - ABBREVIATION_WINDOW), at);
+    const lastWord = (window.split(/\s/u).pop() ?? '').toLowerCase().replace(/^[("']+/u, '');
     if (match[0].startsWith('.') && ABBREVIATIONS.has(lastWord)) continue;
-    const next = text.slice(end).trimStart()[0];
+    const next = nextVisible(text, end);
     if (next !== undefined && /\p{Ll}/u.test(next)) continue;
     out.push(text.slice(from, end).trim());
     from = end;
@@ -314,14 +479,6 @@ const ended = (text: string): string => (TERMINAL.test(text) ? text : `${text}.`
 // ---------------------------------------------------------------------------------------------------
 // Blocks
 // ---------------------------------------------------------------------------------------------------
-
-const FENCE_OPEN = /^\s*(`{3,}|~{3,})\s*([^`\s]*)[^`]*$/u;
-const HEADING = /^\s{0,3}#{1,6}(?:\s+(.*?))?(?:\s+#+)?\s*$/u;
-const RULE = /^\s{0,3}(?:([-*_])(?:\s*\1){2,}|=+)\s*$/u;
-const LIST_ITEM = /^(\s*)(?:[-*+]|\d{1,9}[.)])\s+(.*)$/u;
-const QUOTE = /^\s{0,3}>\s?(.*)$/u;
-const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/u;
-const TASK_BOX = /^\[[ xX]\]\s+/u;
 
 const describeFyRender = (body: string): string | null => {
   const parsed = parseFyRender(body);
@@ -346,194 +503,120 @@ const describeFyRender = (body: string): string | null => {
   return said === '' ? `${name}. It's on screen.` : `${name}: ${ended(said)}`;
 };
 
-const describeCode = (info: string, body: readonly string[]): string => {
-  const lines = body.length > 0 && (body[body.length - 1] ?? '').trim() === '' ? body.length - 1 : body.length;
+const describeCode = (info: string, lines: number): string => {
   const count = `${lines} ${lines === 1 ? 'line' : 'lines'}`;
   const key = info.toLowerCase().replace(/[^a-z0-9+#-]/gu, '');
   const language = LANGUAGE_NAMES[key] ?? (key !== '' && key.length <= 16 ? key : '');
   return `Code block, ${count}${language === '' ? '' : ` of ${language}`}. It's on screen.`;
 };
 
-const describeTable = (rows: readonly string[]): string => {
-  const cells = (row: string): string[] =>
-    row
-      .trim()
-      .replace(/^\|/u, '')
-      .replace(/\|$/u, '')
-      .split(/(?<!\\)\|/u)
-      .map(cell => speakInline(cell))
-      .filter(cell => cell !== '');
-  const body = Math.max(0, rows.length - 2);
-  const columns = cells(rows[0] ?? '');
+/** How many lines a code node's text has, not counting a trailing blank one. */
+const lineCount = (code: string): number => {
+  if (code === '') return 0;
+  let lines = 1;
+  for (let at = code.indexOf('\n'); at !== -1; at = code.indexOf('\n', at + 1)) lines += 1;
+  return code.endsWith('\n') ? lines - 1 : lines;
+};
+
+const describeTable = (table: MdNode): string => {
+  const rows = table.children ?? [];
+  const body = Math.max(0, rows.length - 1);
+  const columns = (rows[0]?.children ?? []).map(cell => speakNodes(cell.children ?? [])).filter(cell => cell !== '');
   const named = columns.slice(0, TABLE_COLUMNS_NAMED).join(', ');
   const more = columns.length > TABLE_COLUMNS_NAMED ? `, and ${columns.length - TABLE_COLUMNS_NAMED} more` : '';
   const head = `A table with ${body} ${body === 1 ? 'row' : 'rows'}.`;
   return named === '' ? `${head} It's on screen.` : `${head} Columns: ${named}${more}.`;
 };
 
-const blocksOf = (source: string): Block[] => {
-  const lines = toLines(source);
-  const blocks: Block[] = [];
-  let paragraph: Line[] = [];
-  let items: { text: string; start: number; end: number }[] = [];
+/** What a prose paragraph is called where it sits: a sentence in a list item is one thing to say. */
+type ProseKind = 'text' | 'quote' | 'list';
 
-  const flushParagraph = (): void => {
-    if (paragraph.length === 0) return;
-    const first = paragraph[0] as Line;
-    const last = paragraph[paragraph.length - 1] as Line;
-    const joined = paragraph.map(line => line.text.trim()).join(' ');
-    paragraph = [];
-    const image = joined.match(/^!\[([^\]]*)\]\([^)]*\)$/u);
-    if (image !== null) {
-      const alt = speakInline(image[1] ?? '');
-      blocks.push({
-        kind: 'image',
-        text: alt === '' ? "An image. It's on screen." : `An image: ${ended(alt)}`,
-        start: first.start,
-        end: last.end,
-      });
+const describeFence = (node: MdNode): Pick<Block, 'kind' | 'text'> => {
+  // Exactly the renderer's test (`remarkFyRenderFences`): the language, and nothing after it.
+  if (node.lang === FY_RENDER_FENCE_LANGUAGE && (node.meta ?? '') === '') {
+    const described = describeFyRender(node.value ?? '');
+    return described === null
+      ? { kind: 'code', text: describeCode('', lineCount(node.value ?? '')) }
+      : { kind: 'diagram', text: described };
+  }
+  return { kind: 'code', text: describeCode(node.lang ?? '', lineCount(node.value ?? '')) };
+};
+
+const walk = (node: MdNode, depth: number, prose: ProseKind, out: Block[]): void => {
+  if (depth > MAX_DEPTH) return;
+  const range = rangeOf(node);
+  switch (node.type) {
+    case 'paragraph': {
+      const children = node.children ?? [];
+      const only = children.length === 1 ? children[0] : undefined;
+      if (only?.type === 'image') {
+        const alt = plainWords(only.alt ?? '');
+        out.push({
+          kind: 'image',
+          text: alt === '' ? "An image. It's on screen." : `An image: ${ended(alt)}`,
+          ...range,
+        });
+        return;
+      }
+      const words = speakNodes(children);
+      if (words !== '') out.push({ kind: prose, text: words, ...range });
       return;
     }
-    const words = speakInline(joined);
-    if (words !== '') blocks.push({ kind: 'text', text: words, start: first.start, end: last.end });
-  };
-
-  const flushList = (): void => {
-    if (items.length === 0) return;
-    const spoken = items
-      .map(item => ({ ...item, words: speakInline(item.text.replace(TASK_BOX, '')) }))
-      .filter(item => item.words !== '');
-    items = [];
-    const shown = spoken.length > LIST_READ_ALL_UP_TO ? spoken.slice(0, LIST_READ_FIRST) : spoken;
-    for (const item of shown) blocks.push({ kind: 'list', text: item.words, start: item.start, end: item.end });
-    if (spoken.length > shown.length) {
-      const hidden = spoken.length - shown.length;
-      const end = spoken[spoken.length - 1]?.end ?? 0;
-      blocks.push({ kind: 'list', text: `and ${hidden} more.`, start: end, end });
+    case 'heading': {
+      const words = speakNodes(node.children ?? []);
+      if (words !== '') out.push({ kind: 'heading', text: words, ...range });
+      return;
     }
-  };
-
-  let at = 0;
-  while (at < lines.length) {
-    const line = lines[at] as Line;
-    const text = line.text;
-
-    if (text.trim() === '') {
-      flushParagraph();
-      // A blank line ends a list unless the list carries on right after it.
-      if (items.length > 0) {
-        let peek = at + 1;
-        while (peek < lines.length && (lines[peek]?.text ?? '').trim() === '') peek += 1;
-        const next = lines[peek]?.text ?? '';
-        if (!(LIST_ITEM.test(next) || /^\s{2,}\S/u.test(next))) flushList();
+    case 'code':
+      out.push({ ...describeFence(node), ...range });
+      return;
+    case 'table':
+      out.push({ kind: 'table', text: describeTable(node), ...range });
+      return;
+    case 'html': {
+      const words = speakNodes([node]);
+      if (words !== '') out.push({ kind: prose, text: words, ...range });
+      return;
+    }
+    case 'blockquote': {
+      const first = out.length;
+      for (const child of node.children ?? []) walk(child, depth + 1, 'quote', out);
+      const opening = out[first];
+      if (opening?.kind === 'quote' && !opening.text.startsWith('Quote:')) {
+        out[first] = { ...opening, text: `Quote: ${opening.text}` };
+      } else if (opening !== undefined && !(opening.kind === 'quote')) {
+        out.splice(first, 0, { kind: 'quote', text: 'Quote:', start: range.start, end: opening.start });
       }
-      at += 1;
-      continue;
+      return;
     }
-
-    const fence = text.match(FENCE_OPEN);
-    if (fence !== null) {
-      flushParagraph();
-      flushList();
-      const marker = (fence[1] as string)[0] as string;
-      const width = (fence[1] as string).length;
-      const closer = new RegExp(`^\\s*${marker === '`' ? '`' : '~'}{${width},}\\s*$`, 'u');
-      const body: string[] = [];
-      let scan = at + 1;
-      while (scan < lines.length && !closer.test(lines[scan]?.text ?? '')) {
-        body.push(lines[scan]?.text ?? '');
-        scan += 1;
+    case 'list': {
+      const items = (node.children ?? [])
+        .map(item => {
+          const spoken: Block[] = [];
+          for (const child of item.children ?? []) walk(child, depth + 1, 'list', spoken);
+          return spoken;
+        })
+        .filter(spoken => spoken.length > 0);
+      const shown = items.length > LIST_READ_ALL_UP_TO ? items.slice(0, LIST_READ_FIRST) : items;
+      for (const spoken of shown) out.push(...spoken);
+      if (items.length > shown.length) {
+        const end = items[items.length - 1]?.at(-1)?.end ?? range.end;
+        out.push({ kind: 'list', text: `and ${items.length - shown.length} more.`, start: end, end });
       }
-      const lastLine = lines[Math.min(scan, lines.length - 1)] as Line;
-      const info = fence[2] ?? '';
-      const described = info.toLowerCase() === 'fy-render' ? describeFyRender(body.join('\n')) : null;
-      blocks.push({
-        kind: described === null ? 'code' : 'diagram',
-        text: described ?? describeCode(info.toLowerCase() === 'fy-render' ? '' : info, body),
-        start: line.start,
-        end: lastLine.end,
-      });
-      at = scan + 1;
-      continue;
+      return;
     }
-
-    const rowAfter = lines[at + 1]?.text ?? '';
-    if (text.includes('|') && rowAfter.includes('|') && TABLE_DIVIDER.test(rowAfter)) {
-      flushParagraph();
-      flushList();
-      const rows: string[] = [];
-      let scan = at;
-      while (
-        scan < lines.length &&
-        (lines[scan]?.text ?? '').trim() !== '' &&
-        (lines[scan]?.text ?? '').includes('|')
-      ) {
-        rows.push(lines[scan]?.text ?? '');
-        scan += 1;
-      }
-      blocks.push({ kind: 'table', text: describeTable(rows), start: line.start, end: (lines[scan - 1] as Line).end });
-      at = scan;
-      continue;
-    }
-
-    const heading = text.match(HEADING);
-    if (heading !== null) {
-      flushParagraph();
-      flushList();
-      const words = speakInline(heading[1] ?? '');
-      if (words !== '') blocks.push({ kind: 'heading', text: words, start: line.start, end: line.end });
-      at += 1;
-      continue;
-    }
-
-    if (RULE.test(text)) {
-      flushParagraph();
-      flushList();
-      at += 1;
-      continue;
-    }
-
-    if (QUOTE.test(text)) {
-      flushParagraph();
-      flushList();
-      const quoted: string[] = [];
-      let scan = at;
-      while (scan < lines.length && QUOTE.test(lines[scan]?.text ?? '')) {
-        quoted.push((lines[scan]?.text ?? '').replace(QUOTE, '$1'));
-        scan += 1;
-      }
-      const words = speakInline(quoted.join(' '));
-      if (words !== '')
-        blocks.push({ kind: 'quote', text: `Quote: ${words}`, start: line.start, end: (lines[scan - 1] as Line).end });
-      at = scan;
-      continue;
-    }
-
-    const item = text.match(LIST_ITEM);
-    if (item !== null) {
-      flushParagraph();
-      items.push({ text: item[2] ?? '', start: line.start, end: line.end });
-      at += 1;
-      continue;
-    }
-
-    if (items.length > 0 && /^\s{2,}\S/u.test(text)) {
-      // A wrapped line of the item above it.
-      const open = items[items.length - 1];
-      if (open !== undefined) {
-        open.text = `${open.text} ${text.trim()}`;
-        open.end = line.end;
-      }
-      at += 1;
-      continue;
-    }
-
-    flushList();
-    paragraph.push(line);
-    at += 1;
+    case 'thematicBreak':
+    case 'definition':
+      return;
+    default:
+      // root, footnote definitions, anything a plugin adds: read what is inside.
+      for (const child of node.children ?? []) walk(child, depth + 1, prose, out);
   }
-  flushParagraph();
-  flushList();
+};
+
+const blocksOf = (source: string): Block[] => {
+  const blocks: Block[] = [];
+  walk(parse(source), 0, 'text', blocks);
   return blocks;
 };
 
@@ -559,6 +642,17 @@ const cutAtWord = (text: string, limit: number): string => {
   return (space > limit / 2 ? slice.slice(0, space) : slice).replace(/[\s,;:-]+$/u, '');
 };
 
+/** The start of `source` a reading can use: at most `SCAN_LIMIT` characters and `SCAN_LINES` lines. */
+const scanWindow = (source: string): string => {
+  const head = source.length > SCAN_LIMIT ? source.slice(0, SCAN_LIMIT) : source;
+  let newline = -1;
+  for (let line = 0; line < SCAN_LINES; line += 1) {
+    newline = head.indexOf('\n', newline + 1);
+    if (newline === -1) return head;
+  }
+  return head.slice(0, newline);
+};
+
 /**
  * The segments one reading says, in order. Always a value, never a throw. Empty `segments` means there
  * is nothing worth saying (blank, or markup with no words).
@@ -568,8 +662,8 @@ export function speakableSegments(markdown: string, options: SpeakableOptions = 
     const source = typeof markdown === 'string' ? markdown : '';
     const limit = options.maxCharacters ?? READING_CHARACTERS_PER_MINUTE;
     const cap = Number.isFinite(limit) && limit >= 1 ? Math.floor(limit) : READING_CHARACTERS_PER_MINUTE;
-    const scanned = source.length > SCAN_LIMIT ? source.slice(0, SCAN_LIMIT) : source;
-    const all = segmentsOf(blocksOf(maskComments(scanned)));
+    const scanned = scanWindow(source);
+    const all = segmentsOf(blocksOf(tame(scanned)));
 
     const out: SpeakableSegment[] = [];
     let used = 0;

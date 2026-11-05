@@ -64,7 +64,7 @@ describe('voice choice', () => {
     expect(chooseVoice(voices, 'en-US')?.name).toBe('Samantha');
   });
 
-  test('falls back to a local voice in the same language, then to a remote one, then to none', () => {
+  test('falls back to a local voice in the same language, then to a remote one in it', () => {
     expect(chooseVoice(voices, 'en-GB')?.name).toBe('Samantha');
     expect(
       chooseVoice(
@@ -72,9 +72,32 @@ describe('voice choice', () => {
         'en-US',
       )?.name,
     ).toBe('Google US English');
-    expect(chooseVoice(voices, 'de-DE')).toBeNull();
-    expect(chooseVoice([], 'en-US')).toBeNull();
     expect(chooseVoice(voices, 'fr_CA')?.name).toBe('Amélie');
+  });
+
+  test("a language nobody speaks still gets a NAMED voice: the device's own local pick, never the unset default", () => {
+    // navigator.language de-DE, no German voice, and the browser's default is remote (Chrome's Google voice).
+    const remoteDefault = { id: 'g', name: 'Google US English', lang: 'en-US', local: false, isDefault: true };
+    const local = { id: 'karen', name: 'Karen', lang: 'en-AU', local: true, isDefault: false };
+    const localDefault = { id: 'sam', name: 'Samantha', lang: 'en-US', local: true, isDefault: true };
+    expect(chooseVoice([remoteDefault, local], 'de-DE')?.name).toBe('Karen');
+    expect(chooseVoice([remoteDefault, local, localDefault], 'de-DE')?.name).toBe('Samantha');
+    expect(chooseVoice([local, localDefault], 'de-DE')?.name).toBe('Samantha');
+    expect(chooseVoice(voices, 'de-DE')?.local).toBe(true);
+  });
+
+  test('with nothing local at all, the best remote voice is named so its note can be shown', () => {
+    const remote = [
+      { id: 'a', name: 'Remote A', lang: 'en-US', local: false, isDefault: false },
+      { id: 'b', name: 'Remote B', lang: 'en-GB', local: false, isDefault: true },
+    ];
+    expect(chooseVoice(remote, 'de-DE')?.name).toBe('Remote B');
+    expect(voiceNote(chooseVoice(remote, 'de-DE'))).toBe('Remote B sends this text to its maker to be spoken.');
+  });
+
+  test('a device that lists no voices (yet) yields none, and the speaker will not guess', () => {
+    expect(chooseVoice([], 'en-US')).toBeNull();
+    expect(chooseVoice([], 'de-DE', 'anything')).toBeNull();
   });
 
   test('a remembered local voice wins; a remembered remote one does not beat a local one', () => {
@@ -159,14 +182,63 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(utterance.rate).toBe(2);
   });
 
-  test('a voice that has gone is simply not set', () => {
+  test('a voice that has gone is replaced by a local one for the language, never left unset', () => {
     const synth = new FakeSynth([voice('Samantha', 'en-US')]);
     const speaker = speakerOver(synth);
     speaker.speak(
       { segments: ['Hi.'], rate: 1, voice: { id: 'gone', name: 'Gone', lang: 'en-US', local: true, isDefault: false } },
       () => {},
     );
-    expect((synth.spoken[0] as FakeUtterance).voice).toBeNull();
+    expect((synth.spoken[0] as FakeUtterance).voice).toMatchObject({ name: 'Samantha' });
+  });
+
+  test('a request with no voice is given a local voice for its language', () => {
+    const synth = new FakeSynth([
+      voice('Google US English', 'en-US', { local: false, isDefault: true }),
+      voice('Hedda', 'de-DE'),
+      voice('Karen', 'en-AU'),
+    ]);
+    speakerOver(synth).speak({ segments: ['Hallo.'], rate: 1, language: 'de-DE' }, () => {});
+    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Hedda' });
+    expect(synth.spoken[0]?.lang).toBe('de-DE');
+  });
+
+  test('no matching language: a local voice is named even though the browser default is remote', () => {
+    const synth = new FakeSynth([
+      voice('Google US English', 'en-US', { local: false, isDefault: true }),
+      voice('Karen', 'en-AU'),
+    ]);
+    speakerOver(synth).speak({ segments: ['Hallo.'], rate: 1, language: 'de-DE' }, () => {});
+    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Karen' });
+    expect(synth.spoken[0]?.voice).toMatchObject({ localService: true });
+  });
+
+  test('refuses, and speaks nothing, when no voice may be used: empty list, only remote voices, a list that throws', () => {
+    const refused = (synth: FakeSynth, request: Parameters<ReturnType<typeof speakerOver>['speak']>[0]) => {
+      const { events, onEvent } = record();
+      speakerOver(synth).speak(request, onEvent);
+      expect(synth.spoken).toEqual([]);
+      return events;
+    };
+    // Voices load late: the very first ask can find the list empty.
+    expect(refused(new FakeSynth([]), { segments: ['Hi.'], rate: 1 })).toEqual([{ type: 'error', reason: 'failed' }]);
+    // Only remote voices, and the caller did not vet one: nothing is sent away behind the person's back.
+    const remoteOnly = new FakeSynth([voice('Google US English', 'en-US', { local: false, isDefault: true })]);
+    expect(refused(remoteOnly, { segments: ['Hi.'], rate: 1, language: 'en-US' })).toEqual([
+      { type: 'error', reason: 'failed' },
+    ]);
+    const broken = new FakeSynth();
+    broken.getVoices = () => {
+      throw new Error('no list');
+    };
+    expect(refused(broken, { segments: ['Hi.'], rate: 1 })).toEqual([{ type: 'error', reason: 'failed' }]);
+  });
+
+  test('a remote voice the caller named (and so announced) is used', () => {
+    const synth = new FakeSynth([voice('Google US English', 'en-US', { local: false, isDefault: true })]);
+    const speaker = speakerOver(synth);
+    speaker.speak({ segments: ['Hi.'], rate: 1, voice: speaker.voices()[0] ?? null }, () => {});
+    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Google US English' });
   });
 
   test('stop() silences at once, says stopped once, and ignores what the engine reports after', () => {
@@ -208,17 +280,59 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(a.events).toHaveLength(2);
   });
 
-  test('an engine error ends the reading as failed; interruptions are not errors', () => {
+  test('an engine error ends the reading as failed', () => {
     const synth = new FakeSynth();
     const speaker = speakerOver(synth);
     const { events, onEvent } = record();
     speaker.speak({ segments: ['One.'], rate: 1 }, onEvent);
-    (synth.spoken[0] as FakeUtterance).onerror?.({ error: 'interrupted' });
-    expect(events).toEqual([]);
     (synth.spoken[0] as FakeUtterance).onerror?.({ error: 'synthesis-failed' });
     expect(events).toEqual([{ type: 'error', reason: 'failed' }]);
     (synth.spoken[0] as FakeUtterance).onend?.();
     expect(events).toHaveLength(1);
+  });
+
+  test.each(['interrupted', 'canceled', 'cancelled'])(
+    'the live reading cancelled from outside (%s) ends as stopped, not left reading',
+    error => {
+      const synth = new FakeSynth();
+      const speaker = speakerOver(synth);
+      const { events, onEvent } = record();
+      speaker.speak({ segments: ['One.', 'Two.'], rate: 1 }, onEvent);
+      synth.start();
+      // Another part of the page cancels the shared engine; the browser reports it on the playing utterance.
+      (synth.spoken[0] as FakeUtterance).onerror?.({ error });
+      expect(events).toEqual([{ type: 'segment', index: 0 }, { type: 'stopped' }]);
+      // Nothing carries on afterwards: no next sentence, no second ending.
+      (synth.spoken[0] as FakeUtterance).onend?.();
+      expect(synth.spoken).toHaveLength(1);
+      expect(events).toHaveLength(2);
+    },
+  );
+
+  test('an outside synth.cancel() ends the live reading as stopped (the engine reports interrupted)', () => {
+    const synth = new FakeSynth();
+    const speaker = speakerOver(synth);
+    const { events, onEvent } = record();
+    speaker.speak({ segments: ['One.'], rate: 1 }, onEvent);
+    synth.start();
+    synth.cancel();
+    expect(events).toEqual([{ type: 'segment', index: 0 }, { type: 'stopped' }]);
+  });
+
+  test('a cancellation the adapter caused itself is never reported twice or against the new reading', () => {
+    const synth = new FakeSynth();
+    const speaker = speakerOver(synth);
+    const a = record();
+    const b = record();
+    speaker.speak({ segments: ['A.'], rate: 1 }, a.onEvent);
+    synth.start();
+    // Replacing cancels the engine: the old utterance reports interrupted AFTER the new reading began.
+    speaker.speak({ segments: ['B.'], rate: 1 }, b.onEvent);
+    (synth.spoken[0] as FakeUtterance).onerror?.({ error: 'interrupted' });
+    expect(a.events).toEqual([{ type: 'segment', index: 0 }, { type: 'stopped' }]);
+    expect(b.events).toEqual([]);
+    synth.play();
+    expect(b.events).toEqual([{ type: 'segment', index: 0 }, { type: 'end' }]);
   });
 
   test('an engine that throws on speak ends as failed instead of throwing', () => {
@@ -293,6 +407,25 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(browserSpeaker().voices()).toEqual([]);
   });
 
+  test('over browser globals whose voice list throws, creating the speaker still works', () => {
+    const g = globalThis as Record<string, unknown>;
+    const before = { synth: g.speechSynthesis, utterance: g.SpeechSynthesisUtterance };
+    const synth = new FakeSynth();
+    synth.getVoices = () => {
+      throw new Error('not yet');
+    };
+    g.speechSynthesis = synth;
+    g.SpeechSynthesisUtterance = FakeUtterance;
+    try {
+      expect(browserSpeaker().supported).toBe(true);
+    } finally {
+      g.speechSynthesis = before.synth;
+      g.SpeechSynthesisUtterance = before.utterance;
+      if (before.synth === undefined) delete g.speechSynthesis;
+      if (before.utterance === undefined) delete g.SpeechSynthesisUtterance;
+    }
+  });
+
   test('over the real browser globals it speaks through them', () => {
     const g = globalThis as Record<string, unknown>;
     const before = { synth: g.speechSynthesis, utterance: g.SpeechSynthesisUtterance };
@@ -300,7 +433,15 @@ describe('createSpeechSynthesisSpeaker', () => {
     g.speechSynthesis = synth;
     g.SpeechSynthesisUtterance = FakeUtterance;
     try {
+      let asked = 0;
+      const getVoices = synth.getVoices.bind(synth);
+      synth.getVoices = () => {
+        asked += 1;
+        return getVoices();
+      };
       const speaker = browserSpeaker();
+      // Creating it already asked the browser for its voices, so the list is loaded by the time of a tap.
+      expect(asked).toBe(1);
       expect(speaker.supported).toBe(true);
       expect(speaker.voices()).toHaveLength(1);
       speaker.speak({ segments: ['Hi.'], rate: 1 }, () => {});
