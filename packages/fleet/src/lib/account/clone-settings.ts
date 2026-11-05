@@ -119,6 +119,53 @@ function flatten(value: unknown, prefix: readonly string[], into: Map<string, un
   if (prefix.length > 0) into.set(prefix.join('.'), value);
 }
 
+const under = (key: string, prefix: string): boolean => key.startsWith(`${prefix}.`);
+
+/** The value a document holds at a dotted path (a path `flatten` produced, so every step is a plain mapping). */
+function valueAt(root: Readonly<Record<string, unknown>>, path: string): unknown {
+  let at: unknown = root;
+  for (const segment of path.split('.')) at = (at as Record<string, unknown>)[segment];
+  return at;
+}
+
+/**
+ * The paths where one side holds a value (a scalar, a list, an empty mapping) and the other a mapping with keys
+ * beneath it. A decision about the one is a decision about everything under the other, so the pair is compared at
+ * that path as ONE value (the whole subtree each side holds there), never leaf by leaf. (No two of them nest: a
+ * side that holds a value at one path holds nothing beneath it.)
+ */
+function structuralPaths(left: ReadonlyMap<string, unknown>, right: ReadonlyMap<string, unknown>): string[] {
+  const found = new Set<string>();
+  for (const [from, to] of [
+    [left, right],
+    [right, left],
+  ] as const) {
+    for (const key of from.keys()) {
+      const segments = key.split('.');
+      for (let length = 1; length < segments.length; length += 1) {
+        const ancestor = segments.slice(0, length).join('.');
+        if (to.has(ancestor)) found.add(ancestor);
+      }
+    }
+  }
+  return [...found];
+}
+
+/** The values with each key at or under a structural path folded into that path's whole subtree. */
+function collapse(
+  values: ReadonlyMap<string, unknown>,
+  root: Readonly<Record<string, unknown>>,
+  paths: readonly string[],
+): Map<string, unknown> {
+  const out = new Map<string, unknown>();
+  for (const [key, value] of values) {
+    const path = paths.find(candidate => key === candidate || under(key, candidate));
+    if (path === undefined) out.set(key, value);
+    else if (!out.has(path)) out.set(path, valueAt(root, path));
+  }
+  return out;
+}
+
 /** JSON with every object's keys in order, so two spellings of one value digest alike. */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -200,6 +247,8 @@ interface FileAnalysis {
   readonly rows: readonly Row[];
   /** Why this document cannot be copied here; none of its keys can be applied until it is left out. */
   readonly refused?: string;
+  /** The text held a secret, so no digest of it may leave the analysis (not even in the fingerprint). */
+  readonly withheld?: true;
   /** The digest of every key the source's document holds: the base after this copy. */
   readonly theirsDigests: Readonly<Record<string, string>>;
   /** This machine's document as parsed, kept to build the merge from. */
@@ -353,23 +402,41 @@ function analyseFile(input: CloneSettingsInput, known: Readonly<Record<string, s
       input,
       rows: [],
       refused: `${input.path} from the source holds a value that looks like a secret, which a configuration file never does. Fix it there, or leave ${input.path} out.`,
+      withheld: true,
       theirsDigests: {},
       root: {},
     };
   }
-  const mine =
+  const own =
     input.mineExists || input.path === 'controls'
       ? read(input.path, input.mine, 'Your')
-      : { values: new Map(), root: {} };
-  const keys = [...new Set([...mine.values.keys(), ...theirs.values.keys()])].toSorted();
+      : { values: new Map<string, unknown>(), root: {} };
+  // The same refusal for this machine's own file: a value pasted into it by hand must never reach a review row,
+  // a digest or a log. Nothing about it is returned but the sentence.
+  if (isFileDoc(input.path) && findRawSecrets(own.root).length > 0) {
+    return {
+      input,
+      rows: [],
+      refused: `Your ${input.path} holds a value that looks like a secret, which a configuration file never does. Move it into a secret and refer to it as \${secret:NAME}, or leave ${input.path} out of this copy.`,
+      withheld: true,
+      theirsDigests: {},
+      root: {},
+    };
+  }
+  // A key one side holds as a value and the other as a mapping is compared whole, at that path.
+  const structural = structuralPaths(own.values, theirs.values);
+  const ours = collapse(own.values, own.root, structural);
+  const source = collapse(theirs.values, theirs.root, structural);
+  const keys = [...new Set([...ours.keys(), ...source.keys()])].toSorted();
   const rows: Row[] = [];
   const theirsDigests: Record<string, string> = {};
   for (const [key, value] of theirs.values) theirsDigests[key] = digestOf(value);
+  for (const path of structural) if (source.has(path)) theirsDigests[path] = digestOf(source.get(path));
   for (const key of keys) {
-    const here = mine.values.has(key) ? mine.values.get(key) : undefined;
-    const there = theirs.values.has(key) ? theirs.values.get(key) : undefined;
-    const mineDigest = mine.values.has(key) ? digestOf(here) : undefined;
-    const theirsDigest = theirs.values.has(key) ? digestOf(there) : undefined;
+    const here = ours.has(key) ? ours.get(key) : undefined;
+    const there = source.has(key) ? source.get(key) : undefined;
+    const mineDigest = ours.has(key) ? digestOf(here) : undefined;
+    const theirsDigest = source.has(key) ? digestOf(there) : undefined;
     const outcome = outcomeOf(mineDigest, theirsDigest, known?.[key], known !== undefined);
     // The controls always have a value here and a source that says nothing about one has not dropped it.
     if (
@@ -395,7 +462,7 @@ function analyseFile(input: CloneSettingsInput, known: Readonly<Record<string, s
       root: {},
     };
   }
-  return { input, rows: withLoosening(input, mine.root, theirs.values, rows), theirsDigests, root: mine.root };
+  return { input, rows: withLoosening(input, own.root, source, rows), theirsDigests, root: own.root };
 }
 
 /** Each row flagged when taking it alone would loosen what this machine may spend or what its agents may do. */
@@ -441,8 +508,8 @@ export function analyseCloneSettings(
       files.map(file => [
         file.input.path,
         file.input.mineExists,
-        sha256Hex(file.input.mine),
-        sha256Hex(file.input.theirs),
+        file.withheld === true ? '' : sha256Hex(file.input.mine),
+        file.withheld === true ? '' : sha256Hex(file.input.theirs),
         file.refused ?? '',
         Object.entries(base?.[file.input.path] ?? {}).toSorted(([a], [b]) => a.localeCompare(b)),
       ]),

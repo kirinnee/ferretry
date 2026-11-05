@@ -188,6 +188,68 @@ describe('clone settings: lists are one value', () => {
   });
 });
 
+describe('clone settings: a value on one side and a mapping on the other is ONE decision (review finding 1)', () => {
+  const EMPTY = MINE.replace(/layers:\n {2}jev: false # off on purpose\n {2}llm: false\n/u, 'layers: {}\n');
+
+  it('an emptied mapping on the source is one row for the parent; the kept children are not rows of their own', () => {
+    const { review, analysis } = rowsOf(warden({ theirs: EMPTY }), BASE_OF_MINE);
+    should(review.keys.map(row => [row.key, row.outcome])).eql([['layers', 'both']]);
+    should(review.keys[0]).not.have.property('choice');
+    should(review.keys[0]?.mine).containEql('"jev":false');
+    should(review.keys[0]?.theirs).equal('{}');
+    // Nothing is chosen for the person, and keeping the parent leaves the children where they were.
+    should(() => planCloneSettings(analysis, undefined)).throw(/warden.yaml: layers/);
+    const kept = planCloneSettings(analysis, { 'warden.yaml': { layers: 'keep' } });
+    should(kept.files).eql([]);
+    should(kept.done.kept).eql(['warden.yaml: layers']);
+    // Taking it is the person saying so, for the whole mapping: the review listed exactly that.
+    const taken = planCloneSettings(analysis, { 'warden.yaml': { layers: 'take' } });
+    should(taken.files[0]?.text).containEql('layers: {}');
+    should(taken.files[0]?.text).not.containEql('jev:');
+    should(taken.files[0]?.keys).eql(['layers']);
+  });
+
+  it('with no record of the source the local-only children are still listed, not silently deleted', () => {
+    const { review, analysis } = rowsOf(warden({ theirs: EMPTY }));
+    should(review.keys.map(row => [row.key, row.outcome])).eql([['layers', 'both']]);
+    should(() => planCloneSettings(analysis, undefined)).throw(/warden.yaml: layers/);
+    should(planCloneSettings(analysis, { 'warden.yaml': { layers: 'keep' } }).files).eql([]);
+  });
+
+  it('a record forged to name the children cannot make taking the parent silent', () => {
+    const forged = { ...BASE_OF_MINE, layers: digest({ jev: false, llm: false }) };
+    const { review } = rowsOf(warden({ theirs: EMPTY }), forged);
+    // The record says the source held exactly this mapping: only the source changed it, so it is a plain `theirs`.
+    should(review.keys.map(row => [row.key, row.outcome])).eql([['layers', 'theirs']]);
+    // A locally edited child is a different mapping from the one the record holds: both changed, asked.
+    const edited = MINE.replace('llm: false', 'llm: true');
+    should(outcomes(warden({ mine: edited, theirs: EMPTY }), forged)).eql({ layers: 'both' });
+  });
+
+  it('a mapping that gains keys where this machine holds an empty one is one row, taken by default', () => {
+    const mine = EMPTY;
+    const recorded = { ...BASE_OF_MINE, layers: digest({}) };
+    const { review, analysis } = rowsOf(warden({ mine, theirs: MINE }), recorded);
+    should(review.keys.map(row => [row.key, row.outcome, row.choice])).eql([['layers', 'theirs', 'take']]);
+    const text = planCloneSettings(analysis, undefined).files[0]?.text;
+    should(text).containEql('jev: false');
+    should(text).containEql('llm: false');
+  });
+
+  it('a scalar against a mapping is compared whole, and the record keeps the digest of the subtree', () => {
+    const mine = 'x: 1\n';
+    const theirs = 'x:\n  y: 2\n  z: 3\n';
+    const analysis = analyseCloneSettings([{ path: 'voice.yaml', mine, theirs, mineExists: true }], undefined);
+    should(reviewCloneSettings(analysis)[0]?.keys.map(row => [row.key, row.outcome, row.theirs])).eql([
+      ['x', 'both', '{"y":2,"z":3}'],
+    ]);
+    const plan = planCloneSettings(analysis, { 'voice.yaml': { x: 'take' } });
+    should(plan.files[0]?.text).containEql('y: 2');
+    should(plan.files[0]?.text).not.containEql('x: 1');
+    should(plan.recorded['voice.yaml']).eql({ x: digest({ y: 2, z: 3 }), 'x.y': digest(2), 'x.z': digest(3) });
+  });
+});
+
 describe('clone settings: the merged text is built from this machine’s file', () => {
   const theirs = MINE.replace('intervalMinutes: 5', 'intervalMinutes: 10').replace('  llm: false', '  llm: true');
 
@@ -363,6 +425,34 @@ describe('clone settings: a document that cannot be copied', () => {
     should(review?.keys).eql([]);
     should(JSON.stringify(review)).not.containEql('sk-ant');
     should(() => planCloneSettings(analysis, undefined)).throw(CloneRefusal);
+  });
+
+  it('a file on THIS machine that holds a raw secret is refused: no row, value, digest or fingerprint input leaves', () => {
+    const token = 'sk-ant-api03-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+    const mine = `enabled: true\ninvestigation:\n  token: ${token}\n`;
+    const theirs = 'enabled: false\ninvestigation:\n  token: other\n';
+    const analysis = analyseCloneSettings([warden({ mine, theirs })], { 'warden.yaml': { enabled: digest(true) } });
+    const review = reviewCloneSettings(analysis)[0];
+    should(review?.refused).containEql('Your warden.yaml');
+    should(review?.keys).eql([]);
+    const shown = JSON.stringify({ review, files: analysis.files.map(file => ({ ...file, input: undefined })) });
+    should(shown).not.containEql(token);
+    should(shown).not.containEql(sha256Hex(token));
+    should(shown).not.containEql(sha256Hex(mine));
+    should(() => planCloneSettings(analysis, undefined)).throw(/Nothing was changed/);
+    // The fingerprint is not a digest of the secret-bearing text: the same refusal with another token is the same review.
+    const other = mine.replace(token, 'sk-ant-api03-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC');
+    should(
+      analyseCloneSettings([warden({ mine: other, theirs })], { 'warden.yaml': { enabled: digest(true) } }).fingerprint,
+    ).equal(analysis.fingerprint);
+  });
+
+  it('a source file that holds a raw secret has no digest of it in the fingerprint either', () => {
+    const secret = 'enabled: true\ninvestigation:\n  token: sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n';
+    const again = secret.replace('AAAAAAAA', 'DDDDDDDD');
+    should(analyseCloneSettings([warden({ theirs: secret })], undefined).fingerprint).equal(
+      analyseCloneSettings([warden({ theirs: again })], undefined).fingerprint,
+    );
   });
 
   it('a source file that is not YAML is refused', () => {
