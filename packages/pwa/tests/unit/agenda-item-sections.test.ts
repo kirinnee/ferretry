@@ -160,6 +160,56 @@ describe('card asks', () => {
   });
 });
 
+describe('the card asks an item carries in cardAsks', () => {
+  const gate = {
+    cardId: 'F12',
+    laneId: 'tested',
+    laneName: 'Try it',
+    entry: 3,
+    projectId: 'p1',
+    options: [
+      { id: 'o0', label: 'Done', outcome: 'close' },
+      { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+    ],
+  };
+  const planGate = {
+    ...gate,
+    laneId: 'plan',
+    entry: 4,
+    options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }],
+  };
+  const at = '2026-08-01T11:00:00.000Z';
+
+  test('read every open ask, each with the daemon’s own text, else the board’s steps, else none', () => {
+    const asks = itemCardAsks(
+      item({
+        gateAttached: gate,
+        cardAsks: [
+          { gate, at, howToTest: '  Try it on the preview: https://a.ferretry.pages.dev  ' },
+          { gate: { ...planGate, cardId: 'F13' }, at },
+          { gate: { ...planGate, cardId: 'F14', entry: 5 }, at },
+        ],
+      } as unknown as Partial<AgendaItem>),
+      cardId => (cardId === 'F13' ? '1. From the board' : null),
+    );
+    expect(asks.map(ask => ask.key)).toEqual(['gate:F12:tested:3', 'gate:F13:plan:4', 'gate:F14:plan:5']);
+    expect(asks.map(ask => ask.howToTest)).toEqual([
+      'Try it on the preview: https://a.ferretry.pages.dev',
+      '1. From the board',
+      null,
+    ]);
+    expect(asks[1]?.view.gate.options.map(option => option.label)).toEqual(['OK to build']);
+  });
+
+  test('skip an answered ask, and any ask on an item a card ask cannot ride', () => {
+    const answered = { gate, at, answer: { at, response: { kind: 'multiple-choice', choice: 'Done' }, receipt: 'r' } };
+    expect(itemCardAsks(item({ cardAsks: [answered] } as unknown as Partial<AgendaItem>))).toEqual([]);
+    expect(itemCardAsks(item({ notice: true, cardAsks: [{ gate, at }] } as unknown as Partial<AgendaItem>))).toEqual(
+      [],
+    );
+  });
+});
+
 describe('the activity log', () => {
   test('keeps every stage the item entered, every edit whole, and its own history lines, oldest first', () => {
     const log = activityLog(
