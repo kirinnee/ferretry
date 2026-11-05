@@ -69,9 +69,12 @@ export class AnalyticsQueryError extends Error {
  * the CALLER's question to rewrite, never the daemon's fault.
  */
 export class AnalyticsGroupLimitError extends AnalyticsQueryError {
-  public constructor(public readonly limit: number) {
+  public readonly limit: number;
+
+  public constructor(limit: number) {
     super(`analytics query produces more than ${limit} groups; add a matcher`);
     this.name = 'AnalyticsGroupLimitError';
+    this.limit = limit;
   }
 }
 
