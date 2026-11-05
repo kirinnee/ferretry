@@ -6,12 +6,12 @@
  * whether to read only the last message of the turn or every one. Everything is kept in this browser
  * (`fy-live-voice-v1`) and nothing here is sent anywhere: the voices are the ones built into the device.
  *
- * Same touch rules as the dictation section above it: no autofocus, 44 px targets, every state said in
- * words (never colour alone), nothing that moves.
+ * Same touch rules as the dictation section above it, a little stricter: no autofocus, every control at least
+ * 44 px tall (48 px on a phone), every state said in words (never colour alone), nothing that moves.
  *
  * THE PICKER SAYS WHICH VOICES SEND TEXT AWAY. A voice the browser marks `localService` speaks on the
  * device; the others (Chrome's "Google …" voices) send the text to their maker, so they sit under their
- * own heading and say so in the option's own label. Browsers load their voices late, so the list is read
+ * own heading and say so on their own line under the name (`voice-picker.tsx` — never clipped). Browsers load their voices late, so the list is read
  * again a few times if it is empty at first.
  */
 
@@ -29,16 +29,17 @@ import {
 } from '../../lib/voice-chat/live-settings.ts';
 import type { SpeakerVoice } from '../../lib/voice-chat/ports.ts';
 import type { ReadAloudController } from '../../lib/voice-chat/read-aloud.ts';
-import { voiceLabel } from '../../lib/voice-chat/voice-choice.ts';
+import { voiceNote } from '../../lib/voice-chat/voice-choice.ts';
 import { Badge, Button } from '../../shell/primitives.tsx';
+import { VoicePicker } from './voice-picker.tsx';
 
 const AUTO_READ_EXPLANATION =
   'When a ferret finishes a turn, this device reads its reply aloud. It reads the last message of the turn, describes code, tables and pictures instead of reading them, and says “Done. No message.” for a turn that wrote nothing. If the ferret asks you something, it reads the question and its options — you still answer by tapping. Tap anywhere or press a key to stop. The microphone is never used.';
 
 const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud unless you press Read aloud on a message.';
 
-const OLDER_DAEMON_NOTE =
-  'Auto-read needs a newer Ferretry daemon on this machine. On an older one nothing is read on its own, but Read aloud on a message still works.';
+const OLDER_MACHINE_NOTE =
+  'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
 
 const READ_ALOUD_PRIVACY_NOTE =
   'Replies are spoken with the voices built into this device. Nothing is sent to your machine or stored. A voice marked “sends text away” hands the words to its maker to speak them.';
@@ -66,17 +67,19 @@ export function useSpeakerVoices(controller: ReadAloudController): readonly Spea
   return voices;
 }
 
-const BEST_VOICE = 'best';
-
 /** The section's address: Live voice's "Change voice, speed and length" moves focus here. */
 export const READ_REPLIES_ALOUD_ID = 'read-replies-aloud';
 
 export interface AutoReadSettingsProps {
   /** Test and harness seam: the settings store, instead of the app's. */
   readonly store?: LiveVoiceSettingsStore | null;
+  /** True only when the connected computer is known to run an older Ferretry that cannot date a turn: the one case the note below applies. */
+  readonly olderMachine?: boolean;
+  /** Harness seam: the voice list is open on arrival. */
+  readonly startOpen?: boolean;
 }
 
-export function AutoReadSettings({ store: given }: AutoReadSettingsProps) {
+export function AutoReadSettings({ store: given, olderMachine = false, startOpen = false }: AutoReadSettingsProps) {
   const appStore = useDeviceVoiceSettingsStore();
   const store = given === undefined ? appStore : given;
   const { settings, update, persisted } = useLiveVoiceSettings(store);
@@ -91,7 +94,16 @@ export function AutoReadSettings({ store: given }: AutoReadSettingsProps) {
       </section>
     );
   }
-  return <Supported controller={controller} persisted={persisted} settings={settings} update={update} />;
+  return (
+    <Supported
+      controller={controller}
+      olderMachine={olderMachine}
+      startOpen={startOpen}
+      persisted={persisted}
+      settings={settings}
+      update={update}
+    />
+  );
 }
 
 function Header() {
@@ -108,7 +120,11 @@ function Supported({
   settings,
   update,
   persisted,
+  olderMachine,
+  startOpen,
 }: {
+  readonly olderMachine: boolean;
+  readonly startOpen: boolean;
   readonly controller: ReadAloudController;
   readonly settings: LiveVoiceSettings;
   readonly update: (patch: LiveVoiceSettingsPatch) => void;
@@ -116,8 +132,6 @@ function Supported({
 }) {
   const voices = useSpeakerVoices(controller);
   const [previewing, setPreviewing] = useState(false);
-  const local = voices.filter(voice => voice.local);
-  const remote = voices.filter(voice => !voice.local);
   const chosen = voices.find(voice => voice.id === settings.voiceId) ?? null;
   // A stored voice this device no longer has falls back to the best one, and the picker says so.
   const missing = settings.voiceId !== null && chosen === null && voices.length > 0;
@@ -153,7 +167,7 @@ function Supported({
   return (
     <section
       aria-label="Read replies aloud"
-      className="flex flex-col gap-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="fy-ar flex flex-col gap-4 outline-none focus-visible:ring-2 focus-visible:ring-accent"
       data-auto-read-settings=""
       id={READ_REPLIES_ALOUD_ID}
       tabIndex={-1}
@@ -169,71 +183,53 @@ function Supported({
           aria-checked={settings.autoRead}
           aria-describedby="auto-read-explanation"
           onClick={() => update({ autoRead: !settings.autoRead })}
-          className={cn(
-            'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-            settings.autoRead ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
-          )}
+          className="fy-ar-switch fy-ar-target"
         >
-          <span className="text-ui font-semibold">Auto-read replies</span>
-          <span className="text-meta">{settings.autoRead ? 'On' : 'Off'}</span>
+          <span className="fy-ar-switch-name">Auto-read replies</span>
+          <span className="fy-ar-switch-state">
+            <span className="fy-ar-switch-word">{settings.autoRead ? 'On' : 'Off'}</span>
+            <span aria-hidden="true" className="fy-ar-track">
+              <span className="fy-ar-thumb" />
+            </span>
+          </span>
         </button>
         <p id="auto-read-explanation" className="text-meta leading-base text-muted">
           {settings.autoRead ? AUTO_READ_EXPLANATION : AUTO_READ_OFF_EXPLANATION}
         </p>
-        <p className="text-meta leading-base text-faint" data-auto-read-needs-daemon="">
-          {OLDER_DAEMON_NOTE}
-        </p>
+        {olderMachine ? (
+          <p className="text-meta leading-base text-warn" data-auto-read-needs-update="" role="status">
+            {OLDER_MACHINE_NOTE}
+          </p>
+        ) : null}
       </div>
 
       {/* ---- the voice, with a preview ---- */}
       <div className="flex flex-col gap-2">
-        <label htmlFor="auto-read-voice" className="text-ui font-semibold">
+        <span id="auto-read-voice-label" className="text-ui font-semibold">
           Voice
-        </label>
-        <div className="flex flex-wrap items-stretch gap-2">
-          <select
-            id="auto-read-voice"
-            className="kt-input min-h-[44px] min-w-full sm:min-w-0 sm:flex-1"
-            value={chosen === null ? BEST_VOICE : chosen.id}
-            onChange={event => update({ voiceId: event.target.value === BEST_VOICE ? null : event.target.value })}
-          >
-            <option value={BEST_VOICE}>Best voice for this device</option>
-            {local.length > 0 ? (
-              <optgroup label="On this device">
-                {local.map(voice => (
-                  <option key={voice.id} value={voice.id}>
-                    {voiceLabel(voice)} — {voice.lang}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            {remote.length > 0 ? (
-              <optgroup label="Sends text away">
-                {remote.map(voice => (
-                  <option key={voice.id} value={voice.id}>
-                    {voiceLabel(voice)} — {voice.lang}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-          </select>
-          <Button className="min-h-[44px] px-4" data-preview="" onClick={preview} type="button">
-            {previewing ? 'Stop preview' : 'Preview voice'}
-          </Button>
-        </div>
-        {chosen === null ? null : (
-          <p className="m-0 break-words text-meta leading-base text-muted" data-chosen-voice="">
-            Chosen: {voiceLabel(chosen)} — {chosen.lang}
-          </p>
-        )}
+        </span>
+        <VoicePicker
+          chosen={chosen}
+          defaultOpen={startOpen}
+          onChoose={voiceId => update({ voiceId })}
+          voices={voices}
+        />
+        <Button
+          className="fy-ar-target w-full px-4 sm:w-auto sm:self-start"
+          data-preview=""
+          onClick={preview}
+          type="button"
+        >
+          {previewing ? 'Stop preview' : 'Preview voice'}
+        </Button>
         {voices.length === 0 ? (
           <p className="text-meta leading-base text-faint" role="status">
             This device has not listed its voices yet. The best voice is used until it does.
           </p>
         ) : null}
         {chosen !== null && !chosen.local ? (
-          <p className="text-meta leading-base text-warn" role="status">
-            {chosen.name} sends the text of each reply to its maker to be spoken.
+          <p className="text-md leading-base text-warn" role="status">
+            {voiceNote(chosen)}
           </p>
         ) : null}
         {missing ? (
@@ -261,7 +257,7 @@ function Supported({
           step={0.1}
           value={settings.rate}
           aria-valuetext={`${rateText} normal speed`}
-          className="min-h-[44px] w-full accent-[var(--accent)]"
+          className="fy-ar-range"
           onChange={event => update({ rate: Number(event.target.value) })}
         />
         <div className="flex justify-between text-meta text-faint">
@@ -277,7 +273,7 @@ function Supported({
         </label>
         <select
           id="auto-read-length"
-          className="kt-input min-h-[44px]"
+          className="kt-input fy-ar-target"
           value={settings.maxSeconds === null ? 'none' : String(settings.maxSeconds)}
           onChange={event => update({ maxSeconds: event.target.value === 'none' ? null : Number(event.target.value) })}
         >
@@ -305,7 +301,7 @@ function Supported({
               <label
                 key={option.id}
                 className={cn(
-                  'flex min-h-[44px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
+                  'fy-ar-target flex min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
                   'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
                   checked
                     ? 'border-accent bg-accent-soft text-accent'

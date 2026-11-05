@@ -2,7 +2,7 @@
  * Screenshots of SETTINGS › BEHAVIOUR › LIVE VOICE (F137 slice 6): the real card, inside the real settings
  * panel, in every state — the defaults (with the one-time screen-reader hint), the hint answered, "no countdown"
  * and its warning, Thinker with a long countdown, sounds and buzzes off, reading off, and a voice with a very
- * long name. Phone (390) and desktop (1280), light and dark. Review evidence; nothing compares the PNGs.
+ * long name, and the older-computer note. Phone (390) and desktop (1280), light and dark. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/live-voice-settings-screenshot.tsx
  *   FY_LIVE_SETTINGS_SHOTS_DIR=/tmp/shots bun harness/live-voice-settings-screenshot.tsx
@@ -55,7 +55,8 @@ const scene = params.get('scene') ?? 'defaults';
 const VOICES: readonly SpeakerVoice[] = [
   { id: 'a', name: 'Samantha', lang: 'en-US', local: true, isDefault: true },
   { id: 'b', name: 'Daniel', lang: 'en-GB', local: true, isDefault: false },
-  { id: 'long', name: 'Microsoft Aria Online (Natural) - English (United States)', lang: 'en-US', local: true, isDefault: false },
+  // A long name from a vendor that gets the text: the picker, the "Chosen" line and the summary must all say so.
+  { id: 'long', name: 'Microsoft Aria Online (Natural) - English (United States)', lang: 'en-US', local: false, isDefault: false },
 ];
 
 // A speaker that makes no sound.
@@ -71,11 +72,12 @@ const controller = createReadAloud({ speaker: quiet, language: () => 'en-US' });
 const memory = new Map<string, string>();
 const store = new LiveVoiceSettingsStore({ getItem: key => memory.get(key) ?? null, setItem: (key, value) => void memory.set(key, value) });
 if (scene === 'hint-answered') store.update({ screenReaderHintSeen: true });
-if (scene === 'countdown-zero') store.update({ countdownMs: 0, screenReaderHintSeen: true });
+if (scene === 'countdown-zero') store.update({ sendWithoutCountdown: true, screenReaderHintSeen: true });
 if (scene === 'thinker') store.update({ pause: 'thinker', countdownMs: 4000, screenReaderHintSeen: true });
 if (scene === 'sounds-off') store.update({ earcons: false, haptics: false, screenReaderHintSeen: true });
 if (scene === 'reading-off') store.update({ liveRead: false, keepAwake: false, screenReaderHintSeen: true });
 if (scene === 'long-voice') store.update({ voiceId: 'long', rate: 1.8, maxSeconds: null, screenReaderHintSeen: true });
+if (scene === 'older-machine') store.update({ autoRead: true, screenReaderHintSeen: true });
 
 function Driver() {
   useEffect(() => {
@@ -94,8 +96,10 @@ createRoot(root).render(
         <SettingsSection definition={settingDefinition('live-voice')}>
           <LiveVoiceSettingsSection />
         </SettingsSection>
-        {scene === 'long-voice' ? (
-          <div style={{ marginTop: 12 }} className="kt-panel p-panel"><AutoReadSettings /></div>
+        {scene === 'long-voice' || scene === 'older-machine' ? (
+          <div style={{ marginTop: 12 }} className="kt-panel p-panel">
+            <AutoReadSettings olderMachine={scene === 'older-machine'} startOpen={scene === 'long-voice'} />
+          </div>
         ) : null}
       </main>
     </ReadAloudProvider>
@@ -109,7 +113,7 @@ const html = (theme: string) => `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/app.css" />
-    <style>html, body { height: auto !important; overflow: visible !important; }</style>
+    <style>html, body { height: auto !important; overflow: visible !important; } /* the open voice list shows every row, so a review sees each vendor line */ .fy-ar-list { max-height: none !important; overflow: visible !important; }</style>
   </head>
   <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/live-settings-entry.js"></script></body>
 </html>`;
@@ -155,6 +159,7 @@ const SCENES = [
   'sounds-off',
   'reading-off',
   'long-voice',
+  'older-machine',
 ] as const;
 /** Space left under the last row, in CSS px. */
 const BOTTOM_MARGIN = 20;
@@ -167,11 +172,12 @@ interface Measured {
 /** Every control the person can press or drag, measured in the page: its box, not its CSS. */
 const measureControls = (page: Page): Promise<Measured[]> =>
   page.evaluate(() => {
-    const section = document.querySelector('[data-live-voice-settings]');
-    if (section === null) return [];
-    const controls = [
-      ...section.querySelectorAll<HTMLElement>('button, input[type="range"], label:has(input[type="radio"])'),
-    ];
+    // The Live card, and (in the scenes that show it) the Read replies aloud card beside it with its voice picker.
+    const sections = [...document.querySelectorAll('[data-live-voice-settings], [data-auto-read-settings]')];
+    if (sections.length === 0) return [];
+    const controls = sections.flatMap(section => [
+      ...section.querySelectorAll<HTMLElement>('button, select, input[type="range"], label:has(input[type="radio"])'),
+    ]);
     return controls.map(control => ({
       name: ((control.getAttribute('aria-label') ?? control.textContent) || control.tagName).trim().slice(0, 48),
       height: Math.round(control.getBoundingClientRect().height * 10) / 10,
@@ -300,6 +306,17 @@ try {
             fail(
               `${label}: controls under ${viewport.minimum}px: ${small.map(c => `${c.name} ${c.height}`).join('; ')}`,
             );
+          const jargon = await page.evaluate(() =>
+            /daemon/i.test(document.querySelector('[data-live-scene]')?.textContent ?? ''),
+          );
+          if (jargon) fail(`${label}: the word "daemon" is on screen`);
+          const thisDevice = await page.evaluate(
+            () =>
+              [...document.querySelectorAll<HTMLElement>('[data-live-voice-settings] *')].filter(
+                element => element.children.length === 0 && element.textContent === 'This device',
+              ).length,
+          );
+          if (thisDevice !== 1) fail(`${label}: the Live voice card shows the "This device" badge ${thisDevice} times`);
           const switches = await checkSwitches(page);
           if (switches.length > 0) fail(`${label}: ${switches.join('; ')}`);
           const clipped = await clippedText(page);

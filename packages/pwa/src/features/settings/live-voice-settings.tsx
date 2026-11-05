@@ -3,15 +3,17 @@
  *
  * The device's own choices for Live, the hands-free voice chat: how long a quiet ends your turn, the
  * countdown you can watch before a send, whether Live reads the reply, whether the screen stays on, and
- * its sounds and buzzes. Everything is kept in this browser (`fy-live-voice-v1`, the same record as
- * Read replies aloud) and nothing here is sent anywhere.
+ * its sounds and buzzes. Everything is kept in this browser (`fy-live-voice-v1` and `fy-live-voice-extras-v1`,
+ * see `lib/voice-chat/live-settings.ts`) and nothing here is sent anywhere. The card says "This device" in the
+ * same badge as Read replies aloud.
  *
  * THE VOICE IS NOT CHOSEN TWICE. Live reads with the voice, speed and length from "Read replies aloud"
  * (the picker next door); this card shows what they are now, in words, and moves you to that picker.
  *
- * SENDING WITHOUT A COUNTDOWN IS A DECISION. The countdown slider starts at half a second; "no countdown" is
- * its own switch, off until chosen, and while it is on the card says in plain words that Live will send
- * without one. A slider dragged to the end can therefore never do it by accident.
+ * SENDING WITHOUT A COUNTDOWN IS A DECISION. The countdown slider runs from half a second; "no countdown" is
+ * its own stored choice (`sendWithoutCountdown`), off until the person switches it on, and while it is on the card
+ * says in plain words that Live will send without one. A slider dragged to the end, or a damaged number in
+ * storage, can therefore never do it by accident.
  *
  * Same touch rules as the sections around it, tightened: every control is at least 48 px, every switch is a
  * real `role="switch"` that says On or Off in words (never colour alone), nothing autofocuses, nothing moves.
@@ -21,7 +23,6 @@ import { type ReactNode, useId } from 'react';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from '../../hooks/use-live-voice-settings.ts';
 import { useReadAloudController } from '../../hooks/use-read-aloud.ts';
 import { cn } from '../../lib/class-names.ts';
-import { DEFAULT_GRACE_MS } from '../../lib/voice-chat/live-machine.ts';
 import {
   COUNTDOWN_MAX_MS,
   COUNTDOWN_STEP_MS,
@@ -31,9 +32,10 @@ import {
   PAUSE_OPTIONS,
   READING_LENGTH_OPTIONS,
 } from '../../lib/voice-chat/live-settings.ts';
-import { voiceLabel } from '../../lib/voice-chat/voice-choice.ts';
-import { Button } from '../../shell/primitives.tsx';
+import type { SpeakerVoice } from '../../lib/voice-chat/ports.ts';
+import { Badge, Button } from '../../shell/primitives.tsx';
 import { READ_REPLIES_ALOUD_ID, useSpeakerVoices } from './auto-read-settings.tsx';
+import { BestVoiceWhere, VoiceWhere } from './voice-picker.tsx';
 
 const LIVE_VOICE_APPLIES_NOTE =
   'Pause, countdown, reading and screen-on apply the next time you press Live. Sounds and buzzes apply at once.';
@@ -87,12 +89,15 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
   const controller = useReadAloudController();
   const voices = useSpeakerVoices(controller);
   const countdownId = useId();
-  const noCountdown = settings.countdownMs === 0;
+  const noCountdown = settings.sendWithoutCountdown;
   const chosen = voices.find(voice => voice.id === settings.voiceId) ?? null;
 
   return (
     <section aria-label="Live voice" className="fy-live-settings flex flex-col gap-4" data-live-voice-settings="">
-      <p className="m-0 text-meta leading-base text-faint">{LIVE_VOICE_APPLIES_NOTE}</p>
+      <div className="flex flex-col items-start gap-2">
+        <Badge tone="pend">This device</Badge>
+        <p className="m-0 text-meta leading-base text-faint">{LIVE_VOICE_APPLIES_NOTE}</p>
+      </div>
 
       {/* ---- how long a quiet ends your turn ---- */}
       <Group id="live-pause" label="Pause before sending">
@@ -165,7 +170,7 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
         <SwitchRow
           label="Send without a countdown"
           checked={noCountdown}
-          onChange={on => update({ countdownMs: on ? 0 : DEFAULT_GRACE_MS })}
+          onChange={on => update({ sendWithoutCountdown: on })}
           on=""
           off="Off by default. With it off, every message waits for the countdown."
           describedBy="live-countdown-zero"
@@ -202,11 +207,7 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
           </p>
         )}
         {settings.liveRead && !settings.screenReaderHintSeen ? <ScreenReaderHint update={update} /> : null}
-        <ReadingSummary
-          reading={settings.liveRead}
-          settings={settings}
-          voiceName={chosen === null ? null : voiceLabel(chosen)}
-        />
+        <ReadingSummary reading={settings.liveRead} settings={settings} voice={chosen} />
       </Group>
 
       {/* ---- the screen ---- */}
@@ -380,11 +381,11 @@ const lengthWords = (maxSeconds: number | null): string => {
 function ReadingSummary({
   reading,
   settings,
-  voiceName,
+  voice,
 }: {
   readonly reading: boolean;
   readonly settings: LiveVoiceSettings;
-  readonly voiceName: string | null;
+  readonly voice: SpeakerVoice | null;
 }) {
   const move = (): void => {
     const target = document.getElementById(READ_REPLIES_ALOUD_ID);
@@ -392,8 +393,8 @@ function ReadingSummary({
     target.scrollIntoView({ block: 'start' });
     target.focus({ preventScroll: true });
   };
-  const rows: readonly (readonly [string, string])[] = [
-    ['Voice', voiceName ?? 'Best voice for this device'],
+  const rows: readonly (readonly [string, ReactNode])[] = [
+    ['Voice', <SummaryVoice key="voice" voice={voice} />],
     ['Speed', `${settings.rate.toFixed(1)}×`],
     ['Longest reading', lengthWords(settings.maxSeconds)],
   ];
@@ -419,5 +420,20 @@ function ReadingSummary({
         Change voice, speed and length
       </Button>
     </div>
+  );
+}
+
+/**
+ * The name AND who gets the text, each on its own line so neither is ever cut off: a voice that sends text away
+ * says so here, where the choice is summarised, as well as in the picker.
+ */
+function SummaryVoice({ voice }: { readonly voice: SpeakerVoice | null }) {
+  return (
+    <span className="flex flex-col gap-1" data-live-summary-voice="">
+      <span>{voice === null ? 'Best voice for this device' : voice.name}</span>
+      <span className="text-meta font-normal text-muted">
+        {voice === null ? <BestVoiceWhere /> : <VoiceWhere voice={voice} />}
+      </span>
+    </span>
   );
 }

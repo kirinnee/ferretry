@@ -34,7 +34,7 @@ import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '
 import { INITIAL_LIVE_STATE } from '../lib/voice-chat/live-machine.ts';
 import { createLiveReader, type LiveReadingSource, pageVoice } from '../lib/voice-chat/live-reader.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
-import { DEFAULT_LIVE_VOICE_SETTINGS } from '../lib/voice-chat/live-settings.ts';
+import { DEFAULT_LIVE_VOICE_SETTINGS, graceMsOf } from '../lib/voice-chat/live-settings.ts';
 import { LiveTurnLog } from '../lib/voice-chat/live-turn-log.ts';
 import { type LiveView, liveView } from '../lib/voice-chat/live-view.ts';
 import { webMicLock } from '../lib/voice-chat/mic-lock.ts';
@@ -219,7 +219,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     const runner = new LiveRunner(buildPorts(), {
       canSend: latest.current.enabled,
       // The countdown, the pause and whether to read are taken as Live starts; a change applies from the next start.
-      graceMs: latest.current.graceMs ?? deviceChoices().countdownMs,
+      graceMs: latest.current.graceMs ?? graceMsOf(deviceChoices()),
       pauseMs: latest.current.pauseMs ?? deviceChoices().pause,
       tapToListen: needsTapToListen(typeof navigator === 'undefined' ? undefined : navigator),
       // Tones and buzzes follow this device's switch at the moment each one would sound.

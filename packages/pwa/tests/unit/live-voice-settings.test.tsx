@@ -3,7 +3,7 @@ import { AutoReadSettings } from '../../src/features/settings/auto-read-settings
 import { LiveVoiceSettingsSection, SCREEN_READER_HINT } from '../../src/features/settings/live-voice-settings.tsx';
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
 import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
-import { LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
+import { graceMsOf, LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
 import { createReadAloud, type ReadAloudController } from '../../src/lib/voice-chat/read-aloud.ts';
 import { createSpeechSynthesisSpeaker } from '../../src/lib/voice-chat/speech-synthesis.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -111,7 +111,9 @@ describe('<LiveVoiceSettingsSection>', () => {
     expect(root.querySelector('[role="radiogroup"]')?.textContent).toContain('Thinker · 2.5 s · chosen');
     await interact(() => radios[0]?.click());
     expect(r.store.get().pause).toBe('quick');
-    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 2, pause: 'quick' });
+    expect(JSON.parse(r.storage.data.get('fy-live-voice-extras-v1') ?? '{}')).toMatchObject({ v: 1, pause: 'quick' });
+    // The record an older build reads is still there, unchanged in shape.
+    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 1 });
   });
 
   test('Countdown before send: a slider from 0.5 to 5 s, 1.5 s to start, saved as you move it', async () => {
@@ -134,7 +136,8 @@ describe('<LiveVoiceSettingsSection>', () => {
     expect(none.getAttribute('aria-checked')).toBe('false');
     expect(root.textContent).toContain('Off by default.');
     await interact(() => none.click());
-    expect(r.store.get().countdownMs).toBe(0);
+    expect(r.store.get().sendWithoutCountdown).toBe(true);
+    expect(graceMsOf(r.store.get())).toBe(0);
     expect(none.getAttribute('aria-checked')).toBe('true');
     const warning = pick(root, '[data-live-countdown-warning]');
     expect(warning.getAttribute('role')).toBe('alert');
@@ -144,14 +147,15 @@ describe('<LiveVoiceSettingsSection>', () => {
     // No slider to drag while it is on.
     expect(root.querySelector('input[type="range"]')).toBeNull();
     await interact(() => none.click());
+    expect(r.store.get().sendWithoutCountdown).toBe(false);
     expect(r.store.get().countdownMs).toBe(1500);
     expect(root.querySelector('[data-live-countdown-warning]')).toBeNull();
     expect(root.querySelector('input[type="range"]')).not.toBeNull();
   });
 
-  test('a stored 0 shows the warning from the first paint, and the intro stops promising a wait', async () => {
+  test('a stored opt-in shows the warning from the first paint, and the intro stops promising a wait', async () => {
     const r = rig();
-    r.store.update({ countdownMs: 0 });
+    r.store.update({ sendWithoutCountdown: true });
     const root = await show(r);
     expect(root.textContent).toContain('Live will send without a countdown');
     expect(root.textContent).toContain('There is no countdown.');
@@ -227,7 +231,8 @@ describe('<LiveVoiceSettingsSection>', () => {
     expect(summary.textContent).toContain('1.4×');
     expect(summary.textContent).toContain('2 minutes');
     // Exactly one voice picker and one speed slider on the page (the Read replies aloud ones).
-    expect(root.querySelectorAll('select#auto-read-voice').length).toBe(1);
+    expect(root.querySelectorAll('button#auto-read-voice').length).toBe(1);
+    expect(root.querySelectorAll('select#auto-read-voice').length).toBe(0);
     expect(root.querySelectorAll('input#auto-read-rate').length).toBe(1);
     expect(root.querySelectorAll('[data-live-voice-settings] select').length).toBe(0);
     const target = pick(root, '#read-replies-aloud');
@@ -238,6 +243,40 @@ describe('<LiveVoiceSettingsSection>', () => {
     await interact(() => pick(summary, '[data-change-voice]').click());
     expect(scrolled).toBe(1);
     expect(document.activeElement).toBe(target);
+  });
+
+  test('the card says "This device" in the same badge as Read replies aloud', async () => {
+    const root = await show(rig(), <AutoReadSettings />);
+    const readBadge = [...root.querySelectorAll<HTMLElement>('[data-auto-read-settings] *')].find(
+      element => element.children.length === 0 && element.textContent === 'This device',
+    );
+    expect(readBadge).toBeDefined();
+    const liveBadge = [...root.querySelectorAll<HTMLElement>('[data-live-voice-settings] *')].find(
+      element => element.children.length === 0 && element.textContent === 'This device',
+    );
+    expect(liveBadge).toBeDefined();
+    expect(liveBadge?.className).toBe(readBadge?.className);
+    expect(liveBadge?.tagName).toBe(readBadge?.tagName);
+  });
+
+  test('the summary names who gets the text for a voice that sends it away, and says the text stays for one that does not', async () => {
+    const r = rig([
+      voice('Samantha', 'en-US', { isDefault: true }),
+      voice('Microsoft Aria Online (Natural) - English (United States)', 'en-US', { local: false }),
+    ]);
+    r.store.update({ voiceId: 'uri:Microsoft Aria Online (Natural) - English (United States)' });
+    const root = await show(r);
+    const spoken = pick(root, '[data-live-summary-voice]');
+    expect(spoken.textContent).toContain('Microsoft Aria Online (Natural) - English (United States)');
+    expect(spoken.textContent).toContain('Sends text to Microsoft');
+    expect(spoken.querySelector('[data-remote]')).not.toBeNull();
+    r.store.update({ voiceId: 'uri:Samantha' });
+    await interact(() => undefined);
+    expect(pick(root, '[data-live-summary-voice]').textContent).toContain('Speaks on this device');
+    expect(pick(root, '[data-live-summary-voice]').querySelector('[data-remote]')).toBeNull();
+    r.store.update({ voiceId: null });
+    await interact(() => undefined);
+    expect(pick(root, '[data-live-summary-voice]').textContent).toContain('Picks a voice that speaks on this device');
   });
 
   test('the summary says the best voice for a device with no pick, "no limit" and an odd stored length', async () => {
@@ -309,7 +348,7 @@ describe('<LiveVoiceSettingsSection>', () => {
 
   test('a store handed in as a prop is used instead of the app one', async () => {
     const store = new LiveVoiceSettingsStore(memory());
-    store.update({ pause: 'quick', countdownMs: 0 });
+    store.update({ pause: 'quick', sendWithoutCountdown: true });
     mounted = await mount(<LiveVoiceSettingsSection store={store} />);
     expect(mounted.container.textContent).toContain('Quick · 0.9 s · chosen');
     expect(mounted.container.textContent).toContain('Live will send without a countdown');

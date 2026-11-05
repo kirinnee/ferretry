@@ -10,8 +10,12 @@
  *
  * THE RULES
  *
+ *   0. ONLY THE DAEMON'S LIVE WORD COUNTS. A snapshot that is this device's CACHED copy (the fleet's seeded
+ *      view, a transcript drawn before the first live read) is not the daemon's word about the session
+ *      now: it moves nothing — it is not looked at, raises no watermark and arms nothing. The first LIVE
+ *      snapshot seeds the watermark; only later transitions are watched.
  *   1. THE WATERMARK. `seen` is the newest turn-state date this page has looked at, seeded by the FIRST
- *      thing it sees (a session that is already at `your-turn` when the page opens, or when the setting is
+ *      live snapshot (a session that is already at `your-turn` when the page opens, or when the setting is
  *      switched on, sets the floor and reads nothing). A `working` only starts a watch when it is dated
  *      AFTER everything already seen: a replay of an older working → your-turn pair (a reconnect, a
  *      snapshot arriving late) is at or below the watermark and arms nothing. Whatever is read, skipped or
@@ -19,23 +23,27 @@
  *   2. A WATCHED TURN is one seen `working` after the watermark. Its end is the next `your-turn` or
  *      `needs-input` dated after its `working` — a date that is not later is the state it already had.
  *   3. A SEND IS A TOKEN, TAKEN AT ITS INITIATION. `armOnSend` is called when the person presses send —
- *      before the request is awaited — and remembers the watermark (the FLOOR). The token is then bound to
- *      the SEND'S IDENTITY: the daemon's ledger entry for that send says when the daemon ACCEPTED it
- *      (`boundary`, the daemon's clock). The reply to a send is a completion that follows a `working` dated
- *      at or after that boundary — a new turn that began because of the send. Until then every other state
- *      is the old turn: a previous completion that arrives late, a replayed older working, an idle session
- *      at the moment of the press are all dated before the boundary and prove nothing. A user row or a
- *      state that is merely newer than an old snapshot is not evidence. With no boundary yet, nothing is
- *      read. A newer send REPLACES the token.
- *   4. THE PERSON'S OWN ROW. A send is also read only once the person's row (one the page did not hold at
- *      the press) is in the conversation, because the reply is cut at it. If the completion is seen first
- *      the watch waits; it never reads the wrong reply.
- *   5. TEXT-SETTLED GUARD. The last words of a reply and the daemon's whose-turn flip arrive separately and
+ *      before the request is awaited — and remembers the watermark (the FLOOR) and whether a turn was
+ *      still in flight (`inFlight`: the newest `working` not yet followed by a completion). The token is
+ *      then bound to the SEND'S IDENTITY: the daemon's ledger entry for that send says when the daemon
+ *      ACCEPTED it (`boundary`, the daemon's clock). A completion is the send's own only if the daemon
+ *      dated it AFTER that acceptance — daemon against daemon, no browser clock — and
+ *        - when a `working` of the new turn was seen (after the floor), that `working` is itself dated at
+ *          or after the acceptance and the completion after it; or
+ *        - when none was seen (a short turn can flip faster than the page renders it), nothing else is
+ *          waiting: the turn that was in flight at the press has ended first (its completion is the old
+ *          turn's and is consumed).
+ *      A previous completion that arrives late is dated before the acceptance; a replayed older `working`
+ *      is at or below the floor. With no boundary yet, nothing is read. A newer send REPLACES the token.
+ *   4. TEXT-SETTLED GUARD. The last words of a reply and the daemon's whose-turn flip arrive separately and
  *      in either order. It waits until nothing new has arrived for `TEXT_SETTLED_MS` (500 ms), and says how
  *      long to wait (`recheckInMs`) so the caller sets one timer, not a polling loop.
- *   6. HIDDEN IS SILENT, FOR GOOD. A completion that is observed while the tab is hidden is consumed
- *      without a reading, whatever the settle timer says and whenever the person comes back.
- *   7. A session that is not live (finished, parked) ends the watch without a reading.
+ *   5. HIDDEN IS SILENT, FOR GOOD. A completion that is observed while the tab is hidden is consumed
+ *      without a reading, whatever the settle timer says and whenever the person comes back. A send that
+ *      cannot yet prove the completion (the ledger has not shown its acceptance) REMEMBERS the date of a
+ *      completion seen hidden, and once it can, that completion — and anything dated at or before it — is
+ *      consumed silently.
+ *   6. A session that is not live (finished, parked) ends the watch without a reading.
  */
 
 export const TEXT_SETTLED_MS = 500;
@@ -45,7 +53,7 @@ export type WatchedTurn = 'working' | 'your-turn' | 'needs-input';
 /** A turn seen `working` while the page was open. */
 interface WatchedWork {
   readonly kind: 'watched';
-  /** The daemon's date for the start of the turn: the words of the turn are cut by it. */
+  /** The daemon's date for the start of the turn: a turn nobody here sent has no row of ours to be cut at, so its words are cut by it. */
   readonly startedAt: number;
   /** A completion must be dated after this to be the end of THIS turn (the newest `working` of it). */
   readonly after: number;
@@ -58,6 +66,10 @@ interface SentWork {
   readonly floor: number | null;
   /** The newest `working` seen after the floor; the send's turn if it is dated at or after the acceptance boundary. */
   readonly working: number | null;
+  /** The newest `working` that had no completion yet at the press: the turn already running, whose end is not the reply. */
+  readonly inFlight: number | null;
+  /** The newest completion date seen while the tab was hidden before this send could be proven: never read. */
+  readonly hiddenAt: number | null;
 }
 
 type ArmedTurn = WatchedWork | SentWork;
@@ -67,11 +79,18 @@ export interface TurnWatch {
   readonly armed: ArmedTurn | null;
   /** The watermark: the newest turn-state date (the daemon's clock) this page has looked at. */
   readonly seen: number | null;
+  /** The newest `working` date with no completion after it yet: a turn the page knows is running. */
+  readonly busyAt: number | null;
 }
 
-export const IDLE_WATCH: TurnWatch = Object.freeze({ armed: null, seen: null });
+export const IDLE_WATCH: TurnWatch = Object.freeze({ armed: null, seen: null, busyAt: null });
 
 export interface WatchInput {
+  /**
+   * This is the daemon's live word about the session, not this device's cached copy. A cached snapshot is
+   * ignored entirely: it arms nothing and raises no watermark.
+   */
+  readonly authoritative: boolean;
   /** Whose turn it is; null for a session that is not live. */
   readonly turn: WatchedTurn | null;
   /** The daemon's `turnStateAt` in ms; null when it sent none or none that can be read (nothing is watched). */
@@ -85,17 +104,16 @@ export interface WatchInput {
    * while the ledger has not shown it, and when no send is armed.
    */
   readonly boundary: number | null;
-  /**
-   * The send's own row: a row of the person's that was NOT among the rows held when the armed send was
-   * pressed is in the conversation now. False when no send is armed.
-   */
-  readonly sentRow: boolean;
 }
 
 export interface WatchStep {
   readonly watch: TurnWatch;
   /** Set when the turn has ended and its reply is ready to be picked and read. */
-  readonly fire: { readonly startedAt: number | null; readonly outcome: 'your-turn' | 'needs-input' } | null;
+  readonly fire: {
+    /** The turn's dated start when it is one this page only watched; null for a send, whose reply is read off the rows. */
+    readonly startedAt: number | null;
+    readonly outcome: 'your-turn' | 'needs-input';
+  } | null;
   /** When nothing fired only because the conversation was not quiet long enough: ask again in this long. */
   readonly recheckInMs: number | null;
 }
@@ -110,7 +128,7 @@ const newest = (a: number | null, b: number): number => (a !== null && a > b ? a
  */
 export const armOnSend = (watch: TurnWatch): TurnWatch => ({
   ...watch,
-  armed: { kind: 'sent', floor: watch.seen, working: null },
+  armed: { kind: 'sent', floor: watch.seen, working: null, inFlight: watch.busyAt, hiddenAt: null },
 });
 
 /** The send went nowhere (its request failed): the token is dropped. Anything else being watched stays. */
@@ -123,47 +141,67 @@ export const stopWatching = (watch: TurnWatch): TurnWatch => (watch.armed === nu
 /** One look at the session. */
 export const observeTurn = (before: TurnWatch, input: WatchInput): WatchStep => {
   const quiet = (next: TurnWatch): WatchStep => ({ watch: next, fire: null, recheckInMs: null });
+  // A cached copy is not the daemon's word about the session now: it is not looked at.
+  if (!input.authoritative) return quiet(before);
   const { turn, turnAt: at } = input;
   // No date, nothing to be sure of: nothing is watched.
   if (!finite(at)) return quiet(stopWatching(before));
+  const first = before.seen === null;
+  const fresh = first || at > (before.seen ?? at);
   const watch: TurnWatch = { ...before, seen: newest(before.seen, at) };
-  if (turn === null) return quiet(stopWatching(watch));
+  if (turn === null) return quiet(stopWatching({ ...watch, busyAt: null }));
   const { armed } = watch;
 
   if (turn === 'working') {
+    const running: TurnWatch = fresh ? { ...watch, busyAt: at } : watch;
     if (armed === null) {
       // Only a working dated after everything already looked at is a turn that began while the page was open.
-      const fresh = before.seen === null || at > before.seen;
-      return quiet(fresh ? { ...watch, armed: { kind: 'watched', startedAt: at, after: at } } : watch);
+      return quiet(fresh ? { ...running, armed: { kind: 'watched', startedAt: at, after: at } } : running);
     }
-    if (armed.kind === 'watched') return quiet(at > armed.after ? { ...watch, armed: { ...armed, after: at } } : watch);
+    if (armed.kind === 'watched')
+      return quiet(at > armed.after ? { ...running, armed: { ...armed, after: at } } : running);
     // A send: a working at or before the floor is an earlier turn (or a replay of one).
     const counts = armed.floor === null || at > armed.floor;
-    return quiet(counts ? { ...watch, armed: { ...armed, working: newest(armed.working, at) } } : watch);
+    return quiet(counts ? { ...running, armed: { ...armed, working: newest(armed.working, at) } } : running);
   }
 
-  // `your-turn` or `needs-input`: a completion. Only the turn being waited on can be ended by it.
-  if (armed === null) return quiet(watch);
-  let startedAt: number;
+  // `your-turn` or `needs-input`: a completion. It ends whatever the page knew to be running before it.
+  const ended: TurnWatch = before.busyAt !== null && at > before.busyAt ? { ...watch, busyAt: null } : watch;
+  // Only the turn being waited on can be ended by it; the first thing ever seen only sets the floor.
+  if (armed === null || (first && armed.kind === 'sent')) return quiet(ended);
   if (armed.kind === 'watched') {
     // The state it was already in is not the end of the turn.
-    if (!(at > armed.after)) return quiet(watch);
-    startedAt = armed.startedAt;
+    if (!(at > armed.after)) return quiet(ended);
+    // The end of the turn we are waiting for, observed. If nobody is looking it is gone for good.
+    if (!input.visible) return quiet(stopWatching(ended));
   } else {
-    const { working } = armed;
-    // NO PROOF OF THE SEND'S OWN TURN, NO COMPLETION: it needs the daemon's acceptance of the send, a
-    // `working` dated at or after it, and an end dated after that working. A previous turn's completion
-    // arriving late is dated before all of these and is simply the old turn.
-    if (working === null || !finite(input.boundary) || working < input.boundary || !(at > working)) return quiet(watch);
-    startedAt = working;
+    // A completion seen while hidden is remembered even if it cannot be tied to the send yet.
+    const hiddenAt = input.visible ? armed.hiddenAt : newest(armed.hiddenAt, at);
+    const noted = (inFlight: number | null): TurnWatch => ({
+      ...ended,
+      armed: { ...armed, inFlight, hiddenAt },
+    });
+    const { boundary, visible } = input;
+    // NO PROOF OF THE SEND'S OWN TURN, NO COMPLETION: it needs the daemon's acceptance of the send and an end
+    // the daemon dated after it. A previous turn's completion arriving late is dated before the acceptance.
+    if (!finite(boundary) || !(at > boundary)) return quiet(noted(armed.inFlight));
+    if (armed.working !== null) {
+      // A `working` of the new turn was seen: it must itself be the send's (at or after the acceptance), and the end after it.
+      if (armed.working < boundary || !(at > armed.working)) return quiet(noted(armed.inFlight));
+    } else if (armed.inFlight !== null) {
+      // The turn already running at the press ends first; that end is not the reply.
+      return quiet(noted(at > armed.inFlight ? null : armed.inFlight));
+    }
+    // Proven. Seen hidden — now or before it could be proven — it is gone for good.
+    if (!visible || (armed.hiddenAt !== null && at <= armed.hiddenAt)) return quiet(stopWatching(ended));
   }
-
-  // The end of the turn we are waiting for, observed. If nobody is looking it is gone for good.
-  if (!input.visible) return quiet(stopWatching(watch));
-  // The reply is cut at the person's own row; until it shows there is nothing safe to read.
-  if (armed.kind === 'sent' && !input.sentRow) return quiet(watch);
+  const startedAt = armed.kind === 'watched' ? armed.startedAt : null;
   if (input.quietMs < TEXT_SETTLED_MS) {
-    return { watch, fire: null, recheckInMs: Math.max(1, Math.ceil(TEXT_SETTLED_MS - Math.max(0, input.quietMs))) };
+    return {
+      watch: ended,
+      fire: null,
+      recheckInMs: Math.max(1, Math.ceil(TEXT_SETTLED_MS - Math.max(0, input.quietMs))),
+    };
   }
-  return { watch: stopWatching(watch), fire: { startedAt, outcome: turn }, recheckInMs: null };
+  return { watch: stopWatching(ended), fire: { startedAt, outcome: turn }, recheckInMs: null };
 };

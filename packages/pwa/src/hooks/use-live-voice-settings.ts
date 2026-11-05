@@ -19,6 +19,7 @@ import {
 import { useLiveVoiceSettingsStore as useAppLiveVoiceSettingsStore } from '../lib/store.tsx';
 import {
   DEFAULT_LIVE_VOICE_SETTINGS,
+  LIVE_VOICE_EXTRAS_KEY,
   LIVE_VOICE_SETTINGS_KEY,
   type LiveVoiceSettings,
   type LiveVoiceSettingsPatch,
@@ -61,7 +62,8 @@ export function useLiveVoiceSettings(store: LiveVoiceSettingsStore | null): Live
   useEffect(() => {
     if (store === null || typeof window === 'undefined') return;
     const onStorage = (event: StorageEvent): void => {
-      if (event.key === null || event.key === LIVE_VOICE_SETTINGS_KEY) store.reload();
+      if (event.key === null || event.key === LIVE_VOICE_SETTINGS_KEY || event.key === LIVE_VOICE_EXTRAS_KEY)
+        store.reload();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);

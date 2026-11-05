@@ -39,11 +39,14 @@ const rig = (
   return { synth, controller, store, storage };
 };
 
-const show = async (r: { controller: ReadAloudController; store: LiveVoiceSettingsStore }) => {
+const show = async (
+  r: { controller: ReadAloudController; store: LiveVoiceSettingsStore },
+  props: { olderMachine?: boolean; startOpen?: boolean } = {},
+) => {
   mounted = await mount(
     <LiveVoiceSettingsProvider store={r.store}>
       <ReadAloudProvider controller={r.controller}>
-        <AutoReadSettings />
+        <AutoReadSettings {...props} />
       </ReadAloudProvider>
     </LiveVoiceSettingsProvider>,
   );
@@ -60,8 +63,12 @@ const change = async (element: HTMLElement, value: string): Promise<void> => {
   });
 };
 
-const NEEDS_DAEMON =
-  'Auto-read needs a newer Ferretry daemon on this machine. On an older one nothing is read on its own, but Read aloud on a message still works.';
+const NEEDS_UPDATE =
+  'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
+
+const trigger = (root: HTMLElement) => byId<HTMLButtonElement>(root, 'auto-read-voice');
+const radios = (root: HTMLElement) => [...root.querySelectorAll<HTMLInputElement>('.fy-ar-list input[type="radio"]')];
+const openList = async (root: HTMLElement) => interact(() => trigger(root).click());
 
 describe('<AutoReadSettings>', () => {
   test('the section is badged "This device" and starts OFF, saying so in words', async () => {
@@ -74,8 +81,20 @@ describe('<AutoReadSettings>', () => {
     expect(toggle.textContent).toContain('Off');
     expect(root.textContent).toContain('Off by default.');
     expect(root.textContent).toContain('Replies are spoken with the voices built into this device.');
-    // The daemon requirement is said in plain words whether or not the switch is on: an old machine reads nothing on its own.
-    expect(root.querySelector('[data-auto-read-needs-daemon]')?.textContent).toBe(NEEDS_DAEMON);
+    // The switch is a real one: a track and a thumb drawn beside the state said in words.
+    expect(toggle.querySelector('.fy-ar-track .fy-ar-thumb')).not.toBeNull();
+    // A computer that is not known to be old gets no note, and no mention of a daemon anywhere on screen.
+    expect(root.querySelector('[data-auto-read-needs-update]')).toBeNull();
+    expect(root.textContent?.toLowerCase()).not.toContain('daemon');
+  });
+
+  test('a computer known to run an older Ferretry gets the plain-words note, whether the switch is on or off', async () => {
+    const r = rig();
+    const root = await show(r, { olderMachine: true });
+    expect(root.querySelector('[data-auto-read-needs-update]')?.textContent).toBe(NEEDS_UPDATE);
+    expect(root.textContent?.toLowerCase()).not.toContain('daemon');
+    await interact(() => must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch').click());
+    expect(root.querySelector('[data-auto-read-needs-update]')?.textContent).toBe(NEEDS_UPDATE);
   });
 
   test('turning it on saves to this device, says On, and explains what is read and how to stop', async () => {
@@ -83,57 +102,79 @@ describe('<AutoReadSettings>', () => {
     const root = await show(r);
     await interact(() => must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch').click());
     expect(r.store.get().autoRead).toBe(true);
-    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 2, autoRead: true });
+    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 1, autoRead: true });
     const toggle = must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch');
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(toggle.textContent).toContain('On');
     expect(root.textContent).toContain('Tap anywhere or press a key to stop.');
     expect(root.textContent).toContain('The microphone is never used.');
-    expect(root.querySelector('[data-auto-read-needs-daemon]')?.textContent).toBe(NEEDS_DAEMON);
     expect(root.textContent).not.toContain('3 seconds');
   });
 
-  test('the voice list groups voices by where they speak and labels the ones that send text away', async () => {
+  test('the voice picker shows the voice in use, and opens a list grouped by where each voice speaks', async () => {
     const root = await show(rig());
-    const select = byId<HTMLSelectElement>(root, 'auto-read-voice');
-    const groups = [...select.querySelectorAll('optgroup')].map(group => group.getAttribute('label'));
+    expect(trigger(root).getAttribute('aria-expanded')).toBe('false');
+    expect(trigger(root).textContent).toContain('Best voice for this device');
+    expect(root.querySelector('.fy-ar-list')).toBeNull();
+    await openList(root);
+    expect(trigger(root).getAttribute('aria-expanded')).toBe('true');
+    const groups = [...root.querySelectorAll('fieldset legend')].map(legend => legend.textContent);
     expect(groups).toEqual(['On this device', 'Sends text away']);
-    const labels = [...select.querySelectorAll('option')].map(option => option.textContent);
-    expect(labels).toEqual([
+    expect(radios(root).map(radio => radio.getAttribute('aria-label'))).toEqual([
       'Best voice for this device',
       'Samantha — en-US',
       'Google US English (sends text to Google) — en-US',
     ]);
-    expect(select.value).toBe('best');
+    expect(radios(root).map(radio => radio.checked)).toEqual([true, false, false]);
+    // The vendor is its own line under the name, never glued onto the end of a name that can be cut.
+    const rows = [...root.querySelectorAll('.fy-ar-row')];
+    const google = rows[2];
+    expect(google?.querySelector('.fy-ar-voice-name')?.textContent).toContain('Google US English');
+    expect(google?.querySelector('.fy-ar-voice-name')?.textContent).not.toContain('sends text');
+    expect(google?.querySelector('.fy-ar-voice-where')?.textContent).toBe('Sends text to Google');
+    expect(google?.querySelector('.fy-ar-voice-where')?.hasAttribute('data-remote')).toBe(true);
+    expect(rows[1]?.querySelector('.fy-ar-voice-where')?.textContent).toBe('Speaks on this device');
+    await interact(() => trigger(root).click());
+    expect(root.querySelector('.fy-ar-list')).toBeNull();
   });
 
-  test('choosing a voice is saved; a remote one warns in words; "best" clears it', async () => {
+  test('a list can arrive open', async () => {
+    const root = await show(rig(), { startOpen: true });
+    expect(root.querySelector('.fy-ar-list')).not.toBeNull();
+  });
+
+  test('choosing a voice is saved and marked Selected; a remote one warns in words; "best" clears it', async () => {
     const r = rig();
     const root = await show(r);
-    const select = byId<HTMLSelectElement>(root, 'auto-read-voice');
-    await change(select, 'uri:Google US English');
+    await openList(root);
+    await interact(() => radios(root)[2]?.click());
     expect(r.store.get().voiceId).toBe('uri:Google US English');
-    expect(root.textContent).toContain('Google US English sends the text of each reply to its maker to be spoken.');
-    await change(select, 'uri:Samantha');
+    expect(trigger(root).textContent).toContain('Google US English');
+    expect(trigger(root).textContent).toContain('Sends text to Google');
+    expect(root.textContent).toContain('Google US English sends text to Google to be spoken.');
+    expect(root.querySelector('.fy-ar-row[data-selected]')?.textContent).toContain('Selected');
+    await interact(() => radios(root)[1]?.click());
     expect(r.store.get().voiceId).toBe('uri:Samantha');
-    expect(root.textContent).not.toContain('sends the text of each reply');
-    await change(select, 'best');
+    expect(trigger(root).textContent).toContain('Speaks on this device');
+    expect(root.textContent).not.toContain('sends text to Google to be spoken');
+    await interact(() => radios(root)[0]?.click());
     expect(r.store.get().voiceId).toBeNull();
   });
 
-  test('a chosen voice is also written out in full under the picker, where a long name cannot be cut off', async () => {
+  test('a remote voice that is listed but not chosen shows its vendor and no warning', async () => {
     const r = rig();
-    const root = await show(r);
-    expect(root.querySelector('[data-chosen-voice]')).toBeNull();
-    await change(byId<HTMLSelectElement>(root, 'auto-read-voice'), 'uri:Samantha');
-    expect(root.querySelector('[data-chosen-voice]')?.textContent).toContain('Chosen: Samantha — en-US');
+    r.store.update({ voiceId: 'uri:Samantha' });
+    const root = await show(r, { startOpen: true });
+    expect(root.textContent).toContain('Sends text to Google');
+    expect(root.textContent).not.toContain('to be spoken.');
+    expect(radios(root)[2]?.checked).toBe(false);
   });
 
   test('a stored voice this device no longer has falls back, and says so', async () => {
     const r = rig();
     r.store.update({ voiceId: 'uri:Gone' });
     const root = await show(r);
-    expect(byId<HTMLSelectElement>(root, 'auto-read-voice').value).toBe('best');
+    expect(trigger(root).textContent).toContain('Best voice for this device');
     expect(root.textContent).toContain('The voice you chose is not on this device any more');
   });
 
@@ -199,10 +240,10 @@ describe('<AutoReadSettings>', () => {
   test('what to read: last message by default, every message by choice', async () => {
     const r = rig();
     const root = await show(r);
-    const radios = [...root.querySelectorAll<HTMLInputElement>('input[name="auto-read-what"]')];
-    expect(radios.map(radio => radio.checked)).toEqual([true, false]);
+    const choices = [...root.querySelectorAll<HTMLInputElement>('input[name="auto-read-what"]')];
+    expect(choices.map(radio => radio.checked)).toEqual([true, false]);
     expect(root.textContent).toContain('Last message of the turn');
-    await interact(() => radios[1]?.click());
+    await interact(() => choices[1]?.click());
     expect(r.store.get().whatToRead).toBe('every');
   });
 
@@ -210,7 +251,9 @@ describe('<AutoReadSettings>', () => {
     const r = rig([]);
     const root = await show(r);
     expect(root.textContent).toContain('This device has not listed its voices yet.');
-    expect(byId<HTMLSelectElement>(root, 'auto-read-voice').options).toHaveLength(1);
+    await openList(root);
+    expect(radios(root)).toHaveLength(1);
+    expect(root.querySelector('fieldset')).toBeNull();
   });
 
   test('a browser with no speech says so and offers no controls', async () => {

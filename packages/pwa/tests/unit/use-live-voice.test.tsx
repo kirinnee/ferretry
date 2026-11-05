@@ -347,7 +347,7 @@ describe("useLiveVoice with this device's Live voice choices", () => {
 
   it('the countdown choice sets the wait: 0 sends at once, with no "Sending in" step', async () => {
     const fake = fakeLive();
-    const { view, get } = await rigWithStore(fake, storeWith({ countdownMs: 0 }));
+    const { view, get } = await rigWithStore(fake, storeWith({ sendWithoutCountdown: true }));
     await interact(() => get().start());
     await flush();
     await speakThenPause(fake, 1_520);
@@ -356,9 +356,30 @@ describe("useLiveVoice with this device's Live voice choices", () => {
     await view.unmount();
   });
 
+  it('SAFEGUARD: a damaged stored countdown (-40, 0.1, 0, "0") never sends at once; only the explicit opt-in does', async () => {
+    for (const damaged of [-40, 0.1, 0, '0']) {
+      const data = new Map<string, string>([
+        ['fy-live-voice-extras-v1', JSON.stringify({ v: 1, countdownMs: damaged })],
+      ]);
+      const store = new LiveVoiceSettingsStore({
+        getItem: key => data.get(key) ?? null,
+        setItem: (key, value) => void data.set(key, value),
+      });
+      const fake = fakeLive();
+      const { view, get } = await rigWithStore(fake, store);
+      await interact(() => get().start());
+      await flush();
+      await speakThenPause(fake, 1_520);
+      // The words are in the box and the countdown is running: nothing has been sent.
+      expect(get().view.stateWord).toContain('Sending in');
+      expect(fake.sends.length).toBe(0);
+      await view.unmount();
+    }
+  });
+
   it('a page that hands in its own countdown and pause overrides the device choice', async () => {
     const fake = fakeLive();
-    const { view, get } = await rigWithStore(fake, storeWith({ countdownMs: 0, pause: 'thinker' }), {
+    const { view, get } = await rigWithStore(fake, storeWith({ sendWithoutCountdown: true, pause: 'thinker' }), {
       graceMs: 2_000,
       pauseMs: 'quick',
     });

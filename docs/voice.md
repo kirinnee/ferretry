@@ -686,10 +686,11 @@ in that order. Only when none has readable words does it say "The ferret needs y
 
 Never read: the person's own messages, **other ferrets' messages**, agenda and system rows, notices, thinking and tool calls (they are not
 assistant text at all), a message the ferret _sent to another ferret_, and Pack commands. The turn is what came after the person's last
-message, so a silent turn can never fall back to the previous turn's reply. For a reply to a send from this page the turn begins at the
-person's own row — the first one the page had not held when send was pressed — so a follow-up typed a moment later never moves it, whatever the
-clocks say. A turn that was only watched is cut by its start time: the last message of the person's at or before the start (a later one moves it only
-when the clock is skewed, it is the first, and the agent has not answered before it). Code, tables and pictures are described, not read (the
+message, so a silent turn can never fall back to the previous turn's reply. The reply to a send from this page is simply **the last
+assistant text after the last message of the person's that is in the conversation when the turn is seen to end** ("Done. No message." when
+there is none) — there is no per-send bookkeeping of which row is whose. A turn that was only watched is cut by its start time: the last message of the
+person's at or before the start (a later one moves it only when the clock is skewed, it is the first, and the agent has not answered before it).
+Code, tables and pictures are described, not read (the
 speakable rules above), and one reading stops at the **longest reading** setting with "There's more on screen."
 
 ### When a turn has "ended"
@@ -698,34 +699,41 @@ speakable rules above), and one reading stops at the **longest reading** setting
 
 **It works only on the daemon's own word.** Every date it uses is the daemon's `turnStateAt`, on the daemon's clock; nothing is ever compared
 with the browser's clock. A machine that sends no `turnState` gives it nothing to work with, so **nothing is auto-read there** — the settings
-row says so in plain words ("Auto-read needs a newer Ferretry daemon on this machine"), and **Read aloud** on a message still works. There is
+row says so in plain words ("Auto-read needs a newer Ferretry on your computer") — **only when it applies**: the connected machine has live ferrets and none of them carries a turn (`machineIsOlder` in `hooks/use-machine-dates-turns.ts`); a machine that does date its turns shows no note — and **Read aloud** on a message still works. There is
 deliberately no guess for an old daemon: a guess timed by "3 seconds of quiet" read history three reviews in a row.
 
-1. **The watermark.** The newest turn-state date the page has looked at. The first thing it sees seeds it: a session already at `your-turn`
-   when the page opens, or when the switch is turned on, reads nothing. A `working` only starts a watch when it is dated **after** everything
-   already seen, so a replay of an older working → your-turn pair (a reconnect, a snapshot arriving late) is at or below the watermark and arms
-   nothing. Whatever is read, skipped or merely looked at raises it: consumed is consumed.
+0. **Only the daemon's live word counts.** The page draws this device's cached copy first (the fleet's seeded view, a transcript from the
+   local cache). A cached snapshot is not the daemon's word about the session now: it is not looked at, raises no watermark and arms
+   nothing. The page tells the hook so (`authoritative`), and the hook never arms a send off a cached copy either.
+1. **The watermark.** The newest turn-state date the page has looked at. The first **live** snapshot seeds it: a session already at
+   `your-turn` when the page opens, or when the switch is turned on, reads nothing. A `working` only starts a watch when it is dated
+   **after** everything already seen, so a replay of an older working → your-turn pair (a reconnect, a snapshot arriving late) is at or
+   below the watermark and arms nothing. Whatever is read, skipped or merely looked at raises it: consumed is consumed.
 2. **A watched turn** is one seen `working` after the watermark. It ends at the next `your-turn` or `needs-input` dated after its `working`.
-3. **A send is a token taken when the press happens**, before the request is awaited, remembering the watermark (the floor). When the request
-   comes back the token is **bound to the send's own id**, and the daemon's send ledger says when the daemon **accepted** it. The reply to a
-   send is a completion that follows a `working` dated at or after that acceptance — a turn that began because of the send. Everything else
-   is the old turn: a previous completion that turns up late, a replayed older working, an idle session at the moment of the press are all
-   dated before the acceptance and prove nothing, and a new row or a state merely newer than an old snapshot is not evidence. Until the
-   ledger shows the send, nothing is read (a turn that was fast enough to finish first is read the moment it does). A newer send drops
-   whatever was waiting on the older one, and a send whose request failed drops its token. The press itself reads nothing, and the
-   acknowledgement of a press the composer already announced stops nothing — above all not a fast reply already being read. A message sent
-   without going through the composer's press (answering a form) stops a reading and is followed like any other turn.
-4. **The person's own row** must be in the conversation before a send is read, because the reply is cut at it. If the completion is seen
-   first it waits; it never reads the wrong reply.
+3. **A send is a token taken when the press happens**, before the request is awaited, remembering the watermark (the floor) and whether a
+   turn was already running (the newest `working` with no completion after it). When the request comes back the token is **bound to the
+   send's own id**, and the daemon's send ledger says when the daemon **accepted** it. A completion is the send's own only if the
+   **daemon dated it after that acceptance** — daemon against daemon, never the browser's clock — and either (a) a `working` of the
+   new turn was seen and is itself dated at or after the acceptance, with the end after it, or (b) none was seen (a short turn can flip
+   faster than the page renders it) and the turn that was running at the press has already ended — that earlier end is the old turn's
+   and is consumed, never read. A previous completion that turns up late is dated before the acceptance; a replayed older `working` is
+   at or below the floor. Until the ledger shows the send, nothing is read (a turn that was fast enough to finish first is read the moment
+   it does). A newer send drops whatever was waiting on the older one, and a send whose request failed drops its token. The press itself
+   reads nothing, and the acknowledgement of a press the composer already announced stops nothing — above all not a fast reply already
+   being read. A message sent without going through the composer's press (answering a form) stops a reading and is followed like any
+   other turn.
+4. **Hidden before the ledger answers.** A completion seen while the tab is hidden is remembered by the send's token even when the
+   ledger has not yet shown the send; once it has, that completion (and anything dated at or before it) is consumed silently and the
+   token is spent — so coming back and the acknowledgement arriving can never read it.
 5. **Text-settled guard:** the last words and the whose-turn flip arrive separately, in either order, so it waits for 500 ms with
    nothing new before it reads.
 6. A turn that ends while the tab is **hidden** is never read: it is judged when it is seen (and the moment the tab hides cancels a
    pending reading), not when the timer would have fired, so coming back changes nothing.
 7. **History is never a fresh arrival.** The page draws this device's cached transcript first and replaces it with the authoritative log;
-   rows are only ever _picked from_ (cut at the person's own row or at the daemon's start of the turn), never counted as arrivals, so that
-   hydration reads nothing.
+   rows are only ever _picked from_, never counted as arrivals, so that hydration reads nothing.
 
-A turn whose `working` the page never saw (it finished between two looks) is not read — silent rather than risk the wrong reply.
+A turn that was only watched, and whose `working` the page never saw (it finished between two looks), is not read — silent rather than
+risk the wrong reply. A **send** whose `working` was never rendered is read, because the daemon's own dates prove it.
 
 ### What stops it
 
@@ -736,7 +744,7 @@ One reading at a time — a new reading replaces any other.
 
 ### The settings
 
-Kept in this browser under its own key, `fy-live-voice-v1` (`lib/voice-chat/live-settings.ts`): zod-parsed field by field, versioned,
+Kept in this browser under its own key, `fy-live-voice-v1` (`lib/voice-chat/live-settings.ts`; Live voice's own fields sit beside it in `fy-live-voice-extras-v1`, see [Live voice settings](#live-voice-settings)): zod-parsed field by field, versioned,
 capped (a voice id is at most 200 characters), a bad field falls back by itself, a payload from another version is discarded, and
 refused storage keeps the choice in memory and says so. Nothing in it is a secret and no reply text is stored.
 
@@ -751,21 +759,29 @@ refused storage keeps the choice in memory and says so. Nothing in it is a secre
 
 **While Live voice is on, Auto-read stands down:** Live reads its own turns ([Reading the reply](#reading-the-reply)), so a reply is never read twice. The "Auto-read replies" setting is not changed; it works again when Live ends.
 
-The voice list groups voices **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as Chrome's
-"Google …" ones), and a remote voice is labelled in words with who it sends text to ("(sends text to Google)") and warns in words when chosen. **Preview voice** speaks one sentence
-with the chosen voice and speed. Free voices built into the device only: no paid or cloud voice and no new secret.
+The voice is chosen from a **picker** (`features/settings/voice-picker.tsx`), not a native `<select>`: a closed select shows one line and cuts what
+does not fit, and the words that matter most are the voice's name and who gets the text. The button shows the voice in use — its name, then a
+second line saying where it speaks ("Speaks on this device" / "Sends text to Google", with a warning icon and bold words for a remote one). It
+opens a list of radio rows grouped **On this device** and **Sends text away** (a voice the browser does not mark `localService`, such as
+Chrome's "Google …" ones); a row carries the name and the vendor line separately, **both wrap, neither is ever clipped**, and the chosen row
+says **Selected**. A remote voice also warns in a full sentence when chosen. **Preview voice** speaks one sentence with the chosen voice and
+speed (a remote voice shows its warning while it is previewed).
+
+**Auto-read replies** is a real switch (`role="switch"`, `aria-checked`) in a full-width row: the name, the state **in words**, and a track
+with a thumb that moves. Every control — the switch row, the voice button and its rows, Preview, the speed slider (a 48 px hit area around a
+32 px thumb), the Longest-reading select and the What-to-read rows — is at least 44 px tall, and 48 px on a phone or any touch screen. Free voices built into the device only: no paid or cloud voice and no new secret.
 
 ### Accessibility
 
 State is always in words: the switch says **On**/**Off**, the chip says **Reading the reply** and how to stop, and a polite live region
-says only "Reading the reply" — never the reply itself, which the voice already says. Targets are 44 px; nothing moves (there is no
+says only "Reading the reply" — never the reply itself, which the voice already says. Targets are 44 px (48 px on a phone); nothing moves (there is no
 animation to turn off); the settings carry no autofocus.
 
 ### Where it lives
 
 `lib/voice-chat/` — `reply-picker.ts`, `auto-read.ts`, `live-settings.ts`. `hooks/use-auto-read.ts` is the composition point (one timer and a few
 document events), used by the chat page, which hands its `beginSend` / `sent` / `failed` to the composer's `onSending` / `onSent` / `onSendFailed` and the daemon's send ledger (`sends`, never the browser's outbox) as the source of each send's accepted time; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
-`features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice.
+`features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice, `voice-picker.tsx` its voice list, and the styles are in `components/read-aloud.css` (`.fy-auto-read*`, `.fy-ar*`).
 
 ## Pause detection (the end of a spoken turn)
 
@@ -1047,42 +1063,73 @@ Talking over the reply is a later, headphones-only slice.
 ### Live voice settings
 
 **Settings › Behaviour › Live voice** (right under Voice, which holds Read replies aloud; badge **This device**; found in the palette by
-"live", "voice chat", "read aloud" and "hands-free"). Same record as Read replies aloud: `fy-live-voice-v1`, now **version 2**. A version-1
-record is still read: the fields it never had take their defaults, and the buzz follows the old single "Live sounds" switch. A
-version this build does not know is discarded. Pause, countdown, reading and keep-screen-on are read **when Live starts** (a change
+"live", "voice chat", "read aloud" and "hands-free"). Pause, countdown, reading and keep-screen-on are read **when Live starts** (a change
 applies the next time you press Live); the tones and the buzz are asked at every cue.
 
-| Setting                       | Choices                                                                                 | Default                      | Stored field                    |
-| ----------------------------- | --------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------- |
-| Pause before sending          | Quick 0.9 s · Normal 1.5 s · Thinker 2.5 s                                              | **Normal**                   | `pause`                         |
-| Countdown before send         | 0.5 s – 5 s in half-seconds                                                             | **1.5 s**                    | `countdownMs`                   |
-| Send without a countdown      | On / Off (stores 0; shows the warning when on)                                          | **Off**                      | `countdownMs` 0                 |
-| Read replies aloud in Live    | On / Off                                                                                | **On**                       | `liveRead`                      |
-| Voice, speed, longest reading | **not repeated**: shown in words, with a button to the one picker in Read replies aloud | best voice · 1.1× · 1 minute | `voiceId`, `rate`, `maxSeconds` |
-| Keep screen on                | On / Off                                                                                | **On**                       | `keepAwake`                     |
-| Sounds                        | On / Off                                                                                | **On**                       | `earcons`                       |
-| Buzz on phones                | On / Off                                                                                | **On**                       | `haptics`                       |
-| Screen-reader hint answered   | (the one-time hint is shown until Got it or Turn it off)                                | not answered                 | `screenReaderHintSeen`          |
-| Clean-up in Live              | read-only line: "Live uses Fix-style clean-up; Polish is treated as Fix."               | Fix                          | —                               |
+**Two records, so an older tab cannot erase a newer one.** Read replies aloud's `fy-live-voice-v1` is read by older builds that accept
+only `v: 1` and rewrite the whole record on every change. So Live voice **never changes that record's shape**: it keeps writing the
+six version-1 fields there (`autoRead`, `voiceId`, `rate`, `maxSeconds`, `whatToRead`, `earcons`), and keeps its own fields in a second
+record, `fy-live-voice-extras-v1` (`v: 1`: `pause`, `countdownMs`, `sendWithoutCountdown`, `liveRead`, `keepAwake`, `haptics`,
+`screenReaderHintSeen`), which an older build neither reads nor writes. A newer tab reads both and merges them; an older tab sees all its
+own choices, and its save changes only the shared six, so every Live choice survives it. A record that is missing, unreadable or of a
+version this build does not know gives _its_ fields their defaults and leaves the other record alone; the buzz follows the old single
+"Live sounds" switch until it has been chosen on its own. Tested in both directions with a copy of the older build's reader and writer
+(`tests/unit/voice-chat-live-settings.test.ts`, "mixed versions in one browser").
+
+| Setting                       | Choices                                                                                   | Default                      | Stored field                    |
+| ----------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------- |
+| Pause before sending          | Quick 0.9 s · Normal 1.5 s · Thinker 2.5 s                                                | **Normal**                   | `pause`                         |
+| Countdown before send         | 0.5 s – 5 s in half-seconds                                                               | **1.5 s**                    | `countdownMs`                   |
+| Send without a countdown      | On / Off (shows the warning when on; keeps the countdown above for when it is turned off) | **Off**                      | `sendWithoutCountdown`          |
+| Read replies aloud in Live    | On / Off                                                                                  | **On**                       | `liveRead`                      |
+| Voice, speed, longest reading | **not repeated**: shown in words, with a button to the one picker in Read replies aloud   | best voice · 1.1× · 1 minute | `voiceId`, `rate`, `maxSeconds` |
+| Keep screen on                | On / Off                                                                                  | **On**                       | `keepAwake`                     |
+| Sounds                        | On / Off                                                                                  | **On**                       | `earcons`                       |
+| Buzz on phones                | On / Off                                                                                  | **On**                       | `haptics`                       |
+| Screen-reader hint answered   | (the one-time hint is shown until Got it or Turn it off)                                  | not answered                 | `screenReaderHintSeen`          |
+| Clean-up in Live              | read-only line: "Live uses Fix-style clean-up; Polish is treated as Fix."                 | Fix                          | —                               |
 
 Not a setting, because it is not built: spoken "Hold" / "Send" words. Live has no spoken commands, so the card does not offer them.
-The countdown is clamped to 0–5 s on read and on write, and a bad field falls back by itself. The hint **Using a screen reader? Turn off
+**Sending at once is only ever the person's own choice.** The stored countdown is clamped to 0.5–5 s on read and on write and can never be 0:
+a negative, fractional, tiny, `NaN`, string or huge value becomes the nearest safe length (or the 1.5 s default for a non-number), so a damaged
+`{countdownMs: -40}` still waits. Live starts with a zero countdown only when `sendWithoutCountdown` is exactly `true` (`graceMsOf`), and the
+loop's own `resolveGraceMs` keeps only the exact number 0 — every other length goes through `resolveCountdownMs`. A bad field falls back by itself. The hint **Using a screen reader? Turn off
 Read replies aloud.** is shown once next to the reading switch while reading is on; **Turn it off** switches reading off, **Got it** keeps it
 on, and either closes the hint for good. Every control is at least 48 px high (measured in the browser, phone and desktop), and every
 switch is a real `role="switch"` that says On or Off in words.
 
 ### The timeline of one turn
 
-Numbers only, in seconds after your last word, with the defaults (Normal pause, 1.5 s countdown):
+Numbers only, in seconds after your last word. **When Live sends by itself:**
 
-| Time    | What happens                                                                                                       |
-| ------- | ------------------------------------------------------------------------------------------------------------------ |
-| 0       | you stop talking                                                                                                   |
-| 1.5     | the pause is heard (0.9 Quick · 2.5 Thinker); the words are worked out, shown in the box, and the countdown starts |
-| 1.5–3.0 | the countdown runs; Hold and Send now work; the engine's remaining decode (0 to 1.8 s) is inside it                |
-| 3.0     | sent (2.4 Quick · 4.0 Thinker; 1.5–1.7 with the countdown at 0)                                                    |
-| +       | the ferret works; Live is silent and the microphone is off                                                         |
-| +       | the reply is read, at most 60 s, then Live listens again                                                           |
+> **send = pause + max(countdown, decode + 0.5 s settle)** — the pause is 0.9 / 1.5 / 2.5 s, `decode` is the engine's work left after the
+> pause, and the 0.5 s settle is the time the words must have been on screen before an automatic send. The countdown and the decode run
+> side by side, so the longer of the two decides. With **Send without a countdown** there is no countdown and no settle: **send = pause + decode**.
+> Hold and Send now work throughout; "Send now" skips the wait.
+
+Example 1 — **a fast engine, no clean-up** (decode 0.22 s: Parakeet 0.6B with the early finish), Normal pause, the default 1.5 s countdown:
+
+| Time    | What happens                                                                                              |
+| ------- | --------------------------------------------------------------------------------------------------------- |
+| 0       | you stop talking                                                                                          |
+| 1.5     | the pause is heard; the words are worked out (done by 1.72 s), shown in the box, and the countdown starts |
+| 1.5–3.0 | the countdown runs: max(1.5, 0.22 + 0.5) = 1.5 s. Hold and Send now work                                  |
+| 3.0     | sent (Quick: 0.9 + 1.5 = 2.4 · Thinker: 2.5 + 1.5 = 4.0)                                                  |
+
+Example 2 — **a slow engine, no clean-up** (decode 1.79 s: Whisper base.en with the early finish), Normal pause, 1.5 s countdown. The decode
+does **not** fit inside the countdown, so the 0.5 s settle starts when the words arrive:
+
+| Time | What happens                                                                                               |
+| ---- | ---------------------------------------------------------------------------------------------------------- |
+| 0    | you stop talking                                                                                           |
+| 1.5  | the pause is heard; the countdown starts and the engine still has 1.79 s of work                           |
+| 3.0  | the countdown ends; the words are not ready yet (they arrive at 1.5 + 1.79 = 3.29)                         |
+| 3.29 | the words appear in the box                                                                                |
+| 3.79 | sent: 1.5 + max(1.5, 1.79 + 0.5 = 2.29) = **~3.8 s** (Quick: 0.9 + 2.29 = 3.2 · Thinker: 2.5 + 2.29 = 4.8) |
+
+Example 3 — **Send without a countdown**, fast engine (decode 0.22 s): the words are sent as soon as they appear, at 1.5 + 0.22 = **~1.72 s**
+(Quick: 1.12 · Thinker: 2.72); with the slow engine, 1.5 + 1.79 = ~3.3 s. Clean-up (Fix-style, up to 3 s) is not in these examples; it comes on top of the decode term. After the send: the ferret works (Live is silent and the microphone is off), the reply is read (at most 60 s), then Live
+listens again.
 
 **Measured:** the engine decode times after an early finish (0 to 1.8 s) were measured on a 32-core Linux box in the Speed section, and the
 loop's own per-turn numbers (end → words, end → send, last word → sent) are measured on your device and shown in the working state.
