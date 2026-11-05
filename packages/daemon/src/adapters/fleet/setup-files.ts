@@ -5,7 +5,12 @@
  * Reads only: every write the setup service makes goes through the provisioner, inside its rollback
  * boundary.
  */
-import { HostHarnessScanner, type StoredCredentialMaterialReader } from '@ferretry/fleet/adapters';
+import {
+  type FleetApplyLockOptions,
+  fleetApplyLockFor,
+  HostHarnessScanner,
+  type StoredCredentialMaterialReader,
+} from '@ferretry/fleet/adapters';
 import { randomBytes } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -133,6 +138,8 @@ export interface FileFleetSetupOptions {
   readonly codexHome?: string;
   /** The platform credential store: reads a login, never hands one out of this adapter. */
   readonly credentials: StoredCredentialMaterialReader;
+  /** How long the clone record's update waits for a running fleet apply; a test shortens it. */
+  readonly lockOptions?: FleetApplyLockOptions;
   readonly tools: Pick<ToolInstallService, 'plans' | 'install'>;
   /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
   readonly configFiles?: CloneConfigFiles;
@@ -145,9 +152,6 @@ export interface FileFleetSetupOptions {
   };
 }
 
-/** How many times an update of the clone record starts over from what a concurrent apply left. */
-const CLONE_BASE_ATTEMPTS = 3;
-
 const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
 /** The largest host document the import reads; anything larger is reported, never truncated. */
@@ -157,24 +161,35 @@ const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog } = options;
   const keyWriter = new AtomicFileWriter();
-  // The update of the clone record in progress; the next one waits for it, whether it succeeded or not.
-  let cloneBaseTurn: Promise<unknown> = Promise.resolve();
-  // One attempt: the record as it was read, handed to `change`, and written only if the file is STILL that
-  // record. A fleet apply writes the same file (checking the revision it planned against); when it lands between
-  // this read and this write the attempt is made again from what it left, so neither update is lost.
-  const compareAndSwap = async (
+  // The claim every fleet apply takes, keyed the one way the provisioner keys it (beside the manifest).
+  const applyLock = fleetApplyLockFor(catalog.layout.manifestPath, options.lockOptions);
+  // One read-modify-write of the clone record while holding the fleet apply claim. An apply publishes this same
+  // file inside that claim, so while it is held no apply can land between the read and the write: the change is
+  // made from what the last apply left, and the next apply's own revision check refuses a plan older than it.
+  // Two updates in this daemon take the claim one after the other, so neither reads what the other is about to write.
+  const exclusively = async (
     path: string,
     change: (current: string | undefined) => string | undefined,
   ): Promise<boolean> => {
-    for (let attempt = 0; attempt < CLONE_BASE_ATTEMPTS; attempt += 1) {
-      const seen = await catalog.documentRevision(path);
+    const token = await applyLock.acquire();
+    let wrote = false;
+    let failure: { readonly error: unknown } | undefined;
+    try {
       const next = change((await keyWriter.read(path)) ?? undefined);
-      if (next === undefined) return false;
-      if ((await catalog.documentRevision(path)) !== seen) continue;
-      await keyWriter.write(path, next);
-      return true;
+      if (next !== undefined) {
+        await keyWriter.write(path, next);
+        wrote = true;
+      }
+    } catch (error) {
+      failure = { error };
     }
-    throw new Error('the record of what was last copied kept changing under this update; try again');
+    const residue = await applyLock.release(token);
+    if (failure !== undefined) throw failure.error;
+    // A claim that could not be cleared blocks every later apply; say so rather than lose it.
+    if (residue !== undefined) {
+      throw new Error(`the record update finished, but the exclusive apply claim at ${residue} could not be cleared`);
+    }
+    return wrote;
   };
   const layout = catalog.layout;
   const scanner = new HostHarnessScanner({
@@ -215,12 +230,8 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     },
     cloneBase: {
       read: async path => (await keyWriter.read(path)) ?? undefined,
-      // One of these at a time, each a compare-and-swap against what a fleet apply may write meanwhile.
-      update: async (path, change) => {
-        const run = cloneBaseTurn.then(async () => await compareAndSwap(path, change));
-        cloneBaseTurn = run.catch(() => undefined);
-        return await run;
-      },
+      // Under the fleet apply claim: one at a time, and never between an apply's read and its publish.
+      update: exclusively,
     },
   };
 }

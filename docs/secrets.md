@@ -988,8 +988,10 @@ defaults and the 2FA factors live in other stores a bundle cannot name, and a lo
 the import answered it filed them. The receiving machine records `filedAt` as the baseline for a key **only if its own
 store entry was created at that instant** — the one thing that proves it is the entry that copy made. A key deleted and
 made again since is left unrecorded; a key the person edited after the copy is still recorded at the copy's instant, so
-the next review says `both`. The update of `clone-base.json` is a compare-and-swap that starts over from what a
-concurrent fleet apply wrote, one writer at a time, so neither a report nor an apply loses the other's data.
+the next review says `both`. The update of `clone-base.json` takes the same exclusive claim a fleet apply holds (the lock
+beside the manifest), reads the record and writes it while holding it, so an apply can never publish between the two:
+it either finishes first, and the update is made from what it left, or waits and its own revision check refuses a
+plan older than the update. A report that writes nothing answers `recorded: 0`.
 
 ### How it works
 

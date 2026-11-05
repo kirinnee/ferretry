@@ -933,15 +933,13 @@ export class FleetSetupService {
         ? [{ name: key.name, sourceUpdatedAt: key.sourceUpdatedAt, targetUpdatedAt: request.filedAt }]
         : [];
     });
-    let count = 0;
-    await this.deps.cloneBase.update(this.#cloneBasePath(), current => {
+    const wrote = await this.deps.cloneBase.update(this.#cloneBasePath(), current => {
       const before = parseCloneBase(current);
       const after = recordCloneKeys(before, request.source.daemonId, recorded);
-      if (after === before) return undefined;
-      count = recorded.length;
-      return serializeCloneBase(after);
+      return after === before ? undefined : serializeCloneBase(after);
     });
-    return { recorded: count };
+    // Counted from the update that committed, never from a change that was handed a record and wrote nothing.
+    return { recorded: wrote ? recorded.length : 0 };
   }
 
   /** The three-way comparison of a bundle against this machine, from what is on disk now. */

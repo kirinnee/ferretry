@@ -47,9 +47,12 @@ import {
   FleetSetupScanSchema,
   FleetToolInstallResultSchema,
 } from '@ferretry/protocol';
+import { type DaemonIdentity } from '@ferretry/relay';
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
 import { FakeSecretCipher, MemorySecretDocuments } from '../runtime/mounts/support.ts';
-import { SecretDirectory } from '../../../src/lib/secrets/vault.ts';
+import { SecretDirectory, SecretVault } from '../../../src/lib/secrets/vault.ts';
+import { SecretExportService, SecretImportService } from '../../../src/lib/secrets/clone.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ConfigFileConflictError, ConfigFileInvalidError } from '../../../src/lib/config-files/index.ts';
 import {
@@ -190,6 +193,8 @@ interface World {
     keysWriteError: unknown;
     keysWrites: number;
     baseWrites: string[];
+    /** Called with the documents each apply is handed, so a test can make the fake apply write them. */
+    commit?: (documents: readonly FleetDocumentWrite[]) => void;
   };
 }
 
@@ -269,6 +274,7 @@ function world(
         },
         apply: async (plan, documents = []) => {
           applied.push({ plan, documents });
+          state.commit?.(documents);
           return (await state.apply()) as never;
         },
       },
@@ -2920,6 +2926,37 @@ describe('API keys newer on the source', () => {
       ]);
     });
 
+    it('should answer none recorded when the update was handed the record and then wrote nothing', async () => {
+      // Arrange — a change was made from the record it was handed, but the update did not commit it (a concurrent
+      // apply removed the source and the second attempt declined to write)
+      let handed = 0;
+      const w = world({
+        overrides: {
+          cloneBase: {
+            read: async () => recordOf(),
+            update: async (_path, change) => {
+              should(change(recordOf())).be.a.String();
+              handed += 1;
+              return false;
+            },
+          },
+        },
+      });
+      w.secrets.set('GLM_API_KEY', FAKE_VALUE);
+      w.state.secretUpdatedAt.GLM_API_KEY = T2;
+
+      // Act
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+
+      // Assert
+      should(answer).deepEqual({ recorded: 0 });
+      should(handed).equal(1);
+    });
+
     it('should not bring back a source that is forgotten while its report is on the way', async () => {
       // Arrange
       const w = target({ GLM_API_KEY: T2 });
@@ -2945,6 +2982,23 @@ describe('a re-copy, by every path, leaves logins and held secrets byte-identica
   const OTHER_VALUE = 'another-held-value-UNIQUE';
   const LOGIN_FILE = '/state/fleet/credentials/claude-you/.credentials.json';
   const SIGN_IN = 'sign-in material that only the harness may read';
+  const DEFAULTS_FILE = '/state/config/account-defaults.yaml';
+  const DEFAULTS = 'accounts:\n  claude.ai: work\n';
+  const TOTP_SEED = 'JBSWY3DPEHPK3PXP-factor-UNIQUE';
+  const NEW_VALUE = 'the-newer-value-on-the-source';
+  const BRAND_NEW_VALUE = 'a-key-this-machine-never-held';
+  const relay = new WebCryptoRelayCrypto();
+  const identityOf = async (): Promise<DaemonIdentity> => {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+      'sign',
+      'verify',
+    ])) as unknown as CryptoKeyPair;
+    const der = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
+    return await relay.importDaemonIdentity(
+      ['-----BEGIN PRIVATE KEY-----', ...(base64.match(/.{1,64}/gu) ?? []), '-----END PRIVATE KEY-----', ''].join('\n'),
+    );
+  };
 
   const ENV_LOGIN = { harness: 'claude', store: 'environment', env: { ANTHROPIC_AUTH_TOKEN: '${secret:GLM_API_KEY}' } };
 
@@ -2997,13 +3051,37 @@ describe('a re-copy, by every path, leaves logins and held secrets byte-identica
 
   /** The target: an earlier copy on disk, a sign-in file, and the secret store behind a real directory. */
   const machine = async (first: Record<string, unknown>) => {
+    const clock = { at: '2026-11-01T00:00:00.000Z', now: () => clock.at };
     const documents = new MemorySecretDocuments();
-    const directory = new SecretDirectory(documents, new FakeSecretCipher(), { now: () => '2026-11-01T00:00:00.000Z' });
+    const directory = new SecretDirectory(documents, new FakeSecretCipher(), clock);
     await directory.put('GLM_API_KEY', GLM_VALUE);
     await directory.put('OTHER_KEY', OTHER_VALUE);
+    // The account factors (a 2FA seed) rest in their own sealed document, apart from the API keys.
+    const factorDocuments = new MemorySecretDocuments();
+    await new SecretDirectory(factorDocuments, new FakeSecretCipher(), clock).put('TOTP_SEED_WORK', TOTP_SEED);
+    // The source machine: it holds NEWER values of both held keys, and one key this machine lacks.
+    const [targetIdentity, sourceIdentity] = [await identityOf(), await identityOf()];
+    const sourceDocuments = new MemorySecretDocuments();
+    const sourceKeys = new SecretDirectory(sourceDocuments, new FakeSecretCipher(), clock);
+    await sourceKeys.put('GLM_API_KEY', NEW_VALUE);
+    await sourceKeys.put('OTHER_KEY', NEW_VALUE);
+    await sourceKeys.put('BRAND_NEW_KEY', BRAND_NEW_VALUE);
+    const imports = new SecretImportService({
+      crypto: relay,
+      identity: { load: async () => targetIdentity },
+      directory,
+      clock,
+    });
+    const exports = new SecretExportService({
+      crypto: relay,
+      identity: { load: async () => sourceIdentity },
+      vault: new SecretVault(sourceDocuments, new FakeSecretCipher()),
+      clock,
+    });
+    clock.at = '2026-11-02T00:00:00.000Z';
     const puts: string[] = [];
     const earlier = world({ overrides: { daemonId: () => 'daemon-target' } });
-    const firstCopy = change('alongside', first);
+    const firstCopy = change('alongside', first, { source: { daemonId: 'daemon-source' } });
     await earlier.service.executors.clone.describe(firstCopy);
     await earlier.service.executors.clone.execute(firstCopy);
     const written = earlier.applied[0]?.documents ?? [];
@@ -3022,13 +3100,27 @@ describe('a re-copy, by every path, leaves logins and held secrets byte-identica
     w.state.reading = configReading(modelOfWrites(written), 'r');
     for (const document of written) w.state.assets[document.path] = document.content;
     w.state.assets[LOGIN_FILE] = SIGN_IN;
+    w.state.assets[DEFAULTS_FILE] = DEFAULTS;
     w.state.emails = async () => [];
+    // The fake apply writes what it is handed, so an untouched file below is proof and not an absent write.
+    w.state.commit = documents => {
+      for (const document of documents) {
+        if (document.remove === true) delete w.state.assets[document.path];
+        else w.state.assets[document.path] = document.content;
+      }
+    };
+    const protectedFiles = { [LOGIN_FILE]: SIGN_IN, [DEFAULTS_FILE]: DEFAULTS };
     return {
       w,
       documents,
       directory,
       puts,
       sealed: JSON.stringify(await documents.read()),
+      factors: JSON.stringify(await factorDocuments.read()),
+      factorDocuments,
+      imports,
+      exports,
+      protectedFiles,
       /** The file each login is held in: an update must not write, change or remove any of them. */
       loginFiles: [...accountModelFiles(modelOfWrites(written))]
         .filter(([, file]) => file.address.kind === 'login')
@@ -3038,38 +3130,65 @@ describe('a re-copy, by every path, leaves logins and held secrets byte-identica
   type Machine = Awaited<ReturnType<typeof machine>>;
 
   const reviewed = async (m: Machine, mode: 'update', bundle: Record<string, unknown>, choice?: 'keep' | 'remove') => {
-    const review = await m.w.service.reviewClone({ bundle });
+    const source = { daemonId: 'daemon-source' };
+    const review = await m.w.service.reviewClone({ bundle, source });
     const gone = review.items.find(item => item.outcome === 'gone');
     const decisions = gone === undefined || choice === undefined ? {} : { [gone.ref]: choice };
-    const update = change(mode, bundle, { reviewed: review.fingerprint, decisions });
+    const update = change(mode, bundle, { reviewed: review.fingerprint, decisions, source });
     await m.w.service.executors.clone.describe(update);
     await m.w.service.executors.clone.execute(update);
     return review;
   };
   const direct = async (m: Machine, mode: 'alongside' | 'replace', bundle: Record<string, unknown>) => {
-    const copy = change(mode, bundle);
+    const copy = change(mode, bundle, { source: { daemonId: 'daemon-source' } });
     await m.w.service.executors.clone.describe(copy);
     await m.w.service.executors.clone.execute(copy);
   };
 
-  /** The sealed copy that follows a re-copy in the app: the source offers a NEWER value of a key held here. */
-  const keyTail = async (m: Machine) =>
-    await m.directory.putMissing([[CloneableSecretNameSchema.parse('GLM_API_KEY'), 'the-newer-value-on-the-source']]);
+  /**
+   * The sealed copy that follows a re-copy in the app, through the real services end to end: the target opens an
+   * import, the source seals NEWER values of both held keys and one key this machine lacks, the target files the
+   * bundle, and the browser reports the filing to the setup service.
+   */
+  const keyTail = async (m: Machine) => {
+    const offer = await m.imports.open();
+    const names = ['GLM_API_KEY', 'OTHER_KEY', 'BRAND_NEW_KEY'].map(name => CloneableSecretNameSchema.parse(name));
+    const { bundle } = await m.exports.seal(offer.importId, { offer, names });
+    const result = await m.imports.complete(offer.importId, bundle);
+    if (result.filedAt === undefined) throw new Error('the copy filed nothing');
+    const reported = await m.w.service.recordCloneKeys({
+      source: { daemonId: 'daemon-source' },
+      filedAt: result.filedAt,
+      keys: names.map(name => ({ name, sourceUpdatedAt: '2026-11-01T00:00:00.000Z' })),
+    });
+    return { result, reported };
+  };
 
   /** Everything a re-copy must not change, after the re-copy and the sealed copy of keys that follows it. */
   const expectUntouched = async (m: Machine) => {
+    const before = (await m.documents.read())?.entries ?? {};
     const tail = await keyTail(m);
     should(m.puts).deepEqual([]);
-    should(tail.stored).deepEqual([]);
-    should(tail.kept).deepEqual(['GLM_API_KEY']);
-    should(JSON.stringify(await m.documents.read())).equal(m.sealed);
-    should(m.w.state.assets[LOGIN_FILE]).equal(SIGN_IN);
+    // Only the key this machine lacked was filed; both held keys were kept, whatever the source offered.
+    should(tail.result.imported).deepEqual(['BRAND_NEW_KEY']);
+    should(tail.result.kept.toSorted()).deepEqual(['GLM_API_KEY', 'OTHER_KEY']);
+    should(tail.reported).deepEqual({ recorded: 1 });
+    // Every held entry is byte for byte what it was; the only difference is the one key that was missing.
+    const after = (await m.documents.read())?.entries ?? {};
+    should(Object.keys(after).toSorted()).deepEqual(['BRAND_NEW_KEY', 'GLM_API_KEY', 'OTHER_KEY']);
+    should(JSON.stringify(after.GLM_API_KEY)).equal(JSON.stringify(before.GLM_API_KEY));
+    should(JSON.stringify(after.OTHER_KEY)).equal(JSON.stringify(before.OTHER_KEY));
+    should(JSON.stringify(after)).not.containEql(NEW_VALUE);
+    // The factors, the sign-in file and the account defaults are exactly as they were.
+    should(JSON.stringify(await m.factorDocuments.read())).equal(m.factors);
+    for (const [file, content] of Object.entries(m.protectedFiles)) should(m.w.state.assets[file]).equal(content);
     const written = m.w.applied[0]?.documents;
     if (written !== undefined) {
       // The writes are edits to the files that differ: none of them is a file one of this machine's logins is held in.
       should(m.loginFiles.length).equal(2);
       should(written.filter(document => m.loginFiles.includes(document.path))).deepEqual([]);
       should(written.map(document => document.path).join('\n')).not.containEql('/credentials/');
+      should(written.filter(document => document.path in m.protectedFiles)).deepEqual([]);
       should(JSON.stringify(written)).not.containEql(GLM_VALUE);
     }
   };
