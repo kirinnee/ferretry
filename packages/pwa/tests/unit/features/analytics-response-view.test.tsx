@@ -146,4 +146,15 @@ describe('AnalyticsResponseView', () => {
     expect(analyticsErrorMessage(new DaemonResponseError(503, 'backfill'))).toContain('503');
     expect(analyticsErrorMessage(new Error('offline'))).toBe('offline');
   });
+
+  it('tells the reader to add a matcher when a query makes too many groups', () => {
+    const message = analyticsErrorMessage(
+      new DaemonResponseError(400, 'analytics query produces more than 100 groups; add a matcher', 'too_many_groups'),
+    );
+    expect(message).toContain('more than 100 groups');
+    expect(message).toContain('matcher');
+    expect(message).not.toContain('failed to handle');
+    // A plain 400 keeps the daemon's own words.
+    expect(analyticsErrorMessage(new DaemonResponseError(400, 'bad query', 'invalid_query'))).toBe('bad query');
+  });
 });

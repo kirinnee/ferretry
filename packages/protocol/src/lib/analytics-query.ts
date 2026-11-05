@@ -61,6 +61,23 @@ export class AnalyticsQueryError extends Error {
   }
 }
 
+/**
+ * A query the parser accepted whose answer would be more groups than a reader can take in.
+ *
+ * Its own type, not a bare `AnalyticsQueryError`, so the daemon can give it a code of its own and the
+ * page can tell the reader what to change ("add a matcher") instead of echoing a parse failure. Still
+ * the CALLER's question to rewrite, never the daemon's fault.
+ */
+export class AnalyticsGroupLimitError extends AnalyticsQueryError {
+  public constructor(public readonly limit: number) {
+    super(`analytics query produces more than ${limit} groups; add a matcher`);
+    this.name = 'AnalyticsGroupLimitError';
+  }
+}
+
+/** The wire code the daemon refuses an over-limit query with; the page reads it to explain the fix. */
+export const ANALYTICS_TOO_MANY_GROUPS_CODE = 'too_many_groups';
+
 /** A query as data: everything `formatAnalyticsQuery` needs to write its one canonical spelling. */
 export interface AnalyticsQueryParts {
   readonly aggregation?: AnalyticsAggregation;
