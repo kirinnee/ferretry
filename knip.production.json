@@ -34,7 +34,10 @@
         "src/lib/board-actions.ts",
         "src/lib/voice-chat/turn-endpointer.ts",
         "src/lib/voice-chat/turn-endpointer-scoring.ts",
-        "src/lib/stt/speed-bench-report.ts"
+        "src/lib/stt/speed-bench-report.ts",
+        "src/lib/voice-chat/live-machine.ts",
+        "src/lib/voice-chat/live-view.ts",
+        "src/lib/voice-chat/ports.ts"
       ]
     }
   },
