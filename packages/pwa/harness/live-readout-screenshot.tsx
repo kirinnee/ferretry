@@ -9,7 +9,7 @@
  *
  *   bun harness/live-readout-screenshot.tsx [outDir]   # default /tmp/claude-1000/shots/F137/s5
  *
- * It renders the REAL `TranscriptRow`, `LiveVoiceBar`, `QuestionForm` and `AutoReadSettings`; the bar's view is
+ * It renders the REAL `TranscriptRow`, `LiveVoiceBar`, `QuestionForm` and `LiveVoiceSettingsSection`; the bar's view is
  * built by the REAL machine and `liveView`. The voice is a FAKE speaker that makes no sound; the scene decides
  * which sentence is "being said". Everything on screen is invented text. No microphone opens and no request
  * leaves the loopback origin.
@@ -40,7 +40,7 @@ import { createRoot } from 'react-dom/client';
 import { LiveVoiceBar } from '../../src/components/live-voice-bar.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
-import { AutoReadSettings } from '../../src/features/settings/auto-read-settings.tsx';
+import { LiveVoiceSettingsSection } from '../../src/features/settings/live-voice-settings.tsx';
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
 import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -165,7 +165,7 @@ createRoot(root).render(
       <Driver />
       <main style={{ margin: '0 auto', maxWidth: layout === 'phone' ? 390 : 880, padding: '10px 12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {scene.startsWith('settings') ? (
-          <AutoReadSettings />
+          <LiveVoiceSettingsSection />
         ) : (
           <>
             <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible' }}>

@@ -61,6 +61,7 @@ import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
 import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
+import { LiveVoiceSettingsSection } from './live-voice-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { KeepChatsFreshSetting } from './keep-chats-fresh.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
@@ -506,6 +507,7 @@ export function SettingsPage({
       dictation: (
         <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
       ),
+      'live-voice': <LiveVoiceSettingsSection />,
       notifications: notifications ?? (
         <p role="status" className="m-0 text-cell leading-base text-muted">
           Notification delivery is unavailable until this page is composed with the paired daemon’s push-subscription

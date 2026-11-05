@@ -133,7 +133,9 @@ const rig = (
     reply?: ReplyFeedPort;
     tapToListen?: boolean;
     /** The tones and buzzes the runner made, in order; the switch asked at each cue. */
-    cues?: { played: string[]; on: boolean };
+    cues?: { played: string[]; on: boolean; buzz?: boolean };
+    /** Whether Live reads replies aloud (the Live voice setting), asked as Live starts. Absent: not asked. */
+    readAloud?: boolean;
   } = {},
 ): Rig => {
   const clock = new FakeClock();
@@ -284,6 +286,8 @@ const rig = (
     graceMs: options.graceMs,
     ...(options.tapToListen === undefined ? {} : { tapToListen: options.tapToListen }),
     ...(options.cues === undefined ? {} : { cues: () => options.cues?.on ?? true }),
+    ...(options.cues?.buzz === undefined ? {} : { buzz: () => options.cues?.buzz ?? true }),
+    ...(options.readAloud === undefined ? {} : { readAloud: () => options.readAloud ?? true }),
     onTurn: turn => void turns.push(turn),
   });
   const rigResult: Rig = {
@@ -1295,5 +1299,38 @@ describe('LiveRunner — reading the reply (slice 5)', () => {
     await q.settle();
     q.runner.end();
     should(quiet.played.filter(entry => entry !== 'tone:unlock')).deepEqual([]);
+  });
+
+  it('the buzz has its own switch: tones without buzzes, buzzes without tones', async () => {
+    const tonesOnly = { played: [] as string[], on: true, buzz: false };
+    const a = await worked({ cues: tonesOnly });
+    a.signal({ kind: 'done' });
+    a.speaker.done();
+    await a.settle();
+    should(tonesOnly.played.filter(entry => entry !== 'tone:unlock')).deepEqual([
+      'tone:listening',
+      'tone:sent',
+      'tone:reply-ready',
+      'tone:listening',
+    ]);
+    const buzzOnly = { played: [] as string[], on: false, buzz: true };
+    const b = await worked({ cues: buzzOnly });
+    b.signal({ kind: 'done' });
+    b.speaker.done();
+    await b.settle();
+    should(buzzOnly.played.filter(entry => entry !== 'tone:unlock')).deepEqual(['buzz:sent', 'buzz:reply-ready']);
+  });
+
+  it('reads the reply only when "Read replies aloud in Live" is on, asked as Live starts', async () => {
+    const off = await worked({ readAloud: false });
+    off.signal({ kind: 'done' });
+    // Nothing is read: the reply is on screen and Live listens again.
+    should(off.speaker.spoke).equal(0);
+    await off.settle();
+    should(off.runner.state.phase).equal('listening');
+    const on = await worked({ readAloud: true });
+    on.signal({ kind: 'done' });
+    should(on.speaker.spoke).equal(1);
+    should(on.runner.state.phase).equal('reading');
   });
 });

@@ -13,9 +13,11 @@ import {
   type UseLiveVoiceOptions,
   useLiveVoice,
 } from '../../src/hooks/use-live-voice.ts';
+import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import type { LiveComposerBridge } from '../../src/lib/voice-chat/live-assembly.ts';
+import { type LiveVoiceSettingsPatch, LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
 import { interact, mount } from '../support/dom.ts';
 import { type FakeLive, fakeLive } from '../support/live-ports.ts';
 
@@ -241,6 +243,125 @@ describe('useLiveVoice with the ports of the page itself', () => {
         expect((handle as LiveVoiceHandle | null)?.view.detail).toContain("isn't installed");
         await view.unmount();
       }
+    }
+  });
+});
+
+describe("useLiveVoice with this device's Live voice choices", () => {
+  beforeEach(() => unitClock.hold());
+
+  const storeWith = (patch: LiveVoiceSettingsPatch) => {
+    const data = new Map<string, string>();
+    const store = new LiveVoiceSettingsStore({
+      getItem: key => data.get(key) ?? null,
+      setItem: (key, value) => void data.set(key, value),
+    });
+    store.update(patch);
+    return store;
+  };
+
+  const rigWithStore = async (
+    fake: FakeLive,
+    store: LiveVoiceSettingsStore,
+    patch: Partial<UseLiveVoiceOptions> = {},
+  ) => {
+    let handle: LiveVoiceHandle | null = null;
+    const view = await mount(
+      <LiveVoiceSettingsProvider store={store}>
+        <Host options={options({ ports: fake.ports, ...patch })} onHandle={next => (handle = next)} />
+      </LiveVoiceSettingsProvider>,
+    );
+    return {
+      view,
+      get: (): LiveVoiceHandle => {
+        if (handle === null) throw new Error('the hook has not rendered');
+        return handle;
+      },
+    };
+  };
+
+  const speakThenPause = async (fake: FakeLive, quietMs: number): Promise<void> => {
+    await interact(async () => {
+      fake.hear(0.1, 600);
+      fake.hear(0.001, quietMs);
+      await Promise.resolve();
+    });
+    await flush();
+  };
+
+  it('the pause choice decides when a quiet ends the turn: Quick ends it at 0.9 s, Normal does not', async () => {
+    const quick = fakeLive();
+    const a = await rigWithStore(quick, storeWith({ pause: 'quick' }));
+    await interact(() => a.get().start());
+    await flush();
+    await speakThenPause(quick, 1_000);
+    expect(a.get().view.stateWord).toContain('Sending in');
+    await a.view.unmount();
+
+    const normal = fakeLive();
+    const b = await rigWithStore(normal, storeWith({ pause: 'normal' }));
+    await interact(() => b.get().start());
+    await flush();
+    await speakThenPause(normal, 1_000);
+    expect(b.get().view.stateWord).toBe('Hearing you');
+    await b.view.unmount();
+  });
+
+  it('the countdown choice sets the wait: 0 sends at once, with no "Sending in" step', async () => {
+    const fake = fakeLive();
+    const { view, get } = await rigWithStore(fake, storeWith({ countdownMs: 0 }));
+    await interact(() => get().start());
+    await flush();
+    await speakThenPause(fake, 1_520);
+    expect(get().view.stateWord).toMatch(/^Working/);
+    expect(fake.sends.length).toBe(1);
+    await view.unmount();
+  });
+
+  it('a page that hands in its own countdown and pause overrides the device choice', async () => {
+    const fake = fakeLive();
+    const { view, get } = await rigWithStore(fake, storeWith({ countdownMs: 0, pause: 'thinker' }), {
+      graceMs: 2_000,
+      pauseMs: 'quick',
+    });
+    await interact(() => get().start());
+    await flush();
+    await speakThenPause(fake, 1_000);
+    expect(get().view.stateWord).toContain('Sending in');
+    await view.unmount();
+  });
+
+  it("builds its reader from the page's conversation, over this device's voice, and still starts", async () => {
+    const fake = fakeLive();
+    const { view, get } = await rigWithStore(fake, storeWith({ rate: 1.6 }), {
+      reading: { rows: () => [], question: () => null },
+    });
+    await interact(() => get().start());
+    await flush();
+    expect(get().view.stateWord).toBe('Listening');
+    await view.unmount();
+  });
+
+  it('"Read replies aloud in Live" off shows the reply and listens again; on reads it', async () => {
+    for (const liveRead of [false, true]) {
+      const fake = fakeLive({ reader: true });
+      const { view, get } = await rigWithStore(fake, storeWith({ liveRead }));
+      await interact(() => get().start());
+      await flush();
+      await speakThenPause(fake, 1_520);
+      await interact(async () => {
+        fake.advance(1_500);
+        await Promise.resolve();
+      });
+      await flush();
+      expect(get().view.stateWord).toMatch(/^Working/);
+      await interact(async () => {
+        fake.signal({ kind: 'done' });
+        await Promise.resolve();
+      });
+      await flush();
+      expect(fake.reader.reads.length).toBe(liveRead ? 1 : 0);
+      await view.unmount();
     }
   });
 });

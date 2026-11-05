@@ -37,11 +37,6 @@ const AUTO_READ_EXPLANATION =
 
 const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud unless you press Read aloud on a message.';
 
-const EARCONS_ON_EXPLANATION =
-  'Live makes a short rising tone when it starts listening, a blip when your message is sent, a two-note chime when the reply is ready and a falling tone when it stops. On an Android phone it also buzzes briefly when your message is sent and when the reply is ready.';
-
-const EARCONS_OFF_EXPLANATION = 'Live is silent: the words on the Live bar are the only signal.';
-
 const OLDER_DAEMON_NOTE =
   'Auto-read needs a newer Ferretry daemon on this machine. On an older one nothing is read on its own, but Read aloud on a message still works.';
 
@@ -52,7 +47,7 @@ const PREVIEW_SENTENCE = 'This is how a reply will sound.';
 const PREVIEW_KEY = 'preview:voice-settings';
 
 /** The voices, again a few times: a browser lists them only after it has loaded them. */
-function useSpeakerVoices(controller: ReadAloudController): readonly SpeakerVoice[] {
+export function useSpeakerVoices(controller: ReadAloudController): readonly SpeakerVoice[] {
   const [voices, setVoices] = useState<readonly SpeakerVoice[]>(() => controller.voices());
   useEffect(() => {
     let tries = 0;
@@ -72,6 +67,9 @@ function useSpeakerVoices(controller: ReadAloudController): readonly SpeakerVoic
 }
 
 const BEST_VOICE = 'best';
+
+/** The section's address: Live voice's "Change voice, speed and length" moves focus here. */
+export const READ_REPLIES_ALOUD_ID = 'read-replies-aloud';
 
 export interface AutoReadSettingsProps {
   /** Test and harness seam: the settings store, instead of the app's. */
@@ -153,7 +151,13 @@ function Supported({
   );
 
   return (
-    <section aria-label="Read replies aloud" className="flex flex-col gap-3" data-auto-read-settings="">
+    <section
+      aria-label="Read replies aloud"
+      className="flex flex-col gap-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      data-auto-read-settings=""
+      id={READ_REPLIES_ALOUD_ID}
+      tabIndex={-1}
+    >
       <Header />
       <p className="text-meta leading-base text-muted">{READ_ALOUD_PRIVACY_NOTE}</p>
 
@@ -178,28 +182,6 @@ function Supported({
         </p>
         <p className="text-meta leading-base text-faint" data-auto-read-needs-daemon="">
           {OLDER_DAEMON_NOTE}
-        </p>
-      </div>
-
-      {/* ---- Live's tones ---- */}
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={settings.earcons}
-          aria-describedby="live-sounds-explanation"
-          data-live-sounds=""
-          onClick={() => update({ earcons: !settings.earcons })}
-          className={cn(
-            'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-            settings.earcons ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
-          )}
-        >
-          <span className="text-ui font-semibold">Live sounds</span>
-          <span className="text-meta">{settings.earcons ? 'On' : 'Off'}</span>
-        </button>
-        <p id="live-sounds-explanation" className="text-meta leading-base text-muted">
-          {settings.earcons ? EARCONS_ON_EXPLANATION : EARCONS_OFF_EXPLANATION}
         </p>
       </div>
 

@@ -41,7 +41,7 @@ import { webMicLock } from '../lib/voice-chat/mic-lock.ts';
 import { needsTapToListen } from '../lib/voice-chat/platform.ts';
 import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import { documentVisibility } from '../lib/voice-chat/visibility.ts';
-import { screenWakeLock } from '../lib/voice-chat/wake-lock.ts';
+import { gatedWakeLock, screenWakeLock } from '../lib/voice-chat/wake-lock.ts';
 import { useDeviceVoiceSettingsStore } from './use-live-voice-settings.ts';
 import { useReadAloudController } from './use-read-aloud.ts';
 
@@ -66,7 +66,9 @@ export interface UseLiveVoiceOptions {
    * (nothing is read). The voice, speed, length and the tones come from this device's voice settings.
    */
   readonly reading?: LiveReadingSource;
+  /** Overrides the countdown from this device's Live voice settings (tests, the harness). */
   readonly graceMs?: unknown;
+  /** Overrides the pause from this device's Live voice settings (tests, the harness). */
   readonly pauseMs?: unknown;
   // Seams for tests and the visual harness.
   readonly recognition?: BrowserRecognitionProvider;
@@ -145,6 +147,12 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   const spoken = useRef({ reader, voiceSettings });
   spoken.current = { reader, voiceSettings };
 
+  /** This device's Live voice choices as they are NOW (the store is read at the moment each one matters). */
+  const deviceChoices = useCallback(
+    () => (spoken.current.voiceSettings ?? { get: () => DEFAULT_LIVE_VOICE_SETTINGS }).get(),
+    [],
+  );
+
   const buildPorts = useCallback((): LiveRunnerPorts => {
     const current = latest.current;
     const clock = browserClock(globalThis as unknown as ClockGlobalLike);
@@ -176,7 +184,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
           : createLiveReader({
               controller: spoken.current.reader,
               source: current.reading,
-              settings: () => spoken.current.voiceSettings?.get() ?? DEFAULT_LIVE_VOICE_SETTINGS,
+              settings: deviceChoices,
               clock,
             }),
       earcons: webAudioEarcons(
@@ -187,10 +195,10 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
       clock,
       visibility,
       micLock: webMicLock(nav.locks),
-      wakeLock: screenWakeLock(nav.wakeLock, visibility),
+      wakeLock: gatedWakeLock(screenWakeLock(nav.wakeLock, visibility), () => deviceChoices().keepAwake),
     });
     return current.ports === undefined ? assembled : { ...assembled, ...current.ports };
-  }, []);
+  }, [deviceChoices]);
 
   const stop = useCallback((): void => {
     runnerRef.current?.dispose();
@@ -205,17 +213,20 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
     stop();
     const runner = new LiveRunner(buildPorts(), {
       canSend: latest.current.enabled,
-      graceMs: latest.current.graceMs,
-      pauseMs: latest.current.pauseMs,
+      // The countdown, the pause and whether to read are taken as Live starts; a change applies from the next start.
+      graceMs: latest.current.graceMs ?? deviceChoices().countdownMs,
+      pauseMs: latest.current.pauseMs ?? deviceChoices().pause,
       tapToListen: needsTapToListen(typeof navigator === 'undefined' ? undefined : navigator),
       // Tones and buzzes follow this device's switch at the moment each one would sound.
-      cues: () => (spoken.current.voiceSettings ?? { get: () => DEFAULT_LIVE_VOICE_SETTINGS }).get().earcons,
+      cues: () => deviceChoices().earcons,
+      buzz: () => deviceChoices().haptics,
+      readAloud: () => deviceChoices().liveRead,
       onTurn: numbers => turns.current.add(numbers),
     });
     runnerRef.current = runner;
     runner.subscribe(repaint);
     runner.start();
-  }, [buildPorts, stop]);
+  }, [buildPorts, deviceChoices, stop]);
 
   const runner = runnerRef.current;
   const phase = runner?.state.phase ?? 'off';

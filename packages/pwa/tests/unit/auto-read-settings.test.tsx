@@ -83,7 +83,7 @@ describe('<AutoReadSettings>', () => {
     const root = await show(r);
     await interact(() => must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch').click());
     expect(r.store.get().autoRead).toBe(true);
-    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 1, autoRead: true });
+    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 2, autoRead: true });
     const toggle = must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch');
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(toggle.textContent).toContain('On');
@@ -233,36 +233,5 @@ describe('<AutoReadSettings>', () => {
   test('without any store the screen still renders on the defaults', async () => {
     mounted = await mount(<AutoReadSettings store={null} />);
     expect(mounted.container.querySelector('h4, p')).not.toBeNull();
-  });
-});
-
-describe('<AutoReadSettings> — Live sounds', () => {
-  const sounds = (root: HTMLElement): HTMLElement =>
-    must(root.querySelector<HTMLElement>('[data-live-sounds]'), 'the Live sounds switch');
-
-  test('are ON by default, said in words, and the switch is a 44 px switch with its explanation', async () => {
-    const root = await show(rig());
-    const toggle = sounds(root);
-    expect(toggle.getAttribute('role')).toBe('switch');
-    expect(toggle.getAttribute('aria-checked')).toBe('true');
-    expect(toggle.textContent).toContain('Live sounds');
-    expect(toggle.textContent).toContain('On');
-    expect(toggle.className).toContain('min-h-[44px]');
-    expect(byId(root, 'live-sounds-explanation').textContent).toContain('a short rising tone when it starts listening');
-    expect(byId(root, 'live-sounds-explanation').textContent).toContain('Android');
-  });
-
-  test('switching them off saves to this device and says Live is silent', async () => {
-    const r = rig();
-    const root = await show(r);
-    await interact(() => sounds(root).click());
-    expect(r.store.get().earcons).toBe(false);
-    expect(JSON.parse(r.storage.data.get('fy-live-voice-v1') ?? '{}')).toMatchObject({ v: 1, earcons: false });
-    expect(sounds(root).getAttribute('aria-checked')).toBe('false');
-    expect(byId(root, 'live-sounds-explanation').textContent).toBe(
-      'Live is silent: the words on the Live bar are the only signal.',
-    );
-    // The Auto-read switch is untouched.
-    expect(r.store.get().autoRead).toBe(false);
   });
 });

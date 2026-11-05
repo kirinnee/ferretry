@@ -81,8 +81,12 @@ export interface LiveRunnerOptions {
   readonly pauseMs?: unknown;
   /** This device cannot reopen the microphone without a tap (an iPhone): Live waits for "Listen" after each reply. */
   readonly tapToListen?: boolean;
-  /** Whether the tones and buzzes are on, asked at each cue so a setting changed mid-Live applies at once. */
+  /** Whether the tones are on, asked at each cue so a setting changed mid-Live applies at once. */
   readonly cues?: () => boolean;
+  /** Whether the phone buzz is on (asked at each cue). Absent: it follows `cues`, as it did before it had its own switch. */
+  readonly buzz?: () => boolean;
+  /** Read each finished reply aloud. Asked once, as Live starts; `false` shows the reply and listens again. Absent: read. */
+  readonly readAloud?: () => boolean;
   /** One call per sent turn with its numbers. Never words. */
   readonly onTurn?: (numbers: TurnNumbers) => void;
 }
@@ -157,7 +161,7 @@ export class LiveRunner {
       canSend: this.#options.canSend,
       visible: this.#ports.visibility.visible(),
       graceMs: this.#options.graceMs,
-      canRead: this.#ports.reader?.supported === true,
+      canRead: this.#ports.reader?.supported === true && this.#options.readAloud?.() !== false,
       tapToListen: this.#options.tapToListen === true,
     });
   }
@@ -545,8 +549,9 @@ export class LiveRunner {
     if (before.phase === after.phase) return;
     const cue = cueFor(before, after);
     if (cue.earcon === null && cue.haptic === null) return;
-    if (this.#options.cues?.() === false) return;
-    if (cue.earcon !== null) this.#ports.earcons?.play(cue.earcon);
-    if (cue.haptic !== null) this.#ports.haptics?.pulse(cue.haptic);
+    const tones = this.#options.cues?.() !== false;
+    const buzz = (this.#options.buzz ?? this.#options.cues)?.() !== false;
+    if (cue.earcon !== null && tones) this.#ports.earcons?.play(cue.earcon);
+    if (cue.haptic !== null && buzz) this.#ports.haptics?.pulse(cue.haptic);
   }
 }

@@ -18,11 +18,18 @@
  */
 
 import { z } from 'zod';
+import { DEFAULT_GRACE_MS, resolveGraceMs } from './live-machine.ts';
+import { PAUSE_PRESETS, type PausePreset } from './turn-endpointer.ts';
 import { clampSpeechRate, DEFAULT_SPEECH_RATE } from './voice-choice.ts';
 
 export const LIVE_VOICE_SETTINGS_KEY = 'fy-live-voice-v1';
-const LIVE_VOICE_SETTINGS_VERSION = 1;
-const READABLE_VERSIONS: readonly number[] = [LIVE_VOICE_SETTINGS_VERSION];
+/**
+ * 2 — Live voice settings (F137 slice 6) added the pause, countdown, read-in-Live, keep-screen-on and buzz fields.
+ * A version-1 payload is still read: the fields it never had take their defaults, and the buzz follows the one
+ * "Live sounds" switch it did have (it used to cover tones AND buzzes), so a person who turned that off stays silent.
+ */
+const LIVE_VOICE_SETTINGS_VERSION = 2;
+const READABLE_VERSIONS: readonly number[] = [1, LIVE_VOICE_SETTINGS_VERSION];
 
 /** A voice id is the browser's `voiceURI`; nothing longer than this is a real one. */
 export const MAX_VOICE_ID_CHARS = 200;
@@ -55,6 +62,37 @@ export const WHAT_TO_READ_OPTIONS = [
 
 type WhatToReadId = (typeof WHAT_TO_READ_OPTIONS)[number]['id'];
 
+/** How long a quiet has to last before Live decides you have finished: the endpointer's three named lengths. */
+export const PAUSE_OPTIONS: readonly {
+  readonly id: PausePreset;
+  readonly label: string;
+  readonly seconds: number;
+  readonly description: string;
+}[] = [
+  {
+    id: 'quick',
+    label: 'Quick',
+    seconds: PAUSE_PRESETS.quick / 1000,
+    description: 'Sends soon after you stop. Best in a quiet room and for short sentences.',
+  },
+  {
+    id: 'normal',
+    label: 'Normal',
+    seconds: PAUSE_PRESETS.normal / 1000,
+    description: 'Waits a little over a second. Works for most people.',
+  },
+  {
+    id: 'thinker',
+    label: 'Thinker',
+    seconds: PAUSE_PRESETS.thinker / 1000,
+    description: 'Waits longer, so you can stop and think mid-sentence without being cut off.',
+  },
+];
+
+/** The countdown picker's steps, in ms: 0 (send at once) to 5 s in half-seconds. */
+export const COUNTDOWN_STEP_MS = 500;
+export const COUNTDOWN_MAX_MS = 5_000;
+
 export interface LiveVoiceSettings {
   readonly v: typeof LIVE_VOICE_SETTINGS_VERSION;
   /** Read each finished reply aloud on its own. OFF by default: nothing speaks unless the person asks. */
@@ -68,6 +106,18 @@ export interface LiveVoiceSettings {
   readonly whatToRead: WhatToReadId;
   /** Live's short tones (and, on Android, a short buzz) at listening, sent, reply ready and stopped. ON by default. */
   readonly earcons: boolean;
+  /** How long a quiet ends your turn in Live: quick 0.9 s, normal 1.5 s, thinker 2.5 s. */
+  readonly pause: PausePreset;
+  /** The visible countdown between the end of your turn and the send, ms (0–5000). 0 sends at once. */
+  readonly countdownMs: number;
+  /** Live reads each reply aloud, then listens again. ON by default; separate from "Auto-read replies" outside Live. */
+  readonly liveRead: boolean;
+  /** Live asks the browser to keep the screen on while it listens. ON by default. */
+  readonly keepAwake: boolean;
+  /** Live's short buzz on an Android phone at "sent" and "reply ready". ON by default. */
+  readonly haptics: boolean;
+  /** The one-time "Using a screen reader?" hint was answered (Got it, or Turn it off). */
+  readonly screenReaderHintSeen: boolean;
 }
 
 export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
@@ -78,6 +128,12 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
   maxSeconds: DEFAULT_READING_SECONDS,
   whatToRead: 'last',
   earcons: true,
+  pause: 'normal',
+  countdownMs: DEFAULT_GRACE_MS,
+  liveRead: true,
+  keepAwake: true,
+  haptics: true,
+  screenReaderHintSeen: false,
 });
 
 const fieldsSchema = z.object({
@@ -98,6 +154,13 @@ const fieldsSchema = z.object({
     .catch(DEFAULT_LIVE_VOICE_SETTINGS.maxSeconds),
   whatToRead: z.enum(['last', 'every']).catch(DEFAULT_LIVE_VOICE_SETTINGS.whatToRead),
   earcons: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.earcons),
+  pause: z.enum(['quick', 'normal', 'thinker']).catch(DEFAULT_LIVE_VOICE_SETTINGS.pause),
+  countdownMs: z.number().transform(resolveGraceMs).catch(DEFAULT_LIVE_VOICE_SETTINGS.countdownMs),
+  liveRead: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.liveRead),
+  keepAwake: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.keepAwake),
+  // Absent (or bad) → undefined here and resolved below to follow `earcons`.
+  haptics: z.boolean().optional().catch(undefined),
+  screenReaderHintSeen: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.screenReaderHintSeen),
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -117,7 +180,7 @@ export const parseLiveVoiceSettings = (raw: string | null): LiveVoiceSettings =>
   const version = parsed['v'];
   if (typeof version !== 'number' || !READABLE_VERSIONS.includes(version)) return DEFAULT_LIVE_VOICE_SETTINGS;
   const fields = fieldsSchema.parse(parsed);
-  return { v: LIVE_VOICE_SETTINGS_VERSION, ...fields };
+  return { v: LIVE_VOICE_SETTINGS_VERSION, ...fields, haptics: fields.haptics ?? fields.earcons };
 };
 
 /** What one reading needs of the settings: the voice, the speed and how long it may run. */

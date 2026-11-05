@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  COUNTDOWN_MAX_MS,
+  COUNTDOWN_STEP_MS,
   DEFAULT_LIVE_VOICE_SETTINGS,
   LIVE_VOICE_SETTINGS_KEY,
   LiveVoiceSettingsStore,
   MAX_VOICE_ID_CHARS,
   normaliseLiveVoiceSettings,
+  PAUSE_OPTIONS,
   parseLiveVoiceSettings,
   READING_LENGTH_OPTIONS,
   readOptionsOf,
@@ -20,15 +23,22 @@ const memory = (initial: Record<string, string> = {}) => {
 };
 
 describe('defaults', () => {
-  test("Auto-read is OFF; rate 1.1; 60 seconds; the last message of the turn; the device's best voice", () => {
+  test("Auto-read is OFF; rate 1.1; 60 seconds; the last message of the turn; the device's best voice; Live's own choices", () => {
     expect(DEFAULT_LIVE_VOICE_SETTINGS).toEqual({
-      v: 1,
+      v: 2,
       autoRead: false,
       voiceId: null,
       rate: 1.1,
       maxSeconds: 60,
       whatToRead: 'last',
       earcons: true,
+      // Live voice (slice 6): Normal pause, a 1.5 s countdown, read replies, screen on, tones and buzzes on.
+      pause: 'normal',
+      countdownMs: 1500,
+      liveRead: true,
+      keepAwake: true,
+      haptics: true,
+      screenReaderHintSeen: false,
     });
     expect(LIVE_VOICE_SETTINGS_KEY).toBe('fy-live-voice-v1');
   });
@@ -43,19 +53,26 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
     expect(parseLiveVoiceSettings('{nope')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings('[1]')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings('"x"')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
-    expect(parseLiveVoiceSettings(JSON.stringify({ v: 2, autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
+    expect(parseLiveVoiceSettings(JSON.stringify({ v: 3, autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
+    expect(parseLiveVoiceSettings(JSON.stringify({ v: 0, autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings(JSON.stringify({ autoRead: true }))).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
   });
 
   test('a good record round-trips', () => {
     const good = {
-      v: 1,
+      v: 2,
       autoRead: true,
       voiceId: 'uri:Samantha',
       rate: 1.5,
       maxSeconds: 120,
       whatToRead: 'every',
       earcons: false,
+      pause: 'thinker',
+      countdownMs: 3000,
+      liveRead: false,
+      keepAwake: false,
+      haptics: true,
+      screenReaderHintSeen: true,
     } as const;
     expect(parseLiveVoiceSettings(JSON.stringify(good))).toEqual(good);
   });
@@ -100,9 +117,15 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
     const parsed = parseLiveVoiceSettings(JSON.stringify({ v: 1, autoRead: true, token: 'secret', text: 'a reply' }));
     expect(Object.keys(parsed).sort()).toEqual([
       'autoRead',
+      'countdownMs',
       'earcons',
+      'haptics',
+      'keepAwake',
+      'liveRead',
       'maxSeconds',
+      'pause',
       'rate',
+      'screenReaderHintSeen',
       'v',
       'voiceId',
       'whatToRead',
@@ -122,6 +145,88 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
   });
 });
 
+describe('Live voice choices (slice 6)', () => {
+  const parse = (fields: Record<string, unknown>) => parseLiveVoiceSettings(JSON.stringify({ v: 2, ...fields }));
+
+  test('the pause is Quick, Normal or Thinker; anything else is Normal', () => {
+    expect(PAUSE_OPTIONS.map(option => [option.id, option.seconds])).toEqual([
+      ['quick', 0.9],
+      ['normal', 1.5],
+      ['thinker', 2.5],
+    ]);
+    expect(parse({ pause: 'quick' }).pause).toBe('quick');
+    expect(parse({ pause: 'thinker' }).pause).toBe('thinker');
+    expect(parse({ pause: 'slow' }).pause).toBe('normal');
+    expect(parse({ pause: 1200 }).pause).toBe('normal');
+  });
+
+  test('the countdown is 0 to 5 s: clamped, rounded, garbage is the default 1.5 s, and 0 is kept', () => {
+    expect(parse({ countdownMs: 0 }).countdownMs).toBe(0);
+    expect(parse({ countdownMs: 2500 }).countdownMs).toBe(2500);
+    expect(parse({ countdownMs: 5000 }).countdownMs).toBe(5000);
+    expect(parse({ countdownMs: 99_999 }).countdownMs).toBe(5000);
+    expect(parse({ countdownMs: -40 }).countdownMs).toBe(0);
+    expect(parse({ countdownMs: 1200.4 }).countdownMs).toBe(1200);
+    expect(parse({ countdownMs: 'long' }).countdownMs).toBe(1500);
+    expect(parse({ countdownMs: Number.NaN }).countdownMs).toBe(1500);
+    expect(COUNTDOWN_STEP_MS).toBe(500);
+    expect(COUNTDOWN_MAX_MS).toBe(5000);
+  });
+
+  test('read in Live, keep screen on, buzz and the hint: booleans, each bad one falls back alone', () => {
+    expect(parse({ liveRead: false }).liveRead).toBe(false);
+    expect(parse({ liveRead: 'no' }).liveRead).toBe(true);
+    expect(parse({ keepAwake: false }).keepAwake).toBe(false);
+    expect(parse({ keepAwake: 0 }).keepAwake).toBe(true);
+    expect(parse({ screenReaderHintSeen: true }).screenReaderHintSeen).toBe(true);
+    expect(parse({ screenReaderHintSeen: 'yes' }).screenReaderHintSeen).toBe(false);
+    expect(parse({ haptics: false, earcons: true }).haptics).toBe(false);
+    expect(parse({ haptics: true, earcons: false }).haptics).toBe(true);
+  });
+
+  test('MIGRATION: a version-1 record is still read; the new fields default, and the buzz follows the old one switch', () => {
+    const old = JSON.stringify({
+      v: 1,
+      autoRead: true,
+      voiceId: 'uri:Daniel',
+      rate: 1.3,
+      maxSeconds: 120,
+      whatToRead: 'every',
+      earcons: true,
+    });
+    expect(parseLiveVoiceSettings(old)).toEqual({
+      ...DEFAULT_LIVE_VOICE_SETTINGS,
+      autoRead: true,
+      voiceId: 'uri:Daniel',
+      rate: 1.3,
+      maxSeconds: 120,
+      whatToRead: 'every',
+    });
+    // Someone who had switched the one Live-sounds switch off (tones AND buzzes) stays silent.
+    const silent = parseLiveVoiceSettings(JSON.stringify({ v: 1, earcons: false }));
+    expect(silent.earcons).toBe(false);
+    expect(silent.haptics).toBe(false);
+    // The next write is version 2 and keeps what was there.
+    const storage = memory({ [LIVE_VOICE_SETTINGS_KEY]: JSON.stringify({ v: 1, earcons: false, rate: 1.7 }) });
+    const store = new LiveVoiceSettingsStore(storage);
+    store.update({ pause: 'quick' });
+    expect(JSON.parse(storage.data.get(LIVE_VOICE_SETTINGS_KEY) ?? '{}')).toMatchObject({
+      v: 2,
+      earcons: false,
+      haptics: false,
+      rate: 1.7,
+      pause: 'quick',
+      countdownMs: 1500,
+    });
+  });
+
+  test('an out-of-range countdown patch is normalised before it is stored', () => {
+    const store = new LiveVoiceSettingsStore(memory());
+    store.update({ countdownMs: 60_000 });
+    expect(store.get().countdownMs).toBe(5000);
+  });
+});
+
 describe('LiveVoiceSettingsStore', () => {
   test('starts from storage, writes through, and tells subscribers once per real change', () => {
     const storage = memory({ [LIVE_VOICE_SETTINGS_KEY]: JSON.stringify({ v: 1, autoRead: true }) });
@@ -135,7 +240,7 @@ describe('LiveVoiceSettingsStore', () => {
     store.update({ rate: 1.6 });
     expect(calls).toBe(1);
     expect(store.get()).not.toBe(before);
-    expect(JSON.parse(storage.data.get(LIVE_VOICE_SETTINGS_KEY) ?? '{}')).toMatchObject({ v: 1, rate: 1.6 });
+    expect(JSON.parse(storage.data.get(LIVE_VOICE_SETTINGS_KEY) ?? '{}')).toMatchObject({ v: 2, rate: 1.6 });
     // A patch that changes nothing keeps the snapshot and tells nobody.
     const same = store.get();
     store.update({ rate: 1.6 });

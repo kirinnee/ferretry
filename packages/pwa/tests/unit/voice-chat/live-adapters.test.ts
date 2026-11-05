@@ -12,7 +12,7 @@ import { LIVE_LOCK_NAME, webMicLock } from '../../../src/lib/voice-chat/mic-lock
 import type { ClockPort, ReplySignal, VisibilityPort } from '../../../src/lib/voice-chat/ports.ts';
 import { type ReplySnapshot, type ReplySource, sessionReplyFeed } from '../../../src/lib/voice-chat/reply-feed.ts';
 import { documentVisibility } from '../../../src/lib/voice-chat/visibility.ts';
-import { screenWakeLock } from '../../../src/lib/voice-chat/wake-lock.ts';
+import { gatedWakeLock, screenWakeLock } from '../../../src/lib/voice-chat/wake-lock.ts';
 
 describe('browserClock', () => {
   it('reads performance.now and runs, and cancels, timers', () => {
@@ -529,5 +529,46 @@ describe('sessionReplyFeed', () => {
       .arm()
       .attach(signal => void seen.push(signal.kind));
     should(seen).deepEqual(['ended', 'ended']);
+  });
+});
+
+describe('gatedWakeLock: the "Keep screen on" switch', () => {
+  const inner = () => {
+    const calls: string[] = [];
+    return {
+      calls,
+      port: {
+        acquire: async () => {
+          calls.push('acquire');
+          return false;
+        },
+        release: () => void calls.push('release'),
+      },
+    };
+  };
+
+  it('asks the browser when the switch is on, and passes its answer through', async () => {
+    const fake = inner();
+    const lock = gatedWakeLock(fake.port, () => true);
+    should(await lock.acquire()).be.false();
+    should(fake.calls).deepEqual(['acquire']);
+  });
+
+  it('does not ask when the switch is off, and says "fine" so no screen-may-turn-off warning is shown', async () => {
+    const fake = inner();
+    const lock = gatedWakeLock(fake.port, () => false);
+    should(await lock.acquire()).be.true();
+    should(fake.calls).deepEqual([]);
+  });
+
+  it('reads the switch at each acquire (a change applies the next time), and always releases', async () => {
+    const fake = inner();
+    let on = false;
+    const lock = gatedWakeLock(fake.port, () => on);
+    await lock.acquire();
+    on = true;
+    await lock.acquire();
+    lock.release();
+    should(fake.calls).deepEqual(['acquire', 'release']);
   });
 });
