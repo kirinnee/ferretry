@@ -59,7 +59,13 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
-import { PASS_OWNER_OF_PART, parseWalkParts, type WalkPartName } from './walk-parts.ts';
+import {
+  PASS_OWNER_OF_PART,
+  parseWalkParts,
+  refuseVacuousParts,
+  VIEWPORT_PARTS,
+  type WalkPartName,
+} from './walk-parts.ts';
 import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -115,7 +121,7 @@ const SELECTED_PARTS = (() => {
 const partWanted = (part: WalkPartName): boolean => SELECTED_PARTS === undefined || SELECTED_PARTS.has(part);
 
 /** Whether this run walks `name`'s viewport. */
-type WalkPart = 'gallery' | 'settings' | 'sessions' | 'overlays';
+type WalkPart = (typeof VIEWPORT_PARTS)[number];
 
 /** How many independent walks share one Chrome. A 2-CPU runner gets two, anything bigger three; the cap is a decision, not a guess at load. */
 const WALK_CONCURRENCY = availableParallelism() <= 2 ? 2 : 3;
@@ -239,6 +245,18 @@ const WALKS_SETTINGS = !(
 
 if (SELECTED_PARTS !== undefined && !WALKS_SETTINGS) {
   process.stderr.write('❌ --parts only splits the gallery walk, which a narrow --*-only mode does not run\n');
+  process.exit(2);
+}
+
+const vacuousParts = WALKS_SETTINGS
+  ? refuseVacuousParts(
+      SELECTED_PARTS,
+      process.argv.includes('--settings-only') ? 'settings' : 'full',
+      SELECTED_VIEWPORTS.map(viewport => viewport.name),
+    )
+  : undefined;
+if (vacuousParts !== undefined) {
+  process.stderr.write(`❌ ${vacuousParts}\n`);
   process.exit(2);
 }
 
@@ -4494,6 +4512,12 @@ try {
     const addTask = (label: string, task: PoolTask): void => {
       walkTasks.push({ weight: task.weight, run: () => timed(`task ${label}`, task.run) });
     };
+    const SEGMENT_WEIGHT: Readonly<Record<WalkPart, number>> = {
+      gallery: 20,
+      settings: 50,
+      sessions: 100,
+      overlays: 60,
+    };
     const walked: readonly (typeof VIEWPORTS)[number][] =
       SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY ? [] : SELECTED_VIEWPORTS;
     for (const viewport of walked) {
@@ -4501,16 +4525,11 @@ try {
         ? [{ part: 'gallery', weight: 100 }]
         : SETTINGS_ONLY
           ? [{ part: 'settings', weight: 100 }]
-          : [
-              { part: 'gallery', weight: 20 },
-              { part: 'settings', weight: 50 },
-              { part: 'sessions', weight: 100 },
-              { part: 'overlays', weight: 60 },
-            ];
+          : VIEWPORT_PARTS.map(part => ({ part, weight: SEGMENT_WEIGHT[part] }));
       for (const segment of segments.filter(candidate => partWanted(candidate.part))) {
         const parts: ReadonlySet<WalkPart> = WALKS_SETTINGS
           ? new Set([segment.part])
-          : new Set<WalkPart>(['gallery', 'settings', 'sessions', 'overlays']);
+          : new Set<WalkPart>(VIEWPORT_PARTS);
         addTask(`${segment.part} ${viewport.name}`, {
           weight: segment.weight,
           run: () => walkViewport(viewport, parts),

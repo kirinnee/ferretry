@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseWalkParts, partsOwedOver, WALK_PARTS } from '../../harness/walk-parts.ts';
+import {
+  parseWalkParts,
+  partsOwedOver,
+  refuseVacuousParts,
+  VIEWPORT_PARTS,
+  WALK_PARTS,
+} from '../../harness/walk-parts.ts';
 
 type Leg = {
   readonly scheme: string;
@@ -75,4 +81,30 @@ describe('the CI screenshot matrix', () => {
       'light/settings/both',
     ]);
   });
+});
+
+describe('refusing a --parts set that leaves a run nothing to do', () => {
+  test('should let a run that names no parts walk everything', () => {
+    expect(refuseVacuousParts(undefined, 'full', ['mobile'])).toBeUndefined();
+  });
+
+  test('should refuse a pass the selected viewport does not own', () => {
+    expect(refuseVacuousParts(new Set(['layout']), 'full', ['mobile'])).toContain('leaves nothing to do on mobile');
+    expect(refuseVacuousParts(new Set(['safe-area', 'sessions-page']), 'full', ['desktop'])).toContain('desktop');
+  });
+
+  test('should accept a pass its viewport owns, or a per-viewport part', () => {
+    expect(refuseVacuousParts(new Set(['layout']), 'full', ['desktop'])).toBeUndefined();
+    expect(refuseVacuousParts(new Set(['sessions']), 'full', ['mobile'])).toBeUndefined();
+    expect(refuseVacuousParts(new Set(['layout']), 'full', ['mobile', 'desktop'])).toBeUndefined();
+  });
+
+  test('should owe only the settings part per viewport in the settings scope', () => {
+    expect(refuseVacuousParts(new Set(['sessions']), 'settings', ['mobile'])).toContain('nothing to do');
+    expect(refuseVacuousParts(new Set(['settings']), 'settings', ['mobile'])).toBeUndefined();
+  });
+});
+
+test('should keep VIEWPORT_PARTS the head of WALK_PARTS', () => {
+  expect(WALK_PARTS.slice(0, VIEWPORT_PARTS.length)).toEqual([...VIEWPORT_PARTS]);
 });

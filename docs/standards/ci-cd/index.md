@@ -79,19 +79,19 @@ did before Namespace.
 **Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
 every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                     | Why                                                        |
-| ------------------------------------------------ | ------------- | ---------------------------- | ---------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores     | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path   |
-| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8 | knip needs more than a 2x4's 4GB; a 4x8 bought 16s         |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                   | `bun test` runs one file at a time                         |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                   | short builds; `Build Checks` also refreshes the cache      |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                   | well inside the critical path                              |
-| `PWA Full Gallery (dark, <viewport>)`            | Namespace 4x8 | RAM peaks 5–7GB a viewport   | PR: GitHub legs wait in its queue (p90 ~11 min vs ~8)      |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB               | one journey at a time                                      |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; the machine-dependent group left for `Realworld`     |
-| `Realworld Tests`                                | Namespace 4x8 | idle budgets, 200 ms stalls  | every event: a quiet dedicated VM is what its budgets need |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace  |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here    |
+| Job                                              | Runner        | Measured                     | Why                                                                                                          |
+| ------------------------------------------------ | ------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores     | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path                                                     |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8 | knip needs more than a 2x4's 4GB; a 4x8 bought 16s                                                           |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                   | `bun test` runs one file at a time                                                                           |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                   | short builds; `Build Checks` also refreshes the cache                                                        |
+| `PWA Settings Geometry (light, <leg>)`           | Namespace 2x4 | ~1.9 cores                   | legs `settings`, `layout`; inside the critical path                                                          |
+| `PWA Full Gallery (dark, <viewport>, <leg>)`     | Namespace 4x8 | RAM peaks 5–7GB a viewport   | legs: mobile `sessions`, `rest`; desktop `sessions`, `layout`, `settings`; PR: GitHub legs wait in its queue |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB               | one journey at a time                                                                                        |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; the machine-dependent group left for `Realworld`                                                       |
+| `Realworld Tests`                                | Namespace 4x8 | idle budgets, 200 ms stalls  | every event: a quiet dedicated VM is what its budgets need                                                   |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace                                                    |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here                                                      |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
@@ -264,19 +264,19 @@ pushes the tag, the tag fires CD. Nothing else publishes anything. `Realworld` a
 
 ## CI jobs
 
-| Job              | Runs                                                                             | Notes                                                                                                                          |
-| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                         | matrix `[format, gates]`: treefmt, and every other hook, in parallel                                                           |
-| `build-checks`   | `nix build .#default`, `wrangler deploy --dry-run` ×2, `scripts/ci/build-pwa.sh` | the install bundle, both relay Workers and the Pages bundle, in one job                                                        |
-| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                    | matrix over `config/test-groups.json`                                                                                          |
-| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                            | `needs: test`; the unit tier's 100% ledger                                                                                     |
-| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                     | matrix over `config/test-groups.json`                                                                                          |
-| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                             | `needs: int`; the int tier's 100% ledger                                                                                       |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light; the full gallery in dark, as one leg per viewport                                                  |
-| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                                                                        |
-| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                                                                       |
-| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one Linux runner per build target; required                                                                  |
-| `smoke-darwin`   | `smoke-darwin.yaml` (`Smoke darwin-arm64`)                                       | `needs: compile`; advisory on a pull request, required and retried on `main` ([macOS runner shortage](#macos-runner-shortage)) |
+| Job              | Runs                                                                                               | Notes                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                                           | matrix `[format, gates]`: treefmt, and every other hook, in parallel                                                                                                 |
+| `build-checks`   | `nix build .#default`, `wrangler deploy --dry-run` ×2, `scripts/ci/build-pwa.sh`                   | the install bundle, both relay Workers and the Pages bundle, in one job                                                                                              |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                                      | matrix over `config/test-groups.json`                                                                                                                                |
+| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                                              | `needs: test`; the unit tier's 100% ledger                                                                                                                           |
+| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                                       | matrix over `config/test-groups.json`                                                                                                                                |
+| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                                               | `needs: int`; the int tier's 100% ledger                                                                                                                             |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" "$VIEWPORT" "$PARTS"` | Settings geometry in light; the full gallery in dark per viewport; each run is split into legs, each walking only its `parts` (`packages/pwa/harness/walk-parts.ts`) |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                                                 | uploads `cli-binaries` from `dist/bin/`                                                                                                                              |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                                     | `needs: compile`, downloads the binaries                                                                                                                             |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                                            | `needs: compile`, one Linux runner per build target; required                                                                                                        |
+| `smoke-darwin`   | `smoke-darwin.yaml` (`Smoke darwin-arm64`)                                                         | `needs: compile`; advisory on a pull request, required and retried on `main` ([macOS runner shortage](#macos-runner-shortage))                                       |
 
 Notable details:
 
@@ -292,7 +292,9 @@ Notable details:
   A source file must reach 100% inside one group ([Testing](../testing/index.md) says why). Like
   `smoke`, the ledger jobs enter no nix shell — the gate is bash, awk, grep and jq — because a nix
   shell would put ~30s back on the critical path the groups took off it. Adding a group means adding
-  it to the config and to the matrix.
+  it to the config and to the matrix. The 30 `*.visual.test.ts` files live in the integration groups
+  `pwa-visual-a` to `pwa-visual-e`; a new visual test must be added to one of them in
+  `config/test-groups.json`, or it runs in `everything-else`.
 - **The int tier warms Chrome before its clock starts.** The first Chrome a fresh runner starts is
   slow — on one slow VM longer than the agent browser's 20-second launch budget — so
   `scripts/ci/warm-chrome.sh` starts it once, headless, before the tests. A warm-up, not a gate or a

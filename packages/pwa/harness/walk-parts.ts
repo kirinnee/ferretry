@@ -1,4 +1,11 @@
 /**
+ * The parts walked once per viewport, as independent tasks; the others are passes of their own. This is the
+ * ONE list: `screenshot.ts` types its segments from it, so a segment added there and not here (or here and
+ * not there) is a type error, and `partsOwedOver` cannot miss it.
+ */
+export const VIEWPORT_PARTS = ['gallery', 'settings', 'sessions', 'overlays'] as const;
+
+/**
  * WHICH INDEPENDENT PARTS OF THE GALLERY WALK A RUN TAKES: all of them, unless `--parts a,b` names some.
  *
  * `screenshot.ts` already walks its parts as independent tasks in one Chrome (`ordered-pool.ts`), each in
@@ -11,21 +18,12 @@
  * The three tallies the Settings walk makes (sideways scroll, Machines geometry, terminal geometry) belong to
  * the `settings` part. The session layout, the safe-area and the sessions-page passes open their own
  * contexts and are parts of their own, still owned by one viewport each (`PASS_OWNER` in `screenshot.ts`).
+ *
+ * Every part `--parts` can name: the per-viewport parts and the passes that own one viewport each.
  */
-export const WALK_PARTS = [
-  'gallery',
-  'settings',
-  'sessions',
-  'overlays',
-  'layout',
-  'safe-area',
-  'sessions-page',
-] as const;
+export const WALK_PARTS = [...VIEWPORT_PARTS, 'layout', 'safe-area', 'sessions-page'] as const;
 
 export type WalkPartName = (typeof WALK_PARTS)[number];
-
-/** The parts walked once per viewport, as independent tasks; the other three are passes of their own. */
-const VIEWPORT_PARTS = ['gallery', 'settings', 'sessions', 'overlays'] as const;
 
 /**
  * WHICH VIEWPORT'S RUN OWES EACH PASS THAT OPENS ITS OWN CONTEXTS after the viewport loop. They pick
@@ -53,6 +51,23 @@ export const partsOwedOver = (
       viewports.includes(PASS_OWNER_OF_PART[part]),
     ),
   ]);
+
+/**
+ * The sentence that refuses a `--parts` set which leaves this run NOTHING to do, or `undefined`: no
+ * per-viewport part among the selected viewports and no pass one of them owns. Such a leg would walk no
+ * frame and owe no tally, and still pass — `--viewport mobile --parts layout`, since the layout pass is the
+ * desktop's. `undefined` parts (all of them) always have something to do.
+ */
+export const refuseVacuousParts = (
+  parts: ReadonlySet<WalkPartName> | undefined,
+  scope: 'settings' | 'full',
+  viewports: readonly ('mobile' | 'desktop')[],
+): string | undefined => {
+  if (parts === undefined) return undefined;
+  const owed = partsOwedOver(scope, viewports);
+  if ([...parts].some(part => owed.has(part))) return undefined;
+  return `--parts ${[...parts].join(',')} leaves nothing to do on ${viewports.join(' + ')}: it owes ${[...owed].join(', ')} there`;
+};
 
 const isWalkPart = (candidate: string): candidate is WalkPartName =>
   (WALK_PARTS as readonly string[]).includes(candidate);

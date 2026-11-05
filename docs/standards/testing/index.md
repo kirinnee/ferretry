@@ -126,7 +126,9 @@ never ran as one coarse range, blank and comment lines included, so groups disag
 lines exist — a union of lines is always red, and an intersection, measured, hid real misses. One
 group's 100% is exactly what one serial run would conclude. If a file is only covered across
 groups, the job names it with each group's hit/found count; give it a test in the group that owns
-it. Locally, `task test` still runs each tier serially and judges it the same way.
+it. Locally, `task test` still runs each tier serially and judges it the same way. The 30 PWA
+`*.visual.test.ts` files are spread over the integration groups `pwa-visual-a` to `pwa-visual-e`; add a new
+visual test to one of them in `config/test-groups.json`, or it lands in `everything-else`.
 
 ---
 
