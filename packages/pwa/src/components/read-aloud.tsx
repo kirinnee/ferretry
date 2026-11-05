@@ -11,7 +11,7 @@ import { speakableSegments } from '../lib/voice-chat/speakable.ts';
  * it through Stop. While reading, the sentence being said is highlighted in a captions block under the
  * message and scrolled into view; the page reads along. The captions are hidden from a screen reader
  * (they repeat the message and the voice), and a polite live region says only "Reading", "Stopped",
- * "Finished" or "Couldn't read this" — never the reply itself.
+ * "Finished", "Couldn't read this" or "No on-device voice, reading unavailable" — never the reply itself.
  *
  * Nothing is shown where the device has no speech, or where the message has nothing to say aloud.
  * Reduced motion: no smooth scrolling and no animated highlight.
@@ -29,6 +29,7 @@ const STATUS_WORDS = {
   stopped: 'Stopped',
   finished: 'Finished',
   failed: "Couldn't read this aloud",
+  unavailable: 'No on-device voice, reading unavailable',
 } as const;
 
 function ReadAloudRow({ row, text }: { readonly row: RowReadAloud; readonly text: string }) {

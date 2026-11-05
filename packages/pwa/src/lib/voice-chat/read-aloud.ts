@@ -16,9 +16,10 @@ import { chooseVoice, clampSpeechRate, DEFAULT_SPEECH_RATE, voiceNote } from './
 
 /**
  * `idle`: nothing has been read here. `reading`: the voice is on. `stopped`: the person stopped it.
- * `finished`: it read to the end. `failed`: the device could not speak.
+ * `finished`: it read to the end. `failed`: the device could not speak. `unavailable`: the device has no voice that
+ * keeps the text on the device (and none was picked), so nothing is spoken and the reply stays text.
  */
-type ReadAloudStatus = 'idle' | 'reading' | 'stopped' | 'finished' | 'failed';
+type ReadAloudStatus = 'idle' | 'reading' | 'stopped' | 'finished' | 'failed' | 'unavailable';
 
 export interface ReadAloudState {
   readonly status: ReadAloudStatus;
@@ -40,6 +41,8 @@ export interface ReadAloudDeps {
   readonly language?: () => string;
   /** The speech rate, read each time a reading starts. */
   readonly rate?: () => number;
+  /** The id of the voice the person picked in the voice picker, if any: the only way a remote voice is used. */
+  readonly pickedVoice?: () => string | undefined;
 }
 
 export interface ReadAloudController {
@@ -93,12 +96,22 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         return;
       }
       let language = 'en-US';
-      let voice: SpeakerVoice | null = null;
       try {
         language = deps.language?.() ?? language;
-        voice = chooseVoice(speaker.voices(), language);
+      } catch {
+        // No language to ask: English.
+      }
+      let voice: SpeakerVoice | null = null;
+      try {
+        voice = chooseVoice(speaker.voices(), language, deps.pickedVoice?.());
       } catch {
         voice = null;
+      }
+      if (voice === null) {
+        // No voice that stays on the device and none picked: say so, and never hand the text to the browser's default.
+        speaker.stop();
+        set({ ...IDLE, status: 'unavailable', key, segments, truncated: reading.truncated });
+        return;
       }
       set({ status: 'reading', key, segments, current: 0, truncated: reading.truncated, voiceNote: voiceNote(voice) });
       const live = (): boolean => mine === token;

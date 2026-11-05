@@ -1,10 +1,12 @@
 /**
  * WHICH VOICE, AND HOW FAST. Pure.
  *
- * Ferretry reads with the voices already built into the device. The browser says which of them keep the
- * text on the device (`localService`), and those win: a voice that sends the text to its maker (Chrome's
- * "Google …" voices) is only used when the device has no local voice in the language, and then the row
- * says so in words (`voiceNote`). A voice is always NAMED: the browser's own unset default can be a remote one.
+ * Ferretry reads with the voices already built into the device, and a voice that sends the text to its
+ * maker (Chrome's "Google …", Edge's "Microsoft … Online") is NEVER chosen automatically. The browser says
+ * which voices keep the text on the device (`localService`); the order is: a local voice in the reply's
+ * language, then any local voice, then NONE — the reading is then unavailable and the reply stays text.
+ * A remote voice speaks only when the person has explicitly picked it in the voice picker, and every place
+ * that voice is shown says in words where the text goes (`voiceLabel`, `voiceNote`).
  */
 
 import type { SpeakerVoice } from './ports.ts';
@@ -19,37 +21,32 @@ export const clampSpeechRate = (rate: number): number =>
 const primary = (lang: string): string => lang.toLowerCase().replace('_', '-').split('-')[0] ?? '';
 const same = (a: string, b: string): boolean => a.toLowerCase().replace('_', '-') === b.toLowerCase().replace('_', '-');
 
-/** A lower number is a better voice. */
-const rank = (voice: SpeakerVoice, language: string): number => {
-  const exact = same(voice.lang, language);
-  const sameLanguage = primary(voice.lang) === primary(language);
-  if (!sameLanguage) return 100 + (voice.local ? 0 : 1);
-  const closeness = exact ? 0 : 1;
-  return (voice.local ? 0 : 4) + closeness * 2 + (voice.isDefault ? 0 : 1);
-};
+/** A lower number is a better voice. Only called for local voices in the language. */
+const rank = (voice: SpeakerVoice, language: string): number =>
+  (same(voice.lang, language) ? 0 : 2) + (voice.isDefault ? 0 : 1);
 
-/** Used only when no voice speaks the language: a voice that stays on the device, the device's own pick first. */
-const fallbackRank = (voice: SpeakerVoice): number => (voice.local ? 0 : 2) + (voice.isDefault ? 0 : 1);
+/** Used only when no local voice speaks the language: the device's own pick first. */
+const fallbackRank = (voice: SpeakerVoice): number => (voice.isDefault ? 0 : 1);
 
 /**
  * The voice to speak `language` with. Never "whatever the browser would pick" — an unset voice can be a
  * remote one (Chrome's "Google …" default) and would send the reply away unannounced, so a voice is always
- * named: the best one in the language (the `preferred` one wins when it is still there and local); else
- * the device's own pick among the voices that stay on the device (it reads with a foreign accent, but it
- * reads in private); else, only when nothing local exists at all, the best remote one — which `voiceNote`
- * then says out loud. Null only when the device lists no voices (yet): the speaker then refuses to guess.
+ * named. `pickedId` is the voice the person chose in the voice picker: it is used as it is, remote or not,
+ * while it is still on the device. Otherwise only voices that stay on the device are considered — the best
+ * one in the language, else the device's own pick among the others (it reads with a foreign accent, but in
+ * private). Null when there is none: the caller then says "no on-device voice" and does not speak.
  */
 export const chooseVoice = (
   voices: readonly SpeakerVoice[],
   language: string,
-  preferredId?: string,
+  pickedId?: string,
 ): SpeakerVoice | null => {
-  const preferred = voices.find(voice => voice.id === preferredId);
-  if (preferred?.local) return preferred;
+  const picked = voices.find(voice => voice.id === pickedId);
+  if (picked !== undefined) return picked;
   let best: SpeakerVoice | null = null;
   let bestRank = Number.POSITIVE_INFINITY;
   for (const voice of voices) {
-    if (primary(voice.lang) !== primary(language)) continue;
+    if (!voice.local || primary(voice.lang) !== primary(language)) continue;
     const score = rank(voice, language);
     if (score < bestRank) {
       best = voice;
@@ -58,6 +55,7 @@ export const chooseVoice = (
   }
   if (best !== null) return best;
   for (const voice of voices) {
+    if (!voice.local) continue;
     const score = fallbackRank(voice);
     if (score < bestRank) {
       best = voice;
@@ -67,10 +65,18 @@ export const chooseVoice = (
   return best;
 };
 
+const VENDORS = ['Google', 'Microsoft', 'Amazon', 'Apple', 'IBM'] as const;
+
+/** Who gets the text when a voice sends it away: a well-known maker named by the voice, else "its maker". */
+const vendorOf = (voice: SpeakerVoice): string => {
+  const name = voice.name.toLowerCase();
+  return VENDORS.find(vendor => name.startsWith(vendor.toLowerCase())) ?? 'its maker';
+};
+
 /** What to say next to a voice that sends the text away; null for a voice that stays on the device. */
 export const voiceNote = (voice: SpeakerVoice | null): string | null =>
-  voice !== null && !voice.local ? `${voice.name} sends this text to its maker to be spoken.` : null;
+  voice !== null && !voice.local ? `${voice.name} sends text to ${vendorOf(voice)} to be spoken.` : null;
 
-/** How a voice is named in a list: remote ones say so. */
+/** How a voice is named in a list: remote ones say where the text goes. */
 export const voiceLabel = (voice: SpeakerVoice): string =>
-  voice.local ? voice.name : `${voice.name} (sends text away)`;
+  voice.local ? voice.name : `${voice.name} (sends text to ${vendorOf(voice)})`;

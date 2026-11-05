@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { SpeakerEvent, SpeakerPort, SpeakRequest } from '../../src/lib/voice-chat/ports.ts';
+import type { SpeakerEvent, SpeakerPort, SpeakerVoice, SpeakRequest } from '../../src/lib/voice-chat/ports.ts';
 import { createReadAloud } from '../../src/lib/voice-chat/read-aloud.ts';
 import { createSpeechSynthesisSpeaker } from '../../src/lib/voice-chat/speech-synthesis.ts';
 import { FakeSynth, FakeUtterance, voice } from '../support/fake-speech.ts';
@@ -7,14 +7,16 @@ import { FakeSynth, FakeUtterance, voice } from '../support/fake-speech.ts';
 const over = (synth: FakeSynth) =>
   createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
 
+const LOCAL: SpeakerVoice = { id: 'local', name: 'Local', lang: 'en-US', local: true, isDefault: true };
+
 /** A speaker the test scripts by hand, to reach the corners the real adapter never produces. */
-const scripted = (supported = true) => {
+const scripted = (supported = true, voices: SpeakerVoice[] = [LOCAL]) => {
   const requests: SpeakRequest[] = [];
   const listeners: ((event: SpeakerEvent) => void)[] = [];
   let stops = 0;
   const port: SpeakerPort = {
     supported,
-    voices: () => [],
+    voices: () => voices,
     unlock: () => undefined,
     speak: (request, onEvent) => {
       requests.push(request);
@@ -62,7 +64,24 @@ describe('createReadAloud', () => {
     const synth = new FakeSynth([voice('Google US English', 'en-US', { local: false })]);
     const controller = createReadAloud({ speaker: over(synth), language: () => 'en-US' });
     controller.read('m1', 'Hello.');
-    expect(controller.getState().voiceNote).toBe('Google US English sends this text to its maker to be spoken.');
+    expect(controller.getState().voiceNote).toBeNull();
+    expect(controller.getState().status).toBe('unavailable');
+  });
+
+  test('says where the text goes when the person picked a remote voice', () => {
+    const picked = voice('Google US English', 'en-US', { local: false });
+    const synth = new FakeSynth([picked, voice('Samantha', 'en-US', { isDefault: true })]);
+    const controller = createReadAloud({
+      speaker: over(synth),
+      language: () => 'en-US',
+      pickedVoice: () => picked.voiceURI,
+    });
+    controller.read('m1', 'Hello.');
+    expect(controller.getState()).toMatchObject({
+      status: 'reading',
+      voiceNote: 'Google US English sends text to Google to be spoken.',
+    });
+    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Google US English' });
   });
 
   test('stop() stops the voice and says stopped; a second stop is a no-op', () => {
@@ -127,7 +146,7 @@ describe('createReadAloud', () => {
     };
     const third = createReadAloud({ speaker: badVoices });
     third.read('a', 'Alpha.');
-    expect(third.getState().status).toBe('reading');
+    expect(third.getState().status).toBe('unavailable');
   });
 
   test('a long reply is capped for the rate and ends with the more-on-screen caption', () => {
@@ -196,19 +215,44 @@ describe('createReadAloud: which voice, and what the person is told', () => {
     expect(controller.getState().voiceNote).toBeNull();
   });
 
-  test('with only remote voices the one it uses is named in the note before it is trusted', () => {
+  test('with only remote voices nothing is spoken: "no on-device voice", text only (owner rule)', () => {
     const synth = new FakeSynth([voice('Google US English', 'en-US', { local: false, isDefault: true })]);
     const controller = createReadAloud({ speaker: over(synth), language: () => 'de-DE' });
+    controller.read('m1', 'Hello. There.');
+    expect(controller.getState()).toMatchObject({
+      status: 'unavailable',
+      key: 'm1',
+      voiceNote: null,
+      segments: ['Hello.', 'There.'],
+    });
+    expect(synth.spoken).toEqual([]);
+  });
+
+  test('a picked voice that is gone is ignored: the local order applies, and remote voices stay unused', () => {
+    const synth = new FakeSynth([voice('Google US English', 'en-US', { local: false, isDefault: true })]);
+    const controller = createReadAloud({ speaker: over(synth), language: () => 'en-US', pickedVoice: () => 'gone' });
     controller.read('m1', 'Hello.');
-    expect(controller.getState().voiceNote).toBe('Google US English sends this text to its maker to be spoken.');
-    expect(synth.spoken[0]?.voice).toMatchObject({ name: 'Google US English' });
+    expect(controller.getState().status).toBe('unavailable');
+    expect(synth.spoken).toEqual([]);
   });
 
   test('hands the speaker the language, so a speaker that must choose can', () => {
     const scripts = scripted();
     const controller = createReadAloud({ speaker: scripts.port, language: () => 'fr-CA' });
     controller.read('m1', 'Bonjour.');
-    expect(scripts.requests[0]).toMatchObject({ language: 'fr-CA', voice: null });
+    expect(scripts.requests[0]).toMatchObject({ language: 'fr-CA', voice: LOCAL });
+  });
+
+  test('no voice at all: nothing is handed to the speaker, which is stopped, and the state says unavailable', () => {
+    const scripts = scripted(true, []);
+    const controller = createReadAloud({ speaker: scripts.port, language: () => 'en-US' });
+    controller.read('m1', 'Hello.');
+    expect(scripts.requests).toEqual([]);
+    expect(scripts.stops()).toBe(1);
+    expect(controller.getState()).toMatchObject({ status: 'unavailable', key: 'm1', segments: ['Hello.'], current: 0 });
+    // Not reading, so Stop is not offered and a second tap tries again.
+    controller.stop();
+    expect(controller.getState().status).toBe('unavailable');
   });
 
   test('a language getter that throws falls back to English instead of throwing', () => {
@@ -223,11 +267,11 @@ describe('createReadAloud: which voice, and what the person is told', () => {
     expect(scripts.requests[0]).toMatchObject({ language: 'en-US' });
   });
 
-  test('a device that lists no voices yet fails out loud, in words, and speaks nothing', () => {
+  test('a device that lists no voices yet says "unavailable" in words, and speaks nothing', () => {
     const synth = new FakeSynth([]);
     const controller = createReadAloud({ speaker: over(synth), language: () => 'en-US' });
     controller.read('m1', 'Hello.');
-    expect(controller.getState().status).toBe('failed');
+    expect(controller.getState().status).toBe('unavailable');
     expect(synth.spoken).toEqual([]);
   });
 

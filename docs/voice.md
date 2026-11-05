@@ -399,8 +399,8 @@ involved.
 
 - **Captions.** While it reads, a block under the message shows the sentences, the one being spoken marked with a tint, an underline and a
   heavier weight (colour is never the only signal) and scrolled into view. With reduced motion the scroll is instant and nothing fades.
-- **Words for the state.** A visible note and a polite live region say **Reading**, **Stopped**, **Finished** or **Couldn't read this
-  aloud**. The reply text is never put in the live region: a screen reader would say it twice over the voice.
+- **Words for the state.** A visible note and a polite live region say **Reading**, **Stopped**, **Finished**, **Couldn't read this
+  aloud** or **No on-device voice, reading unavailable**. The reply text is never put in the live region: a screen reader would say it twice over the voice.
 - **One voice at a time.** Pressing Read aloud on another message moves the reading there; leaving the conversation stops it.
 - **Nothing is shown** where the browser has no speech, or where a message has nothing worth saying (markup only).
 
@@ -444,15 +444,18 @@ comment still slices correctly.
 
 Free voices **built into the device** (`speechSynthesis`): no paid or cloud voice, no new secret, no download.
 
-- **Local voices first.** The browser says which voices are `localService`; one in the reply's language wins. A voice that sends text to
-  its maker (Chrome's "Google …" voices) is used only when the device has no local voice in that language, and then the row **says so**
-  in words ("… sends this text to its maker to be spoken.").
+- **Remote voices are NEVER chosen automatically** (owner rule). The browser says which voices are `localService` (they keep the text
+  on the device). The order is: **a local voice that matches the reply's language, then any local voice** (the device's own pick first;
+  it reads with an accent), **then none**. With none the reading is **unavailable**: nothing is spoken, the row says
+  "No on-device voice, reading unavailable" in words, and the reply stays text. Voices a browser lists as remote (Chrome's "Google …",
+  Edge's "Microsoft … Online") are skipped even when they are the only ones, and even when they are the browser's default.
+- **A remote voice speaks only when the person explicitly picks it in the voice picker** (`ReadAloudDeps.pickedVoice`; the picker itself
+  arrives with the settings slice). It is then labelled in words wherever it is shown — "Google US English (sends text to Google)" in the
+  list, "… sends text to Google to be spoken." on the row; the vendor is read off the voice's name, and an unknown one says "its maker".
+  A picked voice that is no longer on the device is ignored and the automatic order above applies.
 - **A voice is always named, never the browser's unset default** (which can be a remote voice, and would send the reply away with no
-  warning). With no voice in the reply's language (a `de-DE` browser with only English voices), the device's own pick among its **local**
-  voices reads it, with an accent. Only when the device has no local voice at all is a remote one used — named, with the note above. If
-  the device lists no voices yet (browsers load them late; the speaker asks as soon as the page makes it, so by a tap they are there), or
-  only remote ones that the controller has not announced, the reading **fails in words** ("Couldn't read this aloud") instead of
-  guessing; pressing Read aloud again works once they have loaded.
+  warning). If the device lists no voices yet (browsers load them late; the speaker asks as soon as the page makes it, so by a tap they
+  are there), the same "unavailable" words show; pressing Read aloud again works once they have loaded.
 - **Something else cancelling the speech** (another tab of the page, a browser extension) ends the reading as **Stopped** — the button
   does not stay on Stop forever. A cancel Ferretry itself caused (Stop, or a newer reading replacing this one) is told apart by a
   generation number and never reported twice.

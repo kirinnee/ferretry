@@ -136,7 +136,7 @@ describe('<ReadAloudControl>', () => {
     expect(button(two).textContent).toBe('Stop');
   });
 
-  test('a voice that sends text away is named on the row', async () => {
+  test('with only a remote voice the row says in words that reading is unavailable, and speaks nothing', async () => {
     const synth = new FakeSynth([voice('Google US English', 'en-US', { local: false })]);
     const speaker = createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
     const controller = createReadAloud({ speaker, language: () => 'en-US' });
@@ -146,7 +146,26 @@ describe('<ReadAloudControl>', () => {
       </ReadAloudProvider>,
     );
     await interact(() => button(mounted?.container as HTMLElement).click());
-    expect(mounted.container.querySelector('.fy-read-aloud-note')?.textContent).toContain('sends this text');
+    expect(mounted.container.textContent).toContain('No on-device voice, reading unavailable');
+    expect(mounted.container.querySelector('[role="status"]')?.textContent).toBe(
+      'No on-device voice, reading unavailable',
+    );
+    expect(button(mounted.container).textContent).toBe('Read aloud');
+    expect(synth.spoken).toEqual([]);
+  });
+
+  test('a remote voice the person picked is named on the row', async () => {
+    const remote = voice('Google US English', 'en-US', { local: false });
+    const synth = new FakeSynth([remote]);
+    const speaker = createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
+    const controller = createReadAloud({ speaker, language: () => 'en-US', pickedVoice: () => remote.voiceURI });
+    mounted = await mount(
+      <ReadAloudProvider controller={controller}>
+        <ReadAloudControl entryId="m1" text="Hello there." />
+      </ReadAloudProvider>,
+    );
+    await interact(() => button(mounted?.container as HTMLElement).click());
+    expect(mounted.container.querySelector('.fy-read-aloud-note')?.textContent).toContain('sends text to Google');
   });
 
   test('renders nothing where the device cannot speak, or the message has nothing to say', async () => {

@@ -194,6 +194,21 @@ const containerPrefix = (
   return { markers, content: at };
 };
 
+/** Where the line break at or after `from` is (LF, CRLF or a bare CR all end a line), or -1. UTF-16 offsets, as everywhere. */
+const lineBreakFrom = (source: string, from: number): number => {
+  const lf = source.indexOf('\n', from);
+  const cr = source.indexOf('\r', from);
+  return lf === -1 ? cr : cr === -1 ? lf : Math.min(lf, cr);
+};
+
+/** Where the line that holds offset `at` starts: just after the last line break before it. */
+const lineStartOf = (source: string, at: number): number =>
+  Math.max(source.lastIndexOf('\n', at - 1), source.lastIndexOf('\r', at - 1)) + 1;
+
+/** Where the next line starts, given the line break that ended this one (a CRLF is one break). */
+const nextLineStart = (source: string, lineBreak: number): number =>
+  lineBreak + (source[lineBreak] === '\r' && source[lineBreak + 1] === '\n' ? 2 : 1);
+
 const shorten = (run: string): string => `${run.slice(0, MAX_MARK_RUN)}${' '.repeat(run.length - MAX_MARK_RUN)}`;
 
 /** Long tilde runs shortened, except a fence delimiter: the first thing on its line, past at most eight markers. */
@@ -205,8 +220,8 @@ const tameTildes = (source: string): string => {
   for (const match of source.matchAll(TILDE_RUN)) {
     const at = match.index ?? 0;
     if (at > lineEnd) {
-      const start = source.lastIndexOf('\n', at - 1) + 1;
-      const newline = source.indexOf('\n', at);
+      const start = lineStartOf(source, at);
+      const newline = lineBreakFrom(source, at);
       lineEnd = newline === -1 ? source.length : newline;
       const prefix = containerPrefix(source, start, lineEnd);
       content = prefix.markers.length <= MAX_CONTAINER_DEPTH ? prefix.content : -1;
@@ -223,14 +238,14 @@ const tame = (source: string): string => {
   let out = '';
   let copied = 0;
   for (let start = 0; start <= runs.length; ) {
-    const newline = runs.indexOf('\n', start);
+    const newline = lineBreakFrom(runs, start);
     const end = newline === -1 ? runs.length : newline;
     for (const marker of containerPrefix(runs, start, end).markers.slice(MAX_CONTAINER_DEPTH)) {
       out += `${runs.slice(copied, marker)}x`;
       copied = marker + 1;
     }
     if (newline === -1) break;
-    start = newline + 1;
+    start = nextLineStart(runs, newline);
   }
   return out + runs.slice(copied);
 };
@@ -544,12 +559,12 @@ const describeCode = (info: string, lines: number): string => {
   return `Code block, ${count}${language === '' ? '' : ` of ${language}`}. It's on screen.`;
 };
 
-/** How many lines a code node's text has, not counting a trailing blank one. */
+/** How many lines a code node's text has (LF, CRLF or bare CR ends one), not counting a trailing blank one. */
 const lineCount = (code: string): number => {
   if (code === '') return 0;
   let lines = 1;
-  for (let at = code.indexOf('\n'); at !== -1; at = code.indexOf('\n', at + 1)) lines += 1;
-  return code.endsWith('\n') ? lines - 1 : lines;
+  for (let at = lineBreakFrom(code, 0); at !== -1; at = lineBreakFrom(code, nextLineStart(code, at))) lines += 1;
+  return /[\r\n]$/u.test(code) ? lines - 1 : lines;
 };
 
 const describeTable = (table: MdNode): string => {
