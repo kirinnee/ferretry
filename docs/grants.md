@@ -420,8 +420,9 @@ The questions above, answered for it ([design/voice-modes.md](design/voice-modes
   install, remove, threads, caps, the `voice.yaml` engine block (`voice` / `configure`) — is `operator` with
   `caller: 'person'`. A ferret's own session credential (and the warden's) is ungoverned by grants, so a capability
   demand alone would let a ferret install a native runtime or stream audio by simply not being a grant caller;
-  `caller: 'person'` refuses it `403 owner_only`. **No route uses `voice` yet** — this change adds the capability,
-  its grants, labels and repair; the stream and install routes arrive in later slices and are built against this note.
+  `caller: 'person'` refuses it `403 owner_only`. The install routes are the first to use it (`GET /v1/voice/engine` is `voice.use`; install, cancel, remove and
+  use are `voice.configure`, every one `caller: 'person'` — [voice.md](voice.md#on-my-machine-models-and-install));
+  the audio stream arrives in a later slice and is built against this note.
 - **A newly paired device holds `voice` on both axes**, by the same rule as every capability: `FULL_DEVICE_GRANTS`
   is every capability fully on (see "Permissive by default" above), and the daemon-wide default
   (`DEFAULT_CAPABILITY_GRANTS`) is both axes enabled, so a fresh pairing gets `voice` exactly as it got `sharing`.

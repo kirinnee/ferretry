@@ -797,17 +797,126 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Café/TV** — see above.
 - **No screen yet.** The Live bar, the countdown and the loop that uses these events come in later slices.
 
+## On my machine: models and Install
+
+The **speech engine on this machine** transcribes voice chat and dictation on the host instead of on a
+device ([design/voice-modes.md](design/voice-modes.md) §2). This section is the part that exists: **the model
+catalog and Install** — putting a pinned, hash-checked runtime and model on the machine. **Nothing loads or
+runs them yet**: the recognizer (decoding), the audio route, the bench and the Settings chooser are later slices,
+so installing a model today changes what is on the disk and nothing else.
+
+Nothing is downloaded until a person asks. A machine that never presses Install never fetches a byte.
+
+### The catalog
+
+The catalog is data with one owner, `packages/daemon/src/lib/voice-install/catalog.ts`; its shape is
+`@ferretry/protocol`'s `voice-engine.ts`, and the app and `fy` read it from `GET /v1/voice/engine`. Nothing
+else copies a size or a hash from it. A row holds the model's id, role, what kind of sherpa-onnx model it is,
+which archive file plays which part, languages, the archive's URL, exact byte size, SHA-256 and unpacked size,
+declared peak memory, and whether it is the recommended one for its role. Where each hash came from is written
+beside it.
+
+| Role                                     | Rows (ids)                                                                                                                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| batch                                    | `parakeet-tdt-0.6b-v3-int8` (**recommended**), `parakeet-tdt-0.6b-v2-fp16`, `whisper-turbo`, `whisper-large-v3`, `qwen3-asr-0.6b-int8`, `cohere-transcribe-int8`, `canary-180m-flash-int8` |
+| streaming (a separate, optional install) | `nemotron-streaming-0.6b-560ms-int8` (**recommended**), `parakeet-unified-0.6b-streaming-560ms-int8`                                                                                       |
+
+**Peak memory is an estimate** (twice what the model unpacks to, plus 256 MiB) and every row says so; the bench
+(§2.2.1) replaces it with a measured figure.
+
+### What Install puts where
+
+Under the state home, `voice/`:
+
+| Path                                | Holds                                                                                                                 |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `voice/runtime/<version>/<target>/` | the native sherpa-onnx addon and its libraries, from the `sherpa-onnx-<target>` npm tarball                           |
+| `voice/models/<id>/`                | one model, plus `install.json` naming the pinned archive it came from                                                 |
+| `voice/downloads/<sha256>.part`     | an archive being downloaded, or one cancelled part-way (named by its pin, so a new pin never resumes an old download) |
+
+`fy voice install <id>` installs the runtime first (once per version and target), then the model. **What is
+installed is read from the disk** (`install.json` against the catalog's pin), so a daemon restart forgets
+nothing, and a catalog row whose pin has moved reads as not installed.
+
+- **Resumes.** A download that was cancelled or cut off continues from the first missing byte with an HTTP
+  `Range` request. A server that answers `200` ignored the range, so the part is emptied and the download
+  starts again — never appended to. A `416` begins again once.
+- **Hashed twice.** The SHA-256 is taken while the bytes arrive (a partial file is read back through the hasher
+  first), and the finished file is read back from the disk once more. A wrong size or hash **deletes the file**
+  and reports `voice_hash_mismatch`; resuming bytes that cannot be trusted would only repeat the failure.
+- **Unpacked safely.** The daemon reads the tar stream itself (`.tgz` is gunzipped in-process; `.tar.bz2` goes
+  through the machine's `bzip2 -dc` — **`bzip2` must be on the daemon's `PATH`**, and its absence is reported as
+  `voice_no_decompressor` with the download kept). It only ever creates plain files and directories, itself,
+  into a staging directory that is renamed into place when everything checked: an absolute path, a `..`, a
+  backslash or NUL, any link, device or FIFO, more than 1,000 entries, or more content than the catalog says the
+  archive unpacks to is `voice_unsafe_archive`, and the pin that allowed it is dropped.
+- **Cancel keeps finished parts.** `fy voice cancel` stops the install and keeps the part-downloaded archive and
+  an already installed runtime, so the next Install resumes. **Remove deletes** a model's files, its part and any
+  staging leftover, and clears it from `voice.yaml` if it was the chosen one. The shared runtime stays.
+- **Disk.** Install refuses when free space is under **twice the archive** — or under the archive plus what it
+  unpacks to, when that is more (Cohere unpacks to 1.7× its download) — saying how much is needed. Free space
+  that cannot be read is not a refusal.
+- **One install at a time.** A second `install` while one runs is `409 voice_install_busy`.
+
+### Commands, routes and the file
+
+```text
+fy voice status            # the catalog, what is installed, free disk, any install under way
+fy voice install <id>      # download and verify the runtime and a model; follows the download
+fy voice cancel            # stop it; what was downloaded is kept
+fy voice remove <id>       # delete a model and any part-downloaded archive
+fy voice use <id>          # make an installed model the one its role uses (writes voice.yaml)
+```
+
+`fy voice install` returns once the daemon has started the download and then follows it; stopping the command
+does not stop the download. Routes (all `operator`, `caller: 'person'`): `GET /v1/voice/engine`
+(`voice.use`) is the catalog, each row's install state, the runtime, the active models and `install` — how far
+the install under way is, or how the last one ended; `POST /v1/voice/engine/install`, `…/cancel`, `…/remove` and
+`…/use` (`voice.configure`, with a passkey step-up from a governed device). A long install **answers `202` and
+is polled** through the read route, rather than holding a connection for minutes. **A ferret's own session
+credential, and the Warden's, are refused `403 owner_only`**: they are ungoverned by grants, so a capability
+alone would let a ferret download a native library onto the host ([grants.md](grants.md)).
+
+`voice.yaml` takes an `engine` block ([config-files.md](config-files.md)): `batch` and `streaming` (the model
+each role uses; the recommended one when it is installed and the file names none) and `runtimePath`, an
+absolute directory that already holds the runtime, used instead of the download.
+
+### What was read from the native runtime (sherpa-onnx 2.0.1, never loaded)
+
+The three `sherpa-onnx-<target>` tarballs each hold `sherpa-onnx.node`, `libsherpa-onnx-c-api` and
+`libonnxruntime` (plus a C++ API library), and the addon finds its siblings **in-tree**:
+
+| Target         | Addon run-path                               | Libraries' run-path     | Needs a library path variable? |
+| -------------- | -------------------------------------------- | ----------------------- | ------------------------------ |
+| `linux-x64`    | `RUNPATH $ORIGIN:<CI build dir>`             | `RPATH $ORIGIN`         | no                             |
+| `linux-arm64`  | `RPATH $ORIGIN:<CI build dir>`               | `RPATH $ORIGIN`         | no                             |
+| `darwin-arm64` | `LC_RPATH @loader_path` (and a CI build dir) | `LC_RPATH @loader_path` | no                             |
+
+So the worker will not need `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH`, only the addon and its libraries kept
+together in one directory, which is how Install unpacks them. The matching JavaScript wrapper is
+`sherpa-onnx-node` 2.0.1, for the recognizer slice to bundle.
+
+### Declared gaps
+
+- **NixOS.** The downloaded Linux prebuilds link glibc and libstdc++ dynamically, which runs on a normal
+  distribution and under Nix on one, but not on NixOS without `nix-ld`. Point `engine.runtimePath` at a runtime
+  built for it; a change to that path is a **loosening** (the daemon will load native code from it) and waits for
+  the owner like any other ([config-files.md](config-files.md)). Install then skips the runtime download. Whether
+  nixpkgs has a `sherpa-onnx` to point at is not yet checked.
+- **macOS is unverified.** There is no `codesign` step in `scripts/release` today, so library validation is not
+  expected to refuse the downloaded dylibs, and a file this process fetched is not expected to carry a quarantine
+  attribute — neither is proved until the recognizer slice loads them on Apple Silicon.
+- **Nothing is loaded.** The worker, memory caps and idle exit are later slices; the memory figures are estimates.
+
 ## Not built yet
 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
   only its end-of-turn detector exists so far — see [Pause detection](#pause-detection-the-end-of-a-spoken-turn).
   There is no Live button, bar or loop yet.
-- **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
-  downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
-  channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per
-  platform, and inside the Nix build's pinned dependency hash), a 460 MB archive download and
-  extraction on the daemon, an audio route plus its PWA dial and a `grants` capability for it. That is
-  its own change, not part of this one.
+- **The speech engine on your machine, beyond Install.** The catalog and Install exist — see
+  [On my machine: models and Install](#on-my-machine-models-and-install) — and the `voice` capability. Still to
+  come: the worker that loads the runtime and decodes (batch and streaming), the audio route, the bench, and the
+  model chooser in Settings, in the slices of [design/voice-modes.md](design/voice-modes.md) §8.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice

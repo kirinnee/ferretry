@@ -285,6 +285,9 @@ import { type IStateHomeClaimNotices, StateHomeClaimService } from '../src/lib/s
 import { StateHomeController } from '../src/lib/state-home/controller';
 import { registerStatuslineCommands } from '../src/lib/statusline/commands';
 import { BulkStopController, registerStopCommands } from '../src/lib/stop';
+import { registerVoiceCommands } from '../src/lib/voice/commands';
+import { VoiceController } from '../src/lib/voice/controller';
+import { ProtocolVoiceGateway } from '../src/lib/voice/gateway';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
@@ -1378,6 +1381,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   ({ program, world, client }) =>
     registerSttCommands(program, new SttController(new ProtocolSttGateway(client), world.io)),
+  ({ program, world, client }) =>
+    registerVoiceCommands(
+      program,
+      new VoiceController(
+        new ProtocolVoiceGateway(client),
+        world.io,
+        { sleep: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)) },
+        BINARY_NAME,
+      ),
+    ),
   // `fy config` (docs/config-files.md): check, find and confirm the configuration files. `check`,
   // `path`, `schema` and `guide` read the files directly, so they work with the daemon stopped.
   ({ program, world, client }) => {

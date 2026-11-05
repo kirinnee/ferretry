@@ -1437,6 +1437,18 @@ import {
 } from '../src/lib/index.ts';
 import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
 import {
+  ConfigFileVoiceEngineSettings,
+  NodeVoiceInstallFiles,
+  SystemVoiceArchiveReader,
+} from '../src/adapters/voice-install/index.ts';
+import {
+  SHERPA_WRAPPER_VERSION,
+  VOICE_MODELS,
+  VOICE_RUNTIMES,
+  VoiceInstallService,
+  voiceRuntimeTargetFor,
+} from '../src/lib/voice-install/index.ts';
+import {
   admitChild,
   CleanUpService,
   COMMON_SCRATCH_ROOTS,
@@ -13711,6 +13723,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           );
         })(),
+        // The speech engine on this machine (docs/voice.md): a catalog of pinned models, downloaded only when a
+        // person presses Install — resumed, hashed, unpacked safely — and the choice of which one is active.
+        voiceEngine: new VoiceInstallService({
+          root: join(paths.home, 'voice'),
+          catalog: { models: VOICE_MODELS, runtimes: VOICE_RUNTIMES, wrapperVersion: SHERPA_WRAPPER_VERSION },
+          target: voiceRuntimeTargetFor(process.platform, process.arch),
+          files: new NodeVoiceInstallFiles(),
+          fetch: async (url, init) =>
+            await fetch(url, {
+              headers: { ...init.headers, 'user-agent': `${DAEMON_NAME}/${daemonVersion}` },
+              signal: init.signal,
+            }),
+          archives: new SystemVoiceArchiveReader(),
+          settings: new ConfigFileVoiceEngineSettings(configFiles),
+          clock: { now: () => clock.now() },
+        }),
         // Updating this machine's `claude` and `codex` (docs/updating.md › "Updating Claude Code and Codex"):
         // the file a runtime launches comes from the ONE harness resolution rule, its install facts are read
         // exactly as this daemon's own are, and npm is asked for the newest only when somebody looks.

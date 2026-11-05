@@ -661,9 +661,49 @@ describe('configLoosening: voice', () => {
     should(actual).deepEqual(['dictated text now goes to the login home to be cleaned up']);
   });
 
+  const engineWith = (engine: Partial<VoiceConfig['engine']>): VoiceConfig => VoiceConfigSchema.parse({ engine });
+
+  it('should hold pointing the engine at native code in another directory', () => {
+    // Act
+    const actual = configLoosening('voice', DEFAULT_VOICE_CONFIG, engineWith({ runtimePath: '/opt/sherpa/lib' }));
+
+    // Assert
+    should(actual).deepEqual(['the speech engine will now load native code from /opt/sherpa/lib']);
+  });
+
+  it('should hold moving the runtime path, and not hold keeping it', () => {
+    // Arrange
+    const here = engineWith({ runtimePath: '/opt/a' });
+
+    // Act
+    const moved = configLoosening('voice', here, engineWith({ runtimePath: '/opt/b' }));
+    const kept = configLoosening('voice', here, engineWith({ runtimePath: '/opt/a', batch: 'whisper-turbo' }));
+
+    // Assert
+    should(moved).deepEqual(['the speech engine will now load native code from /opt/b']);
+    should(kept).deepEqual([]);
+  });
+
+  it('should not hold choosing a model, or dropping the runtime path (back to the pinned download)', () => {
+    // Act
+    const chosen = configLoosening(
+      'voice',
+      DEFAULT_VOICE_CONFIG,
+      engineWith({ batch: 'whisper-turbo', streaming: 'x' }),
+    );
+    const dropped = configLoosening('voice', engineWith({ runtimePath: '/opt/a' }), DEFAULT_VOICE_CONFIG);
+
+    // Assert
+    should(chosen).deepEqual([]);
+    should(dropped).deepEqual([]);
+  });
+
   it('should name a login provider that holds no login without a stray space', () => {
     // Arrange — the schema refuses this shape; the rule must still say something sensible for it.
-    const bare: VoiceConfig = { postProcessing: { ...DEFAULT_VOICE_CONFIG.postProcessing, provider: 'login' } };
+    const bare: VoiceConfig = {
+      engine: {},
+      postProcessing: { ...DEFAULT_VOICE_CONFIG.postProcessing, provider: 'login' },
+    };
 
     // Act
     const actual = configLoosening('voice', DEFAULT_VOICE_CONFIG, bare);
