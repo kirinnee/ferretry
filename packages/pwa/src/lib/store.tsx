@@ -241,7 +241,7 @@ const CONNECTIONS_CHANGED_CHANNEL = 'ferretry-connections-changed';
  * finishes the first-run page waiting in the old one. The message is a constant: nothing about the
  * pairing travels, a receiver re-reads IndexedDB. No channel where the browser has none.
  */
-const browserConnectionsChanged = (
+export const browserConnectionsChanged = (
   factory: typeof BroadcastChannel | undefined = globalThis.BroadcastChannel,
 ): DaemonConnectionsChanged | undefined => {
   if (factory === undefined) return undefined;

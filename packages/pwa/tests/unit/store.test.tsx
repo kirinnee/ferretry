@@ -15,6 +15,7 @@ import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import {
   type AppStore,
   browserConnectionRepository,
+  browserConnectionsChanged,
   createAppStore,
   DaemonApiPool,
   DaemonClientProvider,
@@ -576,6 +577,40 @@ describe('IndexedDbConnectionRepository', () => {
 
   it('degrades to document-lifetime storage when IndexedDB is unavailable', () => {
     expect(browserConnectionRepository(undefined)).toBeUndefined();
+  });
+
+  it('tells other tabs the registry changed over a constant-message channel, and has none without one', () => {
+    const realChannel = globalThis.BroadcastChannel;
+    Object.defineProperty(globalThis, 'BroadcastChannel', { value: undefined, configurable: true, writable: true });
+    try {
+      expect(browserConnectionsChanged()).toBeUndefined();
+    } finally {
+      Object.defineProperty(globalThis, 'BroadcastChannel', { value: realChannel, configurable: true, writable: true });
+    }
+    const posted: unknown[] = [];
+    const listeners = new Set<() => void>();
+    class FakeChannel {
+      constructor(readonly name: string) {}
+      postMessage(message: unknown) {
+        posted.push(message);
+      }
+      addEventListener(_type: string, listener: () => void) {
+        listeners.add(listener);
+      }
+      removeEventListener(_type: string, listener: () => void) {
+        listeners.delete(listener);
+      }
+    }
+    const changed = browserConnectionsChanged(FakeChannel as unknown as typeof BroadcastChannel);
+    if (changed === undefined) throw new Error('a channel was offered');
+    changed.announce();
+    expect(posted).toEqual(['changed']);
+    let heard = 0;
+    const stop = changed.subscribe(() => (heard += 1));
+    for (const listener of listeners) listener();
+    expect(heard).toBe(1);
+    stop();
+    expect(listeners.size).toBe(0);
   });
 });
 
